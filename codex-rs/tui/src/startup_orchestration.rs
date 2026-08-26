@@ -177,8 +177,8 @@ pub(super) async fn run_main_inner(
 
     let default_daemon = if explicit_remote_endpoint.is_none() && reuse_implicit_local_daemon {
         startup_draft
-            .run_until(maybe_probe_default_daemon_socket(&codex_home))
-            .await?
+            .run_until(find_default_daemon_socket(&codex_home))
+            .await??
     } else {
         None
     };

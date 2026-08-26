@@ -249,10 +249,6 @@ pub use public_widgets::composer_input::ComposerInput;
 const TUI_LOG_FILE_NAME: &str = "codex-tui.log";
 const INTERACTIVE_OTEL_SHUTDOWN_TIMEOUT: Duration = Duration::from_millis(/*millis*/ 500);
 
-#[cfg(unix)]
-const AUTO_CONNECT_DAEMON_CONNECT_TIMEOUT: std::time::Duration =
-    std::time::Duration::from_millis(50);
-
 #[allow(clippy::too_many_arguments)]
 async fn start_embedded_app_server(
     arg0_paths: Arg0DispatchPaths,
@@ -445,33 +441,34 @@ async fn connect_remote_app_server(
 }
 
 #[cfg(unix)]
-async fn maybe_probe_default_daemon_socket(codex_home: &Path) -> Option<AbsolutePathBuf> {
-    let socket_path = codex_app_server_client::app_server_control_socket_path(codex_home).ok()?;
-    match tokio::time::timeout(
-        AUTO_CONNECT_DAEMON_CONNECT_TIMEOUT,
-        tokio::net::UnixStream::connect(socket_path.as_path()),
-    )
-    .await
-    {
-        Ok(Ok(_stream)) => Some(socket_path),
-        Ok(Err(err)) => {
-            tracing::debug!(%err, socket_path = %socket_path.display(), "skipping default app-server daemon socket");
-            None
-        }
-        Err(_) => {
-            tracing::debug!(
-                socket_path = %socket_path.display(),
-                timeout_ms = AUTO_CONNECT_DAEMON_CONNECT_TIMEOUT.as_millis(),
-                "timed out probing default app-server daemon socket"
-            );
-            None
-        }
+async fn find_default_daemon_socket(codex_home: &Path) -> std::io::Result<Option<AbsolutePathBuf>> {
+    use std::os::unix::fs::FileTypeExt;
+
+    let socket_path = codex_app_server_client::app_server_control_socket_path(codex_home)?;
+    // Socket presence establishes ownership of this Codex home. A transient connect failure must
+    // surface from the real connection attempt, not route the TUI to a competing embedded writer.
+    let metadata = match tokio::fs::symlink_metadata(socket_path.as_path()).await {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(err),
+    };
+    if !metadata.file_type().is_socket() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "default app-server daemon endpoint is not a Unix socket: {}",
+                socket_path.display()
+            ),
+        ));
     }
+    Ok(Some(socket_path))
 }
 
 #[cfg(not(unix))]
-async fn maybe_probe_default_daemon_socket(_codex_home: &Path) -> Option<AbsolutePathBuf> {
-    None
+async fn find_default_daemon_socket(
+    _codex_home: &Path,
+) -> std::io::Result<Option<AbsolutePathBuf>> {
+    Ok(None)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2551,8 +2548,8 @@ mod tests {
     async fn default_daemon_auto_connect_skips_missing_socket() -> color_eyre::Result<()> {
         let codex_home = TempDir::new()?;
         assert!(
-            maybe_probe_default_daemon_socket(codex_home.path())
-                .await
+            find_default_daemon_socket(codex_home.path())
+                .await?
                 .is_none()
         );
         Ok(())
@@ -2560,15 +2557,17 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn default_daemon_auto_connect_probes_socket_only() -> color_eyre::Result<()> {
+    async fn default_daemon_auto_connect_preserves_affinity_to_unresponsive_socket()
+    -> color_eyre::Result<()> {
         let codex_home = TempDir::new()?;
         let socket_path =
             codex_app_server_client::app_server_control_socket_path(codex_home.path())?;
         std::fs::create_dir_all(socket_path.as_path().parent().expect("socket parent"))?;
-        let _listener = tokio::net::UnixListener::bind(socket_path.as_path())?;
+        let listener = tokio::net::UnixListener::bind(socket_path.as_path())?;
+        drop(listener);
 
         assert_eq!(
-            maybe_probe_default_daemon_socket(codex_home.path()).await,
+            find_default_daemon_socket(codex_home.path()).await?,
             Some(socket_path)
         );
         Ok(())
