@@ -486,6 +486,12 @@ async fn start_app_server(
     environment_manager: Arc<EnvironmentManager>,
 ) -> color_eyre::Result<AppServerClient> {
     match target {
+        #[cfg(not(test))]
+        AppServerTarget::Embedded if std::env::var_os("CODEX_ALLOW_EMBEDDED_SERVER").is_none() => {
+            Err(color_eyre::eyre::eyre!(
+                "the shared app-server is required; set CODEX_ALLOW_EMBEDDED_SERVER=1 to permit an embedded server"
+            ))
+        }
         AppServerTarget::Embedded => start_embedded_app_server(
             arg0_paths,
             config,
