@@ -1,3 +1,8 @@
+use std::collections::BTreeMap;
+use std::env;
+use std::fs;
+use std::io::ErrorKind;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Context;
@@ -16,6 +21,7 @@ use codex_app_server_transport::app_server_control_socket_path;
 use codex_uds::UnixStream;
 use futures::SinkExt;
 use futures::StreamExt;
+use serde::Deserialize;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -25,9 +31,10 @@ use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::client_async;
 use tokio_tungstenite::tungstenite::Message;
 
-const BRIDGE_PROTOCOL: u16 = 1;
+const BRIDGE_PROTOCOL: u16 = 2;
 const HISTORY_PERIOD: Duration = Duration::from_secs(30);
 const PAGE_SIZE: u32 = 500;
+const ROSTER_VERSION: u8 = 2;
 
 #[derive(Debug, Parser)]
 #[command(version, about = "Codex Wrangler's site-side protocol bridge")]
@@ -75,6 +82,12 @@ struct HistoricalThread {
     archived: bool,
 }
 
+#[derive(Debug, Deserialize)]
+struct RosterState {
+    version: u8,
+    sessions: BTreeMap<String, Value>,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(tag = "frame", rename_all = "kebab-case")]
 enum Frame {
@@ -89,6 +102,9 @@ enum Frame {
     },
     History {
         threads: Vec<HistoricalThread>,
+    },
+    Roster {
+        threads: Vec<String>,
     },
 }
 
@@ -319,6 +335,47 @@ fn app_server_version(user_agent: &str) -> String {
         .to_owned()
 }
 
+fn roster() -> Result<Frame> {
+    let path = roster_path()?;
+    let bytes = match fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            return Ok(Frame::Roster {
+                threads: Vec::new(),
+            });
+        }
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("read Wrangler roster `{}`", path.display()));
+        }
+    };
+    let state = serde_json::from_slice::<RosterState>(&bytes)
+        .with_context(|| format!("decode Wrangler roster `{}`", path.display()))?;
+    anyhow::ensure!(
+        state.version == ROSTER_VERSION,
+        "Wrangler roster `{}` uses version {}, expected {ROSTER_VERSION}",
+        path.display(),
+        state.version
+    );
+    Ok(Frame::Roster {
+        threads: state.sessions.into_keys().collect(),
+    })
+}
+
+fn roster_path() -> Result<PathBuf> {
+    env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .or_else(|| {
+            env::var_os("HOME")
+                .map(PathBuf::from)
+                .filter(|path| path.is_absolute())
+                .map(|home| home.join(".local/state"))
+        })
+        .map(|root| root.join("codex-wrangler/known-sessions.json"))
+        .context("neither absolute XDG_STATE_HOME nor HOME is available")
+}
+
 fn emit(frame: &Frame) -> Result<()> {
     serde_json::to_writer(std::io::stdout().lock(), frame)?;
     println!();
@@ -333,6 +390,7 @@ async fn main() -> Result<()> {
     emit(&rpc.hello())?;
     emit(&rpc.history().await?)?;
     emit(&rpc.live().await?)?;
+    emit(&roster()?)?;
     if cli.snapshot || !cli.watch {
         return Ok(());
     }
@@ -345,7 +403,10 @@ async fn main() -> Result<()> {
     history.tick().await;
     loop {
         tokio::select! {
-            _ = live.tick() => emit(&rpc.live().await?)?,
+            _ = live.tick() => {
+                emit(&rpc.live().await?)?;
+                emit(&roster()?)?;
+            },
             _ = history.tick() => emit(&rpc.history().await?)?,
         }
     }
