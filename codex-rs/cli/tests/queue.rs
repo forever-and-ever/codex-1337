@@ -202,8 +202,6 @@ async fn queue_rejects_local_daemon_that_does_not_support_queueing() -> Result<(
     let listener = tokio::net::UnixListener::bind(socket_path.as_path())?;
     let server_home = codex_home.path().to_path_buf();
     let server = tokio::spawn(async move {
-        let (probe, _) = listener.accept().await?;
-        drop(probe);
         let (stream, _) = listener.accept().await?;
         respond_to_queue_request(
             stream,
@@ -240,15 +238,11 @@ async fn queue_rejects_overrides_that_bypass_local_daemon() -> Result<()> {
             .parent()
             .context("missing socket parent")?,
     )?;
-    let listener = tokio::net::UnixListener::bind(socket_path.as_path())?;
-    let server = tokio::spawn(async move {
-        let (probe, _) = listener.accept().await?;
-        drop(probe);
-        Ok::<_, std::io::Error>(())
-    });
+    let _listener = tokio::net::UnixListener::bind(socket_path.as_path())?;
 
     let output = tokio::process::Command::new(codex_utils_cargo_bin::cargo_bin("codex")?)
         .env("CODEX_HOME", codex_home.path())
+        .env("CODEX_ALLOW_EMBEDDED_SERVER", "1")
         .args([
             "queue",
             "-c",
@@ -260,8 +254,6 @@ async fn queue_rejects_overrides_that_bypass_local_daemon() -> Result<()> {
         ])
         .output()
         .await?;
-    server.await??;
-
     assert!(!output.status.success());
     assert!(
         String::from_utf8(output.stderr)?
