@@ -14,6 +14,7 @@ use anyhow::Result;
 use anyhow::anyhow;
 pub use backend::BackendKind;
 use backend::BackendPaths;
+use codex_app_server_protocol::ReloadAccountResponse;
 use codex_app_server_protocol::RemoteControlConnectionStatus;
 use codex_app_server_protocol::RemoteControlPairingStartResponse;
 use codex_app_server_transport::app_server_control_socket_path;
@@ -79,6 +80,11 @@ pub struct BootstrapOptions {
 /// app-server version.
 pub async fn probe_app_server_version(socket_path: &Path) -> Result<String> {
     Ok(client::probe(socket_path).await?.app_server_version)
+}
+
+/// Asks a running app server to adopt the current configured credentials.
+pub async fn reload_auth(socket_path: &Path) -> Result<ReloadAccountResponse> {
+    client::reload_auth(socket_path).await
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

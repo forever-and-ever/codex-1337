@@ -1583,6 +1583,7 @@ impl MessageProcessor {
                     .logout_account(request_id.clone())
                     .await
             }
+            ClientRequest::ReloadAccount { .. } => self.account_processor.reload_account().await,
             ClientRequest::CancelLoginAccount { params, .. } => {
                 self.account_processor.cancel_login_account(params).await
             }

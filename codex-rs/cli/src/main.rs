@@ -709,6 +709,9 @@ enum AppServerDaemonSubcommand {
     /// Restart the local app server daemon.
     Restart,
 
+    /// Reload authentication without restarting loaded threads.
+    ReloadAuth,
+
     /// Enable remote control for future starts and a currently running managed daemon.
     EnableRemoteControl,
 
@@ -1313,6 +1316,12 @@ async fn cli_main(
                     }
                     AppServerDaemonSubcommand::Restart => {
                         print_app_server_daemon_output(AppServerLifecycleCommand::Restart).await?;
+                    }
+                    AppServerDaemonSubcommand::ReloadAuth => {
+                        let codex_home = find_codex_home()?;
+                        let socket = codex_app_server::app_server_control_socket_path(&codex_home)?;
+                        let output = codex_app_server_daemon::reload_auth(socket.as_path()).await?;
+                        println!("{}", serde_json::to_string(&output)?);
                     }
                     AppServerDaemonSubcommand::EnableRemoteControl => {
                         print_app_server_remote_control_output(AppServerRemoteControlMode::Enabled)
@@ -2489,6 +2498,7 @@ fn app_server_subcommand_name(subcommand: Option<&AppServerSubcommand>) -> &'sta
             AppServerDaemonSubcommand::Bootstrap(_) => "app-server daemon bootstrap",
             AppServerDaemonSubcommand::Start => "app-server daemon start",
             AppServerDaemonSubcommand::Restart => "app-server daemon restart",
+            AppServerDaemonSubcommand::ReloadAuth => "app-server daemon reload-auth",
             AppServerDaemonSubcommand::EnableRemoteControl => {
                 "app-server daemon enable-remote-control"
             }

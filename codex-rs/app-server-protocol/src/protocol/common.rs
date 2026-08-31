@@ -1231,6 +1231,13 @@ client_request_definitions! {
         response: v2::LogoutAccountResponse,
     },
 
+    /// Reloads authentication from the configured credential store.
+    ReloadAccount => "account/reload" {
+        params: #[ts(type = "undefined")] #[serde(skip_serializing_if = "Option::is_none")] Option<()>,
+        serialization: global("account-auth"),
+        response: v2::ReloadAccountResponse,
+    },
+
     GetAccountRateLimits => "account/rateLimits/read" {
         params: #[ts(type = "undefined")] #[serde(skip_serializing_if = "Option::is_none")] Option<()>,
         serialization: None,

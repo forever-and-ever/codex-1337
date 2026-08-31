@@ -125,6 +125,32 @@ impl AccountRequestProcessor {
         self.logout_v2(request_id).await.map(|()| None)
     }
 
+    pub(crate) async fn reload_account(
+        &self,
+    ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
+        let changed = self.auth_manager.reload().await;
+        self.config_manager.replace_cloud_config_bundle_loader(
+            self.auth_manager.clone(),
+            self.config.chatgpt_base_url.clone(),
+            self.config.http_client_factory(),
+        );
+        self.config_manager
+            .sync_default_client_residency_requirement()
+            .await;
+        Self::maybe_refresh_plugin_caches_for_current_config(
+            &self.config_manager,
+            &self.thread_manager,
+            self.auth_manager.auth_cached(),
+        )
+        .await;
+        self.outgoing
+            .send_server_notification(ServerNotification::AccountUpdated(
+                self.current_account_updated_notification(),
+            ))
+            .await;
+        Ok(Some(ReloadAccountResponse { changed }.into()))
+    }
+
     pub(crate) async fn cancel_login_account(
         &self,
         params: CancelLoginAccountParams,

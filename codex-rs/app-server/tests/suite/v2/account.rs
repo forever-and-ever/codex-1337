@@ -34,6 +34,7 @@ use codex_app_server_protocol::JSONRPCNotification;
 use codex_app_server_protocol::JSONRPCResponse;
 use codex_app_server_protocol::LoginAccountResponse;
 use codex_app_server_protocol::LogoutAccountResponse;
+use codex_app_server_protocol::ReloadAccountResponse;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ServerRequest;
@@ -320,6 +321,42 @@ async fn logout_account_removes_auth_and_notifies() -> Result<()> {
     let account: GetAccountResponse =
         timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(get_id)).await??;
     assert_eq!(account.account, None);
+    Ok(())
+}
+
+#[tokio::test]
+async fn reload_account_adopts_an_external_credential_change() -> Result<()> {
+    let codex_home = TempDir::new()?;
+    create_config_toml(
+        codex_home.path(),
+        CreateConfigTomlParams {
+            requires_openai_auth: Some(true),
+            ..Default::default()
+        },
+    )?;
+    let mut mcp = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .without_auto_env()
+        .with_env_overrides(&[("OPENAI_API_KEY", None)])
+        .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
+        .await?;
+    assert_eq!(read_account(&mut mcp).await?.account, None);
+
+    login_with_api_key(
+        codex_home.path(),
+        "sk-external-change",
+        AuthCredentialsStoreMode::File,
+        AuthKeyringBackendKind::default(),
+    )?;
+    let request_id = mcp.send_reload_account_request().await?;
+    let response: ReloadAccountResponse =
+        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(request_id)).await??;
+    assert_eq!(response, ReloadAccountResponse { changed: true });
+    assert_account_updated(&mut mcp, Some(AuthMode::ApiKey)).await?;
+    assert_eq!(
+        read_account(&mut mcp).await?.account,
+        Some(Account::ApiKey {})
+    );
     Ok(())
 }
 

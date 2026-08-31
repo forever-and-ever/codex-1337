@@ -191,8 +191,7 @@ pub async fn run_login_with_chatgpt(cli_config_overrides: CliConfigOverrides) ->
     .await
     {
         Ok(_) => {
-            eprintln!("{LOGIN_SUCCESS_MESSAGE}");
-            std::process::exit(0);
+            finish_auth_change(&config, LOGIN_SUCCESS_MESSAGE).await;
         }
         Err(e) => {
             eprintln!("Error logging in: {e}");
@@ -224,8 +223,7 @@ pub async fn run_login_with_api_key(
         config.auth_keyring_backend_kind(),
     ) {
         Ok(_) => {
-            eprintln!("{LOGIN_SUCCESS_MESSAGE}");
-            std::process::exit(0);
+            finish_auth_change(&config, LOGIN_SUCCESS_MESSAGE).await;
         }
         Err(e) => {
             eprintln!("Error logging in: {e}");
@@ -264,8 +262,7 @@ pub async fn run_login_with_access_token(
     .await
     {
         Ok(_) => {
-            eprintln!("{LOGIN_SUCCESS_MESSAGE}");
-            std::process::exit(0);
+            finish_auth_change(&config, LOGIN_SUCCESS_MESSAGE).await;
         }
         Err(e) => {
             eprintln!("Error logging in with access token: {e}");
@@ -353,8 +350,7 @@ pub async fn run_login_with_device_code(
     }
     match run_device_code_login(opts).await {
         Ok(()) => {
-            eprintln!("{LOGIN_SUCCESS_MESSAGE}");
-            std::process::exit(0);
+            finish_auth_change(&config, LOGIN_SUCCESS_MESSAGE).await;
         }
         Err(e) => {
             eprintln!("Error logging in with device code: {e}");
@@ -407,8 +403,7 @@ pub async fn run_login_with_device_code_fallback_to_browser(
 
     match run_device_code_login(opts.clone()).await {
         Ok(()) => {
-            eprintln!("{LOGIN_SUCCESS_MESSAGE}");
-            std::process::exit(0);
+            finish_auth_change(&config, LOGIN_SUCCESS_MESSAGE).await;
         }
         Err(e) => {
             if e.kind() == std::io::ErrorKind::NotFound {
@@ -418,8 +413,7 @@ pub async fn run_login_with_device_code_fallback_to_browser(
                         print_login_server_start(server.actual_port, &server.auth_url);
                         match server.block_until_done().await {
                             Ok(()) => {
-                                eprintln!("{LOGIN_SUCCESS_MESSAGE}");
-                                std::process::exit(0);
+                                finish_auth_change(&config, LOGIN_SUCCESS_MESSAGE).await;
                             }
                             Err(e) => {
                                 eprintln!("Error logging in: {e}");
@@ -544,11 +538,31 @@ pub async fn run_logout(cli_config_overrides: CliConfigOverrides) -> ! {
             false
         };
 
-    if logged_out || cleared_bedrock_config {
-        eprintln!("Successfully logged out");
+    let message = if logged_out || cleared_bedrock_config {
+        "Successfully logged out"
     } else {
-        eprintln!("Not logged in");
+        "Not logged in"
+    };
+    finish_auth_change(&config, message).await;
+}
+
+async fn finish_auth_change(config: &Config, message: &str) -> ! {
+    let socket = match codex_app_server::app_server_control_socket_path(&config.codex_home) {
+        Ok(socket) => socket,
+        Err(err) => {
+            eprintln!(
+                "Authentication changed, but the app-server socket could not be resolved: {err}"
+            );
+            std::process::exit(1);
+        }
+    };
+    if socket.as_path().exists()
+        && let Err(err) = codex_app_server_daemon::reload_auth(socket.as_path()).await
+    {
+        eprintln!("Authentication changed, but the running app server did not adopt it: {err}");
+        std::process::exit(1);
     }
+    eprintln!("{message}");
     std::process::exit(0);
 }
 

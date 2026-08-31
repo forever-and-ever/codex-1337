@@ -539,6 +539,13 @@ pub struct GetAccountResponse {
     pub requires_openai_auth: bool,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ReloadAccountResponse {
+    pub changed: bool,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]

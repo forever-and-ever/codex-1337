@@ -5,12 +5,14 @@ use anyhow::Context;
 use anyhow::Result;
 use anyhow::anyhow;
 use codex_app_server_protocol::ClientInfo;
+use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::InitializeCapabilities;
 use codex_app_server_protocol::InitializeParams;
 use codex_app_server_protocol::InitializeResponse;
 use codex_app_server_protocol::JSONRPCMessage;
 use codex_app_server_protocol::JSONRPCNotification;
 use codex_app_server_protocol::JSONRPCRequest;
+use codex_app_server_protocol::ReloadAccountResponse;
 use codex_app_server_protocol::RequestId;
 use codex_uds::UnixStream;
 use futures::SinkExt;
@@ -23,8 +25,10 @@ use tokio_tungstenite::client_async;
 use tokio_tungstenite::tungstenite::Message;
 
 pub(crate) const CONTROL_SOCKET_RESPONSE_TIMEOUT: Duration = Duration::from_secs(2);
+const RELOAD_AUTH_RESPONSE_TIMEOUT: Duration = Duration::from_secs(10);
 const CLIENT_NAME: &str = "codex_app_server_daemon";
 const INITIALIZE_REQUEST_ID: RequestId = RequestId::Integer(1);
+const RELOAD_AUTH_REQUEST_ID: RequestId = RequestId::Integer(2);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ProbeInfo {
@@ -42,22 +46,67 @@ pub(crate) async fn probe(socket_path: &Path) -> Result<ProbeInfo> {
         })?
 }
 
+pub(crate) async fn reload_auth(socket_path: &Path) -> Result<ReloadAccountResponse> {
+    timeout(RELOAD_AUTH_RESPONSE_TIMEOUT, reload_auth_inner(socket_path))
+        .await
+        .with_context(|| {
+            format!(
+                "timed out reloading auth through app-server control socket {}",
+                socket_path.display()
+            )
+        })?
+}
+
 async fn probe_inner(socket_path: &Path) -> Result<ProbeInfo> {
     let mut websocket = connect(socket_path).await?;
-
-    let initialize_response = initialize(&mut websocket, /*experimental_api*/ false).await?;
-    let initialized = JSONRPCMessage::Notification(JSONRPCNotification {
-        method: "initialized".to_string(),
-        params: None,
-    });
-    send_message(&mut websocket, &initialized)
-        .await
-        .context("failed to send initialized notification")?;
+    let initialize_response = initialize_client(&mut websocket).await?;
     websocket.close(None).await.ok();
 
     Ok(ProbeInfo {
         app_server_version: parse_version_from_user_agent(&initialize_response.user_agent)?,
     })
+}
+
+async fn reload_auth_inner(socket_path: &Path) -> Result<ReloadAccountResponse> {
+    let mut websocket = connect(socket_path).await?;
+    initialize_client(&mut websocket).await?;
+    let request = ClientRequest::ReloadAccount {
+        request_id: RELOAD_AUTH_REQUEST_ID,
+        params: None,
+    };
+    let request = JSONRPCMessage::Request(serde_json::from_value(serde_json::to_value(request)?)?);
+    send_message(&mut websocket, &request)
+        .await
+        .context("failed to send account/reload request")?;
+    let response = loop {
+        match read_message(&mut websocket).await? {
+            JSONRPCMessage::Response(response) if response.id == RELOAD_AUTH_REQUEST_ID => {
+                break serde_json::from_value(response.result)
+                    .context("failed to parse account/reload response")?;
+            }
+            JSONRPCMessage::Error(error) if error.id == RELOAD_AUTH_REQUEST_ID => {
+                return Err(anyhow!("account/reload failed: {}", error.error.message));
+            }
+            _ => {}
+        }
+    };
+    websocket.close(None).await.ok();
+    Ok(response)
+}
+
+async fn initialize_client<S>(websocket: &mut WebSocketStream<S>) -> Result<InitializeResponse>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let response = initialize(websocket, /*experimental_api*/ false).await?;
+    let initialized = JSONRPCMessage::Notification(JSONRPCNotification {
+        method: "initialized".to_string(),
+        params: None,
+    });
+    send_message(websocket, &initialized)
+        .await
+        .context("failed to send initialized notification")?;
+    Ok(response)
 }
 
 pub(crate) async fn connect(socket_path: &Path) -> Result<WebSocketStream<UnixStream>> {

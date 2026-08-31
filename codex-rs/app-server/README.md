@@ -2520,6 +2520,7 @@ Codex supports these authentication modes. The current mode is surfaced in `acco
 
 - `account/read` — fetch current account info; optionally refresh tokens.
 - `account/login/start` — begin login (`apiKey`, `chatgpt`, `chatgptDeviceCode`, `amazonBedrock`, `amazonBedrockAccessKeys`).
+- `account/reload` — adopt credentials changed outside this app-server process; loaded threads share the new authentication and `account/updated` is emitted.
 - `account/bedrock/discover` — experimental; list available AWS profiles and identify AWS access keys or Amazon Bedrock API keys visible in the app-server environment.
 - `account/bedrock/setup` — experimental; validate a selected AWS profile or existing environment credentials, then persist the Amazon Bedrock provider configuration.
 - `account/login/completed` (notify) — emitted when a login attempt finishes (success or error).

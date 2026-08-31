@@ -452,6 +452,11 @@ impl TestAppServer {
         self.send_request("account/read", params).await
     }
 
+    /// Send an `account/reload` JSON-RPC request.
+    pub async fn send_reload_account_request(&mut self) -> anyhow::Result<i64> {
+        self.send_request("account/reload", /*params*/ None).await
+    }
+
     /// Send an `account/login/start` JSON-RPC request with ChatGPT auth tokens.
     pub async fn send_chatgpt_auth_tokens_login_request(
         &mut self,

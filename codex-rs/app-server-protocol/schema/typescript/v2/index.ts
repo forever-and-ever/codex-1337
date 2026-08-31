@@ -409,6 +409,7 @@ export type { ReasoningEffortOption } from "./ReasoningEffortOption";
 export type { ReasoningSummaryPartAddedNotification } from "./ReasoningSummaryPartAddedNotification";
 export type { ReasoningSummaryTextDeltaNotification } from "./ReasoningSummaryTextDeltaNotification";
 export type { ReasoningTextDeltaNotification } from "./ReasoningTextDeltaNotification";
+export type { ReloadAccountResponse } from "./ReloadAccountResponse";
 export type { RemoteControlConnectionStatus } from "./RemoteControlConnectionStatus";
 export type { RemoteControlDisableParams } from "./RemoteControlDisableParams";
 export type { RemoteControlEnableParams } from "./RemoteControlEnableParams";

@@ -2099,6 +2099,30 @@
           "type": "object"
         },
         {
+          "description": "Reloads authentication from the configured credential store.",
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/v2/RequestId"
+            },
+            "method": {
+              "enum": [
+                "account/reload"
+              ],
+              "title": "Account/reloadRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "id",
+            "method"
+          ],
+          "title": "Account/reloadRequest",
+          "type": "object"
+        },
+        {
           "properties": {
             "id": {
               "$ref": "#/definitions/v2/RequestId"
@@ -17829,6 +17853,19 @@
           "turnId"
         ],
         "title": "ReasoningTextDeltaNotification",
+        "type": "object"
+      },
+      "ReloadAccountResponse": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "changed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "changed"
+        ],
+        "title": "ReloadAccountResponse",
         "type": "object"
       },
       "RemoteControlConnectionStatus": {
