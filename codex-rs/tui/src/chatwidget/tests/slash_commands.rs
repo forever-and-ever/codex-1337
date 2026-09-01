@@ -168,7 +168,7 @@ async fn slash_compact_eagerly_queues_follow_up_before_turn_start() {
     );
     chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
-    assert!(chat.input_queue.pending_steers.is_empty());
+    assert!(chat.input_queue.pending_steer.is_none());
     assert_eq!(chat.input_queue.queued_user_messages.len(), 1);
     assert_eq!(
         chat.input_queue.queued_user_messages.front().unwrap().text,
@@ -3161,7 +3161,7 @@ async fn slash_cd_rejects_pending_input_and_unsupported_session_ownership() {
             "active" => chat.bottom_pane.set_task_running(/*running*/ true),
             "pending" => chat.input_queue.user_turn_pending_start = true,
             "queued" => chat.input_queue.queued_user_messages.push_back(queued),
-            "steer" => chat.input_queue.pending_steers.push_back(steer),
+            "steer" => chat.input_queue.pending_steer = Some(steer),
             "side" => chat.set_side_conversation_active(/*active*/ true),
             "owned" => chat.set_parent_owned_thread(),
             "ephemeral" => chat.config.ephemeral = true,

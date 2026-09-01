@@ -6,6 +6,9 @@ use codex_diagnostics::GaugeGuard;
 use codex_history::ResponseItemEnvelope;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::InterAgentCommunication;
+use codex_protocol::protocol::NonSteerableTurnKind;
+use codex_protocol::turn_input::NotSubmittedReason;
+use codex_protocol::turn_input::PendingSteerMutationOutcome;
 use codex_protocol::turn_input::TurnStartOptions;
 use codex_protocol::user_input::UserInput;
 use serde::Deserialize;
@@ -206,6 +209,96 @@ impl InputQueue {
         let mut turn_state = active_turn.turn_state.lock().await;
         turn_state.clear_pending_waiters();
         turn_state.pending_input.items.clear();
+    }
+
+    pub(crate) async fn replace_pending_steer(
+        &self,
+        active_turn: &Mutex<Option<ActiveTurn>>,
+        client_id: &str,
+        content: Vec<UserInput>,
+    ) -> PendingSteerMutationOutcome {
+        self.mutate_pending_steer(active_turn, |pending_input| {
+            let Some(TurnInput::UserInput {
+                content: pending_content,
+                ..
+            }) = pending_input.items.iter_mut().find(|input| {
+                matches!(
+                    input,
+                    TurnInput::UserInput {
+                        client_id: Some(pending_client_id),
+                        ..
+                    } if pending_client_id == client_id
+                )
+            })
+            else {
+                return false;
+            };
+            *pending_content = content;
+            true
+        })
+        .await
+    }
+
+    pub(crate) async fn cancel_pending_steer(
+        &self,
+        active_turn: &Mutex<Option<ActiveTurn>>,
+        client_id: &str,
+    ) -> PendingSteerMutationOutcome {
+        self.mutate_pending_steer(active_turn, |pending_input| {
+            let Some(index) = pending_input.items.iter().position(|input| {
+                matches!(
+                    input,
+                    TurnInput::UserInput {
+                        client_id: Some(pending_client_id),
+                        ..
+                    } if pending_client_id == client_id
+                )
+            }) else {
+                return false;
+            };
+            pending_input.items.remove(index);
+            true
+        })
+        .await
+    }
+
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "active turn checks and turn state updates must remain atomic"
+    )]
+    async fn mutate_pending_steer(
+        &self,
+        active_turn: &Mutex<Option<ActiveTurn>>,
+        mutate: impl FnOnce(&mut TurnInputQueue) -> bool,
+    ) -> PendingSteerMutationOutcome {
+        let mut active = active_turn.lock().await;
+        let Some(active_turn) = active.as_mut() else {
+            return PendingSteerMutationOutcome::NotSubmitted {
+                reason: NotSubmittedReason::NoActiveTurn,
+            };
+        };
+        let Some(active_task) = active_turn.task.as_ref() else {
+            return PendingSteerMutationOutcome::NotSubmitted {
+                reason: NotSubmittedReason::NoActiveTurn,
+            };
+        };
+        let turn_kind = match active_task.kind {
+            crate::state::TaskKind::Regular => None,
+            crate::state::TaskKind::Review => Some(NonSteerableTurnKind::Review),
+            crate::state::TaskKind::Compact => Some(NonSteerableTurnKind::Compact),
+        };
+        if let Some(turn_kind) = turn_kind {
+            return PendingSteerMutationOutcome::NotSubmitted {
+                reason: NotSubmittedReason::ActiveTurnNotSteerable { turn_kind },
+            };
+        }
+
+        let mut turn_state = active_turn.turn_state.lock().await;
+        if mutate(&mut turn_state.pending_input) {
+            PendingSteerMutationOutcome::Applied
+        } else {
+            PendingSteerMutationOutcome::NotFound
+        }
     }
 
     pub(crate) async fn defer_mailbox_delivery_to_next_turn(

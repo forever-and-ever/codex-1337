@@ -6,6 +6,7 @@
 use std::collections::VecDeque;
 
 use super::PendingSteer;
+use super::PendingSteerReplacement;
 use super::QueuedUserMessage;
 use super::UserMessage;
 use super::UserMessageHistoryRecord;
@@ -14,7 +15,7 @@ use super::user_message_preview_text;
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(super) struct PendingInputPreview {
     pub(super) queued_messages: Vec<String>,
-    pub(super) pending_steers: Vec<String>,
+    pub(super) pending_steer: Option<String>,
     pub(super) rejected_steers: Vec<String>,
 }
 
@@ -36,11 +37,14 @@ pub(super) struct InputQueueState {
     /// in lockstep with `rejected_steers_queue`, with missing entries treated as
     /// user-message text.
     pub(super) rejected_steer_history_records: VecDeque<UserMessageHistoryRecord>,
-    /// Steers already submitted to core but not yet committed into history.
-    pub(super) pending_steers: VecDeque<PendingSteer>,
-    /// When set, the next interrupt should resubmit all pending steers as one
-    /// fresh user turn instead of restoring them into the composer.
-    pub(super) submit_pending_steers_after_interrupt: bool,
+    /// The steer submitted to core but not yet committed into history.
+    pub(super) pending_steer: Option<PendingSteer>,
+    /// Optimistic replacement state retained until app-server adjudicates whether
+    /// the previous steer still exists at the model-input boundary.
+    pub(super) pending_steer_replacement: Option<PendingSteerReplacement>,
+    /// When set, the next interrupt should resubmit the pending steer as one
+    /// fresh user turn instead of restoring it into the composer.
+    pub(super) submit_pending_steer_after_interrupt: bool,
     pub(super) suppress_queue_autosend: bool,
     /// Hold submissions while a usage failure or backend-directed model fallback is resolved.
     pub(super) rate_limit_recovery_pending: bool,
@@ -59,8 +63,9 @@ impl InputQueueState {
         self.user_turn_pending_start = false;
         self.rejected_steers_queue.clear();
         self.rejected_steer_history_records.clear();
-        self.pending_steers.clear();
-        self.submit_pending_steers_after_interrupt = false;
+        self.pending_steer = None;
+        self.pending_steer_replacement = None;
+        self.submit_pending_steer_after_interrupt = false;
         self.rate_limit_recovery_pending = false;
     }
 
@@ -76,13 +81,9 @@ impl InputQueueState {
                 )
             })
             .collect();
-        let pending_steers = self
-            .pending_steers
-            .iter()
-            .map(|steer| {
-                user_message_preview_text(&steer.user_message, Some(&steer.history_record))
-            })
-            .collect();
+        let pending_steer = self.pending_steer.as_ref().map(|steer| {
+            user_message_preview_text(&steer.user_message, Some(&steer.history_record))
+        });
         let rejected_steers = self
             .rejected_steers_queue
             .iter()
@@ -94,7 +95,7 @@ impl InputQueueState {
 
         PendingInputPreview {
             queued_messages,
-            pending_steers,
+            pending_steer,
             rejected_steers,
         }
     }
@@ -115,7 +116,12 @@ mod tests {
         state
             .rejected_steers_queue
             .push_back(UserMessage::from("rejected"));
-        state.pending_steers.push_back(PendingSteer {
+        state.pending_steer = Some(PendingSteer {
+            client_id: "pending-id".to_string(),
+            items: vec![codex_app_server_protocol::UserInput::Text {
+                text: "pending".to_string(),
+                text_elements: Vec::new(),
+            }],
             user_message: UserMessage::from("pending"),
             history_record: UserMessageHistoryRecord::UserMessageText,
             compare_key: crate::chatwidget::user_messages::PendingSteerCompareKey {
@@ -128,7 +134,7 @@ mod tests {
             state.preview(),
             PendingInputPreview {
                 queued_messages: vec!["queued".to_string()],
-                pending_steers: vec!["pending".to_string()],
+                pending_steer: Some("pending".to_string()),
                 rejected_steers: vec!["rejected".to_string()],
             }
         );
@@ -144,7 +150,7 @@ mod tests {
             .rejected_steers_queue
             .push_back(UserMessage::from("rejected"));
         state.user_turn_pending_start = true;
-        state.submit_pending_steers_after_interrupt = true;
+        state.submit_pending_steer_after_interrupt = true;
 
         state.clear();
 
@@ -153,7 +159,7 @@ mod tests {
         assert!(!state.user_turn_pending_start);
         assert!(state.rejected_steers_queue.is_empty());
         assert!(state.rejected_steer_history_records.is_empty());
-        assert!(state.pending_steers.is_empty());
-        assert!(!state.submit_pending_steers_after_interrupt);
+        assert!(state.pending_steer.is_none());
+        assert!(!state.submit_pending_steer_after_interrupt);
     }
 }

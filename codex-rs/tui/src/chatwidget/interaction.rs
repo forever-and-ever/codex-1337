@@ -115,6 +115,38 @@ impl ChatWidget {
         }
 
         if key_event.kind == KeyEventKind::Press
+            && self.chat_keymap.edit_pending_steer.is_pressed(key_event)
+            && self.bottom_pane.no_modal_or_popup_active()
+            && let Some(client_id) = self
+                .input_queue
+                .pending_steer
+                .as_ref()
+                .map(|steer| steer.client_id.clone())
+        {
+            self.submit_op(AppCommand::cancel_pending_steer(
+                client_id,
+                crate::app_command::PendingSteerCancelAction::Edit,
+            ));
+            return;
+        }
+
+        if key_event.kind == KeyEventKind::Press
+            && self.chat_keymap.remove_pending_steer.is_pressed(key_event)
+            && self.bottom_pane.no_modal_or_popup_active()
+            && let Some(client_id) = self
+                .input_queue
+                .pending_steer
+                .as_ref()
+                .map(|steer| steer.client_id.clone())
+        {
+            self.submit_op(AppCommand::cancel_pending_steer(
+                client_id,
+                crate::app_command::PendingSteerCancelAction::Remove,
+            ));
+            return;
+        }
+
+        if key_event.kind == KeyEventKind::Press
             && self.chat_keymap.edit_queued_message.is_pressed(key_event)
             && self.has_queued_follow_up_messages()
             && self.bottom_pane.no_modal_or_popup_active()
@@ -131,7 +163,7 @@ impl ChatWidget {
 
         if self.chat_keymap.interrupt_turn.is_pressed(key_event)
             && self.review.is_review_mode
-            && (!self.input_queue.pending_steers.is_empty()
+            && (self.input_queue.pending_steer.is_some()
                 || !self.input_queue.rejected_steers_queue.is_empty())
             && self.bottom_pane.is_task_running()
             && self.bottom_pane.no_modal_or_popup_active()
@@ -142,16 +174,16 @@ impl ChatWidget {
         }
 
         if self.chat_keymap.interrupt_turn.is_pressed(key_event)
-            && !self.input_queue.pending_steers.is_empty()
+            && self.input_queue.pending_steer.is_some()
             && self.bottom_pane.is_task_running()
             && self.bottom_pane.no_modal_or_popup_active()
             && !self.should_handle_vim_insert_escape(key_event)
         {
-            self.input_queue.submit_pending_steers_after_interrupt = true;
+            self.input_queue.submit_pending_steer_after_interrupt = true;
             if self.submit_op(AppCommand::interrupt()) {
                 self.pause_active_goal_for_interrupt();
             } else {
-                self.input_queue.submit_pending_steers_after_interrupt = false;
+                self.input_queue.submit_pending_steer_after_interrupt = false;
             }
             return;
         }

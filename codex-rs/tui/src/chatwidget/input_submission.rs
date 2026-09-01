@@ -1,6 +1,7 @@
 //! User-message and shell-prompt submission behavior for `ChatWidget`.
 
 use super::*;
+use uuid::Uuid;
 
 impl ChatWidget {
     pub(crate) fn set_task_mentions_enabled(&mut self, enabled: bool) {
@@ -348,6 +349,8 @@ impl ChatWidget {
             None
         };
         let pending_steer = (!render_in_history).then(|| PendingSteer {
+            client_id: format!("tui-steer-{}", Uuid::now_v7()),
+            items: items.clone(),
             user_message: UserMessage {
                 text: text.clone(),
                 local_images: local_images.clone(),
@@ -365,8 +368,33 @@ impl ChatWidget {
             .filter(|_| self.current_model_supports_personality());
         let service_tier = self.service_tier_update_for_core();
         let active_permission_profile = self.config.permissions.active_permission_profile();
+        let local_pending_steer_replacement = if let Some(appended) = pending_steer.as_ref()
+            && let Some(previous) = self.input_queue.pending_steer.as_ref()
+        {
+            Some((
+                previous.append(appended),
+                PendingSteerReplacement {
+                    previous: previous.clone(),
+                    appended: appended.clone(),
+                },
+            ))
+        } else {
+            None
+        };
+        let client_user_message_id = pending_steer.as_ref().map(|steer| steer.client_id.clone());
+        let pending_steer_replacement =
+            local_pending_steer_replacement
+                .as_ref()
+                .map(
+                    |(aggregate, replacement)| crate::app_command::PendingSteerReplacement {
+                        client_user_message_id: replacement.previous.client_id.clone(),
+                        input: aggregate.items.clone(),
+                    },
+                );
         let op = AppCommand::user_turn(
             items,
+            client_user_message_id,
+            pending_steer_replacement,
             self.config.cwd.to_path_buf(),
             AskForApproval::from(self.config.permissions.approval_policy.value()),
             active_permission_profile,
@@ -444,8 +472,13 @@ impl ChatWidget {
             ));
         }
 
-        if let Some(pending_steer) = pending_steer {
-            self.input_queue.pending_steers.push_back(pending_steer);
+        if pending_steer.is_some() {
+            if let Some((aggregate, replacement)) = local_pending_steer_replacement {
+                self.input_queue.pending_steer = Some(aggregate);
+                self.input_queue.pending_steer_replacement = Some(replacement);
+            } else {
+                self.input_queue.pending_steer = pending_steer;
+            }
             self.transcript.saw_plan_item_this_turn = false;
             self.refresh_pending_input_preview();
         }

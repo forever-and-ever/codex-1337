@@ -250,7 +250,7 @@ impl ChatWidget {
         let preview = self.input_queue.preview();
         self.bottom_pane.set_pending_input_preview(
             preview.queued_messages,
-            preview.pending_steers,
+            preview.pending_steer,
             preview.rejected_steers,
         );
     }

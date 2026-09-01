@@ -31,6 +31,23 @@ pub(super) fn validate_user_input_image_urls(
     Ok(())
 }
 
+fn validate_pending_steer_mutation_params(
+    client_user_message_id: &str,
+) -> Result<(), JSONRPCErrorError> {
+    if client_user_message_id.is_empty() {
+        return Err(invalid_request("clientUserMessageId must not be empty"));
+    }
+    Ok(())
+}
+
+fn pending_steer_mutation_applied(outcome: PendingSteerMutationOutcome) -> bool {
+    match outcome {
+        PendingSteerMutationOutcome::Applied => true,
+        PendingSteerMutationOutcome::NotFound
+        | PendingSteerMutationOutcome::NotSubmitted { .. } => false,
+    }
+}
+
 fn validate_response_item_image_urls(items: &[ResponseItem]) -> Result<(), JSONRPCErrorError> {
     if items.iter().any(|item| match item {
         ResponseItem::Message { content, .. } => content.iter().any(|item| {
@@ -252,6 +269,50 @@ impl TurnRequestProcessor {
         self.turn_steer_inner(request_id, params)
             .await
             .map(|response| Some(response.into()))
+    }
+
+    pub(crate) async fn turn_steer_replace(
+        &self,
+        request_id: &ConnectionRequestId,
+        params: TurnSteerReplaceParams,
+    ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
+        validate_user_input_image_urls(&params.input)?;
+        if params.input.is_empty() {
+            return Err(invalid_request("input must not be empty"));
+        }
+        Self::validate_v2_input_limit(&params.input)?;
+        let (_, thread) = self.load_thread(&params.thread_id).await?;
+        self.ensure_direct_input_allowed(request_id, thread.as_ref())
+            .await?;
+        validate_pending_steer_mutation_params(&params.client_user_message_id)?;
+        let content = params
+            .input
+            .into_iter()
+            .map(V2UserInput::into_core)
+            .collect();
+        let replaced = pending_steer_mutation_applied(
+            thread
+                .replace_pending_steer(&params.client_user_message_id, content)
+                .await,
+        );
+        Ok(Some(TurnSteerReplaceResponse { replaced }.into()))
+    }
+
+    pub(crate) async fn turn_steer_cancel(
+        &self,
+        request_id: &ConnectionRequestId,
+        params: TurnSteerCancelParams,
+    ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
+        let (_, thread) = self.load_thread(&params.thread_id).await?;
+        self.ensure_direct_input_allowed(request_id, thread.as_ref())
+            .await?;
+        validate_pending_steer_mutation_params(&params.client_user_message_id)?;
+        let cancelled = pending_steer_mutation_applied(
+            thread
+                .cancel_pending_steer(&params.client_user_message_id)
+                .await,
+        );
+        Ok(Some(TurnSteerCancelResponse { cancelled }.into()))
     }
 
     pub(crate) async fn turn_interrupt(

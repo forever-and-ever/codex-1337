@@ -446,7 +446,9 @@ mod usage;
 mod user_messages;
 mod working_directory;
 use self::user_messages::PendingSteer;
+#[cfg(test)]
 use self::user_messages::PendingSteerCompareKey;
+use self::user_messages::PendingSteerReplacement;
 use self::user_messages::QueueDrain;
 use self::user_messages::QueuedUserMessage;
 use self::user_messages::ShellEscapePolicy;
@@ -1308,7 +1310,12 @@ impl ChatWidget {
         self.request_redraw();
     }
 
-    fn on_committed_user_message(&mut self, items: &[UserInput], from_replay: bool) {
+    fn on_committed_user_message(
+        &mut self,
+        items: &[UserInput],
+        client_id: Option<&str>,
+        from_replay: bool,
+    ) {
         let display = Self::user_message_display_from_inputs(items);
         if from_replay {
             if self.review.is_review_mode {
@@ -1330,11 +1337,15 @@ impl ChatWidget {
         let compare_key = Self::pending_steer_compare_key_from_items(items);
         if self
             .input_queue
-            .pending_steers
-            .front()
-            .is_some_and(|pending| pending.compare_key == compare_key)
+            .pending_steer
+            .as_ref()
+            .is_some_and(|pending| {
+                client_id.is_some_and(|client_id| client_id == pending.client_id)
+                    || (client_id.is_none() && pending.compare_key == compare_key)
+            })
         {
-            if let Some(pending) = self.input_queue.pending_steers.pop_front() {
+            if let Some(pending) = self.input_queue.pending_steer.take() {
+                self.input_queue.pending_steer_replacement = None;
                 self.refresh_pending_input_preview();
                 let pending_display =
                     user_message_display_for_history(pending.user_message, &pending.history_record);
@@ -1788,7 +1799,10 @@ impl ChatWidget {
         if self.blocks_direct_input
             && matches!(
                 &op,
-                AppCommand::UserTurn { .. } | AppCommand::Review { .. } | AppCommand::Compact
+                AppCommand::UserTurn { .. }
+                    | AppCommand::CancelPendingSteer { .. }
+                    | AppCommand::Review { .. }
+                    | AppCommand::Compact
             )
         {
             self.add_error_message(PARENT_OWNED_INPUT_MESSAGE.to_string());

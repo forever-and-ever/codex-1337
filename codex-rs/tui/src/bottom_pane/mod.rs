@@ -451,6 +451,10 @@ impl BottomPane {
         let interrupt_binding = keymap.primary_hint(KeymapContext::Chat, "interrupt_turn");
         self.pending_input_preview
             .set_interrupt_binding(interrupt_binding);
+        self.pending_input_preview.set_pending_steer_bindings(
+            keymap.primary_hint(KeymapContext::Chat, "edit_pending_steer"),
+            keymap.primary_hint(KeymapContext::Chat, "remove_pending_steer"),
+        );
         if let Some(status) = self.status.as_mut() {
             status.set_interrupt_binding(interrupt_binding);
         }
@@ -1406,10 +1410,10 @@ impl BottomPane {
     pub(crate) fn set_pending_input_preview(
         &mut self,
         queued: Vec<String>,
-        pending_steers: Vec<String>,
+        pending_steer: Option<String>,
         rejected_steers: Vec<String>,
     ) {
-        self.pending_input_preview.pending_steers = pending_steers;
+        self.pending_input_preview.pending_steer = pending_steer;
         self.pending_input_preview.rejected_steers = rejected_steers;
         self.pending_input_preview.queued_messages = queued;
         self.request_redraw();
@@ -1918,7 +1922,7 @@ impl BottomPane {
             }
             let has_pending_thread_approvals = !self.pending_thread_approvals.is_empty();
             let has_pending_input = !self.pending_input_preview.queued_messages.is_empty()
-                || !self.pending_input_preview.pending_steers.is_empty()
+                || self.pending_input_preview.pending_steer.is_some()
                 || !self.pending_input_preview.rejected_steers.is_empty();
             let has_status_or_footer = self.status_widget().is_some()
                 || self.hook_status_message.is_some()
@@ -2871,7 +2875,7 @@ mod tests {
         );
         pane.set_pending_input_preview(
             vec!["Queued follow-up question".to_string()],
-            Vec::new(),
+            None,
             Vec::new(),
         );
 
@@ -2902,7 +2906,7 @@ mod tests {
         pane.set_task_running(/*running*/ true);
         pane.set_pending_input_preview(
             vec!["Queued follow-up question".to_string()],
-            Vec::new(),
+            None,
             Vec::new(),
         );
         pane.hide_status_indicator();
@@ -2934,7 +2938,7 @@ mod tests {
         pane.set_task_running(/*running*/ true);
         pane.set_pending_input_preview(
             vec!["Queued follow-up question".to_string()],
-            Vec::new(),
+            None,
             Vec::new(),
         );
 

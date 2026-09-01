@@ -5446,6 +5446,21 @@
       ],
       "type": "object"
     },
+    "TurnSteerCancelParams": {
+      "properties": {
+        "clientUserMessageId": {
+          "type": "string"
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "clientUserMessageId",
+        "threadId"
+      ],
+      "type": "object"
+    },
     "TurnSteerParams": {
       "properties": {
         "clientUserMessageId": {
@@ -5470,6 +5485,28 @@
       },
       "required": [
         "expectedTurnId",
+        "input",
+        "threadId"
+      ],
+      "type": "object"
+    },
+    "TurnSteerReplaceParams": {
+      "properties": {
+        "clientUserMessageId": {
+          "type": "string"
+        },
+        "input": {
+          "items": {
+            "$ref": "#/definitions/UserInput"
+          },
+          "type": "array"
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "clientUserMessageId",
         "input",
         "threadId"
       ],
@@ -7197,6 +7234,54 @@
         "params"
       ],
       "title": "Turn/steerRequest",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "enum": [
+            "turn/steer/replace"
+          ],
+          "title": "Turn/steer/replaceRequestMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/TurnSteerReplaceParams"
+        }
+      },
+      "required": [
+        "id",
+        "method",
+        "params"
+      ],
+      "title": "Turn/steer/replaceRequest",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "enum": [
+            "turn/steer/cancel"
+          ],
+          "title": "Turn/steer/cancelRequestMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/TurnSteerCancelParams"
+        }
+      },
+      "required": [
+        "id",
+        "method",
+        "params"
+      ],
+      "title": "Turn/steer/cancelRequest",
       "type": "object"
     },
     {

@@ -21,7 +21,11 @@ use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::ThreadStartResponse;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::TurnStartResponse;
+use codex_app_server_protocol::TurnSteerCancelParams;
+use codex_app_server_protocol::TurnSteerCancelResponse;
 use codex_app_server_protocol::TurnSteerParams;
+use codex_app_server_protocol::TurnSteerReplaceParams;
+use codex_app_server_protocol::TurnSteerReplaceResponse;
 use codex_app_server_protocol::TurnSteerResponse;
 use codex_app_server_protocol::UserInput as V2UserInput;
 use codex_protocol::user_input::MAX_USER_INPUT_TEXT_CHARS;
@@ -352,6 +356,144 @@ async fn turn_steer_returns_active_turn_id() -> Result<()> {
         DEFAULT_READ_TIMEOUT,
         mcp.read_stream_until_notification_message("turn/completed"),
     )
+    .await??;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn pending_steer_can_be_replaced_and_cancelled_before_delivery() -> Result<()> {
+    skip_if_remote!(
+        Ok(()),
+        "uses a host-local command and cwd fixture unavailable to remote executors"
+    );
+
+    let tmp = TempDir::new()?;
+    let codex_home = tmp.path().join("codex_home");
+    std::fs::create_dir(&codex_home)?;
+    let working_directory = tmp.path().join("workdir");
+    std::fs::create_dir(&working_directory)?;
+
+    let server = create_mock_responses_server_sequence_unchecked(vec![
+        create_command_execution_sse_response(
+            vec!["sleep".to_string(), "2".to_string()],
+            Some(&working_directory),
+            Some(10_000),
+            "call_sleep",
+        )?,
+        app_test_support::create_final_assistant_message_sse_response("Done")?,
+    ])
+    .await;
+    write_mock_responses_config_toml_with_chatgpt_base_url(
+        &codex_home,
+        &server.uri(),
+        &server.uri(),
+    )?;
+
+    let mut mcp = TestAppServer::builder()
+        .with_codex_home(&codex_home)
+        .without_managed_config()
+        .build_initialized()
+        .await?;
+    let ThreadStartResponse { thread, .. } = mcp
+        .start_thread(ThreadStartParams {
+            model: Some("mock-model".to_string()),
+            ..Default::default()
+        })
+        .await?;
+    let TurnStartResponse { turn } = mcp
+        .request(|request_id| ClientRequest::TurnStart {
+            request_id,
+            params: TurnStartParams {
+                thread_id: thread.id.clone(),
+                input: vec![V2UserInput::Text {
+                    text: "run sleep".to_string(),
+                    text_elements: Vec::new(),
+                }],
+                cwd: Some(working_directory),
+                ..Default::default()
+            },
+        })
+        .await?;
+    timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_notification_message("turn/started"),
+    )
+    .await??;
+
+    for client_id in ["cancelled-steer", "replacement-steer"] {
+        let _: TurnSteerResponse = mcp
+            .request(|request_id| ClientRequest::TurnSteer {
+                request_id,
+                params: TurnSteerParams {
+                    thread_id: thread.id.clone(),
+                    client_user_message_id: Some(client_id.to_string()),
+                    input: vec![V2UserInput::Text {
+                        text: "original".to_string(),
+                        text_elements: Vec::new(),
+                    }],
+                    responsesapi_client_metadata: None,
+                    additional_context: None,
+                    expected_turn_id: turn.id.clone(),
+                },
+            })
+            .await?;
+    }
+
+    let replaced: TurnSteerReplaceResponse = mcp
+        .request(|request_id| ClientRequest::TurnSteerReplace {
+            request_id,
+            params: TurnSteerReplaceParams {
+                thread_id: thread.id.clone(),
+                client_user_message_id: "replacement-steer".to_string(),
+                input: vec![V2UserInput::Text {
+                    text: "replacement".to_string(),
+                    text_elements: Vec::new(),
+                }],
+            },
+        })
+        .await?;
+    assert!(replaced.replaced);
+
+    let cancelled: TurnSteerCancelResponse = mcp
+        .request(|request_id| ClientRequest::TurnSteerCancel {
+            request_id,
+            params: TurnSteerCancelParams {
+                thread_id: thread.id.clone(),
+                client_user_message_id: "cancelled-steer".to_string(),
+            },
+        })
+        .await?;
+    assert!(cancelled.cancelled);
+
+    timeout(DEFAULT_READ_TIMEOUT, async {
+        loop {
+            let notification = mcp
+                .read_stream_until_notification_message("item/started")
+                .await?;
+            let params = notification.params.context("item/started params")?;
+            let item_started: ItemStartedNotification = serde_json::from_value(params)?;
+            let ThreadItem::UserMessage {
+                client_id, content, ..
+            } = item_started.item
+            else {
+                continue;
+            };
+            if client_id == Some("cancelled-steer".to_string()) {
+                anyhow::bail!("cancelled steer crossed the model-input boundary");
+            }
+            if client_id == Some("replacement-steer".to_string()) {
+                assert_eq!(
+                    content,
+                    vec![V2UserInput::Text {
+                        text: "replacement".to_string(),
+                        text_elements: Vec::new(),
+                    }]
+                );
+                return Ok::<(), anyhow::Error>(());
+            }
+        }
+    })
     .await??;
 
     Ok(())

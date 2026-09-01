@@ -137,6 +137,10 @@ pub struct TuiChatKeymap {
     pub next_permission_mode: Option<KeybindingsSpec>,
     /// Edit the most recently queued message.
     pub edit_queued_message: Option<KeybindingsSpec>,
+    /// Edit the steer waiting for the next model-input boundary.
+    pub edit_pending_steer: Option<KeybindingsSpec>,
+    /// Remove the steer waiting for the next model-input boundary.
+    pub remove_pending_steer: Option<KeybindingsSpec>,
 }
 
 /// Composer context keybindings. These override corresponding `global` actions.

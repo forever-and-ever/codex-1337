@@ -10,18 +10,18 @@ use crate::render::renderable::Renderable;
 use crate::wrapping::RtOptions;
 use crate::wrapping::adaptive_wrap_lines;
 
-/// Widget that displays pending steers plus follow-up inputs held while a turn is in progress.
+/// Widget that displays the pending steer plus follow-up inputs held during a turn.
 ///
-/// The widget renders pending steers first, then rejected steers that will be
+/// The widget renders the pending steer first, then rejected steers that will be
 /// resubmitted at end of turn, then ordinary queued user messages. Pending
-/// steers explain that they will be submitted after the next tool/result
-/// boundary unless the user invokes the interrupt binding to send them
+/// The steer explains that it will be submitted after the next tool/result
+/// boundary unless the user invokes the interrupt binding to send it
 /// immediately. The edit hint at the bottom only appears when there are actual
 /// queued user inputs to pop back into the composer. Because some terminals
 /// intercept certain modifier-key combinations, the displayed binding is
 /// configurable via [`set_edit_binding`](Self::set_edit_binding).
 pub(crate) struct PendingInputPreview {
-    pub pending_steers: Vec<String>,
+    pub pending_steer: Option<String>,
     pub rejected_steers: Vec<String>,
     pub queued_messages: Vec<String>,
     /// Key combination rendered in the hint line.  Defaults to Alt+Up but may
@@ -29,6 +29,8 @@ pub(crate) struct PendingInputPreview {
     edit_binding: Option<key_hint::ShortcutHint>,
     /// Key combination rendered for immediately interrupting and sending steers.
     interrupt_binding: Option<key_hint::ShortcutHint>,
+    edit_pending_steer_binding: Option<key_hint::ShortcutHint>,
+    remove_pending_steer_binding: Option<key_hint::ShortcutHint>,
 }
 
 const PREVIEW_LINE_LIMIT: usize = 3;
@@ -36,11 +38,13 @@ const PREVIEW_LINE_LIMIT: usize = 3;
 impl PendingInputPreview {
     pub(crate) fn new() -> Self {
         Self {
-            pending_steers: Vec::new(),
+            pending_steer: None,
             rejected_steers: Vec::new(),
             queued_messages: Vec::new(),
             edit_binding: Some(key_hint::alt(KeyCode::Up).into()),
             interrupt_binding: Some(key_hint::plain(KeyCode::Esc).into()),
+            edit_pending_steer_binding: Some(key_hint::alt(KeyCode::Char('e')).into()),
+            remove_pending_steer_binding: Some(key_hint::alt(KeyCode::Char('x')).into()),
         }
     }
 
@@ -53,6 +57,15 @@ impl PendingInputPreview {
 
     pub(crate) fn set_interrupt_binding(&mut self, binding: Option<key_hint::ShortcutHint>) {
         self.interrupt_binding = binding;
+    }
+
+    pub(crate) fn set_pending_steer_bindings(
+        &mut self,
+        edit: Option<key_hint::ShortcutHint>,
+        remove: Option<key_hint::ShortcutHint>,
+    ) {
+        self.edit_pending_steer_binding = edit;
+        self.remove_pending_steer_binding = remove;
     }
 
     fn push_truncated_preview_lines(
@@ -77,7 +90,7 @@ impl PendingInputPreview {
     }
 
     fn as_renderable(&self, width: u16) -> Box<dyn Renderable> {
-        if (self.pending_steers.is_empty()
+        if (self.pending_steer.is_none()
             && self.rejected_steers.is_empty()
             && self.queued_messages.is_empty())
             || width < 4
@@ -87,8 +100,8 @@ impl PendingInputPreview {
 
         let mut lines = vec![];
 
-        if !self.pending_steers.is_empty() {
-            let mut header = vec!["Messages to be submitted after next tool call".into()];
+        if let Some(steer) = &self.pending_steer {
+            let mut header = vec!["Message to be submitted after next tool call".into()];
             if let Some(interrupt_binding) = self.interrupt_binding {
                 header.extend(vec![
                     " (press ".dim(),
@@ -98,17 +111,29 @@ impl PendingInputPreview {
             }
             Self::push_section_header(&mut lines, width, Line::from(header));
 
-            for steer in &self.pending_steers {
-                let wrapped = adaptive_wrap_lines(
-                    steer
-                        .lines()
-                        .take(PREVIEW_LINE_LIMIT + 1)
-                        .map(|line| Line::from(line.dim())),
-                    RtOptions::new(width as usize)
-                        .initial_indent(Line::from("  ↳ ".dim()))
-                        .subsequent_indent(Line::from("    ")),
-                );
-                Self::push_truncated_preview_lines(&mut lines, wrapped, Line::from("    …".dim()));
+            let wrapped = adaptive_wrap_lines(
+                steer
+                    .lines()
+                    .take(PREVIEW_LINE_LIMIT + 1)
+                    .map(|line| Line::from(line.dim())),
+                RtOptions::new(width as usize)
+                    .initial_indent(Line::from("  ↳ ".dim()))
+                    .subsequent_indent(Line::from("    ")),
+            );
+            Self::push_truncated_preview_lines(&mut lines, wrapped, Line::from("    …".dim()));
+
+            let mut hint = vec!["    ".into()];
+            if let Some(binding) = self.edit_pending_steer_binding {
+                hint.extend([binding.into(), " edit".into()]);
+            }
+            if let Some(binding) = self.remove_pending_steer_binding {
+                if hint.len() > 1 {
+                    hint.push(" · ".into());
+                }
+                hint.extend([binding.into(), " remove".into()]);
+            }
+            if hint.len() > 1 {
+                lines.push(Line::from(hint).dim());
             }
         }
 
@@ -334,7 +359,7 @@ mod tests {
     #[test]
     fn render_one_pending_steer() {
         let mut queue = PendingInputPreview::new();
-        queue.pending_steers.push("Please continue.".to_string());
+        queue.pending_steer = Some("Please continue.".to_string());
         let width = 48;
         let height = queue.desired_height(width);
         let mut buf = Buffer::empty(Rect::new(0, 0, width, height));
@@ -345,7 +370,7 @@ mod tests {
     #[test]
     fn render_one_pending_steer_with_remapped_interrupt_binding() {
         let mut queue = PendingInputPreview::new();
-        queue.pending_steers.push("Please continue.".to_string());
+        queue.pending_steer = Some("Please continue.".to_string());
         queue.set_interrupt_binding(Some(key_hint::plain(KeyCode::F(12)).into()));
         let width = 48;
         let height = queue.desired_height(width);
@@ -358,12 +383,9 @@ mod tests {
     }
 
     #[test]
-    fn render_pending_steers_above_queued_messages() {
+    fn render_pending_steer_above_queued_messages() {
         let mut queue = PendingInputPreview::new();
-        queue.pending_steers.push("Please continue.".to_string());
-        queue
-            .pending_steers
-            .push("Check the last command output.".to_string());
+        queue.pending_steer = Some("Please continue.\nCheck the last command output.".to_string());
         queue
             .rejected_steers
             .push("Rejected steer that will be retried.".to_string());
@@ -383,9 +405,8 @@ mod tests {
     #[test]
     fn render_multiline_pending_steer_uses_single_prefix_and_truncates() {
         let mut queue = PendingInputPreview::new();
-        queue
-            .pending_steers
-            .push("First line\nSecond line\nThird line\n\nFourth line".to_string());
+        queue.pending_steer =
+            Some("First line\nSecond line\nThird line\n\nFourth line".to_string());
         let width = 48;
         let height = queue.desired_height(width);
         let mut buf = Buffer::empty(Rect::new(0, 0, width, height));

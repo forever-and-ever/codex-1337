@@ -3190,6 +3190,54 @@
             },
             "method": {
               "enum": [
+                "turn/steer/replace"
+              ],
+              "title": "Turn/steer/replaceRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/TurnSteerReplaceParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Turn/steer/replaceRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "enum": [
+                "turn/steer/cancel"
+              ],
+              "title": "Turn/steer/cancelRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/TurnSteerCancelParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Turn/steer/cancelRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "enum": [
                 "turn/interrupt"
               ],
               "title": "Turn/interruptRequestMethod",
@@ -22520,6 +22568,36 @@
       ],
       "type": "string"
     },
+    "TurnSteerCancelParams": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "clientUserMessageId": {
+          "type": "string"
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "clientUserMessageId",
+        "threadId"
+      ],
+      "title": "TurnSteerCancelParams",
+      "type": "object"
+    },
+    "TurnSteerCancelResponse": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "cancelled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "cancelled"
+      ],
+      "title": "TurnSteerCancelResponse",
+      "type": "object"
+    },
     "TurnSteerParams": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
@@ -22549,6 +22627,43 @@
         "threadId"
       ],
       "title": "TurnSteerParams",
+      "type": "object"
+    },
+    "TurnSteerReplaceParams": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "clientUserMessageId": {
+          "type": "string"
+        },
+        "input": {
+          "items": {
+            "$ref": "#/definitions/UserInput"
+          },
+          "type": "array"
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "clientUserMessageId",
+        "input",
+        "threadId"
+      ],
+      "title": "TurnSteerReplaceParams",
+      "type": "object"
+    },
+    "TurnSteerReplaceResponse": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "replaced": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "replaced"
+      ],
+      "title": "TurnSteerReplaceResponse",
       "type": "object"
     },
     "TurnSteerResponse": {

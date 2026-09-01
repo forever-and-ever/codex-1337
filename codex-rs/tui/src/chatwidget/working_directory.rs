@@ -13,7 +13,7 @@ impl ChatWidget {
             && self.unified_exec_processes.is_empty()
             && !self.is_user_turn_pending_or_running()
             && !self.input_queue.has_queued_follow_up_messages()
-            && self.input_queue.pending_steers.is_empty()
+            && self.input_queue.pending_steer.is_none()
             && active
                 .as_ref()
                 .is_none_or(|cell| !cell.as_any().is::<McpInventoryLoadingCell>())

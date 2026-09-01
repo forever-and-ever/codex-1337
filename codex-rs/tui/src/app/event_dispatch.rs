@@ -723,6 +723,13 @@ impl App {
             }
             AppEvent::CodexOp(op) => {
                 let is_user_turn = matches!(&op, AppCommand::UserTurn { .. });
+                let replaces_pending_steer = matches!(
+                    &op,
+                    AppCommand::UserTurn {
+                        pending_steer_replacement: Some(_),
+                        ..
+                    }
+                );
                 if is_user_turn {
                     let screen_size = tui.terminal.last_known_screen_size;
                     self.handle_draw_pre_render(tui, screen_size)?;
@@ -735,8 +742,10 @@ impl App {
                 }
                 self.chat_widget.prepare_local_op_submission(&op);
                 if let Err(err) = self.submit_active_thread_op(app_server, op).await {
-                    if self.recover_transport_error(&err)
-                    {
+                    if replaces_pending_steer {
+                        self.chat_widget.abort_pending_steer_replacement();
+                    }
+                    if self.recover_transport_error(&err) {
                         return Ok(AppRunControl::Continue);
                     }
                     let unsupported_permissions = err

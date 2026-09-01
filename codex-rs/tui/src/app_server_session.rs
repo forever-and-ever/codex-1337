@@ -117,7 +117,11 @@ use codex_app_server_protocol::TurnInterruptParams;
 use codex_app_server_protocol::TurnInterruptResponse;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::TurnStartResponse;
+use codex_app_server_protocol::TurnSteerCancelParams;
+use codex_app_server_protocol::TurnSteerCancelResponse;
 use codex_app_server_protocol::TurnSteerParams;
+use codex_app_server_protocol::TurnSteerReplaceParams;
+use codex_app_server_protocol::TurnSteerReplaceResponse;
 use codex_app_server_protocol::TurnSteerResponse;
 use codex_app_server_protocol::UserInput;
 use codex_config::ConfigLayerSource;
@@ -1198,6 +1202,7 @@ impl AppServerSession {
         &mut self,
         thread_id: ThreadId,
         items: Vec<UserInput>,
+        client_user_message_id: Option<String>,
         cwd: PathBuf,
         approval_policy: AskForApproval,
         approvals_reviewer: codex_protocol::config_types::ApprovalsReviewer,
@@ -1220,7 +1225,7 @@ impl AppServerSession {
                 params: TurnStartParams {
                     thread_id: thread_id.to_string(),
                     turn_trigger: None,
-                    client_user_message_id: None,
+                    client_user_message_id,
                     input: items,
                     tool_output: None,
                     responsesapi_client_metadata: None,
@@ -1279,6 +1284,7 @@ impl AppServerSession {
         thread_id: ThreadId,
         turn_id: String,
         items: Vec<UserInput>,
+        client_user_message_id: Option<String>,
     ) -> std::result::Result<TurnSteerResponse, TypedRequestError> {
         let request_id = self.next_request_id();
         self.client
@@ -1286,7 +1292,7 @@ impl AppServerSession {
                 request_id,
                 params: TurnSteerParams {
                     thread_id: thread_id.to_string(),
-                    client_user_message_id: None,
+                    client_user_message_id,
                     input: items,
                     responsesapi_client_metadata: None,
                     additional_context: None,
@@ -1294,6 +1300,46 @@ impl AppServerSession {
                 },
             })
             .await
+    }
+
+    pub(crate) async fn turn_steer_replace(
+        &mut self,
+        thread_id: ThreadId,
+        client_user_message_id: String,
+        input: Vec<UserInput>,
+    ) -> std::result::Result<bool, TypedRequestError> {
+        let request_id = self.next_request_id();
+        let response: TurnSteerReplaceResponse = self
+            .client
+            .request_typed(ClientRequest::TurnSteerReplace {
+                request_id,
+                params: TurnSteerReplaceParams {
+                    thread_id: thread_id.to_string(),
+                    client_user_message_id,
+                    input,
+                },
+            })
+            .await?;
+        Ok(response.replaced)
+    }
+
+    pub(crate) async fn turn_steer_cancel(
+        &mut self,
+        thread_id: ThreadId,
+        client_user_message_id: String,
+    ) -> std::result::Result<bool, TypedRequestError> {
+        let request_id = self.next_request_id();
+        let response: TurnSteerCancelResponse = self
+            .client
+            .request_typed(ClientRequest::TurnSteerCancel {
+                request_id,
+                params: TurnSteerCancelParams {
+                    thread_id: thread_id.to_string(),
+                    client_user_message_id,
+                },
+            })
+            .await?;
+        Ok(response.cancelled)
     }
 
     pub(crate) async fn thread_set_name(

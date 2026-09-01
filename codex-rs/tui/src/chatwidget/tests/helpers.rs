@@ -936,6 +936,11 @@ pub(super) fn complete_assistant_message(
 
 pub(super) fn pending_steer(text: &str) -> PendingSteer {
     PendingSteer {
+        client_id: format!("pending-{text}"),
+        items: vec![UserInput::Text {
+            text: text.to_string(),
+            text_elements: Vec::new(),
+        }],
         user_message: UserMessage::from(text),
         history_record: UserMessageHistoryRecord::UserMessageText,
         compare_key: PendingSteerCompareKey {

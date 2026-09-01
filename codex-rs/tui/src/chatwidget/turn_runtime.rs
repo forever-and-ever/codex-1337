@@ -108,7 +108,7 @@ impl ChatWidget {
         duration_ms: Option<i64>,
         from_replay: bool,
     ) {
-        self.input_queue.submit_pending_steers_after_interrupt = false;
+        self.input_queue.submit_pending_steer_after_interrupt = false;
         let sanitized_last_agent_message = last_agent_message.as_deref().map(|message| {
             parse_assistant_markdown(message, self.config.cwd.as_path()).visible_markdown
         });
@@ -193,10 +193,10 @@ impl ChatWidget {
         }
         self.request_redraw();
 
-        let had_pending_steers = !self.input_queue.pending_steers.is_empty();
+        let had_pending_steer = self.input_queue.pending_steer.is_some();
         self.refresh_pending_input_preview();
 
-        if !from_replay && !self.has_queued_follow_up_messages() && !had_pending_steers {
+        if !from_replay && !self.has_queued_follow_up_messages() && !had_pending_steer {
             self.maybe_prompt_plan_implementation();
         }
         // Keep this flag for replayed completion events so a subsequent live TurnComplete can
@@ -345,7 +345,7 @@ impl ChatWidget {
     }
 
     pub(super) fn on_server_overloaded_error(&mut self, message: String) {
-        self.input_queue.submit_pending_steers_after_interrupt = false;
+        self.input_queue.submit_pending_steer_after_interrupt = false;
         self.finalize_turn();
 
         let message = if message.trim().is_empty() {
@@ -360,7 +360,7 @@ impl ChatWidget {
     }
 
     fn on_error(&mut self, message: String) {
-        self.input_queue.submit_pending_steers_after_interrupt = false;
+        self.input_queue.submit_pending_steer_after_interrupt = false;
         self.flush_answer_stream_with_separator();
         self.finalize_turn();
         self.add_to_history(history_cell::new_error_event(message));
@@ -383,7 +383,7 @@ impl ChatWidget {
     }
 
     pub(super) fn on_cyber_policy_error(&mut self) {
-        self.input_queue.submit_pending_steers_after_interrupt = false;
+        self.input_queue.submit_pending_steer_after_interrupt = false;
         self.finalize_turn();
         let plan_type = if self.has_chatgpt_account {
             self.plan_type
@@ -475,7 +475,7 @@ impl ChatWidget {
                         .is_some_and(is_safety_access_block_message)
             })
         {
-            self.input_queue.submit_pending_steers_after_interrupt = false;
+            self.input_queue.submit_pending_steer_after_interrupt = false;
             self.finalize_turn();
             self.add_to_history(history_cell::new_safety_access_block_event());
             self.request_redraw();

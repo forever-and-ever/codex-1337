@@ -660,6 +660,8 @@ impl App {
             }
             AppCommand::UserTurn {
                 items,
+                client_user_message_id,
+                pending_steer_replacement,
                 cwd,
                 approval_policy,
                 approvals_reviewer,
@@ -673,12 +675,30 @@ impl App {
                 personality,
             } => {
                 let mut should_start_turn = true;
+                if let Some(replacement) = pending_steer_replacement {
+                    let replaced = app_server
+                        .turn_steer_replace(
+                            thread_id,
+                            replacement.client_user_message_id.clone(),
+                            replacement.input.clone(),
+                        )
+                        .await?;
+                    self.chat_widget.finish_pending_steer_replacement(replaced);
+                    if replaced {
+                        return Ok(true);
+                    }
+                }
                 if let Some(turn_id) = self.active_turn_id_for_thread(thread_id).await {
                     let mut steer_turn_id = turn_id;
                     let mut retried_after_turn_mismatch = false;
                     loop {
                         match app_server
-                            .turn_steer(thread_id, steer_turn_id.clone(), items.to_vec())
+                            .turn_steer(
+                                thread_id,
+                                steer_turn_id.clone(),
+                                items.to_vec(),
+                                client_user_message_id.clone(),
+                            )
                             .await
                         {
                             Ok(_) => return Ok(true),
@@ -752,6 +772,7 @@ impl App {
                         .turn_start(
                             thread_id,
                             items.to_vec(),
+                            client_user_message_id.clone(),
                             cwd.clone(),
                             *approval_policy,
                             approvals_reviewer,
@@ -772,6 +793,25 @@ impl App {
                         self.chat_widget
                             .record_safety_buffering_turn(response.turn.id, op);
                     }
+                }
+                Ok(true)
+            }
+            AppCommand::CancelPendingSteer {
+                client_user_message_id,
+                action,
+            } => {
+                if app_server
+                    .turn_steer_cancel(thread_id, client_user_message_id.clone())
+                    .await?
+                {
+                    self.chat_widget.finish_pending_steer_cancellation(*action);
+                } else {
+                    self.chat_widget
+                        .discard_stale_pending_steer(client_user_message_id);
+                    self.chat_widget.add_info_message(
+                        "Pending steer has already been sent.".to_string(),
+                        /*hint*/ None,
+                    );
                 }
                 Ok(true)
             }

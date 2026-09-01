@@ -21,6 +21,18 @@ use codex_protocol::request_permissions::RequestPermissionsResponse;
 use serde::Serialize;
 use serde_json::Value;
 
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub(crate) struct PendingSteerReplacement {
+    pub(crate) client_user_message_id: String,
+    pub(crate) input: Vec<UserInput>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub(crate) enum PendingSteerCancelAction {
+    Edit,
+    Remove,
+}
+
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) enum AppCommand {
@@ -31,6 +43,8 @@ pub(crate) enum AppCommand {
     },
     UserTurn {
         items: Vec<UserInput>,
+        client_user_message_id: Option<String>,
+        pending_steer_replacement: Option<PendingSteerReplacement>,
         cwd: PathBuf,
         approval_policy: AskForApproval,
         approvals_reviewer: Option<ApprovalsReviewer>,
@@ -42,6 +56,10 @@ pub(crate) enum AppCommand {
         final_output_json_schema: Option<Value>,
         collaboration_mode: Option<CollaborationMode>,
         personality: Option<Personality>,
+    },
+    CancelPendingSteer {
+        client_user_message_id: String,
+        action: PendingSteerCancelAction,
     },
     OverrideTurnContext {
         cwd: Option<PathBuf>,
@@ -114,6 +132,8 @@ impl AppCommand {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn user_turn(
         items: Vec<UserInput>,
+        client_user_message_id: Option<String>,
+        pending_steer_replacement: Option<PendingSteerReplacement>,
         cwd: PathBuf,
         approval_policy: AskForApproval,
         active_permission_profile: Option<ActivePermissionProfile>,
@@ -127,6 +147,8 @@ impl AppCommand {
     ) -> Self {
         Self::UserTurn {
             items,
+            client_user_message_id,
+            pending_steer_replacement,
             cwd,
             approval_policy,
             approvals_reviewer: None,
@@ -138,6 +160,16 @@ impl AppCommand {
             final_output_json_schema,
             collaboration_mode,
             personality,
+        }
+    }
+
+    pub(crate) fn cancel_pending_steer(
+        client_user_message_id: String,
+        action: PendingSteerCancelAction,
+    ) -> Self {
+        Self::CancelPendingSteer {
+            client_user_message_id,
+            action,
         }
     }
 

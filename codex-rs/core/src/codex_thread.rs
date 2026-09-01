@@ -49,6 +49,7 @@ use codex_protocol::protocol::TokenUsageInfo;
 use codex_protocol::protocol::TurnEnvironmentSelection;
 use codex_protocol::protocol::TurnEnvironmentSelections;
 use codex_protocol::protocol::W3cTraceContext;
+use codex_protocol::turn_input::PendingSteerMutationOutcome;
 use codex_protocol::turn_input::RecoverTurnRequest;
 use codex_protocol::turn_input::StartIfIdleSubmission;
 use codex_protocol::turn_input::SteerSubmission;
@@ -456,6 +457,26 @@ impl CodexThread {
                 unreachable!("steer-only submission cannot start a turn")
             }
         }
+    }
+
+    /// Replaces client-addressed steer input only while it remains pending.
+    pub async fn replace_pending_steer(
+        &self,
+        client_id: &str,
+        content: Vec<codex_protocol::user_input::UserInput>,
+    ) -> PendingSteerMutationOutcome {
+        self.session
+            .input_queue
+            .replace_pending_steer(&self.session.active_turn, client_id, content)
+            .await
+    }
+
+    /// Removes client-addressed steer input only while it remains pending.
+    pub async fn cancel_pending_steer(&self, client_id: &str) -> PendingSteerMutationOutcome {
+        self.session
+            .input_queue
+            .cancel_pending_steer(&self.session.active_turn, client_id)
+            .await
     }
 
     async fn submit_turn_input_with_mode(

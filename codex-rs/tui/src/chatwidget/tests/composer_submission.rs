@@ -1692,9 +1692,7 @@ async fn pending_steer_esc_does_not_steal_vim_insert_escape() {
     let esc = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
 
     chat.bottom_pane.set_task_running(/*running*/ true);
-    chat.input_queue
-        .pending_steers
-        .push_back(pending_steer("queued steer"));
+    chat.input_queue.pending_steer = Some(pending_steer("queued steer"));
     chat.toggle_vim_mode_and_notify();
     chat.handle_key_event(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE));
 
@@ -1702,8 +1700,8 @@ async fn pending_steer_esc_does_not_steal_vim_insert_escape() {
     chat.handle_key_event(esc);
 
     assert!(!chat.should_handle_vim_insert_escape(esc));
-    assert_eq!(chat.input_queue.pending_steers.len(), 1);
-    assert!(!chat.input_queue.submit_pending_steers_after_interrupt);
+    assert_eq!(chat.input_queue.pending_steer.iter().count(), 1);
+    assert!(!chat.input_queue.submit_pending_steer_after_interrupt);
     assert!(op_rx.try_recv().is_err());
 
     chat.handle_key_event(esc);
@@ -1712,7 +1710,7 @@ async fn pending_steer_esc_does_not_steal_vim_insert_escape() {
         Ok(Op::Interrupt) => {}
         other => panic!("expected Op::Interrupt, got {other:?}"),
     }
-    assert!(chat.input_queue.submit_pending_steers_after_interrupt);
+    assert!(chat.input_queue.submit_pending_steer_after_interrupt);
 }
 
 #[tokio::test]
@@ -1723,13 +1721,11 @@ async fn pending_steer_interrupt_uses_remapped_binding() {
     chat.chat_keymap = keymap.chat.clone();
     chat.bottom_pane.set_keymap_bindings(&keymap);
     chat.bottom_pane.set_task_running(/*running*/ true);
-    chat.input_queue
-        .pending_steers
-        .push_back(pending_steer("queued steer"));
+    chat.input_queue.pending_steer = Some(pending_steer("queued steer"));
 
     chat.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
 
-    assert!(!chat.input_queue.submit_pending_steers_after_interrupt);
+    assert!(!chat.input_queue.submit_pending_steer_after_interrupt);
     assert!(op_rx.try_recv().is_err());
 
     chat.handle_key_event(KeyEvent::new(KeyCode::F(12), KeyModifiers::NONE));
@@ -1738,7 +1734,43 @@ async fn pending_steer_interrupt_uses_remapped_binding() {
         Ok(Op::Interrupt) => {}
         other => panic!("expected Op::Interrupt, got {other:?}"),
     }
-    assert!(chat.input_queue.submit_pending_steers_after_interrupt);
+    assert!(chat.input_queue.submit_pending_steer_after_interrupt);
+}
+
+#[tokio::test]
+async fn pending_steer_edit_and_remove_shortcuts_cancel_the_single_slot() {
+    let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.input_queue.pending_steer = Some(pending_steer("edit me"));
+
+    chat.handle_key_event(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::ALT));
+    assert_matches!(
+        op_rx.try_recv(),
+        Ok(Op::CancelPendingSteer {
+            action: crate::app_command::PendingSteerCancelAction::Edit,
+            ..
+        })
+    );
+    assert!(
+        chat.finish_pending_steer_cancellation(crate::app_command::PendingSteerCancelAction::Edit)
+    );
+    assert_eq!(chat.bottom_pane.composer_text(), "edit me");
+
+    chat.input_queue.pending_steer = Some(pending_steer("remove me"));
+    chat.handle_key_event(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::ALT));
+    assert_matches!(
+        op_rx.try_recv(),
+        Ok(Op::CancelPendingSteer {
+            action: crate::app_command::PendingSteerCancelAction::Remove,
+            ..
+        })
+    );
+    assert!(
+        chat.finish_pending_steer_cancellation(
+            crate::app_command::PendingSteerCancelAction::Remove
+        )
+    );
+    assert!(chat.input_queue.pending_steer.is_none());
+    assert_eq!(chat.bottom_pane.composer_text(), "edit me");
 }
 
 #[tokio::test]
@@ -1755,22 +1787,22 @@ async fn restore_thread_input_state_applies_running_state_policy() {
         text: "queued history".to_string(),
         text_elements: Vec::new(),
     });
+    let mut submitted_pending_steer = pending_steer("submitted to the interrupted turn");
+    submitted_pending_steer.history_record = pending_history.clone();
     let input_state = ThreadInputState {
         composer: Some(ThreadComposerState {
             text: "composer draft".to_string(),
             ..Default::default()
         }),
         safety_buffering_prompt: Some(UserMessage::from("buffered prompt")),
-        pending_steers: VecDeque::from([UserMessage::from("submitted to the interrupted turn")]),
-        pending_steer_history_records: VecDeque::from([pending_history.clone()]),
-        pending_steer_compare_keys: VecDeque::new(),
+        pending_steer: Some(submitted_pending_steer),
         rejected_steers_queue: VecDeque::new(),
         rejected_steer_history_records: VecDeque::new(),
         queued_user_messages: VecDeque::from([UserMessage::from("already queued").into()]),
         queued_user_message_history_records: VecDeque::from([queued_history.clone()]),
         recovered_queue: false,
         user_turn_pending_start: true,
-        submit_pending_steers_after_interrupt: true,
+        submit_pending_steer_after_interrupt: true,
         current_collaboration_mode: chat.current_collaboration_mode.clone(),
         active_collaboration_mask: chat.active_collaboration_mask.clone(),
         task_running: true,
@@ -1787,16 +1819,16 @@ async fn restore_thread_input_state_applies_running_state_policy() {
     assert!(chat.turn_lifecycle.sleep_inhibitor.is_turn_running());
     assert!(chat.bottom_pane.is_task_running());
     assert!(chat.input_queue.user_turn_pending_start);
-    assert!(chat.input_queue.submit_pending_steers_after_interrupt);
+    assert!(chat.input_queue.submit_pending_steer_after_interrupt);
     let captured_input_state = chat
         .capture_thread_input_state()
         .expect("thread input state");
-    assert!(captured_input_state.submit_pending_steers_after_interrupt);
+    assert!(captured_input_state.submit_pending_steer_after_interrupt);
     assert_eq!(
         captured_input_state.safety_buffering_prompt,
         Some(UserMessage::from("buffered prompt"))
     );
-    assert_eq!(chat.input_queue.pending_steers.len(), 1);
+    assert_eq!(chat.input_queue.pending_steer.iter().count(), 1);
     assert_eq!(
         chat.safety_buffering_prompt,
         Some(UserMessage::from("buffered prompt"))
@@ -1828,8 +1860,8 @@ async fn restore_thread_input_state_applies_running_state_policy() {
     assert!(!chat.turn_lifecycle.sleep_inhibitor.is_turn_running());
     assert!(!chat.bottom_pane.is_task_running());
     assert!(!chat.input_queue.user_turn_pending_start);
-    assert!(!chat.input_queue.submit_pending_steers_after_interrupt);
-    assert!(chat.input_queue.pending_steers.is_empty());
+    assert!(!chat.input_queue.submit_pending_steer_after_interrupt);
+    assert!(chat.input_queue.pending_steer.is_none());
     assert_eq!(chat.bottom_pane.composer_text(), "composer draft");
     assert_eq!(
         chat.safety_buffering_prompt,

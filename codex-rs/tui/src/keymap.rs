@@ -122,6 +122,10 @@ pub(crate) struct ChatKeymap {
     pub(crate) next_permission_mode: Vec<KeyBinding>,
     /// Edit the most recently queued message.
     pub(crate) edit_queued_message: Vec<KeyBinding>,
+    /// Edit the pending steer.
+    pub(crate) edit_pending_steer: Vec<KeyBinding>,
+    /// Remove the pending steer.
+    pub(crate) remove_pending_steer: Vec<KeyBinding>,
 }
 
 /// Composer-level keybindings validated in the second app-scope conflict pass.
@@ -680,6 +684,16 @@ impl RuntimeKeymap {
                 keymap.chat.edit_queued_message.as_ref(),
                 &defaults.chat.edit_queued_message,
                 "tui.keymap.chat.edit_queued_message",
+            )?,
+            edit_pending_steer: resolve_bindings(
+                keymap.chat.edit_pending_steer.as_ref(),
+                &defaults.chat.edit_pending_steer,
+                "tui.keymap.chat.edit_pending_steer",
+            )?,
+            remove_pending_steer: resolve_bindings(
+                keymap.chat.remove_pending_steer.as_ref(),
+                &defaults.chat.remove_pending_steer,
+                "tui.keymap.chat.remove_pending_steer",
             )?,
         };
 
@@ -1446,6 +1460,8 @@ impl RuntimeKeymap {
                 previous_permission_mode: default_bindings![],
                 next_permission_mode: default_bindings![],
                 edit_queued_message: default_bindings![alt(KeyCode::Up), shift(KeyCode::Left)],
+                edit_pending_steer: default_bindings![alt(KeyCode::Char('e'))],
+                remove_pending_steer: default_bindings![alt(KeyCode::Char('x'))],
             },
             composer: ComposerKeymap {
                 submit: default_bindings![plain(KeyCode::Enter)],
@@ -1792,6 +1808,14 @@ impl RuntimeKeymap {
             (
                 "chat.edit_queued_message",
                 self.chat.edit_queued_message.as_slice(),
+            ),
+            (
+                "chat.edit_pending_steer",
+                self.chat.edit_pending_steer.as_slice(),
+            ),
+            (
+                "chat.remove_pending_steer",
+                self.chat.remove_pending_steer.as_slice(),
             ),
             ("composer.submit", self.composer.submit.as_slice()),
             ("composer.queue", self.composer.queue.as_slice()),
@@ -2629,6 +2653,14 @@ mod tests {
         assert_eq!(
             runtime.chat.edit_queued_message,
             vec![key_hint::alt(KeyCode::Up), key_hint::shift(KeyCode::Left)]
+        );
+        assert_eq!(
+            runtime.chat.edit_pending_steer,
+            vec![key_hint::alt(KeyCode::Char('e'))]
+        );
+        assert_eq!(
+            runtime.chat.remove_pending_steer,
+            vec![key_hint::alt(KeyCode::Char('x'))]
         );
         assert_eq!(
             runtime.composer.history_search_previous,

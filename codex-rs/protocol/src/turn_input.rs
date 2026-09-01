@@ -212,6 +212,18 @@ pub enum SteerSubmission {
     NotSubmitted { reason: NotSubmittedReason },
 }
 
+/// Result of mutating a client-addressed steer that has not reached the model yet.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PendingSteerMutationOutcome {
+    /// The pending steer was replaced or removed.
+    Applied,
+    /// The client id no longer names pending input. The steer may already have
+    /// crossed a model-input boundary.
+    NotFound,
+    /// The requested turn was unavailable or did not accept steering.
+    NotSubmitted { reason: NotSubmittedReason },
+}
+
 /// Why Core did not accept submitted turn input for turn processing.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum NotSubmittedReason {

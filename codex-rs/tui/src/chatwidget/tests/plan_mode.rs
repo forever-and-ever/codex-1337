@@ -1188,7 +1188,7 @@ async fn submit_user_message_queues_while_compaction_turn_is_running() {
 
     chat.submit_user_message(UserMessage::from("queued while compacting"));
 
-    assert_eq!(chat.input_queue.pending_steers.len(), 1);
+    assert_eq!(chat.input_queue.pending_steer.iter().count(), 1);
     match next_submit_op(&mut op_rx) {
         Op::UserTurn { items, .. } => assert_eq!(
             items,
@@ -1208,7 +1208,7 @@ async fn submit_user_message_queues_while_compaction_turn_is_running() {
         }),
     );
 
-    assert!(chat.input_queue.pending_steers.is_empty());
+    assert!(chat.input_queue.pending_steer.is_none());
     assert_eq!(
         chat.queued_user_message_texts(),
         vec!["queued while compacting"]

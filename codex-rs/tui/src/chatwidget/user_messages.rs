@@ -124,16 +124,14 @@ impl ThreadComposerState {
 pub(crate) struct ThreadInputState {
     pub(super) composer: Option<ThreadComposerState>,
     pub(super) safety_buffering_prompt: Option<UserMessage>,
-    pub(super) pending_steers: VecDeque<UserMessage>,
-    pub(super) pending_steer_history_records: VecDeque<UserMessageHistoryRecord>,
-    pub(super) pending_steer_compare_keys: VecDeque<PendingSteerCompareKey>,
+    pub(super) pending_steer: Option<PendingSteer>,
     pub(super) rejected_steers_queue: VecDeque<UserMessage>,
     pub(super) rejected_steer_history_records: VecDeque<UserMessageHistoryRecord>,
     pub(super) queued_user_messages: VecDeque<QueuedUserMessage>,
     pub(super) queued_user_message_history_records: VecDeque<UserMessageHistoryRecord>,
     pub(crate) recovered_queue: bool,
     pub(super) user_turn_pending_start: bool,
-    pub(super) submit_pending_steers_after_interrupt: bool,
+    pub(super) submit_pending_steer_after_interrupt: bool,
     pub(super) current_collaboration_mode: CollaborationMode,
     pub(super) active_collaboration_mask: Option<CollaborationModeMask>,
     pub(super) task_running: bool,
@@ -171,11 +169,44 @@ impl From<&str> for UserMessage {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub(super) struct PendingSteer {
+    pub(super) client_id: String,
+    pub(super) items: Vec<UserInput>,
     pub(super) user_message: UserMessage,
     pub(super) history_record: UserMessageHistoryRecord,
     pub(super) compare_key: PendingSteerCompareKey,
+}
+
+#[derive(Debug)]
+pub(super) struct PendingSteerReplacement {
+    pub(super) previous: PendingSteer,
+    pub(super) appended: PendingSteer,
+}
+
+impl PendingSteer {
+    pub(super) fn append(&self, appended: &Self) -> Self {
+        let mut items = self.items.clone();
+        items.push(UserInput::Text {
+            text: "\n".to_string(),
+            text_elements: Vec::new(),
+        });
+        items.extend(appended.items.clone());
+        let (user_message, history_record) = merge_user_messages_with_history_record(vec![
+            (self.user_message.clone(), self.history_record.clone()),
+            (
+                appended.user_message.clone(),
+                appended.history_record.clone(),
+            ),
+        ]);
+        Self {
+            client_id: self.client_id.clone(),
+            compare_key: ChatWidget::pending_steer_compare_key_from_items(&items),
+            items,
+            user_message,
+            history_record,
+        }
+    }
 }
 
 pub(crate) fn create_initial_user_message(

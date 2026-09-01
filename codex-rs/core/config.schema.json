@@ -3871,11 +3871,13 @@
             },
             "chat": {
               "decrease_reasoning_effort": null,
+              "edit_pending_steer": null,
               "edit_queued_message": null,
               "increase_reasoning_effort": null,
               "interrupt_turn": null,
               "next_permission_mode": null,
               "previous_permission_mode": null,
+              "remove_pending_steer": null,
               "toggle_voice_mute": null
             },
             "composer": {
@@ -4270,6 +4272,14 @@
           ],
           "description": "Decrease the active reasoning effort."
         },
+        "edit_pending_steer": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/KeybindingsSpec"
+            }
+          ],
+          "description": "Edit the steer waiting for the next model-input boundary."
+        },
         "edit_queued_message": {
           "allOf": [
             {
@@ -4309,6 +4319,14 @@
             }
           ],
           "description": "Switch to the previous available permission mode."
+        },
+        "remove_pending_steer": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/KeybindingsSpec"
+            }
+          ],
+          "description": "Remove the steer waiting for the next model-input boundary."
         },
         "toggle_voice_mute": {
           "allOf": [
@@ -4657,11 +4675,13 @@
           ],
           "default": {
             "decrease_reasoning_effort": null,
+            "edit_pending_steer": null,
             "edit_queued_message": null,
             "increase_reasoning_effort": null,
             "interrupt_turn": null,
             "next_permission_mode": null,
             "previous_permission_mode": null,
+            "remove_pending_steer": null,
             "toggle_voice_mute": null
           }
         },

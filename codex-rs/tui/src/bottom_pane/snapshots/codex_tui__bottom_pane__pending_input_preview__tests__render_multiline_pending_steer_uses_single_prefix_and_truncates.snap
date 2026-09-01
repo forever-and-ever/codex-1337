@@ -1,16 +1,18 @@
 ---
 source: tui/src/bottom_pane/pending_input_preview.rs
+assertion_line: 415
 expression: "format!(\"{buf:?}\")"
 ---
 Buffer {
-    area: Rect { x: 0, y: 0, width: 48, height: 6 },
+    area: Rect { x: 0, y: 0, width: 48, height: 7 },
     content: [
-        "• Messages to be submitted after next tool call ",
+        "• Message to be submitted after next tool call  ",
         "  (press esc to interrupt and send immediately) ",
         "  ↳ First line                                  ",
         "    Second line                                 ",
         "    Third line                                  ",
         "    …                                           ",
+        "    ⌥ + e edit · ⌥ + x remove                   ",
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
@@ -25,5 +27,7 @@ Buffer {
         x: 14, y: 4, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 0, y: 5, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
         x: 5, y: 5, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 6, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 29, y: 6, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }
