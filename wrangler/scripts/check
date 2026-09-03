@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+
+cargo fmt --all --check
+cargo clippy --locked --workspace --all-targets
+cargo clippy --locked --workspace --all-targets --all-features
+cargo test --locked --workspace --all-targets --all-features
+cargo doc --locked --workspace --all-features --no-deps

@@ -1,0 +1,3316 @@
+use std::{
+    collections::{HashMap, HashSet},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+    },
+    time::Instant,
+};
+
+use brass_poolrooms::{
+    chrome,
+    chrome::{
+        ForgePin, LonginusCursor, MechanismSize, ScrewScroll, SortDetent, SortToggle, TypeRole,
+    },
+    water::{Domain, Floor, Frame as WaterFrame, Poke, Radiator, Surface, Wetness},
+};
+#[cfg(feature = "egui-test")]
+use codex_wrangler_contract::{
+    CardKey, CardObservation, CardTarget, ClosePreference, DeleteGuard, Flight, ForkField,
+    GuideVisibility, HistoryObservation, HistoryRenameObservation, HistorySortObservation,
+    HistorySortTarget, HistoryTarget, HistoryTranscriptObservation, Observation, PinField,
+    SearchObservation, SearchTarget, SettingTarget, SettingsObservation, Tab, TabTarget,
+    UI_FINGERPRINT, WorkspaceTarget,
+};
+use codex_wrangler_contract::{Harness, HistoryColumn, HistoryOperation, SortDirection, Work};
+use egui::{
+    Color32, RichText, Sense, Stroke, StrokeKind, Vec2,
+    text::{LayoutJob, TextFormat},
+};
+use eternalist_apps::{
+    ApplicationHeader, CloseDisposition, LivingWait, NativeApp, NativeWake, WindowSpec,
+    command_guide::CommandGuide,
+    commands::{CommandDispatch, CommandStatus},
+    settings::{SettingSpec, SettingsFile, SettingsSheet},
+};
+
+use crate::{
+    commands::{
+        APPLICATION_GUIDE_GROUP, Context, Edict, NAVIGATION_GUIDE_GROUP, SEARCH_GUIDE_GROUP,
+        TILE_GUIDE_GROUP, canon,
+    },
+    configuration::Configuration,
+    fleet::{FleetSnapshot, FleetWorker},
+    history::{
+        ArtifactRevision, HistorySnapshot, HistoryWorker, Order as HistoryOrder,
+        Session as HistorySession, Turn as HistoryTurn, spawn as spawn_history,
+    },
+    instance::{Incumbent, NO_DESKTOP},
+    model::{Card, LiveSnapshot},
+    posture::{Ledger, Posture},
+    recon::{Intent, LiveWorker, Strike, spawn},
+    search::{HistoryHit, HistorySearch, Hit, Search},
+    site::{SessionKey, Site},
+    tray::{Signal as TraySignal, Tray},
+};
+
+const TILE_MIN: f32 = 300.0;
+const TILE_HEIGHT: f32 = 185.0;
+const GAP: f32 = 12.0;
+const GREEN: Color32 = Color32::from_rgb(91, 218, 146);
+const BLUE: Color32 = Color32::from_rgb(94, 164, 236);
+const VIOLET: Color32 = Color32::from_rgb(178, 115, 238);
+const ORANGE: Color32 = Color32::from_rgb(235, 158, 74);
+const RED: Color32 = Color32::from_rgb(236, 91, 91);
+const WHITE: Color32 = Color32::from_rgb(238, 234, 224);
+const ASH: Color32 = Color32::from_rgb(174, 172, 166);
+const SITE_PALETTE: [Color32; 6] = [
+    Color32::from_rgb(71, 201, 222),
+    Color32::from_rgb(235, 121, 187),
+    Color32::from_rgb(224, 190, 71),
+    Color32::from_rgb(126, 207, 103),
+    Color32::from_rgb(151, 127, 232),
+    Color32::from_rgb(235, 126, 84),
+];
+const SUMMON_BARRAGE: u8 = 12;
+const LONGINUS_FREQUENCY_HZ: f32 = 0.66;
+const LONGINUS_STRENGTH: f32 = 0.58;
+const LONGINUS_CHROMA_GAIN: f32 = 3.0;
+const TILE_AREA_PER_IMPULSE: f32 = 2_000.0;
+const TILE_IMPULSE_CEIL: f32 = 1.60;
+const TILE_SWEEP_EPSILON: f32 = 0.05;
+const FEAR_REACH: f32 = 720.0;
+const FEAR_FLEE: f32 = 2.25;
+const HISTORY_ROW: f32 = 34.0;
+const MINIMIZE_ON_CLOSE: SettingSpec = SettingSpec::new(
+    "minimize_on_close",
+    "MINIMIZE ON CLOSE",
+    "Keep Wrangler resident in the system tray when its window closes.",
+);
+const CONFIRM_DELETION: SettingSpec = SettingSpec::new(
+    "confirm_deletion",
+    "CONFIRM DELETE",
+    "Require confirmation before permanently deleting a historical session.",
+);
+
+type JoltLedger = HashMap<(Site, Harness), HashMap<String, Vec2>>;
+
+struct CardPhysics<'a> {
+    tool: TileTool,
+    recoiling: bool,
+    water: &'a mut Surface,
+    jolts: &'a mut JoltLedger,
+    hovered: &'a mut Option<usize>,
+}
+
+#[derive(Clone, Copy, Default, Eq, PartialEq)]
+enum TileTool {
+    #[default]
+    Rest,
+    Dismiss,
+    Fork,
+    Pin,
+}
+
+impl TileTool {
+    const fn kinetic(self) -> bool {
+        matches!(self, Self::Dismiss)
+    }
+}
+
+struct ActivationFlight {
+    strike: Strike,
+    witness: FlightWitness,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum FlightWitness {
+    Unpresented,
+    Presented,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum GalleryVisibility {
+    Visible,
+    ConcealPending,
+    Concealed,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum SearchFocus {
+    Idle,
+    Seeking,
+    Held,
+    Releasing,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Page {
+    Live,
+    Historical,
+}
+
+impl Page {
+    const ALL: [Self; 2] = [Self::Live, Self::Historical];
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Live => "LIVE",
+            Self::Historical => "HISTORICAL",
+        }
+    }
+
+    const fn next(self) -> Self {
+        match self {
+            Self::Live => Self::Historical,
+            Self::Historical => Self::Live,
+        }
+    }
+}
+
+struct HistoryGesture {
+    key: SessionKey,
+    operation: HistoryOperation,
+}
+
+enum HistoryAction {
+    Inspect(SessionKey),
+    Open(SessionKey),
+    Operate(HistoryGesture),
+    BeginRename {
+        key: SessionKey,
+        name: String,
+        rect: egui::Rect,
+    },
+    CommitRename {
+        key: SessionKey,
+        name: String,
+    },
+    CancelRename,
+}
+
+struct HistoryRename {
+    key: SessionKey,
+    text: String,
+    seize_focus: bool,
+}
+
+enum HistoryEffect {
+    Archived(bool),
+    Deleted,
+    Renamed(String),
+}
+
+struct HistoryLease {
+    effect: HistoryEffect,
+    phase: HistoryPhase,
+}
+
+#[derive(Eq, PartialEq)]
+enum HistoryPhase {
+    Submitted,
+    Acknowledged,
+}
+
+impl HistoryLease {
+    fn claim(order: &HistoryOrder) -> Self {
+        let effect = match order {
+            HistoryOrder::Archive(_) => HistoryEffect::Archived(true),
+            HistoryOrder::Unarchive(_) => HistoryEffect::Archived(false),
+            HistoryOrder::Delete(_) => HistoryEffect::Deleted,
+            HistoryOrder::Rename { name, .. } => HistoryEffect::Renamed(name.trim().to_owned()),
+        };
+        Self {
+            effect,
+            phase: HistoryPhase::Submitted,
+        }
+    }
+
+    const fn operation(&self) -> HistoryOperation {
+        match self.effect {
+            HistoryEffect::Archived(true) => HistoryOperation::Archive,
+            HistoryEffect::Archived(false) => HistoryOperation::Unarchive,
+            HistoryEffect::Deleted => HistoryOperation::Delete,
+            HistoryEffect::Renamed(_) => HistoryOperation::Rename,
+        }
+    }
+
+    fn settled(&self, key: &SessionKey, snapshot: &HistorySnapshot) -> bool {
+        if self.phase != HistoryPhase::Acknowledged {
+            return false;
+        }
+        let session = snapshot
+            .sessions
+            .iter()
+            .find(|session| session.key() == *key);
+        match &self.effect {
+            HistoryEffect::Archived(archived) => {
+                session.is_some_and(|session| session.archived == *archived)
+            }
+            HistoryEffect::Deleted => session.is_none(),
+            HistoryEffect::Renamed(name) => {
+                session.and_then(|session| session.name.as_deref()) == Some(name)
+            }
+        }
+    }
+}
+
+struct TranscriptView {
+    key: SessionKey,
+    name: Option<String>,
+    state: TranscriptState,
+}
+
+enum TranscriptState {
+    Loading,
+    Ready {
+        turns: Vec<HistoryTurn>,
+        cursor: usize,
+    },
+    Failed(String),
+}
+
+impl SearchFocus {
+    const fn held(self) -> bool {
+        matches!(self, Self::Held)
+    }
+
+    const fn editing(self) -> bool {
+        matches!(self, Self::Seeking | Self::Held)
+    }
+}
+
+impl ActivationFlight {
+    const fn launch(strike: Strike) -> Self {
+        Self {
+            strike,
+            witness: FlightWitness::Unpresented,
+        }
+    }
+
+    fn witness(&mut self) {
+        self.witness = FlightWitness::Presented;
+    }
+}
+
+struct Wrangler<const START_FLOATING: bool> {
+    water: Surface,
+    resting_ior_spread: f32,
+    living_wait: LivingWait,
+    live_worker: LiveWorker,
+    history_worker: HistoryWorker,
+    fleet_worker: FleetWorker,
+    remote_sites: Vec<crate::site::RemoteSite>,
+    local_live_snapshot: Option<LiveSnapshot>,
+    local_history_snapshot: Option<HistorySnapshot>,
+    fleet_snapshot: Option<FleetSnapshot>,
+    live_snapshot: Option<LiveSnapshot>,
+    history_snapshot: Option<HistorySnapshot>,
+    live_snapshot_label: String,
+    first_frame_presented: bool,
+    summon: Arc<AtomicU64>,
+    summon_generation: u32,
+    summon_attempts: Option<u8>,
+    posture: Posture,
+    pending_activation: Option<ActivationFlight>,
+    quit: Arc<AtomicBool>,
+    hovered: Option<usize>,
+    history_hovered: Option<SessionKey>,
+    search_focus: SearchFocus,
+    tile_tool: TileTool,
+    jolts: JoltLedger,
+    search: Search,
+    history_search: HistorySearch,
+    history_requested: HashSet<(SessionKey, ArtifactRevision)>,
+    history_pending: HashMap<SessionKey, HistoryLease>,
+    history_error: Option<String>,
+    history_rename: Option<HistoryRename>,
+    delete_target: Option<SessionKey>,
+    transcript: Option<TranscriptView>,
+    page: Page,
+    configuration: Configuration,
+    settings: SettingsSheet,
+    guide: CommandGuide,
+    window_focused: Option<bool>,
+    configuration_fault_seen: Option<String>,
+    visibility: GalleryVisibility,
+    ledger: Ledger,
+    tray: Option<Tray>,
+}
+
+pub fn launch(
+    ctx: &egui::Context,
+    incumbent: Incumbent,
+    ledger: Ledger,
+    posture: Posture,
+) -> anyhow::Result<()> {
+    match posture {
+        Posture::Floating => eternalist_apps::run(
+            ctx.clone(),
+            Wrangler::<true>::raise(ctx, incumbent, ledger)?,
+        ),
+        Posture::Tiled => eternalist_apps::run(
+            ctx.clone(),
+            Wrangler::<false>::raise(ctx, incumbent, ledger)?,
+        ),
+    }
+}
+
+impl<const START_FLOATING: bool> Wrangler<START_FLOATING> {
+    fn raise(ctx: &egui::Context, incumbent: Incumbent, ledger: Ledger) -> anyhow::Result<Self> {
+        let wake = NativeWake::from_context(ctx);
+        let configuration = Configuration::raise(ctx)?;
+        chrome::set_font_scale(ctx, configuration.font_scale());
+        let remote_sites = configuration.remotes();
+        let live_worker = spawn(wake.clone());
+        let history_worker = spawn_history(wake.clone());
+        let fleet_worker = FleetWorker::spawn(wake.clone(), remote_sites.clone());
+        let resident = incumbent.resident();
+        let summon = Arc::new(AtomicU64::new(pack_summon(1, incumbent.launch_desktop())));
+        let tray_summon = Arc::clone(&summon);
+        let quit = Arc::new(AtomicBool::new(false));
+        let tray_quit = Arc::clone(&quit);
+        let tray_wake = wake;
+        let tray = Tray::raise(incumbent, move |signal| match signal {
+            TraySignal::Reveal(destination) => {
+                let destination = match destination {
+                    Some(desktop) => Some(desktop),
+                    None => match crate::desktop::Desktop::current_desktop() {
+                        Ok(desktop) => desktop,
+                        Err(error) => {
+                            eprintln!(
+                                "codex-wrangler could not sight the current workspace: {error:#}"
+                            );
+                            None
+                        }
+                    },
+                };
+                arm_summon(&tray_summon, destination);
+                let _woken = tray_wake.wake();
+            }
+            TraySignal::Quit => {
+                tray_quit.store(true, Ordering::Release);
+                let _woken = tray_wake.wake();
+            }
+        })
+        .map_err(|error| eprintln!("codex-wrangler could not raise its tray: {error:#}"))
+        .ok();
+        let water = Surface::new(Wetness::Wet);
+        let resting_ior_spread = water.chemistry().ior_spread;
+        Ok(Self {
+            water,
+            resting_ior_spread,
+            living_wait: LivingWait::default(),
+            live_worker,
+            history_worker,
+            fleet_worker,
+            remote_sites,
+            local_live_snapshot: None,
+            local_history_snapshot: None,
+            fleet_snapshot: None,
+            live_snapshot: None,
+            history_snapshot: None,
+            live_snapshot_label: "DISCOVERING MANUAL THREADS".to_owned(),
+            first_frame_presented: false,
+            summon,
+            summon_generation: u32::from(resident),
+            summon_attempts: (!resident).then_some(0),
+            posture: Posture::from_floating(START_FLOATING),
+            pending_activation: None,
+            quit,
+            hovered: None,
+            history_hovered: None,
+            search_focus: SearchFocus::Idle,
+            tile_tool: TileTool::Rest,
+            jolts: JoltLedger::new(),
+            search: Search::default(),
+            history_search: HistorySearch::default(),
+            history_requested: HashSet::new(),
+            history_pending: HashMap::new(),
+            history_error: None,
+            history_rename: None,
+            delete_target: None,
+            transcript: None,
+            page: Page::Live,
+            configuration,
+            settings: SettingsSheet::default(),
+            guide: CommandGuide::default(),
+            window_focused: None,
+            configuration_fault_seen: None,
+            visibility: if resident {
+                GalleryVisibility::ConcealPending
+            } else {
+                GalleryVisibility::Visible
+            },
+            ledger,
+            tray,
+        })
+    }
+
+    fn quench(&mut self) {
+        self.clear_search();
+        self.visibility = GalleryVisibility::Concealed;
+        self.tile_tool = TileTool::Rest;
+        self.jolts.clear();
+        self.history_rename = None;
+        self.transcript = None;
+        self.water.reset();
+        self.water.set_wetness(Wetness::Dry);
+    }
+
+    fn request_conceal(&mut self) {
+        self.quench();
+        self.visibility = GalleryVisibility::ConcealPending;
+    }
+
+    fn reap_activation(&mut self) {
+        if self
+            .pending_activation
+            .as_ref()
+            .is_some_and(|flight| flight.witness != FlightWitness::Presented)
+        {
+            return;
+        }
+        let Some(activation) = self
+            .live_worker
+            .take_activation()
+            .or_else(|| self.fleet_worker.take_activation())
+        else {
+            return;
+        };
+        if self
+            .pending_activation
+            .as_ref()
+            .is_none_or(|flight| flight.strike != activation.strike)
+        {
+            return;
+        }
+        self.pending_activation = None;
+        if activation.succeeded && activation.conceal {
+            self.sight_posture();
+            if self.posture.floating() {
+                self.request_conceal();
+            }
+        }
+    }
+
+    fn kindle_if_summoned(&mut self) -> bool {
+        let generation = u32::try_from(self.summon.load(Ordering::Acquire) >> 32)
+            .expect("summon generation occupies 32 bits");
+        if generation == self.summon_generation {
+            return false;
+        }
+        self.summon_generation = generation;
+        self.summon_attempts = Some(0);
+        self.visibility = GalleryVisibility::Visible;
+        self.water.reset();
+        self.water.set_wetness(Wetness::Wet);
+        self.sight_posture();
+        true
+    }
+
+    fn drain(&mut self) -> bool {
+        if !self.first_frame_presented {
+            return false;
+        }
+        let Some(snapshot) = self.live_worker.take_snapshot() else {
+            return false;
+        };
+        self.local_live_snapshot = Some(snapshot);
+        self.rebuild_snapshots();
+        true
+    }
+
+    fn drain_history(&mut self) -> bool {
+        if let Some(snapshot) = self.history_worker.take_snapshot() {
+            self.history_pending
+                .retain(|key, lease| !lease.settled(key, &snapshot));
+            let revisions = snapshot
+                .sessions
+                .iter()
+                .filter_map(|session| {
+                    session
+                        .revision
+                        .clone()
+                        .map(|revision| (session.key(), revision))
+                })
+                .collect::<HashSet<_>>();
+            self.history_requested
+                .retain(|request| revisions.contains(request));
+            self.local_history_snapshot = Some(snapshot);
+            self.rebuild_snapshots();
+            return true;
+        }
+        false
+    }
+
+    fn drain_fleet(&mut self) -> bool {
+        let Some(snapshot) = self.fleet_worker.take_snapshot() else {
+            return false;
+        };
+        self.fleet_snapshot = Some(snapshot);
+        self.rebuild_snapshots();
+        true
+    }
+
+    fn rebuild_snapshots(&mut self) {
+        self.live_snapshot = self.local_live_snapshot.clone().map(|mut local| {
+            if let Some(fleet) = &self.fleet_snapshot {
+                local
+                    .cards
+                    .extend(fleet.cards.iter().cloned().map(|mut card| {
+                        card.seat = local.relay_seats.get(&card.key()).copied();
+                        card
+                    }));
+                local.cards.sort();
+            }
+            local
+        });
+        self.history_snapshot = self.local_history_snapshot.clone().map(|mut local| {
+            if let Some(fleet) = &self.fleet_snapshot {
+                local.sessions.extend(fleet.sessions.clone());
+                local.sessions.sort_unstable_by(|left, right| {
+                    right
+                        .updated_at_ms
+                        .cmp(&left.updated_at_ms)
+                        .then_with(|| left.site.cmp(&right.site))
+                        .then_with(|| left.thread.cmp(&right.thread))
+                });
+            }
+            local
+        });
+        if let Some(snapshot) = &self.live_snapshot {
+            self.search.reconcile(&snapshot.cards);
+            self.live_snapshot_label = self.search.label().to_owned();
+        }
+        self.reconcile_history_search();
+    }
+
+    fn reap_history_outcomes(&mut self) -> bool {
+        let mut changed = false;
+        for outcome in self.history_worker.take_outcomes() {
+            let thread = outcome.order.thread();
+            let key = SessionKey::new(Site::Local, thread.clone());
+            let operation = outcome.order.operation();
+            if let Some(error) = outcome.error {
+                let _prior = self.history_pending.remove(&key);
+                self.history_error = Some(format!(
+                    "{} {} FAILED · {error}",
+                    operation.present_participle(),
+                    outcome.order.thread()
+                ));
+            } else {
+                let snapshot = self.local_history_snapshot.as_ref();
+                let settled = self.history_pending.get_mut(&key).is_some_and(|lease| {
+                    assert_eq!(
+                        lease.operation(),
+                        operation,
+                        "history outcome crossed its resource lease"
+                    );
+                    lease.phase = HistoryPhase::Acknowledged;
+                    snapshot.is_some_and(|snapshot| lease.settled(&key, snapshot))
+                });
+                if settled {
+                    let _prior = self.history_pending.remove(&key);
+                }
+                self.history_error = None;
+            }
+            changed = true;
+        }
+        changed
+    }
+
+    fn reap_transcripts(&mut self) -> bool {
+        let mut changed = false;
+        for outcome in self.history_worker.take_transcripts() {
+            let Some(view) = self
+                .transcript
+                .as_mut()
+                .filter(|view| view.key.site.local() && view.key.thread == outcome.thread)
+            else {
+                continue;
+            };
+            view.state = if let Some(error) = outcome.error {
+                TranscriptState::Failed(error)
+            } else {
+                let cursor = outcome.turns.len().saturating_sub(1);
+                TranscriptState::Ready {
+                    turns: outcome.turns,
+                    cursor,
+                }
+            };
+            changed = true;
+        }
+        changed
+    }
+
+    fn reconcile_history_search(&mut self) {
+        let Some(live) = live_codex_threads(self.live_snapshot.as_ref()) else {
+            self.history_search.reconcile(&[], &HashSet::new());
+            return;
+        };
+        let sessions = self
+            .history_snapshot
+            .as_ref()
+            .map_or(&[][..], |snapshot| snapshot.sessions.as_slice());
+        self.history_search.reconcile(sessions, &live);
+    }
+
+    fn clear_search(&mut self) {
+        match self.page {
+            Page::Live => {
+                let cards = self
+                    .live_snapshot
+                    .as_ref()
+                    .map_or(&[][..], |snapshot| snapshot.cards.as_slice());
+                self.search.clear(cards);
+                if self.live_snapshot.is_some() {
+                    self.live_snapshot_label = self.search.label().to_owned();
+                }
+            }
+            Page::Historical => {
+                if let Some(live) = live_codex_threads(self.live_snapshot.as_ref()) {
+                    let sessions = self
+                        .history_snapshot
+                        .as_ref()
+                        .map_or(&[][..], |snapshot| snapshot.sessions.as_slice());
+                    self.history_search.clear(sessions, &live);
+                } else {
+                    self.history_search.clear(&[], &HashSet::new());
+                }
+            }
+        }
+        self.search_focus = SearchFocus::Releasing;
+    }
+
+    fn select_page(&mut self, page: Page, ctx: &egui::Context) {
+        if self.page == page {
+            return;
+        }
+        self.page = page;
+        self.history_rename = None;
+        self.search_focus = SearchFocus::Releasing;
+        ctx.request_discard("Wrangler tab changed");
+    }
+
+    fn seize_shortcuts(&mut self, ui: &mut egui::Ui, search_id: egui::Id, modal_open: bool) {
+        if self.history_rename.is_some() {
+            if ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+                self.history_rename = None;
+            }
+            return;
+        }
+        let settings_was_open = self.settings.is_open();
+        let settings_invoked =
+            !modal_open && !self.guide.is_open() && self.settings.take_shortcut(ui.ctx());
+        if !settings_was_open && self.settings.is_open() && self.configuration.settled() {
+            let _requested = self.configuration.request_reload();
+        }
+        let help_invoked = !modal_open
+            && !settings_invoked
+            && !self.settings.is_open()
+            && self.guide.take_shortcuts(ui.ctx());
+        if !modal_open
+            && !self.settings.is_open()
+            && !help_invoked
+            && !self.guide.is_open()
+            && let Some(CommandDispatch::Invoke(Edict::Search)) =
+                canon().route(ui.ctx(), &[Context::Gallery], |_| CommandStatus::Enabled)
+        {
+            self.search_focus = SearchFocus::Seeking;
+        }
+        if !modal_open
+            && !self.settings.is_open()
+            && !help_invoked
+            && !self.guide.is_open()
+            && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Tab))
+        {
+            self.select_page(self.page.next(), ui.ctx());
+        }
+        if !modal_open
+            && !self.settings.is_open()
+            && !self.guide.is_open()
+            && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        {
+            self.clear_search();
+            ui.memory_mut(|memory| memory.surrender_focus(search_id));
+        }
+    }
+
+    fn search_field(&mut self, ui: &mut egui::Ui, id: egui::Id) {
+        match self.page {
+            Page::Live => self.live_search_field(ui, id),
+            Page::Historical => self.history_search_field(ui, id),
+        }
+    }
+
+    fn live_search_field(&mut self, ui: &mut egui::Ui, id: egui::Id) {
+        let before = self.search.query().to_owned();
+        let color = if self.search.valid() {
+            chrome::TEXT
+        } else {
+            RED
+        };
+        let response = ui.add(
+            egui::TextEdit::singleline(self.search.edit())
+                .id(id)
+                .hint_text("CASE-INSENSITIVE REGEXP · TITLES OR NAMELESS PATHS")
+                .text_color(color)
+                .desired_width(ui.available_width()),
+        );
+        brass_poolrooms::poolroom_anchor!(ui, SearchTarget::Editor.to_string(), response.rect);
+        if self.search_focus == SearchFocus::Seeking {
+            response.request_focus();
+        }
+        self.search_focus = if response.has_focus() {
+            SearchFocus::Held
+        } else {
+            SearchFocus::Idle
+        };
+        if response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
+            ui.ctx().request_discard("Search editor submitted");
+        }
+        if response.changed() {
+            let cards = self
+                .live_snapshot
+                .as_ref()
+                .map_or(&[][..], |snapshot| snapshot.cards.as_slice());
+            self.search.revise(cards);
+            if self.live_snapshot.is_some() {
+                self.live_snapshot_label = self.search.label().to_owned();
+            }
+        }
+        if let Some(wake) = chrome::text_wake(ui, &response, &before, self.search.query()) {
+            self.water.text(wake);
+        }
+    }
+
+    fn history_search_field(&mut self, ui: &mut egui::Ui, id: egui::Id) {
+        let before = self.history_search.query().to_owned();
+        let color = if self.history_search.valid() {
+            chrome::TEXT
+        } else {
+            RED
+        };
+        let response = ui.add(
+            egui::TextEdit::singleline(self.history_search.edit())
+                .id(id)
+                .hint_text("CASE-INSENSITIVE REGEXP · SESSION NAMES OR IDS")
+                .text_color(color)
+                .desired_width(ui.available_width()),
+        );
+        brass_poolrooms::poolroom_anchor!(ui, SearchTarget::Editor.to_string(), response.rect);
+        if self.search_focus == SearchFocus::Seeking {
+            response.request_focus();
+        }
+        self.search_focus = if response.has_focus() {
+            SearchFocus::Held
+        } else {
+            SearchFocus::Idle
+        };
+        if response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
+            ui.ctx().request_discard("Search editor submitted");
+        }
+        if response.changed() {
+            if let Some(live) = live_codex_threads(self.live_snapshot.as_ref()) {
+                let sessions = self
+                    .history_snapshot
+                    .as_ref()
+                    .map_or(&[][..], |snapshot| snapshot.sessions.as_slice());
+                self.history_search.revise(sessions, &live);
+            } else {
+                self.history_search.revise(&[], &HashSet::new());
+            }
+        }
+        if let Some(wake) = chrome::text_wake(ui, &response, &before, self.history_search.query()) {
+            self.water.text(wake);
+        }
+    }
+
+    fn close_preference(&mut self, ui: &mut egui::Ui) {
+        let mut minimize = self.configuration.minimize_on_close();
+        let latch = ui
+            .add_enabled_ui(self.configuration.writable(), |ui| {
+                chrome::Checkbox::new(&mut minimize, MINIMIZE_ON_CLOSE.name())
+                    .label_side(chrome::LabelSide::Left)
+                    .size(MechanismSize::Small)
+                    .show(ui)
+            })
+            .inner;
+        brass_poolrooms::poolroom_anchor!(
+            ui,
+            SettingTarget("minimize-on-close").to_string(),
+            latch.rect
+        );
+        self.water.checkbox(&latch);
+        let changed = latch.changed();
+        let _hint = latch
+            .into_response()
+            .on_hover_text(MINIMIZE_ON_CLOSE.detail());
+        if changed {
+            let _revised = self.configuration.set_minimize_on_close(minimize);
+        }
+    }
+
+    fn application_header(&mut self, ui: &mut egui::Ui) {
+        let was_open = self.settings.is_open();
+        let _header = ApplicationHeader::new("CODEX WRANGLER")
+            .settings_attention(self.configuration.fault().is_some())
+            .show(ui, &mut self.guide, &mut self.settings, &mut self.water);
+        if !was_open && self.settings.is_open() && self.configuration.settled() {
+            let _requested = self.configuration.request_reload();
+        }
+    }
+
+    fn header(&mut self, ui: &mut egui::Ui) {
+        self.application_header(ui);
+        ui.add_space(5.0);
+        let _heading = ui.horizontal(|ui| {
+            let (label, valid) = match self.page {
+                Page::Live => (self.live_snapshot_label.as_str(), self.search.valid()),
+                Page::Historical => (self.history_search.label(), self.history_search.valid()),
+            };
+            let count = if valid {
+                chrome::muted(label)
+            } else {
+                TypeRole::Body.text(label).color(RED)
+            };
+            let _count = ui.label(count);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                self.close_preference(ui);
+                ui.add_space(8.0);
+                if self.page == Page::Live {
+                    legend(ui, "DONE", Work::Done);
+                    legend(ui, "SLEEP", Work::Sleep);
+                    legend(ui, "CLOSED", Work::Closed);
+                    legend(ui, "GOAL", Work::Goal);
+                    legend(ui, "DELEGATED", Work::Delegated);
+                    legend(ui, "WORKING", Work::Turn);
+                    legend(ui, "INPUT", Work::Input);
+                    legend(ui, "ERROR", Work::Error);
+                } else {
+                    let mut guarded = self.configuration.confirm_deletion();
+                    let guard = ui
+                        .add_enabled_ui(self.configuration.writable(), |ui| {
+                            chrome::Checkbox::new(&mut guarded, CONFIRM_DELETION.name())
+                                .label_side(chrome::LabelSide::Left)
+                                .size(MechanismSize::Small)
+                                .show(ui)
+                        })
+                        .inner;
+                    brass_poolrooms::poolroom_anchor!(
+                        ui,
+                        SettingTarget("confirm-delete").to_string(),
+                        guard.rect
+                    );
+                    self.water.checkbox(&guard);
+                    let changed = guard.changed();
+                    let _hint = guard
+                        .into_response()
+                        .on_hover_text(CONFIRM_DELETION.detail());
+                    if changed {
+                        let _revised = self.configuration.set_confirm_deletion(guarded);
+                    }
+                }
+            });
+        });
+        fleet_legend(ui, self.fleet_snapshot.as_ref());
+        ui.add_space(7.0);
+        let _tabs = ui.horizontal(|ui| {
+            for page in Page::ALL {
+                let response = page_tab(ui, page, self.page == page);
+                brass_poolrooms::poolroom_anchor!(
+                    ui,
+                    TabTarget(page.into()).to_string(),
+                    response.rect
+                );
+                if response.hovered() {
+                    self.water
+                        .hover(("wrangler-tab", page.label()), response.rect);
+                }
+                if response.clicked() && self.page != page {
+                    self.water.click(response.rect);
+                    self.select_page(page, ui.ctx());
+                }
+            }
+            let (query, valid) = match self.page {
+                Page::Live => (self.search.query(), self.search.valid()),
+                Page::Historical => (self.history_search.query(), self.history_search.valid()),
+            };
+            if !self.search_focus.editing() && !query.is_empty() {
+                ui.add_space(10.0);
+                let filter = format!("FILTER · {query}");
+                let text = if valid {
+                    TypeRole::Label.text(filter).color(chrome::MUTED)
+                } else {
+                    TypeRole::Label.text(filter).color(RED)
+                };
+                let filter_rect = ui
+                    .add(
+                        egui::Label::new(text)
+                            .truncate()
+                            .show_tooltip_when_elided(false),
+                    )
+                    .rect;
+                brass_poolrooms::poolroom_anchor!(
+                    ui,
+                    SearchTarget::Filter.to_string(),
+                    filter_rect
+                );
+                #[cfg(not(feature = "egui-test"))]
+                let _ = filter_rect;
+            }
+        });
+    }
+
+    fn settings_sheet(&mut self, ctx: &egui::Context) {
+        let path = self.configuration.path().to_owned();
+        let fault = self
+            .configuration
+            .fault()
+            .map(|fault| fault.message().to_owned());
+        let file = fault.as_deref().map_or_else(
+            || SettingsFile::ready(&path),
+            |fault| SettingsFile::fault(&path, fault),
+        );
+        let file = file
+            .reloading(self.configuration.reload_pending())
+            .reloadable(self.configuration.fault().is_some() || self.configuration.settled());
+        let mut font_scale = self.configuration.font_scale();
+        let mut minimize = self.configuration.minimize_on_close();
+        let mut confirm = self.configuration.confirm_deletion();
+        let mut font_scale_changed = false;
+        let mut minimize_changed = false;
+        let mut confirm_changed = false;
+        let response = self.settings.show(ctx, &mut self.water, file, |ui| {
+            ui.group("APPEARANCE");
+            font_scale_changed = ui.font_scale(&mut font_scale);
+            ui.group("BEHAVIOR");
+            minimize_changed = ui.boolean(MINIMIZE_ON_CLOSE, &mut minimize);
+            confirm_changed = ui.boolean(CONFIRM_DELETION, &mut confirm);
+        });
+        if font_scale_changed && self.configuration.set_font_scale(font_scale) {
+            chrome::set_font_scale(ctx, font_scale);
+        }
+        if minimize_changed {
+            let _revised = self.configuration.set_minimize_on_close(minimize);
+        }
+        if confirm_changed {
+            let _revised = self.configuration.set_confirm_deletion(confirm);
+        }
+        if response.reload_requested() {
+            let _requested = self.configuration.request_reload();
+        }
+    }
+
+    fn reconcile_configuration(&mut self, ui: &egui::Ui) -> bool {
+        let mut changed = self.configuration.absorb();
+        chrome::set_font_scale(ui.ctx(), self.configuration.font_scale());
+        if self.configuration.fault().is_none() {
+            let remotes = self.configuration.remotes();
+            if remotes != self.remote_sites {
+                self.fleet_worker =
+                    FleetWorker::spawn(NativeWake::from_context(ui.ctx()), remotes.clone());
+                self.remote_sites = remotes;
+                self.fleet_snapshot = None;
+                self.rebuild_snapshots();
+                changed = true;
+            }
+        }
+        let fault = self
+            .configuration
+            .fault()
+            .map(|fault| fault.message().to_owned());
+        let new_fault = fault.is_some() && fault != self.configuration_fault_seen;
+        if fault != self.configuration_fault_seen {
+            self.configuration_fault_seen = fault;
+            changed = true;
+        }
+        if new_fault
+            && self.delete_target.is_none()
+            && self.transcript.is_none()
+            && !self.guide.is_open()
+        {
+            self.settings.require_attention(ui.ctx());
+        }
+        let focused = ui.input(|input| input.focused);
+        let regained = self.window_focused.replace(focused) == Some(false) && focused;
+        if regained && self.configuration.settled() {
+            let _requested = self.configuration.request_reload();
+        }
+        changed
+    }
+
+    fn gallery_panel(
+        &mut self,
+        ui: &mut egui::Ui,
+        search_id: egui::Id,
+        tool: TileTool,
+        recoiling: bool,
+    ) -> (Option<Strike>, f32) {
+        let mut selected = None;
+        let panel = egui::CentralPanel::default()
+            .frame(
+                egui::Frame::new()
+                    .fill(Color32::from_rgba_unmultiplied(12, 11, 9, 232))
+                    .inner_margin(22),
+            )
+            .show(ui, |ui| {
+                self.header(ui);
+                if self.search_focus.editing() {
+                    ui.add_space(7.0);
+                    self.search_field(ui, search_id);
+                }
+                ui.add_space(16.0);
+                let scroll = ScrewScroll::vertical()
+                    .id_salt("codex-gallery")
+                    .auto_shrink([false; 2])
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        if self.live_snapshot.is_none() {
+                            let arena = ui.max_rect();
+                            let _bouncer = self.living_wait.bouncer(ui, arena);
+                        } else if let Some(fault) = self
+                            .live_snapshot
+                            .as_ref()
+                            .and_then(|snapshot| snapshot.fault.as_deref())
+                        {
+                            let _fault = ui.label(RichText::new(fault).color(Color32::LIGHT_RED));
+                        } else if self
+                            .live_snapshot
+                            .as_ref()
+                            .is_some_and(|snapshot| snapshot.cards.is_empty())
+                        {
+                            let _empty = ui.centered_and_justified(|ui| {
+                                ui.label(chrome::muted("NO MANUAL HARNESS TERMINALS FOUND"))
+                            });
+                        } else if self.search.hits().is_empty() {
+                            let _empty = ui.centered_and_justified(|ui| {
+                                ui.label(chrome::muted("NO MATCHING SESSIONS"))
+                            });
+                        } else if let Some(snapshot) = &self.live_snapshot {
+                            selected = gallery(
+                                ui,
+                                &snapshot.cards,
+                                self.search.hits(),
+                                &mut CardPhysics {
+                                    tool,
+                                    recoiling,
+                                    water: &mut self.water,
+                                    jolts: &mut self.jolts,
+                                    hovered: &mut self.hovered,
+                                },
+                            );
+                        }
+                    });
+                scroll.state.offset.y
+            });
+        (selected, panel.inner)
+    }
+
+    fn history_panel(
+        &mut self,
+        ui: &mut egui::Ui,
+        search_id: egui::Id,
+    ) -> (Option<HistoryAction>, f32) {
+        let mut action = None;
+        let mut tally = Vec::new();
+        let panel = egui::CentralPanel::default()
+            .frame(
+                egui::Frame::new()
+                    .fill(Color32::from_rgba_unmultiplied(12, 11, 9, 232))
+                    .inner_margin(22),
+            )
+            .show(ui, |ui| {
+                self.header(ui);
+                if self.search_focus.editing() {
+                    ui.add_space(7.0);
+                    self.search_field(ui, search_id);
+                }
+                if let Some(error) = &self.history_error {
+                    ui.add_space(7.0);
+                    let _error = ui.add(
+                        egui::Label::new(TypeRole::Body.text(error).color(RED))
+                            .wrap()
+                            .show_tooltip_when_elided(false),
+                    );
+                }
+                ui.add_space(14.0);
+                if self.history_barrier(ui) {
+                    return 0.0;
+                }
+                if self.history_search.hits().is_empty() {
+                    let message = if self.history_search.query().is_empty() {
+                        "NO HISTORICAL SESSIONS"
+                    } else {
+                        "NO MATCHING HISTORICAL SESSIONS"
+                    };
+                    let _empty = ui.centered_and_justified(|ui| ui.label(chrome::muted(message)));
+                    return 0.0;
+                }
+                let width = ui.available_width();
+                let columns = HistoryColumns::fit(width);
+                if let Some(column) = history_header(
+                    ui,
+                    columns,
+                    &self.history_search,
+                    self.history_rename.is_none(),
+                    &mut self.water,
+                ) {
+                    let sessions = &self
+                        .history_snapshot
+                        .as_ref()
+                        .expect("history exists")
+                        .sessions;
+                    self.history_search.cycle(column, sessions);
+                    ui.ctx().request_discard("Historical order changed");
+                }
+                ui.add_space(4.0);
+                let scroll = ScrewScroll::vertical()
+                    .id_salt("codex-history")
+                    .auto_shrink([false; 2])
+                    .show_rows(
+                        ui,
+                        HISTORY_ROW,
+                        self.history_search.hits().len(),
+                        |ui, rows| {
+                            let sessions = &self
+                                .history_snapshot
+                                .as_ref()
+                                .expect("history exists")
+                                .sessions;
+                            let result = history_rows(
+                                ui,
+                                sessions,
+                                self.history_search.hits(),
+                                rows,
+                                columns,
+                                &self.history_pending,
+                                &mut self.history_rename,
+                                &mut self.water,
+                                &mut self.history_hovered,
+                            );
+                            action = result.action;
+                            tally = result.tally;
+                        },
+                    );
+                scroll.state.offset.y
+            });
+        self.request_history_tallies(tally);
+        (action, panel.inner)
+    }
+
+    fn request_history_tallies(&mut self, tally: Vec<SessionKey>) {
+        let revisions = self
+            .history_snapshot
+            .iter()
+            .flat_map(|history| &history.sessions)
+            .filter_map(|session| {
+                session
+                    .revision
+                    .clone()
+                    .map(|revision| (session.key(), revision))
+            })
+            .collect::<HashMap<_, _>>();
+        let novel = tally
+            .into_iter()
+            .filter(|key| key.site.local())
+            .filter(|key| {
+                revisions.get(key).is_some_and(|revision| {
+                    self.history_requested
+                        .insert((key.clone(), revision.clone()))
+                })
+            })
+            .collect::<Vec<_>>();
+        let threads = novel
+            .iter()
+            .map(|key| key.thread.clone())
+            .collect::<Vec<_>>();
+        if !threads.is_empty() && self.history_worker.courier().tally(threads).is_err() {
+            for key in novel {
+                if let Some(revision) = revisions.get(&key) {
+                    let _removed = self.history_requested.remove(&(key, revision.clone()));
+                }
+            }
+        }
+    }
+
+    fn history_barrier(&mut self, ui: &mut egui::Ui) -> bool {
+        if self.history_snapshot.is_none() || self.live_snapshot.is_none() {
+            let arena = ui.max_rect();
+            let _bouncer = self.living_wait.bouncer(ui, arena);
+            return true;
+        }
+        if let Some(fault) = self
+            .live_snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.fault.as_deref())
+        {
+            let _fault = ui.label(
+                RichText::new(format!("COULD NOT PARTITION LIVE SESSIONS · {fault}"))
+                    .color(Color32::LIGHT_RED),
+            );
+            return true;
+        }
+        if let Some(fault) = self
+            .history_snapshot
+            .as_ref()
+            .and_then(|history| history.fault.as_deref())
+        {
+            let _fault = ui.label(RichText::new(fault).color(Color32::LIGHT_RED));
+            return true;
+        }
+        false
+    }
+
+    fn submit_history(&mut self, order: HistoryOrder) {
+        let thread = order.thread().clone();
+        let key = SessionKey::new(Site::Local, thread.clone());
+        if self.history_pending.contains_key(&key) {
+            return;
+        }
+        let lease = HistoryLease::claim(&order);
+        let operation = lease.operation();
+        let prior = self.history_pending.insert(key.clone(), lease);
+        assert!(prior.is_none(), "history resource admitted two leases");
+        if self.history_worker.courier().order(order).is_ok() {
+            self.history_error = None;
+        } else {
+            let _lease = self.history_pending.remove(&key);
+            self.history_error = Some(format!(
+                "{} {thread} FAILED · history worker is unavailable",
+                operation.present_participle()
+            ));
+        }
+    }
+
+    fn launch_strike(&mut self, strike: Strike) {
+        if self.pending_activation.is_some() {
+            return;
+        }
+        self.summon_attempts = None;
+        self.sight_posture();
+        let sent = if strike.site.local() {
+            self.live_worker.strike.try_send(strike.clone()).is_ok()
+        } else {
+            self.fleet_worker.strike.try_send(strike.clone()).is_ok()
+        };
+        if sent {
+            self.pending_activation = Some(ActivationFlight::launch(strike));
+        }
+    }
+
+    fn accept_history_action(&mut self, action: HistoryAction) {
+        match action {
+            HistoryAction::Inspect(key) => self.request_transcript(key),
+            HistoryAction::Open(key) => {
+                let seat = self
+                    .local_live_snapshot
+                    .as_ref()
+                    .and_then(|snapshot| snapshot.relay_seats.get(&key))
+                    .copied();
+                self.launch_strike(Strike {
+                    site: key.site,
+                    harness: Harness::Codex,
+                    thread: key.thread,
+                    intent: Intent::Open,
+                    seat,
+                });
+            }
+            HistoryAction::Operate(gesture) => self.accept_history_gesture(gesture),
+            HistoryAction::BeginRename { key, name, rect } => {
+                self.history_rename = Some(HistoryRename {
+                    key,
+                    text: name,
+                    seize_focus: true,
+                });
+                self.water.click(rect);
+            }
+            HistoryAction::CommitRename { key, name } => {
+                self.history_rename = None;
+                assert!(
+                    key.site.local(),
+                    "remote history rename reached local worker"
+                );
+                self.submit_history(HistoryOrder::rename(key.thread, name));
+            }
+            HistoryAction::CancelRename => self.history_rename = None,
+        }
+    }
+
+    fn accept_history_gesture(&mut self, gesture: HistoryGesture) {
+        if gesture.operation == HistoryOperation::Delete && self.configuration.confirm_deletion() {
+            self.delete_target = Some(gesture.key);
+        } else {
+            assert!(
+                gesture.key.site.local(),
+                "remote history operation reached local worker"
+            );
+            self.submit_history(HistoryOrder::operate(gesture.key.thread, gesture.operation));
+        }
+    }
+
+    fn request_transcript(&mut self, key: SessionKey) {
+        if !key.site.local() {
+            return;
+        }
+        let name = self.history_snapshot.as_ref().and_then(|history| {
+            history
+                .sessions
+                .iter()
+                .find(|session| session.key() == key)
+                .and_then(|session| session.name.clone())
+        });
+        self.transcript = Some(TranscriptView {
+            key: key.clone(),
+            name,
+            state: TranscriptState::Loading,
+        });
+        if self
+            .history_worker
+            .courier()
+            .transcript(key.thread)
+            .is_err()
+            && let Some(view) = &mut self.transcript
+        {
+            view.state = TranscriptState::Failed("history reader is unavailable".to_owned());
+        }
+    }
+
+    fn transcript_modal(&mut self, ctx: &egui::Context) {
+        let Some(mut view) = self.transcript.take() else {
+            return;
+        };
+        let modal = egui::Modal::new(egui::Id::new("codex-history-transcript"))
+            .frame(
+                egui::Frame::new()
+                    .fill(chrome::SURFACE)
+                    .stroke(Stroke::new(1.5, chrome::EDGE_STRONG))
+                    .corner_radius(2)
+                    .inner_margin(egui::Margin::same(18)),
+            )
+            .backdrop_color(Color32::from_black_alpha(188))
+            .show(ctx, |ui| {
+                let width = 860.0_f32.min(ctx.content_rect().width() - 48.0);
+                ui.set_width(width);
+                transcript_header(ui, &mut view, &mut self.water);
+                let _thread = ui.label(TypeRole::Label.text(&view.key.thread).color(chrome::MUTED));
+                ui.add_space(12.0);
+                match &view.state {
+                    TranscriptState::Loading => {
+                        let (arena, _) = ui.allocate_exact_size(
+                            Vec2::new(ui.available_width(), 430.0),
+                            Sense::hover(),
+                        );
+                        let _bouncer = self.living_wait.bouncer(ui, arena);
+                    }
+                    TranscriptState::Failed(error) => {
+                        let _error = ui.label(RichText::new(error).color(RED));
+                    }
+                    TranscriptState::Ready { turns, cursor } => {
+                        if let Some(turn) = turns.get(*cursor) {
+                            transcript_turn(ui, turn);
+                        } else {
+                            let _empty = ui.label(chrome::muted(
+                                "NO USER OR MODEL MESSAGES FOUND IN THIS ROLLOUT",
+                            ));
+                        }
+                    }
+                }
+            });
+        if !modal.should_close() {
+            self.transcript = Some(view);
+        }
+    }
+
+    fn deletion_modal(&mut self, ctx: &egui::Context) {
+        let Some(thread) = self.delete_target.clone() else {
+            return;
+        };
+        let name = self
+            .history_snapshot
+            .as_ref()
+            .and_then(|history| {
+                history
+                    .sessions
+                    .iter()
+                    .find(|session| session.key() == thread)
+            })
+            .and_then(|session| session.name.as_deref())
+            .unwrap_or("anonymous")
+            .to_owned();
+        let enter =
+            ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+        let mut cancel = false;
+        let mut delete = enter;
+        let modal = egui::Modal::new(egui::Id::new("codex-history-delete"))
+            .frame(
+                egui::Frame::new()
+                    .fill(chrome::SURFACE)
+                    .stroke(Stroke::new(1.5, RED))
+                    .corner_radius(2)
+                    .inner_margin(egui::Margin::same(18)),
+            )
+            .backdrop_color(Color32::from_black_alpha(188))
+            .show(ctx, |ui| {
+                ui.set_width(520.0_f32.min(ctx.content_rect().width() - 48.0));
+                let _title = ui.label(chrome::title("DELETE SESSION PERMANENTLY?"));
+                ui.add_space(9.0);
+                let _name = ui.label(RichText::new(name).color(chrome::TEXT));
+                let _thread = ui.label(TypeRole::Label.text(&thread.thread).color(chrome::MUTED));
+                ui.add_space(10.0);
+                let _warning = ui.label(
+                    RichText::new("The rollout and its Codex index record will be destroyed.")
+                        .color(RED),
+                );
+                ui.add_space(10.0);
+                let mut guarded = self.configuration.confirm_deletion();
+                let guard = chrome::Checkbox::new(&mut guarded, "CONFIRM FUTURE DELETIONS")
+                    .size(MechanismSize::Small)
+                    .show(ui);
+                brass_poolrooms::poolroom_anchor!(
+                    ui,
+                    HistoryTarget(&thread.thread, "confirm-future").to_string(),
+                    guard.rect
+                );
+                self.water.checkbox(&guard);
+                if guard.changed() {
+                    self.configuration.set_confirm_deletion(guarded);
+                }
+                ui.add_space(12.0);
+                let _buttons = ui.horizontal(|ui| {
+                    let cancel_button =
+                        ui.add(egui::Button::new("CANCEL").min_size(Vec2::new(100.0, 30.0)));
+                    chrome::shallow_tension(ui, &cancel_button);
+                    cancel |= cancel_button.clicked();
+                    let delete_button = ui.add(
+                        egui::Button::new(RichText::new("DELETE").strong().color(RED))
+                            .min_size(Vec2::new(120.0, 30.0))
+                            .stroke(Stroke::new(1.4, RED)),
+                    );
+                    chrome::shallow_tension(ui, &delete_button);
+                    brass_poolrooms::poolroom_anchor!(
+                        ui,
+                        HistoryTarget(&thread.thread, "confirm-delete").to_string(),
+                        delete_button.rect
+                    );
+                    delete |= delete_button.clicked();
+                });
+            });
+        if delete {
+            self.delete_target = None;
+            assert!(
+                thread.site.local(),
+                "remote delete reached local confirmation"
+            );
+            self.submit_history(HistoryOrder::operate(
+                thread.thread,
+                HistoryOperation::Delete,
+            ));
+        } else if cancel || modal.should_close() {
+            self.delete_target = None;
+        }
+    }
+
+    fn sight_posture(&mut self) {
+        match crate::desktop::Desktop::process_floating(std::process::id()) {
+            Ok(Some(floating)) => {
+                self.posture = Posture::from_floating(floating);
+                self.ledger.remember(self.posture);
+            }
+            Ok(None) => {}
+            Err(error) => {
+                eprintln!("codex-wrangler could not read its i3 window mode: {error:#}");
+            }
+        }
+    }
+
+    fn longinus_field(&mut self, ui: &egui::Ui, held: bool) {
+        self.water.chemistry_mut().ior_spread =
+            self.resting_ior_spread * if held { LONGINUS_CHROMA_GAIN } else { 1.0 };
+        if held && let Some(tip) = ui.input(|input| input.pointer.hover_pos()) {
+            self.water.radiate(Radiator::point(
+                "longinus-tip",
+                tip,
+                LONGINUS_STRENGTH,
+                LONGINUS_FREQUENCY_HZ,
+            ));
+        }
+    }
+
+    #[cfg(feature = "egui-test")]
+    fn search_observation(&self) -> SearchObservation {
+        let (query, valid) = match self.page {
+            Page::Live => (self.search.query(), self.search.valid()),
+            Page::Historical => (self.history_search.query(), self.history_search.valid()),
+        };
+        SearchObservation {
+            query: query.to_owned(),
+            valid,
+            focused: self.search_focus.held(),
+            editing: self.search_focus.editing(),
+        }
+    }
+
+    #[cfg(feature = "egui-test")]
+    fn transcript_observation(&self) -> Option<HistoryTranscriptObservation> {
+        self.transcript.as_ref().map(|view| {
+            let (cursor, total, user, model, error) = match &view.state {
+                TranscriptState::Loading => (None, 0, None, None, None),
+                TranscriptState::Failed(error) => (None, 0, None, None, Some(error.clone())),
+                TranscriptState::Ready { turns, cursor } => {
+                    let turn = turns.get(*cursor);
+                    (
+                        turn.map(|_| *cursor),
+                        turns.len(),
+                        turn.map(|turn| turn.user.clone()),
+                        turn.map(|turn| turn.model.clone()),
+                        None,
+                    )
+                }
+            };
+            HistoryTranscriptObservation {
+                thread: view.key.thread.clone(),
+                cursor,
+                total,
+                user,
+                model,
+                error,
+            }
+        })
+    }
+
+    #[cfg(feature = "egui-test")]
+    fn rename_observation(&self, focused: bool) -> Option<HistoryRenameObservation> {
+        self.history_rename
+            .as_ref()
+            .map(|rename| HistoryRenameObservation {
+                thread: rename.key.thread.clone(),
+                draft: rename.text.clone(),
+                focused,
+            })
+    }
+
+    #[cfg(feature = "egui-test")]
+    const fn fork_field(&self) -> ForkField {
+        if matches!(self.tile_tool, TileTool::Fork) {
+            ForkField::Armed
+        } else {
+            ForkField::Quiescent
+        }
+    }
+
+    #[cfg(feature = "egui-test")]
+    const fn pin_field(&self) -> PinField {
+        if matches!(self.tile_tool, TileTool::Pin) {
+            PinField::Armed
+        } else {
+            PinField::Quiescent
+        }
+    }
+
+    #[cfg(feature = "egui-test")]
+    fn card_observations(&self) -> Vec<CardObservation> {
+        self.live_snapshot
+            .iter()
+            .flat_map(|snapshot| &snapshot.cards)
+            .map(|card| CardObservation {
+                harness: card.harness,
+                name: card.name.clone(),
+                thread: card.thread.clone(),
+                work: card.work,
+                workspace: card.workspace(),
+                pinned: card.pinned,
+            })
+            .collect()
+    }
+
+    #[cfg(feature = "egui-test")]
+    fn observation(&self, text_edit_focused: bool) -> Observation {
+        let live = live_codex_threads(self.live_snapshot.as_ref());
+        let history = self.history_observations(live.as_ref());
+        let history_order = self.history_order_observation();
+        Observation {
+            fingerprint: UI_FINGERPRINT.to_owned(),
+            summoning: self.summon_attempts.is_some(),
+            hovered: self.hovered.and_then(|index| {
+                self.live_snapshot
+                    .as_ref()
+                    .and_then(|snapshot| snapshot.cards.get(index))
+                    .map(|card| CardKey {
+                        harness: card.harness,
+                        thread: card.thread.clone(),
+                    })
+            }),
+            loading: self.live_snapshot.is_none(),
+            jiggling: matches!(self.tile_tool, TileTool::Dismiss),
+            fork_field: self.fork_field(),
+            pin_field: self.pin_field(),
+            flight: if self.pending_activation.is_some() {
+                Flight::Striking
+            } else {
+                Flight::Grounded
+            },
+            search: self.search_observation(),
+            guide: if self.guide.is_open() {
+                GuideVisibility::Open
+            } else {
+                GuideVisibility::Closed
+            },
+            settings: SettingsObservation {
+                open: self.settings.is_open(),
+                fault: self.configuration.fault().is_some(),
+                settled: self.configuration.settled(),
+            },
+            tab: self.page.into(),
+            delete_guard: if self.configuration.confirm_deletion() {
+                DeleteGuard::Armed
+            } else {
+                DeleteGuard::Bypassed
+            },
+            close_preference: if self.configuration.minimize_on_close() {
+                ClosePreference::Minimize
+            } else {
+                ClosePreference::Exit
+            },
+            delete_prompt: self
+                .delete_target
+                .as_ref()
+                .map(|target| target.thread.clone()),
+            visible: self
+                .live_snapshot
+                .iter()
+                .flat_map(|snapshot| {
+                    self.search
+                        .hits()
+                        .iter()
+                        .filter_map(|hit| snapshot.cards.get(hit.card()))
+                })
+                .map(|card| CardKey {
+                    harness: card.harness,
+                    thread: card.thread.clone(),
+                })
+                .collect(),
+            cards: self.card_observations(),
+            history,
+            history_rename: self.rename_observation(text_edit_focused),
+            history_transcript: self.transcript_observation(),
+            history_order,
+            history_sorts: self
+                .history_search
+                .sorts()
+                .map(|(column, direction)| HistorySortObservation { column, direction })
+                .collect(),
+        }
+    }
+
+    #[cfg(feature = "egui-test")]
+    fn history_observations(&self, live: Option<&HashSet<SessionKey>>) -> Vec<HistoryObservation> {
+        live.map_or_else(Vec::new, |live| {
+            self.history_snapshot
+                .iter()
+                .flat_map(|history| &history.sessions)
+                .filter(|session| !live.contains(&session.key()))
+                .map(|session| HistoryObservation {
+                    thread: session.thread.clone(),
+                    name: session.name.clone(),
+                    turns: session.turns,
+                    bytes: session.bytes,
+                    archived: session.archived,
+                    pending: self
+                        .history_pending
+                        .get(&session.key())
+                        .map(HistoryLease::operation),
+                })
+                .collect()
+        })
+    }
+
+    #[cfg(feature = "egui-test")]
+    fn history_order_observation(&self) -> Vec<String> {
+        self.history_snapshot
+            .as_ref()
+            .map_or_else(Vec::new, |history| {
+                self.history_search
+                    .hits()
+                    .iter()
+                    .filter_map(|hit| history.sessions.get(hit.session()))
+                    .map(|session| session.thread.clone())
+                    .collect()
+            })
+    }
+}
+
+impl<const START_FLOATING: bool> Drop for Wrangler<START_FLOATING> {
+    fn drop(&mut self) {
+        self.sight_posture();
+        self.ledger.remember(self.posture);
+    }
+}
+
+impl<const START_FLOATING: bool> NativeApp for Wrangler<START_FLOATING> {
+    const WINDOW: WindowSpec = if START_FLOATING {
+        WindowSpec::new("Codex Wrangler", [1_260.0, 820.0]).floating()
+    } else {
+        WindowSpec::new("Codex Wrangler", [1_260.0, 820.0])
+    };
+
+    fn draw(&mut self, ui: &mut egui::Ui) {
+        let modifiers = ui.input(|input| input.modifiers);
+        set_tool_cursor(ui.ctx(), modifiers);
+        self.kindle_if_summoned();
+        self.hovered = None;
+        self.history_hovered = None;
+        self.reap_activation();
+        let history_outcome = self.reap_history_outcomes() | self.reap_transcripts();
+        let configuration_changed = self.reconcile_configuration(ui);
+        if self.visibility != GalleryVisibility::Visible {
+            return;
+        }
+        let search_id = ui.make_persistent_id("thread-search");
+        if self.search_focus == SearchFocus::Releasing {
+            ui.memory_mut(|memory| memory.surrender_focus(search_id));
+            self.search_focus = SearchFocus::Idle;
+        }
+        let modal_open = self.delete_target.is_some() || self.transcript.is_some();
+        self.seize_shortcuts(ui, search_id, modal_open);
+        let basin = ui.max_rect();
+        let physical_mode = !modal_open
+            && self.page == Page::Live
+            && !self.settings.is_open()
+            && !self.guide.is_open()
+            && !ui.ctx().text_edit_focused();
+        let tile_tool = if !physical_mode {
+            TileTool::Rest
+        } else if modifiers.matches_exact(egui::Modifiers::SHIFT) {
+            TileTool::Dismiss
+        } else if modifiers.matches_exact(egui::Modifiers::CTRL) {
+            TileTool::Fork
+        } else if modifiers.matches_exact(egui::Modifiers::ALT) {
+            TileTool::Pin
+        } else {
+            TileTool::Rest
+        };
+        let recoiling = self.tile_tool.kinetic() && !tile_tool.kinetic();
+        self.tile_tool = tile_tool;
+        if tile_tool == TileTool::Dismiss {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(45));
+        }
+        self.water.begin(Domain::basin(basin));
+        self.water.set_floor(Some(Floor::shallow(basin)));
+        self.longinus_field(ui, modifiers.ctrl);
+        let (selected, historical, heave) = match self.page {
+            Page::Live => {
+                let (selected, heave) = self.gallery_panel(ui, search_id, tile_tool, recoiling);
+                (selected, None, heave)
+            }
+            Page::Historical => {
+                let (gesture, heave) = self.history_panel(ui, search_id);
+                (None, gesture, heave)
+            }
+        };
+        if !tile_tool.kinetic() {
+            self.jolts.clear();
+        }
+        if let Some(strike) = selected {
+            self.launch_strike(strike);
+        }
+        if let Some(action) = historical {
+            self.accept_history_action(action);
+        }
+        self.deletion_modal(ui.ctx());
+        self.transcript_modal(ui.ctx());
+        self.settings_sheet(ui.ctx());
+        self.water.heave(ui.ctx(), heave);
+        self.guide.show(
+            ui.ctx(),
+            canon(),
+            &[Context::Gallery],
+            |_| match self.page {
+                Page::Live => "LIVE",
+                Page::Historical => "HISTORICAL",
+            },
+            |_| CommandStatus::Enabled,
+            &[
+                APPLICATION_GUIDE_GROUP,
+                NAVIGATION_GUIDE_GROUP,
+                TILE_GUIDE_GROUP,
+                SEARCH_GUIDE_GROUP,
+            ],
+        );
+        let stable_pointer = match self.page {
+            Page::Live => self.hovered.is_none(),
+            Page::Historical => self.history_hovered.is_none(),
+        };
+        let mut changed = history_outcome | configuration_changed;
+        if stable_pointer
+            && !tile_tool.kinetic()
+            && !self.search_focus.held()
+            && self.history_rename.is_none()
+        {
+            changed |= self.drain();
+            changed |= self.drain_history();
+            changed |= self.drain_fleet();
+        }
+        if changed {
+            ui.ctx().request_repaint();
+        }
+    }
+
+    fn close_requested(&mut self) -> CloseDisposition {
+        if self.configuration.minimize_on_close() && self.tray.as_ref().is_some_and(Tray::available)
+        {
+            self.sight_posture();
+            self.quench();
+            CloseDisposition::HideOrExit
+        } else {
+            CloseDisposition::Exit
+        }
+    }
+
+    fn service_deadline(&self, _now: Instant) -> Option<Instant> {
+        self.configuration.deadline()
+    }
+
+    fn service_deadline_reached(&mut self, now: Instant) -> bool {
+        self.configuration.service_deadline_reached(now)
+    }
+
+    fn take_reveal_request(&mut self) -> bool {
+        self.kindle_if_summoned()
+    }
+
+    fn take_conceal_request(&mut self) -> bool {
+        if self.visibility == GalleryVisibility::ConcealPending {
+            self.visibility = GalleryVisibility::Concealed;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn exit_requested(&self) -> bool {
+        self.quit.load(Ordering::Acquire)
+    }
+
+    fn after_present(&mut self) -> bool {
+        if let Some(flight) = &mut self.pending_activation {
+            flight.witness();
+        }
+        let first = if self.first_frame_presented {
+            false
+        } else {
+            self.first_frame_presented = true;
+            true
+        };
+        self.kindle_if_summoned();
+        let packet = self.summon.load(Ordering::Acquire);
+        let Some(attempts) = self.summon_attempts else {
+            return first;
+        };
+        let destination = unpack_desktop(packet);
+        match crate::desktop::Desktop::summon_process_to(
+            std::process::id(),
+            destination,
+            self.posture.floating(),
+        ) {
+            Ok(true) => {
+                self.summon_attempts = None;
+                true
+            }
+            Ok(false) | Err(_) if attempts < SUMMON_BARRAGE => {
+                self.summon_attempts = Some(attempts + 1);
+                true
+            }
+            Ok(false) => {
+                self.summon_attempts = None;
+                eprintln!("codex-wrangler could not converge its window summon");
+                true
+            }
+            Err(error) => {
+                self.summon_attempts = None;
+                eprintln!("codex-wrangler could not summon itself: {error:#}");
+                true
+            }
+        }
+    }
+
+    fn water(
+        &mut self,
+        ctx: &egui::Context,
+        pixels_per_point: f32,
+        tooltip_rects: &[egui::Rect],
+    ) -> WaterFrame {
+        if self.visibility == GalleryVisibility::Visible {
+            self.living_wait.compose(ctx, &mut self.water);
+        }
+        self.water.frame(ctx, pixels_per_point, tooltip_rects, None)
+    }
+
+    fn register_gpu(
+        _renderer: &mut egui_wgpu::Renderer,
+        _device: &egui_wgpu::wgpu::Device,
+        _format: egui_wgpu::wgpu::TextureFormat,
+    ) {
+    }
+
+    #[cfg(feature = "egui-test")]
+    type Observation = Observation;
+
+    #[cfg(feature = "egui-test")]
+    fn observe(&self, text_edit_focused: bool) -> Self::Observation {
+        self.observation(text_edit_focused)
+    }
+}
+
+#[cfg(feature = "egui-test")]
+impl From<Page> for Tab {
+    fn from(page: Page) -> Self {
+        match page {
+            Page::Live => Self::Live,
+            Page::Historical => Self::Historical,
+        }
+    }
+}
+
+fn live_codex_threads(snapshot: Option<&LiveSnapshot>) -> Option<HashSet<SessionKey>> {
+    let snapshot = snapshot.filter(|snapshot| snapshot.fault.is_none())?;
+    Some(
+        snapshot
+            .cards
+            .iter()
+            .filter(|card| card.harness == Harness::Codex)
+            .map(|card| SessionKey::new(card.site.clone(), card.thread.clone()))
+            .collect(),
+    )
+}
+
+fn page_tab(ui: &mut egui::Ui, page: Page, selected: bool) -> egui::Response {
+    let button = egui::Button::new(chrome::section_title(page.label()))
+        .min_size(Vec2::new(142.0, 28.0))
+        .fill(if selected {
+            chrome::RAISED
+        } else {
+            chrome::CONTROL
+        })
+        .stroke(Stroke::new(
+            if selected { 1.5 } else { 1.0 },
+            if selected { chrome::HOT } else { chrome::EDGE },
+        ));
+    let response = ui.add(button);
+    chrome::shallow_tension(ui, &response);
+    response
+}
+
+fn set_tool_cursor(ctx: &egui::Context, modifiers: egui::Modifiers) {
+    // Bitmap cursors are sticky platform output. Modifier ownership is
+    // window-wide and each frame must earn it anew.
+    ctx.set_cursor_image(if modifiers.ctrl {
+        Some(LonginusCursor::image())
+    } else if modifiers.alt {
+        Some(ForgePin::cursor_image())
+    } else {
+        None
+    });
+}
+
+fn transcript_header(ui: &mut egui::Ui, view: &mut TranscriptView, water: &mut Surface) {
+    let _top = ui.horizontal(|ui| {
+        let (cursor, total) = match &view.state {
+            TranscriptState::Ready { turns, cursor } => (*cursor, turns.len()),
+            TranscriptState::Loading | TranscriptState::Failed(_) => (0, 0),
+        };
+        let previous = ui.add_enabled(
+            cursor > 0,
+            egui::Button::new(TypeRole::Body.text("←")).min_size(Vec2::new(34.0, 28.0)),
+        );
+        chrome::shallow_tension(ui, &previous);
+        brass_poolrooms::poolroom_anchor!(
+            ui,
+            HistoryTarget(&view.key.thread, "previous-turn").to_string(),
+            previous.rect
+        );
+        let next = ui.add_enabled(
+            cursor + 1 < total,
+            egui::Button::new(TypeRole::Body.text("→")).min_size(Vec2::new(34.0, 28.0)),
+        );
+        chrome::shallow_tension(ui, &next);
+        brass_poolrooms::poolroom_anchor!(
+            ui,
+            HistoryTarget(&view.key.thread, "next-turn").to_string(),
+            next.rect
+        );
+        if previous.clicked()
+            && let TranscriptState::Ready { cursor, .. } = &mut view.state
+        {
+            *cursor -= 1;
+            water.click(previous.rect);
+        }
+        if next.clicked()
+            && let TranscriptState::Ready { cursor, .. } = &mut view.state
+        {
+            *cursor += 1;
+            water.click(next.rect);
+        }
+        ui.add_space(8.0);
+        let title = view.name.as_deref().unwrap_or("anonymous");
+        let _title = ui.add(
+            egui::Label::new(chrome::title(title.to_uppercase()))
+                .truncate()
+                .show_tooltip_when_elided(false),
+        );
+        let _position = ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let position = if total == 0 {
+                "NO TURNS".to_owned()
+            } else {
+                format!("TURN {} / {total}", cursor + 1)
+            };
+            let _position = ui.label(TypeRole::Label.text(position).color(chrome::MUTED));
+        });
+    });
+}
+
+fn transcript_turn(ui: &mut egui::Ui, turn: &HistoryTurn) {
+    let _scroll = ScrewScroll::vertical()
+        .id_salt("historical-transcript-turn")
+        .auto_shrink([false; 2])
+        .max_height(520.0)
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            let _user_header = ui.label(chrome::eyebrow("USER"));
+            ui.add_space(5.0);
+            let user = if turn.user.is_empty() {
+                "(no user message recorded)"
+            } else {
+                &turn.user
+            };
+            let _user = ui.add(egui::Label::new(user).selectable(true).wrap());
+            ui.add_space(16.0);
+            let _model_header = ui.label(chrome::eyebrow("MODEL"));
+            ui.add_space(5.0);
+            let model = if turn.model.is_empty() {
+                "(no model response recorded)"
+            } else {
+                &turn.model
+            };
+            let _model = ui.add(egui::Label::new(model).selectable(true).wrap());
+        });
+}
+
+#[derive(Clone, Copy)]
+struct HistoryColumns {
+    id: f32,
+    rename: f32,
+    name: f32,
+    date: f32,
+    turns: f32,
+    size: f32,
+    state: f32,
+    open: f32,
+    action: f32,
+    delete: f32,
+}
+
+impl HistoryColumns {
+    fn fit(width: f32) -> Self {
+        const FIXED: f32 = 270.0 + 28.0 + 136.0 + 58.0 + 82.0 + 96.0 + 72.0 + 104.0 + 42.0;
+        Self {
+            id: 270.0,
+            rename: 28.0,
+            name: (width - FIXED).max(120.0),
+            date: 136.0,
+            turns: 58.0,
+            size: 82.0,
+            state: 96.0,
+            open: 72.0,
+            action: 104.0,
+            delete: 42.0,
+        }
+    }
+}
+
+struct HistoryRows {
+    action: Option<HistoryAction>,
+    tally: Vec<SessionKey>,
+}
+
+fn history_header(
+    ui: &mut egui::Ui,
+    columns: HistoryColumns,
+    search: &HistorySearch,
+    enabled: bool,
+    water: &mut Surface,
+) -> Option<HistoryColumn> {
+    let (rect, _) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), HISTORY_ROW), Sense::hover());
+    let mut row = ui.new_child(
+        egui::UiBuilder::new()
+            .id_salt("history-header")
+            .max_rect(rect)
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    row.spacing_mut().item_spacing.x = 0.0;
+    let mut selected = None;
+    for (width, label, column) in [
+        (columns.id, "SESSION ID", HistoryColumn::SessionId),
+        (columns.name, "NAME", HistoryColumn::Name),
+        (columns.date, "LAST TURN", HistoryColumn::LastTurn),
+        (columns.turns, "TURNS", HistoryColumn::Turns),
+        (columns.size, "SIZE", HistoryColumn::Size),
+        (columns.state, "STATE", HistoryColumn::State),
+    ] {
+        if history_sort_cell(
+            &mut row,
+            width,
+            label,
+            column,
+            search.direction(column),
+            enabled,
+            water,
+        ) {
+            selected = Some(column);
+        }
+        if column == HistoryColumn::SessionId {
+            history_cell(&mut row, columns.rename, |_| {});
+        }
+    }
+    for width in [columns.open, columns.action, columns.delete] {
+        history_cell(&mut row, width, |_| {});
+    }
+    ui.painter().line_segment(
+        [rect.left_bottom(), rect.right_bottom()],
+        Stroke::new(1.0, chrome::EDGE_STRONG),
+    );
+    selected
+}
+
+fn history_sort_cell(
+    row: &mut egui::Ui,
+    width: f32,
+    label: &'static str,
+    column: HistoryColumn,
+    direction: Option<SortDirection>,
+    enabled: bool,
+    water: &mut Surface,
+) -> bool {
+    let mut changed = false;
+    history_cell(row, width, |ui| {
+        let mut detent = match direction {
+            Some(SortDirection::Ascending) => SortDetent::Ascending,
+            Some(SortDirection::Descending) => SortDetent::Descending,
+            None => SortDetent::Off,
+        };
+        let mut text = TypeRole::Label.text(label).color(chrome::MUTED);
+        if direction.is_some() {
+            text = text.color(chrome::HOT);
+        }
+        let side = MechanismSize::Small.side();
+        let gap = 4.0;
+        let label_width = (ui.available_width() - side - gap).max(0.0);
+        let response = ui
+            .add_enabled_ui(enabled, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = gap;
+                    let _label = ui.add_sized(
+                        [label_width, side],
+                        egui::Label::new(text)
+                            .truncate()
+                            .show_tooltip_when_elided(false),
+                    );
+                    SortToggle::new(&mut detent)
+                        .size(MechanismSize::Small)
+                        .show(ui)
+                })
+                .inner
+            })
+            .inner;
+        brass_poolrooms::poolroom_anchor!(ui, HistorySortTarget(column).to_string(), response.rect);
+        if enabled && response.hovered() {
+            water.hover(("history-sort", column), response.rect);
+        }
+        water.sort_toggle(&response);
+        changed = response.changed();
+    });
+    changed
+}
+
+#[allow(clippy::too_many_arguments)]
+fn history_rows(
+    ui: &mut egui::Ui,
+    sessions: &[HistorySession],
+    hits: &[HistoryHit],
+    rows: std::ops::Range<usize>,
+    columns: HistoryColumns,
+    pending: &HashMap<SessionKey, HistoryLease>,
+    rename: &mut Option<HistoryRename>,
+    water: &mut Surface,
+    hovered: &mut Option<SessionKey>,
+) -> HistoryRows {
+    let mut action = None;
+    let mut tally = Vec::new();
+    for visible in rows {
+        let hit = &hits[visible];
+        let session = &sessions[hit.session()];
+        let key = session.key();
+        if key.site.local() && session.turns.is_none() && !session.tally_failed {
+            tally.push(key.clone());
+        }
+        let found = ui
+            .push_id((&session.site, &session.thread), |ui| {
+                history_row(
+                    ui,
+                    visible,
+                    session,
+                    hit,
+                    columns,
+                    pending.get(&key).map(HistoryLease::operation),
+                    rename,
+                    water,
+                    hovered,
+                )
+            })
+            .inner;
+        if action.is_none() {
+            action = found;
+        }
+    }
+    HistoryRows { action, tally }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn history_row(
+    ui: &mut egui::Ui,
+    visible: usize,
+    session: &HistorySession,
+    hit: &HistoryHit,
+    columns: HistoryColumns,
+    flight: Option<HistoryOperation>,
+    rename: &mut Option<HistoryRename>,
+    water: &mut Surface,
+    hovered: &mut Option<SessionKey>,
+) -> Option<HistoryAction> {
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), HISTORY_ROW), Sense::click());
+    let pointer_inside = ui.rect_contains_pointer(rect);
+    let fill = if pointer_inside {
+        Color32::from_rgba_unmultiplied(36, 30, 22, 210)
+    } else if visible.is_multiple_of(2) {
+        Color32::from_rgba_unmultiplied(18, 16, 13, 190)
+    } else {
+        Color32::from_rgba_unmultiplied(13, 12, 10, 176)
+    };
+    ui.painter().rect_filled(rect, 1, fill);
+    let mut row = ui.new_child(
+        egui::UiBuilder::new()
+            .id_salt("history-row")
+            .max_rect(rect)
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    row.spacing_mut().item_spacing.x = 0.0;
+    let editing = rename.is_some();
+    let mut action = history_facts(&mut row, session, hit, columns, flight, rename, water);
+    if flight == Some(HistoryOperation::Delete) {
+        history_cell(&mut row, columns.open, |_| {});
+        history_cell(&mut row, columns.action, |ui| {
+            let _deleting = ui.label(TypeRole::Label.text("DELETING…").color(chrome::MUTED));
+        });
+        history_cell(&mut row, columns.delete, |_| {});
+    } else if action.is_none() {
+        action = history_open(&mut row, session, columns.open, flight, editing, water);
+        if action.is_none() {
+            action = history_operation(&mut row, session, columns.action, flight, editing, water)
+                .map(HistoryAction::Operate);
+        }
+        if action.is_none() {
+            action = history_delete(&mut row, session, columns.delete, flight, editing, water)
+                .map(HistoryAction::Operate);
+        }
+    }
+    if response.clicked()
+        && action.is_none()
+        && !editing
+        && flight != Some(HistoryOperation::Delete)
+    {
+        water.click(rect);
+        if session.site.local() {
+            action = Some(HistoryAction::Inspect(session.key()));
+        }
+    }
+    brass_poolrooms::poolroom_anchor!(
+        ui,
+        HistoryTarget(&session.thread, "inspect").to_string(),
+        response.rect
+    );
+    if pointer_inside {
+        *hovered = Some(session.key());
+        water.hover(("historical", &session.site, &session.thread), rect);
+    }
+    ui.painter().line_segment(
+        [rect.left_bottom(), rect.right_bottom()],
+        Stroke::new(1.0, chrome::EDGE),
+    );
+    action
+}
+
+fn history_facts(
+    row: &mut egui::Ui,
+    session: &HistorySession,
+    hit: &HistoryHit,
+    columns: HistoryColumns,
+    flight: Option<HistoryOperation>,
+    rename: &mut Option<HistoryRename>,
+    water: &mut Surface,
+) -> Option<HistoryAction> {
+    history_cell(row, columns.id, |ui| {
+        if let Some(site) = session.site.remote() {
+            let (rect, _response) = ui.allocate_exact_size(Vec2::splat(10.0), Sense::hover());
+            let center = rect.center();
+            let radius = 3.5;
+            ui.painter().add(egui::Shape::convex_polygon(
+                vec![
+                    center + egui::vec2(0.0, -radius),
+                    center + egui::vec2(radius, 0.0),
+                    center + egui::vec2(0.0, radius),
+                    center + egui::vec2(-radius, 0.0),
+                ],
+                site_color(site),
+                Stroke::NONE,
+            ));
+            ui.add_space(3.0);
+        }
+        let _id = history_marked_label(
+            ui,
+            &session.thread,
+            hit.id_spans(),
+            chrome::MUTED,
+            TypeRole::Label,
+        );
+    });
+    let mut action = history_rename_control(
+        row,
+        session,
+        columns.rename,
+        flight,
+        rename.is_some(),
+        water,
+    );
+    let name_action = history_name(row, session, hit, columns.name, rename, water);
+    if action.is_none() {
+        action = name_action;
+    }
+    history_cell(row, columns.date, |ui| {
+        let _date = ui.label(
+            TypeRole::Label
+                .text(&session.last_turn)
+                .color(chrome::MUTED),
+        );
+    });
+    history_cell(row, columns.turns, |ui| {
+        let tally = if session.site.local() {
+            session.turns.map_or_else(
+                || if session.tally_failed { "ERR" } else { "…" }.to_owned(),
+                |turns| turns.to_string(),
+            )
+        } else {
+            "—".to_owned()
+        };
+        let color = if session.tally_failed {
+            RED
+        } else {
+            chrome::TEXT
+        };
+        let _turns = ui.label(TypeRole::Body.text(tally).color(color));
+    });
+    history_cell(row, columns.size, |ui| {
+        let size = if session.site.local() {
+            format_size(session.bytes)
+        } else {
+            "REMOTE".to_owned()
+        };
+        let _size = ui.label(TypeRole::Body.text(size).color(chrome::TEXT));
+    });
+    history_cell(row, columns.state, |ui| {
+        let (label, color) = if session.archived {
+            ("ARCHIVED", chrome::HOT)
+        } else {
+            ("UNARCHIVED", chrome::MUTED)
+        };
+        let _state = ui.label(TypeRole::Label.text(label).color(color));
+    });
+    action
+}
+
+fn history_rename_control(
+    row: &mut egui::Ui,
+    session: &HistorySession,
+    width: f32,
+    flight: Option<HistoryOperation>,
+    editing: bool,
+    water: &mut Surface,
+) -> Option<HistoryAction> {
+    let mut action = None;
+    history_cell(row, width, |ui| {
+        if flight == Some(HistoryOperation::Delete) {
+            return;
+        }
+        let rename = ui
+            .add_enabled_ui(session.site.local() && !editing && flight.is_none(), |ui| {
+                chrome::Monoglyph::symbol(chrome::Symbol::Rename)
+                    .size(MechanismSize::Small)
+                    .show(ui)
+            })
+            .inner
+            .on_hover_text("Rename this session");
+        water.monoglyph(&rename);
+        brass_poolrooms::poolroom_anchor!(
+            ui,
+            HistoryTarget(&session.thread, "rename").to_string(),
+            rename.rect
+        );
+        if rename.clicked() {
+            action = Some(HistoryAction::BeginRename {
+                key: session.key(),
+                name: session.name.clone().unwrap_or_default(),
+                rect: rename.rect,
+            });
+        }
+    });
+    action
+}
+
+fn history_name(
+    row: &mut egui::Ui,
+    session: &HistorySession,
+    hit: &HistoryHit,
+    width: f32,
+    rename: &mut Option<HistoryRename>,
+    water: &mut Surface,
+) -> Option<HistoryAction> {
+    let mut action = None;
+    history_cell(row, width, |ui| {
+        let Some(draft) = rename.as_mut().filter(|draft| draft.key == session.key()) else {
+            if let Some(name) = session.name.as_deref() {
+                let _name =
+                    history_marked_label(ui, name, hit.name_spans(), chrome::TEXT, TypeRole::Body);
+            } else {
+                let _anonymous = ui.add(
+                    egui::Label::new(TypeRole::Label.text("anonymous").color(chrome::MUTED))
+                        .truncate()
+                        .show_tooltip_when_elided(false),
+                );
+            }
+            return;
+        };
+
+        let before = draft.text.clone();
+        let valid = !draft.text.trim().is_empty();
+        let edit = ui.add_sized(
+            [ui.available_width(), 24.0],
+            egui::TextEdit::singleline(&mut draft.text)
+                .font(egui::TextStyle::Monospace)
+                .hint_text("session name")
+                .text_color(if valid { chrome::TEXT } else { RED }),
+        );
+        brass_poolrooms::poolroom_anchor!(
+            ui,
+            HistoryTarget(&session.thread, "rename-field").to_string(),
+            edit.rect
+        );
+        if draft.seize_focus {
+            edit.request_focus();
+            draft.seize_focus = false;
+            ui.ctx().request_repaint();
+        }
+        if let Some(wake) = chrome::text_wake(ui, &edit, &before, &draft.text) {
+            water.text(wake);
+        }
+        let focused = edit.has_focus();
+        let relinquished = edit.lost_focus();
+        let (enter, escape) = ui.input(|input| {
+            (
+                (focused || relinquished) && input.key_pressed(egui::Key::Enter),
+                focused && input.key_pressed(egui::Key::Escape),
+            )
+        });
+        let name = draft.text.trim();
+        if enter && !name.is_empty() {
+            action = if session.name.as_deref() == Some(name) {
+                Some(HistoryAction::CancelRename)
+            } else {
+                Some(HistoryAction::CommitRename {
+                    key: session.key(),
+                    name: name.to_owned(),
+                })
+            };
+        } else if escape || relinquished {
+            action = Some(HistoryAction::CancelRename);
+        }
+    });
+    action
+}
+
+fn history_open(
+    row: &mut egui::Ui,
+    session: &HistorySession,
+    width: f32,
+    flight: Option<HistoryOperation>,
+    editing: bool,
+    water: &mut Surface,
+) -> Option<HistoryAction> {
+    let mut clicked = false;
+    history_cell(row, width, |ui| {
+        let response = ui.add_enabled(
+            !editing && flight.is_none(),
+            egui::Button::new("OPEN").min_size(Vec2::new(60.0, 24.0)),
+        );
+        chrome::shallow_tension(ui, &response);
+        brass_poolrooms::poolroom_anchor!(
+            ui,
+            HistoryTarget(&session.thread, "open").to_string(),
+            response.rect
+        );
+        clicked = response.clicked();
+        if clicked {
+            water.click(response.rect);
+        }
+    });
+    clicked.then(|| HistoryAction::Open(session.key()))
+}
+
+fn history_operation(
+    row: &mut egui::Ui,
+    session: &HistorySession,
+    width: f32,
+    flight: Option<HistoryOperation>,
+    editing: bool,
+    water: &mut Surface,
+) -> Option<HistoryGesture> {
+    let operation = if session.archived {
+        HistoryOperation::Unarchive
+    } else {
+        HistoryOperation::Archive
+    };
+    let mut clicked = false;
+    history_cell(row, width, |ui| {
+        let label = flight.map_or_else(
+            || match operation {
+                HistoryOperation::Archive => "ARCHIVE",
+                HistoryOperation::Unarchive => "UNARCHIVE",
+                HistoryOperation::Delete | HistoryOperation::Rename => unreachable!(),
+            },
+            HistoryOperation::present_participle,
+        );
+        let response = ui.add_enabled(
+            session.site.local() && !editing && flight.is_none(),
+            egui::Button::new(label).min_size(Vec2::new(92.0, 24.0)),
+        );
+        chrome::shallow_tension(ui, &response);
+        brass_poolrooms::poolroom_anchor!(
+            ui,
+            HistoryTarget(
+                &session.thread,
+                if operation == HistoryOperation::Archive {
+                    "archive"
+                } else {
+                    "unarchive"
+                }
+            )
+            .to_string(),
+            response.rect
+        );
+        clicked = response.clicked();
+        if clicked {
+            water.click(response.rect);
+        }
+    });
+    clicked.then(|| HistoryGesture {
+        key: session.key(),
+        operation,
+    })
+}
+
+fn history_delete(
+    row: &mut egui::Ui,
+    session: &HistorySession,
+    width: f32,
+    flight: Option<HistoryOperation>,
+    editing: bool,
+    water: &mut Surface,
+) -> Option<HistoryGesture> {
+    let mut clicked = false;
+    history_cell(row, width, |ui| {
+        let response = ui
+            .add_enabled_ui(session.site.local() && !editing && flight.is_none(), |ui| {
+                chrome::Monoglyph::symbol(chrome::Symbol::Delete)
+                    .size(MechanismSize::Small)
+                    .show(ui)
+            })
+            .inner
+            .on_hover_text("Delete this session permanently");
+        water.monoglyph(&response);
+        brass_poolrooms::poolroom_anchor!(
+            ui,
+            HistoryTarget(&session.thread, "delete").to_string(),
+            response.rect
+        );
+        clicked = response.clicked();
+    });
+    clicked.then(|| HistoryGesture {
+        key: session.key(),
+        operation: HistoryOperation::Delete,
+    })
+}
+
+fn history_cell(ui: &mut egui::Ui, width: f32, contents: impl FnOnce(&mut egui::Ui)) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, HISTORY_ROW), Sense::hover());
+    let mut cell = ui.new_child(
+        egui::UiBuilder::new()
+            .id_salt((rect.min.x.to_bits(), rect.min.y.to_bits()))
+            .max_rect(rect)
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    cell.set_clip_rect(cell.clip_rect().intersect(rect));
+    cell.add_space(5.0);
+    contents(&mut cell);
+}
+
+fn history_marked_label(
+    ui: &mut egui::Ui,
+    text: &str,
+    spans: &[std::ops::Range<usize>],
+    color: Color32,
+    role: TypeRole,
+) -> egui::Response {
+    let label = if spans.is_empty() {
+        egui::Label::new(role.text(text).color(color))
+    } else {
+        let plain = TextFormat {
+            font_id: role.proportional(ui.style()),
+            color,
+            ..TextFormat::default()
+        };
+        let marked = TextFormat {
+            color: WHITE,
+            background: Color32::from_rgba_unmultiplied(235, 197, 151, 76),
+            ..plain.clone()
+        };
+        let mut job = LayoutJob::default();
+        let mut cursor = 0;
+        for span in spans {
+            job.append(&text[cursor..span.start], 0.0, plain.clone());
+            job.append(&text[span.clone()], 0.0, marked.clone());
+            cursor = span.end;
+        }
+        job.append(&text[cursor..], 0.0, plain);
+        egui::Label::new(job)
+    };
+    ui.add(label.truncate().show_tooltip_when_elided(false))
+}
+
+fn format_size(bytes: u64) -> String {
+    const KIB: u64 = 1 << 10;
+    const MIB: u64 = 1 << 20;
+    const GIB: u64 = 1 << 30;
+    match bytes {
+        GIB.. => format_unit(bytes, GIB, "GiB"),
+        MIB.. => format_unit(bytes, MIB, "MiB"),
+        KIB.. => format_unit(bytes, KIB, "KiB"),
+        _ => format!("{bytes} B"),
+    }
+}
+
+fn format_unit(bytes: u64, unit: u64, suffix: &str) -> String {
+    let whole = bytes / unit;
+    let tenth = bytes % unit * 10 / unit;
+    format!("{whole}.{tenth} {suffix}")
+}
+
+fn gallery(
+    ui: &mut egui::Ui,
+    cards: &[Card],
+    hits: &[Hit],
+    physics: &mut CardPhysics<'_>,
+) -> Option<Strike> {
+    let width = ui.available_width();
+    let mut columns = 1_usize;
+    let mut column_count = 1.0_f32;
+    while (column_count + 1.0) * TILE_MIN + column_count * GAP <= width {
+        columns += 1;
+        column_count += 1.0;
+    }
+    let tile_width = ((width - GAP * (column_count - 1.0)) / column_count).max(180.0);
+    let mut selected = None;
+    for row in hits.chunks(columns) {
+        let _row = ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = GAP;
+            for hit in row {
+                let card_model = &cards[hit.card()];
+                let clicked = card(ui, card_model, hit, tile_width, physics);
+                if selected.is_none() {
+                    selected = clicked;
+                }
+            }
+        });
+        ui.add_space(GAP);
+    }
+    selected
+}
+
+fn card(
+    ui: &mut egui::Ui,
+    card: &Card,
+    hit: &Hit,
+    width: f32,
+    physics: &mut CardPhysics<'_>,
+) -> Option<Strike> {
+    let (id, rect) = ui.allocate_space(Vec2::new(width, TILE_HEIGHT));
+    let dismissible = dismissible(&card.site, card.harness, card.work);
+    let fleeing = physics.tool == TileTool::Dismiss && dismissible;
+    let offset = if fleeing {
+        fear_offset(ui, &card.thread, rect, true)
+    } else {
+        Vec2::ZERO
+    };
+    let visual = rect.translate(offset);
+    let pointer_inside = ui.rect_contains_pointer(rect);
+    if physics.tool.kinetic() || physics.recoiling {
+        let travel = advance_jolt(
+            physics.jolts,
+            &card.site,
+            card.harness,
+            &card.thread,
+            fleeing.then_some(offset),
+        );
+        displace_tile(physics.water, visual, travel);
+    }
+    let stroke = if pointer_inside {
+        Stroke::new(1.5_f32, chrome::EDGE_STRONG)
+    } else {
+        Stroke::new(1.0_f32, chrome::EDGE)
+    };
+    let fill = if pointer_inside {
+        Color32::from_rgba_unmultiplied(39, 32, 24, 226)
+    } else {
+        Color32::from_rgba_unmultiplied(19, 16, 13, 218)
+    };
+    ui.painter().rect_filled(visual, 2, fill);
+    ui.painter()
+        .rect_stroke(visual, 2, stroke, StrokeKind::Inside);
+    paint_card_contents(ui, visual, card, hit.spans());
+
+    // Final authority owns the whole tile after every inert child.
+    let response = ui
+        .interact(rect, id, Sense::click())
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
+    brass_poolrooms::poolroom_anchor!(
+        ui,
+        CardTarget(card.harness, &card.thread).to_string(),
+        response.rect
+    );
+    if response.hovered() {
+        *physics.hovered = Some(hit.card());
+        physics
+            .water
+            .hover((&card.site, card.harness.slug(), &card.thread), visual);
+    }
+    if response.clicked() {
+        let modifiers = ui.input(|input| input.modifiers);
+        let intent = if modifiers.matches_exact(egui::Modifiers::SHIFT) {
+            dismissible.then_some(Intent::Dismiss)?
+        } else if modifiers.matches_exact(egui::Modifiers::CTRL) {
+            (card.harness == Harness::Codex).then_some(Intent::Fork)?
+        } else if modifiers.matches_exact(egui::Modifiers::ALT) {
+            if !card.site.local() {
+                return None;
+            } else if card.pinned {
+                Intent::Unpin
+            } else {
+                Intent::Pin
+            }
+        } else if modifiers.matches_exact(egui::Modifiers::NONE) {
+            Intent::Select
+        } else {
+            return None;
+        };
+        physics.water.click(visual);
+        Some(Strike {
+            site: card.site.clone(),
+            harness: card.harness,
+            thread: card.thread.clone(),
+            intent,
+            seat: card.seat,
+        })
+    } else {
+        None
+    }
+}
+
+fn paint_card_contents(
+    ui: &mut egui::Ui,
+    visual: egui::Rect,
+    card: &Card,
+    match_spans: &[std::ops::Range<usize>],
+) {
+    let workspace_width = paint_workspace(ui, visual, card);
+    paint_site(ui, visual, &card.site);
+    let inner = visual.shrink2(Vec2::new(14.0, 11.0));
+    let mut body = ui.new_child(
+        egui::UiBuilder::new()
+            .id_salt(("harness-card-body", card.harness, &card.thread))
+            .max_rect(inner)
+            .layout(egui::Layout::top_down(egui::Align::Min)),
+    );
+    body.set_max_width(inner.width());
+    body.set_clip_rect(ui.clip_rect().intersect(inner));
+    let name = card.name.as_deref().filter(|name| !name.is_empty());
+    body.set_max_width((inner.width() - workspace_width).max(80.0));
+    let _name = if let Some(name) = name {
+        marked_label(&mut body, name, match_spans, chrome::TEXT)
+    } else {
+        body.add(
+            egui::Label::new(TypeRole::Label.text("anonymous").color(chrome::MUTED))
+                .truncate()
+                .show_tooltip_when_elided(false),
+        )
+    };
+    body.add_space(6.0);
+    let path_spans = if name.is_none() { match_spans } else { &[] };
+    let _cwd = marked_label(&mut body, &card.cwd, path_spans, chrome::HOT);
+    body.add_space(8.0);
+    let tile_preview = if card.tile_preview.is_empty() {
+        "No conversational turn recorded."
+    } else {
+        &card.tile_preview
+    };
+    let _preview = body.add(
+        egui::Label::new(RichText::new(tile_preview).color(chrome::MUTED))
+            .wrap()
+            .show_tooltip_when_elided(false),
+    );
+    drop(body);
+    paint_card_work(ui.painter(), visual, card.work);
+}
+
+fn marked_label(
+    ui: &mut egui::Ui,
+    text: &str,
+    spans: &[std::ops::Range<usize>],
+    color: Color32,
+) -> egui::Response {
+    let label = if spans.is_empty() {
+        egui::Label::new(RichText::new(text).color(color))
+    } else {
+        egui::Label::new(marked_text(ui, text, spans, color))
+    };
+    ui.add(label.truncate().show_tooltip_when_elided(false))
+}
+
+fn marked_text(
+    ui: &egui::Ui,
+    text: &str,
+    spans: &[std::ops::Range<usize>],
+    color: Color32,
+) -> LayoutJob {
+    let plain = TextFormat {
+        font_id: egui::TextStyle::Body.resolve(ui.style()),
+        color,
+        ..TextFormat::default()
+    };
+    let marked = TextFormat {
+        color: WHITE,
+        background: Color32::from_rgba_unmultiplied(235, 197, 151, 76),
+        ..plain.clone()
+    };
+    let mut job = LayoutJob::default();
+    let mut cursor = 0;
+    for span in spans {
+        job.append(&text[cursor..span.start], 0.0, plain.clone());
+        job.append(&text[span.clone()], 0.0, marked.clone());
+        cursor = span.end;
+    }
+    job.append(&text[cursor..], 0.0, plain);
+    job
+}
+
+fn fear_offset(ui: &egui::Ui, thread: &str, bounds: egui::Rect, afraid: bool) -> Vec2 {
+    if !afraid {
+        return Vec2::ZERO;
+    }
+    let (clock, pointer) = ui.input(|input| (input.time, input.pointer.hover_pos()));
+    fear_pose(thread, clock, bounds, pointer)
+}
+
+fn fear_pose(thread: &str, clock: f64, bounds: egui::Rect, pointer: Option<egui::Pos2>) -> Vec2 {
+    let Some(pointer) = pointer else {
+        return Vec2::ZERO;
+    };
+    let away = bounds.center() - pointer;
+    let proximity = fear_proximity(away.length());
+    let direction = if away.length_sq() > f32::EPSILON {
+        away.normalized()
+    } else {
+        let fallback = tremor(thread, 0.0);
+        if fallback.length_sq() > f32::EPSILON {
+            fallback.normalized()
+        } else {
+            Vec2::X
+        }
+    };
+    tremor(thread, clock) * proximity + direction * (FEAR_FLEE * proximity)
+}
+
+const fn dismissible(site: &Site, harness: Harness, work: Work) -> bool {
+    site.local()
+        && matches!(harness, Harness::Codex)
+        && matches!(work, Work::Done | Work::Sleep | Work::Closed)
+}
+
+fn fear_proximity(distance: f32) -> f32 {
+    proximity(distance, FEAR_REACH)
+}
+
+fn proximity(distance: f32, reach: f32) -> f32 {
+    let linear = (1.0 - distance / reach).clamp(0.0, 1.0);
+    linear * linear * (3.0 - 2.0 * linear)
+}
+
+fn tremor(thread: &str, time: f64) -> Vec2 {
+    const AXIS: [f32; 9] = [-2.0, -1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5, 2.0];
+    let millis = std::time::Duration::from_secs_f64(time.max(0.0)).as_millis();
+    let tick = u64::try_from(millis / 59).unwrap_or(u64::MAX);
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64 ^ tick.wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    for byte in thread.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    let component = |bits: u64| AXIS[usize::try_from(bits % 9).expect("jolt axis is bounded")];
+    egui::vec2(component(hash), component(hash.rotate_left(29)))
+}
+
+fn advance_jolt(
+    ledger: &mut JoltLedger,
+    site: &Site,
+    harness: Harness,
+    thread: &str,
+    current: Option<Vec2>,
+) -> Vec2 {
+    let bank = ledger.entry((site.clone(), harness)).or_default();
+    match current {
+        Some(current) => {
+            if let Some(prior) = bank.get_mut(thread) {
+                let travel = current - *prior;
+                *prior = current;
+                travel
+            } else {
+                let _vacant = bank.insert(thread.to_owned(), current);
+                current
+            }
+        }
+        None => bank.remove(thread).map_or(Vec2::ZERO, |prior| -prior),
+    }
+}
+
+/// Couple the tile's projected swept volume into both water axes. `rect` is
+/// the current visual pose; layout motion is deliberately excluded because
+/// tray heave already owns it.
+fn displace_tile(water: &mut Surface, rect: egui::Rect, travel: Vec2) {
+    let envelope = rect.union(rect.translate(-travel));
+    let horizontal = travel.x.abs() * rect.height();
+    if horizontal >= TILE_SWEEP_EPSILON {
+        water.poke(
+            envelope,
+            Poke::slide(
+                (horizontal / TILE_AREA_PER_IMPULSE).min(TILE_IMPULSE_CEIL),
+                travel.x.signum(),
+            ),
+        );
+    }
+    let vertical = travel.y.abs() * rect.width();
+    if vertical >= TILE_SWEEP_EPSILON {
+        water.poke(
+            envelope,
+            Poke::drag(
+                (vertical / TILE_AREA_PER_IMPULSE).min(TILE_IMPULSE_CEIL),
+                travel.y.signum(),
+            ),
+        );
+    }
+}
+
+fn legend(ui: &mut egui::Ui, label: &str, work: Work) {
+    let _legend = ui.horizontal(|ui| {
+        let (rect, _response) = ui.allocate_exact_size(Vec2::splat(7.0), Sense::hover());
+        paint_work(ui.painter(), rect.center(), 3.25, work);
+        let _label = ui.label(TypeRole::Label.text(label).color(chrome::MUTED));
+    });
+}
+
+fn site_legend(ui: &mut egui::Ui, status: &crate::fleet::SiteStatus) {
+    let legend = ui.horizontal(|ui| {
+        let (rect, response) = ui.allocate_exact_size(Vec2::splat(9.0), Sense::hover());
+        let offline = !status.online && status.incompatibility.is_none();
+        let color = if offline {
+            ASH.gamma_multiply(0.65)
+        } else {
+            site_color(&status.site)
+        };
+        ui.painter().circle_filled(rect.center(), 3.5, color);
+        if status.incompatibility.is_some() {
+            ui.painter()
+                .circle_stroke(rect.center(), 4.25, Stroke::new(1.0, RED));
+        }
+        let label = ui.label(
+            TypeRole::Label
+                .text(status.site.endpoint())
+                .color(if offline { color } else { chrome::MUTED }),
+        );
+        response.union(label)
+    });
+    let bridge = status.bridge_version.as_deref().unwrap_or("unknown bridge");
+    let codex = status.codex_version.as_deref().unwrap_or("unknown Codex");
+    let platform = status.platform.as_deref().unwrap_or("unknown platform");
+    let identity = format!("{bridge} · Codex {codex} · {platform}");
+    let hint = status.incompatibility.as_ref().map_or_else(
+        || {
+            if status.online {
+                identity.clone()
+            } else {
+                "OFFLINE".to_owned()
+            }
+        },
+        |fault| format!("{fault}\n{identity}"),
+    );
+    let _hint = legend.inner.on_hover_text(hint);
+}
+
+fn fleet_legend(ui: &mut egui::Ui, fleet: Option<&FleetSnapshot>) {
+    let Some(fleet) = fleet.filter(|fleet| !fleet.sites.is_empty()) else {
+        return;
+    };
+    ui.add_space(3.0);
+    let _row = ui.allocate_ui_with_layout(
+        egui::vec2(ui.available_width(), ui.spacing().interact_size.y),
+        egui::Layout::right_to_left(egui::Align::Center),
+        |ui| {
+            for site in fleet.sites.iter().rev() {
+                site_legend(ui, site);
+            }
+        },
+    );
+}
+
+fn site_color(site: &crate::site::RemoteSite) -> Color32 {
+    let palette_len = u64::try_from(SITE_PALETTE.len()).expect("Site palette length fits u64");
+    let index =
+        usize::try_from(site.palette() % palette_len).expect("Site palette modulus fits usize");
+    SITE_PALETTE[index]
+}
+
+fn paint_card_work(painter: &egui::Painter, tile: egui::Rect, work: Work) {
+    paint_work(
+        painter,
+        tile.right_bottom() - egui::vec2(13.0, 13.0),
+        4.5,
+        work,
+    );
+}
+
+fn paint_closed(painter: &egui::Painter, center: egui::Pos2, radius: f32) {
+    let points = vec![
+        center + egui::vec2(0.0, -radius),
+        center + egui::vec2(radius, radius),
+        center + egui::vec2(-radius, radius),
+    ];
+    painter.add(egui::Shape::convex_polygon(
+        points,
+        Color32::BLACK,
+        Stroke::new(1.0_f32, chrome::MUTED),
+    ));
+}
+
+fn paint_work(painter: &egui::Painter, center: egui::Pos2, radius: f32, work: Work) {
+    if work == Work::Closed {
+        paint_closed(painter, center, radius + 0.75);
+        return;
+    }
+    let color = work_color(work);
+    match work {
+        Work::Goal | Work::Delegated | Work::Turn => {
+            painter.circle_filled(center, radius, color);
+        }
+        Work::Error | Work::Input | Work::Sleep | Work::Done => {
+            painter.rect_filled(
+                egui::Rect::from_center_size(center, Vec2::splat(radius * 2.0)),
+                0,
+                color,
+            );
+        }
+        Work::Closed => unreachable!("closed returns before square projection"),
+    }
+}
+
+fn paint_workspace(ui: &egui::Ui, tile: egui::Rect, card: &Card) -> f32 {
+    let Some(workspace) = card.workspace() else {
+        return 0.0;
+    };
+    let galley = ui.painter().layout_no_wrap(
+        workspace.to_string(),
+        TypeRole::Body.monospace(ui.style()),
+        chrome::TEXT,
+    );
+    let height = (galley.size().y + 6.0).max(25.0);
+    let width = (galley.size().x + 12.0).max(25.0);
+    let edge = Stroke::new(1.0_f32, chrome::EDGE_STRONG);
+    let rect = egui::Rect::from_min_size(
+        egui::pos2(tile.right() - width, tile.top()),
+        egui::vec2(width, height),
+    );
+    let radius = egui::CornerRadius {
+        nw: 2,
+        ne: 2,
+        sw: 0,
+        se: 0,
+    };
+    ui.painter().rect_filled(rect, radius, chrome::RAISED);
+    ui.painter()
+        .rect_stroke(rect, radius, edge, StrokeKind::Inside);
+    ui.painter()
+        .galley(rect.center() - galley.size() * 0.5, galley, chrome::TEXT);
+    brass_poolrooms::poolroom_anchor!(
+        ui,
+        WorkspaceTarget(card.harness, &card.thread).to_string(),
+        rect
+    );
+    if card.pinned {
+        ForgePin::new(egui::pos2(rect.center().x, rect.bottom() + 26.0))
+            .size(MechanismSize::Small)
+            .paint(ui.painter(), false);
+    }
+    width
+}
+
+fn paint_site(ui: &egui::Ui, tile: egui::Rect, site: &Site) {
+    let Some(site) = site.remote() else {
+        return;
+    };
+    ui.painter().circle_filled(
+        tile.left_top() + egui::vec2(7.0, 7.0),
+        3.5,
+        site_color(site),
+    );
+}
+
+const fn work_color(work: Work) -> Color32 {
+    match work {
+        Work::Error => RED,
+        Work::Input => ORANGE,
+        Work::Goal => VIOLET,
+        Work::Delegated => BLUE,
+        Work::Turn => GREEN,
+        Work::Sleep => ASH,
+        Work::Done => WHITE,
+        Work::Closed => Color32::BLACK,
+    }
+}
+
+fn arm_summon(summon: &AtomicU64, destination: Option<u32>) {
+    let prior = summon.load(Ordering::Relaxed);
+    let generation = u32::try_from(prior >> 32)
+        .expect("summon generation occupies 32 bits")
+        .wrapping_add(1);
+    summon.store(pack_summon(generation, destination), Ordering::Release);
+}
+
+const fn pack_summon(generation: u32, destination: Option<u32>) -> u64 {
+    let desktop = match destination {
+        Some(desktop) => desktop,
+        None => NO_DESKTOP,
+    };
+    (generation as u64) << 32 | desktop as u64
+}
+
+fn unpack_desktop(packet: u64) -> Option<u32> {
+    let desktop =
+        u32::try_from(packet & u64::from(u32::MAX)).expect("summon desktop occupies 32 bits");
+    (desktop != NO_DESKTOP).then_some(desktop)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn work_palette_is_exact() {
+        assert_eq!(work_color(Work::Turn), GREEN);
+        assert_eq!(work_color(Work::Delegated), BLUE);
+        assert_eq!(work_color(Work::Goal), VIOLET);
+        assert_eq!(work_color(Work::Input), ORANGE);
+        assert_eq!(work_color(Work::Error), RED);
+        assert_eq!(work_color(Work::Sleep), ASH);
+        assert_eq!(work_color(Work::Closed), Color32::BLACK);
+        assert_eq!(work_color(Work::Done), WHITE);
+    }
+
+    #[test]
+    fn restored_posture_selects_the_native_window_species() {
+        const {
+            assert!(<Wrangler<true> as NativeApp>::WINDOW.floating);
+            assert!(!<Wrangler<false> as NativeApp>::WINDOW.floating);
+        }
+    }
+
+    #[test]
+    fn tool_fields_obey_pointer_proximity_and_direction() {
+        let tile = egui::Rect::from_center_size(egui::pos2(500.0, 400.0), egui::vec2(300.0, 185.0));
+        let near_pointer = egui::pos2(490.0, 400.0);
+        let far_pointer = egui::pos2(-100.0, 400.0);
+        let samples = (0..20)
+            .map(|tick| fear_pose("thread", f64::from(tick) / 17.0, tile, Some(near_pointer)))
+            .collect::<Vec<_>>();
+        let far = (0..20)
+            .map(|tick| fear_pose("thread", f64::from(tick) / 17.0, tile, Some(far_pointer)))
+            .collect::<Vec<_>>();
+        assert!(samples.windows(2).any(|pair| pair[0] != pair[1]));
+        assert!(motion_span(&samples) > motion_span(&far));
+        assert!(samples.iter().all(|sample| sample.x > 0.0));
+        assert_eq!(fear_pose("thread", 0.0, tile, None), Vec2::ZERO);
+    }
+
+    #[test]
+    fn only_stopped_tiles_fear_management() {
+        assert!(dismissible(&Site::Local, Harness::Codex, Work::Done));
+        assert!(dismissible(&Site::Local, Harness::Codex, Work::Sleep));
+        assert!(dismissible(&Site::Local, Harness::Codex, Work::Closed));
+        assert!(!dismissible(&Site::Local, Harness::Codex, Work::Error));
+        assert!(!dismissible(&Site::Local, Harness::Codex, Work::Input));
+        assert!(!dismissible(&Site::Local, Harness::Codex, Work::Goal));
+        assert!(!dismissible(&Site::Local, Harness::Codex, Work::Delegated));
+        assert!(!dismissible(&Site::Local, Harness::Codex, Work::Turn));
+        assert!(!dismissible(&Site::Local, Harness::ClaudeCode, Work::Done));
+        assert!(!dismissible(&Site::Local, Harness::PrimeAgent, Work::Sleep));
+        assert!(!dismissible(
+            &Site::Remote(crate::site::RemoteSite::parse("host").expect("lawful endpoint")),
+            Harness::Codex,
+            Work::Done
+        ));
+    }
+
+    #[test]
+    fn jiggle_sweeps_actual_tile_volume_into_water() {
+        let ctx = egui::Context::default();
+        let mut water = Surface::new(Wetness::Wet);
+        let rect = egui::Rect::from_min_size(egui::pos2(40.0, 50.0), egui::vec2(300.0, 185.0));
+        displace_tile(&mut water, rect, egui::vec2(2.0, -1.5));
+        water.begin(Domain::basin(rect.expand(100.0)));
+        let frame = water.frame(&ctx, 1.0, &[], None);
+        assert!(frame.wants_repaint());
+    }
+
+    fn motion_span(samples: &[Vec2]) -> f32 {
+        samples
+            .windows(2)
+            .map(|pair| (pair[1] - pair[0]).length())
+            .fold(0.0, f32::max)
+    }
+}

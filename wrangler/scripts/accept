@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+
+if [ "$#" -gt 1 ]; then
+  echo "usage: scripts/accept [capture.png]" >&2
+  exit 64
+fi
+if [ "$#" -eq 1 ]; then
+  export CODEX_WRANGLER_ACCEPTANCE_CAPTURE=$1
+fi
+
+if [ -z "${CODEX_WRANGLER_ACCEPTANCE_BINARY:-}" ]; then
+  cargo build --release --locked --features egui-test --bin codex-wrangler
+fi
+cargo run --release --locked -p codex-wrangler-acceptance

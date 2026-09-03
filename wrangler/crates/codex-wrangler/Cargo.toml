@@ -1,0 +1,47 @@
+[package]
+name = "codex-wrangler"
+version.workspace = true
+description = "Linux/X11/i3 tray switcher for live coding-agent TUI sessions"
+edition.workspace = true
+license.workspace = true
+readme.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+keywords = ["codex", "claude", "i3", "x11", "egui"]
+categories = ["gui"]
+
+[features]
+egui-test = [
+  "codex-wrangler-contract/egui-test",
+  "dep:egui-tester-witness",
+  "instrumentation",
+  "eternalist-apps/egui-test",
+]
+instrumentation = ["brass_poolrooms/instrumentation"]
+
+[dependencies]
+anyhow.workspace = true
+crossbeam-channel.workspace = true
+codex-wrangler-contract.workspace = true
+brass_poolrooms.workspace = true
+directories.workspace = true
+egui.workspace = true
+egui-tester-witness = { workspace = true, optional = true, features = ["egui"] }
+egui-wgpu.workspace = true
+eternalist-apps.workspace = true
+inotify.workspace = true
+memchr.workspace = true
+nix.workspace = true
+regex.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+semver.workspace = true
+sha2.workspace = true
+x11rb.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true
