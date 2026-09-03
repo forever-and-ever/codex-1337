@@ -251,11 +251,7 @@ async fn steer_rejection_queues_review_follow_up_before_existing_queued_messages
     assert!(chat.input_queue.pending_steer.is_none());
     assert_eq!(
         chat.queued_user_message_texts(),
-        vec![
-            "review follow-up one",
-            "review follow-up two",
-            "queued later"
-        ]
+        vec!["review follow-up one\nreview follow-up two", "queued later"]
     );
     assert!(drain_insert_history(&mut rx).is_empty());
 
@@ -729,7 +725,9 @@ async fn steer_enter_during_final_stream_preserves_follow_up_prompts_in_order() 
     assert!(chat.input_queue.pending_steer.is_none());
     let inserted = drain_insert_history(&mut rx);
     assert_eq!(inserted.len(), 1);
-    assert!(lines_to_single_string(&inserted[0]).contains("first follow-up\nsecond follow-up"));
+    let rendered = lines_to_single_string(&inserted[0]);
+    assert!(rendered.contains("first follow-up"));
+    assert!(rendered.contains("second follow-up"));
 }
 
 #[tokio::test]

@@ -1844,7 +1844,7 @@ async fn restore_thread_input_state_applies_running_state_policy() {
         chat.composer_text_with_pending(),
         "submitted history\nqueued history"
     );
-    assert!(chat.input_queue.pending_steers.is_empty());
+    assert!(chat.input_queue.pending_steer.is_none());
     assert!(!chat.capture_thread_input_state().unwrap().recovered_queue);
     assert_no_submit_op(&mut op_rx);
     chat.set_queue_autosend_suppressed(/*suppressed*/ false);

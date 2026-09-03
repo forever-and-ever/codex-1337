@@ -64,12 +64,12 @@ impl ChatWidget {
         if key.kind == KeyEventKind::Press && self.chat_keymap.edit_queued_message.is_pressed(key) {
             if let Some(composer) = self.pop_latest_queued_composer_state() {
                 self.restore_composer_state(composer);
-            } else if let Some(steer) = self.input_queue.pending_steers.pop_back() {
+            } else if let Some(steer) = self.input_queue.pending_steer.take() {
                 self.restore_user_message_to_composer(user_message_for_restore(
                     steer.user_message,
                     &steer.history_record,
                 ));
-                self.input_queue.recovered_queue &= !self.input_queue.pending_steers.is_empty();
+                self.input_queue.recovered_queue &= self.input_queue.pending_steer.is_some();
             }
             self.bottom_pane
                 .handle_disconnected_key(KeyEvent::new(KeyCode::Null, KeyModifiers::NONE));
