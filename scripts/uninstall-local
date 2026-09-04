@@ -1,0 +1,32 @@
+#!/bin/sh
+set -eu
+
+install_root=${CODEX_INSTALL_ROOT:-$HOME/.local}
+data_home=${XDG_DATA_HOME:-$HOME/.local/share}
+distribution_root="$data_home/codex-wrangler/distributions"
+wrangler="$install_root/bin/codex-wrangler"
+
+if [ -x "$wrangler" ] && [ -L "$wrangler" ]; then
+    case "$(readlink "$wrangler")" in
+        "$distribution_root/current/bin/codex-wrangler")
+            "$wrangler" uninstall
+            ;;
+    esac
+fi
+
+for executable in codex codex-code-mode-host codex-wrangler-bridge codex-wrangler; do
+    link="$install_root/bin/$executable"
+    [ -L "$link" ] || continue
+    [ "$(readlink "$link")" = "$distribution_root/current/bin/$executable" ] || continue
+    rm -f -- "$link"
+done
+
+completion="$install_root/share/zsh/site-functions/_codex"
+if [ -L "$completion" ] \
+    && [ "$(readlink "$completion")" = "$distribution_root/current/_codex" ]
+then
+    rm -f -- "$completion"
+fi
+
+rm -rf -- "$distribution_root"
+printf 'removed the local Codex distribution; user data was preserved\n'
