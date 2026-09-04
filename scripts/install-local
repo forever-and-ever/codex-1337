@@ -10,7 +10,7 @@ root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 [ "$(uname -s)" = Linux ] || die 'this distribution is Linux-only'
 [ -z "$(git -C "$root" status --porcelain)" ] || die 'source checkout is dirty'
 
-for command in bwrap cargo cut git install ld.lld ln mktemp mv readlink rg rm rustc sed uname zsh; do
+for command in bwrap cargo cut git install ld.lld ln mktemp mv python3 readlink rg rm rustc sed uname zsh; do
     command -v "$command" >/dev/null 2>&1 || die "required command is absent: $command"
 done
 
@@ -72,11 +72,24 @@ if [ ! -d "$payload" ]; then
     package="$stage/package"
     install -d -m755 "$package/bin" "$package/licenses"
 
-    cargo build --locked --release \
+    CODEX_REPO_ROOT="$root" PYTHONPATH="$root/scripts" \
+    python3 - "$target" "$stage/v8" cargo build --locked --release \
         --manifest-path "$root/codex-rs/Cargo.toml" \
         --bin codex \
         --bin codex-code-mode-host \
-        --bin codex-wrangler-bridge
+        --bin codex-wrangler-bridge <<'PY'
+import os
+import sys
+from pathlib import Path
+
+from codex_package.targets import TARGET_SPECS
+from codex_package.v8 import resolve_codex_v8_cargo_env
+
+environment = os.environ | resolve_codex_v8_cargo_env(
+    TARGET_SPECS[sys.argv[1]], cache_root=Path(sys.argv[2])
+)
+os.execvpe(sys.argv[3], sys.argv[3:], environment)
+PY
 
     cargo build --locked --release \
         --manifest-path "$root/wrangler/Cargo.toml" \
