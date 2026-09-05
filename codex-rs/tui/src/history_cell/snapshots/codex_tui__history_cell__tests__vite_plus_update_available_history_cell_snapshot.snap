@@ -4,7 +4,7 @@ assertion_line: 1249
 expression: rendered
 ---
 ╭─────────────────────────────────────────────────╮
-│ ✨ Update available! 0.153.3-wrangler -> 9.9.9  │
+│ ✨ Update available! 0.153.4-wrangler -> 9.9.9  │
 │ Run vp install -g @openai/codex to update.      │
 │                                                 │
 │ See full release notes:                         │

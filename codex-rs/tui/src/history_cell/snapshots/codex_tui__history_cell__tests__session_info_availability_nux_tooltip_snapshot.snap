@@ -4,7 +4,7 @@ assertion_line: 711
 expression: rendered
 ---
 ╭─────────────────────────────────────╮
-│ >_ OpenAI Codex (v0.153.3-wrangler) │
+│ >_ OpenAI Codex (v0.153.4-wrangler) │
 │                                     │
 │ model:     gpt-5   /model to change │
 │ directory: /tmp/project             │
