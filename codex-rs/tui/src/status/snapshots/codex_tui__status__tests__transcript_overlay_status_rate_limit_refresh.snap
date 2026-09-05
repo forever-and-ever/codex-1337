@@ -1,6 +1,6 @@
 ---
 source: tui/src/status/tests.rs
-assertion_line: 1813
+assertion_line: 1814
 expression: "format!(\"before:\\n{before}\\n\\nafter:\\n{after}\")"
 ---
 before:
@@ -8,7 +8,7 @@ before:
 /status
 
 ╭──────────────────────────────────────────────────────────────────────────╮
-│  >_ OpenAI Codex (v0.150.1-wrangler)                                     │
+│  >_ OpenAI Codex (v0.153.3-wrangler)                                     │
 │                                                                          │
 │ Visit https://chatgpt.com/codex/settings/usage for up-to-date            │
 │ information on rate limits and credits                                   │
@@ -40,7 +40,7 @@ after:
 /status
 
 ╭───────────────────────────────────────────────────────────────────────────╮
-│  >_ OpenAI Codex (v0.150.1-wrangler)                                      │
+│  >_ OpenAI Codex (v0.153.3-wrangler)                                      │
 │                                                                           │
 │ Visit https://chatgpt.com/codex/settings/usage for up-to-date             │
 │ information on rate limits and credits                                    │
