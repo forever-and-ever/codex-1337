@@ -1,0 +1,14 @@
+---
+source: tui/src/chatwidget/tests/async_questions_tests.rs
+assertion_line: 34
+expression: "render_bottom_popup(&chat, 80)"
+---
+  Question 1/1 (1 unanswered)
+  Which environment should I deploy to?
+
+  › 1. Staging
+    2. Production
+    3. None of the above  Optionally, add details in notes (tab).
+
+  tab to add notes | enter to submit answer
+  esc to return · ctrl + d to dismiss all

@@ -1790,6 +1790,7 @@ async fn restore_thread_input_state_applies_running_state_policy() {
     let mut submitted_pending_steer = pending_steer("submitted to the interrupted turn");
     submitted_pending_steer.history_record = pending_history.clone();
     let input_state = ThreadInputState {
+        async_questions: Default::default(),
         composer: Some(ThreadComposerState {
             text: "composer draft".to_string(),
             ..Default::default()

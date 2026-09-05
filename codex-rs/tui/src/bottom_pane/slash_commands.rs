@@ -302,6 +302,7 @@ mod tests {
         assert_eq!(
             commands,
             vec![
+                SlashCommand::Questions,
                 SlashCommand::Ide,
                 SlashCommand::Agents,
                 SlashCommand::Copy,

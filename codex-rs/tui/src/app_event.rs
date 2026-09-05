@@ -1237,6 +1237,10 @@ pub(crate) enum AppEvent {
         text: String,
         collaboration_mode: CollaborationModeMask,
     },
+    AsyncQuestionsAnswered {
+        thread_id: ThreadId,
+        response: codex_app_server_protocol::ToolRequestUserInputResponse,
+    },
 
     /// Open the approval popup.
     FullScreenApprovalRequest(ApprovalRequest),

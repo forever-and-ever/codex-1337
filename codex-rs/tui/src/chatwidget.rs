@@ -427,6 +427,7 @@ mod windows_sandbox_prompts;
 use self::status_state::StatusIndicatorState;
 use self::status_state::StatusState;
 use self::status_state::TerminalTitleStatusKind;
+pub(crate) mod async_questions;
 mod status_controls;
 mod status_surfaces;
 mod streaming;

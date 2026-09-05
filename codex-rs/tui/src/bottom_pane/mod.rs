@@ -64,6 +64,7 @@ mod approval_overlay;
 mod hook_status;
 mod mcp_server_elicitation;
 mod multi_select_picker;
+mod pending_questions;
 mod request_user_input;
 mod status_line_setup;
 mod status_line_style;
@@ -261,6 +262,7 @@ pub(crate) struct BottomPane {
     unified_exec_footer: UnifiedExecFooter,
     /// Preview of pending steers and queued drafts shown above the composer.
     pending_input_preview: PendingInputPreview,
+    pending_questions: pending_questions::PendingQuestions,
     /// Inactive threads with pending approval requests.
     pending_thread_approvals: PendingThreadApprovals,
     context_window_percent: Option<i64>,
@@ -329,6 +331,7 @@ impl BottomPane {
             status_timer: crate::status_indicator_widget::StatusTimer::default(),
             unified_exec_footer: UnifiedExecFooter::new(),
             pending_input_preview: PendingInputPreview::new(),
+            pending_questions: Default::default(),
             pending_thread_approvals: PendingThreadApprovals::new(),
             esc_backtrack_hint: false,
             animations_enabled,
@@ -1626,6 +1629,28 @@ impl BottomPane {
         self.push_view(Box::new(modal));
     }
 
+    pub(crate) fn set_pending_questions(&mut self, count: usize, first: Option<String>) {
+        self.pending_questions = pending_questions::PendingQuestions { count, first };
+        self.request_redraw();
+    }
+
+    pub(crate) fn open_async_questions(
+        &mut self,
+        thread_id: codex_protocol::ThreadId,
+        request: ToolRequestUserInputParams,
+    ) {
+        let modal = RequestUserInputOverlay::new_with_keymap(
+            request,
+            self.app_event_tx.clone(),
+            self.has_input_focus,
+            self.enhanced_keys_supported,
+            self.disable_paste_burst,
+            self.keymap.clone(),
+        )
+        .with_async_reply(thread_id);
+        self.push_view(Box::new(modal));
+    }
+
     pub(crate) fn push_mcp_server_elicitation_request(
         &mut self,
         request: McpServerElicitationFormRequest,
@@ -1888,6 +1913,10 @@ impl BottomPane {
             RenderableItem::Borrowed(view)
         } else {
             let mut flex = FlexRenderable::new();
+            flex.push(
+                /*flex*/ 0,
+                RenderableItem::Borrowed(&self.pending_questions),
+            );
             if let Some(banner) = self
                 .inline_banner
                 .as_ref()

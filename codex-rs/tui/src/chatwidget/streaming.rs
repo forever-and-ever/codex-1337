@@ -323,6 +323,9 @@ impl ChatWidget {
         from_replay: bool,
     ) {
         self.transcript.last_completed_agent_message = Some((turn_id.to_string(), item.id.clone()));
+        if !from_replay {
+            self.receive_async_questions(&item);
+        }
         let mut message = String::new();
         for content in &item.content {
             match content {

@@ -233,6 +233,8 @@ fn next_goal_draft(
 
 mod app_server;
 mod approval_requests;
+#[path = "tests/async_questions_tests.rs"]
+mod async_questions;
 #[path = "tests/backend_banners_tests.rs"]
 mod backend_banners_tests;
 #[path = "tests/bedrock_catalog_tests.rs"]

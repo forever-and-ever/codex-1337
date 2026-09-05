@@ -369,6 +369,7 @@ async fn restore_thread_input_state_restores_pending_steer_without_downgrading_t
 
     chat.restore_thread_input_state(
         Some(ThreadInputState {
+            async_questions: Default::default(),
             composer: None,
             safety_buffering_prompt: None,
             pending_steer: Some(pending_steer),

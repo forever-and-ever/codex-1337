@@ -77,12 +77,15 @@ impl App {
             return;
         };
         let input_state = self.chat_widget.capture_thread_input_state();
+        let mut async_questions = self.chat_widget.capture_async_questions();
         let recap_progress = self.recap.progress();
         if let Some(channel) = self.thread_event_channels.get_mut(&active_id) {
             let receiver = self.active_thread_rx.take();
             let mut store = channel.store.lock().await;
             store.active = false;
             store.input_state = input_state;
+            async_questions.merge_unseen(&store.async_questions);
+            store.async_questions = async_questions;
             store.merge_recap_progress(recap_progress);
             if let Some(receiver) = receiver {
                 channel.receiver = Some(receiver);
@@ -1652,6 +1655,8 @@ impl App {
             self.chat_widget
                 .replay_thread_turns(snapshot.turns, ReplayKind::ThreadSnapshot);
         }
+        self.chat_widget
+            .merge_async_questions(&snapshot.async_questions);
         for (event, changes) in snapshot.events.into_iter().zip(request_changes) {
             if suppress_replay_notices && replay_filter::event_is_notice(&event) {
                 continue;

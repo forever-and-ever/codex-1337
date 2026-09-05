@@ -122,6 +122,7 @@ impl ThreadComposerState {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ThreadInputState {
+    pub(super) async_questions: super::async_questions::AsyncQuestions,
     pub(super) composer: Option<ThreadComposerState>,
     pub(super) safety_buffering_prompt: Option<UserMessage>,
     pub(super) pending_steer: Option<PendingSteer>,

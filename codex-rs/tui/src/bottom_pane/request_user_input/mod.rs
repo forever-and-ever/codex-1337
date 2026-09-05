@@ -156,6 +156,7 @@ impl FooterTip {
 }
 
 pub(crate) struct RequestUserInputOverlay {
+    async_reply: Option<codex_protocol::ThreadId>,
     app_event_tx: AppEventSender,
     request: ToolRequestUserInputParams,
     // Queue of incoming requests to process after the current one.
@@ -220,6 +221,7 @@ impl RequestUserInputOverlay {
         // The overlay renders its own footer hints, so keep the composer footer empty.
         composer.set_footer_hint_override(Some(Vec::new()));
         let mut overlay = Self {
+            async_reply: None,
             app_event_tx,
             request,
             queue: VecDeque::new(),
@@ -242,6 +244,12 @@ impl RequestUserInputOverlay {
         overlay.ensure_focus_available();
         overlay.restore_current_draft();
         overlay
+    }
+
+    pub(crate) fn with_async_reply(mut self, thread_id: codex_protocol::ThreadId) -> Self {
+        self.async_reply = Some(thread_id);
+        self.request.is_blocking = true;
+        self
     }
 
     fn current_index(&self) -> usize {
@@ -594,7 +602,11 @@ impl RequestUserInputOverlay {
                 tips.push(FooterTip::highlighted("tab to add notes"));
             }
             if self.selected_option_index().is_some() && notes_visible {
-                tips.push(FooterTip::new("tab or esc to clear notes"));
+                tips.push(FooterTip::new(if self.async_reply.is_some() {
+                    "tab to clear notes"
+                } else {
+                    "tab or esc to clear notes"
+                }));
             }
         }
 
@@ -624,7 +636,9 @@ impl RequestUserInputOverlay {
                 tips.push(FooterTip::new("ctrl + p / ctrl + n change question"));
             }
         }
-        if let Some(interrupt_key) = self.interrupt_turn_hint
+        if self.async_reply.is_some() {
+            tips.push(FooterTip::new("esc to return · ctrl + d to dismiss all"));
+        } else if let Some(interrupt_key) = self.interrupt_turn_hint
             && !(self.has_options()
                 && notes_visible
                 && interrupt_key == ShortcutHint::Single(crate::key_hint::plain(KeyCode::Esc)))
@@ -908,7 +922,11 @@ impl RequestUserInputOverlay {
                 .and_then(|selected_idx| Self::option_label_for_index(question, selected_idx));
             let mut answer_list = selected_label.into_iter().collect::<Vec<_>>();
             if !notes.is_empty() {
-                answer_list.push(format!("user_note: {notes}"));
+                answer_list.push(if self.async_reply.is_some() {
+                    notes
+                } else {
+                    format!("user_note: {notes}")
+                });
             }
             answers.insert(
                 question.id.clone(),
@@ -916,6 +934,14 @@ impl RequestUserInputOverlay {
                     answers: answer_list,
                 },
             );
+        }
+        if let Some(thread_id) = self.async_reply {
+            self.app_event_tx.send(AppEvent::AsyncQuestionsAnswered {
+                thread_id,
+                response: ToolRequestUserInputResponse { answers },
+            });
+            self.done = true;
+            return;
         }
         self.app_event_tx.user_input_answer(
             self.request.turn_id.clone(),
@@ -1204,6 +1230,9 @@ impl BottomPaneView for RequestUserInputOverlay {
     }
 
     fn will_interrupt_turn_on_key_event(&self, key_event: KeyEvent) -> bool {
+        if self.async_reply.is_some() {
+            return false;
+        }
         if KeyBinding::new(KeyCode::Char('c'), KeyModifiers::CONTROL).is_press(key_event) {
             return self.confirm_unanswered_active()
                 || !self.focus_is_notes()
@@ -1223,6 +1252,35 @@ impl BottomPaneView for RequestUserInputOverlay {
             return;
         }
 
+        if let Some(thread_id) = self.async_reply {
+            if key_event.code == KeyCode::Esc {
+                self.done = true;
+                return;
+            }
+            if KeyBinding::new(KeyCode::Char('d'), KeyModifiers::CONTROL).is_press(key_event) {
+                self.app_event_tx.send(AppEvent::AsyncQuestionsAnswered {
+                    thread_id,
+                    response: ToolRequestUserInputResponse {
+                        answers: self
+                            .request
+                            .questions
+                            .iter()
+                            .map(|q| {
+                                (
+                                    q.id.clone(),
+                                    ToolRequestUserInputAnswer {
+                                        answers: Vec::new(),
+                                    },
+                                )
+                            })
+                            .collect(),
+                    },
+                });
+                self.done = true;
+                return;
+            }
+        }
+
         self.snooze_auto_resolution();
 
         if self.confirm_unanswered_active() {
@@ -1235,7 +1293,7 @@ impl BottomPaneView for RequestUserInputOverlay {
             return;
         }
 
-        if self.interrupt_turn_keys.is_pressed(key_event) {
+        if self.async_reply.is_none() && self.interrupt_turn_keys.is_pressed(key_event) {
             // TODO: Emit interrupted request_user_input results (including committed answers)
             // once core supports persisting them reliably without follow-up turn issues.
             self.app_event_tx.interrupt();
@@ -1469,6 +1527,10 @@ impl BottomPaneView for RequestUserInputOverlay {
     }
 
     fn on_ctrl_c(&mut self) -> CancellationEvent {
+        if self.async_reply.is_some() {
+            self.done = true;
+            return CancellationEvent::Handled;
+        }
         if self.confirm_unanswered_active() {
             self.close_unanswered_confirmation();
             // TODO: Emit interrupted request_user_input results (including committed answers)
@@ -1529,6 +1591,9 @@ impl BottomPaneView for RequestUserInputOverlay {
         &mut self,
         request: ToolRequestUserInputParams,
     ) -> Option<ToolRequestUserInputParams> {
+        if self.async_reply.is_some() {
+            return Some(request);
+        }
         self.queue.push_back(request);
         None
     }

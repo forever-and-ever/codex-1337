@@ -2771,6 +2771,13 @@ impl App {
                 self.chat_widget
                     .submit_user_message_with_mode(text, collaboration_mode);
             }
+            AppEvent::AsyncQuestionsAnswered { thread_id, response } => {
+                if self.chat_widget.thread_id() == Some(thread_id) {
+                    self.chat_widget.answer_async_questions(response);
+                } else {
+                    self.chat_widget.add_error_message(format!("Answer not sent: the active conversation changed. Return to {thread_id} and open /questions."));
+                }
+            }
             AppEvent::ManageSkillsClosed => {
                 self.chat_widget.handle_manage_skills_closed();
             }

@@ -509,6 +509,7 @@ impl ChatWidget {
             SlashCommand::Ps => {
                 self.add_ps_output();
             }
+            SlashCommand::Questions => self.open_async_questions(),
             SlashCommand::Stop => {
                 self.clean_background_terminals();
             }
@@ -1138,6 +1139,7 @@ impl ChatWidget {
             | SlashCommand::Usage
             | SlashCommand::DebugConfig
             | SlashCommand::Ps
+            | SlashCommand::Questions
             | SlashCommand::Stop
             | SlashCommand::MemoryDrop
             | SlashCommand::MemoryUpdate

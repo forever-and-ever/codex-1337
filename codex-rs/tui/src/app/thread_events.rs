@@ -10,6 +10,7 @@ use std::borrow::Cow;
 
 #[derive(Debug, Clone)]
 pub(super) struct ThreadEventSnapshot {
+    pub(super) async_questions: crate::chatwidget::async_questions::AsyncQuestions,
     pub(super) session: Option<ThreadSessionState>,
     pub(super) turns: Vec<Turn>,
     pub(super) events: Vec<ThreadBufferedEvent>,
@@ -40,6 +41,7 @@ pub(super) enum ThreadEventAttachment {
 
 #[derive(Debug)]
 pub(super) struct ThreadEventStore {
+    pub(super) async_questions: crate::chatwidget::async_questions::AsyncQuestions,
     pub(super) session: Option<ThreadSessionState>,
     pub(super) turns: Vec<Turn>,
     pub(super) buffer: VecDeque<ThreadBufferedEvent>,
@@ -69,6 +71,7 @@ impl ThreadEventStore {
 
     pub(super) fn new(capacity: usize) -> Self {
         Self {
+            async_questions: Default::default(),
             session: None,
             turns: Vec::new(),
             buffer: VecDeque::new(),
@@ -125,6 +128,16 @@ impl ThreadEventStore {
     }
 
     fn push_notification_inner(&mut self, notification: Cow<'_, ServerNotification>) {
+        if let ServerNotification::ItemCompleted(item) = notification.as_ref()
+            && let ThreadItem::AgentMessage {
+                id,
+                delivery: Some(codex_protocol::items::AgentMessageDelivery::Async),
+                questions: Some(questions),
+                ..
+            } = &item.item
+        {
+            self.async_questions.receive(id, questions);
+        }
         self.pending_interactive_replay
             .note_server_notification(notification.as_ref());
         match notification.as_ref() {
@@ -208,6 +221,7 @@ impl ThreadEventStore {
 
     pub(super) fn snapshot(&self) -> ThreadEventSnapshot {
         ThreadEventSnapshot {
+            async_questions: self.async_questions.clone(),
             session: self.session.clone(),
             turns: self.turns.clone(),
             // Thread switches replay buffered events into a rebuilt ChatWidget. Only replay
