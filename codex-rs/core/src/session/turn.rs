@@ -32,7 +32,7 @@ use crate::responses_metadata::CodexResponsesMetadata;
 use crate::responses_metadata::CodexResponsesRequestKind;
 use crate::responses_retry::ResponsesStreamRequest;
 use crate::responses_retry::ResponsesStreamRetryState;
-use crate::responses_retry::handle_retryable_response_stream_error;
+use crate::responses_retry::handle_response_stream_error;
 use crate::session::PreviousTurnSettings;
 use crate::session::TurnInput;
 use crate::session::session::Session;
@@ -1463,11 +1463,7 @@ async fn run_sampling_request(
             original_input = Some(prompt.input);
         }
 
-        if !err.is_retryable() {
-            return Err(err);
-        }
-
-        handle_retryable_response_stream_error(
+        handle_response_stream_error(
             &mut retry_state,
             max_retries,
             err,
@@ -1476,7 +1472,8 @@ async fn run_sampling_request(
             &turn_context,
             ResponsesStreamRequest::Sampling,
         )
-        .await?;
+        .or_cancel(&cancellation_token)
+        .await??;
         turn_context.turn_timing_state.record_sampling_retry();
     }
 }

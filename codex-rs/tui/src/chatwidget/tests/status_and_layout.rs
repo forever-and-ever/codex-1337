@@ -2762,9 +2762,8 @@ async fn status_widget_active_snapshot() {
 async fn stream_error_updates_status_indicator() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.bottom_pane.set_task_running(/*running*/ true);
-    let msg = "Reconnecting... 2/5";
-    let details = "Idle timeout waiting for SSE";
-    handle_stream_error(&mut chat, msg, Some(details.to_string()));
+    let msg = "Selected model is at capacity. Retrying in 5s...";
+    handle_stream_error(&mut chat, msg, /*additional_details*/ None);
 
     let cells = drain_insert_history(&mut rx);
     assert!(
@@ -2776,7 +2775,18 @@ async fn stream_error_updates_status_indicator() {
         .status_widget()
         .expect("status indicator should be visible");
     assert_eq!(status.header(), msg);
-    assert_eq!(status.details(), Some(details));
+    assert_eq!(status.details(), None);
+
+    let height = chat.desired_height(/*width*/ 80);
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, height))
+        .expect("create terminal");
+    terminal
+        .draw(|f| chat.render(f.area(), f.buffer_mut()))
+        .expect("draw capacity wait");
+    assert_chatwidget_snapshot!(
+        "capacity_retry_status",
+        normalized_backend_snapshot(terminal.backend())
+    );
 }
 
 #[tokio::test]
