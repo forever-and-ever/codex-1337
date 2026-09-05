@@ -37,6 +37,7 @@ pub(super) struct TranscriptState {
     /// Original source of that response, before display sanitization, for exact block copying.
     pub(super) last_agent_source: Option<String>,
     pub(super) last_completed_agent_message: Option<(String, String)>,
+    pub(super) agent_timestamp: Option<crate::history_cell::HistoryTimestamp>,
     /// Raw markdown of the most recently completed proposed plan.
     pub(super) latest_proposed_plan_markdown: Option<String>,
     /// Whether this turn already produced a copyable response.
@@ -97,6 +98,7 @@ impl TranscriptState {
     pub(super) fn reset_turn_flags(&mut self) {
         self.saw_copy_source_this_turn = false;
         self.last_completed_agent_message = None;
+        self.agent_timestamp = None;
         self.saw_plan_update_this_turn = false;
         self.saw_plan_item_this_turn = false;
         self.had_work_activity = false;

@@ -475,6 +475,7 @@ impl StreamCore {
 pub(crate) struct StreamController {
     core: StreamCore,
     header_emitted: bool,
+    pub(crate) timestamp: Option<history_cell::HistoryTimestamp>,
 }
 
 impl StreamController {
@@ -502,6 +503,7 @@ impl StreamController {
         Self {
             core: StreamCore::new(width, cwd, render_mode, inline_visualization_context),
             header_emitted: false,
+            timestamp: None,
         }
     }
 
@@ -580,13 +582,13 @@ impl StreamController {
         if lines.is_empty() {
             return None;
         }
-        Some(Box::new(
-            history_cell::AgentMessageCell::new_hyperlink_lines(lines, {
-                let header_emitted = self.header_emitted;
-                self.header_emitted = true;
-                !header_emitted
-            }),
-        ))
+        let mut cell = history_cell::AgentMessageCell::new_hyperlink_lines(lines, {
+            let header_emitted = self.header_emitted;
+            self.header_emitted = true;
+            !header_emitted
+        });
+        cell.timestamp = self.timestamp;
+        Some(Box::new(cell))
     }
 }
 // ---------------------------------------------------------------------------

@@ -785,6 +785,9 @@ goals = true
             .skip_while(|line| !line.contains(RETRY_PROMPT))
             .collect::<Vec<_>>()
             .join("\n");
+        let rendered_retry = regex_lite::Regex::new(r"\b\d{2}:\d{2}:\d{2}\b")
+            .expect("clock pattern")
+            .replace_all(&rendered_retry, "HH:MM:SS");
         insta::assert_snapshot!("safety_retry_committed_steer_history", rendered_retry);
     }
 

@@ -307,6 +307,7 @@ impl ChatWidget {
                         notification.turn.id.clone(),
                         replay_kind
                             .map_or(ThreadItemRenderSource::Live, ThreadItemRenderSource::Replay),
+                        /*timestamp*/ None,
                     );
                 }
                 self.last_non_retry_error = None;
@@ -355,6 +356,10 @@ impl ChatWidget {
         from_replay: bool,
     ) {
         match notification.item {
+            ThreadItem::AgentMessage { .. } => {
+                self.transcript.agent_timestamp =
+                    history_cell::HistoryTimestamp::from_millis(notification.started_at_ms);
+            }
             item @ ThreadItem::CommandExecution { .. } => self.on_command_execution_started(item),
             ThreadItem::FileChange { id: _, changes, .. } => {
                 self.on_patch_apply_begin(file_update_changes_to_display(changes));
@@ -376,17 +381,20 @@ impl ChatWidget {
                 model,
                 reasoning_effort,
                 agents_states,
-            } => self.on_collab_agent_tool_call(ThreadItem::CollabAgentToolCall {
-                id,
-                tool,
-                status,
-                sender_thread_id,
-                receiver_thread_ids,
-                prompt,
-                model,
-                reasoning_effort,
-                agents_states,
-            }),
+            } => self.on_collab_agent_tool_call(
+                ThreadItem::CollabAgentToolCall {
+                    id,
+                    tool,
+                    status,
+                    sender_thread_id,
+                    receiver_thread_ids,
+                    prompt,
+                    model,
+                    reasoning_effort,
+                    agents_states,
+                },
+                /*timestamp*/ None,
+            ),
             ThreadItem::EnteredReviewMode { review, .. } if !from_replay => {
                 self.enter_review_mode_with_hint(review, /*from_replay*/ false);
             }
@@ -399,12 +407,16 @@ impl ChatWidget {
         notification: ItemCompletedNotification,
         replay_kind: Option<ReplayKind>,
     ) {
+        let timestamp = history_cell::HistoryTimestamp::from_millis(notification.completed_at_ms);
         match notification.item {
-            item @ ThreadItem::CommandExecution { .. } => self.on_command_execution_completed(item),
+            item @ ThreadItem::CommandExecution { .. } => {
+                self.on_command_execution_completed(CompletedItem { item, timestamp })
+            }
             item => self.handle_thread_item(
                 item,
                 notification.turn_id,
                 replay_kind.map_or(ThreadItemRenderSource::Live, ThreadItemRenderSource::Replay),
+                timestamp,
             ),
         }
     }
