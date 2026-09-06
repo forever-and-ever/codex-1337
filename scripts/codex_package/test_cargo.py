@@ -1,19 +1,60 @@
-#!/usr/bin/env python3
-
-from pathlib import Path
+import json
+import subprocess
 import sys
 import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from codex_package.cargo import build_source_binaries
-from codex_package.cargo import source_binaries_for_target
-from codex_package.targets import PACKAGE_VARIANTS
-from codex_package.targets import TARGET_SPECS
+from codex_package.cargo import build_source_binaries, source_binaries_for_target
+from codex_package.targets import PACKAGE_VARIANTS, TARGET_SPECS
 
 
 class SourceBinariesForTargetTest(unittest.TestCase):
+    def test_build_uses_cargo_artifact_paths_not_an_assumed_target_tree(self) -> None:
+        # Cargo config and launch wrappers can redirect artifacts outside the checkout.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = {
+                name: touch_file(Path(temp_dir) / name)
+                for name in ("codex", "codex-code-mode-host", "bwrap")
+            }
+            messages = "\n".join(
+                json.dumps(
+                    {
+                        "reason": "compiler-artifact",
+                        "target": {"name": name},
+                        "executable": str(path),
+                    }
+                )
+                for name, path in paths.items()
+            )
+            with (
+                patch(
+                    "codex_package.cargo.resolve_codex_v8_cargo_env", return_value={}
+                ),
+                patch(
+                    "codex_package.cargo.subprocess.run",
+                    return_value=subprocess.CompletedProcess([], 0, stdout=messages),
+                ),
+            ):
+                outputs = build_source_binaries(
+                    TARGET_SPECS["x86_64-unknown-linux-gnu"],
+                    PACKAGE_VARIANTS["codex"],
+                    cargo="cargo",
+                    profile="release",
+                    entrypoint_bin=None,
+                    code_mode_host_bin=None,
+                    bwrap_bin=None,
+                    codex_command_runner_bin=None,
+                    codex_windows_sandbox_setup_bin=None,
+                )
+            self.assertEqual(
+                (outputs.entrypoint_bin, outputs.code_mode_host_bin, outputs.bwrap_bin),
+                tuple(paths.values()),
+            )
+
     def test_macos_package_with_prebuilt_entrypoint_builds_nothing(self) -> None:
         self.assertEqual(
             source_binaries_for_target(

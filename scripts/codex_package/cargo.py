@@ -1,15 +1,13 @@
 """Cargo builds for source-built Codex package artifacts."""
 
+import json
 import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from .targets import REPO_ROOT
-from .targets import PackageVariant
-from .targets import TargetSpec
+from .targets import REPO_ROOT, PackageVariant, TargetSpec
 from .v8 import resolve_codex_v8_cargo_env
-
 
 CODEX_RS_ROOT = REPO_ROOT / "codex-rs"
 
@@ -51,6 +49,7 @@ def build_source_binaries(
         build_codex_windows_sandbox_setup=spec.is_windows
         and codex_windows_sandbox_setup_bin is None,
     )
+    built_paths: dict[str, Path] = {}
     if binaries:
         cmd = [
             cargo,
@@ -59,6 +58,7 @@ def build_source_binaries(
             spec.target,
             "--profile",
             profile,
+            "--message-format=json-render-diagnostics",
         ]
         for binary in binaries:
             cmd.extend(["--bin", binary])
@@ -70,36 +70,41 @@ def build_source_binaries(
                 cargo_env = {**os.environ, **codex_v8_env}
 
         print("+", " ".join(cmd))
-        subprocess.run(
+        result = subprocess.run(
             cmd,
             cwd=CODEX_RS_ROOT,
             check=True,
             env=cargo_env,
+            stdout=subprocess.PIPE,
+            text=True,
         )
+        for line in result.stdout.splitlines():
+            artifact = json.loads(line)
+            if artifact.get("reason") == "compiler-artifact" and artifact.get(
+                "executable"
+            ):
+                built_paths[artifact["target"]["name"]] = Path(artifact["executable"])
+        for binary in binaries:
+            if binary not in built_paths:
+                raise RuntimeError(f"Cargo omitted executable artifact for {binary}")
 
-    output_dir = cargo_profile_output_dir(spec, profile)
+    def artifact(name: str, explicit: Path | None) -> Path:
+        return (explicit if explicit is not None else built_paths[name]).resolve()
+
     outputs = SourceBuildOutputs(
-        entrypoint_bin=resolve_output_path(
-            entrypoint_bin,
-            output_dir / variant.entrypoint_name(spec),
-        ),
-        code_mode_host_bin=(
-            code_mode_host_bin.resolve()
-            if code_mode_host_bin is not None
-            else output_dir / f"codex-code-mode-host{spec.exe_suffix}"
-        ),
-        bwrap_bin=resolve_output_path(
-            bwrap_bin,
-            output_dir / "bwrap" if spec.is_linux else None,
-        ),
-        codex_command_runner_bin=resolve_output_path(
-            codex_command_runner_bin,
-            output_dir / "codex-command-runner.exe" if spec.is_windows else None,
-        ),
-        codex_windows_sandbox_setup_bin=resolve_output_path(
-            codex_windows_sandbox_setup_bin,
-            output_dir / "codex-windows-sandbox-setup.exe" if spec.is_windows else None,
-        ),
+        entrypoint_bin=artifact(variant.cargo_bin, entrypoint_bin),
+        code_mode_host_bin=artifact("codex-code-mode-host", code_mode_host_bin),
+        bwrap_bin=artifact("bwrap", bwrap_bin) if spec.is_linux else None,
+        codex_command_runner_bin=artifact(
+            "codex-command-runner", codex_command_runner_bin
+        )
+        if spec.is_windows
+        else None,
+        codex_windows_sandbox_setup_bin=artifact(
+            "codex-windows-sandbox-setup", codex_windows_sandbox_setup_bin
+        )
+        if spec.is_windows
+        else None,
     )
     validate_source_outputs(outputs)
     return outputs
@@ -146,40 +151,6 @@ def validate_prebuilt_resource_inputs(
         raise RuntimeError(
             "--codex-windows-sandbox-setup-bin is only supported for Windows targets."
         )
-
-
-def resolve_output_path(
-    explicit_path: Path | None, default_path: Path | None
-) -> Path | None:
-    if explicit_path is not None:
-        return explicit_path.resolve()
-
-    return default_path
-
-
-def cargo_profile_output_dir(spec: TargetSpec, profile: str) -> Path:
-    target_dir = cargo_target_dir()
-    return target_dir / spec.target / cargo_profile_dirname(profile)
-
-
-def cargo_target_dir() -> Path:
-    target_dir = os.environ.get("CARGO_TARGET_DIR")
-    if target_dir is None:
-        return CODEX_RS_ROOT / "target"
-
-    path = Path(target_dir)
-    if path.is_absolute():
-        return path
-
-    return CODEX_RS_ROOT / path
-
-
-def cargo_profile_dirname(profile: str) -> str:
-    if profile == "dev":
-        return "debug"
-    if profile == "release":
-        return "release"
-    return profile
 
 
 def validate_source_outputs(outputs: SourceBuildOutputs) -> None:
