@@ -65,8 +65,9 @@ mod tests {
     }
 
     #[test]
-    fn sandbox_feature_matches_linked_v8() {
-        assert_eq!(super::linked_v8_has_sandbox(), cfg!(feature = "sandbox"));
+    fn requested_sandbox_is_enabled_in_linked_v8() {
+        // Another workspace crate can enable V8's sandbox through Cargo feature unification.
+        assert!(!cfg!(feature = "sandbox") || super::linked_v8_has_sandbox());
     }
 
     #[test]
