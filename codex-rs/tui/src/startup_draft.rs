@@ -489,7 +489,9 @@ fn startup_draft_renderable<'a>(
     renderable.push(
         /*flex*/ 0,
         bottom_pane
-            .as_renderable_with_composer_right_reserve(/*composer_right_reserve*/ 0)
+            .as_renderable_with_composer(
+                /*composer_right_reserve*/ 0, /*footer_prefix*/ None,
+            )
             .inset(Insets::tlbr(
                 /*top*/ u16::from(loading_message.is_none()),
                 /*left*/ 0,

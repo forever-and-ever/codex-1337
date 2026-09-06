@@ -1,4 +1,4 @@
-//! Bounded Goal / Task / Activity display beneath the composer and its footer.
+//! Bounded Goal / Task / Activity display between the entry box and its footer.
 
 use crate::line_truncation::truncate_line_to_width;
 use crate::render::renderable::Renderable;
@@ -33,7 +33,8 @@ impl WorkStatusView<'_> {
                     self.status.and_then(|status| status.activity.as_deref()),
                 ),
             ]);
-        let mut lines = Vec::new();
+        let rule = Line::from("─".repeat(usize::from(width)).dim());
+        let mut lines = vec![rule.clone()];
         for (label, value) in zones {
             // Goal text is user-controlled and unbounded; never lay out the full objective.
             let bounded: String = value.unwrap_or("—").chars().take(1024).collect();
@@ -58,6 +59,7 @@ impl WorkStatusView<'_> {
                     .map(|line| truncate_line_to_width(line, usize::from(width))),
             );
         }
+        lines.push(rule);
         lines
     }
 }

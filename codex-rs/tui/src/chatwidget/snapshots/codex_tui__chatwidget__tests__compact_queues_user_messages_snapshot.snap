@@ -8,8 +8,6 @@ expression: normalize_snapshot_paths(term.backend().vt100().screen().contents())
 
 
 
-
-
 • Working (0s • esc to interrupt)
 
 • Messages to be submitted at end of turn
@@ -17,6 +15,8 @@ expression: normalize_snapshot_paths(term.backend().vt100().screen().contents())
 
 › Ask Codex to do anything
 
-  gpt-5.6-sol default · /tmp/project
+────────────────────────────────────────────────────────────────────────────────
 Task     —
 Activity —
+────────────────────────────────────────────────────────────────────────────────
+  gpt-5.6-sol default · /tmp/project

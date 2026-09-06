@@ -1015,15 +1015,18 @@ impl ChatComposer {
     pub fn set_windows_degraded_sandbox_active(&mut self, enabled: bool) {
         self.windows_degraded_sandbox_active = enabled;
     }
+    #[cfg(test)]
     fn layout_areas(&self, area: Rect) -> [Rect; 4] {
-        self.layout_areas_with_textarea_right_reserve(area, /*textarea_right_reserve*/ 0)
+        let [composer, images, textarea, _, popup] =
+            self.layout_areas_with_options(area, ComposerRenderOptions::default());
+        [composer, images, textarea, popup]
     }
 
-    fn layout_areas_with_textarea_right_reserve(
+    fn layout_areas_with_options(
         &self,
         area: Rect,
-        textarea_right_reserve: u16,
-    ) -> [Rect; 4] {
+        options: ComposerRenderOptions<'_>,
+    ) -> [Rect; 5] {
         let footer_props = self.footer_props();
         let footer_hint_height = self
             .custom_footer_height()
@@ -1043,13 +1046,29 @@ impl ChatComposer {
             }
             ActivePopup::None => Constraint::Max(footer_total_height),
         };
-        let [composer_rect, popup_rect] =
-            Layout::vertical([Constraint::Min(3), popup_constraint]).areas(area);
+        // Presentation metadata yields before editable input in short terminals.
+        let composer_height = self.desired_height_with_options(
+            area.width,
+            ComposerRenderOptions {
+                footer_prefix: None,
+                ..options
+            },
+        );
+        let prefix_height = options
+            .footer_prefix
+            .map_or(0, |prefix| prefix.desired_height(area.width))
+            .min(area.height.saturating_sub(composer_height));
+        let [composer_rect, prefix_rect, popup_rect] = Layout::vertical([
+            Constraint::Min(3),
+            Constraint::Max(prefix_height),
+            popup_constraint,
+        ])
+        .areas(area);
         let mut textarea_rect = composer_rect.inset(Insets::tlbr(
             /*top*/ 1,
             LIVE_PREFIX_COLS,
             /*bottom*/ 1,
-            /*right*/ 1u16.saturating_add(textarea_right_reserve),
+            /*right*/ 1u16.saturating_add(options.textarea_right_reserve),
         ));
         let remote_images_height = self
             .attachments
@@ -1068,7 +1087,13 @@ impl ChatComposer {
         };
         textarea_rect.y = textarea_rect.y.saturating_add(consumed);
         textarea_rect.height = textarea_rect.height.saturating_sub(consumed);
-        [composer_rect, remote_images_rect, textarea_rect, popup_rect]
+        [
+            composer_rect,
+            remote_images_rect,
+            textarea_rect,
+            prefix_rect,
+            popup_rect,
+        ]
     }
 
     fn footer_spacing(footer_hint_height: u16) -> u16 {
@@ -1080,27 +1105,26 @@ impl ChatComposer {
     }
 
     pub fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
-        self.cursor_pos_with_textarea_right_reserve(area, /*textarea_right_reserve*/ 0)
+        self.cursor_pos_with_options(area, ComposerRenderOptions::default())
     }
 
-    pub(crate) fn cursor_pos_with_textarea_right_reserve(
+    pub(super) fn cursor_pos_with_options(
         &self,
         area: Rect,
-        textarea_right_reserve: u16,
+        options: ComposerRenderOptions<'_>,
     ) -> Option<(u16, u16)> {
         if !self.draft.input_enabled || self.attachments.selected_remote_image_index.is_some() {
             return None;
         }
 
+        let [_, _, textarea_rect, _, popup_rect] = self.layout_areas_with_options(area, options);
         if let Some(pos) = self
-            .vim_search_cursor_pos(area)
-            .or_else(|| self.history_search_cursor_pos(area))
+            .vim_search_cursor_pos(popup_rect)
+            .or_else(|| self.history_search_cursor_pos(popup_rect))
         {
             return Some(pos);
         }
 
-        let [_, _, textarea_rect, _] =
-            self.layout_areas_with_textarea_right_reserve(area, textarea_right_reserve);
         let state = *self.draft.textarea_state.borrow();
         self.draft
             .textarea
@@ -4600,9 +4624,15 @@ fn find_next_mention_token_range(text: &str, token: &str, from: usize) -> Option
     None
 }
 
+#[derive(Clone, Copy, Default)]
+pub(super) struct ComposerRenderOptions<'a> {
+    pub textarea_right_reserve: u16,
+    pub footer_prefix: Option<&'a dyn Renderable>,
+}
+
 impl Renderable for ChatComposer {
     fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
-        self.cursor_pos_with_textarea_right_reserve(area, /*textarea_right_reserve*/ 0)
+        self.cursor_pos_with_options(area, ComposerRenderOptions::default())
     }
 
     fn cursor_style(&self, _area: Rect) -> crossterm::cursor::SetCursorStyle {
@@ -4614,7 +4644,7 @@ impl Renderable for ChatComposer {
     }
 
     fn desired_height(&self, width: u16) -> u16 {
-        self.desired_height_with_textarea_right_reserve(width, /*textarea_right_reserve*/ 0)
+        self.desired_height_with_options(width, ComposerRenderOptions::default())
     }
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
@@ -4623,10 +4653,10 @@ impl Renderable for ChatComposer {
 }
 
 impl ChatComposer {
-    pub(crate) fn desired_height_with_textarea_right_reserve(
+    pub(super) fn desired_height_with_options(
         &self,
         width: u16,
-        textarea_right_reserve: u16,
+        options: ComposerRenderOptions<'_>,
     ) -> u16 {
         let footer_props = self.footer_props();
         let footer_hint_height = self
@@ -4636,7 +4666,7 @@ impl ChatComposer {
         let footer_total_height = footer_hint_height + footer_spacing;
         const COLS_WITH_MARGIN: u16 = LIVE_PREFIX_COLS + 1;
         let inner_width =
-            width.saturating_sub(COLS_WITH_MARGIN.saturating_add(textarea_right_reserve));
+            width.saturating_sub(COLS_WITH_MARGIN.saturating_add(options.textarea_right_reserve));
         let remote_images_height: u16 = self
             .attachments
             .remote_image_lines()
@@ -4648,6 +4678,9 @@ impl ChatComposer {
             + remote_images_height
             + remote_images_separator
             + 2
+            + options
+                .footer_prefix
+                .map_or(0, |prefix| prefix.desired_height(width))
             + match &self.popups.active {
                 ActivePopup::None => footer_total_height,
                 ActivePopup::Command(c) => c.calculate_required_height(width),
@@ -4660,20 +4693,26 @@ impl ChatComposer {
 
 impl ChatComposer {
     pub(crate) fn render_with_mask(&self, area: Rect, buf: &mut Buffer, mask_char: Option<char>) {
-        self.render_with_mask_and_textarea_right_reserve(
-            area, buf, mask_char, /*textarea_right_reserve*/ 0,
-        );
+        self.render_with_options(area, buf, mask_char, ComposerRenderOptions::default());
     }
 
-    pub(crate) fn render_with_mask_and_textarea_right_reserve(
+    pub(super) fn render_with_options(
         &self,
         area: Rect,
         buf: &mut Buffer,
         mask_char: Option<char>,
-        textarea_right_reserve: u16,
+        options: ComposerRenderOptions<'_>,
     ) {
-        let [composer_rect, remote_images_rect, textarea_rect, popup_rect] =
-            self.layout_areas_with_textarea_right_reserve(area, textarea_right_reserve);
+        let [
+            composer_rect,
+            remote_images_rect,
+            textarea_rect,
+            prefix_rect,
+            popup_rect,
+        ] = self.layout_areas_with_options(area, options);
+        if let Some(prefix) = options.footer_prefix {
+            prefix.render(prefix_rect, buf);
+        }
         match &self.popups.active {
             ActivePopup::Command(popup) => {
                 popup.render_ref(popup_rect, buf);

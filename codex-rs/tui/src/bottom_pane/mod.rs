@@ -1897,13 +1897,16 @@ impl BottomPane {
     }
 
     fn as_renderable(&'_ self) -> RenderableItem<'_> {
-        self.as_renderable_with_composer_right_reserve(/*composer_right_reserve*/ 0)
+        self.as_renderable_with_composer(
+            /*composer_right_reserve*/ 0, /*footer_prefix*/ None,
+        )
     }
 
-    pub(crate) fn as_renderable_with_composer_right_reserve(
-        &'_ self,
+    pub(crate) fn as_renderable_with_composer<'a>(
+        &'a self,
         composer_right_reserve: u16,
-    ) -> RenderableItem<'_> {
+        footer_prefix: Option<RenderableItem<'a>>,
+    ) -> RenderableItem<'a> {
         if (self.is_task_running || !self.view_stack.is_empty())
             && let Some(banner) = &self.inline_banner
         {
@@ -1976,14 +1979,11 @@ impl BottomPane {
             }
             let mut flex2 = FlexRenderable::new();
             flex2.push(/*flex*/ 1, RenderableItem::Owned(flex.into()));
-            let composer: RenderableItem<'_> = if composer_right_reserve == 0 {
-                RenderableItem::Borrowed(&self.composer)
-            } else {
-                RenderableItem::Owned(Box::new(ChatComposerRightReserveRenderable {
-                    composer: &self.composer,
-                    right_reserve: composer_right_reserve,
-                }))
-            };
+            let composer = RenderableItem::Owned(Box::new(ChatComposerRenderable {
+                composer: &self.composer,
+                right_reserve: composer_right_reserve,
+                footer_prefix,
+            }));
             flex2.push(/*flex*/ 0, composer);
             RenderableItem::Owned(Box::new(flex2))
         }
@@ -2024,29 +2024,37 @@ impl BottomPane {
     }
 }
 
-struct ChatComposerRightReserveRenderable<'a> {
+struct ChatComposerRenderable<'a> {
     composer: &'a chat_composer::ChatComposer,
     right_reserve: u16,
+    footer_prefix: Option<RenderableItem<'a>>,
 }
 
-impl Renderable for ChatComposerRightReserveRenderable<'_> {
+impl ChatComposerRenderable<'_> {
+    fn options(&self) -> chat_composer::ComposerRenderOptions<'_> {
+        chat_composer::ComposerRenderOptions {
+            textarea_right_reserve: self.right_reserve,
+            footer_prefix: self
+                .footer_prefix
+                .as_ref()
+                .map(|prefix| prefix as &dyn Renderable),
+        }
+    }
+}
+
+impl Renderable for ChatComposerRenderable<'_> {
     fn render(&self, area: Rect, buf: &mut Buffer) {
-        self.composer.render_with_mask_and_textarea_right_reserve(
-            area,
-            buf,
-            /*mask_char*/ None,
-            self.right_reserve,
-        );
+        self.composer
+            .render_with_options(area, buf, /*mask_char*/ None, self.options());
     }
 
     fn desired_height(&self, width: u16) -> u16 {
         self.composer
-            .desired_height_with_textarea_right_reserve(width, self.right_reserve)
+            .desired_height_with_options(width, self.options())
     }
 
     fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
-        self.composer
-            .cursor_pos_with_textarea_right_reserve(area, self.right_reserve)
+        self.composer.cursor_pos_with_options(area, self.options())
     }
 
     fn cursor_style(&self, area: Rect) -> crossterm::cursor::SetCursorStyle {

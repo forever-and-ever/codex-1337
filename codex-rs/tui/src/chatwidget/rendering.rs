@@ -13,9 +13,9 @@ impl ChatWidget {
             .selected_index_for_active_view(crate::app::AGENTS_OVERVIEW_VIEW_ID)
             .is_some()
         {
-            return self
-                .bottom_pane
-                .as_renderable_with_composer_right_reserve(/*composer_right_reserve*/ 0);
+            return self.bottom_pane.as_renderable_with_composer(
+                /*composer_right_reserve*/ 0, /*footer_prefix*/ None,
+            );
         }
 
         let active_cell_right_reserve = self.ambient_pet_wrap_reserved_cols();
@@ -71,23 +71,22 @@ impl ChatWidget {
         flex.push(
             /*flex*/ 0,
             self.bottom_pane
-                .as_renderable_with_composer_right_reserve(active_cell_right_reserve)
+                .as_renderable_with_composer(
+                    active_cell_right_reserve,
+                    Some(RenderableItem::Owned(Box::new(
+                        super::work_status::WorkStatusView {
+                            goal: self
+                                .current_goal_status
+                                .as_ref()
+                                .map(|status| status.goal.objective.as_str()),
+                            status: self.current_work_status.as_ref(),
+                        },
+                    ))),
+                )
                 .inset(Insets::tlbr(
                     /*top*/ 1, /*left*/ 0, /*bottom*/ 0, /*right*/ 0,
                 )),
         );
-        if !self.bottom_pane.has_active_view() {
-            flex.push(
-                /*flex*/ 0,
-                RenderableItem::Owned(Box::new(super::work_status::WorkStatusView {
-                    goal: self
-                        .current_goal_status
-                        .as_ref()
-                        .map(|status| status.goal.objective.as_str()),
-                    status: self.current_work_status.as_ref(),
-                })),
-            );
-        }
         RenderableItem::Owned(Box::new(flex))
     }
 

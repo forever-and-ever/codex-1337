@@ -462,9 +462,8 @@ impl ChatComposer {
     /// The cursor tracks the end of the footer query rather than the textarea preview. If the
     /// footer area is collapsed or too narrow, the x coordinate is clamped inside the hint rect so
     /// terminal backends do not receive an off-screen cursor position.
-    pub(super) fn history_search_cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
+    pub(super) fn history_search_cursor_pos(&self, popup_rect: Rect) -> Option<(u16, u16)> {
         let search = self.history_search.as_ref()?;
-        let [_, _, _, popup_rect] = self.layout_areas(area);
         if popup_rect.is_empty() {
             return None;
         }

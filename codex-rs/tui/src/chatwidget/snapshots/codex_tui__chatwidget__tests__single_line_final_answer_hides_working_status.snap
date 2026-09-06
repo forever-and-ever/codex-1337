@@ -5,10 +5,10 @@ expression: normalize_snapshot_paths(terminal.backend().vt100().screen().content
 
 
 • 1
-
-
 › Ask Codex to do anything
 
-  gpt-5 default · /tmp/project
+────────────────────────────────────────
 Task     —
 Activity —
+────────────────────────────────────────
+  gpt-5 default · /tmp/project

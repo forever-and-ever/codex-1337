@@ -105,9 +105,11 @@ async fn completed_global_chord_reuses_the_existing_action_handler() -> Result<(
         @"
     › Ask Codex to do anything
 
-       ctrl + x … waiting for next key    esc cancel
+    ────────────────────────────────────────────────────────────────────────────────
     Task     —
     Activity —
+    ────────────────────────────────────────────────────────────────────────────────
+       ctrl + x … waiting for next key    esc cancel
     "
     );
 
