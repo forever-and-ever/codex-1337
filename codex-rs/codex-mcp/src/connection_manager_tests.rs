@@ -102,6 +102,8 @@ impl McpConnectionSet {
         prefix_mcp_tool_names: bool,
     ) -> Self {
         Self {
+            refreshed_tools: RwLock::new(HashMap::new()),
+            tool_refresh_lock: Mutex::new(()),
             servers: HashMap::new(),
             event_stream_connection: None,
             disabled_servers: Vec::new(),
@@ -331,18 +333,25 @@ impl InProcessTransportFactory for RefreshTestTransportFactory {
 struct MutableToolsServer {
     tools: Arc<tokio::sync::RwLock<Vec<Tool>>>,
     block_tool_listing: Arc<AtomicBool>,
+    peer: Arc<OnceLock<rmcp::Peer<RoleServer>>>,
 }
 
 impl ServerHandler for MutableToolsServer {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+        ServerInfo::new(
+            ServerCapabilities::builder()
+                .enable_tools()
+                .enable_tool_list_changed()
+                .build(),
+        )
     }
 
     async fn list_tools(
         &self,
         _request: Option<rmcp::model::PaginatedRequestParams>,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, rmcp::ErrorData> {
+        let _ = self.peer.set(context.peer);
         if self.block_tool_listing.load(Ordering::Acquire) {
             std::future::pending::<()>().await;
         }
@@ -4779,6 +4788,7 @@ async fn reconcile_reusable_server_with_mcp_config(
 
 #[tokio::test]
 async fn reconciliation_reuses_connection_without_relisting_regular_tools() -> anyhow::Result<()> {
+    let peer = Arc::new(OnceLock::new());
     let tools = Arc::new(tokio::sync::RwLock::new(vec![Tool::new(
         "old_search",
         "old search",
@@ -4788,6 +4798,7 @@ async fn reconciliation_reuses_connection_without_relisting_regular_tools() -> a
     let client = Arc::new(
         RmcpClient::new_in_process_client(Arc::new(MutableToolsTransportFactory {
             server: MutableToolsServer {
+                peer: Arc::clone(&peer),
                 tools: Arc::clone(&tools),
                 block_tool_listing: Arc::clone(&block_tool_listing),
             },
@@ -4834,7 +4845,8 @@ async fn reconciliation_reuses_connection_without_relisting_regular_tools() -> a
         codex_apps_tools_cache_context: None,
     };
     let runtime_context = reusable_server_runtime_context();
-    let config = reusable_server_config("http://127.0.0.1:1");
+    let mut config = reusable_server_config("http://127.0.0.1:1");
+    config.tool_timeout_sec = Some(Duration::from_millis(100));
     let approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
     let permission_profile = Constrained::allow_any(PermissionProfile::default());
     let mut previous = McpConnectionSet::new_uninitialized(
@@ -4906,6 +4918,38 @@ async fn reconciliation_reuses_connection_without_relisting_regular_tools() -> a
             .collect::<Vec<_>>(),
         vec!["old_search".to_string()]
     );
+    peer.get()
+        .expect("initialized peer")
+        .notify_tool_list_changed()
+        .await?;
+    let transport = reconciled.servers["docs"]
+        .connection
+        .client
+        .ready_transport()
+        .expect("ready");
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while transport.tool_list_revision().await.expect("connected") == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await?;
+    let failed_refresh = capture_binding(&reconciled).await;
+    assert_eq!(failed_refresh.tools()[0].tool.name.as_ref(), "old_search");
+    assert_eq!(reconciled.stable_catalog_revision().await, Some(0));
+    block_tool_listing.store(false, Ordering::Release);
+    let refreshed = capture_binding(&reconciled).await;
+    assert_eq!(
+        refreshed
+            .tools()
+            .iter()
+            .map(|tool| tool.tool.name.as_ref())
+            .collect::<Vec<_>>(),
+        vec!["new_search"]
+    );
+    assert!(refreshed.prepare_call("docs", "old_search").is_none());
+    assert!(refreshed.prepare_call("docs", "new_search").is_some());
+    assert_eq!(new_step.tools()[0].tool.name.as_ref(), "old_search");
+    assert!(previous.shares_test_connection_with(&reconciled, "docs"));
     Ok(())
 }
 
@@ -5381,6 +5425,7 @@ async fn reconciliation_replaces_closed_connections() -> anyhow::Result<()> {
     let client = Arc::new(
         RmcpClient::new_in_process_client(Arc::new(DisconnectingToolsTransportFactory {
             server: MutableToolsServer {
+                peer: Arc::new(OnceLock::new()),
                 tools: Arc::new(tokio::sync::RwLock::new(vec![Tool::new(
                     "search",
                     "search",

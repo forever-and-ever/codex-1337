@@ -387,6 +387,11 @@ pub struct RmcpClient {
 }
 
 impl RmcpClient {
+    /// Notification generation of the connected server's tool catalog.
+    pub async fn tool_list_revision(&self) -> Result<u64> {
+        Ok(self.service().await?.service().tool_list_revision())
+    }
+
     /// Returns the protocol compatibility policy captured when this client was created.
     pub fn protocol_mode(&self) -> McpProtocolMode {
         self.protocol_mode

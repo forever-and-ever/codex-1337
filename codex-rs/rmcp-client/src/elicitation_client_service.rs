@@ -60,6 +60,10 @@ pub(crate) struct ElicitationClientService {
 }
 
 impl ElicitationClientService {
+    pub(crate) fn tool_list_revision(&self) -> u64 {
+        self.handler.tool_list_revision()
+    }
+
     pub(crate) fn new(
         client_info: ClientInfo,
         send_elicitation: SendElicitation,

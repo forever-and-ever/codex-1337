@@ -84,6 +84,7 @@ impl McpConnectionSet {
     /// Returns all tools with model-visible names normalized.
     #[instrument(level = "trace", skip_all, fields(mcp_server_count = self.servers.len()))]
     pub async fn list_all_tools(&self) -> Vec<ToolInfo> {
+        self.refresh_changed_tools().await;
         let mut tools = Vec::new();
         let mut available_server_count = 0;
         let mut unavailable_server_count = 0;
@@ -109,7 +110,20 @@ impl McpConnectionSet {
                             &self.tool_plugin_provenance,
                         ))
                     }
-                    None => view.listed_tools(&self.tool_plugin_provenance).await,
+                    None => {
+                        if view.connection.client.ready_transport().is_some()
+                            && let Ok(client) = view.connection.client().await
+                            && let Some(tools) =
+                                self.refreshed_tools_for(server_name, &client).await
+                        {
+                            Some(crate::rmcp_client::prepare_regular_mcp_tools_for_model(
+                                filter_tools(tools, &view.tool_filter),
+                                &self.tool_plugin_provenance,
+                            ))
+                        } else {
+                            view.listed_tools(&self.tool_plugin_provenance).await
+                        }
+                    }
                 }
             }
             .instrument(trace_span!(
@@ -171,6 +185,7 @@ impl McpConnectionSet {
         plugins_available: bool,
         required_servers: &[String],
     ) -> McpBinding {
+        self.refresh_changed_tools().await;
         let revision = self.tool_catalog_revision.read().await;
         let mut listed_tools = Vec::new();
         let mut clients = std::collections::HashMap::new();
@@ -261,7 +276,9 @@ impl McpConnectionSet {
                 } else {
                     None
                 };
-                let server_tools = catalog_override.unwrap_or_else(|| client.tools.clone());
+                let server_tools = catalog_override
+                    .or(self.refreshed_tools_for(server_name, &client).await)
+                    .unwrap_or_else(|| client.tools.clone());
                 (Some(Arc::new(client)), server_tools)
             };
             let server_tools = filter_tools(server_tools, &view.tool_filter);

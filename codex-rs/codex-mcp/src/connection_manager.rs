@@ -15,6 +15,8 @@ mod startup;
 mod status;
 #[path = "connection_manager/tool_catalog.rs"]
 mod tool_catalog;
+#[path = "connection_manager/tool_refresh.rs"]
+mod tool_refresh;
 
 use startup::chatgpt_auth_provider_for_server;
 use startup::emit_update;
@@ -184,6 +186,8 @@ impl McpServerView {
 
 /// A published view over a set of running MCP server connections.
 pub(crate) struct McpConnectionSet {
+    refreshed_tools: RwLock<HashMap<String, tool_refresh::CatalogSnapshot>>,
+    tool_refresh_lock: Mutex<()>,
     servers: HashMap<String, McpServerView>,
     pub(crate) event_stream_connection: Option<Arc<EventStreamConnectionSettings>>,
     disabled_servers: Vec<String>,
@@ -705,6 +709,8 @@ impl McpConnectionSet {
             }
         }
         let manager = Self {
+            refreshed_tools: RwLock::new(HashMap::new()),
+            tool_refresh_lock: Mutex::new(()),
             servers,
             event_stream_connection,
             disabled_servers,
@@ -767,6 +773,8 @@ impl McpConnectionSet {
 
     pub fn empty(prefix_mcp_tool_names: bool) -> Self {
         Self {
+            refreshed_tools: RwLock::new(HashMap::new()),
+            tool_refresh_lock: Mutex::new(()),
             servers: HashMap::new(),
             event_stream_connection: None,
             disabled_servers: Vec::new(),
