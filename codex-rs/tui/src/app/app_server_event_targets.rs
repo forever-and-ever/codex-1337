@@ -71,6 +71,9 @@ pub(super) fn server_notification_thread_target(
         ServerNotification::ThreadGoalCleared(notification) => {
             Some(notification.thread_id.as_str())
         }
+        ServerNotification::ThreadWorkStatusUpdated(notification) => {
+            Some(notification.thread_id.as_str())
+        }
         ServerNotification::ThreadQueueChanged(notification) => {
             Some(notification.thread_id.as_str())
         }

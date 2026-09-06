@@ -1997,6 +1997,15 @@ pub struct ThreadGoalClearedNotification {
     pub thread_id: String,
 }
 
+/// Live presentation metadata, excluded from thread history and resume snapshots.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadWorkStatusUpdatedNotification {
+    pub thread_id: String,
+    pub status: codex_protocol::protocol::WorkStatus,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]

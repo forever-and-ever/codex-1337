@@ -347,6 +347,7 @@ use self::exec_state::command_execution_command_and_parsed;
 use self::exec_state::is_standard_tool_call;
 use self::exec_state::is_unified_exec_source;
 mod goal_status;
+mod work_status;
 use self::goal_status::GoalStatusState;
 #[cfg(test)]
 use self::goal_status::goal_status_indicator_from_app_goal;
@@ -787,6 +788,7 @@ pub(crate) struct ChatWidget {
     // Current thread-goal status shown in the status line when plan mode is inactive.
     current_goal_status_indicator: Option<GoalStatusIndicator>,
     current_goal_status: Option<GoalStatusState>,
+    current_work_status: Option<codex_protocol::protocol::WorkStatus>,
     external_editor_state: ExternalEditorState,
     last_rendered_user_message_display: Option<UserMessageDisplay>,
     last_non_retry_error: Option<(String, String)>,

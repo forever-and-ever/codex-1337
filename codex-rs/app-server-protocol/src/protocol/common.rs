@@ -1869,6 +1869,7 @@ server_notification_definitions! {
     ThreadNameUpdated => "thread/name/updated" (v2::ThreadNameUpdatedNotification),
     ThreadGoalUpdated => "thread/goal/updated" (v2::ThreadGoalUpdatedNotification),
     ThreadGoalCleared => "thread/goal/cleared" (v2::ThreadGoalClearedNotification),
+    ThreadWorkStatusUpdated => "thread/workStatus/updated" (v2::ThreadWorkStatusUpdatedNotification),
     #[experimental("thread/queue/changed")]
     ThreadQueueChanged => "thread/queue/changed" (v2::ThreadQueueChangedNotification),
     #[experimental("project/changed")]

@@ -15813,6 +15813,26 @@
           "properties": {
             "method": {
               "enum": [
+                "thread/workStatus/updated"
+              ],
+              "title": "Thread/workStatus/updatedNotificationMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ThreadWorkStatusUpdatedNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "title": "Thread/workStatus/updatedNotification",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
                 "thread/queue/changed"
               ],
               "title": "Thread/queue/changedNotificationMethod",
@@ -22010,6 +22030,24 @@
       ],
       "type": "object"
     },
+    "ThreadWorkStatusUpdatedNotification": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "description": "Live presentation metadata, excluded from thread history and resume snapshots.",
+      "properties": {
+        "status": {
+          "$ref": "#/definitions/WorkStatus"
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "threadId"
+      ],
+      "title": "ThreadWorkStatusUpdatedNotification",
+      "type": "object"
+    },
     "TokenUsageBreakdown": {
       "properties": {
         "cacheWriteInputTokens": {
@@ -23232,6 +23270,28 @@
         "samplePaths"
       ],
       "title": "WindowsWorldWritableWarningNotification",
+      "type": "object"
+    },
+    "WorkStatus": {
+      "description": "A complete live status snapshot. Activity belongs to the named task.",
+      "properties": {
+        "activity": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "task": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "task",
+        "turnId"
+      ],
       "type": "object"
     },
     "WorkspaceMessage": {

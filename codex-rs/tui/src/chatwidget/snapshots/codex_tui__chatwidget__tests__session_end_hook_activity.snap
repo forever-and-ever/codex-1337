@@ -8,6 +8,8 @@ before reveal:
 "› Ask Codex to do anything                                                      "
 "                                                                                "
 "  gpt-5.6-sol default · /tmp/project                                            "
+"Task     —                                                                      "
+"Activity —                                                                      "
 running:
 "                                                                                "
 "• Saving session summary                                                        "
@@ -16,9 +18,13 @@ running:
 "› Ask Codex to do anything                                                      "
 "                                                                                "
 "  gpt-5.6-sol default · /tmp/project                                            "
+"Task     —                                                                      "
+"Activity —                                                                      "
 completed:
 "                                                                                "
 "                                                                                "
 "› Ask Codex to do anything                                                      "
 "                                                                                "
 "  gpt-5.6-sol default · /tmp/project                                            "
+"Task     —                                                                      "
+"Activity —                                                                      "

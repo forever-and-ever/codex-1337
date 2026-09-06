@@ -53,6 +53,19 @@ impl ChatWidget {
             ServerNotification::ThreadGoalUpdated(notification) => {
                 self.on_thread_goal_updated(notification.goal, notification.turn_id);
             }
+            ServerNotification::ThreadWorkStatusUpdated(notification) => {
+                if replay_kind.is_none()
+                    && self
+                        .thread_id
+                        .is_some_and(|id| id.to_string() == notification.thread_id)
+                    && self.turn_lifecycle.agent_turn_running
+                    && self.turn_lifecycle.last_turn_id.as_deref()
+                        == Some(notification.status.turn_id.as_str())
+                {
+                    self.current_work_status = Some(notification.status);
+                    self.request_redraw();
+                }
+            }
             ServerNotification::ThreadGoalCleared(notification) => {
                 self.on_thread_goal_cleared(notification.thread_id.as_str());
             }

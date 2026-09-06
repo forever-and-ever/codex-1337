@@ -10,9 +10,13 @@ before completion:
 "› Ask Codex to do anything                                                      "
 "                                                                                "
 "  gpt-5.6-sol default · /tmp/project                                            "
+"Task     —                                                                      "
+"Activity —                                                                      "
 after completion:
 "                                                                                "
 "                                                                                "
 "› Ask Codex to do anything                                                      "
 "                                                                                "
 "  gpt-5.6-sol default · /tmp/project                                            "
+"Task     —                                                                      "
+"Activity —                                                                      "

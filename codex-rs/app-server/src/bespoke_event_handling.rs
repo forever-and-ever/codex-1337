@@ -1302,6 +1302,16 @@ pub(crate) async fn apply_bespoke_event_handling(
                 .await;
         }
         EventMsg::ThreadQueueChanged(_) => {}
+        EventMsg::WorkStatusUpdated(status) => {
+            outgoing
+                .send_server_notification(ServerNotification::ThreadWorkStatusUpdated(
+                    codex_app_server_protocol::ThreadWorkStatusUpdatedNotification {
+                        thread_id: conversation_id.to_string(),
+                        status,
+                    },
+                ))
+                .await;
+        }
         EventMsg::ThreadSettingsApplied(_) => {
             let thread_settings =
                 thread_settings_from_config_snapshot(&conversation.config_snapshot().await);

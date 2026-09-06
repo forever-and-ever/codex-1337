@@ -10,7 +10,7 @@ use crate::status::format_tokens_compact;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct GoalStatusState {
-    goal: AppThreadGoal,
+    pub(super) goal: AppThreadGoal,
     observed_at: Instant,
 }
 

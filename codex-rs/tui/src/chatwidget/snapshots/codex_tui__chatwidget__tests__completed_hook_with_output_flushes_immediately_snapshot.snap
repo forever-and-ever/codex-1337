@@ -11,6 +11,8 @@ activity:
 "› Ask Codex to do anything                                                      "
 "                                                                                "
 "  gpt-5.6-sol default · /tmp/project                                            "
+"Task     —                                                                      "
+"Activity —                                                                      "
 history:
 <empty>
 
@@ -21,6 +23,8 @@ activity:
 "› Ask Codex to do anything                                                      "
 "                                                                                "
 "  gpt-5.6-sol default · /tmp/project                                            "
+"Task     —                                                                      "
+"Activity —                                                                      "
 history:
 • Blocked by hook
   └ command blocked by policy

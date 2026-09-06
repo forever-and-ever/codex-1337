@@ -438,8 +438,11 @@ async fn side_context_label_shows_hidden_side_snapshot() {
         .draw(|f| chat.render(f.area(), f.buffer_mut()))
         .expect("draw hidden side conversation footer");
     let hint_start = width - "ctrl + / for side".len() as u16 - 2;
+    let footer_y = (0..height)
+        .find(|y| terminal.backend().buffer()[(hint_start, *y)].symbol() == "c")
+        .expect("side shortcut remains visible above work status");
     assert_eq!(
-        terminal.backend().buffer()[(hint_start, height - 1)]
+        terminal.backend().buffer()[(hint_start, footer_y)]
             .style()
             .fg,
         Some(ratatui::style::Color::Magenta)

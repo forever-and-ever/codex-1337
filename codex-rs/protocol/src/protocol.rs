@@ -1445,6 +1445,9 @@ pub enum EventMsg {
     /// Updated long-running goal metadata for the thread.
     ThreadGoalUpdated(ThreadGoalUpdatedEvent),
 
+    /// Ephemeral task/activity display for the active turn; never persisted or replayed.
+    WorkStatusUpdated(WorkStatus),
+
     /// A durable thread-scoped user-message queue changed.
     ThreadQueueChanged(ThreadQueueChangedEvent),
 
@@ -4038,6 +4041,16 @@ pub struct ThreadGoalUpdatedEvent {
     #[ts(optional)]
     pub turn_id: Option<String>,
     pub goal: ThreadGoal,
+}
+
+/// A complete live status snapshot. Activity belongs to the named task.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct WorkStatus {
+    pub turn_id: String,
+    pub task: String,
+    pub activity: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema, TS)]

@@ -1,6 +1,5 @@
 ---
-source: tui/src/chatwidget/tests/async_questions.rs
-assertion_line: 32
+source: tui/src/chatwidget/tests/async_questions_tests.rs
 expression: "render_bottom_popup(&chat, 36)"
 ---
 1 pending question · /questions to
@@ -11,3 +10,5 @@ to?
 › unfinished steering
 
   tab to queue   100% context left
+Task     —
+Activity —

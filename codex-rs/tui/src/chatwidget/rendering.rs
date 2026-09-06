@@ -76,6 +76,18 @@ impl ChatWidget {
                     /*top*/ 1, /*left*/ 0, /*bottom*/ 0, /*right*/ 0,
                 )),
         );
+        if !self.bottom_pane.has_active_view() {
+            flex.push(
+                /*flex*/ 0,
+                RenderableItem::Owned(Box::new(super::work_status::WorkStatusView {
+                    goal: self
+                        .current_goal_status
+                        .as_ref()
+                        .map(|status| status.goal.objective.as_str()),
+                    status: self.current_work_status.as_ref(),
+                })),
+            );
+        }
         RenderableItem::Owned(Box::new(flex))
     }
 

@@ -68,6 +68,7 @@ impl ChatWidget {
     // Raw reasoning uses the same flow as summarized reasoning
 
     pub(super) fn on_task_started(&mut self) {
+        self.current_work_status = None;
         self.input_queue.user_turn_pending_start = false;
         self.reset_safety_buffering_for_turn_start();
         self.turn_lifecycle.start(Instant::now());
@@ -109,6 +110,7 @@ impl ChatWidget {
         from_replay: bool,
     ) {
         self.input_queue.submit_pending_steer_after_interrupt = false;
+        self.current_work_status = None;
         let sanitized_last_agent_message = last_agent_message.as_deref().map(|message| {
             parse_assistant_markdown(message, self.config.cwd.as_path()).visible_markdown
         });
@@ -313,6 +315,7 @@ impl ChatWidget {
     /// This does not clear MCP startup tracking, because MCP startup can overlap with turn cleanup
     /// and should continue to drive the bottom-pane running indicator while it is in progress.
     pub(super) fn finalize_turn(&mut self) {
+        self.current_work_status = None;
         self.clear_safety_buffering();
         // Drop preview-only stream tail content on any termination path before
         // failed-cell finalization, so transient tail cells are never persisted.

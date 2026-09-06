@@ -1,0 +1,53 @@
+---
+source: tui/src/chatwidget/tests/work_status.rs
+expression: "panels.join(\"\\n\\n\")"
+---
+"                                                                                "
+"• Working (0s • esc to interrupt)                                               "
+"                                                                                "
+"                                                                                "
+"› Draft stays editable                                                          "
+"                                                                                "
+"  tab to queue message                                       100% context left  "
+"Task     Implement the status display                                           "
+"Activity Check lifecycle and narrow-terminal wrapping                           "
+
+
+"                              "
+"• Working (0s • esc to interr…"
+"                              "
+"                              "
+"› Draft stays editable        "
+"                              "
+"  tab to queue message        "
+"Task     Implement the status "
+"         display              "
+"Activity Check lifecycle and  "
+"         narrow-terminal…     "
+
+
+"                                                                                "
+"• Working (0s • esc to interrupt)                                               "
+"                                                                                "
+"                                                                                "
+"› Draft stays editable                                                          "
+"                                                                                "
+"  tab to queue message                                       100% context left  "
+"Goal     Ship useful status updates without cluttering the transcript           "
+"Task     Implement the status display                                           "
+"Activity Check lifecycle and narrow-terminal wrapping                           "
+
+
+"                              "
+"• Working (0s • esc to interr…"
+"                              "
+"                              "
+"› Draft stays editable        "
+"                              "
+"  tab to queue message        "
+"Goal     Ship useful status   "
+"         updates without…     "
+"Task     Implement the status "
+"         display              "
+"Activity Check lifecycle and  "
+"         narrow-terminal…     "

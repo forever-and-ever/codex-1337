@@ -6050,6 +6050,22 @@
       ],
       "type": "object"
     },
+    "ThreadWorkStatusUpdatedNotification": {
+      "description": "Live presentation metadata, excluded from thread history and resume snapshots.",
+      "properties": {
+        "status": {
+          "$ref": "#/definitions/WorkStatus"
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "threadId"
+      ],
+      "type": "object"
+    },
     "TokenUsageBreakdown": {
       "properties": {
         "cacheWriteInputTokens": {
@@ -6700,6 +6716,28 @@
         "samplePaths"
       ],
       "type": "object"
+    },
+    "WorkStatus": {
+      "description": "A complete live status snapshot. Activity belongs to the named task.",
+      "properties": {
+        "activity": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "task": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "task",
+        "turnId"
+      ],
+      "type": "object"
     }
   },
   "description": "Notification sent from the server to the client.",
@@ -6943,6 +6981,26 @@
         "params"
       ],
       "title": "Thread/goal/clearedNotification",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "thread/workStatus/updated"
+          ],
+          "title": "Thread/workStatus/updatedNotificationMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ThreadWorkStatusUpdatedNotification"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "title": "Thread/workStatus/updatedNotification",
       "type": "object"
     },
     {
