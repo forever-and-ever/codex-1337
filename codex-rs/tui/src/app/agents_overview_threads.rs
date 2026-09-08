@@ -10,13 +10,11 @@ use crate::AppServerTarget;
 use crate::app_event::AgentsOverviewThreadRefresh;
 use crate::app_event::AppEvent;
 use crate::app_server_session::AppServerSession;
-use crate::chatwidget::ChatWidget;
 use codex_app_server_client::TypedRequestError;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::SessionSource;
-use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::ThreadListParams;
 use codex_app_server_protocol::ThreadListResponse;
 use codex_app_server_protocol::ThreadLoadedListParams;
@@ -26,8 +24,6 @@ use codex_app_server_protocol::ThreadReadResponse;
 use codex_app_server_protocol::ThreadSortKey;
 use codex_app_server_protocol::ThreadSourceKind;
 use codex_app_server_protocol::ThreadStatus;
-use codex_app_server_protocol::ThreadTurnsListParams;
-use codex_app_server_protocol::ThreadTurnsListResponse;
 use codex_protocol::ThreadId;
 use codex_protocol::protocol::SubAgentSource;
 use std::collections::HashMap;
@@ -183,7 +179,7 @@ impl App {
                                         parent_thread_id: None,
                                         ancestor_thread_id: None,
                                         cwd: None,
-                                        use_state_db_only: false,
+                                        use_state_db_only: true,
                                         search_term: None,
                                     },
                                 })
@@ -256,11 +252,11 @@ impl App {
                             .into_iter()
                             .filter_map(|id| ThreadId::from_string(&id).ok()),
                     );
-                    // Keep list metadata even if a subsequent read fails transiently.
+                    // Historical entries need only indexed metadata, not rollout reads.
+                    // Loaded and explicitly refreshed sessions are read below.
                     for thread in recent {
                         if let Ok(thread_id) = ThreadId::from_string(&thread.id) {
                             threads.insert(thread_id, Some(thread));
-                            thread_ids.insert(thread_id);
                         }
                     }
                 }
@@ -280,32 +276,7 @@ impl App {
                             })
                             .await
                         {
-                            Ok(mut response) => {
-                                if let Ok(turns) = request_handle
-                                    .request_typed::<ThreadTurnsListResponse>(
-                                        ClientRequest::ThreadTurnsList {
-                                            request_id: RequestId::String(
-                                                Uuid::new_v4().to_string(),
-                                            ),
-                                            params: ThreadTurnsListParams {
-                                                thread_id: thread_id.to_string(),
-                                                cursor: None,
-                                                limit: Some(1),
-                                                sort_direction: None,
-                                                items_view: None,
-                                            },
-                                        },
-                                    )
-                                    .await
-                                    && let Some(ThreadItem::UserMessage { content, .. }) =
-                                        turns.data.first().and_then(|turn| turn.items.first())
-                                {
-                                    response.thread.preview =
-                                        ChatWidget::user_message_display_from_inputs(content)
-                                            .message;
-                                }
-                                Some((thread_id, response.thread))
-                            }
+                            Ok(response) => Some((thread_id, response.thread)),
                             Err(error) => {
                                 tracing::warn!(%thread_id, %error, "failed to read agent thread");
                                 None
