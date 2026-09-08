@@ -12,19 +12,17 @@ use pretty_assertions::assert_eq;
 use serde_json::json;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn work_status_updates_atomically_without_entering_history() -> Result<()> {
+async fn work_status_replaces_activity_without_entering_history() -> Result<()> {
     let server = responses::start_mock_server().await;
     let mut builder = test_codex().with_config(|config| {
         config.features.enable(Feature::CodeModeOnly).unwrap();
     });
     let test = builder.build_with_auto_env(&server).await?;
     let updates = [
-        json!({"activity": "Orphan"}),
-        json!({"task": "Implement status", "activity": "Read renderer"}),
+        json!({"activity": "Read renderer"}),
         json!({"activity": "Write tests"}),
-        json!({"task": "Release", "activity": " "}),
-        json!({}),
-        json!({"task": "Release"}),
+        json!({"activity": " "}),
+        json!({"activity": "Release"}),
         json!({"activity": "x".repeat(161)}),
     ];
     let mut requests = Vec::new();
@@ -87,27 +85,22 @@ async fn work_status_updates_atomically_without_entering_history() -> Result<()>
         vec![
             WorkStatus {
                 turn_id: turn_id.clone(),
-                task: "Implement status".into(),
-                activity: Some("Read renderer".into())
+                activity: "Read renderer".into()
             },
             WorkStatus {
                 turn_id: turn_id.clone(),
-                task: "Implement status".into(),
-                activity: Some("Write tests".into())
+                activity: "Write tests".into()
             },
             WorkStatus {
                 turn_id,
-                task: "Release".into(),
-                activity: None
+                activity: "Release".into()
             },
         ]
     );
     for (index, expected) in [
-        "Set a task before setting an activity.",
         "Work status updated.",
         "Work status updated.",
         "Summaries must contain visible text without control characters.",
-        "Supply task, activity, or both.",
         "Work status updated.",
         "Keep each summary within 160 characters.",
     ]

@@ -14,18 +14,13 @@ use codex_tools::ToolName;
 use codex_tools::ToolSpec;
 use serde::Deserialize;
 use std::collections::BTreeMap;
-use tokio::sync::Mutex;
 
 pub struct WorkStatusHandler;
-
-#[derive(Default)]
-struct WorkStatusState(Mutex<Option<WorkStatus>>);
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Update {
-    task: Option<String>,
-    activity: Option<String>,
+    activity: String,
 }
 
 impl ToolExecutor<ToolInvocation> for WorkStatusHandler {
@@ -36,25 +31,20 @@ impl ToolExecutor<ToolInvocation> for WorkStatusHandler {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: "update_work_status".into(),
-            description: "Update the user's compact Goal / Task / Activity display without posting a chat message. Use at the start of substantive work and when the task or activity changes, instead of routine progress-only chat updates. Describe concrete work, not private reasoning. Supply task, task plus activity, or activity alone. Setting task clears the old activity unless a new activity is also supplied. Activity alone requires a task already set in this turn. Each supplied value must be a short, nonempty summary of at most 160 characters. Task/activity clear when the turn ends; this tool never changes the goal.".into(),
+            description: "Show what you are currently working on without posting a chat message. Use at the start of substantive work and when your activity changes, instead of routine progress-only chat updates. Keep it concrete, not private reasoning: a short, nonempty summary of at most 160 characters. Replaces the previous activity and clears when the turn ends. Never changes the goal.".into(),
             strict: false,
             defer_loading: None,
             parameters: JsonSchema::object(
                 BTreeMap::from([
-                    ("task".into(), JsonSchema::string(Some("Current task or subtask, beneath the goal if one exists.".into()))),
-                    ("activity".into(), JsonSchema::string(Some("Concrete activity currently advancing the task.".into()))),
+                    ("activity".into(), JsonSchema::string(Some("What you are currently working on.".into()))),
                 ]),
-                /*required*/ None,
+                Some(vec!["activity".into()]),
                 /*additional_properties*/ Some(false.into()),
             ),
             output_schema: None,
         })
     }
 
-    #[expect(
-        clippy::await_holding_invalid_type,
-        reason = "status replacement and publication must remain ordered; event delivery never acquires this tool-local lock"
-    )]
     fn handle<'a>(&'a self, invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'a>
     where
         ToolInvocation: 'a,
@@ -66,40 +56,14 @@ impl ToolExecutor<ToolInvocation> for WorkStatusHandler {
                 ));
             };
             let update: Update = parse_arguments(arguments)?;
-            let task = update.task.map(summary).transpose()?;
-            let activity = update.activity.map(summary).transpose()?;
-            if task.is_none() && activity.is_none() {
-                return Err(FunctionCallError::RespondToModel(
-                    "Supply task, activity, or both.".into(),
-                ));
-            }
-
-            let state = invocation
-                .turn
-                .extension_data
-                .get_or_init(WorkStatusState::default);
-            // Serialize state replacement and event publication as one operation.
-            let mut current = state.0.lock().await;
-            let task = task
-                .or_else(|| current.as_ref().map(|status| status.task.clone()))
-                .ok_or_else(|| {
-                    FunctionCallError::RespondToModel(
-                        "Set a task before setting an activity.".into(),
-                    )
-                })?;
             let status = WorkStatus {
                 turn_id: invocation.turn.sub_id.clone(),
-                task,
-                activity,
+                activity: summary(update.activity)?,
             };
             invocation
                 .session
-                .send_event(
-                    &invocation.turn,
-                    EventMsg::WorkStatusUpdated(status.clone()),
-                )
+                .send_event(&invocation.turn, EventMsg::WorkStatusUpdated(status))
                 .await;
-            *current = Some(status);
             Ok(boxed_tool_output(FunctionToolOutput::from_text(
                 "Work status updated.".into(),
                 /*success*/ Some(true),

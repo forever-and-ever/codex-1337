@@ -4047,14 +4047,13 @@ pub struct ThreadGoalUpdatedEvent {
     pub goal: ThreadGoal,
 }
 
-/// A complete live status snapshot. Activity belongs to the named task.
+/// What the agent is currently working on, scoped to one live turn.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct WorkStatus {
     pub turn_id: String,
-    pub task: String,
-    pub activity: Option<String>,
+    pub activity: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema, TS)]

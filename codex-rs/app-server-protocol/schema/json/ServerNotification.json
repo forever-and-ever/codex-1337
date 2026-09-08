@@ -6724,15 +6724,9 @@
       "type": "object"
     },
     "WorkStatus": {
-      "description": "A complete live status snapshot. Activity belongs to the named task.",
+      "description": "What the agent is currently working on, scoped to one live turn.",
       "properties": {
         "activity": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "task": {
           "type": "string"
         },
         "turnId": {
@@ -6740,7 +6734,7 @@
         }
       },
       "required": [
-        "task",
+        "activity",
         "turnId"
       ],
       "type": "object"

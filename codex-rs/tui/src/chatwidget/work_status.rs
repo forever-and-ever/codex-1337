@@ -1,4 +1,4 @@
-//! Bounded Goal / Task / Activity display between the entry box and its footer.
+//! Bounded Goal / Activity display between the entry box and its footer.
 
 use crate::line_truncation::truncate_line_to_width;
 use crate::render::renderable::Renderable;
@@ -26,13 +26,10 @@ impl WorkStatusView<'_> {
             .goal
             .map(|goal| ("Goal", Some(goal)))
             .into_iter()
-            .chain([
-                ("Task", self.status.map(|status| status.task.as_str())),
-                (
-                    "Activity",
-                    self.status.and_then(|status| status.activity.as_deref()),
-                ),
-            ]);
+            .chain([(
+                "Activity",
+                self.status.map(|status| status.activity.as_str()),
+            )]);
         let rule = Line::from("─".repeat(usize::from(width)).dim());
         let mut lines = vec![rule.clone()];
         for (label, value) in zones {

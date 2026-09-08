@@ -73,6 +73,8 @@ The API exposes three top level primitives representing an interaction between a
 
 Use the thread APIs to create, list, or archive conversations. Drive a conversation with turn APIs and stream progress via turn notifications.
 
+Downstream `thread/workStatus/updated` notifications carry `{threadId, status: {turnId, activity}}` for the live Activity display. Each replaces the previous activity; clients clear it when that turn ends. These updates are not persisted and do not change the goal.
+
 ## Lifecycle Overview
 
 - Initialize once per connection: Immediately after opening a transport connection, send an `initialize` request with your client metadata, then emit an `initialized` notification. Any other request on that connection before this handshake gets rejected.

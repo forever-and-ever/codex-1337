@@ -11,8 +11,7 @@ async fn work_status_below_composer_clears_without_transcript_entries() {
         .set_composer_text("Draft stays editable".into(), Vec::new(), Vec::new());
     let status = WorkStatus {
         turn_id: "turn-1".into(),
-        task: "Implement the status display".into(),
-        activity: Some("Check lifecycle and narrow-terminal wrapping".into()),
+        activity: "Check lifecycle and narrow-terminal wrapping".into(),
     };
     let turn = Turn {
         id: "turn-1".into(),
