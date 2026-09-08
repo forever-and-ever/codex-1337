@@ -906,7 +906,7 @@ pub async fn run_main_with_transport_options(
         let outbound_control_tx = outbound_control_tx;
         let processor = Arc::new(MessageProcessor::new(MessageProcessorArgs {
             outgoing: outgoing_message_sender,
-            analytics_events_client,
+            analytics_events_client: analytics_events_client.clone(),
             arg0_paths,
             config: Arc::new(config),
             config_manager,
@@ -1185,6 +1185,7 @@ pub async fn run_main_with_transport_options(
                 connection_cleanup_tasks.drain().await;
                 processor.drain_background_tasks().await;
                 processor.shutdown_threads().await;
+                analytics_events_client.flush().await;
             } else {
                 connection_cleanup_tasks.abort();
             }
