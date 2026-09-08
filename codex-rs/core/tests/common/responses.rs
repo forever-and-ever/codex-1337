@@ -1078,10 +1078,12 @@ where
 
 fn base_mock() -> (MockBuilder, ResponseMock) {
     let response_mock = ResponseMock::new();
-    let mock = Mock::given(method("POST"))
-        .and(path_regex(".*/(responses|guardian)$"))
-        .and(response_mock.clone());
+    let mock = base_request().and(response_mock.clone());
     (mock, response_mock)
+}
+
+fn base_request() -> MockBuilder {
+    Mock::given(method("POST")).and(path_regex(".*/(responses|guardian)$"))
 }
 
 fn compact_mock() -> (MockBuilder, ResponseMock) {
@@ -1104,8 +1106,11 @@ pub async fn mount_sse_once_match<M>(server: &MockServer, matcher: M, body: Stri
 where
     M: wiremock::Match + Send + Sync + 'static,
 {
-    let (mock, response_mock) = base_mock();
-    mock.and(matcher)
+    let response_mock = ResponseMock::new();
+    // Recording is itself a matcher side effect: reject unrelated agent requests first.
+    base_request()
+        .and(matcher)
+        .and(response_mock.clone())
         .respond_with(sse_response(body))
         .up_to_n_times(1)
         .mount(server)
