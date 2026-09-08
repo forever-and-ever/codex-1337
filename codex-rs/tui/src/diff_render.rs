@@ -453,10 +453,19 @@ fn render_changes_block(rows: Vec<Row<'_>>, wrap_cols: usize, cwd: &Path) -> Vec
         if !skip_file_header {
             let mut header: Vec<RtSpan<'static>> = Vec::new();
             header.push("  └ ".dim());
+            if matches!(r.change, FileChange::Delete { .. }) {
+                header.push("Deleted ".bold());
+            }
             header.extend(render_path(&r));
             header.push(" ".into());
             header.extend(render_line_count_summary(r.added, r.removed));
             out.push(RtLine::from(header));
+        }
+
+        // A deleted file's body adds no useful context to the completed-patch
+        // summary. Keep detailed rendering below for explicit review surfaces.
+        if matches!(r.change, FileChange::Delete { .. }) {
+            continue;
         }
 
         // For renames, use the destination extension for highlighting — the
@@ -2280,28 +2289,6 @@ mod tests {
                 .iter()
                 .all(|span| !matches!(span.style.fg, Some(ratatui::style::Color::Rgb(..))))
         }));
-    }
-
-    #[test]
-    fn delete_diff_uses_path_extension_for_highlighting() {
-        let mut changes: HashMap<PathBuf, FileChange> = HashMap::new();
-        changes.insert(
-            PathBuf::from("highlight_delete.py"),
-            FileChange::Delete {
-                content: "def scale(x):\n    return x * 2\n".to_string(),
-            },
-        );
-
-        let lines = create_diff_summary(&changes, &PathBuf::from("/"), /*wrap_cols*/ 80);
-        let has_rgb = lines.iter().any(|line| {
-            line.spans
-                .iter()
-                .any(|s| matches!(s.style.fg, Some(ratatui::style::Color::Rgb(..))))
-        });
-        assert!(
-            has_rgb,
-            "delete diff for .py file should produce syntax-highlighted (RGB) spans"
-        );
     }
 
     #[test]
