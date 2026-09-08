@@ -1,0 +1,18 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "accountId": {
+      "description": "Saved identity or an alias from `[wrangler.account_aliases]`.",
+      "type": "string"
+    },
+    "threadId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "accountId",
+    "threadId"
+  ],
+  "title": "ThreadAccountSelectParams",
+  "type": "object"
+}

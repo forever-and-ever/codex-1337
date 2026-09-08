@@ -158,8 +158,12 @@ impl ThreadLifecycleContributor<Config> for GuardianV2Extension {
                 }
             };
             let luna_compaction_hash = if let Some(thread_manager) = self.thread_manager.upgrade() {
-                thread_manager
-                    .get_models_manager()
+                input
+                    .thread_store
+                    .get::<codex_models_manager::manager::SharedModelsManager>()
+                    .as_deref()
+                    .cloned()
+                    .unwrap_or_else(|| thread_manager.get_models_manager())
                     .get_model_info(MODEL, &input.config.to_models_manager_config())
                     .await
                     .comp_hash
@@ -169,7 +173,14 @@ impl ThreadLifecycleContributor<Config> for GuardianV2Extension {
             let sampler_config = LunaSamplerConfig {
                 provider: create_model_provider(
                     input.config.model_provider.clone(),
-                    Some(Arc::clone(&self.auth_manager)),
+                    Some(
+                        input
+                            .thread_store
+                            .get::<Arc<AuthManager>>()
+                            .as_deref()
+                            .cloned()
+                            .unwrap_or_else(|| self.auth_manager.clone()),
+                    ),
                 ),
                 http_client_factory: input.config.http_client_factory(),
                 agent_identity_policy: if input.config.features.enabled(Feature::UseAgentIdentity) {
@@ -721,12 +732,16 @@ impl GuardianV2Extension {
                     let review_model_id = review_model_override.as_deref().unwrap_or_else(|| {
                         create_model_provider(
                             config.model_provider.clone(),
-                            Some(manager.auth_manager()),
+                            Some(thread.auth_manager()),
                         )
                         .approval_review_preferred_model()
                     });
-                    let review_model = manager
-                        .get_models_manager()
+                    let review_model = thread
+                        .thread_extension_data()
+                        .get::<codex_models_manager::manager::SharedModelsManager>()
+                        .as_deref()
+                        .cloned()
+                        .unwrap_or_else(|| manager.get_models_manager())
                         .get_model_info(review_model_id, &config.to_models_manager_config())
                         .await;
                     if review_model.used_fallback_model_metadata && review_model_override.is_none()

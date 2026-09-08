@@ -1,4 +1,7 @@
 use crate::CodexAppsToolsCache;
+
+#[path = "thread_accounts.rs"]
+mod accounts;
 use crate::agent::AgentControl;
 use crate::attestation::AttestationProvider;
 use crate::codex_thread::CodexThread;
@@ -705,6 +708,17 @@ impl ThreadManager {
             .cloned()
             .collect::<Vec<_>>();
         for thread in threads {
+            if !Arc::ptr_eq(
+                &thread.session.services.plugins_manager,
+                &self.state.plugins_manager,
+            ) {
+                thread.session.services.plugins_manager.clear_cache();
+                thread
+                    .session
+                    .services
+                    .plugins_manager
+                    .inherit_remote_installed_plugins(&self.state.plugins_manager);
+            }
             thread.session.request_mcp_runtime_refresh();
         }
     }
@@ -721,6 +735,16 @@ impl ThreadManager {
             .collect::<Vec<_>>();
         for thread in threads {
             let config = thread.session.get_config().await;
+            if !Arc::ptr_eq(
+                &thread.session.services.plugins_manager,
+                &self.state.plugins_manager,
+            ) {
+                thread
+                    .session
+                    .services
+                    .plugins_manager
+                    .inherit_remote_installed_plugins(&self.state.plugins_manager);
+            }
             thread.session.refresh_hooks(config).await;
         }
     }
@@ -1867,7 +1891,7 @@ impl ThreadManagerState {
             user_shell_override,
         } = request;
         let StartThreadOptions {
-            config,
+            mut config,
             allow_provider_model_fallback,
             initial_history,
             history_mode,
@@ -1916,6 +1940,34 @@ impl ThreadManagerState {
                 threads.remove(&resumed.conversation_id);
             }
         }
+        let scoped_auth = Box::pin(self.account_for_spawn(
+            &config,
+            &initial_history,
+            parent_thread_id,
+            &auth_manager,
+        ))
+        .await?;
+        let (auth_manager, models_manager, plugins_manager) = if let Some(auth) = scoped_auth {
+            if auth.auth_cached().is_none() {
+                config.startup_warnings.push("This conversation's account is unavailable. Use /account to choose another, or run codex login.".to_owned());
+            }
+            let models = create_model_provider(config.model_provider.clone(), Some(auth.clone()))
+                .models_manager_without_cache(config.model_catalog.clone());
+            let plugins = Arc::new(PluginsManager::new_with_options(
+                config.codex_home.to_path_buf(),
+                session_source.restriction_product(),
+                auth.clone(),
+                self.skills_service.clone(),
+            ));
+            plugins.inherit_remote_installed_plugins(&self.plugins_manager);
+            (auth, models, plugins)
+        } else {
+            (
+                auth_manager,
+                self.models_manager.clone(),
+                self.plugins_manager.clone(),
+            )
+        };
         let (
             user_instructions,
             inherited_exec_policy,
@@ -1927,7 +1979,7 @@ impl ThreadManagerState {
                 LoadedUserInstructions::default(),
                 None,
                 empty_extension_registry(),
-                Arc::new(McpManager::new(Arc::clone(&self.plugins_manager))),
+                Arc::new(McpManager::new(Arc::clone(&plugins_manager))),
                 Some(MultiAgentVersion::Disabled),
             )
         } else {
@@ -1940,7 +1992,15 @@ impl ThreadManagerState {
                 .await,
                 inherited_exec_policy,
                 Arc::clone(&self.extensions),
-                Arc::clone(&self.mcp_manager),
+                if Arc::ptr_eq(&plugins_manager, &self.plugins_manager) {
+                    self.mcp_manager.clone()
+                } else {
+                    Arc::new(McpManager::new_with_extensions(
+                        plugins_manager.clone(),
+                        self.extensions.clone(),
+                        self.mcp_manager.codex_apps_tools_cache(),
+                    ))
+                },
                 self.initial_multi_agent_version_for_spawn(
                     &initial_history,
                     Some(&session_source),
@@ -1986,11 +2046,11 @@ impl ThreadManagerState {
             user_instructions,
             installation_id: self.installation_id.clone(),
             auth_manager,
-            models_manager: Arc::clone(&self.models_manager),
+            models_manager,
             git_root_discovery: Arc::clone(&self.git_root_discovery),
             environment_manager: Arc::clone(&self.environment_manager),
             skills_service: Arc::clone(&self.skills_service),
-            plugins_manager: Arc::clone(&self.plugins_manager),
+            plugins_manager,
             mcp_manager,
             code_mode_session_provider: Arc::clone(&self.code_mode_session_provider),
             extensions,

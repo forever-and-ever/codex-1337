@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::time::Duration;
 
-use crate::chatgpt_client::chatgpt_get_request_with_timeout;
+use crate::chatgpt_client::chatgpt_get_request_with_auth;
 use crate::chatgpt_client::chatgpt_post_request_with_timeout;
 
 use codex_connectors::AppInfo;
@@ -22,6 +22,7 @@ pub use codex_core::connectors::list_accessible_connectors_from_mcp_tools_with_m
 pub use codex_core::connectors::list_accessible_connectors_from_mcp_tools_with_options;
 pub use codex_core::connectors::list_accessible_connectors_from_mcp_tools_with_options_and_status;
 pub use codex_core::connectors::list_cached_accessible_connectors_from_mcp_tools;
+pub use codex_core::connectors::list_cached_accessible_connectors_with_auth;
 use codex_login::AuthManager;
 use codex_login::CodexAuth;
 use codex_plugin::AppConnectorId;
@@ -87,7 +88,15 @@ pub async fn list_cached_all_connectors(
     }
 
     let auth = connector_auth(config).await.ok()?;
-    let cache_context = connector_directory_cache_context(config, &auth);
+    list_cached_all_connectors_with_auth(config, &auth, plugin_apps)
+}
+
+pub fn list_cached_all_connectors_with_auth(
+    config: &Config,
+    auth: &CodexAuth,
+    plugin_apps: &[AppConnectorId],
+) -> Option<Vec<AppInfo>> {
+    let cache_context = connector_directory_cache_context(config, auth);
     let connectors = codex_connectors::cached_directory_connectors(&cache_context)?;
     Some(merge_directory_and_plugin_connectors(
         connectors,
@@ -104,14 +113,24 @@ pub async fn list_all_connectors_with_options(
         return Ok(Vec::new());
     }
     let auth = connector_auth(config).await?;
-    let cache_context = connector_directory_cache_context(config, &auth);
+    list_all_connectors_with_auth(config, &auth, force_refetch, plugin_apps).await
+}
+
+pub async fn list_all_connectors_with_auth(
+    config: &Config,
+    auth: &CodexAuth,
+    force_refetch: bool,
+    plugin_apps: &[AppConnectorId],
+) -> anyhow::Result<Vec<AppInfo>> {
+    let cache_context = connector_directory_cache_context(config, auth);
     let connectors = codex_connectors::list_all_connectors_with_options(
         cache_context,
         auth.is_workspace_account(),
         force_refetch,
         |path| async move {
-            chatgpt_get_request_with_timeout::<DirectoryListResponse>(
+            chatgpt_get_request_with_auth::<DirectoryListResponse>(
                 config,
+                auth,
                 path,
                 Some(DIRECTORY_CONNECTORS_TIMEOUT),
             )

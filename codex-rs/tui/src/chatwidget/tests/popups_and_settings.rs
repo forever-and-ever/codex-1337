@@ -15,6 +15,37 @@ use codex_features::Stage;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
+async fn account_picker_snapshot() {
+    use codex_app_server_protocol::SavedAccount;
+    use codex_app_server_protocol::ThreadAccountListResponse;
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.show_account_picker(
+        ThreadId::new(),
+        ThreadAccountListResponse {
+            selected_account_id: Some("alice:personal".into()),
+            accounts: vec![
+                SavedAccount {
+                    id: "alice:personal".into(),
+                    alias: Some("work".into()),
+                    email: Some("alice@example.com".into()),
+                    plan: Some("pro".into()),
+                },
+                SavedAccount {
+                    id: "bob:personal".into(),
+                    alias: None,
+                    email: Some("bob@example.com".into()),
+                    plan: Some("pro".into()),
+                },
+            ],
+        },
+    );
+    assert_chatwidget_snapshot!(
+        "account_selection_popup",
+        render_bottom_popup(&chat, /*width*/ 100)
+    );
+}
+
+#[tokio::test]
 async fn experimental_mode_plan_is_ignored_on_startup() {
     let codex_home = tempdir().expect("tempdir");
     let cfg = ConfigBuilder::default()

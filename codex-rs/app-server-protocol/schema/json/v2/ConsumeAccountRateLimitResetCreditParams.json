@@ -11,6 +11,12 @@
     "idempotencyKey": {
       "description": "Identifies one logical reset attempt. A UUID is recommended; reuse the same value when retrying that attempt.",
       "type": "string"
+    },
+    "threadId": {
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "required": [

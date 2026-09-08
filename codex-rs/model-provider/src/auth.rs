@@ -39,6 +39,10 @@ pub struct AgentIdentitySessionFallback {
 }
 
 impl AgentIdentitySessionFallback {
+    /// A newly selected account gets its own attempt at agent-identity authentication.
+    pub fn reset(&self) {
+        self.engaged.store(false, Ordering::Relaxed);
+    }
     pub fn is_engaged(&self) -> bool {
         self.engaged.load(Ordering::Relaxed)
     }

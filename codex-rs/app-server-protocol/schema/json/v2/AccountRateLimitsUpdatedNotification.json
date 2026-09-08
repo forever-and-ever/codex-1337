@@ -194,6 +194,12 @@
   "properties": {
     "rateLimits": {
       "$ref": "#/definitions/RateLimitSnapshot"
+    },
+    "threadId": {
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "required": [

@@ -70,6 +70,9 @@ use wiremock::matchers::method;
 use wiremock::matchers::path;
 
 const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+#[path = "thread_accounts.rs"]
+mod thread_accounts;
 const LOGIN_ISSUER_ENV_VAR: &str = "CODEX_APP_SERVER_LOGIN_ISSUER";
 const LOGIN_OPEN_APP_URL_ENV_VAR: &str = "CODEX_APP_SERVER_DEV_OPEN_APP_URL";
 const WORKSPACE_ID_ALLOWED: &str = "123e4567-e89b-42d3-a456-426614174000";
@@ -193,6 +196,7 @@ region = "us-west-2"
 async fn read_account(mcp: &mut TestAppServer) -> Result<GetAccountResponse> {
     let request_id = mcp
         .send_get_account_request(GetAccountParams {
+            thread_id: None,
             refresh_token: false,
         })
         .await?;
@@ -315,6 +319,7 @@ async fn logout_account_removes_auth_and_notifies() -> Result<()> {
 
     let get_id = mcp
         .send_get_account_request(GetAccountParams {
+            thread_id: None,
             refresh_token: false,
         })
         .await?;
@@ -494,6 +499,7 @@ async fn set_auth_token_updates_account_and_notifies() -> Result<()> {
 
     let get_id = mcp
         .send_get_account_request(GetAccountParams {
+            thread_id: None,
             refresh_token: false,
         })
         .await?;
@@ -502,6 +508,7 @@ async fn set_auth_token_updates_account_and_notifies() -> Result<()> {
     assert_eq!(
         account,
         GetAccountResponse {
+            account_id: None,
             account: Some(Account::Chatgpt {
                 email: Some("embedded@example.com".to_string()),
                 plan_type: AccountPlanType::Pro,
@@ -516,6 +523,7 @@ async fn set_auth_token_updates_account_and_notifies() -> Result<()> {
 
     let get_id = mcp
         .send_get_account_request(GetAccountParams {
+            thread_id: None,
             refresh_token: false,
         })
         .await?;
@@ -570,6 +578,7 @@ async fn account_read_refresh_token_is_noop_in_external_mode() -> Result<()> {
 
     let get_id = mcp
         .send_get_account_request(GetAccountParams {
+            thread_id: None,
             refresh_token: true,
         })
         .await?;
@@ -578,6 +587,7 @@ async fn account_read_refresh_token_is_noop_in_external_mode() -> Result<()> {
     assert_eq!(
         account,
         GetAccountResponse {
+            account_id: None,
             account: Some(Account::Chatgpt {
                 email: Some("embedded@example.com".to_string()),
                 plan_type: AccountPlanType::Pro,
@@ -1262,6 +1272,7 @@ async fn login_amazon_bedrock_replaces_primary_auth_and_persists_provider(
     assert_eq!(
         read_account(&mut mcp).await?,
         GetAccountResponse {
+            account_id: None,
             account: Some(Account::AmazonBedrock {
                 uses_codex_managed_credentials: true,
             }),
@@ -1292,6 +1303,7 @@ async fn login_amazon_bedrock_replaces_primary_auth_and_persists_provider(
         assert_eq!(
             read_account(&mut mcp).await?,
             GetAccountResponse {
+                account_id: None,
                 account: None,
                 requires_openai_auth: true,
             }
@@ -1505,6 +1517,7 @@ async fn logout_managed_bedrock_restores_default_account(
     assert_eq!(
         read_account(&mut mcp).await?,
         GetAccountResponse {
+            account_id: None,
             account: Some(Account::AmazonBedrock {
                 uses_codex_managed_credentials: true,
             }),
@@ -1555,6 +1568,7 @@ async fn logout_managed_bedrock_restores_default_account(
     assert_eq!(
         read_account(&mut mcp).await?,
         GetAccountResponse {
+            account_id: None,
             account: None,
             requires_openai_auth: true,
         }
@@ -1619,6 +1633,7 @@ async fn logout_aws_managed_bedrock_clears_provider_and_restores_default_account
         assert_eq!(
             read_account(&mut mcp).await?,
             GetAccountResponse {
+                account_id: None,
                 account: Some(Account::AmazonBedrock {
                     uses_codex_managed_credentials: false,
                 }),
@@ -1657,6 +1672,7 @@ async fn logout_aws_managed_bedrock_clears_provider_and_restores_default_account
         assert_eq!(
             read_account(&mut mcp).await?,
             GetAccountResponse {
+                account_id: None,
                 account: None,
                 requires_openai_auth: true,
             }
@@ -1725,6 +1741,7 @@ async fn logout_managed_bedrock_preserves_changed_provider_without_experimental_
     assert_eq!(
         read_account(&mut mcp).await?,
         GetAccountResponse {
+            account_id: None,
             account: None,
             requires_openai_auth: false,
         }
@@ -1804,6 +1821,7 @@ async fn login_managed_bedrock_updates_active_bedrock_account() -> Result<()> {
     assert_eq!(
         read_account(&mut mcp).await?,
         GetAccountResponse {
+            account_id: None,
             account: Some(Account::AmazonBedrock {
                 uses_codex_managed_credentials: true,
             }),
@@ -2667,6 +2685,7 @@ async fn get_account_no_auth() -> Result<()> {
         .await?;
 
     let params = GetAccountParams {
+        thread_id: None,
         refresh_token: false,
     };
     let request_id = mcp.send_get_account_request(params).await?;
@@ -2703,6 +2722,7 @@ async fn get_account_with_api_key() -> Result<()> {
         timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(req_id)).await??;
 
     let params = GetAccountParams {
+        thread_id: None,
         refresh_token: false,
     };
     let request_id = mcp.send_get_account_request(params).await?;
@@ -2711,6 +2731,7 @@ async fn get_account_with_api_key() -> Result<()> {
         timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(request_id)).await??;
 
     let expected = GetAccountResponse {
+        account_id: None,
         account: Some(Account::ApiKey {}),
         requires_openai_auth: true,
     };
@@ -2736,6 +2757,7 @@ async fn get_account_when_auth_not_required() -> Result<()> {
         .await?;
 
     let params = GetAccountParams {
+        thread_id: None,
         refresh_token: false,
     };
     let request_id = mcp.send_get_account_request(params).await?;
@@ -2744,6 +2766,7 @@ async fn get_account_when_auth_not_required() -> Result<()> {
         timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(request_id)).await??;
 
     let expected = GetAccountResponse {
+        account_id: None,
         account: None,
         requires_openai_auth: false,
     };
@@ -2776,6 +2799,7 @@ region = "us-west-2"
         .await?;
 
     let params = GetAccountParams {
+        thread_id: None,
         refresh_token: false,
     };
     let request_id = mcp.send_get_account_request(params).await?;
@@ -2784,6 +2808,7 @@ region = "us-west-2"
         timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(request_id)).await??;
 
     let expected = GetAccountResponse {
+        account_id: None,
         account: Some(Account::AmazonBedrock {
             uses_codex_managed_credentials: false,
         }),
@@ -2822,6 +2847,7 @@ command = "print-token"
     assert_eq!(
         read_account(&mut mcp).await?,
         GetAccountResponse {
+            account_id: None,
             account: Some(Account::AmazonBedrock {
                 uses_codex_managed_credentials: false,
             }),
@@ -2860,6 +2886,7 @@ region = "us-west-2"
     assert_eq!(
         read_account(&mut mcp).await?,
         GetAccountResponse {
+            account_id: None,
             account: Some(Account::AmazonBedrock {
                 uses_codex_managed_credentials: false,
             }),
@@ -2916,6 +2943,7 @@ async fn get_account_with_managed_bedrock_provider() -> Result<()> {
 
     let request_id = mcp
         .send_get_account_request(GetAccountParams {
+            thread_id: None,
             refresh_token: false,
         })
         .await?;
@@ -2925,6 +2953,7 @@ async fn get_account_with_managed_bedrock_provider() -> Result<()> {
     assert_eq!(
         received,
         GetAccountResponse {
+            account_id: None,
             account: Some(Account::AmazonBedrock {
                 uses_codex_managed_credentials: true,
             }),
@@ -2960,6 +2989,7 @@ async fn get_account_with_chatgpt() -> Result<()> {
         .await?;
 
     let params = GetAccountParams {
+        thread_id: None,
         refresh_token: false,
     };
     let request_id = mcp.send_get_account_request(params).await?;
@@ -2968,6 +2998,7 @@ async fn get_account_with_chatgpt() -> Result<()> {
         timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(request_id)).await??;
 
     let expected = GetAccountResponse {
+        account_id: None,
         account: Some(Account::Chatgpt {
             email: Some("user@example.com".to_string()),
             plan_type: AccountPlanType::Pro,
@@ -3011,6 +3042,7 @@ async fn get_account_with_chatgpt_plan_variants_returns_plan_type(
 
     let request_id = mcp
         .send_get_account_request(GetAccountParams {
+            thread_id: None,
             refresh_token: false,
         })
         .await?;
@@ -3020,6 +3052,7 @@ async fn get_account_with_chatgpt_plan_variants_returns_plan_type(
     assert_eq!(
         received,
         GetAccountResponse {
+            account_id: None,
             account: Some(Account::Chatgpt {
                 email: Some("user@example.com".to_string()),
                 plan_type: expected_plan,
@@ -3055,6 +3088,7 @@ async fn get_account_with_chatgpt_without_email() -> Result<()> {
 
     let request_id = mcp
         .send_get_account_request(GetAccountParams {
+            thread_id: None,
             refresh_token: false,
         })
         .await?;
@@ -3064,6 +3098,7 @@ async fn get_account_with_chatgpt_without_email() -> Result<()> {
     assert_eq!(
         received,
         GetAccountResponse {
+            account_id: None,
             account: Some(Account::Chatgpt {
                 email: None,
                 plan_type: AccountPlanType::Pro,
@@ -3135,6 +3170,7 @@ async fn get_account_omits_chatgpt_after_permanent_refresh_failure() -> Result<(
 
     let request_id = mcp
         .send_get_account_request(GetAccountParams {
+            thread_id: None,
             refresh_token: false,
         })
         .await?;
@@ -3145,6 +3181,7 @@ async fn get_account_omits_chatgpt_after_permanent_refresh_failure() -> Result<(
     assert_eq!(
         received,
         GetAccountResponse {
+            account_id: None,
             account: None,
             requires_openai_auth: true,
         }
@@ -3177,6 +3214,7 @@ async fn get_account_with_chatgpt_missing_plan_claim_returns_unknown() -> Result
         .await?;
 
     let params = GetAccountParams {
+        thread_id: None,
         refresh_token: false,
     };
     let request_id = mcp.send_get_account_request(params).await?;
@@ -3185,6 +3223,7 @@ async fn get_account_with_chatgpt_missing_plan_claim_returns_unknown() -> Result
         timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(request_id)).await??;
 
     let expected = GetAccountResponse {
+        account_id: None,
         account: Some(Account::Chatgpt {
             email: Some("user@example.com".to_string()),
             plan_type: AccountPlanType::Unknown,

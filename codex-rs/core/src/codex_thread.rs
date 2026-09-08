@@ -773,6 +773,22 @@ impl CodexThread {
         self.session.thread_settings_snapshot().await
     }
 
+    pub async fn select_account(&self, id: &str) -> std::io::Result<()> {
+        self.session.select_account(id).await
+    }
+
+    pub fn auth_manager(&self) -> std::sync::Arc<codex_login::AuthManager> {
+        self.session.services.auth_manager.clone()
+    }
+
+    pub fn mcp_manager(&self) -> std::sync::Arc<crate::mcp::McpManager> {
+        self.session.services.mcp_manager.clone()
+    }
+
+    pub fn plugins_manager(&self) -> std::sync::Arc<codex_core_plugins::PluginsManager> {
+        self.session.services.plugins_manager.clone()
+    }
+
     /// Captures thread-owned settings and environment selections for runtime restoration.
     pub async fn restorable_thread_settings(&self) -> CodexThreadSettingsOverrides {
         self.session.restorable_thread_settings().await

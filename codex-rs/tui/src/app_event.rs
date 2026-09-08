@@ -277,6 +277,21 @@ pub(crate) enum AppEvent {
     },
     /// Open the agent picker for switching active threads.
     OpenAgentPicker,
+    OpenAccountPicker {
+        thread_id: ThreadId,
+    },
+    SelectAccount {
+        thread_id: ThreadId,
+        account_id: String,
+    },
+    RefreshConversationAccount {
+        thread_id: ThreadId,
+    },
+    ConversationAccountLoaded {
+        thread_id: ThreadId,
+        serial: u64,
+        result: Result<codex_app_server_protocol::GetAccountResponse, String>,
+    },
     /// Merge a completed root-scoped agent-picker refresh without blocking terminal input.
     AgentPickerThreadsLoaded {
         primary_thread_id: ThreadId,

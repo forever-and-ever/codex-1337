@@ -540,12 +540,12 @@ pub(crate) async fn start_embedded_app_server_for_picker(
     config: &Config,
 ) -> color_eyre::Result<AppServerSession> {
     let state_db = init_state_db_for_app_server_target(config, &AppServerTarget::Embedded).await?;
-    start_app_server_for_picker(
+    Box::pin(start_app_server_for_picker(
         config,
         &AppServerTarget::Embedded,
         state_db,
         Arc::new(EnvironmentManager::default_for_tests()),
-    )
+    ))
     .await
 }
 

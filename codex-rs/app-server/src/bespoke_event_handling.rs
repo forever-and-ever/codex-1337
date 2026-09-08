@@ -1704,6 +1704,7 @@ async fn handle_token_count_event(
         outgoing
             .send_server_notification(ServerNotification::AccountRateLimitsUpdated(
                 AccountRateLimitsUpdatedNotification {
+                    thread_id: Some(conversation_id.to_string()),
                     rate_limits: rate_limits.into(),
                 },
             ))

@@ -71,6 +71,27 @@ Run `codex` and select **Sign in with ChatGPT**. We recommend signing into your 
 
 You can also use Codex with an API key, but this requires [additional setup](https://developers.openai.com/codex/auth#sign-in-with-an-api-key).
 
+### Downstream Accounts
+
+`codex login` adds or updates a saved account in the existing credential store.
+In a stopped conversation, `/account` selects its account; `/account work` uses
+an alias. The picker shows account IDs for configuring aliases:
+
+```toml
+[wrangler.account_aliases]
+work = "user-id:account-id"
+```
+
+Selection saves `[wrangler].default_account` for new conversations. Existing
+conversations keep their binding across resume; forks and children inherit it
+independently. A missing account requires login or another explicit selection,
+never an automatic fallback. Per-conversation selection supports personal
+accounts only; managed workspace policies remain server-scoped. Credential
+paths are unchanged.
+
+Before adding another account, let the old app-server drain and restart. Old
+Codex binaries do not preserve the multi-account credential document.
+
 ## Docs
 
 - [**Codex Documentation**](https://developers.openai.com/codex)

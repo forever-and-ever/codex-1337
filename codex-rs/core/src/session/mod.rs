@@ -217,6 +217,7 @@ use codex_protocol::error::Result as CodexResult;
 #[cfg(test)]
 use codex_protocol::exec_output::StreamOutput;
 
+mod account;
 mod code_mode_warning;
 pub(crate) mod context_window;
 mod environment;
@@ -1265,6 +1266,22 @@ impl Session {
         context: PersistContext,
     ) -> std::io::Result<()> {
         if let Some(live_thread) = self.live_thread() {
+            if self.services.auth_manager.is_account_scoped() {
+                // Initial account ownership becomes durable with the conversation,
+                // not when a blank composer is opened. Serialize with explicit selection.
+                self.initial_account_binding
+                    .get_or_try_init(|| async {
+                        let _settings = thread_settings::acquire_persistence_lock(self).await;
+                        live_thread
+                            .append_items(&[RolloutItem::EventMsg(
+                                thread_settings::applied_event(self).await,
+                            )])
+                            .await
+                            .map_err(std::io::Error::other)?;
+                        live_thread.flush().await.map_err(std::io::Error::other)
+                    })
+                    .await?;
+            }
             live_thread
                 .persist(context)
                 .await

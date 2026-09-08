@@ -705,7 +705,7 @@ impl App {
                     }
                 }
             },
-            AppEvent::Logout => match app_server.logout_account().await {
+            AppEvent::Logout => match app_server.logout_account(self.current_displayed_thread_id()).await {
                 Ok(()) => {
                     self.show_shutdown_feedback(tui)?;
                     return Ok(self
@@ -1228,6 +1228,10 @@ impl App {
             AppEvent::RefreshRateLimits { origin } => {
                 self.refresh_rate_limits(app_server, origin);
             }
+            AppEvent::OpenAccountPicker { thread_id } => Box::pin(self.open_account_picker(app_server, thread_id)).await,
+            AppEvent::SelectAccount { thread_id, account_id } => Box::pin(self.select_account(app_server, thread_id, account_id)).await,
+            AppEvent::RefreshConversationAccount { thread_id } => self.refresh_conversation_account(app_server, thread_id),
+            AppEvent::ConversationAccountLoaded { thread_id, serial, result } => self.apply_conversation_account(app_server, thread_id, serial, result),
             AppEvent::RefreshTokenActivity { request_id } => {
                 self.refresh_token_activity(app_server, request_id);
             }

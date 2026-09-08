@@ -12,6 +12,12 @@
   "properties": {
     "creditType": {
       "$ref": "#/definitions/AddCreditsNudgeCreditType"
+    },
+    "threadId": {
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "required": [

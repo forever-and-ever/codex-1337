@@ -204,17 +204,8 @@ url = "{mcp_server_url}/mcp""#
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn existing_thread_loads_api_curated_mcp_after_auth_switch_sync() -> Result<()> {
+async fn new_account_thread_loads_api_curated_mcp_after_sync() -> Result<()> {
     let mut fixture = CuratedMcpSyncFixture::set_up().await?;
-    let thread_id = fixture
-        .mcp
-        .start_thread(ThreadStartParams::default())
-        .await?
-        .thread
-        .id;
-    // Establish the existing thread's MCP runtime while curated Git sync is still blocked.
-    wait_for_mcp_ready(&mut fixture.mcp, REFRESH_PROBE_SERVER_NAME).await?;
-
     let request_id = fixture
         .mcp
         .send_login_account_api_key_request("sk-test-key")
@@ -230,7 +221,14 @@ async fn existing_thread_loads_api_curated_mcp_after_auth_switch_sync() -> Resul
     )
     .await??;
 
-    // The account-change refresh has completed without the API-curated bundle on disk.
+    // Existing ChatGPT conversations stay pinned. A new API-key conversation
+    // must still receive a curated bundle that finishes synchronizing later.
+    let thread_id = fixture
+        .mcp
+        .start_thread(ThreadStartParams::default())
+        .await?
+        .thread
+        .id;
     wait_for_mcp_ready(&mut fixture.mcp, REFRESH_PROBE_SERVER_NAME).await?;
 
     // Let sync materialize the bundle; its completion callback must refresh this same thread.

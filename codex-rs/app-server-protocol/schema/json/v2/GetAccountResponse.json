@@ -102,6 +102,13 @@
         }
       ]
     },
+    "accountId": {
+      "description": "Saved conversation binding; null for an unscoped global-account read.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "requiresOpenaiAuth": {
       "type": "boolean"
     }

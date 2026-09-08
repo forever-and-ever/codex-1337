@@ -11,7 +11,6 @@ use app_test_support::MockResponsesConfig;
 use app_test_support::TestAppServer;
 use app_test_support::create_fake_rollout;
 use app_test_support::rollout_path;
-use app_test_support::write_models_cache_with_models;
 use axum::Json;
 use axum::Router;
 use axum::extract::State;
@@ -273,6 +272,31 @@ impl ThreadLifecycle {
                 | Self::RootUserInputHookBlocked
         )
     }
+}
+
+// Safety metadata is fixture input, not a cache owned by whichever account
+// happened to populate the server's singleton catalog.
+fn write_model_catalog(
+    home: &std::path::Path,
+    model: codex_protocol::openai_models::ModelInfo,
+) -> Result<()> {
+    let path = home.join("guardian-models.json");
+    std::fs::write(
+        &path,
+        serde_json::to_vec(&codex_protocol::openai_models::ModelsResponse {
+            models: vec![model],
+        })?,
+    )?;
+    let config = home.join("config.toml");
+    let contents = std::fs::read_to_string(&config)?;
+    std::fs::write(
+        config,
+        format!(
+            "model_catalog_json = {}\n{contents}",
+            serde_json::to_string(&path)?
+        ),
+    )?;
+    Ok(())
 }
 
 fn sync_review_fragments(request: &Value) -> Vec<&str> {
@@ -749,7 +773,7 @@ async fn guardian_v2_routes_scoped_tool_approvals(
         let config = load_default_config_for_test(&codex_home).await;
         let mut model_info = codex_core::test_support::construct_model_info_offline(MODEL, &config);
         model_info.node_repl_auto_review_required = true;
-        write_models_cache_with_models(codex_home.path(), vec![model_info])?;
+        write_model_catalog(codex_home.path(), model_info)?;
     }
     let original_thread_id = match lifecycle {
         ThreadLifecycle::New
@@ -1779,7 +1803,7 @@ async fn first_cua_review_does_not_wait_for_initial_score(
     let config = load_default_config_for_test(&codex_home).await;
     let mut model_info = codex_core::test_support::construct_model_info_offline(MODEL, &config);
     model_info.node_repl_auto_review_required = true;
-    write_models_cache_with_models(codex_home.path(), vec![model_info])?;
+    write_model_catalog(codex_home.path(), model_info)?;
     let mut app_server = TestAppServer::builder()
         .with_codex_home(codex_home.path())
         .build_initialized_with_timeout(TIMEOUT)
@@ -1865,7 +1889,7 @@ async fn user_approval_skips_async_guardian_without_changing_other_modes() -> Re
     let config = load_default_config_for_test(&codex_home).await;
     let mut model_info = codex_core::test_support::construct_model_info_offline(MODEL, &config);
     model_info.node_repl_auto_review_required = true;
-    write_models_cache_with_models(codex_home.path(), vec![model_info])?;
+    write_model_catalog(codex_home.path(), model_info)?;
     let mut app_server = TestAppServer::builder()
         .with_codex_home(codex_home.path())
         .build_initialized_with_timeout(TIMEOUT)

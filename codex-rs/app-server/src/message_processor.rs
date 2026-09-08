@@ -1261,6 +1261,14 @@ impl MessageProcessor {
                     .thread_settings_update(&request_id, params)
                     .await
             }
+            ClientRequest::ThreadAccountList { params, .. } => {
+                self.turn_processor.thread_account_list(params).await
+            }
+            ClientRequest::ThreadAccountSelect { params, .. } => {
+                self.turn_processor
+                    .thread_account_select(&request_id, params)
+                    .await
+            }
             ClientRequest::ThreadMemoryModeSet { params, .. } => {
                 self.thread_processor.thread_memory_mode_set(params).await
             }
@@ -1588,9 +1596,14 @@ impl MessageProcessor {
             ClientRequest::BedrockSetup { params, .. } => {
                 self.account_processor.bedrock_setup(params).await
             }
-            ClientRequest::LogoutAccount { .. } => {
+            ClientRequest::LogoutAccount { params, .. } => {
                 self.account_processor
-                    .logout_account(request_id.clone())
+                    .logout_account(
+                        request_id.clone(),
+                        params
+                            .as_ref()
+                            .and_then(|params| params.thread_id.as_deref()),
+                    )
                     .await
             }
             ClientRequest::ReloadAccount { .. } => self.account_processor.reload_account().await,
@@ -1598,27 +1611,59 @@ impl MessageProcessor {
                 self.account_processor.cancel_login_account(params).await
             }
             ClientRequest::GetAccount { params, .. } => {
-                self.account_processor.get_account(params).await
+                self.account_processor
+                    .for_thread(params.thread_id.as_deref())
+                    .await?
+                    .get_account(params)
+                    .await
             }
             ClientRequest::GetAuthStatus { params, .. } => {
                 self.account_processor.get_auth_status(params).await
             }
-            ClientRequest::GetAccountRateLimits { .. } => {
-                self.account_processor.get_account_rate_limits().await
+            ClientRequest::GetAccountRateLimits { params, .. } => {
+                self.account_processor
+                    .for_thread(
+                        params
+                            .as_ref()
+                            .and_then(|params| params.thread_id.as_deref()),
+                    )
+                    .await?
+                    .get_account_rate_limits()
+                    .await
             }
             ClientRequest::ConsumeAccountRateLimitResetCredit { params, .. } => {
                 self.account_processor
+                    .for_thread(params.thread_id.as_deref())
+                    .await?
                     .consume_account_rate_limit_reset_credit(params)
                     .await
             }
             ClientRequest::GetAccountTokenUsage { params, .. } => {
-                self.account_processor.get_account_token_usage(params).await
+                self.account_processor
+                    .for_thread(
+                        params
+                            .as_ref()
+                            .and_then(|params| params.account_thread_id.as_deref()),
+                    )
+                    .await?
+                    .get_account_token_usage(params)
+                    .await
             }
-            ClientRequest::GetWorkspaceMessages { .. } => {
-                self.account_processor.get_workspace_messages().await
+            ClientRequest::GetWorkspaceMessages { params, .. } => {
+                self.account_processor
+                    .for_thread(
+                        params
+                            .as_ref()
+                            .and_then(|params| params.thread_id.as_deref()),
+                    )
+                    .await?
+                    .get_workspace_messages()
+                    .await
             }
             ClientRequest::SendAddCreditsNudgeEmail { params, .. } => {
                 self.account_processor
+                    .for_thread(params.thread_id.as_deref())
+                    .await?
                     .send_add_credits_nudge_email(params)
                     .await
             }

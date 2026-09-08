@@ -81,6 +81,7 @@ impl App {
         app_server: &AppServerSession,
         origin: RateLimitRefreshOrigin,
     ) {
+        let thread_id = self.current_displayed_thread_id();
         if matches!(
             origin,
             RateLimitRefreshOrigin::Recovery | RateLimitRefreshOrigin::ResetConsume { .. }
@@ -96,7 +97,7 @@ impl App {
         let request_handle = app_server.request_handle();
         let app_event_tx = self.app_event_tx.clone();
         tokio::spawn(async move {
-            let request = fetch_account_rate_limits(request_handle);
+            let request = fetch_account_rate_limits(request_handle, thread_id);
             let result = match origin {
                 RateLimitRefreshOrigin::Recovery
                 | RateLimitRefreshOrigin::ResetConsume { .. }
@@ -126,12 +127,13 @@ impl App {
         app_server: &AppServerSession,
         request_id: u64,
     ) {
+        let thread_id = self.current_displayed_thread_id();
         let request_handle = app_server.request_handle();
         let app_event_tx = self.app_event_tx.clone();
         tokio::spawn(async move {
             let result = tokio::time::timeout(
                 TOKEN_ACTIVITY_FETCH_TIMEOUT,
-                fetch_account_token_activity(request_handle),
+                fetch_account_token_activity(request_handle, thread_id),
             )
             .await
             .map_err(|_| "account/usage/read timed out in TUI".to_string())
@@ -171,6 +173,7 @@ impl App {
         idempotency_key: String,
         credit_id: Option<String>,
     ) {
+        let thread_id = self.current_displayed_thread_id();
         let request_handle = app_server.request_handle();
         let app_event_tx = self.app_event_tx.clone();
         tokio::spawn(async move {
@@ -178,6 +181,7 @@ impl App {
                 RATE_LIMIT_RESET_REQUEST_TIMEOUT,
                 consume_rate_limit_reset_credit_request(
                     request_handle,
+                    thread_id,
                     idempotency_key.clone(),
                     credit_id.clone(),
                 ),
@@ -199,12 +203,13 @@ impl App {
         app_server: &AppServerSession,
         request_id: u64,
     ) {
+        let thread_id = self.current_displayed_thread_id();
         let request_handle = app_server.request_handle();
         let app_event_tx = self.app_event_tx.clone();
         tokio::spawn(async move {
             let result = tokio::time::timeout(
                 WORKSPACE_HEADLINE_FETCH_TIMEOUT,
-                fetch_workspace_messages(request_handle),
+                fetch_workspace_messages(request_handle, thread_id),
             )
             .await
             .map_err(|_| "account/workspaceMessages/read timed out in TUI".to_string())
@@ -223,10 +228,11 @@ impl App {
         request_id: Uuid,
         credit_type: AddCreditsNudgeCreditType,
     ) {
+        let thread_id = self.current_displayed_thread_id();
         let request_handle = app_server.request_handle();
         let app_event_tx = self.app_event_tx.clone();
         tokio::spawn(async move {
-            let result = send_add_credits_nudge_email(request_handle, credit_type)
+            let result = send_add_credits_nudge_email(request_handle, thread_id, credit_type)
                 .await
                 .map_err(|err| err.to_string());
             app_event_tx.send(AppEvent::AddCreditsNudgeEmailFinished { request_id, result });
@@ -798,12 +804,15 @@ pub(super) async fn fetch_all_mcp_server_statuses(
 
 pub(super) async fn fetch_account_rate_limits(
     request_handle: AppServerRequestHandle,
+    thread_id: Option<ThreadId>,
 ) -> Result<GetAccountRateLimitsResponse> {
     let request_id = RequestId::String(format!("account-rate-limits-{}", Uuid::new_v4()));
     request_handle
         .request_typed(ClientRequest::GetAccountRateLimits {
             request_id,
-            params: None,
+            params: thread_id.map(|id| codex_app_server_protocol::AccountScopeParams {
+                thread_id: Some(id.to_string()),
+            }),
         })
         .await
         .wrap_err("account/rateLimits/read failed in TUI")
@@ -811,12 +820,16 @@ pub(super) async fn fetch_account_rate_limits(
 
 pub(super) async fn fetch_account_token_activity(
     request_handle: AppServerRequestHandle,
+    thread_id: Option<ThreadId>,
 ) -> Result<codex_app_server_protocol::GetAccountTokenUsageResponse> {
     let request_id = RequestId::String(format!("account-token-usage-{}", Uuid::new_v4()));
     request_handle
         .request_typed(ClientRequest::GetAccountTokenUsage {
             request_id,
-            params: None,
+            params: thread_id.map(|id| GetAccountTokenUsageParams {
+                account_thread_id: Some(id.to_string()),
+                thread_id: None,
+            }),
         })
         .await
         .wrap_err("account/usage/read failed in TUI")
@@ -831,6 +844,7 @@ async fn fetch_thread_usage(
         .request_typed(ClientRequest::GetAccountTokenUsage {
             request_id,
             params: Some(GetAccountTokenUsageParams {
+                account_thread_id: Some(thread_id.to_string()),
                 thread_id: Some(thread_id.to_string()),
             }),
         })
@@ -844,6 +858,7 @@ async fn fetch_thread_usage(
 
 pub(super) async fn consume_rate_limit_reset_credit_request(
     request_handle: AppServerRequestHandle,
+    thread_id: Option<ThreadId>,
     idempotency_key: String,
     credit_id: Option<String>,
 ) -> Result<ConsumeAccountRateLimitResetCreditResponse> {
@@ -852,6 +867,7 @@ pub(super) async fn consume_rate_limit_reset_credit_request(
         .request_typed(ClientRequest::ConsumeAccountRateLimitResetCredit {
             request_id,
             params: ConsumeAccountRateLimitResetCreditParams {
+                thread_id: thread_id.map(|id| id.to_string()),
                 idempotency_key,
                 credit_id,
             },
@@ -862,12 +878,15 @@ pub(super) async fn consume_rate_limit_reset_credit_request(
 
 pub(super) async fn fetch_workspace_messages(
     request_handle: AppServerRequestHandle,
+    thread_id: Option<ThreadId>,
 ) -> Result<codex_app_server_protocol::GetWorkspaceMessagesResponse> {
     let request_id = RequestId::String(format!("workspace-messages-{}", Uuid::new_v4()));
     request_handle
         .request_typed(ClientRequest::GetWorkspaceMessages {
             request_id,
-            params: None,
+            params: thread_id.map(|id| codex_app_server_protocol::AccountScopeParams {
+                thread_id: Some(id.to_string()),
+            }),
         })
         .await
         .wrap_err("account/workspaceMessages/read failed in TUI")
@@ -875,13 +894,17 @@ pub(super) async fn fetch_workspace_messages(
 
 pub(super) async fn send_add_credits_nudge_email(
     request_handle: AppServerRequestHandle,
+    thread_id: Option<ThreadId>,
     credit_type: AddCreditsNudgeCreditType,
 ) -> Result<codex_app_server_protocol::AddCreditsNudgeEmailStatus> {
     let request_id = RequestId::String(format!("add-credits-nudge-{}", Uuid::new_v4()));
     let response: codex_app_server_protocol::SendAddCreditsNudgeEmailResponse = request_handle
         .request_typed(ClientRequest::SendAddCreditsNudgeEmail {
             request_id,
-            params: SendAddCreditsNudgeEmailParams { credit_type },
+            params: SendAddCreditsNudgeEmailParams {
+                credit_type,
+                thread_id: thread_id.map(|id| id.to_string()),
+            },
         })
         .await
         .wrap_err("account/sendAddCreditsNudgeEmail failed in TUI")?;
@@ -1357,7 +1380,6 @@ mod tests {
     async fn fetch_thread_usage_uses_app_server_auth_after_persisted_account_changes() {
         let mut app = make_test_app().await;
         let server = wiremock::MockServer::start().await;
-        let thread_id = ThreadId::new();
         app.config.chatgpt_base_url = server.uri();
         app.config.cli_auth_credentials_store_mode = AuthCredentialsStoreMode::File;
         write_chatgpt_auth(
@@ -1369,6 +1391,17 @@ mod tests {
         let app_server = crate::start_embedded_app_server_for_picker(&app.config)
             .await
             .expect("start authenticated embedded app server");
+        let started = app_server
+            .request_handle()
+            .request_typed::<codex_app_server_protocol::ThreadStartResponse>(
+                ClientRequest::ThreadStart {
+                    request_id: RequestId::Integer(101),
+                    params: codex_app_server_protocol::ThreadStartParams::default(),
+                },
+            )
+            .await
+            .expect("start account-bound conversation");
+        let thread_id = ThreadId::from_string(&started.thread.id).expect("thread ID");
         write_chatgpt_auth(
             app.config.codex_home.as_path(),
             ChatGptAuthFixture::new("different-token").account_id("different-account"),

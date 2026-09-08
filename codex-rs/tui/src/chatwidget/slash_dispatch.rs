@@ -297,6 +297,16 @@ impl ChatWidget {
                 self.open_model_popup();
                 self.defer_input_until_settings_applied();
             }
+            SlashCommand::Account => {
+                if let Some(thread_id) = self.thread_id {
+                    self.app_event_tx
+                        .send(AppEvent::OpenAccountPicker { thread_id });
+                } else {
+                    self.add_error_message(
+                        "Session is still starting; try /account again shortly.".to_string(),
+                    );
+                }
+            }
             SlashCommand::Personality => {
                 self.open_personality_popup();
                 self.defer_input_until_settings_applied();
@@ -711,6 +721,18 @@ impl ChatWidget {
         } = prepared;
         let trimmed = args.trim();
         match cmd {
+            SlashCommand::Account => {
+                if let Some(thread_id) = self.thread_id {
+                    self.app_event_tx.send(AppEvent::SelectAccount {
+                        thread_id,
+                        account_id: trimmed.to_owned(),
+                    });
+                } else {
+                    self.add_error_message(
+                        "Session is still starting; try /account again shortly.".to_string(),
+                    );
+                }
+            }
             SlashCommand::Export if trimmed.is_empty() => self.show_transcript_export_popup(),
             SlashCommand::Export => {
                 self.set_queue_autosend_suppressed(/*suppressed*/ true);
@@ -1171,6 +1193,7 @@ impl ChatWidget {
             | SlashCommand::Compact
             | SlashCommand::Review
             | SlashCommand::Model
+            | SlashCommand::Account
             | SlashCommand::Personality
             | SlashCommand::Plan
             | SlashCommand::Goal

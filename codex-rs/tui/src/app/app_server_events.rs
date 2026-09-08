@@ -184,6 +184,12 @@ impl App {
                 self.refresh_mcp_startup_expected_servers_from_config();
             }
             ServerNotification::AccountRateLimitsUpdated(notification) => {
+                if notification.thread_id.as_deref().is_some_and(|id| {
+                    self.current_displayed_thread_id()
+                        .is_none_or(|current| current.to_string() != id)
+                }) {
+                    return;
+                }
                 let workspace_hard_stop = matches!(
                     notification.rate_limits.rate_limit_reached_type,
                     Some(
@@ -207,6 +213,18 @@ impl App {
                 return;
             }
             ServerNotification::AccountUpdated(notification) => {
+                if let Some(thread_id) = self.current_displayed_thread_id()
+                    && !self
+                        .account_ui
+                        .displayed
+                        .as_ref()
+                        .is_some_and(|(id, account)| {
+                            *id == thread_id && account.account_id.is_none()
+                        })
+                {
+                    self.refresh_conversation_account(app_server_client, thread_id);
+                    return;
+                }
                 self.rate_limit_hard_stop_generation =
                     self.rate_limit_hard_stop_generation.wrapping_add(1);
                 self.rate_limit_refresh_state.invalidate_recovery();

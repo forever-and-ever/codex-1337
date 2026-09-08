@@ -336,6 +336,7 @@ struct LastResponse {
 
 #[derive(Debug, Default)]
 struct WebsocketSession {
+    auth_generation: u64,
     connection: Option<ApiWebSocketConnection>,
     endpoint: Option<ResponsesEndpoint>,
     last_request: Option<ResponsesApiRequest>,
@@ -573,7 +574,26 @@ impl ModelClient {
             .cached_websocket_session
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        std::mem::take(&mut *cached_websocket_session)
+        let mut session = std::mem::take(&mut *cached_websocket_session);
+        let generation = self.auth_generation();
+        if session.auth_generation != generation {
+            session = WebsocketSession::default();
+        }
+        session.auth_generation = generation;
+        session
+    }
+
+    fn auth_generation(&self) -> u64 {
+        self.auth_manager()
+            .map_or(0, |auth| *auth.auth_change_receiver().borrow())
+    }
+
+    pub(crate) fn invalidate_account(&self) {
+        self.store_cached_websocket_session(WebsocketSession::default());
+        self.state.agent_identity_session_fallback.reset();
+        self.state
+            .disable_websockets
+            .store(false, Ordering::Relaxed);
     }
 
     fn store_cached_websocket_session(&self, websocket_session: WebsocketSession) {
@@ -1485,15 +1505,18 @@ impl ModelClientSession {
             request_route_telemetry,
             endpoint,
         } = params;
-        let needs_new = match self.websocket_session.connection.as_ref() {
-            Some(conn) => {
-                self.websocket_session.endpoint != Some(endpoint) || conn.is_closed().await
-            }
-            None => true,
-        };
+        let generation = self.client.auth_generation();
+        let needs_new = self.websocket_session.auth_generation != generation
+            || match self.websocket_session.connection.as_ref() {
+                Some(conn) => {
+                    self.websocket_session.endpoint != Some(endpoint) || conn.is_closed().await
+                }
+                None => true,
+            };
 
         if needs_new {
             self.reset_websocket_session();
+            self.websocket_session.auth_generation = generation;
             let new_conn = match self
                 .client
                 .connect_websocket(

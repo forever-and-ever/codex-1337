@@ -40,6 +40,7 @@ async fn consume_rate_limit_reset_credit_requires_chatgpt_auth() -> Result<()> {
     let consume_id = mcp
         .send_consume_account_rate_limit_reset_credit_request(
             ConsumeAccountRateLimitResetCreditParams {
+                thread_id: None,
                 idempotency_key: "request-1".to_string(),
                 credit_id: None,
             },
@@ -141,6 +142,7 @@ async fn consume_account_rate_limit_reset_credit_forwards_selected_credit_id() -
     let request_id = mcp
         .send_consume_account_rate_limit_reset_credit_request(
             ConsumeAccountRateLimitResetCreditParams {
+                thread_id: None,
                 idempotency_key: "request-selected".to_string(),
                 credit_id: Some("credit-123".to_string()),
             },
@@ -168,6 +170,7 @@ async fn consume_account_rate_limit_reset_credit_rejects_empty_idempotency_key()
     let request_id = mcp
         .send_consume_account_rate_limit_reset_credit_request(
             ConsumeAccountRateLimitResetCreditParams {
+                thread_id: None,
                 idempotency_key: String::new(),
                 credit_id: None,
             },
@@ -188,6 +191,7 @@ async fn consume_account_rate_limit_reset_credit_rejects_empty_credit_id() -> Re
     let request_id = mcp
         .send_consume_account_rate_limit_reset_credit_request(
             ConsumeAccountRateLimitResetCreditParams {
+                thread_id: None,
                 idempotency_key: "request-1".to_string(),
                 credit_id: Some(String::new()),
             },
@@ -250,6 +254,7 @@ async fn consume_timeout_releases_account_auth_queue() -> Result<()> {
     let consume_id = send_consume_reset_credit(&mut mcp, "request-timeout").await?;
     let account_id = mcp
         .send_get_account_request(GetAccountParams {
+            thread_id: None,
             refresh_token: false,
         })
         .await?;
@@ -307,6 +312,7 @@ async fn consume_reset_credit(
 async fn send_consume_reset_credit(mcp: &mut TestAppServer, idempotency_key: &str) -> Result<i64> {
     mcp.send_consume_account_rate_limit_reset_credit_request(
         ConsumeAccountRateLimitResetCreditParams {
+            thread_id: None,
             idempotency_key: idempotency_key.to_string(),
             credit_id: None,
         },

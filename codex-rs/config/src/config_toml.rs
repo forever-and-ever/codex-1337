@@ -149,10 +149,22 @@ pub struct OrchestratorFeatureToml {
     pub enabled: Option<bool>,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
+#[serde(default)]
+pub struct WranglerConfig {
+    /// Account identity selected explicitly with `/account`; used for new conversations.
+    pub default_account: Option<String>,
+    /// Short names accepted by `/account`, mapped to saved account identities.
+    pub account_aliases: std::collections::BTreeMap<String, String>,
+}
+
 /// Base config deserialized from ~/.codex/config.toml.
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ConfigToml {
+    /// Downstream conversation-account preferences.
+    #[serde(default)]
+    pub wrangler: WranglerConfig,
     /// Optional override of model selection.
     pub model: Option<String>,
     /// Review model override used by the `/review` feature.

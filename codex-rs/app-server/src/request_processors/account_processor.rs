@@ -93,6 +93,26 @@ pub(crate) struct AccountRequestProcessor {
 }
 
 impl AccountRequestProcessor {
+    pub(crate) async fn for_thread(
+        &self,
+        thread_id: Option<&str>,
+    ) -> Result<Self, JSONRPCErrorError> {
+        let mut scoped = self.clone();
+        if let Some(id) = thread_id {
+            let id = ThreadId::from_string(id)
+                .map_err(|error| invalid_request(format!("Invalid thread ID: {error}")))?;
+            scoped.auth_manager = self
+                .thread_manager
+                .get_thread(id)
+                .await
+                .map_err(|error| invalid_request(error.to_string()))?
+                .auth_manager();
+            if scoped.auth_manager.is_account_scoped() {
+                scoped.auth_manager.reload().await;
+            }
+        }
+        Ok(scoped)
+    }
     pub(crate) fn new(
         auth_manager: Arc<AuthManager>,
         thread_manager: Arc<ThreadManager>,
@@ -121,8 +141,14 @@ impl AccountRequestProcessor {
     pub(crate) async fn logout_account(
         &self,
         request_id: ConnectionRequestId,
+        thread_id: Option<&str>,
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
-        self.logout_v2(request_id).await.map(|()| None)
+        let result = self
+            .for_thread(thread_id)
+            .await?
+            .logout_v2(request_id, self)
+            .await;
+        result.map(|()| None)
     }
 
     pub(crate) async fn reload_account(
@@ -977,6 +1003,13 @@ impl AccountRequestProcessor {
     }
 
     async fn logout_common(&self) -> std::result::Result<Option<AuthMode>, JSONRPCErrorError> {
+        if self.auth_manager.is_account_scoped() {
+            self.auth_manager
+                .logout_with_revoke()
+                .await
+                .map_err(|error| internal_error(format!("logout failed: {error}")))?;
+            return Ok(None);
+        }
         if self.auth_manager.is_workload_identity_selected() {
             return Err(self.configured_auth_owned_by_host_error());
         }
@@ -1019,17 +1052,18 @@ impl AccountRequestProcessor {
             .map(auth_mode_to_api))
     }
 
-    async fn logout_v2(&self, request_id: ConnectionRequestId) -> Result<(), JSONRPCErrorError> {
+    async fn logout_v2(
+        &self,
+        request_id: ConnectionRequestId,
+        global: &Self,
+    ) -> Result<(), JSONRPCErrorError> {
         let result = self.logout_common().await;
-        let account_updated =
-            result
-                .as_ref()
-                .ok()
-                .cloned()
-                .map(|auth_mode| AccountUpdatedNotification {
-                    auth_mode,
-                    plan_type: None,
-                });
+        let account_updated = if result.is_ok() {
+            global.auth_manager.reload().await;
+            Some(global.current_account_updated_notification())
+        } else {
+            None
+        };
         self.outgoing
             .send_result(request_id, result.map(|_| LogoutAccountResponse {}))
             .await;
@@ -1149,6 +1183,11 @@ impl AccountRequestProcessor {
         let account = account_state.account.map(Account::from);
 
         Ok(GetAccountResponse {
+            account_id: self
+                .auth_manager
+                .is_account_scoped()
+                .then(|| self.auth_manager.selected_account_id())
+                .flatten(),
             account,
             requires_openai_auth: account_state.requires_openai_auth,
         })

@@ -2520,8 +2520,21 @@ Codex supports these authentication modes. The current mode is surfaced in `acco
 ### API Overview
 
 - `account/read` — fetch current account info; optionally refresh tokens.
+- Downstream: `thread/account/list` lists saved identities and the loaded thread's
+  selected account. `thread/account/select` accepts `threadId` and `accountId`
+  (an ID or configured alias), rejects active turns, persists the binding, and
+  returns `{ accountId, defaultSaved }`. Only personal-account switching is
+  supported. Forks and resumed threads retain their binding.
+- Downstream account reads, quota operations, workspace messages, and logout
+  accept an optional `threadId` to use that loaded conversation's account.
+  Without it they use the server's active login. `account/read` includes the
+  scoped `accountId`; `account/rateLimits/updated` identifies its originating
+  `threadId`. Clients must not apply another thread's quota or global login
+  notifications to a pinned conversation.
+  For `account/usage/read`, `accountThreadId` chooses the account while the
+  existing `threadId` remains the usage-query target.
 - `account/login/start` — begin login (`apiKey`, `chatgpt`, `chatgptDeviceCode`, `amazonBedrock`, `amazonBedrockAccessKeys`).
-- `account/reload` — adopt credentials changed outside this app-server process; loaded threads share the new authentication and `account/updated` is emitted.
+- `account/reload` — adopt the active login changed outside this app-server process and emit `account/updated`; account-bound conversations retain their selected identity.
 - `account/bedrock/discover` — experimental; list available AWS profiles and identify AWS access keys or Amazon Bedrock API keys visible in the app-server environment.
 - `account/bedrock/setup` — experimental; validate a selected AWS profile or existing environment credentials, then persist the Amazon Bedrock provider configuration.
 - `account/login/completed` (notify) — emitted when a login attempt finishes (success or error).

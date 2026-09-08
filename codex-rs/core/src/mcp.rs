@@ -105,6 +105,10 @@ impl McpManager {
         self.codex_apps_tools_cache.clone()
     }
 
+    pub fn auth_manager(&self) -> Arc<codex_login::AuthManager> {
+        self.plugins_manager.auth_manager()
+    }
+
     pub fn tool_catalog_cache(&self) -> McpToolCatalogCache {
         self.tool_catalog_cache.clone()
     }

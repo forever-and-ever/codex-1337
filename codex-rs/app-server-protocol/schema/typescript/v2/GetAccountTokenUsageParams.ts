@@ -4,6 +4,10 @@
 
 export type GetAccountTokenUsageParams = {
 /**
+ * Use this loaded conversation's account without changing the usage query.
+ */
+accountThreadId?: string | null,
+/**
  * When present, read estimated usage for this thread instead of account-wide token activity.
  */
 threadId?: string | null, };

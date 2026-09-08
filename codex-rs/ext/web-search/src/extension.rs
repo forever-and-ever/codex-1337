@@ -135,7 +135,13 @@ impl ToolContributor for WebSearchExtension {
             session_id: session_store.level_id().to_string(),
             provider: create_model_provider(
                 config.provider.clone(),
-                Some(self.auth_manager.clone()),
+                Some(
+                    thread_store
+                        .get::<Arc<AuthManager>>()
+                        .as_deref()
+                        .cloned()
+                        .unwrap_or_else(|| self.auth_manager.clone()),
+                ),
             ),
             settings: config.settings.clone(),
             originator: thread_store

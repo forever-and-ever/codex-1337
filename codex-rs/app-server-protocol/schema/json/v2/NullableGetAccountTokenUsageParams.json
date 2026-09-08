@@ -11,6 +11,13 @@
   "definitions": {
     "GetAccountTokenUsageParams": {
       "properties": {
+        "accountThreadId": {
+          "description": "Use this loaded conversation's account without changing the usage query.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "threadId": {
           "description": "When present, read estimated usage for this thread instead of account-wide token activity.",
           "type": [

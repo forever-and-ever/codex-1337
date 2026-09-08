@@ -381,6 +381,8 @@ pub enum RateLimitResetCreditStatus {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct ConsumeAccountRateLimitResetCreditParams {
+    #[ts(optional = nullable)]
+    pub thread_id: Option<String>,
     /// Identifies one logical reset attempt. A UUID is recommended; reuse the same value when
     /// retrying that attempt.
     pub idempotency_key: String,
@@ -415,6 +417,9 @@ pub enum ConsumeAccountRateLimitResetCreditOutcome {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct GetAccountTokenUsageParams {
+    /// Use this loaded conversation's account without changing the usage query.
+    #[ts(optional = nullable)]
+    pub account_thread_id: Option<String>,
     /// When present, read estimated usage for this thread instead of account-wide token activity.
     #[ts(optional = nullable)]
     pub thread_id: Option<String>,
@@ -492,6 +497,8 @@ pub struct AccountTokenUsageDailyBucket {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct SendAddCreditsNudgeEmailParams {
+    #[ts(optional = nullable)]
+    pub thread_id: Option<String>,
     pub credit_type: AddCreditsNudgeCreditType,
 }
 
@@ -522,6 +529,9 @@ pub enum AddCreditsNudgeEmailStatus {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct GetAccountParams {
+    /// Read the conversation's account instead of the global login.
+    #[ts(optional = nullable)]
+    pub thread_id: Option<String>,
     /// When `true`, requests a proactive token refresh before returning.
     ///
     /// In managed auth mode this triggers the normal refresh-token flow. In
@@ -535,6 +545,8 @@ pub struct GetAccountParams {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct GetAccountResponse {
+    /// Saved conversation binding; null for an unscoped global-account read.
+    pub account_id: Option<String>,
     pub account: Option<Account>,
     pub requires_openai_auth: bool,
 }
@@ -544,6 +556,59 @@ pub struct GetAccountResponse {
 #[ts(export_to = "v2/")]
 pub struct ReloadAccountResponse {
     pub changed: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadAccountListParams {
+    pub thread_id: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct AccountScopeParams {
+    #[ts(optional = nullable)]
+    pub thread_id: Option<String>,
+}
+
+pub type NullableAccountScopeParams = Option<AccountScopeParams>;
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct SavedAccount {
+    pub id: String,
+    pub alias: Option<String>,
+    pub email: Option<String>,
+    pub plan: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadAccountListResponse {
+    pub accounts: Vec<SavedAccount>,
+    pub selected_account_id: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadAccountSelectParams {
+    pub thread_id: String,
+    /// Saved identity or an alias from `[wrangler.account_aliases]`.
+    pub account_id: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadAccountSelectResponse {
+    pub account_id: String,
+    /// The thread changed successfully; false means saving the new-thread default failed.
+    pub default_saved: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
@@ -563,6 +628,7 @@ pub struct AccountUpdatedNotification {
 /// or refetch that snapshot. Nullable account metadata may be unavailable in a rolling update and
 /// does not clear a previously observed value.
 pub struct AccountRateLimitsUpdatedNotification {
+    pub thread_id: Option<String>,
     pub rate_limits: RateLimitSnapshot,
 }
 

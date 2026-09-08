@@ -523,6 +523,54 @@
             },
             "method": {
               "enum": [
+                "thread/account/list"
+              ],
+              "title": "Thread/account/listRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/ThreadAccountListParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Thread/account/listRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/v2/RequestId"
+            },
+            "method": {
+              "enum": [
+                "thread/account/select"
+              ],
+              "title": "Thread/account/selectRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/ThreadAccountSelectParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Thread/account/selectRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/v2/RequestId"
+            },
+            "method": {
+              "enum": [
                 "thread/unarchive"
               ],
               "title": "Thread/unarchiveRequestMethod",
@@ -2136,7 +2184,14 @@
               "type": "string"
             },
             "params": {
-              "type": "null"
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/v2/AccountScopeParams"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -2183,7 +2238,14 @@
               "type": "string"
             },
             "params": {
-              "type": "null"
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/v2/AccountScopeParams"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -2260,7 +2322,14 @@
               "type": "string"
             },
             "params": {
-              "type": "null"
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/v2/AccountScopeParams"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -6714,12 +6783,29 @@
         "properties": {
           "rateLimits": {
             "$ref": "#/definitions/v2/RateLimitSnapshot"
+          },
+          "threadId": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
           "rateLimits"
         ],
         "title": "AccountRateLimitsUpdatedNotification",
+        "type": "object"
+      },
+      "AccountScopeParams": {
+        "properties": {
+          "threadId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
         "type": "object"
       },
       "AccountTokenUsageDailyBucket": {
@@ -10359,6 +10445,12 @@
           "idempotencyKey": {
             "description": "Identifies one logical reset attempt. A UUID is recommended; reuse the same value when retrying that attempt.",
             "type": "string"
+          },
+          "threadId": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -12333,6 +12425,13 @@
           "refreshToken": {
             "description": "When `true`, requests a proactive token refresh before returning.\n\nIn managed auth mode this triggers the normal refresh-token flow. In external auth mode this flag is ignored. Clients should refresh tokens themselves and call `account/login/start` with `chatgptAuthTokens`.",
             "type": "boolean"
+          },
+          "threadId": {
+            "description": "Read the conversation's account instead of the global login.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "title": "GetAccountParams",
@@ -12399,6 +12498,13 @@
               }
             ]
           },
+          "accountId": {
+            "description": "Saved conversation binding; null for an unscoped global-account read.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "requiresOpenaiAuth": {
             "type": "boolean"
           }
@@ -12411,6 +12517,13 @@
       },
       "GetAccountTokenUsageParams": {
         "properties": {
+          "accountThreadId": {
+            "description": "Use this loaded conversation's account without changing the usage query.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "threadId": {
             "description": "When present, read estimated usage for this thread instead of account-wide token activity.",
             "type": [
@@ -15576,6 +15689,18 @@
           "compact"
         ],
         "type": "string"
+      },
+      "NullableAccountScopeParams": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "anyOf": [
+          {
+            "$ref": "#/definitions/v2/AccountScopeParams"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Nullable_AccountScopeParams"
       },
       "NullableGetAccountTokenUsageParams": {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -19281,6 +19406,35 @@
         },
         "type": "object"
       },
+      "SavedAccount": {
+        "properties": {
+          "alias": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "plan": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
       "ScheduledTaskSchedule": {
         "oneOf": [
           {
@@ -19445,6 +19599,12 @@
         "properties": {
           "creditType": {
             "$ref": "#/definitions/v2/AddCreditsNudgeCreditType"
+          },
+          "threadId": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -20454,6 +20614,77 @@
           "turns",
           "updatedAt"
         ],
+        "type": "object"
+      },
+      "ThreadAccountListParams": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "threadId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "threadId"
+        ],
+        "title": "ThreadAccountListParams",
+        "type": "object"
+      },
+      "ThreadAccountListResponse": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "accounts": {
+            "items": {
+              "$ref": "#/definitions/v2/SavedAccount"
+            },
+            "type": "array"
+          },
+          "selectedAccountId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "accounts"
+        ],
+        "title": "ThreadAccountListResponse",
+        "type": "object"
+      },
+      "ThreadAccountSelectParams": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "accountId": {
+            "description": "Saved identity or an alias from `[wrangler.account_aliases]`.",
+            "type": "string"
+          },
+          "threadId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "accountId",
+          "threadId"
+        ],
+        "title": "ThreadAccountSelectParams",
+        "type": "object"
+      },
+      "ThreadAccountSelectResponse": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "accountId": {
+            "type": "string"
+          },
+          "defaultSaved": {
+            "description": "The thread changed successfully; false means saving the new-thread default failed.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "accountId",
+          "defaultSaved"
+        ],
+        "title": "ThreadAccountSelectResponse",
         "type": "object"
       },
       "ThreadActiveFlag": {

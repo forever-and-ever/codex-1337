@@ -684,6 +684,7 @@ impl AppServerSession {
             .request_typed(ClientRequest::GetAccount {
                 request_id: account_request_id,
                 params: GetAccountParams {
+                    thread_id: None,
                     refresh_token: false,
                 },
             })
@@ -1449,13 +1450,15 @@ impl AppServerSession {
             .wrap_err("thread/goal/clear failed in TUI")
     }
 
-    pub(crate) async fn logout_account(&mut self) -> Result<()> {
+    pub(crate) async fn logout_account(&mut self, thread_id: Option<ThreadId>) -> Result<()> {
         let request_id = self.next_request_id();
         let _: LogoutAccountResponse = self
             .client
             .request_typed(ClientRequest::LogoutAccount {
                 request_id,
-                params: None,
+                params: thread_id.map(|id| codex_app_server_protocol::AccountScopeParams {
+                    thread_id: Some(id.to_string()),
+                }),
             })
             .await
             .wrap_err("account/logout failed in TUI")?;
@@ -2388,6 +2391,7 @@ mod tests {
         let mut app_server = crate::start_embedded_app_server_for_picker(&config).await?;
         let next_request_id = app_server.next_request_id;
         let account = GetAccountResponse {
+            account_id: None,
             account: Some(Account::Chatgpt {
                 email: Some("teammate@openai.com".to_string()),
                 plan_type: codex_protocol::account::PlanType::Plus,

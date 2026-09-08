@@ -833,6 +833,7 @@ mod tests {
     fn verify_account_rate_limits_notification_serialization() {
         let notification =
             ServerNotification::AccountRateLimitsUpdated(AccountRateLimitsUpdatedNotification {
+                thread_id: None,
                 rate_limits: RateLimitSnapshot {
                     limit_id: Some("codex".to_string()),
                     limit_name: None,
@@ -854,6 +855,7 @@ mod tests {
             json!({
                 "method": "account/rateLimits/updated",
                 "params": {
+                        "threadId": null,
                         "rateLimits": {
                         "limitId": "codex",
                         "limitName": null,

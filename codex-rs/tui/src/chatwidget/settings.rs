@@ -221,6 +221,8 @@ impl ChatWidget {
         self.clear_pending_token_activity_refreshes();
         self.clear_pending_rate_limit_reset_requests();
         self.clear_backend_banner();
+        self.rate_limit_snapshots_by_limit_id.clear();
+        self.available_rate_limit_reset_credits = None;
         self.input_queue.rate_limit_recovery_pending = false;
         self.add_credits_nudge_email_in_flight = None;
         self.codex_rate_limit_reached_type = None;
@@ -373,6 +375,8 @@ impl ChatWidget {
         }
 
         self.apply_thread_settings(notification.thread_settings);
+        self.app_event_tx
+            .send(AppEvent::RefreshConversationAccount { thread_id });
     }
 
     #[cfg(test)]

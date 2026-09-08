@@ -96,7 +96,16 @@ impl ToolContributor for ImageGenerationExtension {
 
         vec![Arc::new(ImageGenerationTool::new(
             CodexImagesBackend::new(
-                create_model_provider(config.provider.clone(), Some(self.auth_manager.clone())),
+                create_model_provider(
+                    config.provider.clone(),
+                    Some(
+                        thread_store
+                            .get::<Arc<AuthManager>>()
+                            .as_deref()
+                            .cloned()
+                            .unwrap_or_else(|| self.auth_manager.clone()),
+                    ),
+                ),
                 thread_store
                     .get::<ThreadOriginator>()
                     .map(|originator| originator.0.clone()),

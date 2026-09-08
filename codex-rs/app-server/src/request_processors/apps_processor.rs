@@ -5,6 +5,13 @@ use codex_connectors::AppToolPolicyEvaluator;
 mod installed;
 mod read;
 
+struct AppsContext {
+    config: Config,
+    auth_manager: Arc<AuthManager>,
+    plugins_manager: Arc<PluginsManager>,
+    mcp_manager: Arc<McpManager>,
+}
+
 pub(super) use read::APP_READ_MAX_IDS;
 
 pub(crate) struct AppsRequestProcessor {
@@ -52,25 +59,13 @@ impl AppsRequestProcessor {
     ) -> Result<Option<AppsListResponse>, JSONRPCErrorError> {
         let installed_start = Instant::now();
         let reload = params.force_refetch;
-        let thread = if let Some(thread_id) = params.thread_id.as_deref() {
-            let (_, loaded_thread) = self.load_thread(thread_id).await?;
-            Some(loaded_thread)
-        } else {
-            None
-        };
-        let fallback_cwd = match thread.as_ref() {
-            Some(thread) => Some(thread.config_snapshot().await.cwd().to_path_buf()),
-            None => None,
-        };
-        let mut config = self.load_latest_config(fallback_cwd).await?;
-
-        if let Some(thread) = thread {
-            let _ = config
-                .features
-                .set_enabled(Feature::Apps, thread.enabled(Feature::Apps));
-        }
-
-        let auth = self.auth_manager.auth().await;
+        let AppsContext {
+            config,
+            auth_manager,
+            plugins_manager,
+            mcp_manager,
+        } = self.load_apps_context(params.thread_id.as_deref()).await?;
+        let auth = auth_manager.auth().await;
         if !config
             .features
             .apps_enabled_for_auth(auth.as_ref().is_some_and(CodexAuth::uses_codex_backend))
@@ -86,8 +81,6 @@ impl AppsRequestProcessor {
         let request = request_id.clone();
         let outgoing = Arc::clone(&self.outgoing);
         let environment_manager = self.thread_manager.environment_manager();
-        let mcp_manager = self.thread_manager.mcp_manager();
-        let plugins_manager = self.thread_manager.plugins_manager();
         let shutdown_token = self.shutdown_token.child_token();
         tokio::spawn(async move {
             tokio::select! {
@@ -195,10 +188,15 @@ impl AppsRequestProcessor {
                 loaded_plugins.capability_summaries(),
             );
         let plugin_apps = connector_snapshot.connector_ids().to_vec();
-        let (mut accessible_connectors, mut all_connectors) = tokio::join!(
-            connectors::list_cached_accessible_connectors_from_mcp_tools(&config),
-            connectors::list_cached_all_connectors(&config, &plugin_apps)
-        );
+        let auth = plugins_manager
+            .auth_manager()
+            .auth()
+            .await
+            .ok_or_else(|| invalid_request("Conversation account is unavailable"))?;
+        let mut accessible_connectors =
+            connectors::list_cached_accessible_connectors_with_auth(&config, Some(&auth));
+        let mut all_connectors =
+            connectors::list_cached_all_connectors_with_auth(&config, &auth, &plugin_apps);
         let cached_all_connectors = all_connectors.clone();
 
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -220,8 +218,9 @@ impl AppsRequestProcessor {
         let all_config = config.clone();
         let all_plugin_apps = plugin_apps.clone();
         tokio::spawn(async move {
-            let result = connectors::list_all_connectors_with_options(
+            let result = connectors::list_all_connectors_with_auth(
                 &all_config,
+                &auth,
                 force_refetch,
                 &all_plugin_apps,
             )
@@ -354,16 +353,35 @@ impl AppsRequestProcessor {
             .map_err(|err| internal_error(format!("failed to reload config: {err}")))
     }
 
-    async fn load_apps_config(&self, thread_id: Option<&str>) -> Result<Config, JSONRPCErrorError> {
+    async fn load_apps_context(
+        &self,
+        thread_id: Option<&str>,
+    ) -> Result<AppsContext, JSONRPCErrorError> {
         let Some(thread_id) = thread_id else {
-            return self.load_latest_config(/*fallback_cwd*/ None).await;
+            self.auth_manager.reload().await;
+            return Ok(AppsContext {
+                config: self.load_latest_config(/*fallback_cwd*/ None).await?,
+                auth_manager: self.auth_manager.clone(),
+                plugins_manager: self.thread_manager.plugins_manager(),
+                mcp_manager: self.thread_manager.mcp_manager(),
+            });
         };
         let (_, thread) = self.load_thread(thread_id).await?;
         let thread_config = thread.config().await;
-        self.config_manager
+        let mut config = self
+            .config_manager
             .load_latest_config_for_thread(thread_config.as_ref())
             .await
-            .map_err(|err| internal_error(format!("failed to reload config: {err}")))
+            .map_err(|err| internal_error(format!("failed to reload config: {err}")))?;
+        let _ = config
+            .features
+            .set_enabled(Feature::Apps, thread.enabled(Feature::Apps));
+        Ok(AppsContext {
+            config,
+            auth_manager: thread.auth_manager(),
+            plugins_manager: thread.plugins_manager(),
+            mcp_manager: thread.mcp_manager(),
+        })
     }
 }
 

@@ -114,6 +114,11 @@ pub trait ModelsManager: fmt::Debug + Send + Sync {
     /// Return the current in-memory remote model catalog without refreshing or loading cache state.
     fn get_remote_models(&self) -> ModelsManagerFuture<'_, Vec<ModelInfo>>;
 
+    /// Forget account-dependent metadata before switching a conversation's credentials.
+    fn invalidate_account(&self) -> ModelsManagerFuture<'_, ()> {
+        Box::pin(async {})
+    }
+
     /// Attempt to return the current in-memory remote model catalog without blocking.
     ///
     /// Returns an error if the internal lock cannot be acquired.
@@ -216,6 +221,7 @@ pub type SharedModelsManager = Arc<dyn ModelsManager>;
 /// OpenAI-compatible model manager backed by bundled models, cache, and `/models`.
 #[derive(Debug)]
 pub struct OpenAiModelsManager {
+    catalog_refresh: tokio::sync::Semaphore,
     remote_models: RwLock<Vec<ModelInfo>>,
     etag: RwLock<Option<String>>,
     cache: Option<Arc<dyn ModelsCache>>,
@@ -275,6 +281,7 @@ impl OpenAiModelsManager {
     ) -> Self {
         let remote_models = load_remote_models_from_file().unwrap_or_default();
         Self {
+            catalog_refresh: tokio::sync::Semaphore::new(/*permits*/ 1),
             remote_models: RwLock::new(remote_models),
             etag: RwLock::new(None),
             cache,
@@ -295,6 +302,18 @@ impl StaticModelsManager {
 }
 
 impl ModelsManager for OpenAiModelsManager {
+    fn invalidate_account(&self) -> ModelsManagerFuture<'_, ()> {
+        Box::pin(async move {
+            // An old in-flight response must finish publishing before invalidation.
+            let _refresh = self
+                .catalog_refresh
+                .acquire()
+                .await
+                .unwrap_or_else(|_| unreachable!("catalog refresh semaphore is never closed"));
+            *self.remote_models.write().await = load_remote_models_from_file().unwrap_or_default();
+            *self.etag.write().await = None;
+        })
+    }
     fn raw_model_catalog(
         &self,
         refresh_strategy: RefreshStrategy,
@@ -377,6 +396,11 @@ impl OpenAiModelsManager {
         refresh_strategy: RefreshStrategy,
         http_client_factory: &HttpClientFactory,
     ) -> CoreResult<()> {
+        let _refresh = self
+            .catalog_refresh
+            .acquire()
+            .await
+            .unwrap_or_else(|_| unreachable!("catalog refresh semaphore is never closed"));
         if !self.should_refresh_models().await {
             if matches!(
                 refresh_strategy,

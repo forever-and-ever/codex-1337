@@ -637,6 +637,16 @@ client_request_definitions! {
         serialization: thread_id(params.thread_id),
         response: v2::ThreadSettingsUpdateResponse,
     },
+    ThreadAccountList => "thread/account/list" {
+        params: v2::ThreadAccountListParams,
+        serialization: thread_id(params.thread_id),
+        response: v2::ThreadAccountListResponse,
+    },
+    ThreadAccountSelect => "thread/account/select" {
+        params: v2::ThreadAccountSelectParams,
+        serialization: global("account-auth"),
+        response: v2::ThreadAccountSelectResponse,
+    },
     #[experimental("thread/memoryMode/set")]
     ThreadMemoryModeSet => "thread/memoryMode/set" {
         params: v2::ThreadMemoryModeSetParams,
@@ -1236,7 +1246,7 @@ client_request_definitions! {
     },
 
     LogoutAccount => "account/logout" {
-        params: #[ts(type = "undefined")] #[serde(skip_serializing_if = "Option::is_none")] Option<()>,
+        params: #[ts(optional, as = "Option<v2::AccountScopeParams>")] #[serde(default, skip_serializing_if = "Option::is_none")] v2::NullableAccountScopeParams,
         serialization: global("account-auth"),
         response: v2::LogoutAccountResponse,
     },
@@ -1249,7 +1259,7 @@ client_request_definitions! {
     },
 
     GetAccountRateLimits => "account/rateLimits/read" {
-        params: #[ts(type = "undefined")] #[serde(skip_serializing_if = "Option::is_none")] Option<()>,
+        params: #[ts(optional, as = "Option<v2::AccountScopeParams>")] #[serde(default, skip_serializing_if = "Option::is_none")] v2::NullableAccountScopeParams,
         serialization: None,
         response: v2::GetAccountRateLimitsResponse,
     },
@@ -1267,7 +1277,7 @@ client_request_definitions! {
     },
 
     GetWorkspaceMessages => "account/workspaceMessages/read" {
-        params: #[ts(type = "undefined")] #[serde(skip_serializing_if = "Option::is_none")] Option<()>,
+        params: #[ts(optional, as = "Option<v2::AccountScopeParams>")] #[serde(default, skip_serializing_if = "Option::is_none")] v2::NullableAccountScopeParams,
         serialization: None,
         response: v2::GetWorkspaceMessagesResponse,
     },
@@ -2443,6 +2453,7 @@ mod tests {
         let account_read = ClientRequest::GetAccount {
             request_id: request_id(),
             params: v2::GetAccountParams {
+                thread_id: None,
                 refresh_token: false,
             },
         };
@@ -2495,6 +2506,7 @@ mod tests {
         let add_credits_nudge = ClientRequest::SendAddCreditsNudgeEmail {
             request_id: request_id(),
             params: v2::SendAddCreditsNudgeEmailParams {
+                thread_id: None,
                 credit_type: v2::AddCreditsNudgeCreditType::Credits,
             },
         };
@@ -3067,6 +3079,7 @@ mod tests {
         let request = ClientRequest::GetAccountTokenUsage {
             request_id: RequestId::Integer(1),
             params: Some(v2::GetAccountTokenUsageParams {
+                account_thread_id: None,
                 thread_id: Some("thread-123".to_string()),
             }),
         };
@@ -3074,7 +3087,7 @@ mod tests {
             json!({
                 "method": "account/usage/read",
                 "id": 1,
-                "params": { "threadId": "thread-123" },
+                "params": { "threadId": "thread-123", "accountThreadId": null },
             }),
             serde_json::to_value(&request)?,
         );
@@ -3475,6 +3488,7 @@ mod tests {
         let request = ClientRequest::GetAccount {
             request_id: RequestId::Integer(6),
             params: v2::GetAccountParams {
+                thread_id: None,
                 refresh_token: false,
             },
         };
@@ -3482,13 +3496,14 @@ mod tests {
             json!({
                 "method": "account/read",
                 "id": 6,
-                "params": {}
+                "params": { "threadId": null }
             }),
             serde_json::to_value(&request)?,
         );
         let request = ClientRequest::GetAccount {
             request_id: RequestId::Integer(7),
             params: v2::GetAccountParams {
+                thread_id: None,
                 refresh_token: true,
             },
         };
@@ -3497,6 +3512,7 @@ mod tests {
                 "method": "account/read",
                 "id": 7,
                 "params": {
+                    "threadId": null,
                     "refreshToken": true
                 }
             }),

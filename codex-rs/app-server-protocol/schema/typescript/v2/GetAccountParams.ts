@@ -4,6 +4,10 @@
 
 export type GetAccountParams = {
 /**
+ * Read the conversation's account instead of the global login.
+ */
+threadId?: string | null,
+/**
  * When `true`, requests a proactive token refresh before returning.
  *
  * In managed auth mode this triggers the normal refresh-token flow. In

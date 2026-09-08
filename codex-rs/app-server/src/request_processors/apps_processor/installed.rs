@@ -47,15 +47,14 @@ impl AppsRequestProcessor {
         let mut snapshot_age = None;
         let mut snapshot_tool_count = 0;
         let result = async {
-            let config = self
-                .load_apps_config(params.thread_id.as_deref())
+            let AppsContext { config, auth_manager, mcp_manager, .. } = self
+                .load_apps_context(params.thread_id.as_deref())
                 .await?;
-            let auth = self.auth_manager.auth().await;
+            let auth = auth_manager.auth().await;
             let runtime_enabled = config
                 .features
                 .apps_enabled_for_auth(auth.as_ref().is_some_and(CodexAuth::uses_codex_backend));
 
-            let mcp_manager = self.thread_manager.mcp_manager();
             let mcp_config = mcp_manager.runtime_config(&config).await;
             let mut mcp_servers = effective_mcp_servers(&mcp_config, auth.as_ref());
             mcp_servers.retain(|name, _| name == CODEX_APPS_MCP_SERVER_NAME);
@@ -81,7 +80,7 @@ impl AppsRequestProcessor {
                     let cancellation_token = CancellationToken::new();
                     let codex_apps_auth_manager =
                         host_owned_codex_apps_enabled(&mcp_config, auth.as_ref())
-                            .then(|| Arc::clone(&self.auth_manager));
+                            .then(|| Arc::clone(&auth_manager));
                     let runtime = McpRuntime::new(McpRuntimeInput {
                         startup_policy: McpStartupPolicy::Eager,
                         config: Arc::clone(&mcp_config),

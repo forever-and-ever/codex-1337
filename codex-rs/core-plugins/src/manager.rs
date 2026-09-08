@@ -685,6 +685,10 @@ impl PluginsManager {
         self.auth_manager.get_api_auth_mode()
     }
 
+    pub fn auth_manager(&self) -> Arc<AuthManager> {
+        self.auth_manager.clone()
+    }
+
     fn remote_global_catalog_active(&self, config: &PluginsConfigInput) -> bool {
         config.remote_plugin_enabled && self.auth_mode().is_some_and(AuthMode::uses_codex_backend)
     }
@@ -901,6 +905,39 @@ impl PluginsManager {
             Err(err) => err.into_inner(),
         };
         *featured_plugin_ids_cache = None;
+    }
+
+    /// Propagates host reconciliation to a separately pinned consumer of the same account.
+    pub fn inherit_remote_installed_plugins(&self, source: &Self) {
+        let (identity, plugins) = {
+            let cache = source
+                .remote_installed_plugins_cache
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if cache.reconciliation_generation.is_some()
+                || !source.remote_installed_plugins_cache_matches_current_auth(&cache)
+            {
+                return;
+            }
+            let (Some(identity), Some(plugins)) = (&cache.auth_identity, &cache.plugins) else {
+                return;
+            };
+            if !self.remote_installed_plugins_auth_is_current(identity) {
+                return;
+            }
+            (identity.clone(), plugins.clone())
+        };
+        let mut cache = self
+            .remote_installed_plugins_cache
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        cache.generation = cache.generation.wrapping_add(1);
+        cache.auth_identity = Some(identity);
+        cache.plugins = Some(plugins);
+        cache.reconciliation_generation = None;
+        cache.needs_effective_plugins_refresh = false;
+        drop(cache);
+        self.clear_loaded_plugins_cache();
     }
 
     pub fn clear_recommended_plugins_cache(&self) {

@@ -5781,6 +5781,24 @@
     },
     "WorkspaceRootsToml": {
       "type": "object"
+    },
+    "WranglerConfig": {
+      "properties": {
+        "account_aliases": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Short names accepted by `/account`, mapped to saved account identities.",
+          "type": "object"
+        },
+        "default_account": {
+          "default": null,
+          "description": "Account identity selected explicitly with `/account`; used for new conversations.",
+          "type": "string"
+        }
+      },
+      "type": "object"
     }
   },
   "description": "Base config deserialized from ~/.codex/config.toml.",
@@ -6853,6 +6871,18 @@
       ],
       "default": null,
       "description": "Windows-specific configuration."
+    },
+    "wrangler": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/WranglerConfig"
+        }
+      ],
+      "default": {
+        "account_aliases": {},
+        "default_account": null
+      },
+      "description": "Downstream conversation-account preferences."
     }
   },
   "title": "ConfigToml",

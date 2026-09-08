@@ -511,6 +511,7 @@ async fn send_add_credits_nudge_email_requires_auth() -> Result<()> {
 
     let request_id = mcp
         .send_add_credits_nudge_email_request(SendAddCreditsNudgeEmailParams {
+            thread_id: None,
             credit_type: AddCreditsNudgeCreditType::Credits,
         })
         .await?;
@@ -545,6 +546,7 @@ async fn send_add_credits_nudge_email_requires_chatgpt_auth() -> Result<()> {
 
     let request_id = mcp
         .send_add_credits_nudge_email_request(SendAddCreditsNudgeEmailParams {
+            thread_id: None,
             credit_type: AddCreditsNudgeCreditType::UsageLimit,
         })
         .await?;
@@ -601,6 +603,7 @@ async fn send_add_credits_nudge_email_posts_expected_body() -> Result<()> {
 
     let request_id = mcp
         .send_add_credits_nudge_email_request(SendAddCreditsNudgeEmailParams {
+            thread_id: None,
             credit_type: AddCreditsNudgeCreditType::UsageLimit,
         })
         .await?;
@@ -644,6 +647,7 @@ async fn send_add_credits_nudge_email_maps_cooldown() -> Result<()> {
 
     let request_id = mcp
         .send_add_credits_nudge_email_request(SendAddCreditsNudgeEmailParams {
+            thread_id: None,
             credit_type: AddCreditsNudgeCreditType::Credits,
         })
         .await?;
@@ -687,6 +691,7 @@ async fn send_add_credits_nudge_email_surfaces_backend_failure() -> Result<()> {
 
     let request_id = mcp
         .send_add_credits_nudge_email_request(SendAddCreditsNudgeEmailParams {
+            thread_id: None,
             credit_type: AddCreditsNudgeCreditType::Credits,
         })
         .await?;

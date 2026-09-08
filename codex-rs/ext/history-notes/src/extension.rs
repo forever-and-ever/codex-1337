@@ -41,17 +41,22 @@ struct HistoryNotesAgentIdentity {
 
 impl HistoryNotesExtension {
     fn update_config(&self, thread_store: &ExtensionData, config: &Config) {
+        let auth_manager = thread_store
+            .get::<Arc<AuthManager>>()
+            .as_deref()
+            .cloned()
+            .unwrap_or_else(|| self.auth_manager.clone());
         if config
             .token_budget
             .as_ref()
             .is_some_and(|token_budget| token_budget.use_history_notes_extension)
             && config.model_provider.is_openai()
-            && self.auth_manager.current_auth_uses_codex_backend()
+            && auth_manager.current_auth_uses_codex_backend()
         {
             thread_store.insert(HistoryNotesExtensionConfig {
                 backend: HistoryNotesBackend::new(create_model_provider(
                     config.model_provider.clone(),
-                    Some(self.auth_manager.clone()),
+                    Some(auth_manager),
                 )),
             });
         } else {

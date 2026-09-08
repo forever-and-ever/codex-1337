@@ -1,0 +1,11 @@
+---
+source: tui/src/chatwidget/tests/popups_and_settings.rs
+expression: "render_bottom_popup(&chat, 100)"
+---
+  Select Account
+  For this conversation and new conversations. Others stay unchanged.
+
+› 1. work (current)   alice@example.com · pro · alice:personal
+  2. bob@example.com  pro · bob:personal
+
+  Press enter to confirm or esc to go back

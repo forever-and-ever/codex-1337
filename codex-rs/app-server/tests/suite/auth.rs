@@ -193,6 +193,7 @@ async fn personal_access_token_without_email_supports_auth_status_and_account_re
 
     let request_id = mcp
         .send_get_account_request(GetAccountParams {
+            thread_id: None,
             refresh_token: false,
         })
         .await?;
@@ -219,6 +220,7 @@ async fn personal_access_token_without_email_supports_auth_status_and_account_re
     assert_eq!(
         to_response::<GetAccountResponse>(response)?,
         GetAccountResponse {
+            account_id: None,
             account: Some(Account::Chatgpt {
                 email: None,
                 plan_type: AccountPlanType::EnterpriseCbpAutomation,
