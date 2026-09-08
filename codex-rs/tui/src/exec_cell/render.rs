@@ -20,6 +20,7 @@ use codex_ansi_escape::ansi_escape_line;
 use codex_app_server_protocol::CommandExecutionSource as ExecCommandSource;
 use codex_protocol::parse_command::ParsedCommand;
 use codex_shell_command::bash::extract_bash_command;
+use codex_shell_command::read_intent::ReadIntent;
 use codex_utils_elapsed::format_duration;
 use itertools::Itertools;
 use ratatui::prelude::*;
@@ -31,6 +32,22 @@ use textwrap::WordSplitter;
 use unicode_width::UnicodeWidthStr;
 
 pub(crate) const TOOL_CALL_MAX_LINES: usize = 5;
+
+fn read_label(name: &str, command: &str, output: Option<&CommandOutput>) -> String {
+    let mut label = ReadIntent::parse(command).map_or_else(
+        || format!("{name} (range unspecified: {command})"),
+        |intent| intent.label(name),
+    );
+    if output.is_some_and(|output| {
+        output.transcript_lines().any(|line| {
+            line.starts_with("Warning: truncated output")
+                || (line.starts_with("... ") && line.ends_with(" bytes omitted ..."))
+        })
+    }) {
+        label.push_str(" [truncated]");
+    }
+    label
+}
 const USER_SHELL_TOOL_CALL_MAX_LINES: usize = 50;
 const MAX_INTERACTION_PREVIEW_CHARS: usize = 80;
 
@@ -300,9 +317,11 @@ impl ExecCell {
             let call_lines: Vec<(&str, Vec<Span<'static>>)> = if reads_only {
                 let names = group
                     .iter()
-                    .flat_map(|call| &call.parsed)
-                    .map(|parsed| match parsed {
-                        ParsedCommand::Read { name, .. } => name.clone(),
+                    .flat_map(|call| call.parsed.iter().map(move |parsed| (call, parsed)))
+                    .map(|(call, parsed)| match parsed {
+                        ParsedCommand::Read { name, cmd, .. } => {
+                            read_label(name, cmd, call.output.as_ref())
+                        }
                         _ => unreachable!(),
                     })
                     .unique();
@@ -314,8 +333,11 @@ impl ExecCell {
                 let mut lines = Vec::new();
                 for parsed in &call.parsed {
                     match parsed {
-                        ParsedCommand::Read { name, .. } => {
-                            lines.push(("Read", vec![name.clone().into()]));
+                        ParsedCommand::Read { name, cmd, .. } => {
+                            lines.push((
+                                "Read",
+                                vec![read_label(name, cmd, call.output.as_ref()).into()],
+                            ));
                         }
                         ParsedCommand::ListFiles { cmd, path } => {
                             lines.push(("List", vec![path.clone().unwrap_or(cmd.clone()).into()]));
@@ -977,6 +999,40 @@ mod tests {
     }
 
     #[test]
+    fn read_ranges_remain_distinct_in_exploring_group() {
+        let mut cell = new_active_exec_command(
+            "whole".into(),
+            vec!["cat".into(), "file.rs".into()],
+            codex_shell_command::parse_command::parse_command(&["cat".into(), "file.rs".into()]),
+            ExecCommandSource::Agent,
+            None,
+            false,
+        );
+        for (id, script) in [
+            ("first", "sed -n '1,20p' file.rs"),
+            ("second", "sed -n '21,40p' file.rs"),
+        ] {
+            let command = vec!["bash".into(), "-c".into(), script.into()];
+            let parsed = codex_shell_command::parse_command::parse_command(&command);
+            cell.add_call(id.into(), command, parsed, ExecCommandSource::Agent, None);
+        }
+        cell.complete_call(
+            "first",
+            CommandOutput::new(0, "Warning: truncated output\n".into()),
+            std::time::Duration::ZERO,
+        );
+        let rendered = cell
+            .display_lines(100)
+            .iter()
+            .map(render_line_text)
+            .join("\n");
+        insta::assert_snapshot!(rendered, @r"
+        • Exploring
+          └ Read file.rs (whole file), file.rs:1–20 [truncated], file.rs:21–40
+        ");
+    }
+
+    #[test]
     fn powershell_skill_read_snapshot() {
         let command = vec![
             "powershell.exe".to_string(),
@@ -1000,7 +1056,7 @@ mod tests {
 
         insta::assert_snapshot!(rendered, @r"
         • Exploring
-          └ Read SKILL.md
+          └ Read SKILL.md (range unspecified: Get-Content C:\skills\demo\SKILL.md)
         ");
     }
 

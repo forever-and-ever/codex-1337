@@ -99,18 +99,18 @@ async fn failed_exploration_keeps_overlapping_commands_active_until_all_finish()
     let cells = drain_insert_history(&mut rx);
     assert_eq!(cells.len(), 1);
     let history = lines_to_single_string(&cells[0]);
-    insta::assert_snapshot!(history, @r"
-• Explored
-  └ List missing
-    Read foo.txt, bar.txt
-");
+    insta::assert_snapshot!(history, @"
+    • Explored
+      └ List missing
+        Read foo.txt (whole file), bar.txt (whole file)
+    ");
 
     let later = begin_exec(&mut chat, "call-after-failure", "cat later.txt");
     end_exec(&mut chat, later, "later\n", "", /*exit_code*/ 0);
-    insta::assert_snapshot!(active_blob(&chat), @r"
-• Explored
-  └ Read later.txt
-");
+    insta::assert_snapshot!(active_blob(&chat), @"
+    • Explored
+      └ Read later.txt (whole file)
+    ");
 }
 
 #[tokio::test]
