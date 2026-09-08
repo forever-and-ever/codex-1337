@@ -33,11 +33,11 @@ use crate::{
     model::{Card, LiveSnapshot, Seat, snip},
     names::NameIndex,
     pinboard::Pinboard,
+    process_identity::ProcessKey,
     relay,
     rollout::{RolloutSummary, Rollouts, TurnState},
     roster::{Roster, Sighting as SessionSighting},
     site::{SessionKey, Site},
-    stasis::{ProcessKey, Quarry, Stasis},
     terminal::TerminalService,
     transcript::Transcripts,
     watchfire::Watchfire,
@@ -200,10 +200,7 @@ fn raid(
         }
     };
     let mut prior = None;
-    if let Err(error) = recon
-        .refresh_forest()
-        .and_then(|_| recon.project(Instant::now()))
-    {
+    if let Err(error) = recon.refresh_forest().and_then(|_| recon.project()) {
         publish_fault(repaint, latest, &error);
     } else {
         publish_changed(repaint, latest, &mut prior, recon.snapshot());
@@ -211,15 +208,7 @@ fn raid(
     let mut forest_audit = Instant::now() + FOREST_AUDIT;
     let mut integrity_audit = Instant::now() + INTEGRITY_AUDIT;
     while alive.load(Ordering::Acquire) {
-        let deadline = [
-            Some(forest_audit),
-            Some(integrity_audit),
-            recon.stasis.next_deadline(),
-        ]
-        .into_iter()
-        .flatten()
-        .min()
-        .unwrap_or_else(|| Instant::now() + INTEGRITY_AUDIT);
+        let deadline = forest_audit.min(integrity_audit);
         let timeout = deadline.saturating_duration_since(Instant::now());
         let readiness = match wait_for_signal(&recon, wake, timeout) {
             Ok(readiness) => readiness,
@@ -236,10 +225,10 @@ fn raid(
         }
 
         let now = Instant::now();
-        let mut dirty = execute_strikes(repaint, activation, strikes, &mut recon, now);
+        let mut dirty = execute_strikes(repaint, activation, strikes, &mut recon);
 
         if readiness[0] {
-            let demand = heed_desktop(&mut recon, now);
+            let demand = heed_desktop(&mut recon);
             dirty |= demand.projection;
             if demand.forest {
                 forest_audit = now;
@@ -260,20 +249,10 @@ fn raid(
             integrity_audit = now + INTEGRITY_AUDIT;
         }
         if dirty {
-            match recon.project(now) {
+            match recon.project() {
                 Ok(()) => publish_changed(repaint, latest, &mut prior, recon.snapshot()),
                 Err(error) => publish_fault(repaint, latest, &error),
             }
-        }
-        if recon
-            .stasis
-            .next_deadline()
-            .is_some_and(|deadline| deadline <= now)
-        {
-            recon.refresh_focus(now);
-            recon.stasis.freeze_due(now);
-            recon.refresh_focus(Instant::now());
-            publish_changed(repaint, latest, &mut prior, recon.snapshot());
         }
     }
 }
@@ -298,12 +277,11 @@ fn execute_strikes(
     activation: &Mutex<Option<Activation>>,
     strikes: &Receiver<Strike>,
     recon: &mut Recon,
-    now: Instant,
 ) -> bool {
     let mut struck = false;
     while let Ok(strike) = strikes.try_recv() {
         let conceal = matches!(strike.intent, Intent::Select | Intent::Fork | Intent::Open);
-        let succeeded = recon.execute(&strike, now).unwrap_or_else(|error| {
+        let succeeded = recon.execute(&strike).unwrap_or_else(|error| {
             eprintln!(
                 "codex-wrangler could not execute {:?} for {}: {error:#}",
                 strike.intent, strike.thread
@@ -332,17 +310,10 @@ struct DesktopDemand {
     forest: bool,
 }
 
-fn heed_desktop(recon: &mut Recon, now: Instant) -> DesktopDemand {
+fn heed_desktop(recon: &mut Recon) -> DesktopDemand {
     match recon.desktop.drain_events() {
-        Ok(signals) => {
-            let focus = signals.contains(&DesktopSignal::Focus);
-            if focus {
-                recon.refresh_focus(now);
-            }
-            desktop_demand(&signals)
-        }
+        Ok(signals) => desktop_demand(&signals),
         Err(error) => {
-            recon.stasis.focus_uncertain();
             eprintln!("codex-wrangler lost X11 focus truth: {error:#}");
             DesktopDemand {
                 projection: true,
@@ -447,7 +418,6 @@ struct Recon {
     relay_seats: HashMap<SessionKey, Seat>,
     semantic: Vec<Card>,
     codex_bodies: HashMap<String, CodexBody>,
-    stasis: Stasis,
     transcripts: Transcripts,
     watchfire: Watchfire,
     pinboard: Pinboard,
@@ -477,7 +447,6 @@ impl Recon {
             relay_seats: HashMap::new(),
             semantic: Vec::new(),
             codex_bodies: HashMap::new(),
-            stasis: Stasis::arm(),
             transcripts: Transcripts::default(),
             watchfire: Watchfire::kindle()?,
             pinboard: Pinboard::restore()?,
@@ -508,7 +477,7 @@ impl Recon {
         Ok(changed)
     }
 
-    fn project(&mut self, now: Instant) -> Result<()> {
+    fn project(&mut self) -> Result<()> {
         if let Some(codex) = &mut self.codex {
             codex.refresh_names()?;
             codex.reconcile_app_server_claims(&mut self.sightings)?;
@@ -519,16 +488,8 @@ impl Recon {
             }
         }
         let workspaces = self.workspace_numbers();
-        let active = match self.desktop.active_window() {
-            Ok(active) => active,
-            Err(error) => {
-                self.stasis.focus_uncertain();
-                return Err(error.context("read active X11 window"));
-            }
-        };
         let mut locator = SessionLocator::default();
         let mut cards = Vec::new();
-        let mut quarry = Vec::new();
         let mut watched = self
             .codex
             .as_ref()
@@ -576,11 +537,6 @@ impl Recon {
                             },
                         },
                     );
-                    quarry.push(Quarry {
-                        process: process.key,
-                        window: sighting.window,
-                        work: card.work,
-                    });
                 }
                 cards.push(card);
             }
@@ -595,7 +551,6 @@ impl Recon {
         for card in &cards {
             card.assert_lawful();
         }
-        self.stasis.observe(now, active, &quarry);
         self.watchfire.reconcile(watched)?;
         self.relay_seats = seat_relays(&self.relay_windows, &workspaces);
         self.codex_bodies = codex_bodies;
@@ -614,26 +569,8 @@ impl Recon {
             .unwrap_or_default()
     }
 
-    fn refresh_focus(&mut self, now: Instant) {
-        match self.desktop.active_window() {
-            Ok(active) => self.stasis.focus(now, active),
-            Err(error) => {
-                self.stasis.focus_uncertain();
-                eprintln!("codex-wrangler could not establish focus truth: {error:#}");
-            }
-        }
-    }
-
     fn snapshot(&self) -> LiveSnapshot {
         let mut cards = self.semantic.clone();
-        for card in &mut cards {
-            if card
-                .seat
-                .is_some_and(|seat| self.stasis.sleeping(seat.window))
-            {
-                card.work = Work::Sleep;
-            }
-        }
         cards.sort();
         LiveSnapshot {
             cards,
@@ -642,7 +579,7 @@ impl Recon {
         }
     }
 
-    fn execute(&mut self, strike: &Strike, now: Instant) -> Result<bool> {
+    fn execute(&mut self, strike: &Strike) -> Result<bool> {
         assert!(
             strike.site.local(),
             "local reconnaissance received a remote strike"
@@ -666,18 +603,18 @@ impl Recon {
         }
         if strike.harness != Harness::Codex {
             return match (strike.intent, card.seat) {
-                (Intent::Select, Some(seat)) => self.activate(seat.window, now),
+                (Intent::Select, Some(seat)) => self.activate(seat.window),
                 _ => Ok(false),
             };
         }
         match strike.intent {
-            Intent::Select => self.select_codex(&card, now),
+            Intent::Select => self.select_codex(&card),
             Intent::Fork => self.fork_codex(&card),
             Intent::Pin | Intent::Unpin => unreachable!("pin intent returned above"),
             Intent::Open => Ok(false),
             Intent::Dismiss => {
                 let forgotten = card.work == Work::Closed;
-                let succeeded = self.dismiss_codex(&card, now)?;
+                let succeeded = self.dismiss_codex(&card)?;
                 if succeeded && forgotten {
                     self.pinboard.set(card.harness, &card.thread, false);
                     self.pinboard.commit()?;
@@ -687,15 +624,12 @@ impl Recon {
         }
     }
 
-    fn activate(&mut self, window: u32, now: Instant) -> Result<bool> {
-        if !self.stasis.prepare_activation(now, window) {
-            anyhow::bail!("window {window} remains frozen");
-        }
+    fn activate(&mut self, window: u32) -> Result<bool> {
         self.desktop.activate(window)?;
         Ok(true)
     }
 
-    fn select_codex(&mut self, card: &Card, now: Instant) -> Result<bool> {
+    fn select_codex(&mut self, card: &Card) -> Result<bool> {
         if card.work == Work::Closed {
             let version = inspect_codex_version("inspect installed Codex version");
             return self.summon_codex(&card.thread, card.last_workspace, version);
@@ -718,14 +652,14 @@ impl Recon {
                     .get(&card.thread)
                     .copied()
                     .context("live Codex card has no process body")?;
-                self.retire(seat, now)?;
+                self.retire(seat)?;
                 return self.summon_codex(&card.thread, card.workspace(), version);
             }
         }
-        self.activate(seat.window, now)
+        self.activate(seat.window)
     }
 
-    fn dismiss_codex(&mut self, card: &Card, now: Instant) -> Result<bool> {
+    fn dismiss_codex(&mut self, card: &Card) -> Result<bool> {
         let codex = self.codex.as_mut().context("Codex adapter is absent")?;
         if card.work == Work::Closed {
             codex.roster.forget(&card.thread);
@@ -740,7 +674,7 @@ impl Recon {
             .get(&card.thread)
             .copied()
             .context("open Codex card has no process body")?;
-        self.retire(seat, now)?;
+        self.retire(seat)?;
         Ok(true)
     }
 
@@ -785,10 +719,7 @@ impl Recon {
         Ok(true)
     }
 
-    fn retire(&mut self, body: CodexBody, now: Instant) -> Result<()> {
-        if !self.stasis.prepare_retirement(now, body.seat.window) {
-            anyhow::bail!("Codex process {} remains frozen", body.process.pid);
-        }
+    fn retire(&mut self, body: CodexBody) -> Result<()> {
         if let Err(error) = self.desktop.close(body.seat.window) {
             eprintln!(
                 "codex-wrangler could not close terminal window {} cleanly: {error:#}",

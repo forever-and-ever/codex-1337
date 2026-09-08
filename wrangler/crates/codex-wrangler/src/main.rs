@@ -13,13 +13,13 @@ mod model;
 mod names;
 mod pinboard;
 mod posture;
+mod process_identity;
 mod recon;
 mod relay;
 mod rollout;
 mod roster;
 mod search;
 mod site;
-mod stasis;
 mod state;
 mod terminal;
 mod transcript;
@@ -37,9 +37,6 @@ use posture::Ledger;
 fn main() -> Result<()> {
     if matches!(integration::dispatch()?, integration::Dispatch::Exit) {
         return Ok(());
-    }
-    if stasis::thawguard_requested() {
-        return stasis::run_thawguard();
     }
     let invocation = Invocation::read()?;
     let trace = TraceGuard::arm()?;

@@ -84,10 +84,6 @@ impl Desktop {
         self.conn.stream().as_fd()
     }
 
-    pub fn active_window(&self) -> Result<Option<Window>> {
-        self.window(self.root, self.atoms.active)
-    }
-
     pub fn requires_action(&self, window: Window) -> bool {
         self.action_required.get(&window).copied().unwrap_or(false)
     }
