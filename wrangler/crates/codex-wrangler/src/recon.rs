@@ -29,14 +29,13 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension as _, params};
 use semver::Version;
 
 use crate::{
-    codex_rpc::CodexRpc,
     desktop::{Desktop, DesktopSignal},
     model::{Card, LiveSnapshot, Seat, snip},
     names::NameIndex,
     pinboard::Pinboard,
     relay,
     rollout::{RolloutSummary, Rollouts, TurnState},
-    roster::{AccountMark, Roster, Sighting as SessionSighting},
+    roster::{Roster, Sighting as SessionSighting},
     site::{SessionKey, Site},
     stasis::{ProcessKey, Quarry, Stasis},
     terminal::TerminalService,
@@ -698,33 +697,13 @@ impl Recon {
 
     fn select_codex(&mut self, card: &Card, now: Instant) -> Result<bool> {
         if card.work == Work::Closed {
-            let codex = self.codex.as_ref().context("Codex adapter is absent")?;
-            let home = codex.home.clone();
-            let active = inspect_account(&home, "bind resumed Codex login");
-            let rotated = active.as_ref().is_some_and(|active| {
-                codex
-                    .roster
-                    .get(&card.thread)
-                    .is_some_and(|session| session.account.rotated_to(active))
-            });
-            if rotated {
-                let _daemon_was_running = CodexRpc::reload_daemon_auth(&home)?;
-            }
             let version = inspect_codex_version("inspect installed Codex version");
-            return self.summon_codex(&card.thread, card.last_workspace, active, version);
+            return self.summon_codex(&card.thread, card.last_workspace, version);
         }
         let seat = card.seat.expect("live local Codex card owns a seat");
         if card.work == Work::Done {
             let codex = self.codex.as_mut().context("Codex adapter is absent")?;
-            let home = codex.home.clone();
-            let active = inspect_account(&home, "inspect current Codex login");
             let version = inspect_codex_version("inspect installed Codex version");
-            let rotated = active.as_ref().is_some_and(|active| {
-                codex
-                    .roster
-                    .get(&card.thread)
-                    .is_some_and(|session| session.account.rotated_to(active))
-            });
             let superseded = version.as_ref().is_some_and(|installed| {
                 codex
                     .roster
@@ -740,18 +719,7 @@ impl Recon {
                     .copied()
                     .context("live Codex card has no process body")?;
                 self.retire(seat, now)?;
-                return self.summon_codex(&card.thread, card.workspace(), active, version);
-            }
-            if rotated {
-                anyhow::ensure!(
-                    CodexRpc::reload_daemon_auth(&home)?,
-                    "the active Codex terminal has no app-server daemon socket"
-                );
-                let codex = self.codex.as_mut().context("Codex adapter is absent")?;
-                if let Some(active) = active {
-                    codex.roster.bind(&card.thread, active);
-                }
-                codex.commit()?;
+                return self.summon_codex(&card.thread, card.workspace(), version);
             }
         }
         self.activate(seat.window, now)
@@ -847,7 +815,6 @@ impl Recon {
         &mut self,
         thread_id: &str,
         workspace: Option<u32>,
-        active: Option<AccountMark>,
         version: Option<Version>,
     ) -> Result<bool> {
         let codex = self.codex.as_ref().context("Codex adapter is absent")?;
@@ -859,9 +826,6 @@ impl Recon {
         let home = codex.home.clone();
         self.launch_codex(thread_id, &cwd, workspace, &home, CodexLaunch::Resume)?;
         let codex = self.codex.as_mut().context("Codex adapter is absent")?;
-        if let Some(active) = active {
-            codex.roster.bind(thread_id, active);
-        }
         if let Some(version) = version {
             codex.roster.bind_version(thread_id, &version.to_string());
         }
@@ -919,13 +883,6 @@ fn codex_launch_path() -> Result<OsString> {
     let paths = std::iter::once(bin.clone())
         .chain(std::env::split_paths(&inherited).filter(|entry| entry != &bin));
     std::env::join_paths(paths).context("forge Codex launch PATH")
-}
-
-fn inspect_account(home: &Path, operation: &str) -> Option<AccountMark> {
-    CodexRpc::open(home)
-        .and_then(|mut rpc| rpc.account())
-        .map_err(|error| eprintln!("codex-wrangler could not {operation}: {error:#}"))
-        .ok()
 }
 
 fn inspect_codex_version(operation: &str) -> Option<Version> {

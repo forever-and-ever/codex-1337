@@ -1,5 +1,4 @@
 use std::{
-    fmt::Write as _,
     io::{BufRead as _, BufReader, Write as _},
     path::Path,
     process::{Child, ChildStdin, Command, Stdio},
@@ -10,9 +9,6 @@ use std::{
 
 use anyhow::{Context as _, Result, bail};
 use serde_json::{Value, json};
-use sha2::{Digest as _, Sha256};
-
-use crate::roster::{AccountMark, QuotaMark};
 
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(6);
 
@@ -72,58 +68,12 @@ impl CodexRpc {
         Ok(rpc)
     }
 
-    pub fn account(&mut self) -> Result<AccountMark> {
-        let account = self.request("account/read", &json!({ "refreshToken": false }))?;
-        let digest = account
-            .pointer("/account/email")
-            .and_then(Value::as_str)
-            .map(account_digest);
-        let limits = self.request("account/rateLimits/read", &json!({}))?;
-        let quotas = limits
-            .get("rateLimitsByLimitId")
-            .and_then(Value::as_object)
-            .into_iter()
-            .flat_map(serde_json::Map::values)
-            .filter_map(quota)
-            .collect::<Vec<_>>();
-        let quotas = if quotas.is_empty() {
-            limits
-                .get("rateLimits")
-                .and_then(quota)
-                .into_iter()
-                .collect()
-        } else {
-            quotas
-        };
-        Ok(AccountMark::current(digest, quotas))
-    }
-
     pub fn rename_thread(&mut self, thread: &str, name: &str) -> Result<()> {
         let _renamed = self.request(
             "thread/name/set",
             &json!({ "threadId": thread, "name": name }),
         )?;
         Ok(())
-    }
-
-    pub fn reload_daemon_auth(home: &Path) -> Result<bool> {
-        let socket = home.join("app-server-control/app-server-control.sock");
-        if !socket.exists() {
-            return Ok(false);
-        }
-        let output = Command::new("codex")
-            .args(["app-server", "daemon", "reload-auth"])
-            .env("CODEX_HOME", home)
-            .output()
-            .context("ask the Codex app-server daemon to reload authentication")?;
-        if !output.status.success() {
-            bail!(
-                "Codex app-server authentication reload exited with {}: {}",
-                output.status,
-                String::from_utf8_lossy(&output.stderr).trim()
-            );
-        }
-        Ok(true)
     }
 
     fn request(&mut self, method: &str, params: &Value) -> Result<Value> {
@@ -175,56 +125,5 @@ impl Drop for CodexRpc {
         if let Some(reader) = self.reader.take() {
             let _joined = reader.join();
         }
-    }
-}
-
-fn quota(value: &Value) -> Option<QuotaMark> {
-    let primary = value.get("primary")?;
-    Some(QuotaMark {
-        limit: value.get("limitId")?.as_str()?.to_owned(),
-        window_minutes: primary.get("windowDurationMins")?.as_i64()?,
-        resets_at: primary.get("resetsAt")?.as_i64()?,
-    })
-}
-
-fn account_digest(email: &str) -> String {
-    let digest = Sha256::digest(email.trim().to_ascii_lowercase());
-    let mut text = String::with_capacity(digest.len() * 2);
-    for byte in digest {
-        write!(&mut text, "{byte:02x}").expect("writing to a String cannot fail");
-    }
-    text
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn app_server_limit_projection_ignores_usage_and_preserves_account_phase() {
-        assert_eq!(
-            quota(&json!({
-                "limitId": "codex",
-                "primary": {
-                    "usedPercent": 98,
-                    "windowDurationMins": 10_080,
-                    "resetsAt": 1_786_160_091_i64
-                }
-            })),
-            Some(QuotaMark {
-                limit: "codex".to_owned(),
-                window_minutes: 10_080,
-                resets_at: 1_786_160_091,
-            })
-        );
-    }
-
-    #[test]
-    fn account_digest_is_canonical_and_nonrevealing() {
-        assert_eq!(
-            account_digest(" Keeper@Example.COM "),
-            account_digest("keeper@example.com")
-        );
-        assert!(!account_digest("keeper@example.com").contains("keeper"));
     }
 }

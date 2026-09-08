@@ -163,15 +163,6 @@ impl Roster {
         }
     }
 
-    pub fn bind(&mut self, thread: &str, account: AccountMark) {
-        if let Some(session) = self.sessions.get_mut(thread)
-            && session.account != account
-        {
-            session.account = account;
-            self.dirty = true;
-        }
-    }
-
     pub fn bind_version(&mut self, thread: &str, version: &str) {
         if let Some(session) = self.sessions.get_mut(thread)
             && session.cli_version.as_deref() != Some(version)

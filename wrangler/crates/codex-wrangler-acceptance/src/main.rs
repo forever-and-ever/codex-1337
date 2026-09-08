@@ -520,34 +520,9 @@ fn verify_session_lifecycle(
     verify_management_veto(story, fixture)?;
     pin_and_unpin(story, fixture)?;
     fork_and_return(testbed, story, app, fixture)?;
-    reload_auth_and_return(
-        testbed,
-        story,
-        app,
-        ROTATE,
-        &fixture.auth_reload_proof,
-        &fixture.roster,
-    )?;
-    demand(
-        !testbed
-            .private_path(format!("resume-proof-{ROTATE}"))?
-            .exists(),
-        "authentication rollover replaced the existing Codex terminal",
-    )?;
-    demand(
-        read_roster(&fixture.roster)?["sessions"][ROTATE]["account"]["account"].is_string(),
-        "rolled session was not rebound to the current Codex account",
-    )?;
     verify_terminal_supervision(app, &fixture.terminal_service_proof)?;
 
-    select_and_return(
-        testbed,
-        story,
-        app,
-        DORMANT,
-        &fixture.dormant_resume,
-        &fixture.roster,
-    )?;
+    select_and_return(testbed, story, app, DORMANT, &fixture.dormant_resume)?;
     demand(
         fs::read_to_string(&fixture.dormant_resume).is_ok_and(|proof| proof.trim() == "resume 6"),
         "resurrected session did not return to its remembered workspace",
@@ -557,14 +532,7 @@ fn verify_session_lifecycle(
         "reopening a closed session mutated Codex archive state",
     )?;
 
-    select_and_return(
-        testbed,
-        story,
-        app,
-        DONE,
-        &fixture.version_resume,
-        &fixture.roster,
-    )?;
+    select_and_return(testbed, story, app, DONE, &fixture.version_resume)?;
     demand(
         fs::read_to_string(&fixture.version_resume).is_ok_and(|proof| proof.trim() == "resume 7"),
         "superseded Codex session did not roll onto the installed version",
@@ -878,7 +846,6 @@ fn select_and_return(
     app: &Application<'_>,
     thread: &str,
     proof: &Path,
-    roster: &Path,
 ) -> Result<()> {
     story.session().focus()?;
     let (strike_x, strike_y) = seize_card(story, thread, "resume")?;
@@ -897,11 +864,6 @@ fn select_and_return(
         "Wrangler to conceal itself after resuming a Codex session",
         || Ok(wrangler_count(testbed)? == Some(0)),
     )?;
-    app.wait_until(
-        Duration::from_secs(8),
-        "resumed Codex session to finish its account binding",
-        || Ok(read_roster(roster)?["sessions"][thread]["account"]["account"].is_string()),
-    )?;
     let _returned = story.session().key(Key::Function(7))?;
     app.wait_until(
         Duration::from_secs(8),
@@ -913,49 +875,6 @@ fn select_and_return(
     // appear until the gallery returns and presents another frame.
     let _landed = story.wait(Condition::new(
         "Codex session strike to leave flight",
-        |state: &Observation| state.flight == Flight::Grounded,
-    ))?;
-    Ok(())
-}
-
-fn reload_auth_and_return(
-    testbed: &Testbed,
-    story: &mut Story<'_, '_, Observation>,
-    app: &Application<'_>,
-    thread: &str,
-    proof: &Path,
-    roster: &Path,
-) -> Result<()> {
-    story.session().focus()?;
-    let (strike_x, strike_y) = seize_card(story, thread, "reload authentication")?;
-    let selected = story.session().click(strike_x, strike_y, Button::Primary)?;
-    let _armed = story.reaction(selected).until(Condition::new(
-        "account rollover strike to enter flight",
-        |state: &Observation| state.flight == Flight::Striking,
-    ))?;
-    app.wait_until(
-        Duration::from_secs(10),
-        "Codex daemon to reload its account",
-        || Ok(proof.is_file()),
-    )?;
-    app.wait_until(
-        Duration::from_secs(8),
-        "Wrangler to yield to the existing Codex terminal",
-        || Ok(wrangler_count(testbed)? == Some(0)),
-    )?;
-    app.wait_until(
-        Duration::from_secs(8),
-        "existing Codex session to finish its account binding",
-        || Ok(read_roster(roster)?["sessions"][thread]["account"]["account"].is_string()),
-    )?;
-    let _returned = story.session().key(Key::Function(7))?;
-    app.wait_until(
-        Duration::from_secs(8),
-        "i3 to return to the fixed Wrangler workspace after account reload",
-        || Ok(wrangler_count(testbed)? == Some(1)),
-    )?;
-    let _landed = story.wait(Condition::new(
-        "account rollover strike to leave flight",
         |state: &Observation| state.flight == Flight::Grounded,
     ))?;
     Ok(())
@@ -2622,7 +2541,6 @@ struct Fixture {
     configuration_path: PathBuf,
     pinboard: PathBuf,
     index: PathBuf,
-    auth_reload_proof: PathBuf,
     fork_launch: PathBuf,
     version_resume: PathBuf,
     dormant_resume: PathBuf,
@@ -2723,7 +2641,6 @@ impl Fixture {
             configuration_path: testbed.private_path("xdg/config/codex-wrangler/config.toml")?,
             pinboard: testbed.private_path("xdg/state/codex-wrangler/pinned-sessions.json")?,
             index: db_path,
-            auth_reload_proof: testbed.private_path("auth-reload-proof")?,
             fork_launch: testbed.private_path(format!("fork-proof-{TURN}"))?,
             version_resume: testbed.private_path(format!("resume-proof-{DONE}"))?,
             dormant_resume,
