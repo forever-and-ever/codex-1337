@@ -78,6 +78,7 @@ async fn refresh_without_id_token() {
     );
     let updated = super::persist_tokens(
         &storage,
+        &storage.load().unwrap().unwrap(),
         /*id_token*/ None,
         Some("new-access-token".to_string()),
         Some("new-refresh-token".to_string()),
@@ -97,7 +98,7 @@ fn login_with_api_key_overwrites_existing_auth_json() {
     let stale_auth = json!({
         "OPENAI_API_KEY": "sk-old",
         "tokens": {
-            "id_token": "stale.header.payload",
+            "id_token": "e30.e30.c2ln",
             "access_token": "stale-access",
             "refresh_token": "stale-refresh",
             "account_id": "stale-acc"

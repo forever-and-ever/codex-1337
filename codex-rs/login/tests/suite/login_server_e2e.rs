@@ -108,7 +108,7 @@ async fn end_to_end_login_flow_persists_auth_json() -> Result<()> {
     let stale_auth = serde_json::json!({
         "OPENAI_API_KEY": "sk-stale",
         "tokens": {
-            "id_token": "stale.header.payload",
+            "id_token": "e30.e30.c2ln",
             "access_token": "stale-access",
             "refresh_token": "stale-refresh",
             "account_id": "stale-acc"

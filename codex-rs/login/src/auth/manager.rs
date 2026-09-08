@@ -72,6 +72,9 @@ use codex_protocol::protocol::SessionSource;
 use serde_json::Value;
 use thiserror::Error;
 
+mod account_scope;
+pub use account_scope::PreparedAccount;
+
 /// Authentication mechanism used by the current user.
 #[derive(Debug, Clone)]
 pub enum CodexAuth {
@@ -378,6 +381,7 @@ impl CodexAuth {
 
         let storage_mode = auth_dot_json.storage_mode(auth_credentials_store_mode);
         let client = create_default_auth_client(&refresh_token_endpoint(), auth_route_config)?;
+        let account_id = super::accounts::identity(&auth_dot_json);
         let state = ChatgptAuthState {
             auth_dot_json: Arc::new(Mutex::new(Some(auth_dot_json))),
             client,
@@ -385,11 +389,19 @@ impl CodexAuth {
 
         match auth_mode {
             AuthMode::Chatgpt => {
-                let storage = create_auth_storage(
+                let mut storage = create_auth_storage(
                     codex_home.to_path_buf(),
                     storage_mode,
                     keyring_backend_kind,
                 );
+                if let Some(id) = account_id
+                    && storage_mode != AuthCredentialsStoreMode::Ephemeral
+                {
+                    storage = Arc::new(super::accounts::AccountStorage {
+                        backend: storage,
+                        id,
+                    });
+                }
                 Ok(Self::Chatgpt(ChatgptAuth { state, storage }))
             }
             AuthMode::ChatgptAuthTokens => Ok(Self::ChatgptAuthTokens(ChatgptAuthTokens { state })),
@@ -897,13 +909,17 @@ fn persist_agent_identity_record(
     let mut guard = auth_dot_json
         .lock()
         .map_err(|_| std::io::Error::other("failed to lock auth state"))?;
-    let mut auth = storage
+    let previous = storage
         .load()?
         .or_else(|| guard.clone())
         .ok_or_else(|| std::io::Error::other("auth data is not available"))?;
+    let mut auth = previous.clone();
     auth.agent_identity = Some(AgentIdentityStorage::Record(record));
-    storage.save(&auth)?;
-    *guard = Some(auth);
+    if storage.compare_exchange(&previous, &auth)? {
+        *guard = Some(auth);
+    } else {
+        *guard = storage.load()?;
+    }
     Ok(())
 }
 
@@ -933,8 +949,7 @@ fn read_non_empty_env_var(key: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-/// Delete the auth.json file inside `codex_home` if it exists. Returns `Ok(true)`
-/// if a file was removed, `Ok(false)` if no auth file was present.
+/// Remove the active login, preserving other saved accounts in the same credential store.
 pub fn logout(
     codex_home: &Path,
     auth_credentials_store_mode: AuthCredentialsStoreMode,
@@ -945,7 +960,29 @@ pub fn logout(
         auth_credentials_store_mode,
         keyring_backend_kind,
     );
-    storage.delete()
+    if auth_credentials_store_mode == AuthCredentialsStoreMode::Ephemeral {
+        return storage.delete();
+    }
+    let Some(active) = storage.load()? else {
+        return Ok(false);
+    };
+    if let Some(id) = super::accounts::identity(&active) {
+        return super::accounts::AccountStorage {
+            backend: storage,
+            id,
+        }
+        .delete();
+    }
+    let _guard = super::storage::credential_lock(codex_home)?;
+    if let Some(mut document) = storage.read()?
+        && let Some((_, next)) = document.wrangler_accounts.pop_first()
+    {
+        document.active = next;
+        storage.write(&document)?;
+        Ok(true)
+    } else {
+        storage.delete()
+    }
 }
 
 pub async fn logout_with_revoke(
@@ -968,14 +1005,25 @@ pub async fn logout_with_revoke(
     if let Err(err) = revoke_auth_tokens(auth_dot_json.as_ref(), auth_route_config).await {
         tracing::warn!("failed to revoke auth tokens during logout: {err}");
     }
-    logout_all_stores(
-        codex_home,
-        auth_credentials_store_mode,
-        keyring_backend_kind,
-    )
+    if auth_credentials_store_mode != AuthCredentialsStoreMode::Ephemeral
+        && let Some(id) = auth_dot_json.as_ref().and_then(super::accounts::identity)
+    {
+        let backend = create_auth_storage(
+            codex_home.to_path_buf(),
+            auth_credentials_store_mode,
+            keyring_backend_kind,
+        );
+        super::accounts::AccountStorage { backend, id }.delete()
+    } else {
+        logout_all_stores(
+            codex_home,
+            auth_credentials_store_mode,
+            keyring_backend_kind,
+        )
+    }
 }
 
-/// Writes an `auth.json` that contains only the API key.
+/// Select the API key login while retaining saved ChatGPT accounts.
 pub fn login_with_api_key(
     codex_home: &Path,
     api_key: &str,
@@ -1555,13 +1603,12 @@ async fn load_auth(
 // Persist refreshed tokens into auth storage and update last_refresh.
 fn persist_tokens(
     storage: &Arc<dyn AuthStorageBackend>,
+    previous: &AuthDotJson,
     id_token: Option<String>,
     access_token: Option<String>,
     refresh_token: Option<String>,
 ) -> std::io::Result<AuthDotJson> {
-    let mut auth_dot_json = storage
-        .load()?
-        .ok_or(std::io::Error::other("Token data is not available."))?;
+    let mut auth_dot_json = previous.clone();
 
     let tokens = auth_dot_json.tokens.get_or_insert_with(TokenData::default);
     if let Some(id_token) = id_token {
@@ -1574,8 +1621,13 @@ fn persist_tokens(
         tokens.refresh_token = refresh_token;
     }
     auth_dot_json.last_refresh = Some(Utc::now());
-    storage.save(&auth_dot_json)?;
-    Ok(auth_dot_json)
+    if storage.compare_exchange(previous, &auth_dot_json)? {
+        Ok(auth_dot_json)
+    } else {
+        storage
+            .load()?
+            .ok_or_else(|| std::io::Error::other("This account has been removed; log in again."))
+    }
 }
 
 // Requests refreshed ChatGPT OAuth tokens from the auth service using a refresh token.
@@ -2022,16 +2074,12 @@ impl UnauthorizedRecovery {
     }
 }
 
-/// Central manager providing a single source of truth for auth.json derived
-/// authentication data. It loads once (or on preference change) and then
-/// hands out cloned `CodexAuth` values so the rest of the program has a
-/// consistent snapshot.
-///
-/// External modifications to `auth.json` will NOT be observed until
-/// `reload()` is called explicitly. This matches the design goal of avoiding
-/// different parts of the program seeing inconsistent auth data mid‑run.
+/// Owns a credential source, cache, and refresh serialization.
+/// Conversation managers pin a saved identity and reload it before use;
+/// other managers retain the active source's cache and reload behavior.
 pub struct AuthManager {
     codex_home: PathBuf,
+    account_scope: RwLock<Option<String>>,
     inner: RwLock<CachedAuth>,
     auth_change_tx: watch::Sender<u64>,
     enable_codex_api_key_env: bool,
@@ -2165,6 +2213,7 @@ impl AuthManager {
         let (auth_change_tx, _auth_change_rx) = watch::channel(0);
         Self {
             codex_home,
+            account_scope: RwLock::new(None),
             inner: RwLock::new(CachedAuth {
                 auth: managed_auth,
                 permanent_refresh_failure: None,
@@ -2202,6 +2251,7 @@ impl AuthManager {
 
         Arc::new(Self {
             codex_home: PathBuf::from("non-existent"),
+            account_scope: RwLock::new(None),
             inner: RwLock::new(cached),
             auth_change_tx,
             enable_codex_api_key_env: false,
@@ -2230,6 +2280,7 @@ impl AuthManager {
         let (auth_change_tx, _auth_change_rx) = watch::channel(0);
         Arc::new(Self {
             codex_home,
+            account_scope: RwLock::new(None),
             inner: RwLock::new(cached),
             auth_change_tx,
             enable_codex_api_key_env: false,
@@ -2262,6 +2313,7 @@ impl AuthManager {
         let (auth_change_tx, _auth_change_rx) = watch::channel(0);
         Arc::new(Self {
             codex_home: PathBuf::from("non-existent"),
+            account_scope: RwLock::new(None),
             inner: RwLock::new(cached),
             auth_change_tx,
             enable_codex_api_key_env: false,
@@ -2289,6 +2341,7 @@ impl AuthManager {
         let (auth_change_tx, _auth_change_rx) = watch::channel(0);
         Arc::new(Self {
             codex_home: PathBuf::from("non-existent"),
+            account_scope: RwLock::new(None),
             inner: RwLock::new(CachedAuth {
                 auth: None,
                 permanent_refresh_failure: None,
@@ -2343,6 +2396,11 @@ impl AuthManager {
     /// a guarded reload and then refreshes only if the on-disk auth is unchanged.
     #[instrument(level = "trace", skip_all)]
     pub async fn auth(&self) -> Option<CodexAuth> {
+        if self.is_account_scoped() {
+            // Other conversations and `codex login` can refresh or remove this
+            // identity. Resolve it before use, never through the global login.
+            Box::pin(self.reload()).await;
+        }
         if self.has_external_auth() {
             self.reload().await;
             return self.auth_cached();
@@ -2424,8 +2482,15 @@ impl AuthManager {
     /// Reloads auth from the active source. Returns whether the auth value changed.
     pub async fn reload(&self) -> bool {
         tracing::info!("Reloading auth");
+        let expected_scope = self.read_account_scope().clone();
+        let revision = *self.auth_change_tx.borrow();
         let new_auth = self.load_auth().await;
-        self.set_cached_auth(new_auth)
+        let scope = self.read_account_scope();
+        if *scope != expected_scope {
+            return false;
+        }
+        self.set_cached_auth_at_revision(new_auth, Some(revision))
+            .unwrap_or(false)
     }
 
     async fn reload_if_account_id_matches(
@@ -2440,7 +2505,13 @@ impl AuthManager {
             }
         };
 
+        let expected_scope = self.read_account_scope().clone();
+        let revision = *self.auth_change_tx.borrow();
         let new_auth = self.load_auth().await;
+        let scope = self.read_account_scope();
+        if *scope != expected_scope {
+            return ReloadOutcome::Skipped;
+        }
         let new_account_id = new_auth.as_ref().and_then(CodexAuth::get_account_id);
 
         if new_account_id.as_deref() != Some(expected_account_id) {
@@ -2455,8 +2526,8 @@ impl AuthManager {
         let cached_before_reload = self.auth_cached();
         let auth_changed =
             !Self::auths_equal_for_refresh(cached_before_reload.as_ref(), new_auth.as_ref());
-        self.set_cached_auth(new_auth);
-        if auth_changed {
+        let published = self.set_cached_auth_at_revision(new_auth, Some(revision));
+        if auth_changed || published.is_none() {
             ReloadOutcome::ReloadedChanged
         } else {
             ReloadOutcome::ReloadedNoChange
@@ -2518,6 +2589,10 @@ impl AuthManager {
     }
 
     async fn load_auth(&self) -> Option<CodexAuth> {
+        let account = self.read_account_scope().clone();
+        if let Some(account) = account {
+            return self.load_saved_account(&account).await.ok();
+        }
         if let Some(external_auth) = self.external_auth_provider() {
             let cached_auth = self.auth_cached();
             if cached_auth
@@ -2570,7 +2645,20 @@ impl AuthManager {
     }
 
     fn set_cached_auth(&self, new_auth: Option<CodexAuth>) -> bool {
+        self.set_cached_auth_at_revision(new_auth, None)
+            .unwrap_or(false)
+    }
+
+    // Caller holds the selector lock when selection could race this publication.
+    fn set_cached_auth_at_revision(
+        &self,
+        new_auth: Option<CodexAuth>,
+        revision: Option<u64>,
+    ) -> Option<bool> {
         if let Ok(mut guard) = self.inner.write() {
+            if revision.is_some_and(|revision| revision != *self.auth_change_tx.borrow()) {
+                return None;
+            }
             let previous = guard.auth.as_ref();
             let changed = !AuthManager::auths_equal(previous, new_auth.as_ref());
             let auth_changed_for_refresh =
@@ -2583,9 +2671,9 @@ impl AuthManager {
             if auth_changed_for_refresh {
                 self.auth_change_tx.send_modify(|revision| *revision += 1);
             }
-            changed
+            Some(changed)
         } else {
-            false
+            None
         }
     }
 
@@ -2593,9 +2681,9 @@ impl AuthManager {
         &self,
         external_auth: Arc<dyn ExternalAuth>,
     ) -> Result<(), RefreshTokenError> {
-        if self.workload_identity_selected {
+        if self.workload_identity_selected || self.is_account_scoped() {
             return Err(permanent_external_auth_error(
-                "workload identity auth cannot be replaced at runtime",
+                "host-managed or conversation-scoped auth cannot be replaced by external auth",
             ));
         }
         self.install_external_auth(external_auth).await
@@ -2859,17 +2947,24 @@ impl AuthManager {
         result
     }
 
-    /// Log out by deleting the on‑disk auth.json (if present). Returns Ok(true)
-    /// if a file was removed, Ok(false) if no auth file existed. On success,
-    /// reloads the in‑memory auth cache so callers immediately observe the
-    /// unauthenticated state.
+    /// Remove the selected login and reload the cache, preserving other accounts.
+    /// A conversation's selector remains bound even when its credentials are gone.
     pub async fn logout(&self) -> std::io::Result<bool> {
         self.ensure_logout_allowed()?;
-        let removed = logout_all_stores(
-            &self.codex_home,
-            self.auth_credentials_store_mode,
-            self.keyring_backend_kind,
-        )?;
+        let removed = if let Some(id) = self.selected_account_id() {
+            let backend = create_auth_storage(
+                self.codex_home.clone(),
+                self.auth_credentials_store_mode,
+                self.keyring_backend_kind,
+            );
+            super::accounts::AccountStorage { backend, id }.delete()?
+        } else {
+            logout_all_stores(
+                &self.codex_home,
+                self.auth_credentials_store_mode,
+                self.keyring_backend_kind,
+            )?
+        };
         // Always reload to clear any cached auth (even if file absent).
         self.clear_external_auth();
         self.reload().await;
@@ -2878,6 +2973,7 @@ impl AuthManager {
 
     pub async fn logout_with_revoke(&self) -> std::io::Result<bool> {
         self.ensure_logout_allowed()?;
+        let selected = self.selected_account_id();
         let auth_dot_json = self
             .auth_cached()
             .and_then(|auth| auth.get_current_auth_json());
@@ -2885,11 +2981,20 @@ impl AuthManager {
         {
             tracing::warn!("failed to revoke auth tokens during logout: {err}");
         }
-        let result = logout_all_stores(
-            &self.codex_home,
-            self.auth_credentials_store_mode,
-            self.keyring_backend_kind,
-        )?;
+        let result = if let Some(id) = selected {
+            let backend = create_auth_storage(
+                self.codex_home.clone(),
+                self.auth_credentials_store_mode,
+                self.keyring_backend_kind,
+            );
+            super::accounts::AccountStorage { backend, id }.delete()?
+        } else {
+            logout_all_stores(
+                &self.codex_home,
+                self.auth_credentials_store_mode,
+                self.keyring_backend_kind,
+            )?
+        };
         // Always reload to clear any cached auth (even if file absent).
         self.clear_external_auth();
         self.reload().await;
@@ -3014,10 +3119,42 @@ impl AuthManager {
         auth: &ChatgptAuth,
         refresh_token: String,
     ) -> Result<(), RefreshTokenError> {
+        // Managers and processes share rotating refresh tokens. Serialize exchanges,
+        // not logins; compare_exchange below lets a newer login win while HTTP is in flight.
+        let home = self.codex_home.clone();
+        let _exchange = if self.auth_credentials_store_mode == AuthCredentialsStoreMode::Ephemeral {
+            None
+        } else {
+            Some(
+                tokio::task::spawn_blocking(move || {
+                    let mut options = std::fs::OpenOptions::new();
+                    options.read(true).write(true).create(true).truncate(false);
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::OpenOptionsExt;
+                        options.mode(0o600);
+                    }
+                    let file = options.open(home.join("auth.refresh.lock"))?;
+                    file.lock()?;
+                    Ok::<_, std::io::Error>(file)
+                })
+                .await
+                .map_err(std::io::Error::other)??,
+            )
+        };
+        let previous = auth
+            .storage()
+            .load()?
+            .ok_or_else(|| std::io::Error::other("This account has been removed; log in again."))?;
+        if previous.tokens != auth.current_auth_json().and_then(|auth| auth.tokens) {
+            self.reload().await;
+            return Ok(());
+        }
         let refresh_response = request_chatgpt_token_refresh(refresh_token, auth.client()).await?;
 
         persist_tokens(
             auth.storage(),
+            &previous,
             refresh_response.id_token,
             refresh_response.access_token,
             refresh_response.refresh_token,

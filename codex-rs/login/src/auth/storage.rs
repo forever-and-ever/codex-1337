@@ -6,6 +6,7 @@ use sha2::Digest;
 use sha2::Sha256;
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::fs;
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::Read;
@@ -20,6 +21,7 @@ use tracing::warn;
 
 use super::BedrockAccessKeysAuth;
 use super::BedrockApiKeyAuth;
+use super::accounts::AuthDocument;
 use crate::token_data::TokenData;
 use codex_agent_identity::AgentIdentityJwtClaims;
 use codex_agent_identity::decode_agent_identity_jwt;
@@ -165,9 +167,70 @@ pub(super) fn delete_file_if_exists(codex_home: &Path) -> std::io::Result<bool> 
 }
 
 pub(super) trait AuthStorageBackend: Debug + Send + Sync {
-    fn load(&self) -> std::io::Result<Option<AuthDotJson>>;
-    fn save(&self, auth: &AuthDotJson) -> std::io::Result<()>;
+    fn is_ephemeral(&self) -> bool {
+        false
+    }
+    fn home(&self) -> &Path;
+    fn read(&self) -> std::io::Result<Option<AuthDocument>>;
+    fn write(&self, document: &AuthDocument) -> std::io::Result<()>;
+    fn load(&self) -> std::io::Result<Option<AuthDotJson>> {
+        Ok(self.read()?.map(|document| document.active))
+    }
+    fn save(&self, auth: &AuthDotJson) -> std::io::Result<()> {
+        let _guard = credential_lock(self.home())?;
+        let mut document = self
+            .read()?
+            .unwrap_or_else(|| AuthDocument::new(auth.clone()));
+        document.retain_active();
+        document.active = auth.clone();
+        if let Some(id) = super::accounts::identity(auth) {
+            document.wrangler_accounts.remove(&id);
+        }
+        self.write(&document)
+    }
+    /// A delayed refresh must not overwrite a newer login or resurrect a removed account.
+    fn compare_exchange(
+        &self,
+        previous: &AuthDotJson,
+        updated: &AuthDotJson,
+    ) -> std::io::Result<bool> {
+        let _guard = credential_lock(self.home())?;
+        let Some(mut document) = self.read()? else {
+            return Ok(false);
+        };
+        let id = super::accounts::identity(previous);
+        if super::accounts::identity(updated) != id {
+            return Err(std::io::Error::other(
+                "Token refresh changed account identity.",
+            ));
+        }
+        let target = if document.active == *previous {
+            &mut document.active
+        } else if let Some(record) = id
+            .as_ref()
+            .and_then(|id| document.wrangler_accounts.get_mut(id))
+            && record == previous
+        {
+            record
+        } else {
+            return Ok(false);
+        };
+        *target = updated.clone();
+        self.write(&document)?;
+        Ok(true)
+    }
     fn delete(&self) -> std::io::Result<bool>;
+}
+
+pub(super) fn credential_lock(home: &Path) -> std::io::Result<File> {
+    fs::create_dir_all(home)?;
+    let mut options = OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let file = options.open(home.join("auth.lock"))?;
+    file.lock()?;
+    Ok(file)
 }
 
 #[derive(Clone, Debug)]
@@ -180,22 +243,31 @@ impl FileAuthStorage {
         Self { codex_home }
     }
 
+    #[cfg(test)]
     /// Attempt to read and parse the `auth.json` file in the given `CODEX_HOME` directory.
     /// Returns the full AuthDotJson structure.
     pub(super) fn try_read_auth_json(&self, auth_file: &Path) -> std::io::Result<AuthDotJson> {
+        Ok(self.read_document(auth_file)?.active)
+    }
+
+    fn read_document(&self, auth_file: &Path) -> std::io::Result<AuthDocument> {
         let mut file = File::open(auth_file)?;
         let mut contents = String::new();
         file.read_to_string(&mut contents)?;
-        let auth_dot_json: AuthDotJson = serde_json::from_str(&contents)?;
+        let auth_dot_json = serde_json::from_str(&contents)?;
 
         Ok(auth_dot_json)
     }
 }
 
 impl AuthStorageBackend for FileAuthStorage {
-    fn load(&self) -> std::io::Result<Option<AuthDotJson>> {
+    fn home(&self) -> &Path {
+        &self.codex_home
+    }
+
+    fn read(&self) -> std::io::Result<Option<AuthDocument>> {
         let auth_file = get_auth_file(&self.codex_home);
-        let auth_dot_json = match self.try_read_auth_json(&auth_file) {
+        let auth_dot_json = match self.read_document(&auth_file) {
             Ok(auth) => auth,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(err) => return Err(err),
@@ -203,22 +275,19 @@ impl AuthStorageBackend for FileAuthStorage {
         Ok(Some(auth_dot_json))
     }
 
-    fn save(&self, auth_dot_json: &AuthDotJson) -> std::io::Result<()> {
+    fn write(&self, auth_dot_json: &AuthDocument) -> std::io::Result<()> {
         let auth_file = get_auth_file(&self.codex_home);
 
         if let Some(parent) = auth_file.parent() {
             std::fs::create_dir_all(parent)?;
         }
         let json_data = serde_json::to_string_pretty(auth_dot_json)?;
-        let mut options = OpenOptions::new();
-        options.truncate(true).write(true).create(true);
-        #[cfg(unix)]
-        {
-            options.mode(0o600);
-        }
-        let mut file = options.open(auth_file)?;
+        let mut file = tempfile::NamedTempFile::new_in(&self.codex_home)?;
         file.write_all(json_data.as_bytes())?;
-        file.flush()?;
+        file.as_file().sync_all()?;
+        file.persist(auth_file).map_err(|error| error.error)?;
+        #[cfg(unix)]
+        File::open(&self.codex_home)?.sync_all()?;
         Ok(())
     }
 
@@ -262,7 +331,7 @@ impl DirectKeyringAuthStorage {
         }
     }
 
-    fn load_from_keyring(&self, key: &str) -> std::io::Result<Option<AuthDotJson>> {
+    fn load_from_keyring(&self, key: &str) -> std::io::Result<Option<AuthDocument>> {
         match self.keyring_store.load(KEYRING_SERVICE, key) {
             Ok(Some(serialized)) => serde_json::from_str(&serialized).map(Some).map_err(|err| {
                 std::io::Error::other(format!(
@@ -293,12 +362,16 @@ impl DirectKeyringAuthStorage {
 }
 
 impl AuthStorageBackend for DirectKeyringAuthStorage {
-    fn load(&self) -> std::io::Result<Option<AuthDotJson>> {
+    fn home(&self) -> &Path {
+        &self.codex_home
+    }
+
+    fn read(&self) -> std::io::Result<Option<AuthDocument>> {
         let key = compute_store_key(&self.codex_home)?;
         self.load_from_keyring(&key)
     }
 
-    fn save(&self, auth: &AuthDotJson) -> std::io::Result<()> {
+    fn write(&self, auth: &AuthDocument) -> std::io::Result<()> {
         let key = compute_store_key(&self.codex_home)?;
         // Simpler error mapping per style: prefer method reference over closure
         let serialized = serde_json::to_string(auth).map_err(std::io::Error::other)?;
@@ -356,7 +429,11 @@ impl SecretsKeyringAuthStorage {
 }
 
 impl AuthStorageBackend for SecretsKeyringAuthStorage {
-    fn load(&self) -> std::io::Result<Option<AuthDotJson>> {
+    fn home(&self) -> &Path {
+        &self.codex_home
+    }
+
+    fn read(&self) -> std::io::Result<Option<AuthDocument>> {
         match self
             .secrets_manager
             .get(&SecretScope::Global, &CODEX_AUTH_SECRET_NAME)
@@ -374,7 +451,7 @@ impl AuthStorageBackend for SecretsKeyringAuthStorage {
         }
     }
 
-    fn save(&self, auth: &AuthDotJson) -> std::io::Result<()> {
+    fn write(&self, auth: &AuthDocument) -> std::io::Result<()> {
         let serialized = serde_json::to_string(auth).map_err(std::io::Error::other)?;
         self.secrets_manager
             .set(&SecretScope::Global, &CODEX_AUTH_SECRET_NAME, &serialized)
@@ -429,23 +506,27 @@ impl AutoAuthStorage {
 }
 
 impl AuthStorageBackend for AutoAuthStorage {
-    fn load(&self) -> std::io::Result<Option<AuthDotJson>> {
-        match self.keyring_storage.load() {
+    fn home(&self) -> &Path {
+        &self.file_storage.codex_home
+    }
+
+    fn read(&self) -> std::io::Result<Option<AuthDocument>> {
+        match self.keyring_storage.read() {
             Ok(Some(auth)) => Ok(Some(auth)),
-            Ok(None) => self.file_storage.load(),
+            Ok(None) => self.file_storage.read(),
             Err(err) => {
                 warn!("failed to load CLI auth from keyring, falling back to file storage: {err}");
-                self.file_storage.load()
+                self.file_storage.read()
             }
         }
     }
 
-    fn save(&self, auth: &AuthDotJson) -> std::io::Result<()> {
-        match self.keyring_storage.save(auth) {
+    fn write(&self, auth: &AuthDocument) -> std::io::Result<()> {
+        match self.keyring_storage.write(auth) {
             Ok(()) => Ok(()),
             Err(err) => {
                 warn!("failed to save auth to keyring, falling back to file storage: {err}");
-                self.file_storage.save(auth)
+                self.file_storage.write(auth)
             }
         }
     }
@@ -457,7 +538,7 @@ impl AuthStorageBackend for AutoAuthStorage {
 }
 
 // A global in-memory store for mapping codex_home -> AuthDotJson.
-static EPHEMERAL_AUTH_STORE: Lazy<Mutex<HashMap<String, AuthDotJson>>> =
+static EPHEMERAL_AUTH_STORE: Lazy<Mutex<HashMap<String, AuthDocument>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Clone, Debug)]
@@ -472,7 +553,7 @@ impl EphemeralAuthStorage {
 
     fn with_store<F, T>(&self, action: F) -> std::io::Result<T>
     where
-        F: FnOnce(&mut HashMap<String, AuthDotJson>, String) -> std::io::Result<T>,
+        F: FnOnce(&mut HashMap<String, AuthDocument>, String) -> std::io::Result<T>,
     {
         let key = compute_store_key(&self.codex_home)?;
         let mut store = EPHEMERAL_AUTH_STORE
@@ -483,14 +564,47 @@ impl EphemeralAuthStorage {
 }
 
 impl AuthStorageBackend for EphemeralAuthStorage {
-    fn load(&self) -> std::io::Result<Option<AuthDotJson>> {
+    fn is_ephemeral(&self) -> bool {
+        true
+    }
+    fn home(&self) -> &Path {
+        &self.codex_home
+    }
+
+    fn read(&self) -> std::io::Result<Option<AuthDocument>> {
         self.with_store(|store, key| Ok(store.get(&key).cloned()))
     }
 
-    fn save(&self, auth: &AuthDotJson) -> std::io::Result<()> {
+    fn write(&self, auth: &AuthDocument) -> std::io::Result<()> {
         self.with_store(|store, key| {
             store.insert(key, auth.clone());
             Ok(())
+        })
+    }
+
+    fn save(&self, auth: &AuthDotJson) -> std::io::Result<()> {
+        self.write(&AuthDocument::new(auth.clone()))
+    }
+
+    fn compare_exchange(
+        &self,
+        previous: &AuthDotJson,
+        updated: &AuthDotJson,
+    ) -> std::io::Result<bool> {
+        self.with_store(|store, key| {
+            let Some(document) = store.get_mut(&key) else {
+                return Ok(false);
+            };
+            if document.active != *previous {
+                return Ok(false);
+            }
+            if super::accounts::identity(previous) != super::accounts::identity(updated) {
+                return Err(std::io::Error::other(
+                    "Token refresh changed account identity.",
+                ));
+            }
+            document.active = updated.clone();
+            Ok(true)
         })
     }
 
