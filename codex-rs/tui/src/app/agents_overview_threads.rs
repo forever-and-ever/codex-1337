@@ -303,5 +303,6 @@ impl App {
             app_event_tx.send(AppEvent::AgentsOverviewThreadsLoaded { request_id, result });
         });
         self.agents_overview.refresh_task = Some(refresh_task.abort_handle());
+        self.repaint_agents_overview();
     }
 }

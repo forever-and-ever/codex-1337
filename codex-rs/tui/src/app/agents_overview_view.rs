@@ -94,6 +94,7 @@ pub(super) struct AgentsOverviewViewState {
 
 pub(super) struct AgentsOverviewView {
     pub(super) rows: Vec<AgentsOverviewRow>,
+    pub(super) refreshing: bool,
     selected: usize,
     state: Arc<Mutex<AgentsOverviewViewState>>,
     exit_on_cancel: bool,
@@ -118,6 +119,7 @@ impl AgentsOverviewView {
             .unwrap_or(0);
         let mut view = Self {
             rows,
+            refreshing: false,
             selected,
             state,
             exit_on_cancel,
@@ -606,6 +608,15 @@ impl Renderable for AgentsOverviewView {
         let attention = format!("{needs_you} need input");
         if let Some(notice) = self.state().connection_notice {
             Line::from(notice.cyan()).render(inset(summary), buf);
+        } else if self.refreshing {
+            Line::from(if self.rows.is_empty() {
+                "Loading sessions…".cyan()
+            } else {
+                "Refreshing…".dim()
+            })
+            .render(inset(summary), buf);
+        } else if self.rows.is_empty() {
+            Line::from("No sessions found.".dim()).render(inset(summary), buf);
         } else {
             Line::from(format!("{attention}   {working} working   {ready} ready").dim())
                 .render(inset(summary), buf);

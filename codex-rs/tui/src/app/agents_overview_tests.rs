@@ -540,6 +540,19 @@ async fn shared_overview_shows_only_root_sessions() {
         );
     });
 
+    for (snapshot, request_id) in [
+        ("agents_overview_loading", Some(Uuid::new_v4())),
+        ("agents_overview_empty", None),
+    ] {
+        app.agents_overview.request_id = request_id;
+        let view = app.agents_overview_view(Vec::new(), /*selected_thread_id*/ None);
+        app.chat_widget
+            .replace_bottom_pane_view_if_present(AGENTS_OVERVIEW_VIEW_ID, Box::new(view));
+        insta::with_settings!({snapshot_path => "../snapshots"}, {
+            insta::assert_snapshot!(snapshot, render_bottom_popup(&app.chat_widget, /*width*/ 96));
+        });
+    }
+
     let threads = (0..20)
         .map(|index| {
             let thread_id = if index == 0 {

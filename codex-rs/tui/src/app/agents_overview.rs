@@ -252,14 +252,16 @@ impl App {
             });
         }
 
-        AgentsOverviewView::new(
+        let mut view = AgentsOverviewView::new(
             rows,
             selected_thread_id,
             self.primary_thread_id.is_none(),
             self.app_event_tx.clone(),
             self.keymap.clone(),
             Arc::clone(&self.agents_overview.view_state),
-        )
+        );
+        view.refreshing = self.agents_overview.request_id.is_some();
+        view
     }
 
     pub(super) async fn select_agents_overview_thread(
