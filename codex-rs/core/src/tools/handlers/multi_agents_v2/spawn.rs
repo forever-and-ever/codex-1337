@@ -141,7 +141,7 @@ async fn handle_spawn_agent(
                 .clone_from(&turn.developer_instructions);
         }
     }
-    apply_spawn_agent_service_tier(&session, &mut config).await?;
+    apply_spawn_agent_service_tier(&session, &mut config, args.service_tier.as_deref()).await?;
     apply_spawn_agent_runtime_overrides(&mut config, turn.as_ref())?;
 
     // Remember an applied configured default so cold reload reapplies its restrictions.
@@ -278,6 +278,7 @@ impl CoreToolRuntime for Handler {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SpawnAgentArgs {
+    service_tier: Option<String>,
     message: String,
     task_name: String,
     agent_type: Option<String>,

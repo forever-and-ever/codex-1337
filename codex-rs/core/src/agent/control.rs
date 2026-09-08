@@ -25,7 +25,7 @@ use crate::thread_manager::ThreadManagerState;
 use crate::thread_manager::default_thread_id_generator;
 use crate::thread_rollout_truncation::truncate_rollout_to_last_n_fork_turns;
 use crate::turn_timing::now_unix_timestamp_ms;
-use arc_swap::ArcSwapOption;
+use arc_swap::ArcSwap;
 use codex_history::InitialHistory;
 use codex_history::ResumedHistory;
 use codex_history::RolloutItem;
@@ -69,6 +69,8 @@ use uuid::Uuid;
 pub(crate) use self::execution::AgentExecutionGuard;
 use self::execution::AgentExecutionLimiter;
 use self::residency::V2Residency;
+pub(crate) use self::service_tier::AgentTierStatus;
+pub(crate) use self::service_tier::normalize_agent_service_tier;
 
 mod execution;
 mod legacy;
@@ -106,6 +108,8 @@ pub(crate) struct LiveAgent {
 pub(crate) struct ListedAgent {
     pub(crate) agent_name: String,
     pub(crate) agent_status: AgentStatus,
+    #[serde(flatten)]
+    pub(crate) tier: AgentTierStatus,
 }
 
 /// Control-plane handle for multi-agent operations.
@@ -129,8 +133,7 @@ pub(crate) struct AgentControl {
     agent_execution_limiter: Arc<AgentExecutionLimiter>,
     /// Session-scoped state shared by the root thread and every cloned sub-agent control handle.
     rollout_budget: Arc<RolloutBudget>,
-    /// The user-selected root routing tier, shared by the entire agent tree.
-    root_service_tier: Arc<ArcSwapOption<String>>,
+    service_tiers: Arc<ArcSwap<service_tier::TierTree>>,
 }
 
 impl Default for AgentControl {
@@ -158,7 +161,7 @@ impl AgentControl {
             v2_residency: Arc::default(),
             agent_execution_limiter: Arc::default(),
             rollout_budget: Arc::default(),
-            root_service_tier: Arc::new(ArcSwapOption::from(None)),
+            service_tiers: Arc::default(),
         };
         if let Some(rollout_budget) = rollout_budget {
             control.rollout_budget.configure(rollout_budget);
@@ -535,6 +538,7 @@ impl AgentControl {
             agents.push(ListedAgent {
                 agent_name: root_path.to_string(),
                 agent_status: root_thread.agent_status().await,
+                tier: root_thread.session.agent_tier_status().await,
             });
         }
 
@@ -560,6 +564,7 @@ impl AgentControl {
             agents.push(ListedAgent {
                 agent_name,
                 agent_status: thread.agent_status().await,
+                tier: thread.session.agent_tier_status().await,
             });
         }
 

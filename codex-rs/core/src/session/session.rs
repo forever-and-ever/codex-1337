@@ -737,7 +737,13 @@ impl Session {
         .filter(|_| forked_from_id.is_some());
         let parent_thread_id = session_configuration
             .parent_thread_id
-            .or_else(|| initial_history.get_resumed_parent_thread_id());
+            .or_else(|| initial_history.get_resumed_parent_thread_id())
+            .or(match &session_configuration.session_source {
+                SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+                    parent_thread_id, ..
+                }) => Some(*parent_thread_id),
+                _ => None,
+            });
         session_configuration.parent_thread_id = parent_thread_id;
         if parent_thread_id.is_none() {
             agent_control.set_root_service_tier(
@@ -776,6 +782,30 @@ impl Session {
                 ));
             }
         };
+        if let Some(parent) = parent_thread_id {
+            if let InitialHistory::Resumed(history) = &initial_history {
+                // Only this child's snapshot owns its policy; copied ancestor events do not.
+                let selected = history
+                    .history
+                    .iter()
+                    .rev()
+                    .find_map(|item| match item {
+                        RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(event))
+                            if event.thread_id == Some(thread_id) =>
+                        {
+                            Some(event.thread_settings.service_tier.clone())
+                        }
+                        _ => None,
+                    })
+                    .flatten();
+                Arc::make_mut(&mut session_configuration.step_settings).service_tier = selected;
+            }
+            agent_control.set_agent_tier_binding(
+                thread_id,
+                parent,
+                session_configuration.step_settings.service_tier.clone(),
+            );
+        }
         let resumed_session_id = match &initial_history {
             InitialHistory::Resumed(resumed) => {
                 resumed.history.iter().find_map(|item| match item {

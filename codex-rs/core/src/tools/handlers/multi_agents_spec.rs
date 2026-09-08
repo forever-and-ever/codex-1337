@@ -20,6 +20,32 @@ const SPAWN_AGENT_MODEL_OVERRIDE_DESCRIPTION: &str =
     "Model override for the new agent. Omit unless an explicit override is needed.";
 const MAX_REASONING_EFFORT_CHARS_IN_SPAWN_AGENT_DESCRIPTION: usize = 64;
 
+fn service_tier_parameter() -> JsonSchema {
+    JsonSchema::string(Some("Routing tier: `inherit` (default) follows the immediate parent live; `default` forces normal service; `priority` (`fast`) or another advertised tier pins that tier. Independent of model and history overrides. Changes affect subsequent inference requests, never an already-sent request.".to_owned()))
+}
+
+pub(crate) fn create_set_agent_service_tier_tool() -> ToolSpec {
+    ToolSpec::Function(ResponsesApiTool {
+        name: "set_agent_service_tier".to_owned(),
+        description: "Change a descendant agent's routing tier without interrupting it, sending a message, or starting a turn. The selection persists until changed, including across resume. Inheriting descendants follow it; explicitly pinned descendants do not. Only your descendants may be targeted.".to_owned(),
+        strict: false,
+        defer_loading: None,
+        parameters: JsonSchema::object(BTreeMap::from([
+            ("target".to_owned(), JsonSchema::string(Some("Agent id or relative/canonical task name of a descendant.".to_owned()))),
+            ("service_tier".to_owned(), service_tier_parameter()),
+        ]), Some(vec!["target".to_owned(), "service_tier".to_owned()]), Some(false.into())),
+        output_schema: Some(json!({
+            "type": "object",
+            "properties": {
+                "service_tier": {"type": "string"},
+                "effective_service_tier": {"type": ["string", "null"]}
+            },
+            "required": ["service_tier", "effective_service_tier"],
+            "additionalProperties": false
+        })),
+    })
+}
+
 #[derive(Debug, Clone)]
 pub struct SpawnAgentToolOptions {
     pub available_models: Vec<ModelPreset>,
@@ -463,9 +489,11 @@ fn list_agents_output_schema() -> Value {
                         "agent_status": {
                             "description": "Last known status of the agent.",
                             "allOf": [agent_status_output_schema()]
-                        }
+                        },
+                        "service_tier": { "type": "string", "description": "Selected tier, inherit, or model_default for an unconfigured root." },
+                        "effective_service_tier": { "type": ["string", "null"], "description": "Resolved request tier; null uses the model's default routing." }
                     },
-                    "required": ["agent_name", "agent_status"],
+                    "required": ["agent_name", "agent_status", "service_tier", "effective_service_tier"],
                     "additionalProperties": false
                 },
                 "description": "Live agents visible in the current root thread tree."
@@ -580,6 +608,7 @@ fn create_collab_input_items_schema() -> JsonSchema {
 
 fn spawn_agent_common_properties_v1(agent_type_description: &str) -> BTreeMap<String, JsonSchema> {
     BTreeMap::from([
+        ("service_tier".to_string(), service_tier_parameter()),
         (
             "message".to_string(),
             JsonSchema::string(Some(
@@ -619,6 +648,7 @@ fn spawn_agent_common_properties_v1(agent_type_description: &str) -> BTreeMap<St
 
 fn spawn_agent_common_properties_v2(agent_type_description: &str) -> BTreeMap<String, JsonSchema> {
     BTreeMap::from([
+        ("service_tier".to_string(), service_tier_parameter()),
         (
             "message".to_string(),
             JsonSchema::string(Some(

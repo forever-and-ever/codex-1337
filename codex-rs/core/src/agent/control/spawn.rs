@@ -417,7 +417,6 @@ impl AgentControl {
                     CodexErr::InvalidRequest(format!("permission_profile is invalid: {err}"))
                 })?;
         }
-        config.service_tier = self.root_service_tier();
         if let Some(model) = stored_model {
             config.model = Some(model);
         }
@@ -654,6 +653,7 @@ impl AgentControl {
         let notification_source = session_source.clone();
 
         // The same `AgentControl` is sent to spawn the thread.
+        let service_tier = config.service_tier.clone();
         let new_thread = match (session_source, options.fork_mode.as_ref(), inheritance) {
             (Some(session_source), Some(_), inheritance) => {
                 Box::pin(self.spawn_forked_thread(
@@ -707,6 +707,11 @@ impl AgentControl {
             },
         )) = notification_source.as_ref()
         {
+            new_thread
+                .thread
+                .session
+                .select_agent_service_tier(service_tier.as_deref().unwrap_or("inherit"))
+                .await?;
             let client_metadata = match state.get_thread(*parent_thread_id).await {
                 Ok(parent_thread) => parent_thread.session.app_server_client_metadata().await,
                 Err(error) => {

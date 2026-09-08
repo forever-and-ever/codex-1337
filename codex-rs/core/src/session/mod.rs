@@ -234,6 +234,7 @@ mod realtime_history;
 mod review;
 mod rollout_budget;
 mod rollout_reconstruction;
+mod service_tier;
 #[allow(clippy::module_inception)]
 pub(crate) mod session;
 mod step_activation;
@@ -1735,9 +1736,8 @@ impl Session {
                 previous_permission_profile != updated_permission_profile;
             let mcp_inputs_changed =
                 self.mcp_inputs_differ(&state.session_configuration, &updated, &updates);
-            let root_service_tier_changed = updated.parent_thread_id.is_none()
-                && state.session_configuration.step_settings.service_tier
-                    != updated.step_settings.service_tier;
+            let service_tier_changed = state.session_configuration.step_settings.service_tier
+                != updated.step_settings.service_tier;
             if mcp_inputs_changed {
                 self.mark_mcp_runtime_dirty();
             }
@@ -1754,14 +1754,21 @@ impl Session {
                     .update_thread_config(&environment_config);
             }
             state.session_configuration = updated;
-            if root_service_tier_changed {
-                self.services.agent_control.set_root_service_tier(
-                    state
-                        .session_configuration
-                        .step_settings
-                        .service_tier
-                        .clone(),
-                );
+            if service_tier_changed {
+                let selected = state
+                    .session_configuration
+                    .step_settings
+                    .service_tier
+                    .clone();
+                if let Some(parent) = state.session_configuration.parent_thread_id {
+                    self.services.agent_control.set_agent_tier_binding(
+                        self.thread_id,
+                        parent,
+                        selected,
+                    );
+                } else {
+                    self.services.agent_control.set_root_service_tier(selected);
+                }
             }
             let new_config = notify_config_contributors
                 .then(|| self.build_effective_session_config(&state.session_configuration));
@@ -3533,10 +3540,18 @@ impl Session {
             turn_context.session_source,
             SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
         ) {
-            let root_service_tier = self.services.agent_control.root_service_tier();
-            if settings.selected().service_tier != root_service_tier {
+            let service_tier = self
+                .services
+                .agent_control
+                .agent_request_service_tier(
+                    self.thread_id,
+                    &settings.model_info,
+                    self.features.enabled(Feature::FastMode),
+                )
+                .map_err(CodexErr::InvalidRequest)?;
+            if settings.selected().service_tier != service_tier {
                 let mut selected = settings.selected().clone();
-                selected.service_tier = root_service_tier;
+                selected.service_tier = service_tier;
                 let mut inherited_settings = ResolvedStepSettings::new(
                     Arc::new(selected),
                     Arc::clone(&settings.model_info),

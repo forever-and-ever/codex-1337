@@ -2776,9 +2776,7 @@ async fn multi_agent_feature_selects_one_agent_tool_family() {
     for property in ["model", "reasoning_effort"] {
         assert!(spawn_agent_properties.contains_key(property));
     }
-    for property in ["agent_type", "service_tier"] {
-        assert!(!spawn_agent_properties.contains_key(property));
-    }
+    assert!(!spawn_agent_properties.contains_key("agent_type"));
     let spawn_agent_description = spawn_agent.description.as_str();
     assert!(!spawn_agent_description.contains("max_concurrent_threads_per_session"));
     assert!(spawn_agent_description.contains(
@@ -2857,6 +2855,7 @@ async fn multi_agent_v2_can_disable_wait_agent() {
             "interrupt_agent".to_string(),
             "list_agents".to_string(),
             "send_message".to_string(),
+            "set_agent_service_tier".to_string(),
             "spawn_agent".to_string(),
         ]
     );

@@ -11,7 +11,6 @@ use crate::tools::context::ToolPayload;
 use codex_models_manager::manager::RefreshStrategy;
 use codex_protocol::AgentPath;
 use codex_protocol::ThreadId;
-use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::models::BaseInstructions;
@@ -322,16 +321,8 @@ pub(crate) async fn apply_requested_spawn_agent_model_overrides(
 pub(crate) async fn apply_spawn_agent_service_tier(
     session: &Session,
     config: &mut Config,
+    requested: Option<&str>,
 ) -> Result<(), FunctionCallError> {
-    let Some(service_tier) = session.services.agent_control.root_service_tier() else {
-        config.service_tier = None;
-        return Ok(());
-    };
-    if service_tier == SERVICE_TIER_DEFAULT_REQUEST_VALUE {
-        config.service_tier = Some(service_tier);
-        return Ok(());
-    }
-
     let model = config.model.clone().ok_or_else(|| {
         FunctionCallError::RespondToModel(
             "spawn_agent could not resolve the child model for service tier validation".to_string(),
@@ -343,9 +334,12 @@ pub(crate) async fn apply_spawn_agent_service_tier(
         .get_model_info(model.as_str(), &config.to_models_manager_config())
         .await;
 
-    config.service_tier = model_info
-        .supports_service_tier(service_tier.as_str())
-        .then_some(service_tier);
+    config.service_tier = crate::agent::control::normalize_agent_service_tier(
+        requested.unwrap_or("inherit"),
+        &model_info,
+        config.features.enabled(codex_features::Feature::FastMode),
+    )
+    .map_err(FunctionCallError::RespondToModel)?;
     Ok(())
 }
 

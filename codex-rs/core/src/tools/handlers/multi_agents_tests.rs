@@ -420,12 +420,20 @@ async fn spawn_agent_service_tier_uses_root_preference_when_root_model_cannot_su
     assert_eq!(root.thread.config_snapshot().await.service_tier, None);
 
     config.model = Some("gpt-5.4".to_string());
-    apply_spawn_agent_service_tier(root.thread.session.as_ref(), &mut config)
-        .await
-        .expect("root preference should be resolved against the child model");
+    apply_spawn_agent_service_tier(
+        root.thread.session.as_ref(),
+        &mut config,
+        /*requested*/ None,
+    )
+    .await
+    .expect("root preference should be resolved against the child model");
 
     assert_eq!(
-        config.service_tier,
+        root.thread
+            .session
+            .services
+            .agent_control
+            .root_service_tier(),
         Some(ServiceTier::Fast.request_value().to_string())
     );
 }
@@ -472,10 +480,7 @@ async fn spawn_agent_service_tier_inheritance_uses_root_preference_and_child_mod
             .config_snapshot()
             .await;
 
-        assert_eq!(
-            snapshot.service_tier,
-            Some(ServiceTier::Fast.request_value().to_string())
-        );
+        assert_eq!(snapshot.service_tier, None);
     }
 
     {
@@ -649,10 +654,7 @@ service_tier = "turbo"
         .config_snapshot()
         .await;
 
-    assert_eq!(
-        snapshot.service_tier,
-        Some(ServiceTier::Fast.request_value().to_string())
-    );
+    assert_eq!(snapshot.service_tier, None);
 }
 
 #[tokio::test]
@@ -699,14 +701,11 @@ async fn spawn_agent_full_history_fork_inherits_root_service_tier() {
         .config_snapshot()
         .await;
 
-    assert_eq!(
-        snapshot.service_tier,
-        Some(ServiceTier::Fast.request_value().to_string())
-    );
+    assert_eq!(snapshot.service_tier, None);
 }
 
 #[tokio::test]
-async fn multi_agent_v2_full_history_fork_inherits_root_service_tier() {
+async fn multi_agent_v2_full_history_fork_keeps_service_tier_controls_independent() {
     #[derive(Debug, Deserialize)]
     struct SpawnAgentResult {
         task_name: String,
@@ -740,11 +739,12 @@ async fn multi_agent_v2_full_history_fork_inherits_root_service_tier() {
             "spawn_agent",
             function_payload(json!({
                 "message": "inspect this repo",
-                "task_name": "fork_with_tier"
+                "task_name": "fork_with_tier",
+                "service_tier": "default"
             })),
         ))
         .await
-        .expect("multi-agent v2 full-history fork should inherit the root service tier");
+        .expect("full-history forks allow an independent routing tier");
     let (content, _) = expect_text_output(output);
     let result: SpawnAgentResult =
         serde_json::from_str(&content).expect("spawn_agent result should be json");
@@ -758,17 +758,46 @@ async fn multi_agent_v2_full_history_fork_inherits_root_service_tier() {
         )
         .await
         .expect("spawned task name should resolve");
-    let snapshot = manager
+    let child = manager
         .get_thread(child_thread_id)
         .await
-        .expect("spawned agent thread should exist")
-        .config_snapshot()
-        .await;
-
+        .expect("spawned agent thread should exist");
     assert_eq!(
-        snapshot.service_tier,
-        Some(ServiceTier::Fast.request_value().to_string())
+        child.config_snapshot().await.service_tier.as_deref(),
+        Some("default")
     );
+    let control = &session.services.agent_control;
+    let selected = control
+        .select_agent_service_tier(root.thread_id, child_thread_id, "fast")
+        .await
+        .expect("parent selects child tier");
+    assert_eq!(
+        selected,
+        crate::agent::control::AgentTierStatus {
+            service_tier: "priority".to_owned(),
+            effective_service_tier: Some("priority".to_owned()),
+        }
+    );
+    let unchanged = child.config_snapshot().await.service_tier;
+    assert!(
+        control
+            .select_agent_service_tier(root.thread_id, child_thread_id, "unavailable-tier")
+            .await
+            .is_err()
+    );
+    for (caller, target) in [
+        (child_thread_id, child_thread_id),
+        (child_thread_id, root.thread_id),
+        (ThreadId::new(), child_thread_id),
+    ] {
+        assert!(
+            control
+                .select_agent_service_tier(caller, target, "default")
+                .await
+                .is_err()
+        );
+    }
+    assert_eq!(child.config_snapshot().await.service_tier, unchanged);
 }
 
 #[tokio::test]
