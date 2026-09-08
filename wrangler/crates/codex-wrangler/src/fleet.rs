@@ -557,12 +557,13 @@ fn offline(
 fn distribution_incompatibility(expected: Option<&Version>, status: &SiteStatus) -> Option<String> {
     let expected = expected?;
     let codex = status.codex_version.as_deref()?;
-    let bridge = status.bridge_version.as_deref()?;
-    let expected_codex = expected.to_string();
-    let expected_bridge = format!("{expected}-wrangler");
-    (codex != expected_codex || bridge != expected_bridge).then(|| {
-        format!("HARMONIZE SITE · remote Codex {codex}, bridge {bridge}; local Codex {expected}")
-    })
+    // The handshake already checks the bridge protocol. Distribution branding
+    // is not an API incompatibility.
+    let compatible = Version::parse(codex).is_ok_and(|remote| {
+        (remote.major, remote.minor, remote.patch)
+            == (expected.major, expected.minor, expected.patch)
+    });
+    (!compatible).then(|| format!("HARMONIZE SITE · remote Codex {codex}; local Codex {expected}"))
 }
 
 fn publish(

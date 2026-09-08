@@ -54,8 +54,8 @@ fi
 
 revision=$(git -C "$root" rev-parse HEAD)
 short_revision=$(printf '%s' "$revision" | cut -c1-12)
-identity="codex-$codex_version-wrangler-$wrangler_version-$short_revision"
-distribution_root="$data_home/codex-wrangler/distributions"
+identity="codex-$codex_version-1337-$short_revision"
+distribution_root="$data_home/codex-1337/distributions"
 payload="$distribution_root/$identity"
 stage=
 
@@ -149,5 +149,5 @@ for candidate in "$distribution_root"/*; do
     rm -rf -- "$candidate"
 done
 
-printf 'installed Codex %s and Wrangler %s from %s\n' \
-    "$codex_version" "$wrangler_version" "$short_revision"
+printf 'installed Codex %s-1337 from %s (transitional GUI %s)\n' \
+    "$codex_version" "$short_revision" "$wrangler_version"

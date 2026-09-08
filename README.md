@@ -1,3 +1,11 @@
+# Codex 1337
+
+Owned downstream fork of Codex. Local builds carry the `-1337` suffix.
+Install the coordinated distribution with `scripts/install-local`.
+
+The shared app server, account scoping, and agent controls belong to this fork.
+The retained Wrangler sources are transitional, not a Poolrooms application.
+
 <p align="center"><strong>Codex CLI</strong> is a coding agent from OpenAI that runs locally on your computer.
 <p align="center">
   <img src="https://github.com/openai/codex/blob/main/.github/codex-cli-splash.png" alt="Codex CLI splash" width="80%" />

@@ -141,7 +141,7 @@ impl Rpc {
                     "clientInfo": {
                         "name": "codex_wrangler_bridge",
                         "title": "Codex Wrangler Bridge",
-                        "version": concat!(env!("CARGO_PKG_VERSION"), "-wrangler")
+                        "version": concat!(env!("CARGO_PKG_VERSION"), "-1337")
                     }
                 }),
             )
@@ -202,7 +202,7 @@ impl Rpc {
     fn hello(&self) -> Frame {
         Frame::Hello {
             protocol: BRIDGE_PROTOCOL,
-            bridge_version: concat!(env!("CARGO_PKG_VERSION"), "-wrangler"),
+            bridge_version: concat!(env!("CARGO_PKG_VERSION"), "-1337"),
             codex_version: app_server_version(&self.initialized.user_agent),
             platform: self.initialized.platform_os.clone(),
         }
