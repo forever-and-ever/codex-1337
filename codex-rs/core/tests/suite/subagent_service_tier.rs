@@ -58,24 +58,10 @@ fn assert_request_service_tier(request: &ResponseMock, expected: Option<&str>) {
     // inference. A permissive SSE fixture otherwise conceals that whole-turn failure.
     // Compaction requests have no tools.
     for namespace in body["tools"].as_array().into_iter().flatten() {
-        if namespace["type"] == "namespace" && namespace["name"] == "collaboration" {
-            for tool in namespace["tools"].as_array().expect("namespace tools") {
-                assert!(
-                    matches!(
-                        tool["name"].as_str(),
-                        Some(
-                            "spawn_agent"
-                                | "send_message"
-                                | "followup_task"
-                                | "wait_agent"
-                                | "interrupt_agent"
-                                | "list_agents"
-                        )
-                    ),
-                    "unrecognized reserved collaboration tool: {tool}"
-                );
-            }
-        }
+        assert_ne!(
+            namespace["name"], "collaboration",
+            "custom agent schemas must not enter the reserved namespace"
+        );
     }
     assert_eq!(
         request
@@ -133,7 +119,7 @@ async fn mount_root_collaboration_call(
             } else {
                 ev_function_call_with_namespace(
                     call_id,
-                    "collaboration",
+                    "wrangler_agents",
                     tool,
                     &arguments.to_string(),
                 )
