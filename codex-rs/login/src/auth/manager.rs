@@ -1621,13 +1621,24 @@ fn persist_tokens(
         tokens.refresh_token = refresh_token;
     }
     auth_dot_json.last_refresh = Some(Utc::now());
-    if storage.compare_exchange(previous, &auth_dot_json)? {
-        Ok(auth_dot_json)
-    } else {
-        storage
+    let mut expected = previous.clone();
+    while !storage.compare_exchange(&expected, &auth_dot_json)? {
+        let mut latest = storage
             .load()?
-            .ok_or_else(|| std::io::Error::other("This account has been removed; log in again."))
+            .ok_or_else(|| std::io::Error::other("This account has been removed; log in again."))?;
+        // Registration metadata may change during OAuth exchange without superseding its tokens.
+        // Every credential-bearing change still wins over this stale refresh.
+        let identity = latest.agent_identity.take();
+        latest.agent_identity = previous.agent_identity.clone();
+        let credentials_unchanged = &latest == previous;
+        latest.agent_identity = identity;
+        if !credentials_unchanged {
+            return Ok(latest);
+        }
+        auth_dot_json.agent_identity = latest.agent_identity.clone();
+        expected = latest;
     }
+    Ok(auth_dot_json)
 }
 
 // Requests refreshed ChatGPT OAuth tokens from the auth service using a refresh token.

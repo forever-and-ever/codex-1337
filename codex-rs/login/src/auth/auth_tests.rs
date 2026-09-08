@@ -59,7 +59,7 @@ fn header_auth_exposes_a_valid_chatgpt_account_id() {
 }
 
 #[tokio::test]
-async fn refresh_without_id_token() {
+async fn refresh_merges_metadata_but_yields_to_newer_credentials() {
     let codex_home = tempdir().unwrap();
     let fake_jwt = write_auth_file(
         AuthFileParams {
@@ -76,19 +76,52 @@ async fn refresh_without_id_token() {
         AuthCredentialsStoreMode::File,
         AuthKeyringBackendKind::default(),
     );
+    let previous = storage.load().unwrap().unwrap();
+    // Agent registration may commit while the OAuth exchange is in flight.
+    let mut registered = previous.clone();
+    registered.agent_identity = Some(AgentIdentityStorage::Record(agent_identity_record(
+        "account",
+    )));
+    storage.save(&registered).unwrap();
     let updated = super::persist_tokens(
         &storage,
-        &storage.load().unwrap().unwrap(),
+        &previous,
         /*id_token*/ None,
         Some("new-access-token".to_string()),
         Some("new-refresh-token".to_string()),
     )
     .expect("update_tokens should succeed");
 
-    let tokens = updated.tokens.expect("tokens should exist");
+    assert_eq!(storage.load().unwrap(), Some(updated.clone()));
+    assert_eq!(updated.agent_identity, registered.agent_identity);
+    let tokens = updated.tokens.as_ref().expect("tokens should exist");
     assert_eq!(tokens.id_token.raw_jwt, fake_jwt);
     assert_eq!(tokens.access_token, "new-access-token");
     assert_eq!(tokens.refresh_token, "new-refresh-token");
+
+    let winner = super::persist_tokens(
+        &storage,
+        &previous,
+        /*id_token*/ None,
+        Some("stale-access-token".to_string()),
+        Some("stale-refresh-token".to_string()),
+    )
+    .unwrap();
+    assert_eq!(winner, updated);
+    assert_eq!(storage.load().unwrap(), Some(updated.clone()));
+
+    storage.delete().unwrap();
+    assert!(
+        super::persist_tokens(
+            &storage,
+            &updated,
+            /*id_token*/ None,
+            Some("removed-access-token".to_string()),
+            Some("removed-refresh-token".to_string()),
+        )
+        .is_err()
+    );
+    assert_eq!(storage.load().unwrap(), None);
 }
 
 #[test]
