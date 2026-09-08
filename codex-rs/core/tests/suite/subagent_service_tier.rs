@@ -53,6 +53,30 @@ fn body_contains(request: &wiremock::Request, text: &str) -> bool {
 }
 
 fn assert_request_service_tier(request: &ResponseMock, expected: Option<&str>) {
+    let body = request.single_request().body_json();
+    // The real endpoint rejects unknown functions in its reserved namespace before
+    // inference. A permissive SSE fixture otherwise conceals that whole-turn failure.
+    // Compaction requests have no tools.
+    for namespace in body["tools"].as_array().into_iter().flatten() {
+        if namespace["type"] == "namespace" && namespace["name"] == "collaboration" {
+            for tool in namespace["tools"].as_array().expect("namespace tools") {
+                assert!(
+                    matches!(
+                        tool["name"].as_str(),
+                        Some(
+                            "spawn_agent"
+                                | "send_message"
+                                | "followup_task"
+                                | "wait_agent"
+                                | "interrupt_agent"
+                                | "list_agents"
+                        )
+                    ),
+                    "unrecognized reserved collaboration tool: {tool}"
+                );
+            }
+        }
+    }
     assert_eq!(
         request
             .single_request()
@@ -104,7 +128,16 @@ async fn mount_root_collaboration_call(
         },
         sse(vec![
             ev_response_created(&response_id),
-            ev_function_call_with_namespace(call_id, "collaboration", tool, &arguments.to_string()),
+            if tool == "set_agent_service_tier" {
+                ev_function_call(call_id, tool, &arguments.to_string())
+            } else {
+                ev_function_call_with_namespace(
+                    call_id,
+                    "collaboration",
+                    tool,
+                    &arguments.to_string(),
+                )
+            },
             ev_completed(&response_id),
         ]),
     )

@@ -2855,7 +2855,6 @@ async fn multi_agent_v2_can_disable_wait_agent() {
             "interrupt_agent".to_string(),
             "list_agents".to_string(),
             "send_message".to_string(),
-            "set_agent_service_tier".to_string(),
             "spawn_agent".to_string(),
         ]
     );
@@ -3081,6 +3080,7 @@ async fn code_mode_only_can_expose_namespaced_multi_agent_v2_as_normal_tools() {
             "update_work_status",
             "request_user_input",
             "agents",
+            "set_agent_service_tier",
             // Hosted Responses tool.
             "web_search",
         ]

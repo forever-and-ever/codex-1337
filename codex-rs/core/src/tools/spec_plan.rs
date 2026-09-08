@@ -1331,7 +1331,8 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
                 exposure,
             );
             registry.register_trusted_with_exposure(
-                multi_agent_v2_handler(SetAgentServiceTierHandler, tool_namespace),
+                // `collaboration` is server-reserved; downstream tools must stay outside it.
+                Arc::new(SetAgentServiceTierHandler),
                 exposure,
             );
             registry.register_trusted_with_exposure(
