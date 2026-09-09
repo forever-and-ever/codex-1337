@@ -85,6 +85,63 @@ fn login_status_reports_auth_storage_errors() -> Result<()> {
     Ok(())
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn quota_keeps_accounts_independent_without_switching_login() -> Result<()> {
+    let server = MockServer::start().await;
+    let home = TempDir::new()?;
+    std::fs::write(
+        home.path().join("config.toml"),
+        format!(
+            "cli_auth_credentials_store = \"file\"\nchatgpt_base_url = \"{}/backend-api\"\n",
+            server.uri()
+        ),
+    )?;
+    for (id, email) in [("main", "a@example.com"), ("alt", "b@example.com")] {
+        write_chatgpt_auth(
+            home.path(),
+            ChatGptAuthFixture::new(id)
+                .account_id(id)
+                .email(email)
+                .plan_type("pro"),
+            AuthCredentialsStoreMode::File,
+        )?;
+    }
+    let before = read_auth_json(home.path())?;
+    Mock::given(method("GET")).and(path("/backend-api/wham/usage"))
+        .and(header("authorization", "Bearer main"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "plan_type":"pro", "rate_limit": {"allowed":true,"limit_reached":false,
+                "secondary_window":{"used_percent":27,"limit_window_seconds":604800,"reset_after_seconds":60,"reset_at":1800000000}}
+        }))).expect(1).mount(&server).await;
+    Mock::given(method("GET"))
+        .and(path("/backend-api/wham/usage"))
+        .and(header("authorization", "Bearer alt"))
+        .respond_with(ResponseTemplate::new(400))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let output = codex_command(home.path())?
+        .env_remove(CODEX_ACCESS_TOKEN_ENV_VAR)
+        .env_remove("OPENAI_API_KEY")
+        .env("NO_PROXY", "127.0.0.1,localhost")
+        .env("no_proxy", "127.0.0.1,localhost")
+        .arg("quota")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let result: Value = serde_json::from_slice(&output)?;
+    assert_eq!(
+        result["accounts"][0],
+        json!({"id":":main","email":"a@example.com","remainingPercent":73.0,"resetsAt":1800000000,"error":null})
+    );
+    assert_eq!(result["accounts"][1]["remainingPercent"], Value::Null);
+    assert!(result["accounts"][1]["error"].is_string());
+    assert_eq!(read_auth_json(home.path())?, before);
+    Ok(())
+}
+
 #[test]
 fn login_status_validates_configured_workload_identity() -> Result<()> {
     let codex_home = TempDir::new()?;

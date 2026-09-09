@@ -145,6 +145,9 @@ enum Subcommand {
     /// Manage login.
     Login(LoginCommand),
 
+    /// Print weekly quota for every saved ChatGPT account as JSON without switching accounts.
+    Quota,
+
     /// Remove stored authentication credentials.
     Logout(LogoutCommand),
 
@@ -1523,6 +1526,14 @@ async fn cli_main(
             .await?;
             handle_app_exit(exit_info)?;
         }
+        Some(Subcommand::Quota) => {
+            reject_remote_mode_for_subcommand(
+                root_remote.as_deref(),
+                root_remote_auth_token_env.as_deref(),
+                "quota",
+            )?;
+            codex_cli::read_account_quotas(root_config_overrides.clone()).await?;
+        }
         Some(Subcommand::Login(mut login_cli)) => {
             reject_remote_mode_for_subcommand(
                 root_remote.as_deref(),
@@ -2445,6 +2456,7 @@ fn unsupported_subcommand_name_for_strict_config(
         #[cfg(any(target_os = "macos", target_os = "windows"))]
         Some(Subcommand::App(_)) => Some("app"),
         Some(Subcommand::Login(_)) => Some("login"),
+        Some(Subcommand::Quota) => Some("quota"),
         Some(Subcommand::Logout(_)) => Some("logout"),
         Some(Subcommand::Completion(_)) => Some("completion"),
         Some(Subcommand::Update) => Some("update"),
