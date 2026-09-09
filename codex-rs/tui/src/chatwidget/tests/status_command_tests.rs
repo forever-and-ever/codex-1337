@@ -5,23 +5,38 @@ use codex_app_server_protocol::ThreadUsage;
 use codex_app_server_protocol::ThreadUsageBreakdownGroup;
 use codex_utils_path_uri::PathUri;
 
+fn complete_status_limits(
+    chat: &mut ChatWidget,
+    rx: &mut tokio::sync::mpsc::UnboundedReceiver<AppEvent>,
+) -> String {
+    let mut output = Vec::new();
+    while let Ok(event) = rx.try_recv() {
+        match event {
+            AppEvent::RefreshRateLimits {
+                origin: RateLimitRefreshOrigin::StatusCommand { request_id },
+            } => {
+                chat.finish_status_rate_limit_refresh(request_id, vec![snapshot(/*percent*/ 20.0)])
+            }
+            AppEvent::InsertHistoryCell(cell) => {
+                output.push(lines_to_single_string(&cell.display_lines(/*width*/ 90)));
+            }
+            event => panic!("unexpected status event: {event:?}"),
+        }
+    }
+    assert!(
+        !output.is_empty(),
+        "status must be printed after its refreshes finish"
+    );
+    output.join("\n")
+}
+
 #[tokio::test]
-async fn status_command_renders_immediately_and_refreshes_rate_limits_for_chatgpt_auth() {
+async fn status_command_waits_for_fresh_limits_before_printing() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     set_chatgpt_auth(&mut chat);
 
     chat.dispatch_command(SlashCommand::Status);
 
-    let rendered = match rx.try_recv() {
-        Ok(AppEvent::InsertHistoryCell(cell)) => {
-            lines_to_single_string(&cell.display_lines(/*width*/ 80))
-        }
-        other => panic!("expected status output before refresh request, got {other:?}"),
-    };
-    assert!(
-        !rendered.contains("refreshing limits"),
-        "expected /status to avoid transient refresh text in terminal history, got: {rendered}"
-    );
     let request_id = match rx.try_recv() {
         Ok(AppEvent::RefreshRateLimits {
             origin: RateLimitRefreshOrigin::StatusCommand { request_id },
@@ -29,19 +44,21 @@ async fn status_command_renders_immediately_and_refreshes_rate_limits_for_chatgp
         other => panic!("expected rate-limit refresh request, got {other:?}"),
     };
     pretty_assertions::assert_eq!(request_id, 0);
+    assert!(drain_insert_history(&mut rx).is_empty());
+    chat.finish_status_rate_limit_refresh(request_id, vec![snapshot(/*percent*/ 20.0)]);
+    let cells = drain_insert_history(&mut rx);
+    assert_eq!(cells.len(), 1);
+    assert!(lines_to_single_string(&cells[0]).contains("80% left"));
 }
 
 #[tokio::test]
-async fn status_command_refresh_updates_cached_limits_for_future_status_outputs() {
+async fn status_command_does_not_print_cached_limits_when_refresh_fails() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     set_chatgpt_auth(&mut chat);
 
+    chat.on_rate_limit_snapshot(Some(snapshot(/*percent*/ 92.0)));
+    drain_insert_history(&mut rx);
     chat.dispatch_command(SlashCommand::Status);
-
-    match rx.try_recv() {
-        Ok(AppEvent::InsertHistoryCell(_)) => {}
-        other => panic!("expected status output before refresh request, got {other:?}"),
-    }
     let first_request_id = match rx.try_recv() {
         Ok(AppEvent::RefreshRateLimits {
             origin: RateLimitRefreshOrigin::StatusCommand { request_id },
@@ -49,10 +66,7 @@ async fn status_command_refresh_updates_cached_limits_for_future_status_outputs(
         other => panic!("expected rate-limit refresh request, got {other:?}"),
     };
 
-    chat.finish_status_rate_limit_refresh(first_request_id, vec![snapshot(/*percent*/ 92.0)]);
-    drain_insert_history(&mut rx);
-
-    chat.dispatch_command(SlashCommand::Status);
+    chat.finish_status_rate_limit_refresh(first_request_id, Vec::new());
     let refreshed = match rx.try_recv() {
         Ok(AppEvent::InsertHistoryCell(cell)) => {
             lines_to_single_string(&cell.display_lines(/*width*/ 80))
@@ -60,8 +74,8 @@ async fn status_command_refresh_updates_cached_limits_for_future_status_outputs(
         other => panic!("expected refreshed status output, got {other:?}"),
     };
     assert!(
-        refreshed.contains("8% left"),
-        "expected a future /status output to use refreshed cached limits, got: {refreshed}"
+        !refreshed.contains("8% left"),
+        "failed refresh must not print cached limits: {refreshed}"
     );
 }
 
@@ -141,10 +155,6 @@ async fn status_command_overlapping_refreshes_update_matching_cells_only() {
     set_chatgpt_auth(&mut chat);
 
     chat.dispatch_command(SlashCommand::Status);
-    match rx.try_recv() {
-        Ok(AppEvent::InsertHistoryCell(_)) => {}
-        other => panic!("expected first status output, got {other:?}"),
-    }
     let first_request_id = match rx.try_recv() {
         Ok(AppEvent::RefreshRateLimits {
             origin: RateLimitRefreshOrigin::StatusCommand { request_id },
@@ -153,12 +163,6 @@ async fn status_command_overlapping_refreshes_update_matching_cells_only() {
     };
 
     chat.dispatch_command(SlashCommand::Status);
-    let second_rendered = match rx.try_recv() {
-        Ok(AppEvent::InsertHistoryCell(cell)) => {
-            lines_to_single_string(&cell.display_lines(/*width*/ 80))
-        }
-        other => panic!("expected second status output, got {other:?}"),
-    };
     let second_request_id = match rx.try_recv() {
         Ok(AppEvent::RefreshRateLimits {
             origin: RateLimitRefreshOrigin::StatusCommand { request_id },
@@ -167,16 +171,14 @@ async fn status_command_overlapping_refreshes_update_matching_cells_only() {
     };
 
     assert_ne!(first_request_id, second_request_id);
-    assert!(
-        !second_rendered.contains("refreshing limits"),
-        "expected /status to avoid transient refresh text in terminal history, got: {second_rendered}"
-    );
+    assert!(drain_insert_history(&mut rx).is_empty());
 
     chat.finish_status_rate_limit_refresh(first_request_id, Vec::new());
     pretty_assertions::assert_eq!(chat.refreshing_status_outputs.len(), 1);
 
-    chat.finish_status_rate_limit_refresh(second_request_id, vec![snapshot(/*percent*/ 92.0)]);
+    chat.finish_status_rate_limit_refresh(second_request_id, vec![snapshot(/*percent*/ 20.0)]);
     assert!(chat.refreshing_status_outputs.is_empty());
+    assert_eq!(drain_insert_history(&mut rx).len(), 2);
 }
 
 #[tokio::test]
@@ -184,7 +186,6 @@ async fn account_update_rejects_stale_status_rate_limit_snapshots() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     set_chatgpt_auth(&mut chat);
     chat.dispatch_command(SlashCommand::Status);
-    assert_matches!(rx.try_recv(), Ok(AppEvent::InsertHistoryCell(_)));
     let request_id = match rx.try_recv() {
         Ok(AppEvent::RefreshRateLimits {
             origin: RateLimitRefreshOrigin::StatusCommand { request_id },
@@ -202,7 +203,7 @@ async fn account_update_rejects_stale_status_rate_limit_snapshots() {
 }
 
 #[tokio::test]
-async fn status_command_renders_immediately_and_updates_first_card_without_status_line() {
+async fn status_command_waits_for_usage_and_limits_without_status_line() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     set_chatgpt_auth(&mut chat);
     let thread_id =
@@ -211,13 +212,6 @@ async fn status_command_renders_immediately_and_updates_first_card_without_statu
     chat.plan_type = Some(PlanType::Business);
 
     chat.dispatch_command(SlashCommand::Status);
-
-    let first_cell = match rx.try_recv() {
-        Ok(AppEvent::InsertHistoryCell(cell)) => cell,
-        event => panic!("expected immediate /status output, got {event:?}"),
-    };
-    let initial = lines_to_single_string(&first_cell.display_lines(/*width*/ 90));
-    assert!(!initial.contains("Thread usage"));
 
     let request_id = match rx.try_recv() {
         Ok(AppEvent::RefreshThreadUsage {
@@ -229,7 +223,7 @@ async fn status_command_renders_immediately_and_updates_first_card_without_statu
         }
         event => panic!("expected /status to request thread usage, got {event:?}"),
     };
-    drain_insert_history(&mut rx);
+    assert_eq!(chat.pending_status_outputs.len(), 1);
     assert!(chat.finish_thread_usage_refresh(
         thread_id,
         request_id,
@@ -264,17 +258,7 @@ async fn status_command_renders_immediately_and_updates_first_card_without_statu
         })),
     ));
 
-    let settled = lines_to_single_string(&first_cell.display_lines(/*width*/ 90));
-    assert!(settled.contains("50 credits · ~$1.82"));
-    assert!(settled.contains("GPT-5.4 80%, GPT-5 Mini 20%"));
-    assert!(drain_insert_history(&mut rx).is_empty());
-    chat.dispatch_command(SlashCommand::Status);
-    let cell = match rx.try_recv() {
-        Ok(AppEvent::InsertHistoryCell(cell)) => cell,
-        event => panic!("expected /status output with cached thread usage, got {event:?}"),
-    };
-    let rendered =
-        normalize_snapshot_paths(lines_to_single_string(&cell.display_lines(/*width*/ 90)));
+    let rendered = normalize_snapshot_paths(complete_status_limits(&mut chat, &mut rx));
     assert!(rendered.contains("50 credits · ~$1.82"));
     assert!(rendered.contains("GPT-5.4 80%, GPT-5 Mini 20%"));
     assert!(rendered.contains("Medium 20%, High 80%"));
@@ -310,12 +294,7 @@ async fn status_command_omits_thread_usage_for_non_cbp_enterprise_plans() {
 
         chat.dispatch_command(SlashCommand::Status);
 
-        let rendered = match rx.try_recv() {
-            Ok(AppEvent::InsertHistoryCell(cell)) => {
-                lines_to_single_string(&cell.display_lines(/*width*/ 90))
-            }
-            event => panic!("expected immediate /status output, got {event:?}"),
-        };
+        let rendered = complete_status_limits(&mut chat, &mut rx);
         assert!(!rendered.contains("Thread usage"));
         assert!(
             !std::iter::from_fn(|| rx.try_recv().ok())
@@ -326,7 +305,7 @@ async fn status_command_omits_thread_usage_for_non_cbp_enterprise_plans() {
 }
 
 #[tokio::test]
-async fn status_command_stays_visible_and_updates_after_thread_usage_retry() {
+async fn status_command_reports_usage_failure_and_can_retry() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     set_chatgpt_auth(&mut chat);
     let thread_id = ThreadId::new();
@@ -334,28 +313,18 @@ async fn status_command_stays_visible_and_updates_after_thread_usage_retry() {
     chat.plan_type = Some(PlanType::Business);
 
     chat.dispatch_command(SlashCommand::Status);
-    let cell = match rx.try_recv() {
-        Ok(AppEvent::InsertHistoryCell(cell)) => cell,
-        event => panic!("expected immediate /status output, got {event:?}"),
-    };
-    assert!(!lines_to_single_string(&cell.display_lines(/*width*/ 90)).contains("Thread usage"));
     let request_id = match rx.try_recv() {
         Ok(AppEvent::RefreshThreadUsage { request_id, .. }) => request_id,
         event => panic!("expected thread usage request, got {event:?}"),
     };
-    while rx.try_recv().is_ok() {}
     assert!(chat.finish_thread_usage_refresh(
         thread_id,
         request_id,
         Err("thread usage temporarily unavailable".to_string()),
     ));
-    assert!(drain_insert_history(&mut rx).is_empty());
+    assert!(complete_status_limits(&mut chat, &mut rx).contains("Could not refresh thread usage"));
 
     chat.dispatch_command(SlashCommand::Status);
-    let retry_cell = match rx.try_recv() {
-        Ok(AppEvent::InsertHistoryCell(cell)) => cell,
-        event => panic!("expected another immediate /status output, got {event:?}"),
-    };
     let retry_request_id = match rx.try_recv() {
         Ok(AppEvent::RefreshThreadUsage { request_id, .. }) => request_id,
         event => panic!("expected thread usage retry, got {event:?}"),
@@ -371,12 +340,7 @@ async fn status_command_stays_visible_and_updates_after_thread_usage_retry() {
         })),
     ));
 
-    for status_cell in [&cell, &retry_cell] {
-        assert!(
-            lines_to_single_string(&status_cell.display_lines(/*width*/ 90))
-                .contains("50 credits · ~$1.82")
-        );
-    }
+    assert!(complete_status_limits(&mut chat, &mut rx).contains("50 credits · ~$1.82"));
 }
 
 #[tokio::test]
@@ -388,15 +352,11 @@ async fn status_command_renders_credits_and_breakdowns_without_usd_estimate() {
     chat.plan_type = Some(PlanType::Business);
 
     chat.dispatch_command(SlashCommand::Status);
-    let first_cell = match rx.try_recv() {
-        Ok(AppEvent::InsertHistoryCell(cell)) => cell,
-        event => panic!("expected immediate /status output, got {event:?}"),
-    };
     let request_id = match rx.try_recv() {
         Ok(AppEvent::RefreshThreadUsage { request_id, .. }) => request_id,
         event => panic!("expected thread usage request, got {event:?}"),
     };
-    drain_insert_history(&mut rx);
+    assert_eq!(chat.pending_status_outputs.len(), 1);
     assert!(chat.finish_thread_usage_refresh(
         thread_id,
         request_id,
@@ -418,18 +378,7 @@ async fn status_command_renders_credits_and_breakdowns_without_usd_estimate() {
         })),
     ));
 
-    let first_rendered = lines_to_single_string(&first_cell.display_lines(/*width*/ 90));
-    assert!(first_rendered.contains("50 credits"));
-    assert!(first_rendered.contains("GPT-5.4 100%"));
-    assert!(!first_rendered.contains("~$"));
-    drain_insert_history(&mut rx);
-    chat.dispatch_command(SlashCommand::Status);
-    let rendered = match rx.try_recv() {
-        Ok(AppEvent::InsertHistoryCell(cell)) => {
-            lines_to_single_string(&cell.display_lines(/*width*/ 90))
-        }
-        event => panic!("expected cached credits-only /status output, got {event:?}"),
-    };
+    let rendered = complete_status_limits(&mut chat, &mut rx);
     assert!(rendered.contains("50 credits"));
     assert!(rendered.contains("GPT-5.4 100%"));
     assert!(rendered.contains("High 100%"));
@@ -456,12 +405,11 @@ async fn status_command_drops_stale_usd_when_updated_usage_has_only_credits() {
     chat.plan_type = Some(PlanType::Business);
 
     chat.dispatch_command(SlashCommand::Status);
-    assert_matches!(rx.try_recv(), Ok(AppEvent::InsertHistoryCell(_)));
     let request_id = match rx.try_recv() {
         Ok(AppEvent::RefreshThreadUsage { request_id, .. }) => request_id,
         event => panic!("expected initial thread usage request, got {event:?}"),
     };
-    drain_insert_history(&mut rx);
+    assert_eq!(chat.pending_status_outputs.len(), 1);
     assert!(chat.finish_thread_usage_refresh(
         thread_id,
         request_id,
@@ -473,20 +421,13 @@ async fn status_command_drops_stale_usd_when_updated_usage_has_only_credits() {
         })),
     ));
 
-    drain_insert_history(&mut rx);
+    assert!(complete_status_limits(&mut chat, &mut rx).contains("40 credits · ~$1.82"));
     chat.dispatch_command(SlashCommand::Status);
-    let cached = match rx.try_recv() {
-        Ok(AppEvent::InsertHistoryCell(cell)) => {
-            lines_to_single_string(&cell.display_lines(/*width*/ 90))
-        }
-        event => panic!("expected cached /status output, got {event:?}"),
-    };
-    assert!(cached.contains("40 credits · ~$1.82"));
     let request_id = match rx.try_recv() {
         Ok(AppEvent::RefreshThreadUsage { request_id, .. }) => request_id,
         event => panic!("expected refreshed thread usage request, got {event:?}"),
     };
-    drain_insert_history(&mut rx);
+    assert_eq!(chat.pending_status_outputs.len(), 1);
     assert!(chat.finish_thread_usage_refresh(
         thread_id,
         request_id,
@@ -498,14 +439,7 @@ async fn status_command_drops_stale_usd_when_updated_usage_has_only_credits() {
         })),
     ));
 
-    drain_insert_history(&mut rx);
-    chat.dispatch_command(SlashCommand::Status);
-    let refreshed = match rx.try_recv() {
-        Ok(AppEvent::InsertHistoryCell(cell)) => {
-            lines_to_single_string(&cell.display_lines(/*width*/ 90))
-        }
-        event => panic!("expected credits-only /status output, got {event:?}"),
-    };
+    let refreshed = complete_status_limits(&mut chat, &mut rx);
     assert!(refreshed.contains("50 credits"));
     assert!(!refreshed.contains("~$1.82"));
 }
@@ -527,7 +461,6 @@ async fn status_command_requests_thread_usage_for_remote_connection_metadata() {
 
     chat.dispatch_command(SlashCommand::Status);
 
-    assert_matches!(rx.try_recv(), Ok(AppEvent::InsertHistoryCell(_)));
     assert_matches!(rx.try_recv(), Ok(AppEvent::RefreshThreadUsage { .. }));
 }
 
@@ -545,12 +478,11 @@ async fn status_command_requests_thread_usage_with_backend_only_authentication()
     assert!(chat.has_codex_backend_auth());
     chat.dispatch_command(SlashCommand::Status);
 
-    assert_matches!(rx.try_recv(), Ok(AppEvent::InsertHistoryCell(_)));
     assert_matches!(rx.try_recv(), Ok(AppEvent::RefreshThreadUsage { .. }));
 }
 
 #[tokio::test]
-async fn status_command_remains_visible_when_account_changes_during_usage_refresh() {
+async fn status_command_is_cancelled_when_account_changes_during_usage_refresh() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     set_chatgpt_auth(&mut chat);
     let thread_id = ThreadId::new();
@@ -558,7 +490,6 @@ async fn status_command_remains_visible_when_account_changes_during_usage_refres
     chat.plan_type = Some(PlanType::Business);
 
     chat.dispatch_command(SlashCommand::Status);
-    assert_matches!(rx.try_recv(), Ok(AppEvent::InsertHistoryCell(_)));
     let request_id = match rx.try_recv() {
         Ok(AppEvent::RefreshThreadUsage { request_id, .. }) => request_id,
         event => panic!("expected thread usage request, got {event:?}"),
@@ -584,7 +515,7 @@ async fn status_command_remains_visible_when_account_changes_during_usage_refres
 }
 
 #[tokio::test]
-async fn status_command_remains_visible_when_thread_changes_during_usage_refresh() {
+async fn status_command_is_cancelled_when_thread_changes_during_usage_refresh() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     set_chatgpt_auth(&mut chat);
     let thread_id = ThreadId::new();
@@ -592,7 +523,6 @@ async fn status_command_remains_visible_when_thread_changes_during_usage_refresh
     chat.plan_type = Some(PlanType::Business);
 
     chat.dispatch_command(SlashCommand::Status);
-    assert_matches!(rx.try_recv(), Ok(AppEvent::InsertHistoryCell(_)));
     let request_id = match rx.try_recv() {
         Ok(AppEvent::RefreshThreadUsage { request_id, .. }) => request_id,
         event => panic!("expected thread usage request, got {event:?}"),

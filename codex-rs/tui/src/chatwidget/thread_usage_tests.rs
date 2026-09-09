@@ -113,10 +113,6 @@ async fn status_history_survives_exhausted_billing_retries() {
     chat.add_status_output(
         /*refreshing_rate_limits*/ false, /*request_id*/ None,
     );
-    let first_status_cell = match rx.try_recv() {
-        Ok(AppEvent::InsertHistoryCell(cell)) => cell,
-        event => panic!("expected the first /status card, got {event:?}"),
-    };
 
     for attempt in 0..=THREAD_USAGE_RETRY_DELAYS.len() {
         assert!(chat.finish_thread_usage_refresh(
@@ -124,7 +120,7 @@ async fn status_history_survives_exhausted_billing_retries() {
             request_id,
             Err("thread usage temporarily unavailable".to_string()),
         ));
-        assert_eq!(chat.thread_usage.status_history_handles.len(), 1);
+        while rx.try_recv().is_ok() {}
 
         if attempt < THREAD_USAGE_RETRY_DELAYS.len() {
             chat.thread_usage.retry_due_at = Some(Instant::now());
@@ -137,10 +133,6 @@ async fn status_history_survives_exhausted_billing_retries() {
     chat.add_status_output(
         /*refreshing_rate_limits*/ false, /*request_id*/ None,
     );
-    let retry_status_cell = match rx.try_recv() {
-        Ok(AppEvent::InsertHistoryCell(cell)) => cell,
-        event => panic!("expected a fresh /status card, got {event:?}"),
-    };
     request_id = thread_usage_request_id(&mut rx);
     assert!(chat.finish_thread_usage_refresh(
         thread_id,
@@ -152,8 +144,12 @@ async fn status_history_survives_exhausted_billing_retries() {
         ))),
     ));
 
-    for status_cell in [&first_status_cell, &retry_status_cell] {
-        let rendered = status_cell
+    let retry_status_cell = match rx.try_recv() {
+        Ok(AppEvent::InsertHistoryCell(cell)) => cell,
+        event => panic!("expected a refreshed /status card, got {event:?}"),
+    };
+    {
+        let rendered = retry_status_cell
             .display_lines(/*width*/ 90)
             .into_iter()
             .flat_map(|line| line.spans)
@@ -194,10 +190,6 @@ async fn status_history_updates_again_after_billing_settles() {
         chat.add_status_output(
             /*refreshing_rate_limits*/ false, /*request_id*/ None,
         );
-        let status_cell = match rx.try_recv() {
-            Ok(AppEvent::InsertHistoryCell(cell)) => cell,
-            event => panic!("expected an immediate /status card, got {event:?}"),
-        };
         assert!(chat.finish_thread_usage_refresh(
             thread_id,
             request_id,
@@ -208,6 +200,10 @@ async fn status_history_updates_again_after_billing_settles() {
             ))),
         ));
         assert_eq!(chat.thread_usage.status_history_handles.len(), 1);
+        let status_cell = match rx.try_recv() {
+            Ok(AppEvent::InsertHistoryCell(cell)) => cell,
+            event => panic!("expected a refreshed /status card, got {event:?}"),
+        };
 
         chat.thread_usage.settlement_refresh_due_at = Some(Instant::now());
         chat.refresh_thread_usage_if_settlement_due();

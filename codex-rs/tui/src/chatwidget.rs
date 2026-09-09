@@ -585,6 +585,9 @@ pub(crate) struct ChatWidget {
     token_usage_pending: bool,
     rate_limit_snapshots_by_limit_id: BTreeMap<String, RateLimitSnapshotDisplay>,
     refreshing_status_outputs: Vec<(u64, StatusHistoryHandle)>,
+    // Ordinary terminal scrollback cannot be reliably patched after insertion.
+    // Publish each card only once its requested remote data has arrived.
+    pending_status_outputs: Vec<(history_cell::CompositeHistoryCell, StatusHistoryHandle)>,
     next_status_refresh_request_id: u64,
     refreshing_token_activity_output: Option<tokens::PendingTokenActivityOutput>,
     completed_token_activity_output: Option<history_cell::CompositeHistoryCell>,

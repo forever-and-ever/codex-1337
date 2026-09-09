@@ -56,6 +56,7 @@ pub(super) struct ThreadUsageState {
 
 impl ChatWidget {
     pub(super) fn clear_thread_usage_state(&mut self) {
+        self.pending_status_outputs.clear();
         let next_request_id = self.thread_usage.next_request_id;
         self.thread_usage = ThreadUsageState {
             next_request_id,
@@ -155,6 +156,7 @@ impl ChatWidget {
             self.thread_usage.thread_id = Some(thread_id);
         }
 
+        handle.begin_thread_usage_refresh();
         self.thread_usage.status_history_handles.push(handle);
         self.thread_usage.status_requested = true;
         self.thread_usage.retry_attempts = 0;
@@ -297,9 +299,13 @@ impl ChatWidget {
                 self.schedule_thread_usage_retry();
             }
         }
-        if usage_updated && !self.thread_usage.status_history_handles.is_empty() {
+        if !self.thread_usage.status_history_handles.is_empty() {
             for handle in &self.thread_usage.status_history_handles {
-                handle.set_thread_usage(self.thread_usage.estimate.clone());
+                handle.set_thread_usage(if usage_updated {
+                    self.thread_usage.estimate.clone()
+                } else {
+                    None
+                });
             }
             if self
                 .thread_usage
@@ -319,6 +325,10 @@ impl ChatWidget {
             self.request_thread_usage();
         }
         self.refresh_status_line();
+        if !usage_updated && !self.pending_status_outputs.is_empty() {
+            self.add_error_message("Could not refresh thread usage for /status.".to_string());
+        }
+        self.flush_status_outputs();
         self.request_redraw();
         true
     }

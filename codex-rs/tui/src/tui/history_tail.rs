@@ -13,14 +13,6 @@ use std::io;
 use std::io::Write;
 
 impl Tui {
-    #[cfg(test)]
-    pub(crate) fn pending_history_lines_for_test(&self) -> Vec<HyperlinkLine> {
-        self.pending_history_lines
-            .iter()
-            .flat_map(|batch| batch.lines.iter().cloned())
-            .collect()
-    }
-
     pub(crate) fn replace_visible_history_tail(
         &mut self,
         previous_lines: &[HyperlinkLine],

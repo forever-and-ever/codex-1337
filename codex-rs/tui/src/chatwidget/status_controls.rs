@@ -250,11 +250,20 @@ impl ChatWidget {
         }
         if self.thread_usage_is_available() {
             handle.reserve_thread_usage_label_width();
-            handle.set_thread_usage(self.estimated_thread_usage().cloned());
-            self.add_to_history(cell);
-            self.request_thread_usage_for_status(handle);
-        } else {
-            self.add_to_history(cell);
+            self.request_thread_usage_for_status(handle.clone());
+        }
+        self.pending_status_outputs.push((cell, handle));
+        self.flush_status_outputs();
+    }
+
+    pub(super) fn flush_status_outputs(&mut self) {
+        let pending = std::mem::take(&mut self.pending_status_outputs);
+        for (cell, handle) in pending {
+            if handle.is_ready() {
+                self.add_to_history(cell);
+            } else {
+                self.pending_status_outputs.push((cell, handle));
+            }
         }
     }
 
@@ -271,6 +280,7 @@ impl ChatWidget {
             return;
         }
 
+        let fresh = !snapshots.is_empty();
         for snapshot in snapshots {
             self.on_rate_limit_snapshot(Some(snapshot));
         }
@@ -286,13 +296,21 @@ impl ChatWidget {
         for (pending_request_id, handle) in self.refreshing_status_outputs.drain(..) {
             if pending_request_id == request_id {
                 updated_any = true;
-                handle.finish_rate_limit_refresh(rate_limit_snapshots.as_slice(), now);
+                handle.finish_rate_limit_refresh(
+                    if fresh {
+                        rate_limit_snapshots.as_slice()
+                    } else {
+                        &[]
+                    },
+                    now,
+                );
             } else {
                 remaining.push((pending_request_id, handle));
             }
         }
         self.refreshing_status_outputs = remaining;
         if updated_any {
+            self.flush_status_outputs();
             self.request_redraw();
         }
     }

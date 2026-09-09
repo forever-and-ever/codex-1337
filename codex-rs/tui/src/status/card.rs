@@ -75,6 +75,7 @@ pub(crate) struct StatusTokenUsageData {
 struct StatusRateLimitState {
     rate_limits: StatusRateLimitData,
     refreshing_rate_limits: bool,
+    refreshing_thread_usage: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -84,6 +85,20 @@ pub(crate) struct StatusHistoryHandle {
 }
 
 impl StatusHistoryHandle {
+    pub(crate) fn begin_thread_usage_refresh(&self) {
+        self.rate_limit_state
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .refreshing_thread_usage = true;
+    }
+
+    pub(crate) fn is_ready(&self) -> bool {
+        let state = self
+            .rate_limit_state
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        !state.refreshing_rate_limits && !state.refreshing_thread_usage
+    }
     pub(crate) fn reserve_thread_usage_label_width(&self) {
         self.thread_usage.reserve_label_width();
     }
@@ -112,6 +127,10 @@ impl StatusHistoryHandle {
         estimate: Option<codex_app_server_protocol::ThreadUsage>,
     ) {
         self.thread_usage.set_estimate(estimate);
+        self.rate_limit_state
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .refreshing_thread_usage = false;
     }
 }
 
@@ -362,6 +381,7 @@ impl StatusHistoryCell {
         let rate_limit_state = Arc::new(RwLock::new(StatusRateLimitState {
             rate_limits,
             refreshing_rate_limits,
+            refreshing_thread_usage: false,
         }));
         let agents_summary = Arc::new(RwLock::new(agents_summary));
         let thread_usage = StatusThreadUsage::default();
