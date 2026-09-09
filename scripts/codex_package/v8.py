@@ -104,7 +104,9 @@ def resolved_v8_crate_version() -> str:
 
 
 def default_cache_root() -> Path:
-    return Path(tempfile.gettempdir()) / "codex-package"
+    configured = Path(os.environ.get("XDG_CACHE_HOME", ""))
+    root = configured if configured.is_absolute() else Path.home() / ".cache"
+    return root / "codex-1337" / "v8"
 
 
 def load_checksums(checksums_path: Path, artifact_names: set[str]) -> dict[str, str]:
@@ -144,7 +146,6 @@ def ensure_valid_artifact(artifact: Path, checksum: str, url: str) -> None:
     if has_checksum(artifact, checksum):
         return
 
-    artifact.unlink(missing_ok=True)
     download_file(url, artifact)
     if has_checksum(artifact, checksum):
         return
@@ -168,12 +169,13 @@ def has_checksum(path: Path, expected: str) -> bool:
 
 def download_file(url: str, dest: Path) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = dest.with_suffix(f"{dest.suffix}.tmp")
-    temp_path.unlink(missing_ok=True)
-    try:
-        with urlopen(url, timeout=DOWNLOAD_TIMEOUT_SECS) as response:
-            with temp_path.open("wb") as output:
+    # Builds share the cache: never unlink another downloader's temporary file.
+    with tempfile.NamedTemporaryFile(dir=dest.parent, delete=False) as output:
+        temp_path = Path(output.name)
+        try:
+            with urlopen(url, timeout=DOWNLOAD_TIMEOUT_SECS) as response:
                 shutil.copyfileobj(response, output)
-        temp_path.replace(dest)
-    finally:
-        temp_path.unlink(missing_ok=True)
+            output.close()
+            temp_path.replace(dest)
+        finally:
+            temp_path.unlink(missing_ok=True)

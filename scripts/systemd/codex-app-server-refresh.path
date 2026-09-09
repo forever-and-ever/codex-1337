@@ -2,7 +2,7 @@
 Description=Watch the selected Codex release
 
 [Path]
-PathChanged=@CODEX@
+PathChanged=@CODEX_PATH@
 Unit=codex-app-server-refresh.service
 
 [Install]

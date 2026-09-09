@@ -1,9 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Codex Wrangler
-Comment=Survey and activate agent sessions across machines
-Exec=@WRANGLER@
-Terminal=false
-Categories=Development;
-StartupNotify=false
-X-GNOME-UsesNotifications=false

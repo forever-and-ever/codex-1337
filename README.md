@@ -4,7 +4,9 @@ Owned downstream fork of Codex. Local builds carry the `-1337` suffix.
 Install the coordinated distribution with `scripts/install-local`.
 
 The shared app server, account scoping, and agent controls belong to this fork.
-The retained Wrangler sources are transitional, not a Poolrooms application.
+Use `codex agents` for the session dashboard. The graphical Wrangler is retired.
+The distribution owns its systemd user units; upgrades drain active turns rather
+than forcibly restarting the shared server. The federation bridge remains bundled.
 
 <p align="center"><strong>Codex CLI</strong> is a coding agent from OpenAI that runs locally on your computer.
 <p align="center">
