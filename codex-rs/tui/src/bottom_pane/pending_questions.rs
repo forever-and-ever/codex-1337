@@ -7,6 +7,8 @@ use ratatui::text::Line;
 use ratatui::widgets::Paragraph;
 
 use crate::render::renderable::Renderable;
+use crate::ui_consts::LIVE_PREFIX_COLS;
+use crate::wrapping::RtOptions;
 
 #[derive(Default)]
 pub(super) struct PendingQuestions {
@@ -30,13 +32,24 @@ impl PendingQuestions {
             "/questions".cyan(),
             " to answer or dismiss".dim(),
         ]);
-        let mut lines = crate::wrapping::word_wrap_lines([header], usize::from(width.max(1)));
+        let indent = " ".repeat(usize::from(LIVE_PREFIX_COLS));
+        let mut lines = crate::wrapping::word_wrap_lines(
+            [header],
+            RtOptions::new(usize::from(width.max(1)))
+                .initial_indent(Line::from(indent.clone()))
+                .subsequent_indent(Line::from(indent.clone())),
+        );
         if let Some(first) = &self.first {
             lines.extend(
-                textwrap::wrap(first, usize::from(width.max(1)))
-                    .into_iter()
-                    .take(2)
-                    .map(|s| Line::from(s.into_owned())),
+                textwrap::wrap(
+                    first,
+                    textwrap::Options::new(usize::from(width.max(1)))
+                        .initial_indent(&indent)
+                        .subsequent_indent(&indent),
+                )
+                .into_iter()
+                .take(2)
+                .map(|s| Line::from(s.into_owned())),
             );
         }
         lines

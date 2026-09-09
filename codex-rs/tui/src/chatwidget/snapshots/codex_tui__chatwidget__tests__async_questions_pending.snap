@@ -2,13 +2,12 @@
 source: tui/src/chatwidget/tests/async_questions_tests.rs
 expression: "render_bottom_popup(&chat, 80)"
 ---
-1 pending question · /questions to answer or dismiss
-Which environment should I deploy to?
+  1 pending question · /questions to answer or dismiss
+  Which environment should I deploy to?
 
 › unfinished steering
 
 ────────────────────────────────────────────────────────────────────────────────
-Task     —
-Activity —
+  Activity —
 ────────────────────────────────────────────────────────────────────────────────
   tab to queue message                                       100% context left

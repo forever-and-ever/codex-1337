@@ -2,6 +2,7 @@
 
 use crate::line_truncation::truncate_line_to_width;
 use crate::render::renderable::Renderable;
+use crate::ui_consts::LIVE_PREFIX_COLS;
 use crate::wrapping::RtOptions;
 use crate::wrapping::word_wrap_lines;
 use codex_protocol::protocol::WorkStatus;
@@ -40,9 +41,11 @@ impl WorkStatusView<'_> {
             let line = Line::from(vec![format!("{label:<8} ").dim(), value.into()]);
             let mut wrapped = word_wrap_lines(
                 [line],
-                RtOptions::new(usize::from(width)).subsequent_indent(Line::from(
-                    " ".repeat(usize::from(width.saturating_sub(1).min(9))),
-                )),
+                RtOptions::new(usize::from(width))
+                    .initial_indent(Line::from(" ".repeat(usize::from(LIVE_PREFIX_COLS))))
+                    .subsequent_indent(Line::from(" ".repeat(usize::from(
+                        width.saturating_sub(1).min(9 + LIVE_PREFIX_COLS),
+                    )))),
             );
             if wrapped.len() > 2 {
                 wrapped.truncate(2);
