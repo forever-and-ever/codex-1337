@@ -2602,7 +2602,33 @@ impl AuthManager {
     async fn load_auth(&self) -> Option<CodexAuth> {
         let account = self.read_account_scope().clone();
         if let Some(account) = account {
-            return self.load_saved_account(&account).await.ok();
+            use account_scope::SavedAccountLoadError;
+
+            let mut loaded = self.load_saved_account(&account).await;
+            if let Err(SavedAccountLoadError::Storage(error)) = &loaded {
+                tracing::warn!(%error, "Saved-account storage read failed; retrying");
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                loaded = self.load_saved_account(&account).await;
+            }
+            return match loaded {
+                Ok(auth) => Some(auth),
+                Err(SavedAccountLoadError::Storage(error)) => {
+                    tracing::warn!(%error, "Saved-account storage remains unreadable; retaining cached credentials until the next reload");
+                    // reload() publishes only if the selector and cache revision still match.
+                    self.auth_cached().filter(|auth| {
+                        validate_auth_restrictions(
+                            Some(&self.allowed_login_methods()),
+                            self.effective_chatgpt_workspaces().as_deref(),
+                            auth,
+                        )
+                        .is_ok()
+                    })
+                }
+                Err(SavedAccountLoadError::Rejected(error)) => {
+                    tracing::warn!(%error, "Saved account is absent or rejected");
+                    None
+                }
+            };
         }
         if let Some(external_auth) = self.external_auth_provider() {
             let cached_auth = self.auth_cached();

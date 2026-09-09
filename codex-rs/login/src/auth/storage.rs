@@ -176,6 +176,9 @@ pub(super) trait AuthStorageBackend: Debug + Send + Sync {
     fn load(&self) -> std::io::Result<Option<AuthDotJson>> {
         Ok(self.read()?.map(|document| document.active))
     }
+    fn load_account(&self, id: &str) -> std::io::Result<Option<AuthDotJson>> {
+        Ok(self.read()?.and_then(|document| document.select(id)))
+    }
     fn save(&self, auth: &AuthDotJson) -> std::io::Result<()> {
         let _guard = credential_lock(self.home())?;
         let mut document = self
@@ -517,6 +520,21 @@ impl AuthStorageBackend for AutoAuthStorage {
             Err(err) => {
                 warn!("failed to load CLI auth from keyring, falling back to file storage: {err}");
                 self.file_storage.read()
+            }
+        }
+    }
+
+    fn load_account(&self, id: &str) -> std::io::Result<Option<AuthDotJson>> {
+        match self.keyring_storage.read() {
+            Ok(Some(document)) => Ok(document.select(id)),
+            Ok(None) => self.file_storage.load_account(id),
+            Err(error) => {
+                // A fallback can supply this identity, but cannot prove it was
+                // removed from a keyring we could not read.
+                match self.file_storage.load_account(id)? {
+                    Some(auth) => Ok(Some(auth)),
+                    None => Err(error),
+                }
             }
         }
     }

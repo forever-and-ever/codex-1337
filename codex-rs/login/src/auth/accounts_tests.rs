@@ -94,7 +94,24 @@ async fn conversation_selectors_do_not_follow_global_login_or_each_other() -> an
     assert_eq!(first.auth_cached().unwrap().auth_mode(), AuthMode::Chatgpt);
     assert!(first.select_account("missing").await.is_err());
     assert_eq!(first.selected_account_id(), Some(bob_id));
+    // A failed read used to erase the scoped cache as if logout had occurred.
+    // Neither reader may switch to the global login during a storage outage.
+    let auth_file = home.path().join("auth.json");
+    let preserved = home.path().join("auth.saved");
+    std::fs::rename(&auth_file, &preserved)?;
+    std::fs::create_dir(&auth_file)?;
+    assert_eq!(
+        first.auth().await.unwrap().get_account_id().as_deref(),
+        Some("bob")
+    );
+    assert_eq!(
+        second.auth().await.unwrap().get_account_id().as_deref(),
+        Some("alice")
+    );
+    std::fs::remove_dir(&auth_file)?;
+    std::fs::rename(&preserved, &auth_file)?;
     second.logout().await?;
+    assert!(second.auth().await.is_none());
     let missing = root.for_account(&alice_id).await?;
     missing.reload().await;
     assert_eq!(missing.selected_account_id(), Some(alice_id));

@@ -726,15 +726,28 @@ fn auto_auth_storage_load_falls_back_when_keyring_errors() -> anyhow::Result<()>
     );
     let key = compute_keyring_account(codex_home.path());
 
-    let encrypted = auth_with_prefix("encrypted");
+    let mut encrypted = auth_with_prefix("encrypted");
+    encrypted.auth_mode = Some(AuthMode::Chatgpt);
     seed_secrets_backend_with_auth(&mock_keyring, codex_home.path(), &encrypted)?;
     mock_keyring.set_error(&key, KeyringError::Invalid("error".into(), "load".into()));
 
-    let expected = auth_with_prefix("fallback");
+    let mut expected = auth_with_prefix("fallback");
+    expected.auth_mode = Some(AuthMode::Chatgpt);
     storage.file_storage.save(&expected)?;
 
     let loaded = storage.load()?;
-    assert_eq!(loaded, Some(expected));
+    assert_eq!(loaded, Some(expected.clone()));
+    let encrypted_id = super::super::accounts::identity(&encrypted).unwrap();
+    let fallback_id = super::super::accounts::identity(&expected).unwrap();
+    mock_keyring.set_error(&key, KeyringError::Invalid("error".into(), "load".into()));
+    assert_eq!(storage.load_account(&fallback_id)?, Some(expected));
+    // Neither a different fallback identity nor an absent fallback proves logout.
+    mock_keyring.set_error(&key, KeyringError::Invalid("error".into(), "load".into()));
+    assert!(storage.load_account(&encrypted_id).is_err());
+    std::fs::remove_file(get_auth_file(codex_home.path()))?;
+    mock_keyring.set_error(&key, KeyringError::Invalid("error".into(), "load".into()));
+    assert!(storage.load_account(&encrypted_id).is_err());
+    assert_eq!(storage.load_account(&encrypted_id)?, Some(encrypted));
     Ok(())
 }
 

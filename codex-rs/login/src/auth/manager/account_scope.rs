@@ -2,6 +2,20 @@ use super::*;
 use crate::auth::SavedAccount;
 use crate::auth::accounts::identity;
 
+// Failure to observe the store is not evidence that the selected identity was removed.
+pub(super) enum SavedAccountLoadError {
+    Storage(std::io::Error),
+    Rejected(std::io::Error),
+}
+
+impl From<SavedAccountLoadError> for std::io::Error {
+    fn from(error: SavedAccountLoadError) -> Self {
+        match error {
+            SavedAccountLoadError::Storage(error) | SavedAccountLoadError::Rejected(error) => error,
+        }
+    }
+}
+
 /// Validated selection, held until its caller has durably recorded the conversation binding.
 pub struct PreparedAccount<'a> {
     manager: &'a AuthManager,
@@ -146,19 +160,22 @@ impl AuthManager {
         })
     }
 
-    pub(super) async fn load_saved_account(&self, id: &str) -> std::io::Result<CodexAuth> {
+    pub(super) async fn load_saved_account(
+        &self,
+        id: &str,
+    ) -> Result<CodexAuth, SavedAccountLoadError> {
         let document = create_auth_storage(
             self.codex_home.clone(),
             self.auth_credentials_store_mode,
             self.keyring_backend_kind,
         )
-        .read()?
-        .and_then(|document| document.select(id))
+        .load_account(id)
+        .map_err(SavedAccountLoadError::Storage)?
         .ok_or_else(|| {
-            std::io::Error::new(
+            SavedAccountLoadError::Rejected(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
                 "Saved account is unavailable; use /account or codex login.",
-            )
+            ))
         })?;
         let auth = CodexAuth::from_auth_dot_json(
             &self.codex_home,
@@ -169,13 +186,14 @@ impl AuthManager {
             self.agent_identity_authapi_base_url.as_deref(),
             &self.auth_route_config,
         )
-        .await?;
+        .await
+        .map_err(SavedAccountLoadError::Rejected)?;
         validate_auth_restrictions(
             Some(&self.allowed_login_methods()),
             self.effective_chatgpt_workspaces().as_deref(),
             &auth,
         )
-        .map_err(std::io::Error::other)?;
+        .map_err(|error| SavedAccountLoadError::Rejected(std::io::Error::other(error)))?;
         Ok(auth)
     }
 }

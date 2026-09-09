@@ -109,7 +109,7 @@ impl AuthStorageBackend for AccountStorage {
     }
 
     fn load(&self) -> std::io::Result<Option<AuthDotJson>> {
-        Ok(self.read()?.and_then(|document| document.select(&self.id)))
+        self.backend.load_account(&self.id)
     }
 
     fn save(&self, auth: &AuthDotJson) -> std::io::Result<()> {
