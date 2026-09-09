@@ -2101,6 +2101,14 @@
             "kind": {
               "$ref": "#/definitions/SubAgentActivityKind"
             },
+            "messagePreview": {
+              "default": null,
+              "description": "Display-only excerpt of sent instructions, at most 512 characters.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "type": {
               "enum": [
                 "subAgentActivity"

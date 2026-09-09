@@ -242,6 +242,7 @@ async fn handle_spawn_agent(
         &session,
         turn,
         SubAgentActivityItem {
+            message_preview: None,
             id: call_id,
             agent_thread_id: new_thread_id,
             agent_path: new_agent_path.clone(),

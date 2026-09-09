@@ -166,17 +166,21 @@ impl App {
     }
 
     pub(super) fn agent_picker_selection_view_params(
-        &self,
+        &mut self,
         selected: Option<usize>,
     ) -> SelectionViewParams {
-        let mut initial_selected_idx = selected;
-        let items: Vec<SelectionItem> = self
-            .agent_navigation
-            .ordered_threads()
+        let selected_thread = selected
+            .and_then(|index| self.agent_navigation.picker_order.get(index).copied())
+            .or(self.active_thread_id);
+        let mut threads = self.agent_navigation.ordered_threads();
+        threads.sort_by_key(|(_, entry)| !(entry.is_running && !entry.is_closed));
+        let picker_order = threads.iter().map(|(id, _)| *id).collect();
+        let mut initial_selected_idx = None;
+        let items: Vec<SelectionItem> = threads
             .into_iter()
             .enumerate()
             .map(|(idx, (thread_id, entry))| {
-                if initial_selected_idx.is_none() && self.active_thread_id == Some(thread_id) {
+                if selected_thread == Some(thread_id) {
                     initial_selected_idx = Some(idx);
                 }
                 let id = thread_id;
@@ -209,6 +213,7 @@ impl App {
                 }
             })
             .collect();
+        self.agent_navigation.picker_order = picker_order;
 
         SelectionViewParams {
             view_id: Some(AGENT_PICKER_VIEW_ID),

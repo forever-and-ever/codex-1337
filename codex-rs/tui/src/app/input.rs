@@ -182,6 +182,24 @@ impl App {
         app_server: &mut AppServerSession,
         key_event: KeyEvent,
     ) {
+        if key_event.code == KeyCode::Esc
+            && key_event.modifiers.is_empty()
+            && matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat)
+            && self.overlay.is_none()
+            && self.chat_widget.no_modal_or_popup_active()
+            && self.chat_widget.composer_is_empty()
+            && self.chat_widget.composer_text_with_pending().is_empty()
+            && let Some(root) = self.primary_thread_id
+            && self
+                .current_displayed_thread_id()
+                .is_some_and(|id| id != root && !self.side_threads.contains_key(&id))
+        {
+            if let Err(error) = self.select_agent_thread(tui, app_server, root).await {
+                self.chat_widget
+                    .add_error_message(format!("Could not return to the main agent: {error}"));
+            }
+            return;
+        }
         // Some terminals, especially on macOS, encode Option+Left/Right as Option+b/f unless
         // enhanced keyboard reporting is available. We only treat those word-motion fallbacks as
         // agent-switch shortcuts when the composer is empty so we never steal the expected

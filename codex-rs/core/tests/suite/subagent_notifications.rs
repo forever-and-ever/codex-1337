@@ -2622,6 +2622,7 @@ async fn plaintext_multi_agent_v2_completion_sends_agent_message(
         assert_eq!(
             completed_item,
             &SubAgentActivityItem {
+                message_preview: None,
                 id: format!("subagent-completed-{child_turn_id}"),
                 kind: SubAgentActivityKind::Completed,
                 agent_thread_id: child_thread_id,
@@ -2881,6 +2882,7 @@ async fn multi_agent_v2_peer_followup_completion_notifies_initiating_turn() -> R
             requester_turn_id,
             SubAgentActivityItem {
                 id: format!("subagent-completed-{worker_followup_turn_id}"),
+                message_preview: None,
                 kind: SubAgentActivityKind::Completed,
                 agent_thread_id: worker_thread_id,
                 agent_path: codex_protocol::AgentPath::root()

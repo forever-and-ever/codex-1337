@@ -96,6 +96,15 @@ pub(super) async fn handle_message_string_tool(
         .session_source
         .get_agent_path()
         .unwrap_or_else(AgentPath::root);
+    let message_preview = Some(
+        message
+            .chars()
+            .take(/*n*/ 512)
+            .collect::<String>()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" "),
+    );
     let communication = communication_from_tool_message(
         author,
         receiver_agent_path.clone(),
@@ -135,6 +144,7 @@ pub(super) async fn handle_message_string_tool(
             agent_thread_id: receiver_thread_id,
             agent_path: receiver_agent_path,
             kind: SubAgentActivityKind::Interacted,
+            message_preview,
         },
     )
     .await;

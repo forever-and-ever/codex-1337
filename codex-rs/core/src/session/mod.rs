@@ -2253,6 +2253,7 @@ impl Session {
                         parent_turn_id,
                         SubAgentActivityItem {
                             id: format!("subagent-completed-{}", turn_context.sub_id),
+                            message_preview: None,
                             kind: SubAgentActivityKind::Completed,
                             agent_thread_id: self.thread_id,
                             agent_path: child_agent_path.clone(),

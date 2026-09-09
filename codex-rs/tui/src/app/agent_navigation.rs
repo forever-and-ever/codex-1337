@@ -43,8 +43,10 @@ use uuid::Uuid;
 pub(crate) struct AgentNavigationState {
     /// Latest picker metadata for each tracked thread id.
     threads: HashMap<ThreadId, AgentPickerThreadEntry>,
-    /// Stable first-seen traversal order for picker rows and keyboard cycling.
+    /// Stable first-seen traversal order for keyboard cycling and picker tie-breaking.
     order: Vec<ThreadId>,
+    /// Last rendered picker rows; selection follows identity across status-driven reordering.
+    pub(super) picker_order: Vec<ThreadId>,
     /// Threads with observed terminal liveness that must not be revived by delayed activity.
     stopped_threads: HashSet<ThreadId>,
     /// Spawned child threads whose instructions are owned by their parent agent.
@@ -221,6 +223,7 @@ impl AgentNavigationState {
     pub(crate) fn clear(&mut self) {
         self.threads.clear();
         self.order.clear();
+        self.picker_order.clear();
         self.stopped_threads.clear();
         self.parent_owned_threads.clear();
         self.picker_refresh = None;
@@ -249,7 +252,7 @@ impl AgentNavigationState {
             .any(|thread_id| Some(*thread_id) != primary_thread_id)
     }
 
-    /// Returns live picker rows in the same order users cycle through them.
+    /// Returns rows in keyboard traversal order; the picker separately groups running rows first.
     ///
     /// The `order` vector is intentionally historical and may briefly contain thread ids that no
     /// longer have cached metadata, so this filters through the map instead of assuming both
@@ -277,7 +280,7 @@ impl AgentNavigationState {
             .collect()
     }
 
-    /// Returns tracked thread ids in the same stable order used by the picker.
+    /// Returns tracked thread ids in stable spawn order.
     pub(crate) fn tracked_thread_ids(&self) -> Vec<ThreadId> {
         self.ordered_threads()
             .into_iter()
@@ -369,7 +372,7 @@ impl AgentNavigationState {
         let previous: Span<'static> = previous_agent_shortcut().into();
         let next: Span<'static> = next_agent_shortcut().into();
         format!(
-            "Select an agent to watch. {} previous, {} next.",
+            "Empty prompt: Esc → main. {} previous, {} next.",
             previous.content, next.content
         )
     }

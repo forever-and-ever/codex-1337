@@ -1,4 +1,84 @@
 use super::*;
+use pretty_assertions::assert_eq;
+
+#[tokio::test]
+async fn agents_navigation_picker_keeps_selection_when_running_order_changes() {
+    let mut app = make_test_app().await;
+    let root = ThreadId::new();
+    let idle = ThreadId::new();
+    let busy = ThreadId::new();
+    app.primary_thread_id = Some(root);
+    app.active_thread_id = Some(idle);
+    for (id, name) in [(root, "main"), (idle, "researcher"), (busy, "reviewer")] {
+        app.upsert_agent_picker_thread(
+            id,
+            Some(name.into()),
+            /*agent_role*/ None,
+            /*is_closed*/ false,
+        );
+    }
+    app.agent_navigation.set_running(busy, /*is_running*/ true);
+    let first = app.agent_picker_selection_view_params(/*selected*/ None);
+    assert_eq!(app.agent_navigation.picker_order, vec![busy, root, idle]);
+    assert_eq!(first.initial_selected_idx, Some(2));
+    app.agent_navigation.set_running(busy, /*is_running*/ false);
+    app.agent_navigation.set_running(idle, /*is_running*/ true);
+    let next = app.agent_picker_selection_view_params(first.initial_selected_idx);
+    assert_eq!(app.agent_navigation.picker_order, vec![idle, root, busy]);
+    assert_eq!(next.initial_selected_idx, Some(0));
+    app.chat_widget.show_selection_view(next);
+    insta::assert_snapshot!(
+        "subagents_running_first",
+        render_bottom_popup(&app.chat_widget, /*width*/ 90)
+            .replace(&root.to_string(), "ROOT_ID")
+            .replace(&idle.to_string(), "IDLE_ID")
+            .replace(&busy.to_string(), "BUSY_ID")
+    );
+}
+
+#[tokio::test]
+async fn agents_navigation_escape_returns_to_main_but_preserves_drafts_and_popups() -> Result<()> {
+    let mut app = make_test_app().await;
+    let mut app_server = crate::start_embedded_app_server_for_picker(&app.config).await?;
+    let root = app_server.start_thread(&app.config).await?;
+    let root_id = root.session.thread_id;
+    app.enqueue_primary_thread_session(root.session, root.turns)
+        .await?;
+    let child = app_server.start_thread(&app.config).await?;
+    let child_id = child.session.thread_id;
+    app.thread_event_channels.insert(
+        child_id,
+        ThreadEventChannel::new_with_session(/*capacity*/ 1, child.session, child.turns),
+    );
+    let mut tui = crate::tui::test_support::make_test_tui()?;
+    app.select_agent_thread(&mut tui, &mut app_server, child_id)
+        .await?;
+    assert_eq!(app.current_displayed_thread_id(), Some(child_id));
+    app.chat_widget.apply_external_edit("x".into());
+    assert_eq!(app.chat_widget.composer_text_with_pending(), "x");
+    app.handle_key_event(&mut tui, &mut app_server, KeyCode::Esc.into())
+        .await;
+    assert_eq!(app.current_displayed_thread_id(), Some(child_id));
+    app.chat_widget.apply_external_edit(String::new());
+    assert!(app.chat_widget.composer_is_empty());
+    app.chat_widget.show_selection_view(SelectionViewParams {
+        title: Some("Child popup".into()),
+        items: vec![SelectionItem {
+            name: "Keep working".into(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    });
+    app.handle_key_event(&mut tui, &mut app_server, KeyCode::Esc.into())
+        .await;
+    assert_eq!(app.current_displayed_thread_id(), Some(child_id));
+    assert!(app.chat_widget.no_modal_or_popup_active());
+    app.handle_key_event(&mut tui, &mut app_server, KeyCode::Esc.into())
+        .await;
+    assert_eq!(app.current_displayed_thread_id(), Some(root_id));
+    app_server.shutdown().await?;
+    Ok(())
+}
 
 #[tokio::test]
 async fn agents_navigation_requires_local_daemon() -> Result<()> {

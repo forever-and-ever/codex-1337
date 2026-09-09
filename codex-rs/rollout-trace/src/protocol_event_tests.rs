@@ -20,6 +20,7 @@ fn sub_agent_activity_is_a_terminal_tool_runtime_event() -> anyhow::Result<()> {
     let agent_thread_id = ThreadId::new();
     let event = EventMsg::SubAgentActivity(SubAgentActivityEvent {
         event_id: "call-spawn".to_string(),
+        message_preview: None,
         occurred_at_ms: 1234,
         agent_thread_id,
         agent_path: AgentPath::try_from("/root/reviewer").map_err(anyhow::Error::msg)?,
@@ -54,6 +55,7 @@ fn sub_agent_activity_is_a_terminal_tool_runtime_event() -> anyhow::Result<()> {
 fn completed_sub_agent_activity_is_not_a_tool_runtime_event() -> anyhow::Result<()> {
     let event = EventMsg::SubAgentActivity(SubAgentActivityEvent {
         event_id: "child-turn-completed".to_string(),
+        message_preview: None,
         occurred_at_ms: 1234,
         agent_thread_id: ThreadId::new(),
         agent_path: AgentPath::try_from("/root/reviewer").map_err(anyhow::Error::msg)?,

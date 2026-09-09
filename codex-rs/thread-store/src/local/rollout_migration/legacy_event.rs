@@ -203,6 +203,7 @@ pub(super) fn completed_item(
         )),
         EventMsg::SubAgentActivity(event) => Some((
             TurnItem::SubAgentActivity(SubAgentActivityItem {
+                message_preview: event.message_preview.clone(),
                 id: event.event_id.clone(),
                 kind: event.kind,
                 agent_thread_id: event.agent_thread_id,

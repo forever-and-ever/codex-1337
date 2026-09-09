@@ -2354,14 +2354,19 @@ async fn item_completion_without_a_start_uses_completion_timestamp() {
 async fn subagent_activity_emits_matching_start_and_completion() {
     let (session, turn_context, rx) = make_session_and_context_with_rx().await;
     let item = codex_protocol::items::SubAgentActivityItem {
+        message_preview: Some("Inspect the parser without editing files.".into()),
         id: "activity-1".to_string(),
-        kind: codex_protocol::protocol::SubAgentActivityKind::Started,
+        kind: codex_protocol::protocol::SubAgentActivityKind::Interacted,
         agent_thread_id: ThreadId::new(),
         agent_path: AgentPath::root(),
     };
 
-    crate::tools::handlers::multi_agents_v2::emit_sub_agent_activity(&session, &turn_context, item)
-        .await;
+    crate::tools::handlers::multi_agents_v2::emit_sub_agent_activity(
+        &session,
+        &turn_context,
+        item.clone(),
+    )
+    .await;
 
     let EventMsg::ItemStarted(started) = rx.recv().await.expect("started item event").msg else {
         panic!("expected started item event");
@@ -2371,6 +2376,12 @@ async fn subagent_activity_emits_matching_start_and_completion() {
         panic!("expected completed item event");
     };
     assert_eq!(completed.started_at_ms, Some(started.started_at_ms));
+    let (TurnItem::SubAgentActivity(started), TurnItem::SubAgentActivity(completed)) =
+        (started.item, completed.item)
+    else {
+        panic!("expected subagent activity items");
+    };
+    assert_eq!([started, completed], [item.clone(), item]);
 }
 
 #[tokio::test]

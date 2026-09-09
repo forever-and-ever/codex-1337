@@ -307,14 +307,22 @@ pub(crate) fn sub_agent_activity_display(item: &ThreadItem) -> Option<SubAgentAc
 
 pub(crate) fn sub_agent_activity_history_cell(item: &ThreadItem) -> Option<PlainHistoryCell> {
     let ThreadItem::SubAgentActivity {
-        kind, agent_path, ..
+        kind,
+        agent_path,
+        message_preview,
+        ..
     } = item
     else {
         return None;
     };
     Some(collab_event(
         sub_agent_activity_title(*kind, agent_path),
-        Vec::new(),
+        message_preview
+            .as_deref()
+            .and_then(prompt_line)
+            .map(ratatui::prelude::Stylize::dim)
+            .into_iter()
+            .collect(),
     ))
 }
 
@@ -689,6 +697,10 @@ mod tests {
     #[test]
     fn interacted_sub_agent_activity_does_not_change_liveness() {
         let item = ThreadItem::SubAgentActivity {
+            message_preview: Some(
+                "Check the parser failure, then report the root cause without editing files."
+                    .into(),
+            ),
             id: "activity-1".to_string(),
             kind: SubAgentActivityKind::Interacted,
             agent_thread_id: ThreadId::new().to_string(),
@@ -696,12 +708,15 @@ mod tests {
         };
 
         assert_eq!(sub_agent_activity_display(&item), None);
+        let cell = sub_agent_activity_history_cell(&item).expect("interaction history");
+        insta::assert_snapshot!("subagent_interaction_preview", cell_to_text(&cell));
     }
 
     #[test]
     fn completed_sub_agent_activity_stops_running_liveness() {
         let thread_id = ThreadId::new();
         let item = ThreadItem::SubAgentActivity {
+            message_preview: None,
             id: "activity-1".to_string(),
             kind: SubAgentActivityKind::Completed,
             agent_thread_id: thread_id.to_string(),

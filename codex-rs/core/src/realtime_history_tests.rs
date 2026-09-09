@@ -249,6 +249,7 @@ fn promotes_backing_agent_artifacts_once_without_a_client_request() {
         started_at_ms: 0,
     });
     let subagent = completed_item(TurnItem::SubAgentActivity(SubAgentActivityItem {
+        message_preview: None,
         id: "subagent-1".to_string(),
         kind: SubAgentActivityKind::Started,
         agent_thread_id: ThreadId::new(),

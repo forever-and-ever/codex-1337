@@ -375,6 +375,24 @@ async fn multi_agent_v2_tools_emit_collaborator_analytics() -> Result<()> {
         })
         .collect::<Vec<_>>();
     assert_eq!(activity_ids, vec!["call-0", "call-1", "call-2", "call-3"]);
+    let previews = items
+        .iter()
+        .filter_map(|item| match item {
+            ThreadItem::SubAgentActivity {
+                id,
+                message_preview: Some(preview),
+                ..
+            } => Some((id.as_str(), preview.as_str())),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        previews,
+        vec![
+            ("call-1", "PRIVATE_MESSAGE"),
+            ("call-2", "PRIVATE_FOLLOWUP")
+        ]
+    );
 
     for (index, (tool, _)) in calls.iter().enumerate() {
         let event = wait_for_matching_analytics_event(&server, READ_TIMEOUT, |event| {

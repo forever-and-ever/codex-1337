@@ -979,6 +979,7 @@ impl ThreadHistoryBuilder {
             kind: payload.kind.into(),
             agent_thread_id: payload.agent_thread_id.to_string(),
             agent_path: String::from(payload.agent_path.clone()),
+            message_preview: payload.message_preview.clone(),
         });
     }
 
@@ -4648,6 +4649,7 @@ mod tests {
                 thread_id: ThreadId::new(),
                 turn_id: "turn-a".into(),
                 item: CoreTurnItem::SubAgentActivity(CoreSubAgentActivityItem {
+                    message_preview: None,
                     id: "child-turn-completed".into(),
                     kind: CoreSubAgentActivityKind::Completed,
                     agent_thread_id: child_thread_id,
@@ -4664,6 +4666,7 @@ mod tests {
         assert_eq!(
             turns[0].items,
             vec![ThreadItem::SubAgentActivity {
+                message_preview: None,
                 id: "child-turn-completed".into(),
                 kind: crate::protocol::v2::SubAgentActivityKind::Completed,
                 agent_thread_id: child_thread_id.to_string(),

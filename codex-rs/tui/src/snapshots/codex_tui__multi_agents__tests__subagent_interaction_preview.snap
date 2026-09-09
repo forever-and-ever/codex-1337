@@ -1,0 +1,6 @@
+---
+source: tui/src/multi_agents.rs
+expression: cell_to_text(&cell)
+---
+• Interacted with `/root/child`
+  └ Check the parser failure, then report the root cause without editing files.
