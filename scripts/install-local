@@ -138,5 +138,4 @@ for candidate in "$distribution_root"/*; do
     rm -rf -- "$candidate"
 done
 
-printf 'installed Codex %s-1337 from %s (transitional GUI %s)\n' \
-    "$codex_version" "$short_revision" "$wrangler_version"
+printf 'installed Codex %s-1337 from %s\n' "$codex_version" "$short_revision"
