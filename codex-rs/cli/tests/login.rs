@@ -9,7 +9,6 @@ use app_test_support::ChatGptAuthFixture;
 use app_test_support::write_chatgpt_auth;
 use codex_config::types::AuthCredentialsStoreMode;
 use codex_login::AuthKeyringBackendKind;
-use codex_login::CLIENT_ID;
 use codex_login::CODEX_ACCESS_TOKEN_ENV_VAR;
 use codex_login::REVOKE_TOKEN_URL_OVERRIDE_ENV_VAR;
 use codex_login::login_with_bedrock_access_keys;
@@ -249,12 +248,21 @@ async fn debug_prompt_input_follows_authenticated_attribution_setting() -> Resul
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn device_login_revokes_existing_auth_before_requesting_new_tokens() -> Result<()> {
+async fn device_login_adds_an_account_without_revoking_existing_credentials() -> Result<()> {
+    let new_home = TempDir::new()?;
+    write_chatgpt_auth(
+        new_home.path(),
+        ChatGptAuthFixture::new("new-access")
+            .chatgpt_account_id("new-account")
+            .plan_type("pro"),
+        AuthCredentialsStoreMode::File,
+    )?;
+    let new_auth = read_auth_json(new_home.path())?;
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/oauth/revoke"))
         .respond_with(ResponseTemplate::new(200))
-        .expect(1)
+        .expect(0)
         .mount(&server)
         .await;
     Mock::given(method("POST"))
@@ -280,7 +288,7 @@ async fn device_login_revokes_existing_auth_before_requesting_new_tokens() -> Re
     Mock::given(method("POST"))
         .and(path("/oauth/token"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "id_token": "eyJhbGciOiJub25lIn0.e30.c2ln",
+            "id_token": new_auth["tokens"]["id_token"],
             "access_token": "new-access",
             "refresh_token": "new-refresh",
         })))
@@ -304,6 +312,7 @@ async fn device_login_revokes_existing_auth_before_requesting_new_tokens() -> Re
         }))?,
     )?;
 
+    let old_auth = read_auth_json(codex_home.path())?;
     let issuer = server.uri();
     let mut cmd = codex_command(codex_home.path())?;
     cmd.env(
@@ -327,24 +336,35 @@ async fn device_login_revokes_existing_auth_before_requesting_new_tokens() -> Re
     assert_eq!(
         paths,
         vec![
-            "/oauth/revoke",
             "/api/accounts/deviceauth/usercode",
             "/api/accounts/deviceauth/token",
             "/oauth/token",
         ]
     );
-    assert_eq!(
-        requests[0]
-            .body_json::<Value>()
-            .context("revoke request should be JSON")?,
-        json!({
-            "token": "old-refresh",
-            "token_type_hint": "refresh_token",
-            "client_id": CLIENT_ID,
-        })
-    );
-
     let auth = read_auth_json(codex_home.path())?;
     assert_eq!(auth["tokens"]["refresh_token"], "new-refresh");
+    assert_eq!(auth["tokens"]["account_id"], "new-account");
+    assert_eq!(auth["wrangler_accounts"], json!({":old-account": old_auth}));
+
+    server.reset().await;
+    Mock::given(method("POST"))
+        .and(path("/api/accounts/deviceauth/usercode"))
+        .respond_with(ResponseTemplate::new(400))
+        .expect(1)
+        .mount(&server)
+        .await;
+    codex_command(codex_home.path())?
+        .env(
+            REVOKE_TOKEN_URL_OVERRIDE_ENV_VAR,
+            format!("{issuer}/oauth/revoke"),
+        )
+        .env("NO_PROXY", "127.0.0.1,localhost")
+        .env("no_proxy", "127.0.0.1,localhost")
+        .env_remove("CODEX_ACCESS_TOKEN")
+        .env_remove("OPENAI_API_KEY")
+        .args(["login", "--device-auth", "--experimental_issuer", &issuer])
+        .assert()
+        .failure();
+    assert_eq!(read_auth_json(codex_home.path())?, auth);
     Ok(())
 }

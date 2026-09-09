@@ -231,6 +231,15 @@ pub(crate) async fn resolve_provider_auth_for_scope(
     provider: &ModelProviderInfo,
     scope: ProviderAuthScope,
 ) -> codex_protocol::error::Result<ResolvedProviderAuth> {
+    if auth.is_none()
+        && auth_manager
+            .as_ref()
+            .is_some_and(|manager| manager.is_account_scoped())
+    {
+        return Err(CodexErr::InvalidRequest(
+            "This conversation's saved account is unavailable. Run `codex login` for that account, or use /account to select another saved account.".into(),
+        ));
+    }
     let ProviderAuthScope {
         agent_identity_policy,
         session_source,
@@ -616,6 +625,31 @@ mod tests {
             },
             Ok(_) => panic!("Bedrock API key auth should be rejected"),
         }
+    }
+
+    #[tokio::test]
+    async fn missing_conversation_account_rejects_request_setup() {
+        let home = test_codex_home();
+        let root = AuthManager::from_auth_for_testing_with_home(
+            CodexAuth::from_api_key("test"),
+            home.clone(),
+        );
+        let scoped = root.for_account("missing-account").await.unwrap();
+        let result = resolve_provider_auth_for_scope(
+            Some(scoped),
+            /*auth*/ None,
+            &ModelProviderInfo::create_openai_provider(/*base_url*/ None),
+            provider_auth_scope(
+                AgentIdentityAuthPolicy::JwtOnly,
+                AgentIdentitySessionFallback::default(),
+            ),
+        )
+        .await;
+        let error = result
+            .err()
+            .expect("missing bound account must reject request setup");
+        assert!(error.to_string().contains("/account"));
+        std::fs::remove_dir_all(home).unwrap();
     }
 
     #[tokio::test]

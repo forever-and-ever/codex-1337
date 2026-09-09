@@ -37,7 +37,9 @@ fn account_transactions_preserve_other_logins_and_reject_stale_writers() -> anyh
     let home = tempfile::tempdir()?;
     let backend: Arc<dyn AuthStorageBackend> =
         Arc::new(FileAuthStorage::new(home.path().to_owned()));
-    let alice = account("alice", 0);
+    let mut alice = account("alice", 0);
+    // Browser login can include an exchanged API key alongside explicit ChatGPT auth.
+    alice.openai_api_key = Some("exchanged-key".into());
     let bob = account("bob", 0);
     backend.save(&alice)?;
     backend.save(&bob)?;

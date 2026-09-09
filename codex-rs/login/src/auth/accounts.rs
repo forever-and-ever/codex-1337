@@ -29,11 +29,7 @@ pub struct SavedAccount {
 }
 
 pub(super) fn identity(auth: &AuthDotJson) -> Option<String> {
-    if auth
-        .auth_mode
-        .is_some_and(|mode| mode != codex_protocol::auth::AuthMode::Chatgpt)
-        || auth.openai_api_key.is_some()
-    {
+    if auth.resolved_mode() != codex_protocol::auth::AuthMode::Chatgpt {
         return None;
     }
     let tokens = auth.tokens.as_ref()?;
