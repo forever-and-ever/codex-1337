@@ -21,6 +21,7 @@ use codex_app_server_protocol::ThreadStatus;
 use codex_protocol::ThreadId;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
+use crossterm::event::KeyModifiers;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Constraint;
 use ratatui::layout::Layout;
@@ -33,6 +34,7 @@ use ratatui::text::Span;
 use ratatui::widgets::Clear;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
+use ratatui::widgets::Wrap;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::MutexGuard;
@@ -90,6 +92,8 @@ pub(super) struct AgentsOverviewViewState {
     searching: bool,
     pub(super) status_grouping: bool,
     pub(super) renaming: bool,
+    pub(super) archiving: Option<ThreadId>,
+    pub(super) archive_error: Option<String>,
 }
 
 pub(super) struct AgentsOverviewView {
@@ -147,6 +151,7 @@ impl AgentsOverviewView {
         self.rows
             .get(self.selected)
             .filter(|_| self.visible_indices().contains(&self.selected))
+            .filter(|row| self.state().archiving != Some(row.thread_id))
     }
 
     fn visible_indices(&self) -> Vec<usize> {
@@ -168,10 +173,29 @@ impl AgentsOverviewView {
             })
             .collect::<Vec<_>>();
         if !state.status_grouping {
+            let mut projects = std::collections::HashMap::new();
+            for row in &self.rows {
+                let activity = match row.group {
+                    AgentsOverviewGroup::NeedsYou => AgentsOverviewGroup::Working,
+                    group => group,
+                };
+                projects
+                    .entry(&row.thread.cwd)
+                    .and_modify(|(strongest, latest): &mut (AgentsOverviewGroup, i64)| {
+                        *strongest = (*strongest).min(activity);
+                        *latest = (*latest).max(row.thread.updated_at);
+                    })
+                    .or_insert((activity, row.thread.updated_at));
+            }
             visible.sort_by_key(|index| {
+                let row = &self.rows[*index];
+                let (activity, latest) = projects[&row.thread.cwd];
                 (
-                    &self.rows[*index].thread.cwd,
-                    std::cmp::Reverse(self.rows[*index].thread.updated_at),
+                    activity,
+                    std::cmp::Reverse(latest),
+                    &row.thread.cwd,
+                    row.group,
+                    std::cmp::Reverse(row.thread.updated_at),
                 )
             });
         }
@@ -195,6 +219,37 @@ impl AgentsOverviewView {
         } else {
             visible[current.checked_sub(1).unwrap_or(visible.len() - 1)]
         };
+    }
+
+    fn archive_shortcut_available(&self) -> bool {
+        let key = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL);
+        self.keymap.action_for(key).is_none()
+            && ![
+                &self.agents_keymap.search,
+                &self.agents_keymap.new_task,
+                &self.agents_keymap.rename,
+                &self.agents_keymap.stop,
+                &self.agents_keymap.toggle_grouping,
+            ]
+            .iter()
+            .any(|bindings| bindings.is_pressed(key))
+    }
+
+    fn archive_enabled(&self) -> bool {
+        let state = self.state().clone();
+        state.archiving.is_none()
+            && !state.renaming
+            && self.selected_row().is_some_and(|row| {
+                !row.is_current
+                    && matches!(
+                        row.thread.status,
+                        ThreadStatus::Idle | ThreadStatus::NotLoaded
+                    )
+                    && matches!(
+                        row.group,
+                        AgentsOverviewGroup::Ready | AgentsOverviewGroup::Finished
+                    )
+            })
     }
 
     fn activate(&mut self) {
@@ -339,7 +394,11 @@ impl AgentsOverviewView {
                 .as_deref()
                 .or_else(|| (!row.thread.preview.is_empty()).then_some(row.thread.preview.as_str()))
                 .unwrap_or("Untitled task");
-            let (status, dot) = Self::status(row);
+            let (status, dot) = if self.state().archiving == Some(row.thread_id) {
+                ("Archiving…", "…".dim())
+            } else {
+                Self::status(row)
+            };
             let current = if row.is_current { "  current" } else { "" };
             let mut spans = vec![
                 marker,
@@ -349,7 +408,7 @@ impl AgentsOverviewView {
                 title.into(),
                 current.dim(),
             ];
-            if project_grouping {
+            if project_grouping || self.state().archiving == Some(row.thread_id) {
                 spans.extend(["  ".into(), status.dim()]);
             }
             Line::from(spans).render(Rect::new(area.x, area.y + offset, area.width, 1), buf);
@@ -479,6 +538,21 @@ impl BottomPaneView for AgentsOverviewView {
             state.status_grouping = !state.status_grouping;
             return;
         }
+        if key == KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL)
+            && self.archive_shortcut_available()
+        {
+            if self.archive_enabled()
+                && let Some(row) = self.selected_row()
+            {
+                let thread_id = row.thread_id;
+                let mut state = self.state();
+                state.archiving = Some(thread_id);
+                state.archive_error = None;
+                self.app_event_tx
+                    .send(AppEvent::ArchiveAgentsOverviewThread { thread_id });
+            }
+            return;
+        }
         if self.agents_keymap.new_task.is_pressed(key) {
             let mut state = self.state();
             state.search.clear();
@@ -576,7 +650,7 @@ impl Renderable for AgentsOverviewView {
             .x
             .saturating_add((label.width() + input.width()) as u16)
             .min(area.right().saturating_sub(3));
-        Some((x, area.bottom().saturating_sub(2)))
+        Some((x, area.bottom().saturating_sub(3)))
     }
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
@@ -590,7 +664,7 @@ impl Renderable for AgentsOverviewView {
             Constraint::Length(1),
             Constraint::Min(3),
             Constraint::Length(1),
-            Constraint::Length(1),
+            Constraint::Length(2),
         ])
         .areas(area);
         let inset =
@@ -608,6 +682,8 @@ impl Renderable for AgentsOverviewView {
         let attention = format!("{needs_you} need input");
         if let Some(notice) = self.state().connection_notice {
             Line::from(notice.cyan()).render(inset(summary), buf);
+        } else if let Some(error) = self.state().archive_error.as_deref() {
+            Line::from(format!("Archive failed: {error}").red()).render(inset(summary), buf);
         } else if self.refreshing {
             Line::from(if self.rows.is_empty() {
                 "Loading sessions…".cyan()
@@ -719,6 +795,15 @@ impl Renderable for AgentsOverviewView {
             }
         };
         add_hint(list_hint(ListAction::Accept), "open", true);
+        if self.archive_shortcut_available() {
+            add_hint(
+                Some(ShortcutHint::Single(crate::key_hint::ctrl(KeyCode::Char(
+                    'a',
+                )))),
+                "archive",
+                self.archive_enabled(),
+            );
+        }
         add_hint(
             self.agents_keymap
                 .primary_hint("search", &self.agents_keymap.search),
@@ -754,6 +839,8 @@ impl Renderable for AgentsOverviewView {
                 }
             }
         }
-        footer_line.render(footer_area, buf);
+        Paragraph::new(footer_line)
+            .wrap(Wrap { trim: true })
+            .render(footer_area, buf);
     }
 }

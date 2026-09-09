@@ -2524,6 +2524,12 @@ impl App {
             AppEvent::OpenAgentsOverview => {
                 self.open_agents_overview(app_server);
             }
+            AppEvent::ArchiveAgentsOverviewThread { thread_id } => {
+                self.archive_agents_overview_thread(app_server, thread_id);
+            }
+            AppEvent::AgentsOverviewThreadArchived { thread_id, result } => {
+                self.finish_agents_overview_archive(thread_id, result);
+            }
             AppEvent::AgentsOverviewThreadsLoaded { request_id, result } => {
                 self.apply_agents_overview_thread_refresh(app_server, request_id, result);
             }

@@ -233,6 +233,13 @@ pub(crate) enum AppEvent {
     SelectAgentsOverviewThread {
         thread_id: ThreadId,
     },
+    ArchiveAgentsOverviewThread {
+        thread_id: ThreadId,
+    },
+    AgentsOverviewThreadArchived {
+        thread_id: ThreadId,
+        result: Result<(), String>,
+    },
     /// Start a background task directly from the shared dashboard.
     DispatchAgentsOverviewTask {
         prompt: String,

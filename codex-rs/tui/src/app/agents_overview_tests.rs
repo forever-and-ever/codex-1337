@@ -296,6 +296,29 @@ async fn shared_overview_seeds_once_and_retains_locally_resumed_history() -> Res
     finish_overview_refresh(&mut restarted, &app_server, &mut event_rx).await;
     let retained: HashSet<_> = restarted.agents_overview.threads.keys().copied().collect();
     assert_eq!(retained, recent_ids);
+    let archived = ids[21];
+    restarted
+        .agents_overview
+        .view_state
+        .lock()
+        .unwrap()
+        .archiving = Some(archived);
+    restarted.archive_agents_overview_thread(&app_server, archived);
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let AppEvent::AgentsOverviewThreadArchived { thread_id, result } =
+                event_rx.recv().await.expect("archive result")
+            {
+                assert_eq!(thread_id, archived);
+                assert!(result.is_ok(), "{result:?}");
+                restarted.finish_agents_overview_archive(thread_id, result);
+                break;
+            }
+        }
+    })
+    .await
+    .expect("archive completed");
+    assert!(!restarted.agents_overview.threads.contains_key(&archived));
     app_server.shutdown().await?;
     Ok(())
 }
@@ -518,6 +541,17 @@ async fn shared_overview_shows_only_root_sessions() {
         Ok(AppEvent::DispatchAgentsOverviewTask { prompt, .. })
             if prompt.trim() == "Continue working"
     ));
+    action_view.handle_key_event(KeyEvent::new(KeyCode::End, KeyModifiers::NONE));
+    action_view.handle_key_event(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL));
+    action_view.handle_key_event(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL));
+    action_view.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    action_view.handle_key_event(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
+    assert!(
+        matches!(event_rx.try_recv(), Ok(AppEvent::ArchiveAgentsOverviewThread { thread_id }) if thread_id == unloaded_root)
+    );
+    assert!(event_rx.try_recv().is_err());
+    app.finish_agents_overview_archive(unloaded_root, Err("fixture rejection".to_string()));
+    app.agents_overview.view_state.lock().unwrap().archive_error = None;
     action_view.handle_key_event(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL));
     crate::chatwidget::tests::helpers::set_active_cell(
         &mut app.chat_widget,

@@ -30,6 +30,7 @@ pub(super) struct AgentsOverviewState {
     pub(super) refresh_pending: bool,
     pub(super) refresh_thread_ids: HashSet<ThreadId>,
     pub(super) refresh_task: Option<tokio::task::AbortHandle>,
+    pub(super) archive_task: Option<tokio::task::AbortHandle>,
     pub(super) refresh_notifications: HashMap<ThreadId, Vec<ServerNotification>>,
     pub(super) rendered_full_screen: bool,
     pub(super) visible_thread_ids: Vec<ThreadId>,
@@ -42,6 +43,9 @@ pub(super) struct AgentsOverviewState {
 impl Drop for AgentsOverviewState {
     fn drop(&mut self) {
         if let Some(task) = self.refresh_task.take() {
+            task.abort();
+        }
+        if let Some(task) = self.archive_task.take() {
             task.abort();
         }
     }
