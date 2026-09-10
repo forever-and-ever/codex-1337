@@ -307,6 +307,8 @@ pub(crate) enum AppEvent {
     },
     /// Switch the active thread to the selected agent.
     SelectAgentThread(ThreadId),
+    /// Seed the inline roster after adopting a new root, without opening a picker.
+    RefreshSubagentRoster(ThreadId),
 
     /// Fork the current thread into a transient side conversation.
     StartSide {

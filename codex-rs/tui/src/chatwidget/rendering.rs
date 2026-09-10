@@ -74,13 +74,18 @@ impl ChatWidget {
                 .as_renderable_with_composer(
                     active_cell_right_reserve,
                     Some(RenderableItem::Owned(Box::new(
-                        super::work_status::WorkStatusView {
-                            goal: self
-                                .current_goal_status
-                                .as_ref()
-                                .map(|status| status.goal.objective.as_str()),
-                            status: self.current_work_status.as_ref(),
-                        },
+                        crate::render::ruled_sections::RuledSections(vec![
+                            RenderableItem::Owned(Box::new(super::work_status::WorkStatusView {
+                                goal: self
+                                    .current_goal_status
+                                    .as_ref()
+                                    .map(|status| status.goal.objective.as_str()),
+                                status: self.current_work_status.as_ref(),
+                            })),
+                            RenderableItem::Owned(Box::new(crate::subagent_roster::RosterView(
+                                self.subagent_roster.clone(),
+                            ))),
+                        ]),
                     ))),
                 )
                 .inset(Insets::tlbr(
@@ -206,6 +211,15 @@ impl Renderable for ChatWidget {
     }
 
     fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
+        if self
+            .subagent_roster
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .focused
+            .is_some()
+        {
+            return None;
+        }
         self.as_renderable().cursor_pos(area)
     }
 

@@ -464,6 +464,10 @@ impl ChatComposerHistory {
         }
     }
 
+    pub(super) fn navigation_pending(&self) -> bool {
+        self.pending_navigation_direction.is_some()
+    }
+
     /// Integrates a persistent history entry response into navigation or active search.
     ///
     /// Responses with a stale log id are ignored, matching responses update the persistent cache,

@@ -41,6 +41,7 @@ use uuid::Uuid;
 /// temporarily out of sync during teardown races.
 #[derive(Debug, Default)]
 pub(crate) struct AgentNavigationState {
+    pub(super) roster: crate::subagent_roster::SharedRoster,
     /// Latest picker metadata for each tracked thread id.
     threads: HashMap<ThreadId, AgentPickerThreadEntry>,
     /// Stable first-seen traversal order for keyboard cycling and picker tie-breaking.
@@ -221,6 +222,7 @@ impl AgentNavigationState {
     /// This is used when `App` tears down thread event state and needs the picker cache to return
     /// to a pristine single-session state.
     pub(crate) fn clear(&mut self) {
+        self.roster = Default::default();
         self.threads.clear();
         self.order.clear();
         self.picker_order.clear();

@@ -73,7 +73,7 @@ The API exposes three top level primitives representing an interaction between a
 
 Use the thread APIs to create, list, or archive conversations. Drive a conversation with turn APIs and stream progress via turn notifications.
 
-Downstream `thread/workStatus/updated` notifications carry `{threadId, status: {turnId, activity}}` for the live Activity display. Each replaces the previous activity; clients clear it when that turn ends. These updates are not persisted and do not change the goal.
+Downstream `thread/workStatus/updated` notifications carry `{threadId, status: {turnId, activity}}` for the live Activity display. Each replaces the previous activity; clients clear it when that turn ends. These updates are not persisted and do not change the goal. Live Activity and token-usage updates are broadcast to connected clients, like thread status, so root views can display subagent metadata without subscribing to child transcripts. Restored token-usage replay remains connection-scoped.
 
 ## Lifecycle Overview
 

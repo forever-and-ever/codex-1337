@@ -7,6 +7,10 @@
 use super::*;
 
 impl ChatWidget {
+    pub(crate) fn is_parent_owned_thread(&self) -> bool {
+        self.blocks_direct_input && !self.active_side_conversation
+    }
+
     pub(crate) fn set_parent_owned_thread(&mut self) {
         self.blocks_direct_input = true;
         self.bottom_pane.set_parent_owned_thread();
@@ -18,6 +22,13 @@ impl ChatWidget {
         had_modal_or_popup: bool,
     ) {
         match input_result {
+            InputResult::NavigationDownBoundary => {
+                self.subagent_roster
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .down();
+                self.request_redraw();
+            }
             InputResult::Submitted {
                 text,
                 text_elements,

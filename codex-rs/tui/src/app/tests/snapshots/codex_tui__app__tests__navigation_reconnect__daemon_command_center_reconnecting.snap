@@ -7,7 +7,7 @@ expression: "render_bottom_popup(&app.chat_widget, 100)"
   ────────────────────────────────────────────────────────────────────────────────────────────────
   /tmp/project  2                                         │ Task details
   › ● Selected task  Working                              │
-    ○ Vanished task  Ready                                │ Selected task
+    ■ Vanished task  Ready                                │ Selected task
                                                           │ ● Working
                                                           │
                                                           │ Project
@@ -15,7 +15,6 @@ expression: "render_bottom_popup(&app.chat_widget, 100)"
                                                           │
                                                           │ Latest activity
                                                           │ Selected task
-                                                          │
                                                           │
                                                           │
                                                           │

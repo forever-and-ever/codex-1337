@@ -1304,7 +1304,7 @@ pub(crate) async fn apply_bespoke_event_handling(
         EventMsg::ThreadQueueChanged(_) => {}
         EventMsg::WorkStatusUpdated(status) => {
             outgoing
-                .send_server_notification(ServerNotification::ThreadWorkStatusUpdated(
+                .send_global_server_notification(ServerNotification::ThreadWorkStatusUpdated(
                     codex_app_server_protocol::ThreadWorkStatusUpdatedNotification {
                         thread_id: conversation_id.to_string(),
                         status,
@@ -1697,7 +1697,9 @@ async fn handle_token_count_event(
             token_usage,
         };
         outgoing
-            .send_server_notification(ServerNotification::ThreadTokenUsageUpdated(notification))
+            .send_global_server_notification(ServerNotification::ThreadTokenUsageUpdated(
+                notification,
+            ))
             .await;
     }
     if let Some(rate_limits) = rate_limits {

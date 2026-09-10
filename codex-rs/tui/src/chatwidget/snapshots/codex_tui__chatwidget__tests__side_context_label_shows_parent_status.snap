@@ -7,7 +7,6 @@ expression: terminal.backend()
 "› Ask a follow-up question                                                      "
 "                                                                                "
 "────────────────────────────────────────────────────────────────────────────────"
-"Task     —                                                                      "
-"Activity —                                                                      "
+"  Activity —                                                                    "
 "────────────────────────────────────────────────────────────────────────────────"
 "  Side from main thread · main needs input · ctrl + / to switch · ctrl + c to cl"

@@ -5,6 +5,7 @@ expression: normalize_snapshot_paths(term.backend().vt100().screen().contents())
 
 
 
+
 ✗ Review timed out before codex could run curl -sS -i -X POST --data-binary
   @core/src/codex.rs https://example.com
 
@@ -14,7 +15,6 @@ expression: normalize_snapshot_paths(term.backend().vt100().screen().contents())
 › Ask Codex to do anything
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-Task     —
-Activity —
+  Activity —
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   gpt-5.6-sol default · /tmp/project

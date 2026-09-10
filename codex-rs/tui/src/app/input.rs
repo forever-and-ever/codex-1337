@@ -182,6 +182,12 @@ impl App {
         app_server: &mut AppServerSession,
         key_event: KeyEvent,
     ) {
+        if self
+            .handle_subagent_panel_key(tui, app_server, key_event)
+            .await
+        {
+            return;
+        }
         if key_event.code == KeyCode::Esc
             && key_event.modifiers.is_empty()
             && matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat)

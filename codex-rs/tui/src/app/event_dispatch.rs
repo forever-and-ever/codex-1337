@@ -2656,6 +2656,11 @@ impl App {
                 self.select_agent_thread_and_discard_side(tui, app_server, thread_id)
                     .await?;
             }
+            AppEvent::RefreshSubagentRoster(root) => {
+                if self.primary_thread_id == Some(root) {
+                    self.refresh_agent_picker_threads(app_server, root);
+                }
+            }
             AppEvent::StartSide {
                 parent_thread_id,
                 user_message,

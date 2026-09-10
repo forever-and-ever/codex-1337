@@ -368,6 +368,8 @@ fn user_input_too_large_message(actual_chars: usize) -> String {
 /// Result returned when the user interacts with the text area.
 #[derive(Debug, PartialEq)]
 pub enum InputResult {
+    /// Down exhausted editor/history navigation; the surrounding UI may take focus.
+    NavigationDownBoundary,
     Submitted {
         text: String,
         text_elements: Vec<TextElement>,
@@ -1059,7 +1061,11 @@ impl ChatComposer {
             .map_or(0, |prefix| prefix.desired_height(area.width))
             .min(area.height.saturating_sub(composer_height));
         let [composer_rect, prefix_rect, popup_rect] = Layout::vertical([
-            Constraint::Min(3),
+            Constraint::Min(if self.blocks_direct_input && self.is_empty() {
+                super::watch_help::lines(area.width).len() as u16
+            } else {
+                3
+            }),
             Constraint::Max(prefix_height),
             popup_constraint,
         ])
@@ -1113,7 +1119,10 @@ impl ChatComposer {
         area: Rect,
         options: ComposerRenderOptions<'_>,
     ) -> Option<(u16, u16)> {
-        if !self.draft.input_enabled || self.attachments.selected_remote_image_index.is_some() {
+        if (self.blocks_direct_input && self.is_empty())
+            || !self.draft.input_enabled
+            || self.attachments.selected_remote_image_index.is_some()
+        {
             return None;
         }
 
@@ -3527,6 +3536,8 @@ impl ChatComposer {
     }
 
     /// Handle key event when no popup is visible.
+    /// Editing, attachment selection and history take precedence. Only an exhausted plain Down
+    /// returns NavigationDownBoundary to the surrounding UI; redraw is not a consumption signal.
     fn handle_key_event_without_popup(&mut self, key_event: KeyEvent) -> (InputResult, bool) {
         if let Some((result, redraw)) = self.handle_remote_image_selection_key(&key_event) {
             return (result, redraw);
@@ -3633,7 +3644,18 @@ impl ChatComposer {
                     return (InputResult::None, true);
                 }
             }
-            return self.handle_input_basic(key_event);
+            let cursor = self.draft.textarea.cursor();
+            let pending_paste = self.is_in_paste_burst();
+            let result = self.handle_input_basic(key_event);
+            if key_event.code == KeyCode::Down
+                && key_event.modifiers.is_empty()
+                && !pending_paste
+                && !self.history.navigation_pending()
+                && self.draft.textarea.cursor() == cursor
+            {
+                return (InputResult::NavigationDownBoundary, result.1);
+            }
+            return result;
         }
 
         self.handle_input_basic(key_event)
@@ -4674,13 +4696,16 @@ impl ChatComposer {
             .try_into()
             .unwrap_or(u16::MAX);
         let remote_images_separator = u16::from(remote_images_height > 0);
-        self.draft.textarea.desired_height(inner_width)
-            + remote_images_height
-            + remote_images_separator
-            + 2
-            + options
-                .footer_prefix
-                .map_or(0, |prefix| prefix.desired_height(width))
+        (if self.blocks_direct_input && self.is_empty() {
+            super::watch_help::lines(width).len() as u16
+        } else {
+            self.draft.textarea.desired_height(inner_width)
+                + remote_images_height
+                + remote_images_separator
+                + 2
+        }) + options
+            .footer_prefix
+            .map_or(0, |prefix| prefix.desired_height(width))
             + match &self.popups.active {
                 ActivePopup::None => footer_total_height,
                 ActivePopup::Command(c) => c.calculate_required_height(width),
@@ -4973,6 +4998,11 @@ impl ChatComposer {
                     }
                 }
             }
+        }
+        if self.blocks_direct_input && self.is_empty() {
+            Paragraph::new(super::watch_help::lines(composer_rect.width))
+                .render(composer_rect, buf);
+            return;
         }
         let style = user_message_style();
         Block::default().style(style).render(composer_rect, buf);
@@ -9865,7 +9895,9 @@ mod tests {
             InputResult::ParentOwnedInputBlocked => {
                 panic!("expected command dispatch, but parent-owned input was blocked")
             }
-            InputResult::None => panic!("expected Command result for '/init'"),
+            InputResult::None | InputResult::NavigationDownBoundary => {
+                panic!("expected Command result for '/init'")
+            }
         }
         assert!(
             composer.draft.textarea.is_empty(),
@@ -10375,7 +10407,9 @@ mod tests {
             InputResult::ParentOwnedInputBlocked => {
                 panic!("expected command dispatch, but parent-owned input was blocked")
             }
-            InputResult::None => panic!("expected Command result for '/diff'"),
+            InputResult::None | InputResult::NavigationDownBoundary => {
+                panic!("expected Command result for '/diff'")
+            }
         }
         assert!(composer.draft.textarea.is_empty());
     }
@@ -10575,7 +10609,9 @@ mod tests {
             InputResult::ParentOwnedInputBlocked => {
                 panic!("expected command dispatch, but parent-owned input was blocked")
             }
-            InputResult::None => panic!("expected Command result for '/mention'"),
+            InputResult::None | InputResult::NavigationDownBoundary => {
+                panic!("expected Command result for '/mention'")
+            }
         }
         assert!(
             composer.draft.textarea.is_empty(),

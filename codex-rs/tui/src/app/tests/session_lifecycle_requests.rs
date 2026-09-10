@@ -3275,10 +3275,10 @@ fn session_lifecycle_avoids_redundant_subagent_metadata_reads() -> Result<()> {
                         .replace(&child_thread_id.to_string(), "[child]"),
                     @r###"
                       Subagents
-                      Select an agent to watch. ⌥ + ← previous, ⌥ + → next.
+                      Empty prompt: Esc → main. ⌥ + ← previous, ⌥ + → next.
 
-                    › 1. • Main [default] (current)  [root]
-                      2. • /root/worker              [child]
+                    › 1. ■ Main [default] (current)  [root]
+                      2. ■ /root/worker              [child]
 
                       Press enter to confirm or esc to go back
                     "###

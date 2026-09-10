@@ -5,8 +5,8 @@ expression: "render_bottom_popup(&app.chat_widget,\n90).replace(&root.to_string(
   Subagents
   Empty prompt: Esc → main. ⌥ + ← previous, ⌥ + → next.
 
-› 1. • researcher (current)  IDLE_ID
-  2. • Main [default]        ROOT_ID
-  3. • reviewer              BUSY_ID
+› 1. ● researcher (current)  IDLE_ID
+  2. ■ Main [default]        ROOT_ID
+  3. ■ reviewer              BUSY_ID
 
   Press enter to confirm or esc to go back

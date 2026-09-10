@@ -210,7 +210,11 @@ async fn reconnect_restores_history_permissions_and_keeps_old_input_paused() -> 
                 )
                 .is_some()
         );
-        assert!(app.agent_navigation.begin_picker_refresh(id).is_some());
+        assert!(
+            app.agent_navigation
+                .picker_refresh
+                .is_some_and(|(root, request)| root == id && request != stale_picker_refresh)
+        );
         assert!(
             !app.agent_navigation
                 .finish_picker_refresh(id, stale_picker_refresh)

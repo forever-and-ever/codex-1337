@@ -628,7 +628,7 @@ async fn shared_overview_shows_only_root_sessions() {
     assert!(
         rendered
             .lines()
-            .any(|line| line.contains("› ● Inspect unnamed task  current")
+            .any(|line| line.contains("› ■ Inspect unnamed task  current")
                 && line.contains("Needs input"))
     );
 

@@ -137,6 +137,7 @@ impl App {
                 .entry(thread_id)
                 .or_default();
         }
+        self.track_subagent_panel(&notification);
         self.track_agents_overview_notification(&notification);
         if matches!(
             &notification,

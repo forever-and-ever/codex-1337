@@ -196,6 +196,7 @@ impl App {
     /// intentionally hidden until there is more than one known thread so single-thread sessions do
     /// not spend footer space restating that the user is already on the main conversation.
     pub(super) fn sync_active_agent_label(&mut self) {
+        self.sync_subagent_roster();
         let label = self
             .agent_navigation
             .active_agent_label(self.current_displayed_thread_id(), self.primary_thread_id);
@@ -1061,6 +1062,20 @@ impl App {
                 started.thread.agent_role.clone(),
                 /*is_closed*/ false,
             );
+            if started.thread.can_accept_direct_input == Some(false) {
+                self.agent_navigation.mark_parent_owned(thread_id);
+            }
+            if let Some(row) = self
+                .agent_navigation
+                .roster
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .rows
+                .iter_mut()
+                .find(|row| row.id == thread_id)
+            {
+                row.status.get_or_insert(started.thread.status.clone());
+            }
 
             // Lifecycle responses already contain authoritative session state. Their rollout may
             // not exist until the first turn, so inferring it again can wait through reader retries.
@@ -1350,6 +1365,8 @@ impl App {
         let thread_id = session.thread_id;
         if self.primary_thread_id != Some(thread_id) {
             self.recap.reset_for_new_thread(Instant::now());
+            self.app_event_tx
+                .send(AppEvent::RefreshSubagentRoster(thread_id));
         }
         self.primary_thread_id = Some(thread_id);
         self.agents_overview.threads.entry(thread_id).or_default();

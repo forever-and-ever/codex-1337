@@ -201,7 +201,29 @@ impl App {
                 let uuid = thread_id.to_string();
                 SelectionItem {
                     name: name.clone(),
-                    name_prefix_spans: agent_picker_status_dot_spans(entry.is_closed),
+                    name_prefix_spans: {
+                        let roster = self
+                            .agent_navigation
+                            .roster
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
+                        let fallback = if entry.is_closed {
+                            codex_app_server_protocol::ThreadStatus::NotLoaded
+                        } else if entry.is_running {
+                            codex_app_server_protocol::ThreadStatus::Active {
+                                active_flags: Vec::new(),
+                            }
+                        } else {
+                            codex_app_server_protocol::ThreadStatus::Idle
+                        };
+                        let status = roster
+                            .rows
+                            .iter()
+                            .find(|row| row.id == thread_id)
+                            .and_then(|row| row.status.as_ref())
+                            .unwrap_or(&fallback);
+                        vec![crate::agent_status::marker(Some(status)), " ".into()]
+                    },
                     description: Some(uuid.clone()),
                     is_current: self.active_thread_id == Some(thread_id),
                     actions: vec![Box::new(move |tx| {
@@ -323,6 +345,17 @@ impl App {
                     self.agent_navigation.mark_parent_owned(thread_id);
                 }
                 self.agent_navigation.set_agent_path(thread_id, agent_path);
+                if let Some(row) = self
+                    .agent_navigation
+                    .roster
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .rows
+                    .iter_mut()
+                    .find(|row| row.id == thread_id)
+                {
+                    row.status = Some(thread.status);
+                }
                 if is_running {
                     self.agent_navigation.mark_running(thread_id);
                 } else {

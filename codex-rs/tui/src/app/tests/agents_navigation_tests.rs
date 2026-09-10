@@ -2,6 +2,63 @@ use super::*;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
+async fn agents_navigation_roster_tracks_background_metadata_without_replaying_a_child() {
+    let mut app = make_test_app().await;
+    let root = ThreadId::new();
+    let child = ThreadId::new();
+    app.primary_thread_id = Some(root);
+    app.active_thread_id = Some(root);
+    app.upsert_agent_picker_thread(child, Some("worker".into()), None, false);
+    let status = |status| {
+        ServerNotification::ThreadStatusChanged(
+            codex_app_server_protocol::ThreadStatusChangedNotification {
+                thread_id: child.to_string(),
+                status,
+            },
+        )
+    };
+    app.track_subagent_panel(&status(codex_app_server_protocol::ThreadStatus::Active {
+        active_flags: Vec::new(),
+    }));
+    let activity = ServerNotification::ThreadWorkStatusUpdated(
+        codex_app_server_protocol::ThreadWorkStatusUpdatedNotification {
+            thread_id: child.to_string(),
+            status: codex_protocol::protocol::WorkStatus {
+                turn_id: "turn".into(),
+                activity: "Inspect parser".into(),
+            },
+        },
+    );
+    app.track_subagent_panel(&activity);
+    app.track_subagent_panel(&token_usage_notification(child, "turn", None));
+    {
+        let roster = app.agent_navigation.roster.lock().unwrap();
+        let row = &roster.rows[0];
+        assert_eq!(
+            (
+                row.activity.as_deref(),
+                row.tokens,
+                roster.watched,
+                roster.focused
+            ),
+            (Some("Inspect parser"), Some(10), Some(root), None)
+        );
+    }
+    app.track_subagent_panel(&status(codex_app_server_protocol::ThreadStatus::Idle));
+    app.track_subagent_panel(&activity);
+    let roster = app.agent_navigation.roster.lock().unwrap();
+    let row = &roster.rows[0];
+    assert_eq!(
+        (&row.status, &row.activity, row.tokens),
+        (
+            &Some(codex_app_server_protocol::ThreadStatus::Idle),
+            &None,
+            Some(10)
+        )
+    );
+}
+
+#[tokio::test]
 async fn agents_navigation_picker_keeps_selection_when_running_order_changes() {
     let mut app = make_test_app().await;
     let root = ThreadId::new();
@@ -76,6 +133,26 @@ async fn agents_navigation_escape_returns_to_main_but_preserves_drafts_and_popup
     app.handle_key_event(&mut tui, &mut app_server, KeyCode::Esc.into())
         .await;
     assert_eq!(app.current_displayed_thread_id(), Some(root_id));
+    app.upsert_agent_picker_thread(child_id, Some("child".into()), None, false);
+    app.agent_navigation.mark_parent_owned(child_id);
+    app.chat_widget
+        .apply_external_edit("Preserve this root draft".into());
+    app.handle_key_event(&mut tui, &mut app_server, KeyCode::Down.into())
+        .await;
+    assert_eq!(
+        app.agent_navigation.roster.lock().unwrap().focused,
+        Some(child_id)
+    );
+    app.handle_key_event(&mut tui, &mut app_server, KeyCode::Enter.into())
+        .await;
+    assert_eq!(app.current_displayed_thread_id(), Some(child_id));
+    app.handle_key_event(&mut tui, &mut app_server, KeyCode::Esc.into())
+        .await;
+    assert_eq!(app.current_displayed_thread_id(), Some(root_id));
+    assert_eq!(
+        app.chat_widget.composer_text_with_pending(),
+        "Preserve this root draft"
+    );
     app_server.shutdown().await?;
     Ok(())
 }

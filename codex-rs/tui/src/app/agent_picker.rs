@@ -135,11 +135,24 @@ impl App {
             }
             self.upsert_agent_picker_thread(thread_id, agent_nickname, agent_role, is_closed);
             self.agent_navigation.set_agent_path(thread_id, agent_path);
+            if let Some(row) = self
+                .agent_navigation
+                .roster
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .rows
+                .iter_mut()
+                .find(|row| row.id == thread_id)
+            {
+                // Live notifications win over an asynchronously fetched seed.
+                row.status.get_or_insert(thread.status);
+            }
             if !live && update_liveness {
                 self.agent_navigation.set_running(thread_id, is_running);
             }
         }
 
+        self.sync_subagent_roster();
         let params = self.agent_picker_selection_view_params(selected);
         self.chat_widget
             .replace_selection_view_if_present(AGENT_PICKER_VIEW_ID, params);

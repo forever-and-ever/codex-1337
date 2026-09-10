@@ -312,12 +312,13 @@ impl AgentsOverviewView {
     }
 
     fn status(row: &AgentsOverviewRow) -> (&'static str, Span<'static>) {
-        match row.group {
-            AgentsOverviewGroup::NeedsYou => ("Needs input", "●".red()),
-            AgentsOverviewGroup::Working => ("Working", "●".green()),
-            AgentsOverviewGroup::Ready => ("Ready", "○".cyan()),
-            AgentsOverviewGroup::Finished => ("Finished", "✓".dim()),
-        }
+        let label = match row.group {
+            AgentsOverviewGroup::NeedsYou => "Needs input",
+            AgentsOverviewGroup::Working => "Working",
+            AgentsOverviewGroup::Ready => "Ready",
+            AgentsOverviewGroup::Finished => "Finished",
+        };
+        (label, crate::agent_status::marker(Some(&row.thread.status)))
     }
 
     fn render_rows(&self, area: Rect, buf: &mut Buffer) {

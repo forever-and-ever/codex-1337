@@ -165,6 +165,16 @@ impl App {
             return false;
         }
         if !self.reconnect.offline {
+            for row in &mut self
+                .agent_navigation
+                .roster
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .rows
+            {
+                row.status = None;
+                row.activity = None;
+            }
             self.reconnect.offline = true;
             self.reconnect.failed = false;
             self.cancel_pending_key_chord();
@@ -362,6 +372,9 @@ impl App {
             let view = self.agents_overview_view(threads, selected);
             self.chat_widget.show_bottom_pane_view(Box::new(view));
             self.refresh_agents_overview_threads(app_server);
+        }
+        if let Some(root) = self.primary_thread_id {
+            self.refresh_agent_picker_threads(app_server, root);
         }
         // Only accept fresh task-tool calls once this connection and its event queue are adopted.
         if let ThreadToolTransport::Mcp(server) = app_server.thread_tool_transport() {

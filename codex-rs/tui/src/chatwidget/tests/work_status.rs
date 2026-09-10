@@ -96,4 +96,57 @@ async fn work_status_below_composer_clears_without_transcript_entries() {
         chat.handle_server_notification(notification.clone(), /*replay_kind*/ None);
         assert_eq!(chat.current_work_status, None);
     }
+    chat.current_goal_status = None;
+    chat.bottom_pane
+        .set_composer_text(String::new(), Vec::new(), Vec::new());
+    let ids: Vec<_> = (0..9).map(|_| ThreadId::new()).collect();
+    {
+        let mut roster = chat.subagent_roster.lock().unwrap();
+        roster.reconcile(
+            ids.iter()
+                .enumerate()
+                .map(|(n, id)| (*id, format!("worker-{n}")))
+                .collect(),
+            None,
+        );
+        for row in &mut roster.rows {
+            row.status = Some(codex_app_server_protocol::ThreadStatus::Idle);
+            row.tokens = Some(12_345);
+        }
+        roster.rows[8].activity = Some("Checking the parser and its integration tests".into());
+        roster.rows[8].status = Some(codex_app_server_protocol::ThreadStatus::Active {
+            active_flags: Vec::new(),
+        });
+        for _ in 0..9 {
+            roster.down();
+        }
+    }
+    let mut panels = Vec::new();
+    for watching in [false, true] {
+        if watching {
+            chat.set_parent_owned_thread();
+            let mut roster = chat.subagent_roster.lock().unwrap();
+            roster.watched = Some(ids[8]);
+            roster.focused = None;
+        }
+        for (width, max_height) in [(80, 16), (30, 16), (30, 8)] {
+            let height = chat.desired_height(width).min(max_height);
+            let mut terminal = ratatui::Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal
+                .draw(|frame| chat.render(frame.area(), frame.buffer_mut()))
+                .unwrap();
+            assert_eq!(
+                terminal
+                    .backend()
+                    .buffer()
+                    .content()
+                    .iter()
+                    .any(|cell| cell.modifier.contains(ratatui::style::Modifier::REVERSED)),
+                watching
+            );
+            panels.push(normalized_backend_snapshot(terminal.backend()));
+            assert_eq!(chat.cursor_pos(Rect::new(0, 0, width, height)), None);
+        }
+    }
+    insta::assert_snapshot!("subagent_roster_below_activity", panels.join("\n\n"));
 }

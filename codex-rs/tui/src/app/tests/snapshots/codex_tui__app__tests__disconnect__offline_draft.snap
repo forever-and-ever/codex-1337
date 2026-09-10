@@ -12,7 +12,6 @@ expression: "format!(\"{}\\n{}\",\nlines_to_single_string(&app.transcript_cells.
 › keep this draft!
 
 ────────────────────────────────────────────────────────────────────────────────
-Task     —
-Activity —
+  Activity —
 ────────────────────────────────────────────────────────────────────────────────
    ctrl+c quit

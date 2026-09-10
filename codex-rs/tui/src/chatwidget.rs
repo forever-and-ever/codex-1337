@@ -792,6 +792,7 @@ pub(crate) struct ChatWidget {
     current_goal_status_indicator: Option<GoalStatusIndicator>,
     current_goal_status: Option<GoalStatusState>,
     current_work_status: Option<codex_protocol::protocol::WorkStatus>,
+    pub(crate) subagent_roster: crate::subagent_roster::SharedRoster,
     external_editor_state: ExternalEditorState,
     last_rendered_user_message_display: Option<UserMessageDisplay>,
     last_non_retry_error: Option<(String, String)>,
@@ -1410,7 +1411,7 @@ impl ChatWidget {
         self.bottom_pane.show_shutdown_in_progress();
     }
 
-    fn request_redraw(&mut self) {
+    pub(crate) fn request_redraw(&mut self) {
         self.frame_requester.schedule_frame();
     }
 

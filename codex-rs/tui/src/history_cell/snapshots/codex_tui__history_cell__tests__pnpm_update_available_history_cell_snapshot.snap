@@ -1,10 +1,9 @@
 ---
 source: tui/src/history_cell/tests.rs
-assertion_line: 1238
 expression: rendered
 ---
 ╭─────────────────────────────────────────────────╮
-│ ✨ Update available! 0.153.4-wrangler -> 9.9.9  │
+│ ✨ Update available! 0.153.4-1337 -> 9.9.9      │
 │ Run pnpm add -g @openai/codex to update.        │
 │                                                 │
 │ See full release notes:                         │

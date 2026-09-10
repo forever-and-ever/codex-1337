@@ -31,8 +31,7 @@ impl WorkStatusView<'_> {
                 "Activity",
                 self.status.map(|status| status.activity.as_str()),
             )]);
-        let rule = Line::from("─".repeat(usize::from(width)).dim());
-        let mut lines = vec![rule.clone()];
+        let mut lines = Vec::new();
         for (label, value) in zones {
             // Goal text is user-controlled and unbounded; never lay out the full objective.
             let bounded: String = value.unwrap_or("—").chars().take(1024).collect();
@@ -59,7 +58,6 @@ impl WorkStatusView<'_> {
                     .map(|line| truncate_line_to_width(line, usize::from(width))),
             );
         }
-        lines.push(rule);
         lines
     }
 }
