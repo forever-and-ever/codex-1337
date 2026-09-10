@@ -307,22 +307,14 @@ pub(crate) fn sub_agent_activity_display(item: &ThreadItem) -> Option<SubAgentAc
 
 pub(crate) fn sub_agent_activity_history_cell(item: &ThreadItem) -> Option<PlainHistoryCell> {
     let ThreadItem::SubAgentActivity {
-        kind,
-        agent_path,
-        message_preview,
-        ..
+        kind, agent_path, ..
     } = item
     else {
         return None;
     };
     Some(collab_event(
         sub_agent_activity_title(*kind, agent_path),
-        message_preview
-            .as_deref()
-            .and_then(prompt_line)
-            .map(ratatui::prelude::Stylize::dim)
-            .into_iter()
-            .collect(),
+        Vec::new(),
     ))
 }
 
