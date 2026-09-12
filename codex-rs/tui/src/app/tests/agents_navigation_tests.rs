@@ -56,6 +56,31 @@ async fn agents_navigation_roster_tracks_background_metadata_without_replaying_a
             Some(10)
         )
     );
+    drop(roster);
+
+    // An unloaded thread must not reappear when unrelated metadata reconciles
+    // the roster; an authoritative live status can make it available again.
+    app.agent_navigation.roster.lock().unwrap().down();
+    app.track_subagent_panel(&status(codex_app_server_protocol::ThreadStatus::NotLoaded));
+    app.sync_subagent_roster();
+    {
+        let roster = app.agent_navigation.roster.lock().unwrap();
+        assert_eq!((roster.rows.len(), roster.focused), (0, None));
+    }
+    insta::assert_snapshot!(
+        "subagent_roster_unloaded",
+        render_bottom_popup(&app.chat_widget, /*width*/ 80)
+    );
+    app.track_subagent_panel(&status(codex_app_server_protocol::ThreadStatus::Idle));
+    let roster = app.agent_navigation.roster.lock().unwrap();
+    assert_eq!(
+        roster
+            .rows
+            .iter()
+            .map(|row| (row.id, row.status.clone()))
+            .collect::<Vec<_>>(),
+        vec![(child, Some(codex_app_server_protocol::ThreadStatus::Idle))]
+    );
 }
 
 #[tokio::test]

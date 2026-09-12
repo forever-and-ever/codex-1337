@@ -1,5 +1,6 @@
 ---
 source: tui/src/app/tests/navigation_reconnect_tests.rs
+assertion_line: 394
 expression: "format!(\"{content}\\n{}\", render_bottom_popup(&app.chat_widget, 80))"
 ---
 Cached previous conversation
@@ -12,6 +13,6 @@ Cached previous conversation
 ────────────────────────────────────────────────────────────────────────────────
   Activity —
 ────────────────────────────────────────────────────────────────────────────────
-  ? 01a08c74-3a3a-7410-b516-  —                                              —
+  ? 00000000-0000-7000-8000-  —                                              —
 ────────────────────────────────────────────────────────────────────────────────
   gpt-test default · /tmp/project

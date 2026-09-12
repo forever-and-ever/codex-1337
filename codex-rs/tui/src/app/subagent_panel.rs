@@ -7,12 +7,27 @@ use codex_app_server_protocol::ThreadStatus;
 
 impl App {
     pub(super) fn sync_subagent_roster(&mut self) {
+        // A replay channel can outlive the server thread. It does not make the
+        // thread available for the inline switcher.
+        {
+            let roster = self.agent_navigation.roster.clone();
+            let roster = roster
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            for row in &roster.rows {
+                if matches!(row.status, Some(ThreadStatus::NotLoaded)) {
+                    self.agent_navigation.mark_closed(row.id);
+                }
+            }
+        }
         let agents = self
             .agent_navigation
             .ordered_threads()
             .into_iter()
-            .filter(|(id, _)| {
-                Some(*id) != self.primary_thread_id && !self.side_threads.contains_key(id)
+            .filter(|(id, entry)| {
+                Some(*id) != self.primary_thread_id
+                    && !self.side_threads.contains_key(id)
+                    && !entry.is_closed
             })
             .map(|(id, entry)| {
                 (
@@ -60,6 +75,20 @@ impl App {
         else {
             return;
         };
+        // Authoritative liveness can restore a previously unloaded descendant.
+        if let ServerNotification::ThreadStatusChanged(event) = notification
+            && !matches!(event.status, ThreadStatus::NotLoaded)
+            && let Some(entry) = self.agent_navigation.get(&id)
+            && entry.is_closed
+        {
+            self.agent_navigation.upsert(
+                id,
+                entry.agent_nickname.clone(),
+                entry.agent_role.clone(),
+                /*is_closed*/ false,
+            );
+            self.sync_subagent_roster();
+        }
         let mut roster = self
             .agent_navigation
             .roster
@@ -118,6 +147,12 @@ impl App {
             _ => return,
         }
         drop(roster);
+        if matches!(notification, ServerNotification::ThreadClosed(_))
+            || matches!(notification, ServerNotification::ThreadStatusChanged(event)
+                if matches!(event.status, ThreadStatus::NotLoaded))
+        {
+            self.sync_subagent_roster();
+        }
         self.chat_widget.request_redraw();
     }
 

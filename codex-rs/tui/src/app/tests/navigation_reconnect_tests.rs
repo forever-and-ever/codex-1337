@@ -28,7 +28,7 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
     ] {
         let (mut app, mut events, _) = make_test_app_with_channels().await;
         app.keymap.app.open_agents = vec![crate::key_hint::alt(KeyCode::Char('a'))];
-        let child = ThreadId::new();
+        let child = ThreadId::from_string("00000000-0000-7000-8000-000000000001")?;
         let child_recap = recap::RecapProgress {
             completed_turns: 3,
             last_recapped_turn_count: Some(3),
