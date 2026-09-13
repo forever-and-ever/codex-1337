@@ -24,6 +24,8 @@
 //! [`ChatComposer::sync_popups`] so UI state follows the latest buffer/cursor.
 //! Fresh Vim drafts start in Insert; Normal `/` and `?` search the composer.
 //! Backspace on an empty Vim search query cancels search and any pending operator.
+//! Parent-owned threads preserve drafts but replace the editor with watch controls;
+//! composer keys, history navigation, pastes, and completion popups are inactive.
 //!
 //! # Completion and Popup Dismissal
 //!
@@ -967,6 +969,9 @@ impl ChatComposer {
 
     /// Return the contexts whose handlers can consume the next composer key.
     pub(crate) fn keymap_contexts(&self) -> KeymapContextSet {
+        if self.blocks_direct_input {
+            return KeymapContextSet::default();
+        }
         if self.draft.textarea.vim_query().is_some() {
             return KeymapContextSet::new(KeymapContext::Editor);
         }
@@ -1066,7 +1071,7 @@ impl ChatComposer {
             .map_or(0, |prefix| prefix.desired_height(area.width))
             .min(area.height.saturating_sub(composer_height));
         let [composer_rect, prefix_rect, popup_rect] = Layout::vertical([
-            Constraint::Min(if self.blocks_direct_input && self.is_empty() {
+            Constraint::Min(if self.blocks_direct_input {
                 super::watch_help::lines(area.width).len() as u16
             } else {
                 3
@@ -1124,7 +1129,7 @@ impl ChatComposer {
         area: Rect,
         options: ComposerRenderOptions<'_>,
     ) -> Option<(u16, u16)> {
-        if (self.blocks_direct_input && self.is_empty())
+        if self.blocks_direct_input
             || !self.draft.input_enabled
             || self.attachments.selected_remote_image_index.is_some()
         {
@@ -1250,9 +1255,12 @@ impl ChatComposer {
     ///   trailing space so the user can keep typing naturally.
     /// - Otherwise, inserts the pasted text directly into the textarea.
     ///
-    /// In all cases, clears any paste-burst Enter suppression state so a real paste cannot affect
+    /// For editable threads, clears paste-burst Enter suppression so a real paste cannot affect
     /// the next user Enter key, then syncs popup state.
     pub fn handle_paste(&mut self, pasted: String) -> bool {
+        if self.blocks_direct_input {
+            return false;
+        }
         let pasted = pasted.replace("\r\n", "\n").replace('\r', "\n");
         let pasted = sanitize_user_text(pasted.into());
         if let Some(query) = self.draft.textarea.vim_query_mut() {
@@ -1285,6 +1293,9 @@ impl ChatComposer {
     }
 
     pub fn handle_paste_image_path(&mut self, pasted: &str) -> bool {
+        if self.blocks_direct_input {
+            return false;
+        }
         let Some(path_buf) = normalize_pasted_path(pasted) else {
             return false;
         };
@@ -1724,6 +1735,8 @@ impl ChatComposer {
 
     pub(crate) fn set_parent_owned_thread(&mut self) {
         self.blocks_direct_input = true;
+        self.history_search = None;
+        self.sync_popups();
         self.placeholder_text = "Viewing sub-agent — direct input is disabled".to_string();
     }
 
@@ -2038,7 +2051,7 @@ impl ChatComposer {
 
     /// Handle a key event coming from the main UI.
     pub fn handle_key_event(&mut self, key_event: KeyEvent) -> (InputResult, bool) {
-        if !self.draft.input_enabled {
+        if self.blocks_direct_input || !self.draft.input_enabled {
             return (InputResult::None, false);
         }
 
@@ -4015,7 +4028,10 @@ impl ChatComposer {
 
     pub(crate) fn sync_popups(&mut self) {
         self.sync_slash_command_elements();
-        if self.history_search.is_some() || self.draft.textarea.vim_query().is_some() {
+        if self.blocks_direct_input
+            || self.history_search.is_some()
+            || self.draft.textarea.vim_query().is_some()
+        {
             if self.popups.current_file_query.is_some() {
                 self.app_event_tx
                     .send(AppEvent::StartFileSearch(String::new()));
@@ -4704,7 +4720,7 @@ impl ChatComposer {
             .try_into()
             .unwrap_or(u16::MAX);
         let remote_images_separator = u16::from(remote_images_height > 0);
-        (if self.blocks_direct_input && self.is_empty() {
+        (if self.blocks_direct_input {
             super::watch_help::lines(width).len() as u16
         } else {
             self.draft.textarea.desired_height(inner_width)
@@ -5007,7 +5023,7 @@ impl ChatComposer {
                 }
             }
         }
-        if self.blocks_direct_input && self.is_empty() {
+        if self.blocks_direct_input {
             Paragraph::new(super::watch_help::lines(composer_rect.width))
                 .render(composer_rect, buf);
             return;
@@ -5243,19 +5259,6 @@ mod tests {
                 InputResult::Command(expected)
             );
         }
-    }
-
-    #[test]
-    fn parent_owned_thread_allows_safe_command_selected_from_prefix() {
-        let (mut composer, _rx) = new_test_composer();
-        composer.set_parent_owned_thread();
-        type_chars_humanlike(&mut composer, &['/', 'a', 'g']);
-
-        let result = composer
-            .handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
-            .0;
-
-        assert_eq!(result, InputResult::Command(SlashCommand::Agents));
     }
 
     #[test]
@@ -8985,51 +8988,45 @@ mod tests {
     /// Behavior: while a paste-like burst is active, Enter should not submit; it should insert a
     /// newline into the buffered payload and flush as a single paste later.
     #[test]
-    fn ascii_burst_treats_enter_as_newline_even_when_parent_owned() {
+    fn ascii_burst_treats_enter_as_newline() {
         use crossterm::event::KeyCode;
         use crossterm::event::KeyEvent;
         use crossterm::event::KeyModifiers;
 
-        for parent_owned in [false, true] {
-            let (mut composer, _rx) = new_test_composer();
-            if parent_owned {
-                composer.set_parent_owned_thread();
-            }
-            let mut now = Instant::now();
-            let step = Duration::from_millis(1);
+        let (mut composer, _rx) = new_test_composer();
+        let mut now = Instant::now();
+        let step = Duration::from_millis(1);
 
-            let _ = composer.handle_input_basic_with_time(
-                KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE),
-                now,
-            );
+        let _ = composer.handle_input_basic_with_time(
+            KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE),
+            now,
+        );
+        now += step;
+        let _ = composer.handle_input_basic_with_time(
+            KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE),
+            now,
+        );
+        now += step;
+
+        let (result, _) = composer.handle_submission_with_time(/*should_queue*/ false, now);
+        assert!(
+            matches!(result, InputResult::None),
+            "Enter during a burst should insert newline, not submit"
+        );
+
+        for ch in ['t', 'h', 'e', 'r', 'e'] {
             now += step;
             let _ = composer.handle_input_basic_with_time(
-                KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE),
+                KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE),
                 now,
             );
-            now += step;
-
-            let (result, _) =
-                composer.handle_submission_with_time(/*should_queue*/ false, now);
-            assert!(
-                matches!(result, InputResult::None),
-                "Enter during a burst should insert newline, not submit"
-            );
-
-            for ch in ['t', 'h', 'e', 'r', 'e'] {
-                now += step;
-                let _ = composer.handle_input_basic_with_time(
-                    KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE),
-                    now,
-                );
-            }
-
-            assert!(composer.draft.textarea.text().is_empty());
-            let flush_time = now + PasteBurst::recommended_active_flush_delay() + step;
-            let flushed = composer.handle_paste_burst_flush(flush_time);
-            assert!(flushed, "expected paste burst to flush");
-            assert_eq!(composer.draft.textarea.text(), "hi\nthere");
         }
+
+        assert!(composer.draft.textarea.text().is_empty());
+        let flush_time = now + PasteBurst::recommended_active_flush_delay() + step;
+        let flushed = composer.handle_paste_burst_flush(flush_time);
+        assert!(flushed, "expected paste burst to flush");
+        assert_eq!(composer.draft.textarea.text(), "hi\nthere");
     }
 
     /// Behavior: startup-pending submissions are queued immediately, so Enter should flush any

@@ -146,6 +146,7 @@ impl App {
             }
             _ => return,
         }
+        roster.sort_by_activity();
         drop(roster);
         if matches!(notification, ServerNotification::ThreadClosed(_))
             || matches!(notification, ServerNotification::ThreadStatusChanged(event)

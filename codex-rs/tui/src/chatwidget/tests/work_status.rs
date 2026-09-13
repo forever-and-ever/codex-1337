@@ -120,11 +120,23 @@ async fn work_status_below_composer_clears_without_transcript_entries() {
         for _ in 0..9 {
             roster.down();
         }
+        roster.sort_by_activity();
+        assert_eq!(roster.rows[0].id, ids[8]);
+        assert_eq!(roster.focused, Some(ids[8]));
     }
     let mut panels = Vec::new();
     for watching in [false, true] {
         if watching {
+            // A retained root draft must neither render nor become history input in watch mode.
+            chat.bottom_pane.set_composer_text(
+                "Retained root draft".into(),
+                Vec::new(),
+                Vec::new(),
+            );
             chat.set_parent_owned_thread();
+            chat.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+            chat.handle_key_event(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
+            assert_eq!(chat.composer_text_with_pending(), "Retained root draft");
             let mut roster = chat.subagent_roster.lock().unwrap();
             roster.watched = Some(ids[8]);
             roster.focused = None;

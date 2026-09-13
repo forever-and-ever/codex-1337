@@ -2376,12 +2376,7 @@ async fn slash_copy_picker_remains_available_from_parent_owned_threads() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.transcript.last_agent_markdown = Some("Safe local copy".to_string());
     chat.set_parent_owned_thread();
-    chat.bottom_pane
-        .set_composer_text("/cop".to_string(), Vec::new(), Vec::new());
-
-    chat.handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
-    assert!(!render_bottom_popup(&chat, /*width*/ 80).contains("Whole response"));
-    chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    chat.dispatch_command(SlashCommand::Copy);
     assert!(render_bottom_popup(&chat, /*width*/ 80).contains("Whole response"));
     chat.handle_key_event(KeyEvent::new(KeyCode::Char('1'), KeyModifiers::NONE));
 

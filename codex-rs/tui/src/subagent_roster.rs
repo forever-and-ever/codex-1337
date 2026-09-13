@@ -56,7 +56,7 @@ impl SubagentRoster {
                 },
             })
             .collect();
-        self.rows.sort_by(|a, b| a.name.cmp(&b.name));
+        self.sort_by_activity();
         self.name_width = self
             .rows
             .iter()
@@ -73,6 +73,14 @@ impl SubagentRoster {
                 .and_then(|index| self.rows.get(index.min(self.rows.len().saturating_sub(1))))
                 .map(|row| row.id);
         }
+    }
+
+    pub fn sort_by_activity(&mut self) {
+        self.rows.sort_by(|a, b| {
+            matches!(b.status, Some(ThreadStatus::Active { .. }))
+                .cmp(&matches!(a.status, Some(ThreadStatus::Active { .. })))
+                .then_with(|| a.name.cmp(&b.name))
+        });
     }
 
     pub fn down(&mut self) {

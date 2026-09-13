@@ -244,8 +244,9 @@ impl App {
             && matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat)
             && self.overlay.is_none()
             && self.chat_widget.no_modal_or_popup_active()
-            && self.chat_widget.composer_is_empty()
-            && self.chat_widget.composer_text_with_pending().is_empty()
+            && (self.chat_widget.is_parent_owned_thread()
+                || (self.chat_widget.composer_is_empty()
+                    && self.chat_widget.composer_text_with_pending().is_empty()))
             && let Some(root) = self.primary_thread_id
             && self
                 .current_displayed_thread_id()

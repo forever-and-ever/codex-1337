@@ -9,6 +9,8 @@ async fn agents_navigation_roster_tracks_background_metadata_without_replaying_a
     app.primary_thread_id = Some(root);
     app.active_thread_id = Some(root);
     app.upsert_agent_picker_thread(child, Some("worker".into()), None, false);
+    let other = ThreadId::new();
+    app.upsert_agent_picker_thread(other, Some("alpha".into()), None, false);
     let status = |status| {
         ServerNotification::ThreadStatusChanged(
             codex_app_server_protocol::ThreadStatusChangedNotification {
@@ -33,6 +35,10 @@ async fn agents_navigation_roster_tracks_background_metadata_without_replaying_a
     app.track_subagent_panel(&token_usage_notification(child, "turn", None));
     {
         let roster = app.agent_navigation.roster.lock().unwrap();
+        assert_eq!(
+            roster.rows.iter().map(|row| row.id).collect::<Vec<_>>(),
+            vec![child, other]
+        );
         let row = &roster.rows[0];
         assert_eq!(
             (
@@ -47,7 +53,11 @@ async fn agents_navigation_roster_tracks_background_metadata_without_replaying_a
     app.track_subagent_panel(&status(codex_app_server_protocol::ThreadStatus::Idle));
     app.track_subagent_panel(&activity);
     let roster = app.agent_navigation.roster.lock().unwrap();
-    let row = &roster.rows[0];
+    assert_eq!(
+        roster.rows.iter().map(|row| row.id).collect::<Vec<_>>(),
+        vec![other, child]
+    );
+    let row = &roster.rows[1];
     assert_eq!(
         (&row.status, &row.activity, row.tokens),
         (
@@ -60,6 +70,8 @@ async fn agents_navigation_roster_tracks_background_metadata_without_replaying_a
 
     // An unloaded thread must not reappear when unrelated metadata reconciles
     // the roster; an authoritative live status can make it available again.
+    app.agent_navigation.remove(other);
+    app.sync_subagent_roster();
     app.agent_navigation.roster.lock().unwrap().down();
     app.track_subagent_panel(&status(codex_app_server_protocol::ThreadStatus::NotLoaded));
     app.sync_subagent_roster();
@@ -171,6 +183,15 @@ async fn agents_navigation_escape_returns_to_main_but_preserves_drafts_and_popup
     app.handle_key_event(&mut tui, &mut app_server, KeyCode::Enter.into())
         .await;
     assert_eq!(app.current_displayed_thread_id(), Some(child_id));
+    app.chat_widget
+        .apply_external_edit("Hidden child draft".into());
+    app.chat_widget.set_parent_owned_thread();
+    app.handle_key_event(&mut tui, &mut app_server, KeyCode::Up.into())
+        .await;
+    assert_eq!(
+        app.chat_widget.composer_text_with_pending(),
+        "Hidden child draft"
+    );
     app.handle_key_event(&mut tui, &mut app_server, KeyCode::Esc.into())
         .await;
     assert_eq!(app.current_displayed_thread_id(), Some(root_id));

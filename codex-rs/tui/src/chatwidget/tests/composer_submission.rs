@@ -219,13 +219,7 @@ async fn parent_owned_thread_blocks_all_direct_input_entry_points() {
     after.last_composer_activity_at = before.last_composer_activity_at;
     assert_eq!(after, before);
     assert_no_submit_op(&mut op_rx);
-    let rendered = drain_insert_history(&mut rx)
-        .into_iter()
-        .flatten()
-        .map(|line| line.to_string())
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert_chatwidget_snapshot!("parent_owned_thread_rejects_input", rendered);
+    assert!(drain_insert_history(&mut rx).is_empty());
 
     let collaboration_mode_before = chat.active_collaboration_mask.clone();
     let plan_mode = collaboration_modes::mask_for_kind(chat.model_catalog.as_ref(), ModeKind::Plan)
