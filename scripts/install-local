@@ -10,6 +10,9 @@ root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 [ "$(uname -s)" = Linux ] || die 'this distribution is Linux-only'
 [ -z "$(git -C "$root" status --porcelain)" ] || die 'source checkout is dirty'
 
+# rustup selects the workspace toolchain by cwd, not Cargo's --manifest-path.
+cd "$root/codex-rs"
+
 for command in bwrap cargo cut git install ld.lld ln mktemp mv python3 readlink rg rm rustc sed uname zsh; do
     command -v "$command" >/dev/null 2>&1 || die "required command is absent: $command"
 done

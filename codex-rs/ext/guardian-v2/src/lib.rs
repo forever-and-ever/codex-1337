@@ -17,7 +17,6 @@ use codex_protocol::ThreadId;
 mod async_scorer;
 mod sync_reviewer;
 
-pub use async_scorer::StrictReviewReason;
 pub use sync_reviewer::GuardianExtension as GuardianReviewerExtension;
 pub use sync_reviewer::GuardianThreadContext as GuardianReviewerThreadContext;
 

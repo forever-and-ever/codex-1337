@@ -369,7 +369,7 @@ async fn restore_thread_input_state_restores_pending_steer_without_downgrading_t
 
     chat.restore_thread_input_state(
         Some(ThreadInputState {
-            async_questions: Default::default(),
+            questions: None,
             composer: None,
             safety_buffering_prompt: None,
             pending_steer: Some(pending_steer),
@@ -408,6 +408,33 @@ async fn restore_thread_input_state_restores_pending_steer_without_downgrading_t
         chat.input_queue.pending_steer.as_ref().unwrap().compare_key,
         expected_compare_key
     );
+}
+
+#[tokio::test]
+async fn identical_steer_receipts_only_acknowledge_the_matching_submission() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    let pending = pending_steer("continue");
+    chat.input_queue.pending_steer = Some(pending.clone());
+
+    for (client_id, expected) in [
+        ("older-submission", Some(pending.clone())),
+        (pending.client_id.as_str(), None),
+    ] {
+        chat.handle_thread_item(
+            AppServerThreadItem::UserMessage {
+                id: client_id.to_string(),
+                client_id: Some(client_id.to_string()),
+                content: vec![UserInput::Text {
+                    text: "continue".to_string(),
+                    text_elements: Vec::new(),
+                }],
+            },
+            "turn-1".to_string(),
+            ThreadItemRenderSource::Live,
+            /*timestamp*/ None,
+        );
+        assert_eq!(chat.input_queue.pending_steer, expected);
+    }
 }
 
 #[tokio::test]

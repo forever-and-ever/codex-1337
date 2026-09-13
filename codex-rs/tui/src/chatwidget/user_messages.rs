@@ -122,10 +122,10 @@ impl ThreadComposerState {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ThreadInputState {
-    pub(super) async_questions: super::async_questions::AsyncQuestions,
+    pub(crate) questions: Option<crate::bottom_pane::QuestionState>,
     pub(super) composer: Option<ThreadComposerState>,
     pub(super) safety_buffering_prompt: Option<UserMessage>,
-    pub(super) pending_steer: Option<PendingSteer>,
+    pub(crate) pending_steer: Option<PendingSteer>,
     pub(super) rejected_steers_queue: VecDeque<UserMessage>,
     pub(super) rejected_steer_history_records: VecDeque<UserMessageHistoryRecord>,
     pub(super) queued_user_messages: VecDeque<QueuedUserMessage>,
@@ -171,8 +171,8 @@ impl From<&str> for UserMessage {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(super) struct PendingSteer {
-    pub(super) client_id: String,
+pub(crate) struct PendingSteer {
+    pub(crate) client_id: String,
     pub(super) items: Vec<UserInput>,
     pub(super) user_message: UserMessage,
     pub(super) history_record: UserMessageHistoryRecord,
@@ -728,10 +728,7 @@ impl ChatWidget {
         }
     }
 
-    /// Build the compare key for a submitted pending steer without invoking the
-    /// expensive request-serialization path. Pending steers only need to match the
-    /// committed app-server `UserMessage` item emitted after input drains, which
-    /// preserves flattened text and total image count.
+    /// Build the legacy content key for app servers that do not echo submission IDs.
     pub(super) fn pending_steer_compare_key_from_items(
         items: &[UserInput],
     ) -> PendingSteerCompareKey {

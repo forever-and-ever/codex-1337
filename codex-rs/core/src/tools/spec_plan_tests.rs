@@ -3248,6 +3248,7 @@ async fn hosted_web_search_and_standalone_image_generation_follow_runtime_gates(
             "request_user_input",
             // Multi-agent v2 tools.
             MULTI_AGENT_V2_NAMESPACE,
+            "set_agent_service_tier",
             // Hosted Responses tools.
             "web_search",
         ]

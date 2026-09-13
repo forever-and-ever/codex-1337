@@ -1,12 +1,12 @@
 //! Input queue restore and thread-input snapshot behavior for `ChatWidget`.
 
 use std::collections::HashSet;
-use std::collections::VecDeque;
 
 use crate::bottom_pane::ComposerDraftSnapshot;
 
 use super::user_messages::remap_colliding_paste_placeholders;
 use super::*;
+use std::collections::VecDeque;
 
 impl ChatWidget {
     /// Restore the exact draft entered before the fully initialized composer became available.
@@ -83,7 +83,7 @@ impl ChatWidget {
             draft.last_composer_activity_at,
             draft.startup_local_history,
         );
-        if startup_has_content && self.config.tui_vim_mode_default {
+        if startup_has_content && self.local_settings.tui.vim_mode_default {
             self.bottom_pane.enable_vim_in_insert_mode();
         }
     }
@@ -99,6 +99,11 @@ impl ChatWidget {
         pending_draft: &mut Option<ComposerDraftSnapshot>,
     ) {
         if self.has_active_view()
+            || self
+                .bottom_pane
+                .questions
+                .as_ref()
+                .is_some_and(|q| q.expanded)
             || self.has_pending_protected_request()
             || !self.bottom_pane.composer_input_enabled()
         {
@@ -489,7 +494,7 @@ impl ChatWidget {
         }
     }
 
-    pub(crate) fn capture_thread_input_state(&self) -> Option<ThreadInputState> {
+    pub(crate) fn capture_thread_input_state(&mut self) -> Option<ThreadInputState> {
         let draft = self.bottom_pane.composer_draft_snapshot();
         let composer = ThreadComposerState {
             text: draft.text,
@@ -500,7 +505,11 @@ impl ChatWidget {
             pending_pastes: draft.pending_pastes,
         };
         Some(ThreadInputState {
-            async_questions: self.input_queue.async_questions.clone(),
+            questions: self
+                .bottom_pane
+                .questions
+                .as_deref_mut()
+                .map(crate::bottom_pane::AsyncQuestions::capture),
             composer: composer.has_content().then_some(composer),
             safety_buffering_prompt: self.safety_buffering_prompt.clone(),
             pending_steer: self.input_queue.pending_steer.clone(),
@@ -532,7 +541,7 @@ impl ChatWidget {
         let restored_task_running =
             preserve_in_flight_turn && input_state.as_ref().is_some_and(|state| state.task_running);
         if let Some(input_state) = input_state {
-            self.input_queue.async_questions = input_state.async_questions;
+            self.bottom_pane.restore_questions(input_state.questions);
             self.input_queue.recovered_queue = input_state.recovered_queue;
             self.current_collaboration_mode = input_state.current_collaboration_mode;
             self.active_collaboration_mask = input_state.active_collaboration_mask;
@@ -579,7 +588,6 @@ impl ChatWidget {
                 UserMessageHistoryRecord::UserMessageText,
             );
         } else {
-            self.input_queue.async_questions = Default::default();
             self.turn_lifecycle
                 .restore_running(/*running*/ false, Instant::now());
             self.safety_buffering_prompt = None;
@@ -588,7 +596,6 @@ impl ChatWidget {
         }
         self.input_queue.recovered_queue &= self.input_queue.has_queued_follow_up_messages()
             || self.input_queue.pending_steer.is_some();
-        self.refresh_async_questions();
         let effort = self.effective_reasoning_effort();
         self.bottom_pane
             .set_active_reasoning_effort_baseline(effort.as_ref());

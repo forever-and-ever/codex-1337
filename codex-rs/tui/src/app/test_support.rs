@@ -18,6 +18,17 @@ pub(super) fn make_test_app() -> impl std::future::Future<Output = Box<App>> {
         let session_telemetry = test_session_telemetry(&config, model.as_str());
 
         Box::new(App {
+            feature_write_lock: Arc::default(),
+            local_settings: crate::local_settings::LocalSettings::from(&config),
+            pending_server_profiles: HashMap::new(),
+            pending_thread_titles: HashSet::new(),
+            pending_open_resume_picker: false,
+            pending_working_directory_change: None,
+            pending_start_managed_worktree: None,
+            pending_managed_worktree_creation: false,
+            pending_managed_worktree_created: None,
+            pending_managed_worktree_transition: None,
+            pending_managed_worktree_attach: None,
             model_catalog: chat_widget.model_catalog(),
             session_telemetry,
             app_event_tx,

@@ -1,7 +1,6 @@
 //! User-message and shell-prompt submission behavior for `ChatWidget`.
 
 use super::*;
-use uuid::Uuid;
 
 impl ChatWidget {
     pub(crate) fn set_task_mentions_enabled(&mut self, enabled: bool) {
@@ -108,13 +107,13 @@ impl ChatWidget {
         .1
     }
 
-    fn submit_user_message_with_history_and_shell_escape_policy(
+    pub(super) fn submit_user_message_with_history_and_shell_escape_policy(
         &mut self,
         user_message: UserMessage,
         history_record: UserMessageHistoryRecord,
         shell_escape_policy: ShellEscapePolicy,
     ) -> (bool, Option<AppCommand>) {
-        if self.misalignment_policy_violation {
+        if self.has_misalignment_policy_violation() {
             return (false, None);
         }
         if self.input_queue.rate_limit_recovery_pending {
@@ -348,8 +347,9 @@ impl ChatWidget {
         } else {
             None
         };
+        let client_user_message_id = uuid::Uuid::new_v4().to_string();
         let pending_steer = (!render_in_history).then(|| PendingSteer {
-            client_id: format!("tui-steer-{}", Uuid::now_v7()),
+            client_id: client_user_message_id.clone(),
             items: items.clone(),
             user_message: UserMessage {
                 text: text.clone(),
@@ -381,7 +381,6 @@ impl ChatWidget {
         } else {
             None
         };
-        let client_user_message_id = pending_steer.as_ref().map(|steer| steer.client_id.clone());
         let pending_steer_replacement =
             local_pending_steer_replacement
                 .as_ref()
@@ -392,8 +391,8 @@ impl ChatWidget {
                     },
                 );
         let op = AppCommand::user_turn(
-            items,
             client_user_message_id,
+            items,
             pending_steer_replacement,
             self.config.cwd.to_path_buf(),
             AskForApproval::from(self.config.permissions.approval_policy.value()),

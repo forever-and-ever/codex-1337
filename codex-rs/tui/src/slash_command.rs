@@ -14,7 +14,6 @@ pub enum SlashCommand {
     // more frequently used commands should be listed first.
     Model,
     Account,
-    Questions,
     Ide,
     Permissions,
     Keymap,
@@ -37,6 +36,7 @@ pub enum SlashCommand {
     Delete,
     Resume,
     Fork,
+    Worktree,
     App,
     Init,
     Compact,
@@ -89,7 +89,6 @@ impl SlashCommand {
     /// User-visible description shown in the popup.
     pub fn description(self) -> &'static str {
         match self {
-            SlashCommand::Questions => "answer or dismiss pending questions",
             SlashCommand::Feedback => "send logs to maintainers",
             SlashCommand::New => "start a new chat during a conversation",
             SlashCommand::Init => "create an AGENTS.md file with instructions for Codex",
@@ -102,9 +101,10 @@ impl SlashCommand {
             SlashCommand::Delete => "permanently delete this session and exit",
             SlashCommand::Clear => "clear the terminal and start a new chat",
             SlashCommand::Fork => "fork the current chat",
+            SlashCommand::Worktree => "start or continue a conversation in a new worktree",
             SlashCommand::App => "continue this session in the Desktop app",
             SlashCommand::Quit | SlashCommand::Exit => "exit Codex",
-            SlashCommand::Copy => "copy the last response, code block, or quote",
+            SlashCommand::Copy => "copy the last response or part of it",
             SlashCommand::Export => "export the conversation as markdown",
             SlashCommand::Raw => "toggle raw scrollback mode for copy-friendly terminal selection",
             SlashCommand::Diff => "show git diff (including untracked files)",
@@ -198,7 +198,6 @@ impl SlashCommand {
         matches!(
             self,
             SlashCommand::Copy
-                | SlashCommand::Questions
                 | SlashCommand::Agents
                 | SlashCommand::Export
                 | SlashCommand::Raw
@@ -219,6 +218,7 @@ impl SlashCommand {
             | SlashCommand::Archive
             | SlashCommand::Delete
             | SlashCommand::Fork
+            | SlashCommand::Worktree
             | SlashCommand::Init
             | SlashCommand::Compact
             | SlashCommand::Recap
@@ -239,7 +239,6 @@ impl SlashCommand {
             | SlashCommand::MemoryUpdate => false,
             SlashCommand::Diff
             | SlashCommand::Resume
-            | SlashCommand::Questions
             | SlashCommand::Model
             | SlashCommand::Personality
             | SlashCommand::Permissions

@@ -10,7 +10,6 @@ use std::borrow::Cow;
 
 #[derive(Debug, Clone)]
 pub(super) struct ThreadEventSnapshot {
-    pub(super) async_questions: crate::chatwidget::async_questions::AsyncQuestions,
     pub(super) session: Option<ThreadSessionState>,
     pub(super) turns: Vec<Turn>,
     pub(super) events: Vec<ThreadBufferedEvent>,
@@ -37,16 +36,18 @@ pub(super) struct FeedbackThreadEvent {
 pub(super) enum ThreadEventAttachment {
     Live,
     ReplayOnly,
+    ExternalWriter,
 }
 
 #[derive(Debug)]
 pub(super) struct ThreadEventStore {
-    pub(super) async_questions: crate::chatwidget::async_questions::AsyncQuestions,
     pub(super) session: Option<ThreadSessionState>,
     pub(super) turns: Vec<Turn>,
     pub(super) buffer: VecDeque<ThreadBufferedEvent>,
     pub(super) pending_interactive_replay: PendingInteractiveReplayState,
     pub(super) active_turn_id: Option<String>,
+    // Lifecycle identity must survive bounded replay-buffer eviction.
+    pub(super) latest_turn_id: Option<String>,
     pub(super) pending_interrupt_turn_id: Option<String>,
     pub(super) input_state: Option<ThreadInputState>,
     pub(super) capacity: usize,
@@ -56,7 +57,19 @@ pub(super) struct ThreadEventStore {
 }
 
 impl ThreadEventStore {
-    pub(super) fn event_survives_session_refresh(event: &ThreadBufferedEvent) -> bool {
+    pub(super) fn event_survives_session_refresh(event: &mut ThreadBufferedEvent) -> bool {
+        if let ThreadBufferedEvent::Notification(notification) = event
+            && let ServerNotification::ItemCompleted(notification) = notification.as_mut()
+            && let ThreadItem::AgentMessage {
+                questions: Some(_),
+                text,
+                ..
+            } = &mut notification.item
+        {
+            // Refreshed turns contain the text; retain only the live question state.
+            text.clear();
+            return true;
+        }
         match event {
             ThreadBufferedEvent::Request(_) | ThreadBufferedEvent::FeedbackSubmission(_) => true,
             ThreadBufferedEvent::Notification(notification) => matches!(
@@ -71,12 +84,12 @@ impl ThreadEventStore {
 
     pub(super) fn new(capacity: usize) -> Self {
         Self {
-            async_questions: Default::default(),
             session: None,
             turns: Vec::new(),
             buffer: VecDeque::new(),
             pending_interactive_replay: PendingInteractiveReplayState::default(),
             active_turn_id: None,
+            latest_turn_id: None,
             pending_interrupt_turn_id: None,
             input_state: None,
             capacity,
@@ -104,7 +117,7 @@ impl ThreadEventStore {
     }
 
     pub(super) fn rebase_buffer_after_session_refresh(&mut self) {
-        self.buffer.retain(Self::event_survives_session_refresh);
+        self.buffer.retain_mut(Self::event_survives_session_refresh);
         self.buffered_agent_message_delta_bytes = 0;
     }
 
@@ -116,7 +129,13 @@ impl ThreadEventStore {
             .rev()
             .find(|turn| matches!(turn.status, TurnStatus::InProgress))
             .map(|turn| turn.id.clone());
+        self.latest_turn_id = turns.last().map(|turn| turn.id.clone());
         self.turns = turns;
+    }
+
+    pub(super) fn set_active_turn_id(&mut self, turn_id: String) {
+        self.latest_turn_id = Some(turn_id.clone());
+        self.active_turn_id = Some(turn_id);
     }
 
     pub(super) fn push_notification(&mut self, notification: ServerNotification) {
@@ -128,23 +147,16 @@ impl ThreadEventStore {
     }
 
     fn push_notification_inner(&mut self, notification: Cow<'_, ServerNotification>) {
-        if let ServerNotification::ItemCompleted(item) = notification.as_ref()
-            && let ThreadItem::AgentMessage {
-                id,
-                delivery: Some(codex_protocol::items::AgentMessageDelivery::Async),
-                questions: Some(questions),
-                ..
-            } = &item.item
-        {
-            self.async_questions.receive(id, questions);
-        }
         self.pending_interactive_replay
             .note_server_notification(notification.as_ref());
         match notification.as_ref() {
             ServerNotification::TurnStarted(turn) => {
-                self.active_turn_id = Some(turn.turn.id.clone());
+                self.set_active_turn_id(turn.turn.id.clone());
             }
             ServerNotification::TurnCompleted(turn) => {
+                if self.active_turn_id.is_none() {
+                    self.latest_turn_id = Some(turn.turn.id.clone());
+                }
                 if matches!(turn.turn.status, TurnStatus::Completed) {
                     self.recap_progress.completed_turns += 1;
                 }
@@ -154,6 +166,14 @@ impl ThreadEventStore {
                 if self.pending_interrupt_turn_id.as_deref() == Some(turn.turn.id.as_str()) {
                     self.pending_interrupt_turn_id = None;
                 }
+            }
+            ServerNotification::Error(n)
+                if self.active_turn_id.is_none()
+                    && !n.will_retry
+                    && n.error.codex_error_info
+                        == Some(AppServerCodexErrorInfo::MisalignmentPolicyViolation) =>
+            {
+                self.latest_turn_id = Some(n.turn_id.clone());
             }
             ServerNotification::ThreadClosed(_) => {
                 self.active_turn_id = None;
@@ -220,8 +240,7 @@ impl ThreadEventStore {
     }
 
     pub(super) fn snapshot(&self) -> ThreadEventSnapshot {
-        ThreadEventSnapshot {
-            async_questions: self.async_questions.clone(),
+        let mut snapshot = ThreadEventSnapshot {
             session: self.session.clone(),
             turns: self.turns.clone(),
             // Thread switches replay buffered events into a rebuilt ChatWidget. Only replay
@@ -240,7 +259,11 @@ impl ThreadEventStore {
                 .cloned()
                 .collect(),
             input_state: self.input_state.clone(),
+        };
+        if let Some(latest_turn_id) = &self.latest_turn_id {
+            replay_filter::omit_resolved_misalignment_errors(&mut snapshot, latest_turn_id);
         }
+        snapshot
     }
 
     pub(super) fn recap_progress(&self) -> recap::RecapProgress {
@@ -362,6 +385,10 @@ impl ThreadEventChannel {
 
     pub(super) fn mark_replay_only(&mut self) {
         self.attachment = ThreadEventAttachment::ReplayOnly;
+    }
+
+    pub(super) fn mark_external_writer(&mut self) {
+        self.attachment = ThreadEventAttachment::ExternalWriter;
     }
 
     pub(super) fn attachment(&self) -> ThreadEventAttachment {
@@ -709,6 +736,28 @@ mod tests {
         let snapshot = store.snapshot();
         assert!(snapshot.events.is_empty());
         assert_eq!(store.has_pending_thread_approvals(), false);
+    }
+
+    #[test]
+    fn refresh_retains_live_questions_without_replaying_their_text() {
+        let mut expected = serde_json::json!({
+            "method": "item/completed", "params": {
+                "threadId": "thread", "turnId": "turn", "completedAtMs": 0,
+                "item": {
+                    "type": "agentMessage", "id": "question", "text": "already in the snapshot",
+                    "phase": null, "memoryCitation": null, "delivery": null,
+                    "questions": [{"title": "Which way?", "options": null}]
+                }
+            }
+        });
+        let mut store = ThreadEventStore::new(/*capacity*/ 8);
+        store.push_notification(serde_json::from_value(expected.clone()).unwrap());
+        store.rebase_buffer_after_session_refresh();
+        expected["params"]["item"]["text"] = serde_json::json!("");
+        let ThreadBufferedEvent::Notification(actual) = &store.snapshot().events[0] else {
+            panic!("missing live question");
+        };
+        assert_eq!(serde_json::to_value(actual).unwrap(), expected);
     }
 
     #[test]

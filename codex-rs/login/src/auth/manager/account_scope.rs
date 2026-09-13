@@ -95,16 +95,7 @@ impl AuthManager {
             ));
         }
         let manager = Self::new_from_auth_config(
-            AuthConfig {
-                codex_home: self.codex_home.clone(),
-                auth_credentials_store_mode: self.auth_credentials_store_mode,
-                keyring_backend_kind: self.keyring_backend_kind,
-                forced_login_method: self.forced_login_method,
-                chatgpt_base_url: self.chatgpt_base_url.clone(),
-                forced_chatgpt_workspace_id: self.effective_chatgpt_workspaces(),
-                managed_auth_policy: self.managed_auth_policy.clone(),
-                auth_route_config: self.auth_route_config.clone(),
-            },
+            self.saved_account_config(),
             /*enable_codex_api_key_env*/ false,
         )
         .await;
@@ -164,6 +155,30 @@ impl AuthManager {
         &self,
         id: &str,
     ) -> Result<CodexAuth, SavedAccountLoadError> {
+        self.saved_account_config().read_saved_account(id).await
+    }
+
+    fn saved_account_config(&self) -> AuthConfig {
+        AuthConfig {
+            codex_home: self.codex_home.clone(),
+            auth_credentials_store_mode: self.auth_credentials_store_mode,
+            keyring_backend_kind: self.keyring_backend_kind,
+            forced_login_method: self.forced_login_method,
+            chatgpt_base_url: self.chatgpt_base_url.clone(),
+            forced_chatgpt_workspace_id: self.effective_chatgpt_workspaces(),
+            managed_auth_policy: self.managed_auth_policy.clone(),
+            auth_route_config: self.auth_route_config.clone(),
+        }
+    }
+}
+
+impl AuthConfig {
+    /// Reads one saved identity without changing the selected account or refreshing tokens.
+    pub async fn load_saved_account(&self, id: &str) -> std::io::Result<CodexAuth> {
+        self.read_saved_account(id).await.map_err(Into::into)
+    }
+
+    async fn read_saved_account(&self, id: &str) -> Result<CodexAuth, SavedAccountLoadError> {
         let document = create_auth_storage(
             self.codex_home.clone(),
             self.auth_credentials_store_mode,
@@ -183,7 +198,9 @@ impl AuthManager {
             self.auth_credentials_store_mode,
             self.chatgpt_base_url.as_deref(),
             self.keyring_backend_kind,
-            self.agent_identity_authapi_base_url.as_deref(),
+            agent_identity_authapi_base_url(self.chatgpt_base_url.as_deref())
+                .ok()
+                .as_deref(),
             &self.auth_route_config,
         )
         .await

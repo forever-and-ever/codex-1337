@@ -91,6 +91,15 @@ impl App {
         {
             return;
         }
+        self.chat_widget.cyber_policy_notice = Default::default();
+        if chatgpt {
+            crate::daybreak::prefetch_notice(
+                &self.config,
+                server,
+                self.chat_widget.cyber_policy_notice.clone(),
+                response.account_id.clone(),
+            );
+        }
         self.account_ui.displayed = Some((thread_id, response));
         self.rate_limit_hard_stop_generation = self.rate_limit_hard_stop_generation.wrapping_add(1);
         self.rate_limit_refresh_state.invalidate_recovery();

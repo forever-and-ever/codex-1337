@@ -221,7 +221,7 @@ async fn guardian_network_approval_preserves_action_and_outcome_routing() -> Res
         .iter()
         .find_map(|request| request.function_call_output_text(second_call_id))
         .context("expected denied network tool output")?;
-    assert!(denied_output.contains(denial));
+    assert!(denied_output.contains(denial), "{denied_output}");
     Ok(())
 }
 

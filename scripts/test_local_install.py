@@ -76,11 +76,20 @@ class LocalInstallTest(unittest.TestCase):
                 ]
                 digest = hashlib.sha256(b"artifact").hexdigest()
                 destination.write_text("".join(f"{digest}  {name}\n" for name in names))
+                trusted = (
+                    v8.REPO_ROOT
+                    / "third_party/v8/rusty_v8_test_release_manifests.sha256"
+                )
+                trusted.parent.mkdir(parents=True, exist_ok=True)
+                trusted.write_text(
+                    f"{hashlib.sha256(destination.read_bytes()).hexdigest()}  {destination.name}\n"
+                )
             else:
                 destination.write_bytes(b"artifact")
 
         with (
             tempfile.TemporaryDirectory() as temporary,
+            patch.object(v8, "REPO_ROOT", Path(temporary)),
             patch.dict(os.environ, {"XDG_CACHE_HOME": temporary}),
             patch.object(v8, "resolved_v8_crate_version", return_value="test"),
             patch.object(v8, "download_file", side_effect=download),

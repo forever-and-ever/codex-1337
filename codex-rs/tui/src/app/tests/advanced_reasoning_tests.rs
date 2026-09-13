@@ -65,7 +65,6 @@ async fn switching_from_ultra_thread_restores_configured_plan_effort() {
 
     app.replay_thread_snapshot(
         ThreadEventSnapshot {
-            async_questions: Default::default(),
             session: Some(ultra_session),
             turns: Vec::new(),
             events: Vec::new(),
@@ -75,7 +74,6 @@ async fn switching_from_ultra_thread_restores_configured_plan_effort() {
     );
     app.replay_thread_snapshot(
         ThreadEventSnapshot {
-            async_questions: Default::default(),
             session: Some(normal_session),
             turns: Vec::new(),
             events: Vec::new(),

@@ -21,7 +21,6 @@ pub(super) struct PendingInputPreview {
 
 #[derive(Debug, Default)]
 pub(super) struct InputQueueState {
-    pub(super) async_questions: super::async_questions::AsyncQuestions,
     /// User inputs queued while a turn is in progress.
     pub(super) queued_user_messages: VecDeque<QueuedUserMessage>,
     /// History records for queued user messages. Slash commands such as `/goal`

@@ -302,7 +302,7 @@ impl ChatWidget {
                 parsed_cmd,
                 source,
                 /*interaction_input*/ None,
-                self.config.animations,
+                self.local_settings.tui.animations,
             )));
             self.bump_active_cell_revision();
         }
@@ -419,7 +419,7 @@ impl ChatWidget {
                     parsed,
                     source,
                     /*interaction_input*/ None,
-                    self.config.animations,
+                    self.local_settings.tui.animations,
                 );
                 orphan.completed_at = completed.timestamp;
                 let completed = orphan.complete_call(&id, output, duration);
@@ -437,7 +437,7 @@ impl ChatWidget {
                     parsed,
                     source,
                     /*interaction_input*/ None,
-                    self.config.animations,
+                    self.local_settings.tui.animations,
                 );
                 cell.completed_at = completed.timestamp;
                 let completed = cell.complete_call(&id, output, duration);

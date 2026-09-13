@@ -1,0 +1,13 @@
+---
+source: tui/src/chatwidget/tests/luna_reserve_usage_tests.rs
+expression: rendered
+---
+• Working (0s • esc to interrupt)
+
+
+› x
+
+────────────────────────────────────────────────────────────────────────────────
+  Activity —
+────────────────────────────────────────────────────────────────────────────────
+  tab to queue message                                       100% context left

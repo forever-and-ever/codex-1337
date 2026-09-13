@@ -1083,7 +1083,7 @@ fn base_mock() -> (MockBuilder, ResponseMock) {
 }
 
 fn base_request() -> MockBuilder {
-    Mock::given(method("POST")).and(path_regex(".*/(responses|guardian)$"))
+    Mock::given(method("POST")).and(path_regex(".*/(responses|guardian|guardian-classifier)$"))
 }
 
 fn compact_mock() -> (MockBuilder, ResponseMock) {
