@@ -2,6 +2,8 @@
 
 use std::fmt;
 
+use codex_app_server_protocol::ThreadTokenUsage;
+use codex_app_server_protocol::TokenUsageBreakdown;
 use codex_protocol::num_format::format_with_separators;
 use serde::Deserialize;
 use serde::Serialize;
@@ -15,6 +17,18 @@ pub struct TokenUsage {
     pub output_tokens: i64,
     pub reasoning_output_tokens: i64,
     pub total_tokens: i64,
+}
+
+impl From<&TokenUsageBreakdown> for TokenUsage {
+    fn from(usage: &TokenUsageBreakdown) -> Self {
+        Self {
+            input_tokens: usage.input_tokens,
+            cached_input_tokens: usage.cached_input_tokens,
+            output_tokens: usage.output_tokens,
+            reasoning_output_tokens: usage.reasoning_output_tokens,
+            total_tokens: usage.total_tokens,
+        }
+    }
 }
 
 impl TokenUsage {
@@ -58,6 +72,16 @@ pub(crate) struct TokenUsageInfo {
     pub(crate) total_token_usage: TokenUsage,
     pub(crate) last_token_usage: TokenUsage,
     pub(crate) model_context_window: Option<i64>,
+}
+
+impl From<ThreadTokenUsage> for TokenUsageInfo {
+    fn from(usage: ThreadTokenUsage) -> Self {
+        Self {
+            total_token_usage: (&usage.total).into(),
+            last_token_usage: (&usage.last).into(),
+            model_context_window: usage.model_context_window,
+        }
+    }
 }
 
 impl fmt::Display for TokenUsage {

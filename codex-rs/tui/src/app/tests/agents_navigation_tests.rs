@@ -32,7 +32,20 @@ async fn agents_navigation_roster_tracks_background_metadata_without_replaying_a
         },
     );
     app.track_subagent_panel(&activity);
-    app.track_subagent_panel(&token_usage_notification(child, "turn", None));
+    let mut usage = token_usage_notification(child, "turn", None);
+    if let ServerNotification::ThreadTokenUsageUpdated(event) = &mut usage {
+        // Match the status line: session totals, excluding cached input, with
+        // reasoning already included in output (not counted a second time).
+        event.token_usage.total = TokenUsageBreakdown {
+            total_tokens: 20_000_000,
+            input_tokens: 19_000_000,
+            cached_input_tokens: 18_500_000,
+            cache_write_input_tokens: 0,
+            output_tokens: 1_000_000,
+            reasoning_output_tokens: 200_000,
+        };
+    }
+    app.track_subagent_panel(&usage);
     {
         let roster = app.agent_navigation.roster.lock().unwrap();
         assert_eq!(
@@ -47,7 +60,7 @@ async fn agents_navigation_roster_tracks_background_metadata_without_replaying_a
                 roster.watched,
                 roster.focused
             ),
-            (Some("Inspect parser"), Some(10), Some(root), None)
+            (Some("Inspect parser"), Some(1_500_000), Some(root), None)
         );
     }
     app.track_subagent_panel(&status(codex_app_server_protocol::ThreadStatus::Idle));
@@ -63,7 +76,7 @@ async fn agents_navigation_roster_tracks_background_metadata_without_replaying_a
         (
             &Some(codex_app_server_protocol::ThreadStatus::Idle),
             &None,
-            Some(10)
+            Some(1_500_000)
         )
     );
     drop(roster);

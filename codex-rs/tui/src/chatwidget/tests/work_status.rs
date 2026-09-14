@@ -114,6 +114,7 @@ async fn work_status_below_composer_clears_without_transcript_entries() {
             row.tokens = Some(12_345);
         }
         roster.rows[8].activity = Some("Checking the parser and its integration tests".into());
+        roster.rows[8].tokens = Some(1_500_000);
         roster.rows[8].status = Some(codex_app_server_protocol::ThreadStatus::Active {
             active_flags: Vec::new(),
         });

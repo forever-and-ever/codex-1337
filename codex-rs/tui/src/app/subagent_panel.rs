@@ -125,7 +125,7 @@ impl App {
                 }
             }
             ServerNotification::ThreadTokenUsageUpdated(event) => {
-                row.tokens = Some(event.token_usage.total.total_tokens)
+                row.tokens = Some(TokenUsage::from(&event.token_usage.total).blended_total())
             }
             ServerNotification::TurnStarted(_) => {
                 row.status = Some(ThreadStatus::Active {

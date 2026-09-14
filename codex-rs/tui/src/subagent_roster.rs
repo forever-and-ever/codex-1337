@@ -2,6 +2,7 @@
 use crate::agent_status;
 use crate::line_truncation::truncate_line_to_width;
 use crate::render::renderable::Renderable;
+use crate::status::format_tokens_compact;
 use codex_app_server_protocol::ThreadStatus;
 use codex_protocol::ThreadId;
 use ratatui::buffer::Buffer;
@@ -141,16 +142,9 @@ impl Renderable for RosterView {
             .take(height)
             .enumerate()
         {
-            let tokens = row.tokens.map_or_else(
-                || "—".to_string(),
-                |n| {
-                    if n >= 1000 {
-                        format!("{:.1}k", n as f64 / 1000.0)
-                    } else {
-                        n.to_string()
-                    }
-                },
-            );
+            let tokens = row
+                .tokens
+                .map_or_else(|| "—".to_string(), format_tokens_compact);
             let tokens_width = tokens.len().min(usize::from(area.width));
             let edge = if offset == 0 && roster.first > 0 {
                 '↑'
