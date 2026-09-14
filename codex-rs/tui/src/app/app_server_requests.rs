@@ -80,6 +80,14 @@ pub(super) struct PendingAppServerRequests {
 }
 
 impl PendingAppServerRequests {
+    pub(super) fn is_empty(&self) -> bool {
+        self.exec_approvals.is_empty()
+            && self.file_change_approvals.is_empty()
+            && self.permissions_approvals.is_empty()
+            && self.user_inputs.is_empty()
+            && self.mcp_requests.is_empty()
+    }
+
     fn canonical_thread_id(thread_id: &str) -> String {
         codex_protocol::ThreadId::from_string(thread_id)
             .map(|thread_id| thread_id.to_string())

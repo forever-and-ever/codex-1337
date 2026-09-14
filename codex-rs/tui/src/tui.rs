@@ -582,6 +582,12 @@ pub enum TuiEvent {
     FocusLost,
 }
 
+/// Whether buffered input belongs to an external program or the returning TUI.
+pub enum RestoredInput {
+    Discard,
+    Preserve,
+}
+
 pub struct Tui {
     frame_requester: FrameRequester,
     draw_tx: broadcast::Sender<()>,
@@ -739,7 +745,8 @@ impl Tui {
     /// This pauses crossterm's stdin polling by dropping the underlying event stream, restores
     /// terminal modes and stderr while keeping raw mode enabled, then re-applies Codex TUI modes
     /// and stderr suppression before resuming events.
-    pub async fn with_restored<R, F, Fut>(&mut self, f: F) -> R
+    /// Preserve buffered input when `f` only attempts replacement and consumes none.
+    pub async fn with_restored<R, F, Fut>(&mut self, input: RestoredInput, f: F) -> R
     where
         F: FnOnce() -> Fut,
         Fut: Future<Output = R>,
@@ -768,8 +775,10 @@ impl Tui {
         if let Err(err) = set_modes() {
             tracing::warn!("failed to re-enable terminal modes after external program: {err}");
         }
-        // After the external program `f` finishes, reset terminal state and flush any buffered keypresses.
-        flush_terminal_input_buffer();
+        // Interactive children own their buffered input; failed replacement does not.
+        if matches!(input, RestoredInput::Discard) {
+            flush_terminal_input_buffer();
+        }
 
         if was_alt_screen {
             let _ = self.enter_alt_screen();

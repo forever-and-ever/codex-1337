@@ -224,6 +224,7 @@ mod experimental_features;
 mod file_change_approvals;
 mod history_pagination;
 mod history_ui;
+mod idle_restart;
 mod input;
 mod loaded_threads;
 mod managed_worktree_creation;

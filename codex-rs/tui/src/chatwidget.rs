@@ -346,6 +346,7 @@ use self::ide_context::IdeContextState;
 mod input_queue;
 mod reconnect;
 use self::input_queue::InputQueueState;
+mod idle_restart;
 mod input_flow;
 mod input_restore;
 mod input_submission;

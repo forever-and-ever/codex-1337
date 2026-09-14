@@ -426,8 +426,10 @@ impl App {
                 (chat_widget, None)
             }
             SessionSelection::Resume(target_session) => {
-                if app_server_target.thread_params_mode()
-                    == crate::app_server_session::ThreadParamsMode::Remote
+                let rejoining = crate::idle_restart::rejoins(target_session.thread_id);
+                if !rejoining
+                    && app_server_target.thread_params_mode()
+                        == crate::app_server_session::ThreadParamsMode::Remote
                     && config_persistence::has_explicit_resume_permission_override(
                         &config,
                         &harness_overrides,
@@ -444,10 +446,14 @@ impl App {
                 if let Some(history_mode) = target_session.history_mode {
                     app_server.remember_thread_history_mode(target_session.thread_id, history_mode);
                 }
-                let model_settings = config_persistence::resume_model_settings_for_overrides(
-                    &config,
-                    &harness_overrides,
-                );
+                let model_settings = if rejoining {
+                    crate::app_server_session::ResumeModelSettings::PreserveExistingThread
+                } else {
+                    config_persistence::resume_model_settings_for_overrides(
+                        &config,
+                        &harness_overrides,
+                    )
+                };
                 let resumed = match startup_draft
                     .run_until(
                         tui,
@@ -899,6 +905,7 @@ See the Codex keymap documentation for supported actions and examples."
         }
 
         let mut listen_for_app_server_events = true;
+        let mut idle_restart = crate::idle_restart::IdleRestart::new();
         let mut reconnect = None;
         let mut waiting_for_initial_session_configured = wait_for_initial_session_configured;
         let mut waiting_for_initial_session_header = true;
@@ -979,6 +986,7 @@ See the Codex keymap documentation for supported actions and examples."
                 // Replay queues history and operations. A buffered closure must not switch
                 // widgets before those app events have been applied.
                 let has_pending_app_events = !app_event_rx.is_empty();
+                idle_restart.set_ready(app.ready_for_idle_restart());
                 let initial_session_header_pending = waiting_for_initial_session_header
                     && app.primary_session_configured.is_some()
                     && has_pending_app_events;
@@ -1042,6 +1050,9 @@ See the Codex keymap documentation for supported actions and examples."
                     }
                     event = tui_events.next(), if app.reconnect.offline || !block_terminal_input_for_pending_startup_events => {
                         if let Some(event) = event {
+                            if !matches!(event, TuiEvent::Draw | TuiEvent::FocusLost) {
+                                idle_restart.postpone();
+                            }
                             if (matches!(
                                 &event,
                                 TuiEvent::Key(key)
@@ -1137,6 +1148,12 @@ See the Codex keymap documentation for supported actions and examples."
                     }, if !has_pending_app_events => {
                         crate::session_log::log_commit_tick();
                         app.chat_widget.on_commit_tick();
+                        AppRunControl::Continue
+                    }
+                    () = idle_restart.tick(), if !has_pending_app_events => {
+                        if app_event_rx.is_empty() {
+                            app.try_idle_restart(tui, &mut idle_restart).await;
+                        }
                         AppRunControl::Continue
                     }
                 };

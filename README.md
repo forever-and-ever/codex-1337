@@ -8,6 +8,10 @@ Use `codex agents` for the session dashboard. The graphical Wrangler is retired.
 The distribution owns its systemd user units; upgrades drain active turns rather
 than forcibly restarting the shared server. The federation bridge remains bundled.
 
+Idle Linux root views on the local daemon refresh to compatible installed bundles
+after five quiet minutes following a turn. Drafts, queued input, and open prompts
+defer replacement. The same thread and terminal are kept; server work continues.
+
 <p align="center"><strong>Codex CLI</strong> is a coding agent from OpenAI that runs locally on your computer.
 <p align="center">
   <img src="https://github.com/openai/codex/blob/main/.github/codex-cli-splash.png" alt="Codex CLI splash" width="80%" />

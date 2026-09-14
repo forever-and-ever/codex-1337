@@ -260,6 +260,9 @@ struct DebugCommand {
 
 #[derive(Debug, clap::Subcommand)]
 enum DebugSubcommand {
+    /// Internal client-replacement protocol negotiation.
+    #[clap(hide = true)]
+    TuiRestartProbe,
     /// Render the raw model catalog as JSON.
     Models(DebugModelsCommand),
 
@@ -1143,6 +1146,15 @@ async fn cli_main(
         mut interactive,
         subcommand,
     } = MultitoolCli::parse();
+    if matches!(
+        subcommand,
+        Some(Subcommand::Debug(DebugCommand {
+            subcommand: DebugSubcommand::TuiRestartProbe,
+        }))
+    ) {
+        println!("{}", codex_tui::IDLE_RESTART_PROTOCOL);
+        return Ok(());
+    }
     reject_unsupported_worktree_for_subcommand(interactive.shared.worktree, &subcommand)?;
     // Fold --enable/--disable into config overrides so they flow to all subcommands.
     let toggle_overrides = feature_toggles.to_overrides()?;
@@ -1756,6 +1768,11 @@ async fn cli_main(
             }
         }
         Some(Subcommand::Debug(DebugCommand { subcommand })) => match subcommand {
+            DebugSubcommand::TuiRestartProbe => {
+                unreachable!(
+                    "the restart probe is handled before configuration and authentication"
+                );
+            }
             DebugSubcommand::Models(cmd) => {
                 reject_remote_mode_for_subcommand(
                     root_remote.as_deref(),
@@ -2713,6 +2730,7 @@ async fn run_interactive_tui(
     remote_auth_token_env: Option<String>,
     arg0_paths: Arg0DispatchPaths,
 ) -> std::io::Result<AppExitInfo> {
+    codex_tui::apply_idle_restart_handoff(&mut interactive)?;
     if let Some(prompt) = interactive.prompt.take() {
         // Normalize CRLF/CR to LF so CLI-provided text can't leak `\r` into TUI state.
         interactive.prompt = Some(prompt.replace("\r\n", "\n").replace('\r', "\n"));

@@ -51,6 +51,12 @@ pub(crate) struct QuestionState {
     seen_ids: HashSet<String>,
 }
 
+impl QuestionState {
+    pub(crate) fn unanswered_count(&self) -> usize {
+        self.pending.len()
+    }
+}
+
 pub(crate) enum QuestionSubmission {
     Submit(String),
     Queue(String),
@@ -253,7 +259,7 @@ impl AsyncQuestions {
     }
 
     pub(crate) fn unanswered_count(&self) -> usize {
-        self.state.pending.len()
+        self.state.unanswered_count()
     }
 }
 
