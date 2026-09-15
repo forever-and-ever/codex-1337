@@ -12,6 +12,10 @@ Idle Linux root views on the local daemon refresh to compatible installed bundle
 after five quiet minutes following a turn. Drafts, queued input, and open prompts
 defer replacement. The same thread and terminal are kept; server work continues.
 
+On Linux, subagent rows support clicks and wheel scrolling, with a draggable
+scrollbar. Mouse capture is limited to the visible roster's lifetime; in Alacritty,
+hold Shift for native text selection or terminal scrollback.
+
 <p align="center"><strong>Codex CLI</strong> is a coding agent from OpenAI that runs locally on your computer.
 <p align="center">
   <img src="https://github.com/openai/codex/blob/main/.github/codex-cli-splash.png" alt="Codex CLI splash" width="80%" />

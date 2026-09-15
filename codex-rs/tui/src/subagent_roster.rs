@@ -15,6 +15,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 
+mod mouse;
+pub(crate) use mouse::MouseAction;
+
 pub(crate) type SharedRoster = Arc<Mutex<SubagentRoster>>;
 
 #[derive(Debug)]
@@ -33,10 +36,21 @@ pub(crate) struct SubagentRoster {
     pub focused: Option<ThreadId>,
     first: usize,
     name_width: usize,
+    reveal: Option<ThreadId>,
+    pointer: mouse::Pointer,
+    deferred: Option<Vec<(ThreadId, String)>>,
 }
 
 impl SubagentRoster {
     pub fn reconcile(&mut self, agents: Vec<(ThreadId, String)>, watched: Option<ThreadId>) {
+        if self.watched != watched {
+            self.reveal = watched;
+        }
+        self.watched = watched;
+        if self.pointer.engaged() {
+            self.deferred = Some(agents);
+            return;
+        }
         let old_index = self
             .focused
             .and_then(|id| self.rows.iter().position(|row| row.id == id));
@@ -65,7 +79,6 @@ impl SubagentRoster {
             .max()
             .unwrap_or(0)
             .min(24);
-        self.watched = watched;
         if self
             .focused
             .is_some_and(|id| !self.rows.iter().any(|row| row.id == id))
@@ -73,15 +86,23 @@ impl SubagentRoster {
             self.focused = old_index
                 .and_then(|index| self.rows.get(index.min(self.rows.len().saturating_sub(1))))
                 .map(|row| row.id);
+            self.reveal = self.focused;
         }
     }
 
     pub fn sort_by_activity(&mut self) {
+        if self.pointer.engaged() {
+            return;
+        }
+        self.begin_frame();
         self.rows.sort_by(|a, b| {
             matches!(b.status, Some(ThreadStatus::Active { .. }))
                 .cmp(&matches!(a.status, Some(ThreadStatus::Active { .. })))
                 .then_with(|| a.name.cmp(&b.name))
         });
+        if self.focused.is_some() {
+            self.reveal = self.focused;
+        }
     }
 
     pub fn down(&mut self) {
@@ -92,6 +113,7 @@ impl SubagentRoster {
                 (index + 1).min(self.rows.len().saturating_sub(1))
             });
         self.focused = self.rows.get(index).map(|row| row.id);
+        self.reveal = self.focused;
     }
 
     pub fn up(&mut self) {
@@ -100,6 +122,7 @@ impl SubagentRoster {
             .and_then(|id| self.rows.iter().position(|row| row.id == id))
             .and_then(|index| index.checked_sub(1))
             .map(|index| self.rows[index].id);
+        self.reveal = self.focused;
     }
 }
 
@@ -124,8 +147,9 @@ impl Renderable for RosterView {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let height = usize::from(area.height);
         let index = roster
-            .focused
-            .or(roster.watched)
+            .reveal
+            .take()
+            .or(roster.focused)
             .and_then(|id| roster.rows.iter().position(|row| row.id == id));
         if let Some(index) = index {
             roster.first = roster
@@ -134,6 +158,12 @@ impl Renderable for RosterView {
                 .max(index.saturating_sub(height - 1));
         }
         roster.first = roster.first.min(roster.rows.len().saturating_sub(height));
+        roster.record_view(area);
+        let scrollbar = roster.scrollbar();
+        let area = Rect {
+            width: area.width.saturating_sub(u16::from(scrollbar.is_some())),
+            ..area
+        };
         let name_width = roster.name_width.min(usize::from(area.width) / 3);
         for (offset, row) in roster
             .rows
@@ -146,16 +176,9 @@ impl Renderable for RosterView {
                 .tokens
                 .map_or_else(|| "—".to_string(), format_tokens_compact);
             let tokens_width = tokens.len().min(usize::from(area.width));
-            let edge = if offset == 0 && roster.first > 0 {
-                '↑'
-            } else if offset + 1 == height && roster.first + height < roster.rows.len() {
-                '↓'
-            } else {
-                ' '
-            };
             let mut spans = vec![
                 format!(
-                    "{}{edge}",
+                    "{} ",
                     if roster.focused == Some(row.id) {
                         '›'
                     } else {
@@ -166,7 +189,10 @@ impl Renderable for RosterView {
                 agent_status::marker(row.status.as_ref()),
                 " ".into(),
             ];
-            let name = truncate_line_to_width(Line::from(row.name.clone()), name_width);
+            let mut name = truncate_line_to_width(Line::from(row.name.clone()), name_width);
+            if roster.hovered() == Some(row.id) {
+                name = name.underlined();
+            }
             let padding = name_width.saturating_sub(name.width()) + 2;
             spans.extend(name.spans);
             spans.push(" ".repeat(padding).into());
@@ -196,5 +222,16 @@ impl Renderable for RosterView {
                 buf,
             );
         }
+        if let Some((top, length)) = scrollbar {
+            for offset in 0..area.height {
+                let thumb = (top..top + length).contains(&usize::from(offset));
+                Paragraph::new(if thumb { "┃".into() } else { "│".dim() })
+                    .render(Rect::new(area.right(), area.y + offset, 1, 1), buf);
+            }
+        }
     }
 }
+
+#[cfg(test)]
+#[path = "subagent_roster_tests.rs"]
+mod tests;

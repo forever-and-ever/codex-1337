@@ -247,9 +247,10 @@ impl<S: EventSource + Default + Unpin> TuiEventStream<S> {
         }
     }
 
-    /// Map a crossterm event to a [`TuiEvent`], skipping events we don't use (mouse events, etc.).
+    /// Map supported terminal input to a [`TuiEvent`].
     fn map_crossterm_event(&mut self, event: Event) -> Option<TuiEvent> {
         match event {
+            Event::Mouse(event) => Some(TuiEvent::Mouse(event)),
             Event::Key(key_event) => {
                 #[cfg(unix)]
                 if crate::tui::job_control::SUSPEND_KEY.is_press(key_event) {
@@ -281,7 +282,6 @@ impl<S: EventSource + Default + Unpin> TuiEventStream<S> {
                 self.terminal_focused.store(false, Ordering::Relaxed);
                 Some(TuiEvent::FocusLost)
             }
-            _ => None,
         }
     }
 }
@@ -417,21 +417,23 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn key_event_skips_unmapped() {
+    async fn mouse_and_keys_share_the_input_stream() {
         let (broker, handle, _draw_tx, draw_rx, terminal_focused) = setup();
         let mut stream = make_stream(broker, draw_rx, terminal_focused);
 
-        handle.send(Ok(Event::Mouse(MouseEvent {
+        let mouse = MouseEvent {
             kind: MouseEventKind::Moved,
             column: 0,
             row: 0,
             modifiers: KeyModifiers::NONE,
-        })));
+        };
+        handle.send(Ok(Event::Mouse(mouse)));
         handle.send(Ok(Event::Key(KeyEvent::new(
             KeyCode::Char('a'),
             KeyModifiers::NONE,
         ))));
 
+        assert!(matches!(stream.next().await, Some(TuiEvent::Mouse(event)) if event == mouse));
         let next = stream.next().await.unwrap();
         match next {
             TuiEvent::Key(key) => {

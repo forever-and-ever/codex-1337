@@ -1,0 +1,14 @@
+---
+source: tui/src/subagent_roster_tests.rs
+expression: "format!(\"Initial:\\n{initial}\\nScrolled:\\n{scrolled}\")"
+---
+Initial:
+  ? worker-0  —                             —  ┃
+  ? worker-1  —                             —  ┃
+  ? worker-2  —                             —  │
+  ? worker-3  —                             —  │
+Scrolled:
+  ? worker-3  —                             —  │
+  ? worker-4  —                             —  ┃
+  ? worker-5  —                             —  ┃
+  ? worker-6  —                             —  │
