@@ -242,17 +242,12 @@ impl App {
         });
     }
 
-    /// Starts the initial skills refresh without delaying the first interactive frame.
-    ///
-    /// Startup only needs skill metadata to populate skill mentions and the skills UI; the prompt can be
-    /// rendered before that metadata arrives. The result is routed through the normal app event queue so
-    /// the same response handler updates the chat widget and emits invalid `SKILL.md` warnings once the
-    /// app-server RPC finishes. User-initiated skills refreshes still use the blocking app command path so
-    /// callers that explicitly asked for fresh skill state do not race ahead of their own refresh.
-    pub(super) fn refresh_startup_skills(&mut self, app_server: &AppServerSession) {
+    /// Session attachment needs catalogue metadata, not a redraw barrier. Explicit user refreshes
+    /// retain the synchronous command path so subsequent actions observe the refreshed state.
+    pub(super) fn refresh_skills(&mut self, app_server: &AppServerSession) {
         let request_handle = app_server.request_handle();
         let app_event_tx = self.app_event_tx.clone();
-        let cwd = self.config.cwd.to_path_buf();
+        let cwd = self.chat_widget.config_ref().cwd.to_path_buf();
         tokio::spawn(async move {
             let result = fetch_skills_list(request_handle, cwd.clone())
                 .await

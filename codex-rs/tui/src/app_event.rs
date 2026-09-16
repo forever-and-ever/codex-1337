@@ -1010,11 +1010,10 @@ pub(crate) enum AppEvent {
         thread_id: Option<ThreadId>,
     },
 
-    /// Result of the startup skills refresh that runs after the first frame is scheduled.
-    ///
-    /// This event is startup-only. Interactive skills refreshes are handled synchronously through the app
-    /// command path because those callers expect the visible skill state to be current when their command
-    /// completes.
+    /// Refresh the displayed conversation's skill catalogue without blocking rendering.
+    RefreshSkills,
+
+    /// Background catalogue result; explicit user refreshes use the synchronous command path.
     SkillsListLoaded {
         cwd: PathBuf,
         result: Result<SkillsListResponse, String>,

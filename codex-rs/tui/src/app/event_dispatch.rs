@@ -75,7 +75,7 @@ impl App {
             }
             AppEvent::CloseMisalignmentReview => self.chat_widget.show_misalignment_policy_precaution(),
             AppEvent::SkillsListLoaded { ref cwd, .. }
-                if cwds_differ(cwd, self.config.cwd.as_path()) =>
+                if cwds_differ(cwd, self.chat_widget.config_ref().cwd.as_path()) =>
             {
                 self.skill_load_warnings.startup_complete = true;
             }
@@ -1251,10 +1251,11 @@ impl App {
             } => {
                 self.handle_mcp_inventory_result(result, detail, thread_id);
             }
+            AppEvent::RefreshSkills => self.refresh_skills(app_server),
             AppEvent::SkillsListLoaded { result, .. } => {
                 self.handle_skills_list_result(
                     result.map_err(|err| color_eyre::eyre::eyre!(err)),
-                    "failed to load skills on startup",
+                    "failed to refresh skills",
                 );
                 self.skill_load_warnings.startup_complete = true;
             }

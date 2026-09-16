@@ -170,7 +170,7 @@ impl ChatWidget {
             self.bump_active_cell_revision();
         }
         self.transcript.saw_copy_source_this_turn = false;
-        self.refresh_skills_for_current_cwd(/*force_reload*/ true);
+        self.app_event_tx.send(AppEvent::RefreshSkills);
         self.refresh_connector_mentions(/*force_refresh*/ false);
         let initial_user_message_pending = self.initial_user_message.is_some();
         self.submit_initial_user_message_if_pending();
