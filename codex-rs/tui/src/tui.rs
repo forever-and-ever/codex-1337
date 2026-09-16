@@ -211,10 +211,17 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread", start_paused = true)]
-    async fn inserting_history_lines_schedules_a_draw() {
+    async fn replacing_history_clears_only_in_the_scheduled_frame() {
         let mut tui = crate::tui::test_support::make_test_tui().expect("test tui");
         let mut draw_rx = tui.draw_tx.subscribe();
 
+        tui.terminal.set_viewport_area(Rect::new(
+            /*x*/ 0, /*y*/ 7, /*width*/ 80, /*height*/ 4,
+        ));
+        tui.insert_history_lines(vec![Line::from("old thread")]);
+        tui.queue_scrollback_clear();
+        // A switch must not clear before replay finishes, or discard the replacement's lines.
+        assert_eq!(tui.terminal.viewport_area.y, 7);
         tui.insert_history_lines(vec![Line::from("committed stream line")]);
         tokio::time::advance(std::time::Duration::from_millis(20)).await;
 
@@ -222,6 +229,14 @@ mod tests {
             tokio::time::timeout(std::time::Duration::from_millis(50), draw_rx.recv()).await,
             Ok(Ok(()))
         ));
+        tui.draw_with_resize_reflow(
+            /*height*/ 4,
+            ratatui::layout::Size::new(/*width*/ 80, /*height*/ 24),
+            |_| {},
+        )
+        .expect("replacement frame");
+        assert_eq!(tui.terminal.viewport_area.y, 1);
+        assert!(!tui.pending_scrollback_clear);
     }
 }
 
@@ -600,6 +615,7 @@ pub struct Tui {
     event_broker: Arc<EventBroker>,
     pub(crate) terminal: Terminal,
     pending_history_lines: Vec<PendingHistoryLines>,
+    pending_scrollback_clear: bool,
     screen_size: ScreenSizePolicy,
     ambient_pet_image_state: crate::pets::PetImageRenderState,
     pet_picker_preview_image_state: crate::pets::PetImageRenderState,
@@ -658,6 +674,7 @@ impl Tui {
             event_broker: Arc::new(EventBroker::new()),
             terminal,
             pending_history_lines: vec![],
+            pending_scrollback_clear: false,
             screen_size: ScreenSizePolicy::default(),
             ambient_pet_image_state: crate::pets::PetImageRenderState::default(),
             pet_picker_preview_image_state: crate::pets::PetImageRenderState::default(),
@@ -925,6 +942,24 @@ impl Tui {
         self.pending_history_lines.clear();
     }
 
+    /// Keep the previous screen intact until the replacement history and viewport can be painted.
+    pub(crate) fn queue_scrollback_clear(&mut self) {
+        self.pending_history_lines.clear();
+        self.pending_scrollback_clear = true;
+        self.frame_requester.schedule_frame();
+    }
+
+    fn flush_scrollback_clear(&mut self) -> Result<()> {
+        if self.pending_scrollback_clear {
+            self.terminal.clear_scrollback_and_visible_screen_ansi()?;
+            let mut area = self.terminal.viewport_area;
+            area.y = 0;
+            self.terminal.set_viewport_area(area);
+            self.pending_scrollback_clear = false;
+        }
+        Ok(())
+    }
+
     /// Resize the inline viewport for the resize-reflow path.
     ///
     /// Unlike the legacy draw path, this path does not scroll rows above the viewport when the
@@ -1007,11 +1042,16 @@ impl Tui {
 
         // Precompute any viewport updates that need a cursor-position query before entering
         // the synchronized update, to avoid racing with the event reader.
-        let mut pending_viewport_area = self.pending_viewport_area(screen_size)?;
+        let mut pending_viewport_area = if self.pending_scrollback_clear {
+            None
+        } else {
+            self.pending_viewport_area(screen_size)?
+        };
 
         ensure_virtual_terminal_processing()?;
 
         stdout().sync_update(|_| {
+            self.flush_scrollback_clear()?;
             #[cfg(unix)]
             if let Some(prepared) = prepared_resume.take() {
                 prepared.apply(&mut self.terminal, screen_size)?;
@@ -1147,6 +1187,7 @@ impl Tui {
         ensure_virtual_terminal_processing()?;
 
         stdout().sync_update(|_| {
+            self.flush_scrollback_clear()?;
             #[cfg(unix)]
             if let Some(prepared) = prepared_resume.take() {
                 prepared.apply(&mut self.terminal, screen_size)?;

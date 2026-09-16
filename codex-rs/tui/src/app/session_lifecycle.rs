@@ -4,8 +4,6 @@
 //! resuming/forking saved sessions, replacing ChatWidget instances, and maintaining the agent picker
 //! cache used for multi-agent navigation.
 
-use std::io;
-
 use super::agent_picker::AGENT_PICKER_VIEW_ID;
 use super::app_server_event_targets::ServerNotificationThreadTarget;
 use super::app_server_event_targets::server_notification_thread_target;
@@ -695,7 +693,7 @@ impl App {
         self.recap.seed_from_progress(recap_progress, now);
         self.schedule_recap_check(thread_id, now);
 
-        self.render_thread_snapshot(tui, app_server, thread_id, snapshot, !is_replay_only)?;
+        self.render_thread_snapshot(tui, app_server, thread_id, snapshot, !is_replay_only);
         if is_replay_only
             && self
                 .thread_event_channels
@@ -724,7 +722,7 @@ impl App {
         thread_id: ThreadId,
         snapshot: ThreadEventSnapshot,
         resume_restored_queue: bool,
-    ) -> Result<()> {
+    ) {
         let init = self.chatwidget_init_for_forked_or_resumed_thread(
             tui,
             self.config.clone(),
@@ -745,12 +743,12 @@ impl App {
         if self.agent_navigation.is_parent_owned(thread_id) {
             self.chat_widget.set_parent_owned_thread();
         }
-        self.reset_for_thread_switch(tui)?;
+        self.reset_transcript_state_after_clear();
+        tui.queue_scrollback_clear();
         self.replay_thread_snapshot(snapshot, resume_restored_queue);
         if external_writer {
             self.chat_widget.show_external_writer_thread();
         }
-        Ok(())
     }
 
     pub(super) fn should_attach_live_thread_for_selection(&self, thread_id: ThreadId) -> bool {
@@ -761,28 +759,6 @@ impl App {
                 .agent_navigation
                 .get(&thread_id)
                 .is_none_or(|entry| !entry.is_closed || self.thread_unavailable(thread_id))
-    }
-
-    pub(super) fn reset_for_thread_switch(&mut self, tui: &mut tui::Tui) -> Result<()> {
-        self.reset_transcript_state_after_clear();
-        tui.clear_pending_history_lines();
-        Self::clear_terminal_for_thread_switch(&mut tui.terminal)?;
-        Ok(())
-    }
-
-    pub(super) fn clear_terminal_for_thread_switch<B>(
-        terminal: &mut crate::custom_terminal::Terminal<B>,
-    ) -> Result<()>
-    where
-        B: Backend<Error = io::Error> + Write,
-    {
-        terminal.clear_scrollback_and_visible_screen_ansi()?;
-        let mut area = terminal.viewport_area;
-        if area.y > 0 {
-            area.y = 0;
-            terminal.set_viewport_area(area);
-        }
-        Ok(())
     }
 
     pub(super) fn reset_thread_event_state(&mut self) {

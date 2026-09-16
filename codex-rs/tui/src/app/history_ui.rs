@@ -39,8 +39,18 @@ impl App {
         let width = self
             .chat_widget
             .history_wrap_width(tui.terminal.last_known_screen_size.width);
-        let lines =
-            cell.display_hyperlink_lines_for_mode(width, self.chat_widget.history_render_mode());
+        // Thread-switch replay retains source cells; the tail renderer chooses what to format.
+        // Usage cards still need their rendered identity for subsequent in-place refreshes.
+        let render_from_tail = self
+            .initial_history_replay_buffer
+            .as_ref()
+            .is_some_and(|buffer| buffer.render_from_transcript_tail);
+        let lines = if render_from_tail && !cell.as_any().is::<history_cell::CompositeHistoryCell>()
+        {
+            Vec::new()
+        } else {
+            cell.display_hyperlink_lines_for_mode(width, self.chat_widget.history_render_mode())
+        };
         if cell.as_any().is::<history_cell::CompositeHistoryCell>()
             && lines.first().is_some_and(|line| {
                 line.line.spans.len() == 1 && line.line.spans[0].content.as_ref() == "/status"

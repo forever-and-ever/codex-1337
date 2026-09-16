@@ -6629,18 +6629,49 @@ async fn required_stream_reflow_during_capped_initial_replay_survives_transcript
 }
 
 #[tokio::test]
-async fn thread_switch_replay_buffer_uses_transcript_tail_mode_when_row_cap_present() {
+async fn thread_switch_replay_formats_only_the_retained_tail() -> Result<()> {
+    #[derive(Debug)]
+    struct CountedCell(Arc<AtomicUsize>);
+
+    impl HistoryCell for CountedCell {
+        fn display_lines(&self, _width: u16) -> Vec<Line<'static>> {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            vec![Line::from("history")]
+        }
+
+        fn raw_lines(&self) -> Vec<Line<'static>> {
+            self.display_lines(/*width*/ 80)
+        }
+    }
+
     let (mut app, _rx, _op_rx) = make_test_app_with_channels().await;
     app.local_settings.tui.terminal_resize_reflow_max_rows = Some(3);
-
+    let mut tui = crate::tui::test_support::make_test_tui()?;
+    let rendered = Arc::new(AtomicUsize::new(0));
     app.begin_thread_switch_history_replay_buffer();
-
-    let buffer = app
-        .initial_history_replay_buffer
-        .as_ref()
-        .expect("thread switch replay buffer should be active");
-    assert!(buffer.render_from_transcript_tail);
-    assert!(buffer.retained_lines.is_empty());
+    for _ in 0..100 {
+        app.insert_history_cell(&mut tui, Box::new(CountedCell(rendered.clone())));
+    }
+    // Insertion used to format every cell even though the tail buffer discarded those lines.
+    assert_eq!(rendered.load(Ordering::Relaxed), 0);
+    app.finish_initial_history_replay_buffer(&mut tui);
+    let tail = app.render_transcript_lines_for_reflow(/*width*/ 80);
+    assert!(rendered.load(Ordering::Relaxed) <= 4);
+    assert_eq!(app.transcript_cells.len(), 100);
+    assert_eq!(tail.lines.len(), 3);
+    assert_eq!(
+        tail.lines.last().map(rendered_line_text),
+        Some("history".into())
+    );
+    assert_snapshot!(
+        "thread_switch_retained_tail",
+        tail.lines
+            .iter()
+            .map(rendered_line_text)
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    Ok(())
 }
 
 #[tokio::test]

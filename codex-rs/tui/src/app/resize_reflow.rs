@@ -277,7 +277,8 @@ impl App {
         if tui.is_alt_screen_active() {
             tui.terminal.clear_visible_screen()?;
         } else {
-            tui.terminal.clear_scrollback_and_visible_screen_ansi()?;
+            tui.queue_scrollback_clear();
+            return Ok(());
         }
         let mut area = tui.terminal.viewport_area;
         if area.y > 0 {
