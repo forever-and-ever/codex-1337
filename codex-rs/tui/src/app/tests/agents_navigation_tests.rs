@@ -185,6 +185,37 @@ async fn agents_navigation_escape_returns_to_main_but_preserves_drafts_and_popup
     assert_eq!(app.current_displayed_thread_id(), Some(root_id));
     app.upsert_agent_picker_thread(child_id, Some("child".into()), None, false);
     app.agent_navigation.mark_parent_owned(child_id);
+    // The inline roster must not swallow the first character or leave arrow keys
+    // navigating agents after typing has resumed in the composer.
+    for (character, modifiers) in [
+        ('x', KeyModifiers::NONE),
+        ('Ж', KeyModifiers::SHIFT),
+        (' ', KeyModifiers::NONE),
+    ] {
+        app.chat_widget.apply_external_edit(String::new());
+        app.handle_key_event(&mut tui, &mut app_server, KeyCode::Down.into())
+            .await;
+        assert_eq!(
+            app.agent_navigation.roster.lock().unwrap().focused,
+            Some(child_id)
+        );
+        app.handle_key_event(
+            &mut tui,
+            &mut app_server,
+            KeyEvent::new(KeyCode::Char(character), modifiers),
+        )
+        .await;
+        std::thread::sleep(crate::bottom_pane::ChatComposer::recommended_paste_flush_delay());
+        app.chat_widget
+            .handle_paste_burst_tick(tui.frame_requester());
+        assert_eq!(
+            (
+                app.agent_navigation.roster.lock().unwrap().focused,
+                app.chat_widget.composer_text_with_pending(),
+            ),
+            (None, character.to_string())
+        );
+    }
     app.chat_widget
         .apply_external_edit("Preserve this root draft".into());
     app.handle_key_event(&mut tui, &mut app_server, KeyCode::Down.into())

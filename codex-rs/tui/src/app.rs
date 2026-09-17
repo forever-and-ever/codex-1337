@@ -935,6 +935,13 @@ impl App {
                     self.handle_key_event(tui, app_server, key_event).await;
                 }
                 TuiEvent::Paste(pasted) => {
+                    if !pasted.is_empty() && self.chat_widget.no_modal_or_popup_active() {
+                        self.agent_navigation
+                            .roster
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .focused = None;
+                    }
                     // Pasted text may contain CRLF pairs or bare CRs (e.g., from iTerm2),
                     // but tui-textarea expects LF. Normalize CRLF pairs before bare CRs so
                     // each pasted line break becomes one LF and existing LFs stay unchanged.

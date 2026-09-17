@@ -1,4 +1,4 @@
-//! Integration hooks for the inline roster. Editing remains owned by the composer.
+//! Integration hooks for the inline roster. Typing yields focus to the composer.
 use super::app_server_event_targets::ServerNotificationThreadTarget;
 use super::app_server_event_targets::server_notification_thread_target;
 use super::*;
@@ -184,6 +184,17 @@ impl App {
                     .add_error_message(format!("Could not interrupt subagent: {error}"));
             }
             return true;
+        }
+        if matches!(key.code, KeyCode::Char(c) if !c.is_control())
+            && (key.modifiers - KeyModifiers::SHIFT).is_empty()
+            && !watch_only
+        {
+            self.agent_navigation
+                .roster
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .focused = None;
+            return false;
         }
         if !key.modifiers.is_empty() {
             return false;

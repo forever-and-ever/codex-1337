@@ -200,6 +200,7 @@ async fn pasted_text_normalizes_mixed_line_endings_at_app_boundary() -> Result<(
     let mut app = make_test_app().await;
     let mut app_server = start_config_write_test_app_server(&app).await?;
     let mut tui = crate::tui::test_support::make_test_tui()?;
+    app.agent_navigation.roster.lock().unwrap().focused = Some(ThreadId::new());
 
     app.handle_tui_event(
         &mut tui,
@@ -208,6 +209,7 @@ async fn pasted_text_normalizes_mixed_line_endings_at_app_boundary() -> Result<(
     )
     .await?;
 
+    assert_eq!(app.agent_navigation.roster.lock().unwrap().focused, None);
     assert_snapshot!(app.chat_widget.composer_text_with_pending(), @r"
     line1
     line2
