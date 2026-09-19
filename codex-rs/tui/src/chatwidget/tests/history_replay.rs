@@ -1330,23 +1330,27 @@ async fn deferred_mcp_lifecycle_events_keep_fifo_after_stream_finishes() {
     assert!(!chat.interrupts.is_empty());
 
     chat.stream_controller = None;
-    chat.on_mcp_tool_call_completed(AppServerThreadItem::McpToolCall {
-        id: "mcp-deferred".to_string(),
-        server: "copilot-bridge".to_string(),
-        tool: "copilot".to_string(),
-        status: codex_app_server_protocol::McpToolCallStatus::Completed,
-        arguments: json!({"action": "wait"}),
-        app_context: None,
-        mcp_app_resource_uri: None,
-        plugin_id: None,
-        read_only_hint: None,
-        result: Some(Box::new(codex_app_server_protocol::McpToolCallResult {
-            content: vec![json!({"type": "text", "text": "deferred result"})],
-            structured_content: None,
-            meta: None,
-        })),
-        error: None,
-        duration_ms: Some(5),
+    let timestamp = history_cell::HistoryTimestamp::from_millis(1_777_777_777_000).unwrap();
+    chat.on_mcp_tool_call_completed(CompletedItem {
+        timestamp: Some(timestamp),
+        item: AppServerThreadItem::McpToolCall {
+            id: "mcp-deferred".to_string(),
+            server: "copilot-bridge".to_string(),
+            tool: "copilot".to_string(),
+            status: codex_app_server_protocol::McpToolCallStatus::Completed,
+            arguments: json!({"action": "wait"}),
+            app_context: None,
+            mcp_app_resource_uri: None,
+            plugin_id: None,
+            read_only_hint: None,
+            result: Some(Box::new(codex_app_server_protocol::McpToolCallResult {
+                content: vec![json!({"type": "text", "text": "deferred result"})],
+                structured_content: None,
+                meta: None,
+            })),
+            error: None,
+            duration_ms: Some(5),
+        },
     });
 
     assert!(!chat.interrupts.is_empty());
@@ -1361,6 +1365,10 @@ async fn deferred_mcp_lifecycle_events_keep_fifo_after_stream_finishes() {
         .map(|lines| lines_to_single_string(&lines))
         .collect::<String>();
     assert!(rendered.contains("deferred result"), "{rendered}");
+    assert!(
+        rendered.contains(&format!("• {}Called", timestamp.span().content)),
+        "{rendered}"
+    );
 }
 
 #[tokio::test]

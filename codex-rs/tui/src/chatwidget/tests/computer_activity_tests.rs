@@ -36,7 +36,10 @@ async fn computer_activity_live_and_replay_group_identically() {
                 chat.replay_thread_item(item, "turn-1".to_string(), ReplayKind::ThreadSnapshot);
             } else {
                 chat.on_mcp_tool_call_started(computer_item(id, McpToolCallStatus::InProgress));
-                chat.on_mcp_tool_call_completed(item);
+                chat.on_mcp_tool_call_completed(CompletedItem {
+                    item,
+                    timestamp: None,
+                });
             }
         }
         assert!(drain_insert_history(&mut rx).is_empty());
@@ -61,21 +64,33 @@ async fn computer_activity_live_and_replay_group_identically() {
 async fn computer_activity_preserves_boundaries_and_expanded_output() {
     use codex_app_server_protocol::McpToolCallStatus;
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    chat.on_mcp_tool_call_completed(computer_item("1", McpToolCallStatus::Completed));
+    chat.on_mcp_tool_call_completed(CompletedItem {
+        item: computer_item("1", McpToolCallStatus::Completed),
+        timestamp: None,
+    });
     chat.prepare_assistant_message();
     let cells = drain_insert_history(&mut rx);
     assert!(lines_to_single_string(&cells[0]).contains("Used computer · 1 action"));
-    chat.on_mcp_tool_call_completed(computer_item("2", McpToolCallStatus::Completed));
+    chat.on_mcp_tool_call_completed(CompletedItem {
+        item: computer_item("2", McpToolCallStatus::Completed),
+        timestamp: None,
+    });
     let mut other = computer_item("other", McpToolCallStatus::Completed);
     if let AppServerThreadItem::McpToolCall { server, .. } = &mut other {
         *server = "another_server".to_string();
     }
-    chat.on_mcp_tool_call_completed(other);
+    chat.on_mcp_tool_call_completed(CompletedItem {
+        item: other,
+        timestamp: None,
+    });
     let cells = drain_insert_history(&mut rx);
     assert_eq!(cells.len(), 2);
     assert!(lines_to_single_string(&cells[0]).contains("Used computer · 1 action"));
     assert!(lines_to_single_string(&cells[1]).contains("another_server"));
-    chat.on_mcp_tool_call_completed(computer_item("3", McpToolCallStatus::Completed));
+    chat.on_mcp_tool_call_completed(CompletedItem {
+        item: computer_item("3", McpToolCallStatus::Completed),
+        timestamp: None,
+    });
     let transcript = chat.active_cell_transcript_lines(/*width*/ 100).unwrap();
     assert!(lines_to_single_string(&transcript).contains("Full output for 3"));
     assert!(lines_to_single_string(&transcript).contains("await cua.getState()"));
@@ -87,7 +102,10 @@ async fn computer_activity_out_of_order_completion_and_interruption() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.on_mcp_tool_call_started(computer_item("1", McpToolCallStatus::InProgress));
     chat.on_mcp_tool_call_started(computer_item("2", McpToolCallStatus::InProgress));
-    chat.on_mcp_tool_call_completed(computer_item("2", McpToolCallStatus::Completed));
+    chat.on_mcp_tool_call_completed(CompletedItem {
+        item: computer_item("2", McpToolCallStatus::Completed),
+        timestamp: None,
+    });
     assert!(active_blob(&chat).contains("Using computer"));
     chat.finalize_turn();
     let cells = drain_insert_history(&mut rx);

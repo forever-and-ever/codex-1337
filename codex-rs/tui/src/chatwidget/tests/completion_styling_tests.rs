@@ -62,16 +62,62 @@ fn saved_completion_label() -> String {
 
 #[tokio::test]
 async fn completion_follows_plain_and_streamed_tool_answers() {
+    let started_at_ms = Local
+        .with_ymd_and_hms(2000, 9, 6, 13, 4, 5)
+        .unwrap()
+        .timestamp_millis();
     for streamed in [false, true] {
         let (mut chat, mut rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
         handle_turn_started(&mut chat, "turn-1");
+        let turn = completed_turn(Some(125_000), Some(COMPLETED_AT));
+        let answer = turn.items[0].clone();
         if streamed {
-            let command = begin_exec(&mut chat, "command-1", "echo ready");
-            end_exec(&mut chat, command, "ready", "", /*exit_code*/ 0);
+            let mut command = begin_exec(&mut chat, "command-1", "echo ready");
+            if let AppServerThreadItem::CommandExecution {
+                status,
+                aggregated_output,
+                exit_code,
+                duration_ms,
+                ..
+            } = &mut command
+            {
+                *status = AppServerCommandExecutionStatus::Completed;
+                *aggregated_output = Some("ready".to_string());
+                *exit_code = Some(0);
+                *duration_ms = Some(5);
+            }
+            chat.handle_server_notification(
+                ServerNotification::ItemCompleted(ItemCompletedNotification {
+                    thread_id: "thread-1".to_string(),
+                    turn_id: "turn-1".to_string(),
+                    item: command,
+                    completed_at_ms: started_at_ms - 1_000,
+                }),
+                /*replay_kind*/ None,
+            );
+            chat.handle_server_notification(
+                ServerNotification::ItemStarted(ItemStartedNotification {
+                    thread_id: "thread-1".to_string(),
+                    turn_id: "turn-1".to_string(),
+                    item: answer.clone(),
+                    started_at_ms,
+                }),
+                /*replay_kind*/ None,
+            );
             handle_agent_message_delta(&mut chat, "The change is ready.\n");
             chat.run_commit_tick();
         }
-        complete_turn(&mut chat, completed_turn(Some(125_000), Some(COMPLETED_AT)));
+        // Completion-only messages use their completion clock; streams retain their start clock.
+        chat.handle_server_notification(
+            ServerNotification::ItemCompleted(ItemCompletedNotification {
+                thread_id: "thread-1".to_string(),
+                turn_id: "turn-1".to_string(),
+                item: answer,
+                completed_at_ms: started_at_ms + 1_000,
+            }),
+            /*replay_kind*/ None,
+        );
+        complete_turn(&mut chat, turn);
 
         let text = drain_insert_history(&mut rx)
             .iter()

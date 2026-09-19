@@ -420,6 +420,7 @@ impl ChatWidget {
                         notification.turn.id.clone(),
                         replay_kind
                             .map_or(ThreadItemRenderSource::Live, ThreadItemRenderSource::Replay),
+                        /*timestamp*/ None,
                     );
                 }
                 if replay_kind.is_none()
@@ -494,8 +495,12 @@ impl ChatWidget {
             {
                 self.remember_realtime_delegated_reasoning_turn(&notification.turn_id);
             }
-            ThreadItem::AgentMessage { id, .. } if replay_kind.is_none() => {
-                self.is_realtime_delegated_agent_item(&notification.turn_id, &id);
+            ThreadItem::AgentMessage { id, .. } => {
+                self.transcript.agent_timestamp =
+                    history_cell::HistoryTimestamp::from_millis(notification.started_at_ms);
+                if replay_kind.is_none() {
+                    self.is_realtime_delegated_agent_item(&notification.turn_id, &id);
+                }
             }
             ThreadItem::Reasoning { id, .. } => {
                 if replay_kind.is_none()
@@ -550,17 +555,20 @@ impl ChatWidget {
                 model,
                 reasoning_effort,
                 agents_states,
-            } => self.on_collab_agent_tool_call(ThreadItem::CollabAgentToolCall {
-                id,
-                tool,
-                status,
-                sender_thread_id,
-                receiver_thread_ids,
-                prompt,
-                model,
-                reasoning_effort,
-                agents_states,
-            }),
+            } => self.on_collab_agent_tool_call(
+                ThreadItem::CollabAgentToolCall {
+                    id,
+                    tool,
+                    status,
+                    sender_thread_id,
+                    receiver_thread_ids,
+                    prompt,
+                    model,
+                    reasoning_effort,
+                    agents_states,
+                },
+                /*timestamp*/ None,
+            ),
             ThreadItem::EnteredReviewMode { review, .. } if replay_kind.is_none() => {
                 self.enter_review_mode_with_hint(review, /*from_replay*/ false);
             }
@@ -600,12 +608,16 @@ impl ChatWidget {
         {
             return;
         }
+        let timestamp = history_cell::HistoryTimestamp::from_millis(notification.completed_at_ms);
         match notification.item {
-            item @ ThreadItem::CommandExecution { .. } => self.on_command_execution_completed(item),
+            item @ ThreadItem::CommandExecution { .. } => {
+                self.on_command_execution_completed(CompletedItem { item, timestamp })
+            }
             item => self.handle_thread_item(
                 item,
                 notification.turn_id,
                 replay_kind.map_or(ThreadItemRenderSource::Live, ThreadItemRenderSource::Replay),
+                timestamp,
             ),
         }
     }

@@ -5,17 +5,30 @@ use super::*;
 #[derive(Debug)]
 pub(crate) struct PlainHistoryCell {
     pub(super) lines: Vec<Line<'static>>,
+    pub(crate) timestamp: Option<HistoryTimestamp>,
 }
 
 impl PlainHistoryCell {
     pub(crate) fn new(lines: Vec<Line<'static>>) -> Self {
-        Self { lines }
+        Self {
+            lines,
+            timestamp: None,
+        }
     }
 }
 
 impl HistoryCell for PlainHistoryCell {
     fn display_lines(&self, _width: u16) -> Vec<Line<'static>> {
-        self.lines.clone()
+        let mut lines = self.lines.clone();
+        if let Some(timestamp) = self.timestamp
+            && let Some(header) = lines.first_mut()
+        {
+            // Timestamped plain cells have a single leading result-marker span ("• ").
+            header
+                .spans
+                .insert(1.min(header.spans.len()), timestamp.span());
+        }
+        lines
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {

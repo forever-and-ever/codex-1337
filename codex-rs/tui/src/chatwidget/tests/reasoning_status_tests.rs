@@ -220,6 +220,7 @@ async fn reasoning_status_replay_retains_last_usable_heading() {
             },
             "turn-1".to_string(),
             ThreadItemRenderSource::Replay(ReplayKind::ThreadSnapshot),
+            /*timestamp*/ None,
         );
         assert_eq!(
             chat.reasoning_header.as_deref().unwrap_or("Working"),
@@ -279,6 +280,7 @@ async fn completed_reasoning_stays_in_expanded_transcript_for_live_and_replay() 
                     },
                     "turn-1".to_string(),
                     ThreadItemRenderSource::Replay(ReplayKind::ThreadSnapshot),
+                    /*timestamp*/ None,
                 );
             } else {
                 handle_agent_reasoning_started(&mut chat, id);

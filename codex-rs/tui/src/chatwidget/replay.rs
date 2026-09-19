@@ -241,7 +241,12 @@ impl ChatWidget {
         turn_id: String,
         replay_kind: ReplayKind,
     ) {
-        self.handle_thread_item(item, turn_id, ThreadItemRenderSource::Replay(replay_kind));
+        self.handle_thread_item(
+            item,
+            turn_id,
+            ThreadItemRenderSource::Replay(replay_kind),
+            /*timestamp*/ None,
+        );
     }
 
     pub(super) fn handle_thread_item(
@@ -249,6 +254,7 @@ impl ChatWidget {
         item: ThreadItem,
         turn_id: String,
         render_source: ThreadItemRenderSource,
+        timestamp: Option<history_cell::HistoryTimestamp>,
     ) {
         let from_replay = render_source.is_replay();
         let replay_kind = render_source.replay_kind();
@@ -285,6 +291,9 @@ impl ChatWidget {
                     from_replay,
                 ) {
                     return;
+                }
+                if self.transcript.agent_timestamp.is_none() {
+                    self.transcript.agent_timestamp = timestamp;
                 }
                 self.on_agent_message_item_completed(
                     AgentMessageItem {
@@ -359,18 +368,26 @@ impl ChatWidget {
                     codex_app_server_protocol::CommandExecutionStatus::Completed
                     | codex_app_server_protocol::CommandExecutionStatus::Failed,
                 ..
-            } if from_replay => self.handle_command_execution_completed_now(item),
-            item @ ThreadItem::CommandExecution { .. } => self.on_command_execution_completed(item),
+            } if from_replay => {
+                self.handle_command_execution_completed_now(CompletedItem { item, timestamp })
+            }
+            item @ ThreadItem::CommandExecution { .. } => {
+                self.on_command_execution_completed(CompletedItem { item, timestamp })
+            }
             ThreadItem::FileChange {
                 status: codex_app_server_protocol::PatchApplyStatus::InProgress,
                 ..
             } => {}
-            item @ ThreadItem::FileChange { .. } => self.on_file_change_completed(item),
+            item @ ThreadItem::FileChange { .. } => {
+                self.on_file_change_completed(CompletedItem { item, timestamp })
+            }
             item @ ThreadItem::McpToolCall {
                 status: codex_app_server_protocol::McpToolCallStatus::InProgress,
                 ..
             } => self.on_mcp_tool_call_started(item),
-            item @ ThreadItem::McpToolCall { .. } => self.on_mcp_tool_call_completed(item),
+            item @ ThreadItem::McpToolCall { .. } => {
+                self.on_mcp_tool_call_completed(CompletedItem { item, timestamp })
+            }
             ThreadItem::WebSearch(item) => {
                 self.on_web_search_begin(item.id.clone());
                 self.on_web_search_end(
@@ -378,10 +395,11 @@ impl ChatWidget {
                     item.query,
                     item.action
                         .unwrap_or(codex_app_server_protocol::WebSearchAction::Other),
+                    timestamp,
                 );
             }
             ThreadItem::ImageView { id: _, path } => {
-                self.on_view_image_tool_call(path);
+                self.on_view_image_tool_call(path, timestamp);
             }
             ThreadItem::ImageGeneration(item) => {
                 self.on_image_generation_end(
@@ -389,6 +407,7 @@ impl ChatWidget {
                     item.status,
                     item.revised_prompt,
                     item.saved_path,
+                    timestamp,
                 );
             }
             ThreadItem::EnteredReviewMode { review, .. } => {
@@ -433,17 +452,20 @@ impl ChatWidget {
                 model,
                 reasoning_effort,
                 agents_states,
-            } => self.on_collab_agent_tool_call(ThreadItem::CollabAgentToolCall {
-                id,
-                tool,
-                status,
-                sender_thread_id,
-                receiver_thread_ids,
-                prompt,
-                model,
-                reasoning_effort,
-                agents_states,
-            }),
+            } => self.on_collab_agent_tool_call(
+                ThreadItem::CollabAgentToolCall {
+                    id,
+                    tool,
+                    status,
+                    sender_thread_id,
+                    receiver_thread_ids,
+                    prompt,
+                    model,
+                    reasoning_effort,
+                    agents_states,
+                },
+                timestamp,
+            ),
             item @ ThreadItem::SubAgentActivity { .. } => self.on_sub_agent_activity(item),
             ThreadItem::DynamicToolCall { .. } => {}
             ThreadItem::Sleep(_) => {}

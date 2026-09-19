@@ -103,13 +103,22 @@ fn computer_activity_prioritizes_errors_and_images_without_reordering() {
 
 #[test]
 fn computer_activity_completed_and_transport_errors_keep_full_details() {
+    use chrono::TimeZone;
     let mut cell = ComputerActivityCell::default();
     cell.complete(
         call("1", "Inspect page"),
         Duration::ZERO,
         result("A successful result with details"),
     );
-    cell.complete(call("2", "Reload page"), Duration::ZERO, result("Loaded"));
+    let mut completed = call("2", "Reload page");
+    completed.completed_at = HistoryTimestamp::from_millis(
+        chrono::Local
+            .with_ymd_and_hms(2000, 9, 6, 13, 4, 5)
+            .unwrap()
+            .timestamp_millis(),
+    );
+    cell.start(call("2", "Reload page"));
+    cell.complete(completed, Duration::ZERO, result("Loaded"));
     insta::assert_snapshot!("computer_activity_success", render(&cell, /*width*/ 80));
     let mut failure =
         result("Browser state changed\nRe-query the browser before continuing").unwrap();

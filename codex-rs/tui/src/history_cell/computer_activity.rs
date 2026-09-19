@@ -8,6 +8,7 @@ use super::*;
 #[derive(Debug, Default)]
 pub(crate) struct ComputerActivityCell {
     calls: Vec<McpToolCallCell>,
+    completed_at: Option<HistoryTimestamp>,
 }
 
 impl ComputerActivityCell {
@@ -29,8 +30,10 @@ impl ComputerActivityCell {
         result: Result<codex_protocol::mcp::CallToolResult, String>,
     ) {
         let id = call.call_id.clone();
+        self.completed_at = call.completed_at;
         self.start(call);
         if let Some(call) = self.calls.iter_mut().find(|call| call.call_id == id) {
+            call.completed_at = self.completed_at;
             // Images are represented in the action preview and full MCP transcript. Inserting a
             // separate image-output history cell here would prematurely break adjacent grouping.
             let _ = call.complete(duration, result);
@@ -120,12 +123,11 @@ impl HistoryCell for ComputerActivityCell {
             "Used computer"
         };
         let unit = if count == 1 { "action" } else { "actions" };
-        let mut header = vec![
-            bullet,
-            " ".into(),
-            label.bold(),
-            format!(" · {count} {unit}").dim(),
-        ];
+        let mut header = vec![bullet, " ".into()];
+        if active.is_none() {
+            header.extend(self.completed_at.map(HistoryTimestamp::span));
+        }
+        header.extend([label.bold(), format!(" · {count} {unit}").dim()]);
         if failures > 0 {
             header.push(format!(" · {failures} failed").red());
         }

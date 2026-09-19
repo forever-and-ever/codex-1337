@@ -364,17 +364,19 @@ impl ChatWidget {
                     thread_id,
                 )
             });
-            let cell = history_cell::AgentMarkdownCell::new_with_inline_visualizations(
+            let mut cell = history_cell::AgentMarkdownCell::new_with_inline_visualizations(
                 parsed.visible_markdown.clone(),
                 self.config.cwd.as_path(),
                 context,
             );
+            cell.timestamp = self.transcript.agent_timestamp;
             self.add_to_history(cell);
             self.handle_stream_finished();
             self.request_redraw();
         } else {
             self.finalize_completed_assistant_message(Some(parsed.visible_markdown.as_str()));
         }
+        self.transcript.agent_timestamp = None;
         if !parsed.visible_markdown.is_empty() {
             self.transcript
                 .record_agent_markdown(parsed.visible_markdown.clone(), message);
@@ -503,12 +505,17 @@ impl ChatWidget {
                     thread_id,
                 )
             });
-            self.stream_controller = Some(StreamController::new_with_inline_visualizations(
-                self.current_stream_width(/*reserved_cols*/ 2),
+            let timestamp = self.transcript.agent_timestamp;
+            let mut controller = StreamController::new_with_inline_visualizations(
+                self.current_stream_width(
+                    history_cell::agent_prefix(timestamp, /*first*/ true).width(),
+                ),
                 &self.config.cwd,
                 self.history_render_mode(),
                 inline_visualization_context,
-            ));
+            );
+            controller.timestamp = timestamp;
+            self.stream_controller = Some(controller);
         }
         if let Some(controller) = self.stream_controller.as_mut()
             && controller.push(&delta)
@@ -542,10 +549,11 @@ impl ChatWidget {
             }
 
             self.bottom_pane.hide_status_indicator();
-            let cell = history_cell::StreamingAgentTailCell::new(
+            let mut cell = history_cell::StreamingAgentTailCell::new(
                 tail_lines,
                 controller.tail_starts_stream(),
             );
+            cell.timestamp = controller.timestamp;
             if self
                 .transcript
                 .active_cell

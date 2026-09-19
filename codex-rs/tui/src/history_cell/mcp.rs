@@ -45,6 +45,7 @@ fn mcp_auth_status_label(status: McpAuthStatus) -> &'static str {
 }
 #[derive(Debug)]
 pub(crate) struct McpToolCallCell {
+    pub(crate) completed_at: Option<HistoryTimestamp>,
     call_id: String,
     invocation: McpInvocation,
     start_time: Instant,
@@ -88,6 +89,7 @@ impl McpToolCallCell {
     ) -> Self {
         Self {
             call_id,
+            completed_at: None,
             invocation,
             start_time: Instant::now(),
             duration: None,
@@ -180,7 +182,11 @@ impl McpToolCallCell {
         } else {
             line_to_static(&format_mcp_invocation(&self.invocation))
         };
-        let mut compact_spans = vec![bullet.clone(), " ".into(), header_text.bold(), " ".into()];
+        let mut compact_spans = vec![bullet.clone(), " ".into()];
+        if status.is_some() {
+            compact_spans.extend(self.completed_at.map(HistoryTimestamp::span));
+        }
+        compact_spans.extend([header_text.bold(), " ".into()]);
         let mut compact_header = Line::from(compact_spans.clone());
         let reserved = compact_header.width();
 
@@ -531,7 +537,7 @@ pub(crate) fn new_mcp_tools_output(
         lines.push(Line::from(""));
     }
 
-    PlainHistoryCell { lines }
+    PlainHistoryCell::new(lines)
 }
 
 /// Build the `/mcp` history cell from app-server `McpServerStatus` responses.
@@ -678,7 +684,7 @@ pub(crate) fn new_mcp_tools_output_from_statuses(
         lines.push("  Use /mcp verbose for tools and resources.".dim().into());
     }
 
-    PlainHistoryCell { lines }
+    PlainHistoryCell::new(lines)
 }
 /// A transient history cell that shows an animated spinner while the MCP
 /// inventory RPC is in flight.

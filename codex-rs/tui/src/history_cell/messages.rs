@@ -382,6 +382,7 @@ impl HistoryCell for ReasoningSummaryCell {
 pub(crate) struct AgentMessageCell {
     lines: Vec<HyperlinkLine>,
     is_first_line: bool,
+    pub(crate) timestamp: Option<HistoryTimestamp>,
 }
 
 impl AgentMessageCell {
@@ -390,6 +391,7 @@ impl AgentMessageCell {
         Self {
             lines: plain_hyperlink_lines(lines),
             is_first_line,
+            timestamp: None,
         }
     }
 
@@ -397,6 +399,7 @@ impl AgentMessageCell {
         Self {
             lines,
             is_first_line,
+            timestamp: None,
         }
     }
 }
@@ -409,12 +412,10 @@ impl HistoryCell for AgentMessageCell {
     fn display_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         let mut wrapped = Vec::new();
         for (index, line) in self.lines.iter().enumerate() {
-            let initial_indent = if index == 0 && self.is_first_line {
-                "• ".dim().into()
-            } else {
-                "  ".into()
-            };
-            let mut subsequent_indent = Line::from("  ");
+            let initial_indent =
+                agent_prefix(self.timestamp, index == 0 && self.is_first_line).into();
+            let mut subsequent_indent =
+                Line::from(agent_prefix(self.timestamp, /*first*/ false));
             subsequent_indent
                 .spans
                 .extend(crate::insert_history::leading_whitespace_prefix(&line.line).spans);
@@ -457,6 +458,7 @@ impl HistoryCell for AgentMessageCell {
 /// because resolving their local file links depends on filesystem state that can change later.
 #[derive(Debug)]
 pub(crate) struct AgentMarkdownCell {
+    pub(crate) timestamp: Option<HistoryTimestamp>,
     markdown_source: String,
     cwd: PathBuf,
     inline_visualization_context: Option<crate::inline_visualization::InlineVisualizationContext>,
@@ -491,6 +493,7 @@ impl AgentMarkdownCell {
                 .then(MarkdownRenderCache::default);
         Self {
             markdown_source,
+            timestamp: None,
             cwd: cwd.to_path_buf(),
             inline_visualization_context,
             rendered_lines,
@@ -531,18 +534,19 @@ impl HistoryCell for AgentMarkdownCell {
 
     fn display_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         let render = || {
+            let initial_prefix = agent_prefix(self.timestamp, /*first*/ true);
+            let subsequent_prefix = agent_prefix(self.timestamp, /*first*/ false);
             let Some(wrap_width) =
-                crate::width::usable_content_width_u16(width, /*reserved_cols*/ 2)
+                crate::width::usable_content_width_u16(width, initial_prefix.width() as u16)
             else {
                 return prefix_hyperlink_lines(
                     vec![HyperlinkLine::new(Line::default())],
-                    "• ".dim(),
-                    "  ".into(),
+                    initial_prefix,
+                    subsequent_prefix,
                 );
             };
 
-            // Re-render markdown from source at the current width. Reserve 2 columns for the "• " /
-            // " " prefix prepended below.
+            // The clock is part of the gutter, including on continuation and table rows.
             let lines = crate::markdown::render_markdown_agent_with_links_cwd_and_visualizations(
                 &self.markdown_source,
                 Some(wrap_width),
@@ -558,8 +562,8 @@ impl HistoryCell for AgentMarkdownCell {
             };
             normalize_whitespace_only_hyperlink_lines(prefix_hyperlink_lines(
                 lines,
-                "• ".dim(),
-                "  ".into(),
+                initial_prefix,
+                subsequent_prefix,
             ))
         };
 
@@ -596,6 +600,7 @@ mod tests;
 pub(crate) struct StreamingAgentTailCell {
     lines: Vec<HyperlinkLine>,
     is_first_line: bool,
+    pub(crate) timestamp: Option<HistoryTimestamp>,
 }
 
 impl StreamingAgentTailCell {
@@ -603,6 +608,7 @@ impl StreamingAgentTailCell {
         Self {
             lines,
             is_first_line,
+            timestamp: None,
         }
     }
 }
@@ -617,12 +623,8 @@ impl HistoryCell for StreamingAgentTailCell {
         // Re-wrapping them here can split table borders and produce malformed in-flight rows.
         normalize_whitespace_only_hyperlink_lines(prefix_hyperlink_lines(
             self.lines.clone(),
-            if self.is_first_line {
-                "• ".dim()
-            } else {
-                "  ".into()
-            },
-            "  ".into(),
+            agent_prefix(self.timestamp, self.is_first_line),
+            agent_prefix(self.timestamp, /*first*/ false),
         ))
     }
 

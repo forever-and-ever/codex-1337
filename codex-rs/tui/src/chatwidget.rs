@@ -352,6 +352,7 @@ mod input_restore;
 mod input_submission;
 mod interrupts;
 mod questions;
+use self::interrupts::CompletedItem;
 use self::interrupts::InterruptManager;
 mod keymap_picker;
 mod mcp_startup;
@@ -1684,7 +1685,12 @@ impl ChatWidget {
     pub(crate) fn on_terminal_resize(&mut self, width: u16) {
         let had_rendered_width = self.last_rendered_width.get().is_some();
         self.last_rendered_width.set(Some(width));
-        let stream_width = self.current_stream_width(/*reserved_cols*/ 2);
+        let timestamp = self
+            .stream_controller
+            .as_ref()
+            .and_then(|controller| controller.timestamp);
+        let stream_width = self
+            .current_stream_width(history_cell::agent_prefix(timestamp, /*first*/ true).width());
         let plan_stream_width = self.current_stream_width(/*reserved_cols*/ 4);
         if let Some(controller) = self.stream_controller.as_mut() {
             controller.set_width(stream_width);
