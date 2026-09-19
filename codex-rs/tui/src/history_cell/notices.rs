@@ -91,6 +91,21 @@ pub(crate) fn new_warning_event(message: String) -> PrefixedWrappedHistoryCell {
     PrefixedWrappedHistoryCell::new(message.yellow(), "⚠ ".yellow(), "  ")
 }
 
+#[allow(clippy::disallowed_methods)]
+pub(crate) fn new_server_version_warning(
+    notice: crate::status::remote_connection::ServerVersionNotice,
+) -> PrefixedWrappedHistoryCell {
+    let mut lines = vec![Line::from(notice.message.yellow())];
+    if notice.offer_update {
+        lines.push(Line::from("To update the service, run:".yellow()));
+        lines.push(Line::from("  codex app-server daemon update".cyan()));
+        lines.push(Line::from(
+            "Updating may interrupt active or queued work.".yellow(),
+        ));
+    }
+    PrefixedWrappedHistoryCell::new(Text::from(lines), "⚠ ".yellow(), "  ")
+}
+
 #[derive(Debug)]
 pub(crate) struct SafetyAccessBlockCell {
     title: &'static str,
@@ -241,7 +256,7 @@ pub(crate) fn new_info_event(message: String, hint: Option<String>) -> PlainHist
         line.push(hint.dark_gray());
     }
     let lines: Vec<Line<'static>> = vec![line.into()];
-    PlainHistoryCell::new(lines)
+    PlainHistoryCell { lines }
 }
 
 pub(crate) fn new_error_event(message: String) -> PlainHistoryCell {
@@ -249,7 +264,7 @@ pub(crate) fn new_error_event(message: String) -> PlainHistoryCell {
     // before the text. VS16 is intentionally omitted to keep spacing tighter
     // in terminals like Ghostty.
     let lines: Vec<Line<'static>> = vec![vec![format!("■ {message}").red()].into()];
-    PlainHistoryCell::new(lines)
+    PlainHistoryCell { lines }
 }
 
 #[derive(Debug)]

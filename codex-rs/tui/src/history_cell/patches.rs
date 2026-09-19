@@ -54,7 +54,7 @@ pub(crate) fn new_patch_apply_failure(stderr: String) -> PlainHistoryCell {
         lines.extend(output.lines);
     }
 
-    PlainHistoryCell::new(lines)
+    PlainHistoryCell { lines }
 }
 
 pub(crate) fn new_view_image_tool_call(path: LegacyAppPathString, cwd: &Path) -> PlainHistoryCell {
@@ -69,7 +69,7 @@ pub(crate) fn new_view_image_tool_call(path: LegacyAppPathString, cwd: &Path) ->
         vec!["  └ ".dim(), display_path.dim()].into(),
     ];
 
-    PlainHistoryCell::new(lines)
+    PlainHistoryCell { lines }
 }
 
 pub(crate) fn new_image_generation_call(
@@ -92,5 +92,5 @@ pub(crate) fn new_image_generation_call(
         lines.push(vec!["  └ ".dim(), "Saved to: ".dim(), saved_path.into()].into());
     }
 
-    PlainHistoryCell::new(lines)
+    PlainHistoryCell { lines }
 }

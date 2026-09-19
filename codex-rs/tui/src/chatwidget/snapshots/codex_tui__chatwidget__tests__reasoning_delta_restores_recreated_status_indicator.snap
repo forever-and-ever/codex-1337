@@ -3,12 +3,13 @@ source: tui/src/chatwidget/tests/status_and_layout.rs
 expression: normalized_backend_snapshot(terminal.backend())
 ---
 "                                                                                "
-"• Checking files (0s • esc to interrupt) · 1 background terminal running · /ps …"
+"• Working (0s • esc to interrupt) · 1 background terminal running · /ps to view…"
 "                                                                                "
 "                                                                                "
 "› Ask Codex to do anything                                                      "
 "                                                                                "
 "────────────────────────────────────────────────────────────────────────────────"
-"  Activity —                                                                    "
+"  Activity  —                                                                   "
+"  Reasoning Checking files and preparing a response                             "
 "────────────────────────────────────────────────────────────────────────────────"
 "  gpt-5.6-sol default · /tmp/project                                            "

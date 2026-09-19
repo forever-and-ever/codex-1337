@@ -1271,10 +1271,15 @@ async fn failed_repl_mcp_tool_call_preserves_status_and_result() {
             /*replay_kind*/ None,
         );
 
+        chat.flush_active_cell();
         let cells = drain_insert_history(&mut rx);
         let [lines] = cells.as_slice() else {
             panic!("expected one completed MCP tool call for {server}");
         };
+        if server == "cua_repl" {
+            insta::assert_snapshot!("failed_computer_activity", lines_to_single_string(lines));
+            continue;
+        }
         insta::allow_duplicates! {
             insta::assert_snapshot!(lines_to_single_string(lines), @r#"
             • Called Inspect workspace
@@ -1325,27 +1330,23 @@ async fn deferred_mcp_lifecycle_events_keep_fifo_after_stream_finishes() {
     assert!(!chat.interrupts.is_empty());
 
     chat.stream_controller = None;
-    let timestamp = history_cell::HistoryTimestamp::from_millis(1_777_777_777_000).unwrap();
-    chat.on_mcp_tool_call_completed(CompletedItem {
-        timestamp: Some(timestamp),
-        item: AppServerThreadItem::McpToolCall {
-            id: "mcp-deferred".to_string(),
-            server: "copilot-bridge".to_string(),
-            tool: "copilot".to_string(),
-            status: codex_app_server_protocol::McpToolCallStatus::Completed,
-            arguments: json!({"action": "wait"}),
-            app_context: None,
-            mcp_app_resource_uri: None,
-            plugin_id: None,
-            read_only_hint: None,
-            result: Some(Box::new(codex_app_server_protocol::McpToolCallResult {
-                content: vec![json!({"type": "text", "text": "deferred result"})],
-                structured_content: None,
-                meta: None,
-            })),
-            error: None,
-            duration_ms: Some(5),
-        },
+    chat.on_mcp_tool_call_completed(AppServerThreadItem::McpToolCall {
+        id: "mcp-deferred".to_string(),
+        server: "copilot-bridge".to_string(),
+        tool: "copilot".to_string(),
+        status: codex_app_server_protocol::McpToolCallStatus::Completed,
+        arguments: json!({"action": "wait"}),
+        app_context: None,
+        mcp_app_resource_uri: None,
+        plugin_id: None,
+        read_only_hint: None,
+        result: Some(Box::new(codex_app_server_protocol::McpToolCallResult {
+            content: vec![json!({"type": "text", "text": "deferred result"})],
+            structured_content: None,
+            meta: None,
+        })),
+        error: None,
+        duration_ms: Some(5),
     });
 
     assert!(!chat.interrupts.is_empty());
@@ -1360,10 +1361,6 @@ async fn deferred_mcp_lifecycle_events_keep_fifo_after_stream_finishes() {
         .map(|lines| lines_to_single_string(&lines))
         .collect::<String>();
     assert!(rendered.contains("deferred result"), "{rendered}");
-    assert!(
-        rendered.contains(&format!("• {}Called", timestamp.span().content)),
-        "{rendered}"
-    );
 }
 
 #[tokio::test]
@@ -1388,6 +1385,8 @@ async fn live_reasoning_summary_is_not_rendered_twice_when_item_completes() {
         /*replay_kind*/ None,
     );
     let _ = drain_insert_history(&mut rx);
+
+    handle_agent_reasoning_started(&mut chat, "reasoning-1");
 
     chat.handle_server_notification(
         ServerNotification::ReasoningSummaryTextDelta(ReasoningSummaryTextDeltaNotification {
@@ -1445,6 +1444,8 @@ async fn live_reasoning_summary_drops_empty_parts_without_losing_content() {
         /*replay_kind*/ None,
     );
     let _ = drain_insert_history(&mut rx);
+
+    handle_agent_reasoning_started(&mut chat, "reasoning-1");
 
     for (summary_index, delta) in [
         (0, "**Plan**\n\ndone"),
@@ -1516,29 +1517,51 @@ async fn thread_snapshot_replayed_turn_started_marks_task_running() {
 
 #[tokio::test]
 async fn replayed_in_progress_turn_marks_task_running() {
-    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-
-    chat.replay_thread_turns(
-        vec![AppServerTurn {
-            id: "turn-1".to_string(),
-            items_view: codex_app_server_protocol::TurnItemsView::Full,
-            items: Vec::new(),
-            status: AppServerTurnStatus::InProgress,
-            error: None,
-            started_at: None,
-            completed_at: None,
-            duration_ms: None,
-        }],
+    for replay_kind in [
         ReplayKind::ResumeInitialMessages,
-    );
+        ReplayKind::ThreadSnapshot,
+    ] {
+        for items_view in [
+            codex_app_server_protocol::TurnItemsView::Full,
+            codex_app_server_protocol::TurnItemsView::NotLoaded,
+        ] {
+            let (mut chat, mut rx, mut op_rx) =
+                make_chatwidget_manual(/*model_override*/ None).await;
+            chat.thread_id = Some(ThreadId::new());
+            chat.replay_thread_turns(
+                vec![AppServerTurn {
+                    items_view,
+                    ..app_server_turn(
+                        "turn-1",
+                        AppServerTurnStatus::InProgress,
+                        /*duration_ms*/ None,
+                        /*error*/ None,
+                    )
+                }],
+                replay_kind,
+            );
 
-    assert!(drain_insert_history(&mut rx).is_empty());
-    assert!(chat.bottom_pane.is_task_running());
-    let status = chat
-        .bottom_pane
-        .status_widget()
-        .expect("status indicator should be visible");
-    assert_eq!(status.header(), "Working");
+            assert!(drain_insert_history(&mut rx).is_empty());
+            assert_eq!(
+                (
+                    chat.bottom_pane.is_task_running(),
+                    chat.turn_lifecycle.last_turn_id.as_deref(),
+                ),
+                (true, Some("turn-1")),
+            );
+            assert_chatwidget_snapshot!(
+                "replayed_in_progress_turn",
+                normalize_snapshot_paths(render_bottom_popup(&chat, /*width*/ 80)),
+            );
+
+            chat.handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+            assert_matches!(op_rx.try_recv(), Ok(Op::Interrupt));
+            assert!(
+                std::iter::from_fn(|| rx.try_recv().ok())
+                    .all(|event| !matches!(event, AppEvent::Exit(_)))
+            );
+        }
+    }
 }
 
 #[tokio::test]

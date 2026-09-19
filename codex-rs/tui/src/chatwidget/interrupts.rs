@@ -13,13 +13,6 @@ use codex_protocol::request_permissions::RequestPermissionsEvent;
 
 use super::ChatWidget;
 
-/// Keep the event clock attached while a completion waits behind an input overlay.
-#[derive(Debug)]
-pub(crate) struct CompletedItem {
-    pub(crate) item: ThreadItem,
-    pub(crate) timestamp: Option<crate::history_cell::HistoryTimestamp>,
-}
-
 #[derive(Debug)]
 pub(crate) enum QueuedInterrupt {
     ExecApproval(ExecApprovalRequestEvent),
@@ -31,7 +24,7 @@ pub(crate) enum QueuedInterrupt {
     RequestPermissions(RequestPermissionsEvent),
     RequestUserInput(ToolRequestUserInputParams),
     ItemStarted(ThreadItem),
-    ItemCompleted(CompletedItem),
+    ItemCompleted(ThreadItem),
 }
 
 #[derive(Default)]
@@ -96,7 +89,7 @@ impl InterruptManager {
         self.queue.push_back(QueuedInterrupt::ItemStarted(item));
     }
 
-    pub(crate) fn push_item_completed(&mut self, item: CompletedItem) {
+    pub(crate) fn push_item_completed(&mut self, item: ThreadItem) {
         self.queue.push_back(QueuedInterrupt::ItemCompleted(item));
     }
 

@@ -7,6 +7,10 @@ use codex_protocol::mcp::is_node_repl_backed_server;
 #[path = "mcp_result.rs"]
 mod result;
 
+#[path = "computer_activity.rs"]
+mod computer_activity;
+pub(crate) use computer_activity::ComputerActivityCell;
+
 use crate::style::StatusTone;
 use crate::style::accent_style;
 use crate::style::status_style;
@@ -41,7 +45,6 @@ fn mcp_auth_status_label(status: McpAuthStatus) -> &'static str {
 }
 #[derive(Debug)]
 pub(crate) struct McpToolCallCell {
-    pub(crate) completed_at: Option<HistoryTimestamp>,
     call_id: String,
     invocation: McpInvocation,
     start_time: Instant,
@@ -55,6 +58,12 @@ pub(crate) struct McpInvocation {
     pub(crate) server: String,
     pub(crate) tool: String,
     pub(crate) arguments: Option<serde_json::Value>,
+}
+
+impl McpInvocation {
+    pub(crate) fn is_computer_activity(&self) -> bool {
+        self.server == "cua_repl"
+    }
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -79,7 +88,6 @@ impl McpToolCallCell {
     ) -> Self {
         Self {
             call_id,
-            completed_at: None,
             invocation,
             start_time: Instant::now(),
             duration: None,
@@ -127,7 +135,9 @@ impl McpToolCallCell {
     }
 
     fn result_kind(&self) -> McpResultKind {
-        if is_node_repl_backed_server(&self.invocation.server) && self.invocation.tool == "js" {
+        if self.invocation.is_computer_activity()
+            || (is_node_repl_backed_server(&self.invocation.server) && self.invocation.tool == "js")
+        {
             McpResultKind::NodeRepl
         } else {
             McpResultKind::Standard
@@ -170,11 +180,7 @@ impl McpToolCallCell {
         } else {
             line_to_static(&format_mcp_invocation(&self.invocation))
         };
-        let mut compact_spans = vec![bullet.clone(), " ".into()];
-        if status.is_some() {
-            compact_spans.extend(self.completed_at.map(HistoryTimestamp::span));
-        }
-        compact_spans.extend([header_text.bold(), " ".into()]);
+        let mut compact_spans = vec![bullet.clone(), " ".into(), header_text.bold(), " ".into()];
         let mut compact_header = Line::from(compact_spans.clone());
         let reserved = compact_header.width();
 
@@ -525,7 +531,7 @@ pub(crate) fn new_mcp_tools_output(
         lines.push(Line::from(""));
     }
 
-    PlainHistoryCell::new(lines)
+    PlainHistoryCell { lines }
 }
 
 /// Build the `/mcp` history cell from app-server `McpServerStatus` responses.
@@ -672,7 +678,7 @@ pub(crate) fn new_mcp_tools_output_from_statuses(
         lines.push("  Use /mcp verbose for tools and resources.".dim().into());
     }
 
-    PlainHistoryCell::new(lines)
+    PlainHistoryCell { lines }
 }
 /// A transient history cell that shows an animated spinner while the MCP
 /// inventory RPC is in flight.

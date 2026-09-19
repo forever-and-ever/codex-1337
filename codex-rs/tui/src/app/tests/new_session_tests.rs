@@ -115,7 +115,7 @@ async fn replacement_uses_server_defaults_and_preserves_explicit_launch_settings
             › Ask Codex to do anything
 
             ────────────────────────────────────────────────────────────────────────────────
-              Activity —
+              Activity  —
             ────────────────────────────────────────────────────────────────────────────────
               server-model high · <PROJECT>
             ");

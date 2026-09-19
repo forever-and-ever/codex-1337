@@ -1,7 +1,7 @@
 //! Narrow TLS backend fallback for delegated requests that select their route per destination.
 //!
-//! Native TLS remains the default. A recognized connection-time protocol negotiation failure can
-//! select rustls for one HTTPS origin and outbound route without changing other destinations.
+//! On native-TLS transports, a recognized connection-time negotiation failure can select rustls
+//! for one HTTPS origin and route. The Linux fork starts with rustls and needs no backend fallback.
 
 use std::collections::HashMap;
 use std::collections::HashSet;

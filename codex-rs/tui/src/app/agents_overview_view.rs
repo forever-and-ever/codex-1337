@@ -7,6 +7,7 @@ mod input;
 mod render;
 
 use super::agents_overview::AGENTS_OVERVIEW_VIEW_ID;
+use crate::app_event::AgentsOverviewAction;
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::BottomPaneView;
@@ -29,7 +30,6 @@ use codex_app_server_protocol::ThreadStatus;
 use codex_protocol::ThreadId;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
-use crossterm::event::KeyModifiers;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Constraint;
 use ratatui::layout::Layout;
@@ -133,12 +133,11 @@ pub(super) struct AgentsOverviewViewState {
     pub(super) key_chord_hint: Option<Vec<(String, String)>>,
     pub(super) focus: AgentsOverviewFocus,
     pub(super) connection_notice: Option<&'static str>,
+    pub(super) server_version_notice: Option<String>,
     search: String,
     searching: bool,
     pub(super) status_grouping: bool,
     pub(super) renaming: bool,
-    pub(super) archiving: Option<ThreadId>,
-    pub(super) archive_error: Option<String>,
     // The picker can finish this retained view when it selects the already active session.
     pub(super) completion: Option<ViewCompletion>,
 }
@@ -183,7 +182,6 @@ pub(super) struct AgentsOverviewView {
     project_groups: Vec<AgentsOverviewProjectGroup>,
     selected: usize,
     state: Arc<Mutex<AgentsOverviewViewState>>,
-    exit_on_cancel: bool,
     app_event_tx: AppEventSender,
     keymap: ListKeymap,
     agents_keymap: AgentsKeymap,
@@ -195,7 +193,6 @@ impl AgentsOverviewView {
     pub(super) fn new(
         rows: Vec<AgentsOverviewRow>,
         selected_thread_id: Option<ThreadId>,
-        exit_on_cancel: bool,
         worktrees_enabled: bool,
         app_event_tx: AppEventSender,
         keymap: RuntimeKeymap,
@@ -227,7 +224,6 @@ impl AgentsOverviewView {
             project_groups,
             selected,
             state,
-            exit_on_cancel,
             app_event_tx,
             keymap: keymap.list,
             agents_keymap: keymap.agents,
@@ -254,7 +250,6 @@ impl AgentsOverviewView {
         self.rows
             .get(self.selected)
             .filter(|_| self.visible_indices().contains(&self.selected))
-            .filter(|row| self.state().archiving != Some(row.thread_id))
     }
 
     fn visible_indices(&self) -> Vec<usize> {
@@ -323,39 +318,6 @@ impl AgentsOverviewView {
         } else {
             visible[current.checked_sub(1).unwrap_or(visible.len() - 1)]
         };
-    }
-
-    fn archive_shortcut_available(&self) -> bool {
-        let key = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL);
-        self.keymap.action_for(key).is_none()
-            && ![
-                &self.agents_keymap.search,
-                &self.agents_keymap.new_task,
-                &self.agents_keymap.rename,
-                &self.agents_keymap.stop,
-                &self.agents_keymap.toggle_grouping,
-            ]
-            .iter()
-            .any(|bindings| bindings.is_pressed(key))
-    }
-
-    fn archive_enabled(&self) -> bool {
-        let available = {
-            let state = self.state();
-            state.archiving.is_none() && !state.renaming
-        };
-        available
-            && self.selected_row().is_some_and(|row| {
-                !row.is_current
-                    && matches!(
-                        row.thread.status,
-                        ThreadStatus::Idle | ThreadStatus::NotLoaded
-                    )
-                    && matches!(
-                        row.group,
-                        AgentsOverviewGroup::Ready | AgentsOverviewGroup::Finished
-                    )
-            })
     }
 
     fn activate(&mut self) {
@@ -492,11 +454,7 @@ impl AgentsOverviewView {
             } else {
                 " ".into()
             };
-            let (status, dot) = if self.state().archiving == Some(row.thread_id) {
-                ("Archiving…", "…".dim())
-            } else {
-                Self::status(row)
-            };
+            let (status, dot) = Self::status(row);
             let current = if row.is_current { "  current" } else { "" };
             let mut spans = vec![
                 marker,
@@ -506,7 +464,7 @@ impl AgentsOverviewView {
                 display_title(&row.thread).into(),
                 current.dim(),
             ];
-            if project_grouping || self.state().archiving == Some(row.thread_id) {
+            if project_grouping {
                 spans.extend(["  ".into(), status.dim()]);
             }
             Line::from(spans).render(Rect::new(area.x, area.y + offset, area.width, 1), buf);
@@ -713,7 +671,9 @@ impl BottomPaneView for AgentsOverviewView {
             return;
         }
 
-        if self.state().connection_notice.is_some() && !self.agents_keymap.new_task.is_pressed(key)
+        if self.state().connection_notice.is_some()
+            && !self.agents_keymap.new_task.is_pressed(key)
+            && self.keymap.action_for(key) != Some(ListAction::Cancel)
         {
             match self.keymap.action_for(key) {
                 Some(ListAction::MoveUp) => self.move_selection(/*forward*/ false),
@@ -730,21 +690,6 @@ impl BottomPaneView for AgentsOverviewView {
         if self.agents_keymap.toggle_grouping.is_pressed(key) {
             let mut state = self.state();
             state.status_grouping = !state.status_grouping;
-            return;
-        }
-        if key == KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL)
-            && self.archive_shortcut_available()
-        {
-            if self.archive_enabled()
-                && let Some(row) = self.selected_row()
-            {
-                let thread_id = row.thread_id;
-                let mut state = self.state();
-                state.archiving = Some(thread_id);
-                state.archive_error = None;
-                self.app_event_tx
-                    .send(AppEvent::ArchiveAgentsOverviewThread { thread_id });
-            }
             return;
         }
         if self.agents_keymap.new_task.is_pressed(key) {
@@ -765,6 +710,29 @@ impl BottomPaneView for AgentsOverviewView {
                     state.searching = false;
                     state.renaming = true;
                 }
+            }
+            return;
+        }
+        for (bindings, action) in [
+            (&self.agents_keymap.archive, AgentsOverviewAction::Archive),
+            (&self.agents_keymap.delete, AgentsOverviewAction::Delete),
+        ] {
+            if bindings.is_pressed(key) {
+                if let Some(row) = self.selected_row() {
+                    self.app_event_tx
+                        .send(AppEvent::ConfirmAgentsOverviewAction {
+                            thread_id: row.thread_id,
+                            action,
+                        });
+                }
+                return;
+            }
+        }
+        if self.agents_keymap.hide.is_pressed(key) {
+            if let Some(row) = self.selected_row() {
+                self.app_event_tx.send(AppEvent::HideAgentsOverviewThread {
+                    thread_id: row.thread_id,
+                });
             }
             return;
         }
@@ -805,11 +773,7 @@ impl BottomPaneView for AgentsOverviewView {
                         state.input.clear();
                         state.renaming = false;
                     } else {
-                        if self.exit_on_cancel {
-                            self.app_event_tx
-                                .send(AppEvent::Exit(crate::app::ExitMode::Immediate));
-                        }
-                        state.completion = Some(ViewCompletion::Cancelled);
+                        state.focus_composer();
                     }
                 }
                 ListAction::PageUp | ListAction::PageDown => {
@@ -817,6 +781,7 @@ impl BottomPaneView for AgentsOverviewView {
                         self.move_selection(action == ListAction::PageDown);
                     }
                 }
+                ListAction::MoveRight if !self.state().editing_metadata() => self.activate(),
                 ListAction::MoveLeft | ListAction::MoveRight => {}
             }
         } else if key.code == KeyCode::Backspace {

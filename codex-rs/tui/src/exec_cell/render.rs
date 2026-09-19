@@ -271,26 +271,19 @@ impl ExecCell {
 
     fn exploring_display_lines(&self, width: u16) -> Vec<Line<'static>> {
         let mut out: Vec<Line<'static>> = Vec::new();
-        let mut header = vec![
+        out.push(Line::from(vec![
             if self.is_active() {
                 activity_marker(self.active_start_time(), self.animations_enabled())
             } else {
                 "•".dim()
             },
             " ".into(),
-        ];
-        if !self.is_active() {
-            header.extend(
-                self.completed_at
-                    .map(crate::history_cell::HistoryTimestamp::span),
-            );
-        }
-        header.push(if self.is_active() {
-            "Exploring".bold()
-        } else {
-            "Explored".bold()
-        });
-        out.push(Line::from(header));
+            if self.is_active() {
+                "Exploring".bold()
+            } else {
+                "Explored".bold()
+            },
+        ]));
 
         let mut calls = self.calls.as_slice();
         let mut out_indented = Vec::new();
@@ -402,16 +395,11 @@ impl ExecCell {
             "Ran"
         };
 
-        let mut header_line = Line::from(vec![bullet.clone(), " ".into()]);
-        if !self.is_active() {
-            header_line.extend(
-                self.completed_at
-                    .map(crate::history_cell::HistoryTimestamp::span),
-            );
-        }
-        if !is_interaction {
-            header_line.extend([title.bold(), " ".into()]);
-        }
+        let mut header_line = if is_interaction {
+            Line::from(vec![bullet.clone(), " ".into()])
+        } else {
+            Line::from(vec![bullet.clone(), " ".into(), title.bold(), " ".into()])
+        };
         let header_prefix_width = header_line.width();
 
         let cmd_display = if call.is_unified_exec_interaction() {

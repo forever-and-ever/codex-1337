@@ -199,7 +199,7 @@ pub(crate) fn new_session_info(
                 format!("requested: {requested_model}").into(),
                 format!("used: {}", session.model).into(),
             ];
-            parts.push(Box::new(PlainHistoryCell::new(lines)));
+            parts.push(Box::new(PlainHistoryCell { lines }));
         }
     }
 

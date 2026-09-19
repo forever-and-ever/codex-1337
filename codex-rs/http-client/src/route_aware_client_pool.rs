@@ -110,13 +110,6 @@ impl RouteAwareRequestError {
         if self.status() == Some(StatusCode::PROXY_AUTHENTICATION_REQUIRED) {
             return Some(RouteFailureClass::ProxyAuthenticationRequired);
         }
-        if let Self::Route(RouteAwareClientPoolError::Resolve(error)) = self
-            && let Some(source) = error.get_ref()
-            && source.is::<rustls::Error>()
-        {
-            return Some(RouteFailureClass::TlsError);
-        }
-
         let mut source: Option<&(dyn std::error::Error + 'static)> = Some(self);
         while let Some(error) = source {
             if error.downcast_ref::<rustls::Error>().is_some()
@@ -127,7 +120,13 @@ impl RouteAwareRequestError {
             if error.to_string() == "tunnel error: proxy authorization required" {
                 return Some(RouteFailureClass::ProxyAuthenticationRequired);
             }
-            source = error.source();
+            // io::Error::source may skip the wrapped error itself. TLS errors
+            // arrive inside io::Error from both the resolver and hyper.
+            source = error
+                .downcast_ref::<std::io::Error>()
+                .and_then(std::io::Error::get_ref)
+                .map(|inner| inner as &(dyn std::error::Error + 'static))
+                .or_else(|| error.source());
         }
 
         match self {
@@ -810,6 +809,8 @@ impl RouteAwareClientPool {
 #[path = "route_aware_client_pool_tests.rs"]
 mod tests;
 
-#[cfg(test)]
+// These exercise native-TLS -> rustls fallback. The Linux fork starts with
+// rustls; a native backend's negotiation failure cannot occur there.
+#[cfg(all(test, not(target_os = "linux")))]
 #[path = "route_aware_tls_fallback_tests.rs"]
 mod tls_fallback_tests;

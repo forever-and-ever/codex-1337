@@ -10,7 +10,6 @@ impl ChatWidget {
         let Some(wait) = self.unified_exec_wait_streak.take() else {
             return;
         };
-        self.transcript.needs_final_message_separator = true;
         let cell = history_cell::new_unified_exec_interaction(wait.command_display, String::new());
         self.app_event_tx
             .send(AppEvent::InsertHistoryCell(Box::new(cell)));
@@ -131,13 +130,13 @@ impl ChatWidget {
         }
     }
 
-    pub(super) fn on_command_execution_completed(&mut self, item: CompletedItem) {
+    pub(super) fn on_command_execution_completed(&mut self, item: ThreadItem) {
         let ThreadItem::CommandExecution {
             id,
             process_id,
             source,
             ..
-        } = &item.item
+        } = &item
         else {
             return;
         };
@@ -318,7 +317,7 @@ impl ChatWidget {
     /// standalone history entry instead of replacing or flushing the unrelated active exploring
     /// cell. If this method treated every unknown end as "complete the active cell", the UI could
     /// merge unrelated commands and hide still-running exploring work.
-    pub(crate) fn handle_command_execution_completed_now(&mut self, completed: CompletedItem) {
+    pub(crate) fn handle_command_execution_completed_now(&mut self, item: ThreadItem) {
         enum ExecEndTarget {
             // Normal case: the active exec cell already tracks this call id.
             ActiveTracked,
@@ -340,7 +339,7 @@ impl ChatWidget {
             exit_code,
             duration_ms,
             ..
-        } = completed.item
+        } = item
         else {
             return;
         };
@@ -377,7 +376,12 @@ impl ChatWidget {
                 Some(exec_cell) if exec_cell.is_active() => {
                     ExecEndTarget::OrphanHistoryWhileActiveExec
                 }
-                None if cell.as_any().is::<McpToolCallCell>() => {
+                None if cell.as_any().is::<McpToolCallCell>()
+                    || cell
+                        .as_any()
+                        .downcast_ref::<history_cell::ComputerActivityCell>()
+                        .is_some_and(history_cell::ComputerActivityCell::is_active) =>
+                {
                     ExecEndTarget::OrphanHistoryWhileActiveExec
                 }
                 Some(_) | None => ExecEndTarget::NewCell,
@@ -401,7 +405,6 @@ impl ChatWidget {
                     .as_mut()
                     .and_then(|c| c.as_any_mut().downcast_mut::<ExecCell>())
                 {
-                    cell.completed_at = completed.timestamp;
                     let completed = cell.complete_call(&id, output, duration);
                     debug_assert!(completed, "active exec cell should contain {id}");
                     if cell.should_flush() {
@@ -421,10 +424,8 @@ impl ChatWidget {
                     /*interaction_input*/ None,
                     self.local_settings.tui.animations,
                 );
-                orphan.completed_at = completed.timestamp;
                 let completed = orphan.complete_call(&id, output, duration);
                 debug_assert!(completed, "new orphan exec cell should contain {id}");
-                self.transcript.needs_final_message_separator = true;
                 self.app_event_tx
                     .send(AppEvent::InsertHistoryCell(Box::new(orphan)));
                 self.request_redraw();
@@ -439,7 +440,6 @@ impl ChatWidget {
                     /*interaction_input*/ None,
                     self.local_settings.tui.animations,
                 );
-                cell.completed_at = completed.timestamp;
                 let completed = cell.complete_call(&id, output, duration);
                 debug_assert!(completed, "new exec cell should contain {id}");
                 if cell.should_flush() {
@@ -451,8 +451,6 @@ impl ChatWidget {
                 }
             }
         }
-        // Mark that actual work was done (command executed)
-        self.transcript.had_work_activity = true;
         if is_user_shell {
             self.maybe_send_next_queued_input();
         }

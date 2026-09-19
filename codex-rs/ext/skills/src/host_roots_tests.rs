@@ -406,7 +406,16 @@ async fn repo_ancestry_without_project_marker_does_not_walk_parents() {
     fs::create_dir_all(outer.join(".agents/skills")).expect("create outer skills");
     fs::create_dir_all(cwd.join(".agents/skills")).expect("create cwd skills");
 
-    let roots = repo_agents_skill_roots(Some(Arc::clone(&LOCAL_FS)), &stack(Vec::new()), &cwd)
+    // Ambient ancestors (including /tmp) may have their own Git marker.
+    // Exercise the absent-marker case without depending on the host's layout.
+    let layer = ConfigLayerEntry::new(
+        ConfigLayerSource::User {
+            file: absolute(temp_dir.path().join("config.toml")),
+            profile: None,
+        },
+        toml::toml! { project_root_markers = [".absent-skill-test-root"] }.into(),
+    );
+    let roots = repo_agents_skill_roots(Some(Arc::clone(&LOCAL_FS)), &stack(vec![layer]), &cwd)
         .await
         .into_iter()
         .map(|root| root.path)

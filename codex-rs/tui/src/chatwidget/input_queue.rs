@@ -10,6 +10,7 @@ use super::PendingSteerReplacement;
 use super::QueuedUserMessage;
 use super::UserMessage;
 use super::UserMessageHistoryRecord;
+use super::UserMessageSource;
 use super::user_message_preview_text;
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -32,6 +33,8 @@ pub(super) struct InputQueueState {
     pub(super) user_turn_pending_start: bool,
     /// User messages that tried to steer a non-regular turn and must be retried first.
     pub(super) rejected_steers_queue: VecDeque<UserMessage>,
+    /// The origin of each rejected steer, kept in lockstep with its message.
+    pub(super) rejected_steer_sources: VecDeque<UserMessageSource>,
     /// History records for rejected steers. Slash commands such as `/goal` can
     /// render history that differs from the text submitted to core, so this stays
     /// in lockstep with `rejected_steers_queue`, with missing entries treated as
@@ -62,6 +65,7 @@ impl InputQueueState {
         self.queued_user_message_history_records.clear();
         self.user_turn_pending_start = false;
         self.rejected_steers_queue.clear();
+        self.rejected_steer_sources.clear();
         self.rejected_steer_history_records.clear();
         self.pending_steer = None;
         self.pending_steer_replacement = None;
@@ -124,6 +128,7 @@ mod tests {
             }],
             user_message: UserMessage::from("pending"),
             history_record: UserMessageHistoryRecord::UserMessageText,
+            source: UserMessageSource::Prompt,
             compare_key: crate::chatwidget::user_messages::PendingSteerCompareKey {
                 message: "pending".to_string(),
                 image_count: 0,

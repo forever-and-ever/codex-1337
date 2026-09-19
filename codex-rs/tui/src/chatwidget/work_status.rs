@@ -1,4 +1,4 @@
-//! Bounded Goal / Activity display between the entry box and its footer.
+//! Bounded Goal / Activity / Reasoning display between the entry box and its footer.
 
 use crate::line_truncation::truncate_line_to_width;
 use crate::render::renderable::Renderable;
@@ -16,6 +16,7 @@ use ratatui::widgets::Widget;
 pub(super) struct WorkStatusView<'a> {
     pub goal: Option<&'a str>,
     pub status: Option<&'a WorkStatus>,
+    pub reasoning: Option<&'a str>,
 }
 
 impl WorkStatusView<'_> {
@@ -30,20 +31,21 @@ impl WorkStatusView<'_> {
             .chain([(
                 "Activity",
                 self.status.map(|status| status.activity.as_str()),
-            )]);
+            )])
+            .chain(self.reasoning.map(|text| ("Reasoning", Some(text))));
         let mut lines = Vec::new();
         for (label, value) in zones {
             // Goal text is user-controlled and unbounded; never lay out the full objective.
             let bounded: String = value.unwrap_or("—").chars().take(1024).collect();
             let value = bounded.split_whitespace().collect::<Vec<_>>().join(" ");
             let value: String = value.chars().filter(|ch| !ch.is_control()).collect();
-            let line = Line::from(vec![format!("{label:<8} ").dim(), value.into()]);
+            let line = Line::from(vec![format!("{label:<9} ").dim(), value.into()]);
             let mut wrapped = word_wrap_lines(
                 [line],
                 RtOptions::new(usize::from(width))
                     .initial_indent(Line::from(" ".repeat(usize::from(LIVE_PREFIX_COLS))))
                     .subsequent_indent(Line::from(" ".repeat(usize::from(
-                        width.saturating_sub(1).min(9 + LIVE_PREFIX_COLS),
+                        width.saturating_sub(1).min(10 + LIVE_PREFIX_COLS),
                     )))),
             );
             if wrapped.len() > 2 {

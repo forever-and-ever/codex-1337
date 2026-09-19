@@ -372,8 +372,10 @@ async fn restore_thread_input_state_restores_pending_steer_without_downgrading_t
             questions: None,
             composer: None,
             safety_buffering_prompt: None,
+            safety_buffering_source: UserMessageSource::Prompt,
             pending_steer: Some(pending_steer),
             rejected_steers_queue,
+            rejected_steer_sources: VecDeque::new(),
             rejected_steer_history_records: VecDeque::new(),
             queued_user_messages,
             queued_user_message_history_records: VecDeque::new(),
@@ -431,7 +433,6 @@ async fn identical_steer_receipts_only_acknowledge_the_matching_submission() {
             },
             "turn-1".to_string(),
             ThreadItemRenderSource::Live,
-            /*timestamp*/ None,
         );
         assert_eq!(chat.input_queue.pending_steer, expected);
     }

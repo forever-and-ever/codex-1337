@@ -163,6 +163,21 @@ impl ChatWidget {
                 .rejected_steers_queue
                 .drain(..)
                 .collect::<Vec<_>>();
+            let sources = self
+                .input_queue
+                .rejected_steer_sources
+                .drain(..)
+                .collect::<Vec<_>>();
+            let source = if !rejected_messages.is_empty()
+                && sources.len() == rejected_messages.len()
+                && sources
+                    .iter()
+                    .all(|source| *source == UserMessageSource::QuestionAnswer)
+            {
+                UserMessageSource::QuestionAnswer
+            } else {
+                UserMessageSource::Prompt
+            };
             let mut history_records = self
                 .input_queue
                 .rejected_steer_history_records
@@ -178,7 +193,13 @@ impl ChatWidget {
                     .zip(history_records)
                     .collect::<Vec<_>>(),
             );
-            Some((QueuedUserMessage::from(message), history_record))
+            Some((
+                QueuedUserMessage {
+                    source,
+                    ..QueuedUserMessage::from(message)
+                },
+                history_record,
+            ))
         }
     }
 
@@ -202,6 +223,7 @@ impl ChatWidget {
             ))
         } else {
             let user_message = self.input_queue.rejected_steers_queue.pop_back()?;
+            self.input_queue.rejected_steer_sources.pop_back();
             self.input_queue.recovered_queue &= self.input_queue.has_queued_follow_up_messages()
                 || self.input_queue.pending_steer.is_some();
             let history_record = self
@@ -226,6 +248,9 @@ impl ChatWidget {
         self.input_queue
             .rejected_steers_queue
             .push_back(pending_steer.user_message);
+        self.input_queue
+            .rejected_steer_sources
+            .push_back(pending_steer.source);
         self.input_queue
             .rejected_steer_history_records
             .push_back(pending_steer.history_record);
@@ -322,9 +347,11 @@ impl ChatWidget {
         // tracked here must be restored locally instead of waiting for a later commit.
         if send_pending_steer_immediately {
             if let Some(pending) = self.input_queue.pending_steer.take() {
-                self.submit_user_message_with_history_record(
+                self.submit_user_message_with_history_and_shell_escape_policy(
                     pending.user_message,
                     pending.history_record,
+                    ShellEscapePolicy::Allow,
+                    pending.source,
                 );
             } else if let Some(combined) = self.drain_pending_messages_for_restore() {
                 self.restore_composer_state(combined);
@@ -363,6 +390,7 @@ impl ChatWidget {
             .rejected_steers_queue
             .drain(..)
             .collect::<Vec<_>>();
+        self.input_queue.rejected_steer_sources.clear();
         let mut rejected_history_records = self
             .input_queue
             .rejected_steer_history_records
@@ -512,8 +540,10 @@ impl ChatWidget {
                 .map(crate::bottom_pane::AsyncQuestions::capture),
             composer: composer.has_content().then_some(composer),
             safety_buffering_prompt: self.safety_buffering_prompt.clone(),
+            safety_buffering_source: self.safety_buffering_source,
             pending_steer: self.input_queue.pending_steer.clone(),
             rejected_steers_queue: self.input_queue.rejected_steers_queue.clone(),
+            rejected_steer_sources: self.input_queue.rejected_steer_sources.clone(),
             rejected_steer_history_records: self.input_queue.rejected_steer_history_records.clone(),
             queued_user_messages: self.input_queue.queued_user_messages.clone(),
             queued_user_message_history_records: self
@@ -546,6 +576,7 @@ impl ChatWidget {
             self.current_collaboration_mode = input_state.current_collaboration_mode;
             self.active_collaboration_mask = input_state.active_collaboration_mask;
             self.safety_buffering_prompt = input_state.safety_buffering_prompt;
+            self.safety_buffering_source = input_state.safety_buffering_source;
             self.turn_lifecycle.restore_running(
                 preserve_in_flight_turn && input_state.agent_turn_running,
                 Instant::now(),
@@ -567,13 +598,21 @@ impl ChatWidget {
                 self.input_queue.pending_steer = None;
                 let mut safety_retry_follow_ups = VecDeque::new();
                 if let Some(steer) = pending_steer {
-                    safety_retry_follow_ups.push_back(QueuedUserMessage::from(steer.user_message));
+                    safety_retry_follow_ups.push_back(QueuedUserMessage {
+                        source: steer.source,
+                        ..QueuedUserMessage::from(steer.user_message)
+                    });
                     queued_user_message_history_records.push_front(steer.history_record);
                 }
                 safety_retry_follow_ups.append(&mut queued_user_messages);
                 queued_user_messages = safety_retry_follow_ups;
             }
             self.input_queue.rejected_steers_queue = input_state.rejected_steers_queue;
+            self.input_queue.rejected_steer_sources = input_state.rejected_steer_sources;
+            self.input_queue.rejected_steer_sources.resize(
+                self.input_queue.rejected_steers_queue.len(),
+                UserMessageSource::Prompt,
+            );
             self.input_queue.rejected_steer_history_records =
                 input_state.rejected_steer_history_records;
             self.input_queue.rejected_steer_history_records.resize(
@@ -591,6 +630,7 @@ impl ChatWidget {
             self.turn_lifecycle
                 .restore_running(/*running*/ false, Instant::now());
             self.safety_buffering_prompt = None;
+            self.safety_buffering_source = UserMessageSource::Prompt;
             self.input_queue.clear();
             self.restore_composer_state(Default::default());
         }

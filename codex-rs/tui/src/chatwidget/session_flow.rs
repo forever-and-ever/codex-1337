@@ -28,6 +28,11 @@ impl ChatWidget {
             .send(AppEvent::RefreshConversationAccount {
                 thread_id: session.thread_id,
             });
+        self.realtime_conversation_available_for_thread =
+            self.config.features.enabled(Feature::RealtimeConversation)
+                && codex_realtime_webrtc::RealtimeWebrtcSession::is_supported();
+        self.bottom_pane
+            .set_voice_command_enabled(self.realtime_conversation_available_for_thread);
         self.bottom_pane
             .set_queue_submissions(/*queue_submissions*/ false);
         if previous_thread_id != self.thread_id {

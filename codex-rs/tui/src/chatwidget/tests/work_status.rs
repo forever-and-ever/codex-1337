@@ -33,6 +33,7 @@ async fn work_status_below_composer_clears_without_transcript_entries() {
     chat.handle_server_notification(notification.clone(), /*replay_kind*/ None);
     assert_eq!(chat.current_work_status, Some(status.clone()));
     assert!(drain_insert_history(&mut rx).is_empty());
+    chat.on_agent_reasoning_delta("**Checking the lifecycle**".into());
     let mut panels = Vec::new();
     for goal in [
         None,
@@ -66,6 +67,7 @@ async fn work_status_below_composer_clears_without_transcript_entries() {
             let status_height = super::super::work_status::WorkStatusView {
                 goal,
                 status: Some(&status),
+                reasoning: chat.reasoning_header.as_deref(),
             }
             .desired_height(width);
             assert!(cursor_y < height - status_height);

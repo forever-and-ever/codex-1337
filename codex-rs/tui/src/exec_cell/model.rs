@@ -75,7 +75,6 @@ pub(crate) struct ExecCall {
 #[derive(Debug)]
 pub(crate) struct ExecCell {
     pub(crate) calls: Vec<ExecCall>,
-    pub(crate) completed_at: Option<crate::history_cell::HistoryTimestamp>,
     animations_enabled: bool,
 }
 
@@ -83,7 +82,6 @@ impl ExecCell {
     pub(crate) fn new(call: ExecCall, animations_enabled: bool) -> Self {
         Self {
             calls: vec![call],
-            completed_at: None,
             animations_enabled,
         }
     }

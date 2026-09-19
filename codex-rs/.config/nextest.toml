@@ -11,6 +11,12 @@ path = "junit.xml"
 [profile.local]
 inherits = "default"
 
+[[profile.local.overrides]]
+# Large credential-discovery and attachment-compression fixtures are CPU-bound
+# in unoptimized builds, especially alongside the full local suite.
+filter = 'test(snapshot_discovers_and_redacts_shell_initialized_credentials) | test(feedback_upload_delivers_whole_files_or_marked_prefixes)'
+slow-timeout = { period = "1m", terminate-after = 5 }
+
 [test-groups.app_server_protocol_codegen]
 max-threads = 1
 

@@ -48,7 +48,6 @@ fn web_search_detail(action: Option<&WebSearchAction>, query: &str) -> String {
 
 #[derive(Debug)]
 pub(crate) struct WebSearchCell {
-    pub(crate) completed_at: Option<HistoryTimestamp>,
     call_id: String,
     query: String,
     action: Option<WebSearchAction>,
@@ -66,7 +65,6 @@ impl WebSearchCell {
     ) -> Self {
         Self {
             call_id,
-            completed_at: None,
             query,
             action,
             start_time: Instant::now(),
@@ -109,11 +107,7 @@ impl HistoryCell for WebSearchCell {
             let separator = if self.completed { " for " } else { " " };
             Line::from(vec![header.bold(), separator.into(), detail.into()]).into()
         };
-        let mut prefix = vec![bullet, " ".into()];
-        if self.completed {
-            prefix.extend(self.completed_at.map(HistoryTimestamp::span));
-        }
-        PrefixedWrappedHistoryCell::new(text, prefix, "  ").display_lines(width)
+        PrefixedWrappedHistoryCell::new(text, vec![bullet, " ".into()], "  ").display_lines(width)
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
