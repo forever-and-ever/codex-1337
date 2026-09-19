@@ -251,7 +251,6 @@ mod side;
 mod startup;
 mod startup_prompts;
 mod startup_warnings;
-mod subagent_mouse;
 mod subagent_panel;
 mod thread_event_buffer;
 mod thread_events;
@@ -855,23 +854,6 @@ impl App {
         app_server: &mut AppServerSession,
         event: TuiEvent,
     ) -> Result<AppRunControl> {
-        if let TuiEvent::Mouse(mouse) = event {
-            self.handle_subagent_mouse(tui, app_server, mouse).await?;
-            return Ok(AppRunControl::Continue);
-        }
-        if !matches!(event, TuiEvent::Draw | TuiEvent::FocusGained) {
-            self.agent_navigation
-                .roster
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .invalidate_pointer();
-            if matches!(event, TuiEvent::FocusLost) {
-                tui.frame_requester().schedule_frame();
-            }
-        }
-        if self.overlay.is_some() {
-            tui.set_mouse_capture(false)?;
-        }
         if self.reconnect.offline
             && let TuiEvent::Key(key) = &event
             && matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat)
@@ -945,9 +927,6 @@ impl App {
                 .await?;
         } else {
             match event {
-                TuiEvent::Mouse(_) => {
-                    unreachable!("mouse events are routed before keyboard and rendering")
-                }
                 TuiEvent::Key(key_event) => {
                     self.handle_key_event(tui, app_server, key_event).await;
                 }
@@ -1046,11 +1025,6 @@ impl App {
     }
 
     fn render_chat_widget_frame(&mut self, tui: &mut tui::Tui, screen_size: Size) -> Result<Rect> {
-        let roster = self.agent_navigation.roster.clone();
-        roster
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .begin_frame();
         self.sync_thread_title_progress();
         let dashboard_visible = self
             .chat_widget
@@ -1070,34 +1044,25 @@ impl App {
             self.schedule_immediate_resize_reflow(tui);
             self.maybe_run_resize_reflow(tui, screen_size)?;
         }
-        let area =
-            self.with_chat_widget_frame(screen_size.width, |desired_height, chat_widget| {
-                let desired_height = if dashboard_visible {
-                    screen_size.height
-                } else {
-                    desired_height
-                };
-                let mut rendered_area = Rect::default();
-                tui.draw_with_resize_reflow(desired_height, screen_size, |frame| {
-                    let area = frame.area();
-                    rendered_area = area;
-                    chat_widget.render(area, frame.buffer);
-                    self.chat_widget.note_rendered_width(area.width);
-                    if let Some((x, y)) = chat_widget.cursor_pos(area) {
-                        frame.set_cursor_style(chat_widget.cursor_style(area));
-                        frame.set_cursor_position((x, y));
-                    }
-                })?;
-                Ok::<_, std::io::Error>(rendered_area)
+        self.with_chat_widget_frame(screen_size.width, |desired_height, chat_widget| {
+            let desired_height = if dashboard_visible {
+                screen_size.height
+            } else {
+                desired_height
+            };
+            let mut rendered_area = Rect::default();
+            tui.draw_with_resize_reflow(desired_height, screen_size, |frame| {
+                let area = frame.area();
+                rendered_area = area;
+                chat_widget.render(area, frame.buffer);
+                self.chat_widget.note_rendered_width(area.width);
+                if let Some((x, y)) = chat_widget.cursor_pos(area) {
+                    frame.set_cursor_style(chat_widget.cursor_style(area));
+                    frame.set_cursor_position((x, y));
+                }
             })?;
-        let visible = roster
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .finish_frame();
-        tui.set_mouse_capture(
-            visible && self.chat_widget.no_modal_or_popup_active() && !self.reconnect.offline,
-        )?;
-        Ok(area)
+            Ok(rendered_area)
+        })
     }
 
     fn with_chat_widget_frame<T>(

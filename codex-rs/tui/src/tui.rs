@@ -69,7 +69,6 @@ mod input_boundary;
 #[cfg(unix)]
 mod job_control;
 mod keyboard_modes;
-mod mouse;
 mod screen_size;
 mod scrollback;
 mod size_monitor;
@@ -329,11 +328,7 @@ fn restore_common(
         KeyboardRestore::ResetAfterExit => keyboard_modes::reset_keyboard_reporting_after_exit(),
     }
 
-    if let Err(err) = execute!(
-        stdout(),
-        DisableBracketedPaste,
-        crossterm::event::DisableMouseCapture
-    ) {
+    if let Err(err) = execute!(stdout(), DisableBracketedPaste) {
         first_error.get_or_insert(err);
     }
     let _ = execute!(stdout(), DisableFocusChange);
@@ -581,7 +576,6 @@ fn set_panic_hook() {
 
 #[derive(Clone, Debug)]
 pub enum TuiEvent {
-    Mouse(crossterm::event::MouseEvent),
     /// A terminal key event after focus, paste, and protocol bookkeeping has been handled.
     Key(KeyEvent),
     /// A bracketed paste payload normalized by the app layer before it reaches the composer.
@@ -633,7 +627,6 @@ pub struct Tui {
     scrollback: ScrollbackStrategy,
     // When false, enter_alt_screen() becomes a no-op.
     alt_screen_enabled: bool,
-    mouse_capture: bool,
     // Keeps unmanaged process stderr writes out of the inline viewport.
     _stderr_guard: terminal_stderr::TerminalStderrGuard,
 }
@@ -696,7 +689,6 @@ impl Tui {
             notification_condition: NotificationCondition::default(),
             scrollback,
             alt_screen_enabled: true,
-            mouse_capture: false,
             _stderr_guard: stderr_guard,
         }
     }
@@ -753,7 +745,6 @@ impl Tui {
 
     /// Reclaim terminal modes and stderr after a panic hook ran inside a recovery boundary.
     pub(crate) fn recover_after_caught_panic(&mut self) -> Result<()> {
-        self.mouse_capture = false;
         set_modes()?;
         self._stderr_guard.recover_after_caught_panic()?;
         self.terminal.invalidate_viewport();
@@ -797,7 +788,6 @@ impl Tui {
         if let Err(err) = restore_keep_raw() {
             tracing::warn!("failed to restore terminal modes before external program: {err}");
         }
-        self.mouse_capture = false;
         if let Err(err) = terminal_stderr::pause() {
             tracing::warn!("failed to restore terminal stderr before external program: {err}");
         }
@@ -873,7 +863,6 @@ impl Tui {
     /// Enter alternate screen and expand the viewport to full terminal size, saving the current
     /// inline viewport for restoration when leaving.
     pub fn enter_alt_screen(&mut self) -> Result<()> {
-        self.set_mouse_capture(false)?;
         if !self.alt_screen_enabled || self.is_alt_screen_active() {
             return Ok(());
         }

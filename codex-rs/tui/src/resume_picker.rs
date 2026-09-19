@@ -621,7 +621,7 @@ async fn run_session_picker_with_loader(
                             state.open_pending_transcript_if_ready();
                         }
                     }
-                    TuiEvent::Mouse(_) | TuiEvent::FocusLost => {}
+                    TuiEvent::FocusLost => {}
                 }
             }
             Some(event) = background_events.next() => {

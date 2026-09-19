@@ -20,9 +20,6 @@ pub(super) struct ScreenSizePolicy {
 impl Tui {
     /// Resolve event geometry while avoiding backend queries on ordinary repaint frames.
     pub(crate) fn screen_size_for_event(&mut self, event: &TuiEvent) -> io::Result<Size> {
-        if matches!(event, TuiEvent::Resume) {
-            self.mouse_capture = false;
-        }
         if matches!(event, TuiEvent::Resize(_)) {
             self.schedule_screen_size_recheck(TRANSCRIPT_REFLOW_DEBOUNCE);
         } else if matches!(event, TuiEvent::Draw | TuiEvent::FocusGained)
@@ -50,9 +47,7 @@ impl Tui {
             TuiEvent::Draw | TuiEvent::FocusGained => {
                 self.screen_size.deferred_size.take().unwrap_or(cached)
             }
-            TuiEvent::Key(_) | TuiEvent::Paste(_) | TuiEvent::Mouse(_) | TuiEvent::FocusLost => {
-                cached
-            }
+            TuiEvent::Key(_) | TuiEvent::Paste(_) | TuiEvent::FocusLost => cached,
         };
         if matches!(event, TuiEvent::Resize(_) | TuiEvent::Resume)
             && let Some(monitor) = &self.event_broker.size_monitor
@@ -61,7 +56,7 @@ impl Tui {
         }
         self.screen_size.pending_draw_size = (!matches!(
             event,
-            TuiEvent::Key(_) | TuiEvent::Paste(_) | TuiEvent::Mouse(_) | TuiEvent::FocusLost
+            TuiEvent::Key(_) | TuiEvent::Paste(_) | TuiEvent::FocusLost
         ))
         .then_some(size);
         Ok(size)

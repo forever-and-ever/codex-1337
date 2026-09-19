@@ -243,36 +243,6 @@ async fn agents_navigation_escape_returns_to_main_but_preserves_drafts_and_popup
         app.chat_widget.composer_text_with_pending(),
         "Preserve this root draft"
     );
-    // Mouse activation uses painted terminal coordinates and the same draft-preserving switch.
-    let area = Rect::new(4, 7, 60, 1);
-    crate::render::renderable::Renderable::render(
-        &crate::subagent_roster::RosterView(app.agent_navigation.roster.clone()),
-        area,
-        &mut ratatui::buffer::Buffer::empty(area),
-    );
-    for kind in [
-        crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
-        crossterm::event::MouseEventKind::Up(crossterm::event::MouseButton::Left),
-    ] {
-        app.handle_tui_event(
-            &mut tui,
-            &mut app_server,
-            TuiEvent::Mouse(crossterm::event::MouseEvent {
-                kind,
-                column: 8,
-                row: 7,
-                modifiers: KeyModifiers::NONE,
-            }),
-        )
-        .await?;
-    }
-    assert_eq!(app.current_displayed_thread_id(), Some(child_id));
-    app.handle_key_event(&mut tui, &mut app_server, KeyCode::Esc.into())
-        .await;
-    assert_eq!(
-        app.chat_widget.composer_text_with_pending(),
-        "Preserve this root draft"
-    );
     app_server.shutdown().await?;
     Ok(())
 }
