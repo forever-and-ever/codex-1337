@@ -39,6 +39,23 @@ impl TurnAdmission {
             .closed = true;
     }
 
+    /// Check quiescence and close admission atomically with respect to new work.
+    #[cfg(unix)]
+    pub(crate) fn begin_idle_drain(&self, running_turns: &watch::Receiver<usize>) -> bool {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // A start publishes its running turn before dropping its admission permit.
+        // Read the running count under this lock: an earlier snapshot can miss a
+        // request that acquires and releases its permit before we close the gate.
+        if state.active != 0 || *running_turns.borrow() != 0 {
+            return false;
+        }
+        state.closed = true;
+        true
+    }
+
     pub(crate) fn subscribe_active(&self) -> watch::Receiver<usize> {
         self.active_tx.subscribe()
     }

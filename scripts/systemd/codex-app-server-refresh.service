@@ -3,6 +3,6 @@ Description=Adopt the installed Codex app-server release
 
 [Service]
 Type=oneshot
-# SIGHUP drains running turns before replacing the daemon. Patched local TUIs
-# reconnect after the replacement socket is ready.
+# SIGHUP requests replacement at the next idle boundary without blocking resumes
+# or new work. Local TUIs reconnect after the replacement socket is ready.
 ExecStart=/usr/bin/systemctl --user kill --signal=SIGHUP --kill-whom=main codex-app-server.service

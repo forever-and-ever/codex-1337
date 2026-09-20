@@ -75,7 +75,7 @@ def integrate(action: str, install_root: Path) -> None:
                 temporary.unlink(missing_ok=True)
     systemctl("daemon-reload")
     systemctl("enable", "--now", UNITS[0], UNITS[2])
-    # Do not restart: the daemon adopts the release after running turns drain.
+    # Do not restart: adoption waits for idle without closing admission to new work.
     systemctl("start", UNITS[1])
 
 

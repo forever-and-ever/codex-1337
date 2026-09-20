@@ -20,6 +20,7 @@ use codex_app_server_protocol::InitializeCapabilities;
 use codex_app_server_protocol::InitializeParams;
 use codex_app_server_protocol::JSONRPCMessage;
 use codex_app_server_protocol::RequestId;
+use codex_app_server_protocol::ThreadResumeResponse;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::ThreadStartResponse;
 use codex_app_server_protocol::TurnStartParams;
@@ -215,20 +216,83 @@ async fn websocket_transport_second_sigterm_forces_exit_while_turn_running() -> 
 
 #[cfg(unix)]
 #[tokio::test]
-async fn websocket_transport_repeated_sighup_keeps_waiting_for_running_turn() -> Result<()> {
+async fn websocket_transport_pending_upgrade_allows_resume_and_new_turns_until_idle() -> Result<()>
+{
     let GracefulCtrlCFixture {
         _codex_home,
-        _server,
+        _server: server,
         mut process,
         mut ws,
-        ..
-    } = start_ctrl_c_restart_fixture(Duration::from_secs(3)).await?;
+        thread_id,
+        turn_id,
+    } = start_ctrl_c_restart_fixture(Duration::from_secs(30)).await?;
 
     send_sighup(&process)?;
     assert_process_does_not_exit_within(&mut process, Duration::from_millis(300)).await?;
 
     send_sighup(&process)?;
     assert_process_does_not_exit_within(&mut process, Duration::from_millis(300)).await?;
+
+    // Reproduce a fresh TUI bootstrapping against a server with a pending upgrade.
+    // The old eager-drain behavior rejected this resume for the whole active turn.
+    let tokio_tungstenite::MaybeTlsStream::Plain(socket) = ws.get_ref() else {
+        bail!("expected a local plaintext websocket");
+    };
+    let mut resumed = connect_websocket(socket.peer_addr()?).await?;
+    send_request(
+        &mut resumed,
+        "initialize",
+        /*id*/ 1,
+        Some(json!({
+            "clientInfo": {"name": "resumed_tui", "version": "0.1.0"},
+            "capabilities": {"experimentalApi": true},
+        })),
+    )
+    .await?;
+    read_response_for_id(&mut resumed, /*id*/ 1).await?;
+    send_request(
+        &mut resumed,
+        "thread/resume",
+        /*id*/ 2,
+        Some(json!({"threadId": thread_id})),
+    )
+    .await?;
+    let response: ThreadResumeResponse =
+        to_response(read_response_for_id(&mut resumed, /*id*/ 2).await?)?;
+    assert_eq!(response.thread.id, thread_id);
+
+    Mock::given(method("POST"))
+        .and(path_regex(".*/responses$"))
+        .respond_with(
+            responses::sse_response(create_final_assistant_message_sse_response("New work")?)
+                .set_delay(Duration::from_secs(30)),
+        )
+        .mount(&server)
+        .await;
+    send_thread_start_request(&mut resumed, /*id*/ 3).await?;
+    let response: ThreadStartResponse =
+        to_response(read_response_for_id(&mut resumed, /*id*/ 3).await?)?;
+    send_turn_start_request(&mut resumed, /*id*/ 4, &response.thread.id).await?;
+    let started: TurnStartResponse =
+        to_response(read_response_for_id(&mut resumed, /*id*/ 4).await?)?;
+
+    send_request(
+        &mut ws,
+        "turn/interrupt",
+        /*id*/ 4,
+        Some(json!({"threadId": thread_id, "turnId": turn_id})),
+    )
+    .await?;
+    read_response_for_id(&mut ws, /*id*/ 4).await?;
+    assert_process_does_not_exit_within(&mut process, Duration::from_millis(300)).await?;
+    send_request(
+        &mut resumed,
+        "turn/interrupt",
+        /*id*/ 5,
+        Some(json!({"threadId": response.thread.id, "turnId": started.turn.id})),
+    )
+    .await?;
+    read_response_for_id(&mut resumed, /*id*/ 5).await?;
 
     let status = wait_for_process_exit_within(
         &mut process,
@@ -239,6 +303,7 @@ async fn websocket_transport_repeated_sighup_keeps_waiting_for_running_turn() ->
     assert!(status.success(), "expected graceful exit, got {status}");
 
     expect_websocket_disconnect(&mut ws).await?;
+    expect_websocket_disconnect(&mut resumed).await?;
 
     Ok(())
 }
