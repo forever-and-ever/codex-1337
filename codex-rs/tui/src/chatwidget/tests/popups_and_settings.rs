@@ -18,12 +18,19 @@ use pretty_assertions::assert_eq;
 async fn account_picker_snapshot() {
     use codex_app_server_protocol::SavedAccount;
     use codex_app_server_protocol::ThreadAccountListResponse;
-    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    let thread_id = ThreadId::new();
+    chat.thread_id = Some(thread_id);
+    chat.bottom_pane.set_task_running(/*running*/ true);
+    chat.handle_slash_command_dispatch(SlashCommand::Account);
+    assert!(
+        matches!(rx.try_recv(), Ok(AppEvent::OpenAccountPicker { thread_id: id }) if id == thread_id)
+    );
     chat.show_account_picker(
-        ThreadId::new(),
+        thread_id,
         ThreadAccountListResponse {
             selected_account_id: Some("alice:personal".into()),
-            pending_account_id: None,
+            pending_account_id: Some("bob:personal".into()),
             accounts: vec![
                 SavedAccount {
                     id: "alice:personal".into(),

@@ -92,17 +92,19 @@ You can also use Codex with an API key, but this requires [additional setup](htt
 ### Downstream Accounts
 
 `codex login` adds or updates a saved account in the existing credential store.
-In a stopped conversation, `/account` selects its account; `/account work` uses
-an alias. The picker shows account IDs for configuring aliases:
+`/account` opens the picker, including during work; `/account work` uses an alias.
+The picker shows account IDs for configuring aliases:
 
 ```toml
 [wrangler.account_aliases]
 work = "user-id:account-id"
 ```
 
-Selection saves `[wrangler].default_account` for new conversations. Existing
-conversations keep their binding across resume; forks and children inherit it
-independently. A missing account requires login or another explicit selection,
+The conversation and its agents switch independently at model/tool boundaries,
+without interrupting in-flight work. Selection also saves
+`[wrangler].default_account` for new conversations. Bindings survive resume;
+independent forks inherit once, while children follow the family. A missing
+account requires login or another explicit selection,
 never an automatic fallback. Per-conversation selection supports personal
 accounts only; managed workspace policies remain server-scoped. Credential
 paths are unchanged.

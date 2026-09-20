@@ -28,12 +28,18 @@ impl ChatWidget {
                     .or(account.email.clone())
                     .unwrap_or_else(|| account.id.clone());
                 let email = account.email.filter(|email| email != &name);
+                let pending = response.pending_account_id.as_ref() == Some(&account.id);
                 let description = Some(
-                    [email, account.plan, Some(account.id.clone())]
-                        .into_iter()
-                        .flatten()
-                        .collect::<Vec<_>>()
-                        .join(" · "),
+                    [
+                        pending.then(|| "switch pending".to_owned()),
+                        email,
+                        account.plan,
+                        Some(account.id.clone()),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>()
+                    .join(" · "),
                 );
                 let is_current = response.selected_account_id.as_ref() == Some(&account.id);
                 SelectionItem {
@@ -53,9 +59,7 @@ impl ChatWidget {
             .collect();
         self.bottom_pane.show_selection_view(SelectionViewParams {
             title: Some("Select Account".to_owned()),
-            subtitle: Some(
-                "For this conversation and new conversations. Others stay unchanged.".to_owned(),
-            ),
+            subtitle: Some("Conversation + agents; also the new-conversation default.".to_owned()),
             items,
             footer_hint: Some(standard_popup_hint_line()),
             ..Default::default()

@@ -348,6 +348,15 @@ pub(crate) enum AppEvent {
         thread_id: ThreadId,
         account_id: String,
     },
+    AccountPickerLoaded {
+        thread_id: ThreadId,
+        serial: uuid::Uuid,
+        result: Result<codex_app_server_protocol::ThreadAccountListResponse, String>,
+    },
+    AccountSelectionFinished {
+        thread_id: ThreadId,
+        result: Result<codex_app_server_protocol::ThreadAccountSelectResponse, String>,
+    },
     RefreshConversationAccount {
         thread_id: ThreadId,
     },

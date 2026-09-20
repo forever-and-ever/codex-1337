@@ -8,6 +8,9 @@ use codex_app_server_protocol::ThreadAccountSelectResponse;
 #[derive(Default)]
 pub(super) struct AccountUi {
     serial: u64,
+    picker_request: Option<uuid::Uuid>,
+    selection_request: Option<ThreadId>,
+    pending: std::collections::HashMap<ThreadId, String>,
     pub(super) displayed: Option<(ThreadId, codex_app_server_protocol::GetAccountResponse)>,
 }
 
@@ -66,6 +69,12 @@ impl App {
                 return;
             }
         };
+        if self.account_ui.pending.get(&thread_id) == response.account_id.as_ref()
+            && self.account_ui.pending.remove(&thread_id).is_some()
+        {
+            self.chat_widget
+                .add_info_message("Conversation account changed.".to_owned(), None);
+        }
         use crate::status::StatusAccountDisplay;
         use codex_app_server_protocol::Account;
         // Backend-only host authentication has no Account projection. Its
@@ -118,21 +127,47 @@ impl App {
         }
     }
 
-    pub(super) async fn open_account_picker(
+    pub(super) fn open_account_picker(
         &mut self,
         server: &mut AppServerSession,
         thread_id: ThreadId,
     ) {
+        if self.account_ui.picker_request.is_some() || self.account_ui.selection_request.is_some() {
+            return;
+        }
+        let serial = uuid::Uuid::new_v4();
+        self.account_ui.picker_request = Some(serial);
         let request_id = server.next_request_id();
-        let result = server
-            .request_handle()
-            .request_typed::<ThreadAccountListResponse>(ClientRequest::ThreadAccountList {
-                request_id,
-                params: ThreadAccountListParams {
-                    thread_id: thread_id.to_string(),
-                },
-            })
-            .await;
+        let handle = server.request_handle();
+        let tx = self.app_event_tx.clone();
+        tokio::spawn(async move {
+            let result = handle
+                .request_typed::<ThreadAccountListResponse>(ClientRequest::ThreadAccountList {
+                    request_id,
+                    params: ThreadAccountListParams {
+                        thread_id: thread_id.to_string(),
+                    },
+                })
+                .await
+                .map_err(|error| error.to_string());
+            tx.send(AppEvent::AccountPickerLoaded {
+                thread_id,
+                serial,
+                result,
+            });
+        });
+    }
+
+    pub(super) fn apply_account_picker(
+        &mut self,
+        thread_id: ThreadId,
+        serial: uuid::Uuid,
+        result: Result<ThreadAccountListResponse, String>,
+    ) {
+        if self.account_ui.picker_request != Some(serial) {
+            return;
+        }
+        self.account_ui.picker_request = None;
         if self.current_displayed_thread_id() != Some(thread_id) {
             return;
         }
@@ -144,46 +179,79 @@ impl App {
         }
     }
 
-    pub(super) async fn select_account(
+    pub(super) fn select_account(
         &mut self,
         server: &mut AppServerSession,
         thread_id: ThreadId,
         account_id: String,
     ) {
-        let request_id = server.next_request_id();
-        let result = server
-            .request_handle()
-            .request_typed::<ThreadAccountSelectResponse>(ClientRequest::ThreadAccountSelect {
-                request_id,
-                params: ThreadAccountSelectParams {
-                    thread_id: thread_id.to_string(),
-                    account_id,
-                },
-            })
-            .await;
-        if self.current_displayed_thread_id() != Some(thread_id) {
+        if self.account_ui.selection_request.is_some() {
             return;
         }
+        self.account_ui.selection_request = Some(thread_id);
+        self.account_ui.picker_request = None;
+        let request_id = server.next_request_id();
+        let handle = server.request_handle();
+        let tx = self.app_event_tx.clone();
+        tokio::spawn(async move {
+            let result = handle
+                .request_typed::<ThreadAccountSelectResponse>(ClientRequest::ThreadAccountSelect {
+                    request_id,
+                    params: ThreadAccountSelectParams {
+                        thread_id: thread_id.to_string(),
+                        account_id,
+                    },
+                })
+                .await
+                .map_err(|error| error.to_string());
+            tx.send(AppEvent::AccountSelectionFinished { thread_id, result });
+        });
+    }
+
+    pub(super) fn finish_account_selection(
+        &mut self,
+        server: &AppServerSession,
+        thread_id: ThreadId,
+        result: Result<ThreadAccountSelectResponse, String>,
+    ) {
+        self.account_ui.selection_request = None;
         match result {
             Ok(response) => {
+                if response.pending {
+                    self.account_ui
+                        .pending
+                        .insert(thread_id, response.account_id.clone());
+                } else {
+                    self.account_ui.pending.remove(&thread_id);
+                }
+                if response.default_saved {
+                    self.config.wrangler.default_account = Some(response.account_id);
+                }
+                if self.current_displayed_thread_id() != Some(thread_id) {
+                    return;
+                }
                 self.rate_limit_hard_stop_generation =
                     self.rate_limit_hard_stop_generation.wrapping_add(1);
                 self.rate_limit_refresh_state.invalidate_recovery();
                 self.last_thread_usage_status_cell = None;
                 self.pending_thread_usage_history_refresh = false;
                 self.refresh_conversation_account(server, thread_id);
-                if response.default_saved {
-                    self.config.wrangler.default_account = Some(response.account_id);
-                }
                 self.chat_widget.add_info_message(
-                    "Conversation account changed.".to_owned(),
+                    if response.pending {
+                        "Account switch pending. This conversation and its agents will switch between model/tool steps."
+                    } else {
+                        "Conversation account changed. Running agents will follow between model/tool steps."
+                    }.to_owned(),
                     (!response.default_saved)
                         .then(|| "Could not save the default for new conversations.".to_owned()),
                 );
             }
-            Err(error) => self
+            Err(error) if self.current_displayed_thread_id() == Some(thread_id) => self
                 .chat_widget
                 .add_error_message(format!("Cannot change account: {error}")),
+            Err(error) => {
+                tracing::warn!(%thread_id, %error, "cannot change background conversation account")
+            }
         }
     }
 }

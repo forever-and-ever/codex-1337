@@ -1381,8 +1381,10 @@ impl App {
             AppEvent::RefreshRateLimits { origin } => {
                 self.refresh_rate_limits(app_server, origin);
             }
-            AppEvent::OpenAccountPicker { thread_id } => Box::pin(self.open_account_picker(app_server, thread_id)).await,
-            AppEvent::SelectAccount { thread_id, account_id } => Box::pin(self.select_account(app_server, thread_id, account_id)).await,
+            AppEvent::OpenAccountPicker { thread_id } => self.open_account_picker(app_server, thread_id),
+            AppEvent::SelectAccount { thread_id, account_id } => self.select_account(app_server, thread_id, account_id),
+            AppEvent::AccountPickerLoaded { thread_id, serial, result } => self.apply_account_picker(thread_id, serial, result),
+            AppEvent::AccountSelectionFinished { thread_id, result } => self.finish_account_selection(app_server, thread_id, result),
             AppEvent::RefreshConversationAccount { thread_id } => self.refresh_conversation_account(app_server, thread_id),
             AppEvent::ConversationAccountLoaded { thread_id, serial, result } => self.apply_conversation_account(app_server, thread_id, serial, result),
             AppEvent::ApplyBackendBannerFallback { thread_id } => {
