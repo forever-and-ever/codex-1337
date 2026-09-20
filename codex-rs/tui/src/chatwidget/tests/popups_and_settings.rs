@@ -23,6 +23,7 @@ async fn account_picker_snapshot() {
         ThreadId::new(),
         ThreadAccountListResponse {
             selected_account_id: Some("alice:personal".into()),
+            pending_account_id: None,
             accounts: vec![
                 SavedAccount {
                     id: "alice:personal".into(),

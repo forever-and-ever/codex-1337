@@ -138,6 +138,9 @@ pub(crate) struct AgentControl {
     /// Session-scoped state shared by the root thread and every cloned sub-agent control handle.
     rollout_budget: Arc<RolloutBudget>,
     service_tiers: Arc<ArcSwap<service_tier::TierTree>>,
+    /// Desired payer for this agent family. Each session applies it between steps;
+    /// an independent fork gets its own control and never follows later selections.
+    pub(crate) account_selection: Arc<arc_swap::ArcSwapOption<String>>,
 }
 
 impl Default for AgentControl {
@@ -166,6 +169,7 @@ impl AgentControl {
             agent_execution_limiter: Arc::default(),
             rollout_budget: Arc::default(),
             service_tiers: Arc::default(),
+            account_selection: Arc::default(),
         };
         if let Some(rollout_budget) = rollout_budget {
             control.rollout_budget.configure(rollout_budget);

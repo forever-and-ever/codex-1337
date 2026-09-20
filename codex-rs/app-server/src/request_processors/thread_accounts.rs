@@ -37,7 +37,8 @@ impl TurnRequestProcessor {
         Ok(Some(
             ThreadAccountListResponse {
                 accounts,
-                selected_account_id: thread.thread_settings_snapshot().await.account_id,
+                selected_account_id: thread.auth_manager().selected_account_id(),
+                pending_account_id: thread.pending_account_id(),
             }
             .into(),
         ))
@@ -78,6 +79,7 @@ impl TurnRequestProcessor {
         Ok(Some(
             ThreadAccountSelectResponse {
                 account_id: id,
+                pending: thread.pending_account_id().is_some(),
                 default_saved,
             }
             .into(),

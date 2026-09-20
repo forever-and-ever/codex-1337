@@ -326,6 +326,10 @@ impl Session {
         self.emit_turn_start_lifecycle(turn_context.as_ref(), &token_usage_at_turn_start)
             .await;
 
+        let account_work = Arc::clone(&self.account_work)
+            .acquire_owned()
+            .await
+            .unwrap_or_else(|_| unreachable!("account work semaphore is never closed"));
         let mut active = self.active_turn.lock().await;
         let turn = active.get_or_insert_with(ActiveTurn::default);
         debug_assert!(turn.task.is_none());
@@ -369,6 +373,7 @@ impl Session {
                     )
                     .instrument(trace_span!("session_task.run"))
                     .await;
+                drop(account_work);
                 let sess = Arc::clone(&session);
                 if let Err(err) = sess.flush_rollout().await {
                     warn!("failed to flush rollout before completing turn: {err}");
@@ -533,6 +538,7 @@ impl Session {
             self.input_queue.clear_pending(&active_turn).await;
         }
         if reason == TurnAbortReason::Interrupted && aborted_turn {
+            self.settle_idle_account().await;
             self.maybe_start_turn_for_pending_work().await;
         }
     }
@@ -579,6 +585,7 @@ impl Session {
         self.input_queue.clear_pending(&active_turn).await;
 
         if reason == TurnAbortReason::Interrupted {
+            self.settle_idle_account().await;
             self.maybe_start_turn_for_pending_work().await;
         }
 
@@ -854,6 +861,7 @@ impl Session {
             }
         };
         if cleared_active_turn {
+            self.settle_idle_account().await;
             self.emit_thread_idle_lifecycle_if_idle(idle_cause).await;
         }
         // Regular items were flushed before this terminal event was appended; buffering

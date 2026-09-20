@@ -18586,6 +18586,13 @@
           },
           "type": "array"
         },
+        "pendingAccountId": {
+          "description": "Selected target whose handoff is not yet complete.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "selectedAccountId": {
           "type": [
             "string",
@@ -18624,7 +18631,12 @@
           "type": "string"
         },
         "defaultSaved": {
-          "description": "The thread changed successfully; false means saving the new-thread default failed.",
+          "description": "False means saving the new-thread default failed; the selection was still accepted.",
+          "type": "boolean"
+        },
+        "pending": {
+          "default": false,
+          "description": "Whether this thread's account handoff is still pending.",
           "type": "boolean"
         }
       },

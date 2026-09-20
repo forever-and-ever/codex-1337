@@ -52,6 +52,9 @@ pub(crate) struct Session {
     /// Keep this separate from `state` so storage I/O does not block runtime state access.
     pub(super) thread_settings_persistence: Semaphore,
     pub(super) initial_account_binding: tokio::sync::OnceCell<()>,
+    /// Survives removal from `active_turn` until the task has actually stopped.
+    pub(crate) account_work: Arc<Semaphore>,
+    pub(super) account_refresh_pending: std::sync::atomic::AtomicBool,
     /// Serializes rebuild/apply cycles for the running proxy; each cycle
     /// rebuilds from the current SessionState while holding this lock.
     pub(super) managed_network_proxy_refresh_lock: Semaphore,
@@ -86,6 +89,7 @@ pub(crate) struct Session {
 pub(crate) struct SessionConfiguration {
     /// Runtime provider and its provider-specific execution policy.
     pub(super) provider: SharedModelProvider,
+    pub(super) account_selection: Arc<arc_swap::ArcSwapOption<String>>,
 
     /// Desired configured inputs inherited by future turns.
     pub(super) step_settings: Arc<StepSettings>,
@@ -294,9 +298,14 @@ impl SessionConfiguration {
     ) -> ThreadSettingsSnapshot {
         ThreadSettingsSnapshot {
             account_id: self
-                .provider
-                .auth_manager()
-                .and_then(|auth| auth.selected_account_id()),
+                .account_selection
+                .load_full()
+                .map(|id| (*id).clone())
+                .or_else(|| {
+                    self.provider
+                        .auth_manager()
+                        .and_then(|auth| auth.selected_account_id())
+                }),
             model: self.step_settings.collaboration_mode.model().to_string(),
             model_provider_id: self.original_config_do_not_use.model_provider_id.clone(),
             service_tier: self.step_settings.service_tier.clone(),
@@ -1623,6 +1632,8 @@ impl Session {
                 state: Mutex::new(state),
                 thread_settings_persistence: Semaphore::new(/*permits*/ 1),
                 initial_account_binding: tokio::sync::OnceCell::new(),
+                account_work: Arc::new(Semaphore::new(/*permits*/ 1)),
+                account_refresh_pending: std::sync::atomic::AtomicBool::new(/*v*/ false),
                 managed_network_proxy_refresh_lock: Semaphore::new(/*permits*/ 1),
                 features: config.features.clone(),
                 guardian_context_mode,

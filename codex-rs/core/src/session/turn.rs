@@ -180,12 +180,18 @@ pub(crate) async fn run_turn(
     // new user message are recorded. Estimate pending incoming items (context
     // diffs/full reinjection + user input) and trigger compaction preemptively
     // when they would push the thread over the compaction threshold.
-    if let Err(err) = run_pre_sampling_compact(
-        &sess,
-        &turn_context,
-        &mut client_session,
-        &cancellation_token,
-    )
+    if let Err(err) = async {
+        sess.apply_pending_account().await.map_err(|error| {
+            CodexErr::InvalidRequest(format!("Cannot apply account selection: {error}"))
+        })?;
+        run_pre_sampling_compact(
+            &sess,
+            &turn_context,
+            &mut client_session,
+            &cancellation_token,
+        )
+        .await
+    }
     .await
     {
         // Compaction runs before the new input is recorded, so preserve it on every failure.
@@ -532,8 +538,20 @@ pub(crate) async fn run_turn(
             .await
         }
         .await;
+        // Sampling has drained its tools. No submitted work is interrupted or
+        // replayed, and the next request (including compaction) can use the new payer.
+        sess.apply_pending_account().await.map_err(|error| {
+            CodexErr::InvalidRequest(format!("Cannot apply account selection: {error}"))
+        })?;
         match sampling_request_result {
-            Ok((sampling_request_output, sampling_request_input)) => {
+            Ok(SamplingRequestOutcome::AccountHandoff) => {
+                next_step_context = None;
+                continue;
+            }
+            Ok(SamplingRequestOutcome::Completed(
+                sampling_request_output,
+                sampling_request_input,
+            )) => {
                 guardian_budget_compacted = false;
                 let SamplingRequestResult {
                     needs_follow_up: model_needs_follow_up,
@@ -1524,6 +1542,11 @@ pub(crate) fn build_prompt(
     }
 }
 
+enum SamplingRequestOutcome {
+    Completed(SamplingRequestResult, Vec<ResponseItem>),
+    AccountHandoff,
+}
+
 #[allow(clippy::too_many_arguments)]
 #[allow(deprecated)]
 #[instrument(level = "trace",
@@ -1543,7 +1566,7 @@ async fn run_sampling_request(
     responses_metadata: &CodexResponsesMetadata,
     input: Vec<ResponseItem>,
     cancellation_token: CancellationToken,
-) -> CodexResult<(SamplingRequestResult, Vec<ResponseItem>)> {
+) -> CodexResult<SamplingRequestOutcome> {
     let turn_context = Arc::clone(&step_context.turn);
     let base_instructions = sess.get_prompt_base_instructions().await;
 
@@ -1563,6 +1586,11 @@ async fn run_sampling_request(
     let mut original_input = None;
     let mut executed_tool_calls_by_output = HashMap::new();
     loop {
+        if sess.pending_account_id().is_some() {
+            // A retry/backoff is also a safe boundary. Return to the step driver so
+            // account-dependent capabilities are recaptured, not just the bearer.
+            return Ok(SamplingRequestOutcome::AccountHandoff);
+        }
         // A retry must not attribute the next tool call to the previous response.
         turn_context
             .extension_data
@@ -1606,7 +1634,13 @@ async fn run_sampling_request(
         .await
         {
             Ok(output) => {
-                return Ok((output, original_input.unwrap_or(prompt.input)));
+                return Ok(SamplingRequestOutcome::Completed(
+                    output,
+                    original_input.unwrap_or(prompt.input),
+                ));
+            }
+            Err(err) if sess.can_retry_after_account_handoff(&err) => {
+                return Ok(SamplingRequestOutcome::AccountHandoff);
             }
             Err(err) => match err.details() {
                 CodexErrorDetails::ContextWindowExceeded => {

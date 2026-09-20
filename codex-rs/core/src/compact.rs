@@ -275,6 +275,9 @@ async fn run_compact_task_inner_impl(
         .await;
 
     let compaction_response_id = loop {
+        sess.apply_pending_account().await.map_err(|error| {
+            CodexErr::InvalidRequest(format!("Cannot apply account selection: {error}"))
+        })?;
         // Clone is required because of the loop
         let turn_input = history
             .clone()
@@ -298,6 +301,7 @@ async fn run_compact_task_inner_impl(
             Ok(response_id) => {
                 break response_id;
             }
+            Err(error) if sess.can_retry_after_account_handoff(&error) => continue,
             Err(err)
                 if matches!(
                     err.details(),

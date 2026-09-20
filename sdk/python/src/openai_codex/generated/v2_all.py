@@ -5057,6 +5057,13 @@ class ThreadAccountListResponse(BaseModel):
         populate_by_name=True,
     )
     accounts: list[SavedAccount]
+    pending_account_id: Annotated[
+        str | None,
+        Field(
+            alias="pendingAccountId",
+            description="Selected target whose handoff is not yet complete.",
+        ),
+    ] = None
     selected_account_id: Annotated[str | None, Field(alias="selectedAccountId")] = None
 
 
@@ -5083,9 +5090,12 @@ class ThreadAccountSelectResponse(BaseModel):
         bool,
         Field(
             alias="defaultSaved",
-            description="The thread changed successfully; false means saving the new-thread default failed.",
+            description="False means saving the new-thread default failed; the selection was still accepted.",
         ),
     ]
+    pending: Annotated[
+        bool | None, Field(description="Whether this thread's account handoff is still pending.")
+    ] = False
 
 
 class ThreadActiveFlag(Enum):

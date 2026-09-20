@@ -384,6 +384,9 @@ async fn run_remote_compaction_request_v2(
         .min(MAX_REMOTE_COMPACTION_V2_STREAM_RETRIES);
     let mut retry_state = ResponsesStreamRetryState::default();
     loop {
+        sess.apply_pending_account().await.map_err(|error| {
+            CodexErr::InvalidRequest(format!("Cannot apply account selection: {error}"))
+        })?;
         let result = match client_session
             .stream(
                 prompt,
@@ -407,6 +410,7 @@ async fn run_remote_compaction_request_v2(
 
         match result {
             Ok(compaction_output) => return Ok(compaction_output),
+            Err(error) if sess.can_retry_after_account_handoff(&error) => continue,
             Err(err) => {
                 handle_response_stream_error(
                     &mut retry_state,

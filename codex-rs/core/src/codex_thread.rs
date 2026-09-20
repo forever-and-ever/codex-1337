@@ -795,8 +795,14 @@ impl CodexThread {
         self.session.thread_settings_snapshot().await
     }
 
+    /// Accepts a saved account for this family. Running work keeps its payer until
+    /// a safe boundary; `pending_account_id` distinguishes acceptance from handoff.
     pub async fn select_account(&self, id: &str) -> std::io::Result<()> {
         self.session.select_account(id).await
+    }
+
+    pub fn pending_account_id(&self) -> Option<String> {
+        self.session.pending_account_id()
     }
 
     pub fn auth_manager(&self) -> std::sync::Arc<codex_login::AuthManager> {

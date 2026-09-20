@@ -38,6 +38,13 @@
       },
       "type": "array"
     },
+    "pendingAccountId": {
+      "description": "Selected target whose handoff is not yet complete.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "selectedAccountId": {
       "type": [
         "string",

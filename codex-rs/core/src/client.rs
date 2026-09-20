@@ -1992,6 +1992,15 @@ impl ModelClientSession {
         responses_metadata: &CodexResponsesMetadata,
         inference_trace: &InferenceTraceContext,
     ) -> Result<ResponseStream> {
+        let owner = self.client.auth_owner_generation();
+        if self.websocket_session.auth_owner_generation != owner {
+            // HTTP sticky routing is account-bound too, not just WS continuation IDs.
+            self.websocket_session = WebsocketSession {
+                auth_owner_generation: owner,
+                ..Default::default()
+            };
+            self.turn_state = Arc::new(OnceLock::new());
+        }
         let wire_api = self.client.state.provider.info().wire_api;
         match wire_api {
             WireApi::Responses => {

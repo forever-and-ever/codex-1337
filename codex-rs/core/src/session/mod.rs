@@ -769,7 +769,13 @@ impl Session {
         );
         let service_tier =
             get_service_tier(config.service_tier.clone(), fast_mode_enabled, &model_info);
+        if parent_thread_id.is_none() && auth_manager.is_account_scoped() {
+            agent_control
+                .account_selection
+                .store(auth_manager.selected_account_id().map(Arc::new));
+        }
         let session_configuration = SessionConfiguration {
+            account_selection: Arc::clone(&agent_control.account_selection),
             provider: create_model_provider(
                 config.model_provider.clone(),
                 Some(Arc::clone(&auth_manager)),

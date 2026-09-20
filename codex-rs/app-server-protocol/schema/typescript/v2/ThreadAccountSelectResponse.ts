@@ -4,6 +4,10 @@
 
 export type ThreadAccountSelectResponse = { accountId: string,
 /**
- * The thread changed successfully; false means saving the new-thread default failed.
+ * Whether this thread's account handoff is still pending.
+ */
+pending: boolean,
+/**
+ * False means saving the new-thread default failed; the selection was still accepted.
  */
 defaultSaved: boolean, };

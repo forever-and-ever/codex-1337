@@ -2025,6 +2025,7 @@ impl ThreadManagerState {
             &initial_history,
             parent_thread_id,
             &auth_manager,
+            &agent_control,
         ))
         .await?;
         let (auth_manager, models_manager, plugins_manager) = if let Some(auth) = scoped_auth {

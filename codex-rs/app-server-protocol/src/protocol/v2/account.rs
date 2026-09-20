@@ -614,6 +614,8 @@ pub struct SavedAccount {
 pub struct ThreadAccountListResponse {
     pub accounts: Vec<SavedAccount>,
     pub selected_account_id: Option<String>,
+    /// Selected target whose handoff is not yet complete.
+    pub pending_account_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
@@ -630,7 +632,10 @@ pub struct ThreadAccountSelectParams {
 #[ts(export_to = "v2/")]
 pub struct ThreadAccountSelectResponse {
     pub account_id: String,
-    /// The thread changed successfully; false means saving the new-thread default failed.
+    /// Whether this thread's account handoff is still pending.
+    #[serde(default)]
+    pub pending: bool,
+    /// False means saving the new-thread default failed; the selection was still accepted.
     pub default_saved: bool,
 }
 
