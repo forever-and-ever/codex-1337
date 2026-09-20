@@ -442,16 +442,11 @@ fn list_agents_tool_includes_path_prefix_and_agent_fields() {
         properties
             .get("path_prefix")
             .and_then(|schema| schema.description.as_deref()),
-        Some("Task-path prefix filter without a trailing slash. Omit to list all live agents.")
+        Some("Task-path prefix filter without a trailing slash. Omit to list all retained agents.")
     );
     assert_eq!(
         output_schema.expect("list_agents output schema")["properties"]["agents"]["items"]["required"],
-        json!([
-            "agent_name",
-            "agent_status",
-            "service_tier",
-            "effective_service_tier"
-        ])
+        json!(["agent_name", "agent_status"])
     );
 }
 
@@ -464,7 +459,7 @@ fn list_agents_tool_status_schema_includes_interrupted() {
 
     assert_eq!(
         output_schema.expect("list_agents output schema")["properties"]["agents"]["items"]["properties"]
-            ["agent_status"]["allOf"][0]["oneOf"][0]["enum"],
+            ["agent_status"]["anyOf"][0]["oneOf"][0]["enum"],
         json!([
             "pending_init",
             "running",

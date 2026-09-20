@@ -3958,8 +3958,14 @@ async fn multi_agent_v2_interrupt_agent_accepts_unloaded_task_name_target() {
     let (content, _) = expect_text_output(output);
     let result: ListAgentsResult =
         serde_json::from_str(&content).expect("list_agents result should be json");
-    assert_eq!(result.agents.len(), 1);
-    assert_eq!(result.agents[0].agent_name, "/root");
+    assert_eq!(
+        result
+            .agents
+            .iter()
+            .map(|agent| (agent.agent_name.as_str(), agent.agent_status.is_null()))
+            .collect::<Vec<_>>(),
+        vec![("/root", false), ("/root/worker", true)]
+    );
 }
 
 #[tokio::test]

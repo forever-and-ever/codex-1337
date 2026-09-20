@@ -1131,7 +1131,7 @@ impl ThreadManager {
         .await
     }
 
-    /// Reloads a recorded Multi-Agent V2 child through its currently loaded immediate parent.
+    /// Reloads a retained V2 child and its unloaded ancestors through the loaded owner.
     ///
     /// The child keeps the existing parent-controlled reload semantics. Callers cannot supply
     /// configuration overrides, and an unavailable or unrecognized owner is an error.
@@ -1139,29 +1139,55 @@ impl ThreadManager {
         &self,
         child_thread_id: ThreadId,
     ) -> CodexResult<()> {
-        let stored_thread = self
-            .state
-            .read_stored_thread(ReadThreadParams {
-                thread_id: child_thread_id,
-                include_archived: true,
-                include_history: false,
-            })
-            .await?;
-        let Some(parent_thread_id) = stored_thread.parent_thread_id else {
-            return Err(CodexErr::InvalidRequest(format!(
-                "thread {child_thread_id} is not a recorded multi-agent v2 child"
-            )));
+        let mut lineage = Vec::new();
+        let mut seen = HashSet::new();
+        let mut cursor = child_thread_id;
+        let mut parent = loop {
+            if !seen.insert(cursor) {
+                return Err(CodexErr::InvalidRequest("cyclic agent ancestry".into()));
+            }
+            let stored = self
+                .state
+                .read_stored_thread(ReadThreadParams {
+                    thread_id: cursor,
+                    include_archived: true,
+                    include_history: false,
+                })
+                .await?;
+            let parent_id = stored.parent_thread_id.ok_or_else(|| {
+                CodexErr::InvalidRequest("resume the owning root before its subagents".into())
+            })?;
+            lineage.push(cursor);
+            if let Ok(parent) = self.get_thread(parent_id).await {
+                break parent;
+            }
+            cursor = parent_id;
         };
-        let parent = self.get_thread(parent_thread_id).await.map_err(|_| {
-            CodexErr::InvalidRequest(format!(
-                "cannot resume multi-agent v2 child {child_thread_id}: parent {parent_thread_id} is not loaded; resume the parent first"
-            ))
-        })?;
-        let config = parent.session.get_config().await.as_ref().clone();
-        let agent_control = parent.session.services.agent_control.clone();
-        agent_control
-            .ensure_v2_agent_loaded(config, child_thread_id, Some(parent))
-            .await
+        for child in lineage.into_iter().rev() {
+            let config = parent.session.get_config().await.as_ref().clone();
+            let control = parent.session.services.agent_control.clone();
+            control
+                .ensure_v2_agent_loaded(config, child, Some(parent))
+                .await?;
+            parent = self.get_thread(child).await?;
+        }
+        Ok(())
+    }
+
+    /// Retire a stopped subtree belonging to a loaded owning root, preserving its history.
+    pub async fn retire_agent(
+        &self,
+        root: ThreadId,
+        target: ThreadId,
+    ) -> CodexResult<Vec<ThreadId>> {
+        let owner = self.get_thread(root).await?;
+        if owner.session_source.is_non_root_agent() {
+            return Err(CodexErr::InvalidRequest(
+                "retirement requires the owning root".into(),
+            ));
+        }
+        let control = &owner.session.services.agent_control;
+        control.retire_agent(root, target).await
     }
 
     #[instrument(level = "trace", skip_all)]

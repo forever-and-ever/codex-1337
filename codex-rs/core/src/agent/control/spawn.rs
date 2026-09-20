@@ -312,12 +312,17 @@ impl AgentControl {
     }
 
     /// A provided parent enables owner-validated reloads; `None` preserves sender-driven reloads.
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "Retirement must exclude owner validation and runtime reload as one admission."
+    )]
     pub(crate) async fn ensure_v2_agent_loaded(
         &self,
         mut config: Config,
         thread_id: ThreadId,
         parent: Option<Arc<CodexThread>>,
     ) -> CodexResult<()> {
+        let _lifecycle = self.lifecycle.read().await;
         let state = self.upgrade()?;
         let parent = if let Some(parent) = parent {
             let parent_thread_id = parent.session.thread_id;
@@ -599,6 +604,10 @@ impl AgentControl {
         }
     }
 
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "Retirement must exclude child creation through initial input submission."
+    )]
     async fn spawn_agent_internal(
         &self,
         config: Config,
@@ -606,6 +615,7 @@ impl AgentControl {
         session_source: Option<SessionSource>,
         options: SpawnAgentOptions,
     ) -> CodexResult<LiveAgent> {
+        let _lifecycle = self.lifecycle.read().await;
         let state = self.upgrade()?;
         let multi_agent_version = state
             .effective_multi_agent_version_for_spawn(
@@ -776,11 +786,11 @@ impl AgentControl {
         };
         match initial_input {
             SpawnInitialInput::UserInput(input) => {
-                self.send_input(new_thread.thread_id, input, start_options)
+                self.submit_agent_input(new_thread.thread_id, input, start_options)
                     .await?;
             }
             SpawnInitialInput::InterAgentCommunication(communication, context) => {
-                self.send_inter_agent_communication_after_capacity_check(
+                self.submit_inter_agent_communication(
                     new_thread.thread_id,
                     &state,
                     communication,

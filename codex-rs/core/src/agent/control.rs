@@ -76,6 +76,7 @@ pub(crate) use self::service_tier::normalize_agent_service_tier;
 mod execution;
 mod legacy;
 mod residency;
+mod retirement;
 mod service_tier;
 mod spawn;
 mod user_authorization;
@@ -111,9 +112,10 @@ pub(crate) struct LiveAgent {
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub(crate) struct ListedAgent {
     pub(crate) agent_name: String,
-    pub(crate) agent_status: AgentStatus,
+    /// None means retained but unloaded, not missing or retired.
+    pub(crate) agent_status: Option<AgentStatus>,
     #[serde(flatten)]
-    pub(crate) tier: AgentTierStatus,
+    pub(crate) tier: Option<AgentTierStatus>,
 }
 
 /// Control-plane handle for multi-agent operations.
@@ -133,6 +135,8 @@ pub(crate) struct AgentControl {
     /// Captured at construction so delegates retain their manager's allocation policy.
     thread_id_generator: ThreadIdGenerator,
     state: Arc<AgentRegistry>,
+    /// Retirement excludes concurrent spawn, reload, and message admission.
+    lifecycle: Arc<tokio::sync::RwLock<()>>,
     v2_residency: Arc<V2Residency>,
     agent_execution_limiter: Arc<AgentExecutionLimiter>,
     /// Session-scoped state shared by the root thread and every cloned sub-agent control handle.
@@ -165,6 +169,7 @@ impl AgentControl {
             manager,
             thread_id_generator,
             state: Arc::default(),
+            lifecycle: Arc::default(),
             v2_residency: Arc::default(),
             agent_execution_limiter: Arc::default(),
             rollout_budget: Arc::default(),
@@ -196,7 +201,23 @@ impl AgentControl {
     }
 
     /// Send rich user input items to an existing agent thread.
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "Retirement must exclude the complete async input admission."
+    )]
     pub(crate) async fn send_input(
+        &self,
+        agent_id: ThreadId,
+        input: Vec<UserInput>,
+        start_options: TurnStartOptions,
+    ) -> CodexResult<String> {
+        let _lifecycle = self.lifecycle.read().await;
+        self.submit_agent_input(agent_id, input, start_options)
+            .await
+    }
+
+    // The caller owns lifecycle admission, including the initial input of a spawn.
+    async fn submit_agent_input(
         &self,
         agent_id: ThreadId,
         input: Vec<UserInput>,
@@ -225,6 +246,10 @@ impl AgentControl {
             .await
     }
 
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "Retirement must exclude the complete async message admission."
+    )]
     pub(crate) async fn send_inter_agent_communication(
         &self,
         agent_id: ThreadId,
@@ -232,13 +257,14 @@ impl AgentControl {
         agent_communication_context: AgentCommunicationContext,
         start_options: TurnStartOptions,
     ) -> CodexResult<String> {
+        let _lifecycle = self.lifecycle.read().await;
         let state = self.upgrade()?;
         if communication.trigger_turn {
             let thread = state.get_thread(agent_id).await?;
             self.ensure_execution_capacity_for_turn_start(&thread)
                 .await?;
         }
-        self.send_inter_agent_communication_after_capacity_check(
+        self.submit_inter_agent_communication(
             agent_id,
             &state,
             communication,
@@ -295,24 +321,6 @@ impl AgentControl {
                 .await;
         }
         Ok(())
-    }
-
-    async fn send_inter_agent_communication_after_capacity_check(
-        &self,
-        agent_id: ThreadId,
-        state: &Arc<ThreadManagerState>,
-        communication: InterAgentCommunication,
-        context: AgentCommunicationContext,
-        start_options: TurnStartOptions,
-    ) -> CodexResult<String> {
-        self.submit_inter_agent_communication(
-            agent_id,
-            state,
-            communication,
-            context,
-            start_options,
-        )
-        .await
     }
 
     async fn submit_inter_agent_communication(
@@ -393,7 +401,7 @@ impl AgentControl {
         {
             let _ = state.remove_thread(&agent_id).await;
             self.forget_v2_residency(agent_id);
-            self.state.release_spawned_thread(agent_id);
+            // A dead runtime does not retire its durable identity.
         }
         result
     }
@@ -468,7 +476,7 @@ impl AgentControl {
             return Ok(thread_id);
         }
         Err(CodexErr::UnsupportedOperation(format!(
-            "live agent path `{}` not found",
+            "agent path `{}` not found",
             agent_path.as_str()
         )))
     }
@@ -516,7 +524,7 @@ impl AgentControl {
         let parent_prefix = format!("{parent_path}/");
         let mut agent_paths = self
             .state
-            .live_agents()
+            .retained_agents()
             .into_iter()
             .filter_map(|metadata| metadata.agent_path)
             .filter(|path| {
@@ -568,8 +576,8 @@ impl AgentControl {
             })
             .transpose()?;
 
-        let mut live_agents = self.state.live_agents();
-        live_agents.sort_by(|left, right| {
+        let mut retained_agents = self.state.retained_agents();
+        retained_agents.sort_by(|left, right| {
             left.agent_path
                 .as_deref()
                 .unwrap_or_default()
@@ -583,7 +591,7 @@ impl AgentControl {
         });
 
         let root_path = AgentPath::root();
-        let mut agents = Vec::with_capacity(live_agents.len().saturating_add(1));
+        let mut agents = Vec::with_capacity(retained_agents.len().saturating_add(1));
         if resolved_prefix
             .as_ref()
             .is_none_or(|prefix| agent_matches_prefix(Some(&root_path), prefix))
@@ -592,12 +600,12 @@ impl AgentControl {
         {
             agents.push(ListedAgent {
                 agent_name: root_path.to_string(),
-                agent_status: root_thread.agent_status().await,
-                tier: root_thread.session.agent_tier_status().await,
+                agent_status: Some(root_thread.agent_status().await),
+                tier: Some(root_thread.session.agent_tier_status().await),
             });
         }
 
-        for metadata in live_agents {
+        for metadata in retained_agents {
             let Some(thread_id) = metadata.agent_id else {
                 continue;
             };
@@ -608,8 +616,12 @@ impl AgentControl {
                 continue;
             }
 
-            let Ok(thread) = state.get_thread(thread_id).await else {
-                continue;
+            let (agent_status, tier) = match state.get_thread(thread_id).await {
+                Ok(thread) => (
+                    Some(thread.agent_status().await),
+                    Some(thread.session.agent_tier_status().await),
+                ),
+                Err(_) => (None, None),
             };
             let agent_name = metadata
                 .agent_path
@@ -618,8 +630,8 @@ impl AgentControl {
                 .unwrap_or_else(|| thread_id.to_string());
             agents.push(ListedAgent {
                 agent_name,
-                agent_status: thread.agent_status().await,
-                tier: thread.session.agent_tier_status().await,
+                agent_status,
+                tier,
             });
         }
 
@@ -893,6 +905,13 @@ impl AgentControl {
         let Some(agent_graph_store) = state.agent_graph_store() else {
             return;
         };
+        // Even an empty child must be reloadable after a crash. Persist the conversation
+        // before publishing its durable family membership, not on its first output.
+        child_thread.ensure_rollout_materialized().await;
+        if let Err(err) = child_thread.flush_rollout().await {
+            warn!(%child_thread_id, %err, "failed to persist spawned agent conversation");
+            return;
+        }
         if let Err(err) = agent_graph_store
             .upsert_thread_spawn_edge(
                 parent_thread_id,

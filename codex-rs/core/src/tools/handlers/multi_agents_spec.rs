@@ -319,7 +319,7 @@ pub fn create_list_agents_tool() -> ToolSpec {
     let properties = BTreeMap::from([(
         "path_prefix".to_string(),
         JsonSchema::string(Some(
-            "Task-path prefix filter without a trailing slash. Omit to list all live agents."
+            "Task-path prefix filter without a trailing slash. Omit to list all retained agents."
                 .to_string(),
         )),
     )]);
@@ -327,7 +327,7 @@ pub fn create_list_agents_tool() -> ToolSpec {
     ToolSpec::Function(ResponsesApiTool {
         name: "list_agents".to_string(),
         description:
-            "List live agents in the current root thread tree. Optionally filter by task-path prefix."
+            "List retained agents in the current root thread tree, including unloaded agents (agent_status: null). Messaging an unloaded agent restores its existing context; followup_task starts a turn. Optionally filter by task-path prefix."
                 .to_string(),
         strict: false,
         defer_loading: None,
@@ -487,16 +487,16 @@ fn list_agents_output_schema() -> Value {
                             "description": "Canonical task name for the agent when available, otherwise the agent id."
                         },
                         "agent_status": {
-                            "description": "Last known status of the agent.",
-                            "allOf": [agent_status_output_schema()]
+                            "description": "Current runtime status; null means retained but unloaded.",
+                            "anyOf": [agent_status_output_schema(), { "type": "null" }]
                         },
                         "service_tier": { "type": "string", "description": "Selected tier, inherit, or model_default for an unconfigured root." },
                         "effective_service_tier": { "type": ["string", "null"], "description": "Resolved request tier; null uses the model's default routing." }
                     },
-                    "required": ["agent_name", "agent_status", "service_tier", "effective_service_tier"],
+                    "required": ["agent_name", "agent_status"],
                     "additionalProperties": false
                 },
-                "description": "Live agents visible in the current root thread tree."
+                "description": "Retained agents in the current root thread tree; routing fields are absent for unloaded agents."
             }
         },
         "required": ["agents"],

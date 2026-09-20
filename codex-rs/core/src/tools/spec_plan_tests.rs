@@ -3081,6 +3081,7 @@ async fn code_mode_only_can_expose_namespaced_multi_agent_v2_as_normal_tools() {
             "request_user_input",
             "agents",
             "set_agent_service_tier",
+            "retire_agent",
             // Hosted Responses tool.
             "web_search",
         ]
@@ -3249,6 +3250,7 @@ async fn hosted_web_search_and_standalone_image_generation_follow_runtime_gates(
             // Multi-agent v2 tools.
             MULTI_AGENT_V2_NAMESPACE,
             "set_agent_service_tier",
+            "retire_agent",
             // Hosted Responses tools.
             "web_search",
         ]

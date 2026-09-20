@@ -1,3 +1,4 @@
+use anyhow::Context;
 use anyhow::Result;
 use codex_core::TurnInputRequest;
 use codex_core::config::AgentRoleConfig;
@@ -8,10 +9,12 @@ use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::Op;
 use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::user_input::UserInput;
+use core_test_support::responses::ResponseMock;
 use core_test_support::responses::assert_parent_turn;
 use core_test_support::responses::assert_root_turn;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
+use core_test_support::responses::ev_function_call;
 use core_test_support::responses::ev_function_call_with_namespace;
 use core_test_support::responses::ev_response_created;
 use core_test_support::responses::mount_sse_once;
@@ -100,8 +103,13 @@ async fn mount_root_collaboration_call(
     call_id: &'static str,
     tool_name: &'static str,
     arguments: &str,
-) {
+) -> ResponseMock {
     let first_response_id = format!("resp-{call_id}-1");
+    let call = if tool_name == "retire_agent" {
+        ev_function_call(call_id, tool_name, arguments)
+    } else {
+        ev_function_call_with_namespace(call_id, COLLABORATION_NAMESPACE, tool_name, arguments)
+    };
     mount_sse_once_match(
         server,
         move |request: &wiremock::Request| {
@@ -109,7 +117,7 @@ async fn mount_root_collaboration_call(
         },
         sse(vec![
             ev_response_created(&first_response_id),
-            ev_function_call_with_namespace(call_id, COLLABORATION_NAMESPACE, tool_name, arguments),
+            call,
             ev_completed(&first_response_id),
         ]),
     )
@@ -128,7 +136,7 @@ async fn mount_root_collaboration_call(
             ev_completed(&second_response_id),
         ]),
     )
-    .await;
+    .await
 }
 
 fn configure_multi_agent_v2_with_role(
@@ -352,6 +360,17 @@ async fn cold_root_resume_restores_agent_identity_and_role_on_followup() -> Resu
 
     let grandchild = nested_mock.last_request().expect("grandchild").body_json();
     let nested_id = &grandchild["client_metadata"]["thread_id"];
+    let grandchild_id = codex_protocol::ThreadId::from_string(nested_id.as_str().unwrap())?;
+    if let Ok(nested_thread) = initial.thread_manager.get_thread(grandchild_id).await {
+        wait_for_event(nested_thread.as_ref(), |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+        // TestCodex::restart stops only the root. A daemon restart must stop every writer.
+        // The residency limiter may already have evicted this idle grandchild.
+        nested_thread.ensure_rollout_materialized().await;
+        nested_thread.shutdown_and_wait().await?;
+    }
     let sibling_thread_id = initial
         .thread_manager
         .list_thread_ids()
@@ -425,6 +444,44 @@ async fn cold_root_resume_restores_agent_identity_and_role_on_followup() -> Resu
     });
     let resumed = resume_builder.restart(&server, &initial).await?;
     drop(initial);
+    assert_eq!(
+        resumed.thread_manager.list_thread_ids().await,
+        vec![root_thread_id]
+    );
+    let listed = mount_root_collaboration_call(
+        &server,
+        "enumerate cold family",
+        "cold-family",
+        "list_agents",
+        "{}",
+    )
+    .await;
+    resumed.submit_turn("enumerate cold family").await?;
+    let roster: Value = serde_json::from_str(
+        &listed
+            .single_request()
+            .function_call_output_text("cold-family")
+            .expect("agent roster"),
+    )?;
+    assert_eq!(
+        roster["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|agent| {
+                (
+                    agent["agent_name"].as_str().unwrap(),
+                    agent["agent_status"].is_null(),
+                )
+            })
+            .collect::<Vec<_>>(),
+        vec![
+            ("/root", false),
+            ("/root/survivor", true),
+            ("/root/worker", true),
+            ("/root/worker/grandchild", true),
+        ]
+    );
     assert_eq!(
         resumed.thread_manager.list_thread_ids().await,
         vec![root_thread_id]
@@ -707,6 +764,84 @@ openai_base_url = "{redirected_base_url}"
             .expect("captured redirected-provider requests")
             .is_empty(),
         "a changed role must not redirect resumed model requests",
+    );
+
+    // Selecting an unloaded grandchild restores its owning chain, not an independent agent.
+    resumed
+        .thread_manager
+        .ensure_multi_agent_v2_child_loaded(grandchild_id)
+        .await
+        .context("reload the retained grandchild through its owning chain")?;
+    assert_eq!(
+        resumed
+            .thread_manager
+            .get_thread(grandchild_id)
+            .await?
+            .config_snapshot()
+            .await
+            .parent_thread_id,
+        Some(worker_thread_id)
+    );
+
+    let retired = mount_root_collaboration_call(
+        &server,
+        "retire the worker subtree",
+        "retire-worker",
+        "retire_agent",
+        r#"{"target":"worker"}"#,
+    )
+    .await;
+    resumed.submit_turn("retire the worker subtree").await?;
+    assert_eq!(
+        retired
+            .single_request()
+            .function_call_output_text("retire-worker")
+            .as_deref(),
+        Some("Retired 2 agent(s). Saved conversations were preserved.")
+    );
+    assert!(
+        resumed
+            .thread_manager
+            .ensure_multi_agent_v2_child_loaded(grandchild_id)
+            .await
+            .is_err()
+    );
+
+    if resumed
+        .thread_manager
+        .get_thread(sibling_thread_id)
+        .await
+        .is_ok()
+    {
+        surviving_sibling.shutdown_and_wait().await?;
+    }
+    let again = resume_builder
+        .restart(&server, &resumed)
+        .await
+        .context("restart after retirement")?;
+    let listed = mount_root_collaboration_call(
+        &server,
+        "enumerate retained family",
+        "retained-family",
+        "list_agents",
+        "{}",
+    )
+    .await;
+    again.submit_turn("enumerate retained family").await?;
+    let roster: Value = serde_json::from_str(
+        &listed
+            .single_request()
+            .function_call_output_text("retained-family")
+            .expect("retained roster"),
+    )?;
+    assert_eq!(
+        roster["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|agent| { agent["agent_name"].as_str().unwrap() })
+            .collect::<Vec<_>>(),
+        vec!["/root", "/root/survivor"]
     );
 
     Ok(())

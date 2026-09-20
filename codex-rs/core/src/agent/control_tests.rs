@@ -983,7 +983,7 @@ async fn check_v2_agent_reload(route: V2ReloadRoute) {
 }
 
 #[tokio::test]
-async fn resume_agent_from_rollout_does_not_reopen_v2_descendants() {
+async fn v2_family_survives_unload_until_idle_subtree_retirement() {
     let (home, mut config) = test_config().await;
     let _ = config.features.enable(Feature::MultiAgentV2);
     let _ = config.features.enable(Feature::Sqlite);
@@ -1016,7 +1016,7 @@ async fn resume_agent_from_rollout_does_not_reopen_v2_descendants() {
                 depth: 2,
                 agent_path: Some(reviewer_path.clone()),
                 agent_nickname: None,
-                agent_role: Some("reviewer".to_string()),
+                agent_role: None,
             })),
         )
         .await
@@ -1091,14 +1091,38 @@ async fn resume_agent_from_rollout_does_not_reopen_v2_descendants() {
         assert!(resumed_control.ensure_agent_known(thread_id).is_ok());
     }
 
-    resumed_control
-        .close_agent(worker_thread_id)
+    resumed_manager
+        .ensure_multi_agent_v2_child_loaded(reviewer_thread_id)
         .await
-        .expect("closing a restored sibling should succeed");
+        .expect("nested attachment should restore its owning chain");
+    let reviewer = resumed_manager
+        .get_thread(reviewer_thread_id)
+        .await
+        .unwrap();
+    // A turn reserves active_turn before it becomes Running. Retirement must seal
+    // that admission boundary, not rely on a potentially stale presentation status.
+    *reviewer.session.active_turn.lock().await = Some(crate::state::ActiveTurn::default());
+    assert!(
+        resumed_control
+            .retire_agent(parent_thread_id, worker_thread_id)
+            .await
+            .is_err()
+    );
+    assert!(resumed_control.ensure_agent_known(worker_thread_id).is_ok());
+    *reviewer.session.active_turn.lock().await = None;
+    resumed_control
+        .retire_agent(parent_thread_id, worker_thread_id)
+        .await
+        .expect("retiring a stopped subtree should succeed");
 
     let closed_worker = resumed_control.ensure_agent_known(worker_thread_id);
     let surviving_sibling = resumed_control.ensure_agent_known(sibling_thread_id);
     assert!(closed_worker.is_err());
+    assert!(
+        resumed_control
+            .ensure_agent_known(reviewer_thread_id)
+            .is_err()
+    );
     assert!(surviving_sibling.is_ok());
     assert_thread_not_loaded(&resumed_manager, sibling_thread_id).await;
 }
