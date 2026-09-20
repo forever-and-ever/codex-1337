@@ -125,7 +125,8 @@ async fn work_status_below_composer_clears_without_transcript_entries() {
             roster.down();
         }
         roster.sort_by_activity();
-        assert_eq!(roster.rows[0].id, ids[8]);
+        // Activity changes cannot move a row while keyboard navigation owns focus.
+        assert_eq!(roster.rows[0].id, ids[0]);
         assert_eq!(roster.focused, Some(ids[8]));
     }
     let mut panels = Vec::new();
@@ -144,6 +145,7 @@ async fn work_status_below_composer_clears_without_transcript_entries() {
             let mut roster = chat.subagent_roster.lock().unwrap();
             roster.watched = Some(ids[8]);
             roster.focused = None;
+            roster.sort_by_activity();
         }
         for (width, max_height) in [(80, 16), (30, 16), (30, 8)] {
             let height = chat.desired_height(width).min(max_height);

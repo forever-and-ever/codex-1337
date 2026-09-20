@@ -156,6 +156,16 @@ impl App {
                 .or_default();
         }
         self.track_subagent_panel(&notification);
+        if matches!(
+            &notification,
+            ServerNotification::ThreadClosed(_) | ServerNotification::TurnCompleted(_)
+        ) && let Some(root) = self.primary_thread_id
+            && let super::app_server_event_targets::ServerNotificationThreadTarget::Thread(id) =
+                super::app_server_event_targets::server_notification_thread_target(&notification)
+            && (id == root || self.agent_navigation.get(&id).is_some())
+        {
+            self.refresh_agent_picker_threads(app_server_client, root);
+        }
         self.track_agents_overview_notification(&notification);
         if matches!(
             &notification,

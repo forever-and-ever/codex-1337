@@ -57,11 +57,7 @@ impl App {
                         .await
                     {
                         Ok(page) => page,
-                        Err(err) if threads.is_empty() => return Err(err.to_string()),
-                        Err(err) => {
-                            tracing::warn!(%err, "failed to refresh remaining agent picker descendants");
-                            break;
-                        }
+                        Err(err) => return Err(err.to_string()),
                     };
                     threads.extend(
                         page.data
@@ -109,6 +105,35 @@ impl App {
         let selected = self
             .chat_widget
             .selected_index_for_present_view(AGENT_PICKER_VIEW_ID);
+        if threads.len() < AGENT_PICKER_MAX_THREADS {
+            let reconciling = match self
+                .agent_navigation
+                .roster
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .retiring
+            {
+                Some(crate::subagent_roster::Retirement::Reconciling(target)) => Some(target),
+                _ => None,
+            };
+            let retained: HashSet<_> = threads
+                .iter()
+                .filter_map(|thread| ThreadId::from_string(&thread.id).ok())
+                .collect();
+            for id in std::mem::take(&mut self.agent_navigation.picker_refresh_known) {
+                if !retained.contains(&id)
+                    && (reconciling == Some(id)
+                        || !self.thread_event_channels.get(&id).is_some_and(|channel| {
+                            channel.attachment() == ThreadEventAttachment::Live
+                        }))
+                {
+                    self.agent_navigation.remove(id);
+                    if self.active_thread_id == Some(id) {
+                        self.app_event_tx.send(AppEvent::SelectAgentThread(root));
+                    }
+                }
+            }
+        }
         for thread in threads {
             let Ok(thread_id) = ThreadId::from_string(&thread.id) else {
                 continue;
@@ -121,9 +146,6 @@ impl App {
             let is_running = matches!(thread.status, ThreadStatus::Active { .. });
             let update_liveness = previous.is_none() || !is_running;
             let is_closed = !live && matches!(thread.status, ThreadStatus::NotLoaded);
-            if !is_closed && previous.is_some_and(|entry| entry.is_closed) {
-                continue;
-            }
             let agent_path = crate::app_server_session::source_agent_path(&thread.source);
             let agent_nickname = thread
                 .agent_nickname
@@ -145,8 +167,12 @@ impl App {
                 .iter_mut()
                 .find(|row| row.id == thread_id)
             {
-                // Live notifications win over an asynchronously fetched seed.
-                row.status.get_or_insert(thread.status);
+                // Subscribed notifications win; unloaded roster entries rely on snapshots.
+                if live {
+                    row.status.get_or_insert(thread.status);
+                } else {
+                    row.status = Some(thread.status);
+                }
             }
             if !live && update_liveness {
                 self.agent_navigation.set_running(thread_id, is_running);
@@ -154,6 +180,19 @@ impl App {
         }
 
         self.sync_subagent_roster();
+        {
+            let mut roster = self
+                .agent_navigation
+                .roster
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if matches!(
+                roster.retiring,
+                Some(crate::subagent_roster::Retirement::Reconciling(_))
+            ) {
+                roster.retiring = None;
+            }
+        }
         let params = self.agent_picker_selection_view_params(selected);
         self.chat_widget
             .replace_selection_view_if_present(AGENT_PICKER_VIEW_ID, params);

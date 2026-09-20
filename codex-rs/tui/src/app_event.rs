@@ -365,6 +365,12 @@ pub(crate) enum AppEvent {
         serial: u64,
         result: Result<codex_app_server_protocol::GetAccountResponse, String>,
     },
+    /// Reconcile a user-requested retirement without blocking terminal input.
+    AgentRetired {
+        root: ThreadId,
+        target: ThreadId,
+        result: Result<Vec<String>, String>,
+    },
     /// Merge a completed root-scoped agent-picker refresh without blocking terminal input.
     AgentPickerThreadsLoaded {
         primary_thread_id: ThreadId,

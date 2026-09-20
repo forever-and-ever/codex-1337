@@ -1,4 +1,4 @@
-//! Live, root-scoped subagent presentation. Focus is independent of the watched thread.
+//! Retained, root-scoped subagents. Runtime residency does not determine membership.
 use crate::agent_status;
 use crate::line_truncation::truncate_line_to_width;
 use crate::render::Insets;
@@ -20,6 +20,12 @@ use std::sync::Mutex;
 pub(crate) type SharedRoster = Arc<Mutex<SubagentRoster>>;
 
 #[derive(Debug)]
+pub(crate) enum Retirement {
+    Pending,
+    Reconciling(ThreadId),
+}
+
+#[derive(Debug)]
 pub(crate) struct AgentRow {
     pub id: ThreadId,
     pub name: String,
@@ -33,6 +39,7 @@ pub(crate) struct SubagentRoster {
     pub rows: Vec<AgentRow>,
     pub watched: Option<ThreadId>,
     pub focused: Option<ThreadId>,
+    pub retiring: Option<Retirement>,
     first: usize,
     name_width: usize,
 }
@@ -42,6 +49,13 @@ impl SubagentRoster {
         let old_index = self
             .focused
             .and_then(|id| self.rows.iter().position(|row| row.id == id));
+        let focused_order = self.focused.map(|_| {
+            self.rows
+                .iter()
+                .enumerate()
+                .map(|(index, row)| (row.id, index))
+                .collect::<HashMap<_, _>>()
+        });
         let mut previous: HashMap<_, _> = self.rows.drain(..).map(|row| (row.id, row)).collect();
         self.rows = agents
             .into_iter()
@@ -59,6 +73,10 @@ impl SubagentRoster {
                 },
             })
             .collect();
+        if let Some(order) = focused_order {
+            self.rows
+                .sort_by_key(|row| order.get(&row.id).copied().unwrap_or(usize::MAX));
+        }
         self.sort_by_activity();
         self.name_width = self
             .rows
@@ -79,6 +97,9 @@ impl SubagentRoster {
     }
 
     pub fn sort_by_activity(&mut self) {
+        if self.focused.is_some() {
+            return;
+        }
         self.rows.sort_by(|a, b| {
             matches!(b.status, Some(ThreadStatus::Active { .. }))
                 .cmp(&matches!(a.status, Some(ThreadStatus::Active { .. })))
@@ -102,6 +123,7 @@ impl SubagentRoster {
             .and_then(|id| self.rows.iter().position(|row| row.id == id))
             .and_then(|index| index.checked_sub(1))
             .map(|index| self.rows[index].id);
+        self.sort_by_activity();
     }
 }
 
@@ -113,7 +135,11 @@ impl Renderable for RosterView {
             .0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        roster.rows.len().min(6) as u16
+        if roster.rows.is_empty() {
+            0
+        } else {
+            roster.rows.len().min(6) as u16 + 1
+        }
     }
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
@@ -127,7 +153,28 @@ impl Renderable for RosterView {
             .0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let height = usize::from(area.height);
+        // Preserve at least one selectable row when the terminal is vertically cramped.
+        let show_hint = area.height > 1;
+        let height = usize::from(area.height) - usize::from(show_hint);
+        let hint = match roster.retiring {
+            Some(Retirement::Pending) => "  Retiring…",
+            Some(Retirement::Reconciling(_)) => "  Checking retirement…",
+            None => "  Ctrl+X retire · ↑↓ select · Enter open · Esc back",
+        };
+        if show_hint {
+            Paragraph::new(truncate_line_to_width(
+                Line::from(hint).dim(),
+                usize::from(area.width),
+            ))
+            .render(
+                Rect {
+                    y: area.bottom() - 1,
+                    height: 1,
+                    ..area
+                },
+                buf,
+            );
+        }
         let index = roster
             .focused
             .or(roster.watched)

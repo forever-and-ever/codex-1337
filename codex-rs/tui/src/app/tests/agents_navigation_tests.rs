@@ -81,8 +81,7 @@ async fn agents_navigation_roster_tracks_background_metadata_without_replaying_a
     );
     drop(roster);
 
-    // An unloaded thread must not reappear when unrelated metadata reconciles
-    // the roster; an authoritative live status can make it available again.
+    // Residency changes must preserve roster identity and keyboard focus.
     app.agent_navigation.remove(other);
     app.sync_subagent_roster();
     app.agent_navigation.roster.lock().unwrap().down();
@@ -90,12 +89,19 @@ async fn agents_navigation_roster_tracks_background_metadata_without_replaying_a
     app.sync_subagent_roster();
     {
         let roster = app.agent_navigation.roster.lock().unwrap();
-        assert_eq!((roster.rows.len(), roster.focused), (0, None));
+        assert_eq!((roster.rows.len(), roster.focused), (1, Some(child)));
     }
     insta::assert_snapshot!(
         "subagent_roster_unloaded",
         render_bottom_popup(&app.chat_widget, /*width*/ 80)
     );
+    app.agent_navigation.roster.lock().unwrap().retiring =
+        Some(crate::subagent_roster::Retirement::Pending);
+    insta::assert_snapshot!(
+        "subagent_roster_retiring",
+        render_bottom_popup(&app.chat_widget, /*width*/ 80)
+    );
+    app.agent_navigation.roster.lock().unwrap().retiring = None;
     app.track_subagent_panel(&status(codex_app_server_protocol::ThreadStatus::Idle));
     let roster = app.agent_navigation.roster.lock().unwrap();
     assert_eq!(
@@ -106,6 +112,12 @@ async fn agents_navigation_roster_tracks_background_metadata_without_replaying_a
             .collect::<Vec<_>>(),
         vec![(child, Some(codex_app_server_protocol::ThreadStatus::Idle))]
     );
+    drop(roster);
+    app.agent_navigation.retire(child);
+    // A response issued before retirement cannot resurrect the retired row.
+    app.upsert_agent_picker_thread(child, Some("worker".into()), None, false);
+    app.sync_subagent_roster();
+    assert!(app.agent_navigation.roster.lock().unwrap().rows.is_empty());
 }
 
 #[tokio::test]

@@ -2852,6 +2852,9 @@ impl App {
             AppEvent::OpenAgentPicker => {
                 self.open_agent_picker(app_server).await;
             }
+            AppEvent::AgentRetired { root, target, result } => {
+                self.finish_agent_retirement(tui, app_server, root, target, result).await?;
+            }
             AppEvent::AgentPickerThreadsLoaded {
                 primary_thread_id,
                 request_id,

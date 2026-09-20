@@ -773,10 +773,6 @@ impl App {
         self.thread_event_channels
             .get(&thread_id)
             .is_none_or(|channel| channel.attachment() != ThreadEventAttachment::Live)
-            && self
-                .agent_navigation
-                .get(&thread_id)
-                .is_none_or(|entry| !entry.is_closed || self.thread_unavailable(thread_id))
     }
 
     pub(super) fn reset_for_thread_switch(&mut self, tui: &mut tui::Tui) -> Result<()> {

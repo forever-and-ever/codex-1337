@@ -50,10 +50,13 @@ pub(crate) struct AgentNavigationState {
     pub(super) picker_order: Vec<ThreadId>,
     /// Threads with observed terminal liveness that must not be revived by delayed activity.
     stopped_threads: HashSet<ThreadId>,
+    /// Tombstones reject stale refreshes and replayed activity after confirmed retirement.
+    retired_threads: HashSet<ThreadId>,
     /// Spawned child threads whose instructions are owned by their parent agent.
     parent_owned_threads: HashSet<ThreadId>,
     /// Coalesces root refreshes while rejecting replies from a previous session.
     pub(super) picker_refresh: Option<(ThreadId, Uuid)>,
+    pub(super) picker_refresh_known: HashSet<ThreadId>,
 }
 
 /// Direction of keyboard traversal through the stable picker order.
@@ -72,6 +75,12 @@ impl AgentNavigationState {
         }
         let request_id = Uuid::new_v4();
         self.picker_refresh = Some((thread_id, request_id));
+        self.picker_refresh_known = self
+            .threads
+            .keys()
+            .copied()
+            .filter(|id| *id != thread_id)
+            .collect();
         Some(request_id)
     }
 
@@ -122,6 +131,9 @@ impl AgentNavigationState {
         agent_role: Option<String>,
         is_closed: bool,
     ) {
+        if self.retired_threads.contains(&thread_id) {
+            return;
+        }
         if !self.threads.contains_key(&thread_id) {
             self.order.push(thread_id);
         }
@@ -143,6 +155,9 @@ impl AgentNavigationState {
     }
 
     pub(crate) fn record_sub_agent_activity(&mut self, activity: SubAgentActivityDisplay) {
+        if self.retired_threads.contains(&activity.thread_id) {
+            return;
+        }
         if !self.threads.contains_key(&activity.thread_id) {
             self.order.push(activity.thread_id);
         }
@@ -227,20 +242,25 @@ impl AgentNavigationState {
         self.order.clear();
         self.picker_order.clear();
         self.stopped_threads.clear();
+        self.retired_threads.clear();
         self.parent_owned_threads.clear();
         self.picker_refresh = None;
+        self.picker_refresh_known.clear();
     }
 
     /// Removes a tracked thread entirely from picker metadata and traversal order.
     ///
-    /// This is reserved for entries that were only discovered opportunistically and never became
-    /// replayable local threads. Keeping those around after the backend confirms they are gone
-    /// would leave ghost rows in `/subagents`.
+    /// Used after authoritative roster reconciliation or retirement, not runtime unloading.
     pub(crate) fn remove(&mut self, thread_id: ThreadId) {
         self.threads.remove(&thread_id);
         self.order.retain(|candidate| *candidate != thread_id);
         self.stopped_threads.remove(&thread_id);
         self.parent_owned_threads.remove(&thread_id);
+    }
+
+    pub(crate) fn retire(&mut self, thread_id: ThreadId) {
+        self.retired_threads.insert(thread_id);
+        self.remove(thread_id);
     }
 
     /// Returns whether there is at least one tracked thread other than the primary one.

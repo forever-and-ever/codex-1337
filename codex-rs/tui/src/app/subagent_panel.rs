@@ -7,27 +7,12 @@ use codex_app_server_protocol::ThreadStatus;
 
 impl App {
     pub(super) fn sync_subagent_roster(&mut self) {
-        // A replay channel can outlive the server thread. It does not make the
-        // thread available for the inline switcher.
-        {
-            let roster = self.agent_navigation.roster.clone();
-            let roster = roster
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            for row in &roster.rows {
-                if matches!(row.status, Some(ThreadStatus::NotLoaded)) {
-                    self.agent_navigation.mark_closed(row.id);
-                }
-            }
-        }
         let agents = self
             .agent_navigation
             .ordered_threads()
             .into_iter()
-            .filter(|(id, entry)| {
-                Some(*id) != self.primary_thread_id
-                    && !self.side_threads.contains_key(id)
-                    && !entry.is_closed
+            .filter(|(id, _)| {
+                Some(*id) != self.primary_thread_id && !self.side_threads.contains_key(id)
             })
             .map(|(id, entry)| {
                 (
@@ -173,6 +158,31 @@ impl App {
             Some(*id) != self.primary_thread_id && !self.side_threads.contains_key(id)
         });
         let watch_only = watched_child.is_some() && self.chat_widget.is_parent_owned_thread();
+        if key.modifiers == KeyModifiers::CONTROL && key.code == KeyCode::Char('x') {
+            let target = self
+                .agent_navigation
+                .roster
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .focused
+                .or(watched_child);
+            if let Some(target) = target {
+                self.begin_agent_retirement(server, target);
+                tui.frame_requester().schedule_frame();
+                return true;
+            }
+        }
+        let retirement_blocks_navigation = {
+            let roster = self
+                .agent_navigation
+                .roster
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            roster.retiring.is_some() && (roster.focused.is_some() || watch_only)
+        };
+        if retirement_blocks_navigation && key.code != KeyCode::Esc {
+            return true;
+        }
         if watch_only && key.modifiers == KeyModifiers::CONTROL && key.code == KeyCode::Char('c') {
             if let Some(id) = watched_child
                 && self.active_turn_id_for_thread(id).await.is_some()
@@ -189,11 +199,13 @@ impl App {
             && (key.modifiers - KeyModifiers::SHIFT).is_empty()
             && !watch_only
         {
-            self.agent_navigation
+            let mut roster = self
+                .agent_navigation
                 .roster
                 .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .focused = None;
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            roster.focused = None;
+            roster.sort_by_activity();
             return false;
         }
         if !key.modifiers.is_empty() {
@@ -230,11 +242,13 @@ impl App {
                     }
                     KeyCode::Esc => {
                         roster.focused = None;
+                        roster.sort_by_activity();
                         None
                     }
                     KeyCode::Enter => {
                         let target = roster.focused;
                         roster.focused = None;
+                        roster.sort_by_activity();
                         target
                     }
                     _ => return true,
@@ -249,5 +263,101 @@ impl App {
         }
         tui.frame_requester().schedule_frame();
         true
+    }
+
+    fn begin_agent_retirement(&mut self, server: &AppServerSession, target: ThreadId) {
+        let Some(root) = self.primary_thread_id else {
+            return;
+        };
+        if root == target {
+            return;
+        }
+        let mut roster = self
+            .agent_navigation
+            .roster
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if roster.retiring.is_some() {
+            return;
+        }
+        roster.retiring = Some(crate::subagent_roster::Retirement::Pending);
+        drop(roster);
+        let request = server.request_handle();
+        let events = self.app_event_tx.clone();
+        tokio::spawn(async move {
+            let result = request
+                .request_typed::<codex_app_server_protocol::ThreadRetireResponse>(
+                    ClientRequest::ThreadRetire {
+                        request_id: codex_app_server_protocol::RequestId::String(
+                            Uuid::new_v4().to_string(),
+                        ),
+                        params: codex_app_server_protocol::ThreadRetireParams {
+                            root_thread_id: root.to_string(),
+                            thread_id: target.to_string(),
+                        },
+                    },
+                )
+                .await
+                .map(|response| response.thread_ids)
+                .map_err(|error| error.to_string());
+            events.send(AppEvent::AgentRetired {
+                root,
+                target,
+                result,
+            });
+        });
+    }
+
+    pub(super) async fn finish_agent_retirement(
+        &mut self,
+        tui: &mut tui::Tui,
+        server: &mut AppServerSession,
+        root: ThreadId,
+        target: ThreadId,
+        result: Result<Vec<String>, String>,
+    ) -> Result<()> {
+        if self.primary_thread_id != Some(root) {
+            return Ok(());
+        }
+        match result {
+            Ok(ids) => {
+                self.agent_navigation
+                    .roster
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .retiring = None;
+                let ids = ids
+                    .iter()
+                    .filter_map(|id| ThreadId::from_string(id).ok())
+                    .collect::<Vec<_>>();
+                let return_to_root = self.active_thread_id.is_some_and(|id| ids.contains(&id));
+                for id in &ids {
+                    self.agent_navigation.retire(*id);
+                }
+                self.sync_subagent_roster();
+                if return_to_root {
+                    self.select_agent_thread(tui, server, root).await?;
+                }
+                for id in ids {
+                    self.discard_thread_local_state(id).await;
+                }
+                self.refresh_agent_picker_threads(server, root);
+            }
+            Err(error) => {
+                self.chat_widget
+                    .add_error_message(format!("Could not confirm retirement: {error}"));
+                self.agent_navigation
+                    .roster
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .retiring = Some(crate::subagent_roster::Retirement::Reconciling(target));
+                // A transport failure can follow a committed retirement. Only a fresh,
+                // authoritative roster may release the operation lease in that case.
+                self.agent_navigation.picker_refresh = None;
+                self.refresh_agent_picker_threads(server, root);
+            }
+        }
+        tui.frame_requester().schedule_frame();
+        Ok(())
     }
 }
