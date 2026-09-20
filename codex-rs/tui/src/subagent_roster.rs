@@ -1,6 +1,8 @@
 //! Live, root-scoped subagent presentation. Focus is independent of the watched thread.
 use crate::agent_status;
 use crate::line_truncation::truncate_line_to_width;
+use crate::render::Insets;
+use crate::render::RectExt as _;
 use crate::render::renderable::Renderable;
 use crate::status::format_tokens_compact;
 use codex_app_server_protocol::ThreadStatus;
@@ -115,6 +117,9 @@ impl Renderable for RosterView {
     }
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
+        let area = area.inset(Insets::tlbr(
+            /*top*/ 0, /*left*/ 0, /*bottom*/ 0, /*right*/ 2,
+        ));
         if area.is_empty() {
             return;
         }
@@ -144,8 +149,9 @@ impl Renderable for RosterView {
         {
             let tokens = row
                 .tokens
-                .map_or_else(|| "—".to_string(), format_tokens_compact);
-            let tokens_width = tokens.len().min(usize::from(area.width));
+                .map_or_else(|| "—".to_string(), format_tokens_compact)
+                .dim();
+            let tokens_width = tokens.width().min(usize::from(area.width));
             let edge = if offset == 0 && roster.first > 0 {
                 '↑'
             } else if offset + 1 == height && roster.first + height < roster.rows.len() {
@@ -183,7 +189,7 @@ impl Renderable for RosterView {
                 " ".repeat(usize::from(area.width).saturating_sub(line.width() + tokens_width))
                     .into(),
             );
-            line.spans.push(tokens.dim());
+            line.spans.push(tokens);
             if roster.watched == Some(row.id) {
                 line = line.reversed();
             }

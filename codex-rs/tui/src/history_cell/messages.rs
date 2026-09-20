@@ -546,7 +546,7 @@ impl HistoryCell for AgentMarkdownCell {
                 );
             };
 
-            // The clock is part of the gutter, including on continuation and table rows.
+            // Reserve room for the first-line clock without splitting table rows.
             let lines = crate::markdown::render_markdown_agent_with_links_cwd_and_visualizations(
                 &self.markdown_source,
                 Some(wrap_width),

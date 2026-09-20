@@ -17,7 +17,7 @@ use std::time::Duration;
 
 #[test]
 fn timestamp_gutter_survives_stream_finalization_and_reflow() {
-    // The stream and source-backed render must agree on the clock gutter, especially for tables.
+    // First-line clocks and normal continuation indents must agree across stream finalization.
     let timestamp = HistoryTimestamp(NaiveTime::from_hms_opt(13, 4, 5).unwrap());
     let source = "A **reply** with a table and enough prose to wrap.\n\n| Name | Value |\n| --- | --- |\n| alpha | 42 |\n";
     let mut stream = StreamController::new(Some(49), Path::new("/tmp"), HistoryRenderMode::Rich);

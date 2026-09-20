@@ -28,9 +28,8 @@ pub(crate) fn agent_prefix(timestamp: Option<HistoryTimestamp>, first: bool) -> 
         (Some(timestamp), true) => format!("• {} ", timestamp.0.format("%H:%M:%S"))
             .reset()
             .dim(),
-        (Some(_), false) => "           ".into(),
         (None, true) => "• ".dim(),
-        (None, false) => "  ".into(),
+        (_, false) => "  ".into(),
     }
 }
 
