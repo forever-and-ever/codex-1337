@@ -39,9 +39,9 @@ pub enum SortDirection {
 /// Spawn-graph relationship used to filter thread listings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThreadRelationFilter {
-    /// Return only threads whose immediate parent is the given thread.
+    /// Return retained children whose immediate parent is the given thread.
     DirectChildrenOf(ThreadId),
-    /// Return every thread transitively descended from the given thread.
+    /// Return descendants reached through retained spawn edges only.
     DescendantsOf(ThreadId),
 }
 

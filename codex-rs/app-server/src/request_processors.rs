@@ -703,6 +703,7 @@ mod thread_delete;
 mod thread_goal_processor;
 mod thread_lifecycle;
 mod thread_resume_redaction;
+mod thread_retire;
 mod thread_summary;
 
 use self::config_errors::*;

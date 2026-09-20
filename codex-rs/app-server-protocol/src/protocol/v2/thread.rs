@@ -672,6 +672,22 @@ pub struct ThreadArchiveParams {
 #[ts(export_to = "v2/")]
 pub struct ThreadArchiveResponse {}
 
+/// Retire a stopped agent subtree without deleting or archiving its conversations.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadRetireParams {
+    pub root_thread_id: String,
+    pub thread_id: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadRetireResponse {
+    pub thread_ids: Vec<String>,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
@@ -1434,12 +1450,12 @@ pub struct ThreadListParams {
     /// Optional substring filter for the extracted thread title.
     #[ts(optional = nullable)]
     pub search_term: Option<String>,
-    /// Optional direct parent thread filter. Mutually exclusive with `ancestorThreadId`.
+    /// Optional direct parent thread filter, excluding retired children. Mutually exclusive with `ancestorThreadId`.
     #[experimental("thread/list.parentThreadId")]
     #[ts(optional = nullable)]
     pub parent_thread_id: Option<String>,
     /// Optional ancestor thread filter. Returns spawned descendants at any depth, excluding the
-    /// ancestor itself. Mutually exclusive with `parentThreadId`.
+    /// ancestor itself and retired subtrees. Mutually exclusive with `parentThreadId`.
     #[experimental("thread/list.ancestorThreadId")]
     #[ts(optional = nullable)]
     pub ancestor_thread_id: Option<String>,

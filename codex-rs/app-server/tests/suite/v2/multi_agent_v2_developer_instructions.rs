@@ -977,7 +977,7 @@ features.shell_tool = false
         .request(|request_id| ClientRequest::TurnStart {
             request_id,
             params: TurnStartParams {
-                thread_id,
+                thread_id: thread_id.clone(),
                 input: vec![UserInput::Text {
                     text: FOLLOWUP_PROMPT.to_string(),
                     text_elements: Vec::new(),
@@ -1019,6 +1019,111 @@ features.shell_tool = false
             .is_empty(),
         "caller or role config redirected the owner-restored child"
     );
+
+    if history_mode == ThreadHistoryMode::Paginated {
+        // Exercise the public retirement boundary, then cold-load the same saved family.
+        let mut completed = std::collections::HashSet::new();
+        while !completed.contains(&thread_id) || !completed.contains(&child_thread_id) {
+            let event = timeout(
+                READ_TIMEOUT,
+                app_server.read_stream_until_notification_message("turn/completed"),
+            )
+            .await??;
+            if let Some(id) = event
+                .params
+                .as_ref()
+                .and_then(|params| params["threadId"].as_str())
+            {
+                completed.insert(id.to_owned());
+            }
+        }
+        app_server.shutdown_gracefully().await?;
+        let mut app_server = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .build_initialized()
+            .await?;
+        let _: ThreadResumeResponse = app_server
+            .request(|request_id| ClientRequest::ThreadResume {
+                request_id,
+                params: ThreadResumeParams {
+                    thread_id: thread_id.clone(),
+                    ..Default::default()
+                },
+            })
+            .await?;
+        let retired: codex_app_server_protocol::ThreadRetireResponse = app_server
+            .request(|request_id| ClientRequest::ThreadRetire {
+                request_id,
+                params: codex_app_server_protocol::ThreadRetireParams {
+                    root_thread_id: thread_id.clone(),
+                    thread_id: child_thread_id.clone(),
+                },
+            })
+            .await?;
+        assert_eq!(retired.thread_ids, vec![child_thread_id.clone()]);
+        app_server.shutdown_gracefully().await?;
+        let mut app_server = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .build_initialized()
+            .await?;
+        let _: ThreadResumeResponse = app_server
+            .request(|request_id| ClientRequest::ThreadResume {
+                request_id,
+                params: ThreadResumeParams {
+                    thread_id: thread_id.clone(),
+                    ..Default::default()
+                },
+            })
+            .await?;
+        let family: codex_app_server_protocol::ThreadListResponse = app_server
+            .request(|request_id| ClientRequest::ThreadList {
+                request_id,
+                params: codex_app_server_protocol::ThreadListParams {
+                    ancestor_thread_id: Some(thread_id.clone()),
+                    source_kinds: Some(vec![
+                        codex_app_server_protocol::ThreadSourceKind::SubAgentThreadSpawn,
+                    ]),
+                    cursor: None,
+                    limit: None,
+                    sort_key: None,
+                    sort_direction: None,
+                    model_providers: None,
+                    originators: None,
+                    archived: None,
+                    section_id: None,
+                    project_id: None,
+                    cwd: None,
+                    use_state_db_only: true,
+                    search_term: None,
+                    parent_thread_id: None,
+                },
+            })
+            .await?;
+        assert!(family.data.is_empty());
+        let saved: ThreadReadResponse = app_server
+            .request(|request_id| ClientRequest::ThreadRead {
+                request_id,
+                params: ThreadReadParams {
+                    thread_id: child_thread_id.clone(),
+                    include_turns: true,
+                },
+            })
+            .await?;
+        assert!(!saved.thread.turns.is_empty());
+        let resume = app_server
+            .send_thread_resume_request(ThreadResumeParams {
+                thread_id: child_thread_id.clone(),
+                ..Default::default()
+            })
+            .await?;
+        let rejected = app_server
+            .read_stream_until_error_message(RequestId::Integer(resume))
+            .await?;
+        assert_eq!(
+            rejected.error.code, -32600,
+            "retirement must not be undone by attachment"
+        );
+    }
 
     Ok(())
 }

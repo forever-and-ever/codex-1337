@@ -579,6 +579,11 @@ client_request_definitions! {
         serialization: thread_id(params.thread_id),
         response: v2::ThreadArchiveResponse,
     },
+    ThreadRetire => "thread/retire" {
+        params: v2::ThreadRetireParams,
+        serialization: thread_id(params.thread_id),
+        response: v2::ThreadRetireResponse,
+    },
     ThreadDelete => "thread/delete" {
         params: v2::ThreadDeleteParams,
         serialization: thread_id(params.thread_id),

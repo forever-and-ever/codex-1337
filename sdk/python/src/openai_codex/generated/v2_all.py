@@ -5919,6 +5919,21 @@ class ThreadResumeParams(BaseModel):
     thread_id: Annotated[str, Field(alias="threadId")]
 
 
+class ThreadRetireParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root_thread_id: Annotated[str, Field(alias="rootThreadId")]
+    thread_id: Annotated[str, Field(alias="threadId")]
+
+
+class ThreadRetireResponse(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    thread_ids: Annotated[list[str], Field(alias="threadIds")]
+
+
 class ThreadRevertParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -6807,6 +6822,15 @@ class ThreadArchiveRequest(BaseModel):
     id: RequestId
     method: Annotated[Literal["thread/archive"], Field(title="Thread/archiveRequestMethod")]
     params: ThreadArchiveParams
+
+
+class ThreadRetireRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[Literal["thread/retire"], Field(title="Thread/retireRequestMethod")]
+    params: ThreadRetireParams
 
 
 class ThreadDeleteRequest(BaseModel):
@@ -12320,6 +12344,7 @@ class ClientRequest(
         | ThreadResumeRequest
         | ThreadForkRequest
         | ThreadArchiveRequest
+        | ThreadRetireRequest
         | ThreadDeleteRequest
         | ThreadUnsubscribeRequest
         | ThreadNameSetRequest
@@ -12433,6 +12458,7 @@ class ClientRequest(
         | ThreadResumeRequest
         | ThreadForkRequest
         | ThreadArchiveRequest
+        | ThreadRetireRequest
         | ThreadDeleteRequest
         | ThreadUnsubscribeRequest
         | ThreadNameSetRequest

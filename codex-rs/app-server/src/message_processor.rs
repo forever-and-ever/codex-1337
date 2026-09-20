@@ -988,6 +988,7 @@ impl MessageProcessor {
             | ClientRequest::ThreadSettingsUpdate { .. }
             | ClientRequest::TurnSettingsUpdate { .. }
             | ClientRequest::ThreadDelete { .. }
+            | ClientRequest::ThreadRetire { .. }
             | ClientRequest::ThreadArchive { .. } => (Some(self.turn_admission.admit()?), false),
             ClientRequest::TurnStart { .. }
             | ClientRequest::TurnSteer { .. }
@@ -1323,6 +1324,11 @@ impl MessageProcessor {
                     .thread_delete(request_id.clone(), params)
                     .await
             }
+            ClientRequest::ThreadRetire { params, .. } => self
+                .thread_processor
+                .thread_retire(params)
+                .await
+                .map(|response| Some(response.into())),
             ClientRequest::ThreadIncrementElicitation { params, .. } => {
                 self.thread_processor
                     .thread_increment_elicitation(params)

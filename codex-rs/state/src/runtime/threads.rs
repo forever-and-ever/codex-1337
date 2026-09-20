@@ -1221,7 +1221,7 @@ fn push_list_threads_query(
 WITH RECURSIVE subtree(child_thread_id, parent_thread_id) AS (
     SELECT child_thread_id, parent_thread_id
     FROM thread_spawn_edges
-    WHERE parent_thread_id =
+    WHERE status = 'open' AND parent_thread_id =
 "#,
         );
         builder.push_bind(ancestor_thread_id.to_string());
@@ -1231,6 +1231,7 @@ WITH RECURSIVE subtree(child_thread_id, parent_thread_id) AS (
     SELECT edge.child_thread_id, edge.parent_thread_id
     FROM thread_spawn_edges AS edge
     JOIN subtree ON edge.parent_thread_id = subtree.child_thread_id
+    WHERE edge.status = 'open'
 )
 "#,
         );
@@ -1260,7 +1261,7 @@ WITH RECURSIVE subtree(child_thread_id, parent_thread_id) AS (
     );
     match relation_filter {
         Some(crate::ThreadRelationFilter::DirectChildrenOf(parent_thread_id)) => {
-            builder.push(" AND listed_edge.parent_thread_id = ");
+            builder.push(" AND listed_edge.status = 'open' AND listed_edge.parent_thread_id = ");
             builder.push_bind(parent_thread_id.to_string());
         }
         Some(crate::ThreadRelationFilter::DescendantsOf(ancestor_thread_id)) => {
@@ -2402,7 +2403,7 @@ mod tests {
             (
                 parent_id,
                 second_child_id,
-                DirectionalThreadSpawnEdgeStatus::Closed,
+                DirectionalThreadSpawnEdgeStatus::Open,
             ),
             (
                 first_child_id,
@@ -2567,6 +2568,28 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![grandchild_id, second_child_id, first_child_id]
         );
+
+        runtime
+            .set_thread_spawn_edge_status(first_child_id, DirectionalThreadSpawnEdgeStatus::Closed)
+            .await
+            .expect("retire child subtree");
+        for relation in [
+            crate::ThreadRelationFilter::DirectChildrenOf(parent_id),
+            crate::ThreadRelationFilter::DescendantsOf(parent_id),
+        ] {
+            let retained = runtime
+                .list_threads_by_relation(/*page_size*/ 10, relation, filters(None))
+                .await
+                .expect("retained family should load");
+            assert_eq!(
+                retained
+                    .items
+                    .iter()
+                    .map(|item| item.id)
+                    .collect::<Vec<_>>(),
+                vec![second_child_id]
+            );
+        }
     }
 
     #[tokio::test]

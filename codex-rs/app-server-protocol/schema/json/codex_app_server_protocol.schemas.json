@@ -331,6 +331,30 @@
             },
             "method": {
               "enum": [
+                "thread/retire"
+              ],
+              "title": "Thread/retireRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/ThreadRetireParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Thread/retireRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/v2/RequestId"
+            },
+            "method": {
+              "enum": [
                 "thread/delete"
               ],
               "title": "Thread/deleteRequestMethod",
@@ -23731,6 +23755,40 @@
           "thread"
         ],
         "title": "ThreadResumeResponse",
+        "type": "object"
+      },
+      "ThreadRetireParams": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "Retire a stopped agent subtree without deleting or archiving its conversations.",
+        "properties": {
+          "rootThreadId": {
+            "type": "string"
+          },
+          "threadId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "rootThreadId",
+          "threadId"
+        ],
+        "title": "ThreadRetireParams",
+        "type": "object"
+      },
+      "ThreadRetireResponse": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "threadIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "threadIds"
+        ],
+        "title": "ThreadRetireResponse",
         "type": "object"
       },
       "ThreadRevertParams": {
