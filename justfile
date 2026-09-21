@@ -83,9 +83,11 @@ install:
 # Run `cargo install --locked cargo-nextest` if you don't have it installed.
 # Prefer this for routine local runs. Workspace crate features are banned, so
 # there should be no need to add `--all-features`.
+# Unix runs own a disk-backed TMPDIR, removed after nextest exits, even on failure.
+# CODEX_TEST_TMP_ROOT overrides /var/tmp; Linux rejects memory-backed roots.
 [unix]
 test *args:
-    RUST_MIN_STACK={{ rust_min_stack }} NEXTEST_PROFILE=local cargo nextest run --no-fail-fast "$@"
+    RUST_MIN_STACK={{ rust_min_stack }} NEXTEST_PROFILE=local {{ python }} {{ justfile_directory() }}/scripts/run_tests.py "$@"
 
 [windows]
 test *args:
