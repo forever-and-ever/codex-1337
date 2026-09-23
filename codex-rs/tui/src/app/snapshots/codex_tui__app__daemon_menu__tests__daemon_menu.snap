@@ -3,11 +3,11 @@ source: tui/src/app/daemon_menu_tests.rs
 expression: "render_bottom_popup(&app.chat_widget, 80)"
 ---
   Daemon
-  Running daemon: v0.153.0
-  Codex 1337 updates come from the local fork, never the public release.
-  Install the new build first; update the service only at an all-stop.
+  Local shared service: v0.156.0
+  Codex 1337 does not replace the shared service from the TUI.
+  Install the fork build and adopt it only at an all-stop.
 
 
-› 1. Use this CLI build
+› 1. Close
 
   enter select · esc back

@@ -179,7 +179,6 @@ impl App {
         daemon_startup_warning: Option<String>,
         mut startup_draft: StartupDraftPump,
         managed_worktree: Option<crate::ManagedTuiWorktree>,
-        daemon_cli_executable: Option<AbsolutePathBuf>,
     ) -> Result<AppExitInfo> {
         use tokio_stream::StreamExt;
 
@@ -800,8 +799,6 @@ See the Codex keymap documentation for supported actions and examples."
                     .map(|(_, key)| key.clone()),
                 ..Default::default()
             },
-            daemon_cli_executable,
-            pending_update_action: None,
             pending_shutdown_exit_thread_id: None,
             windows_sandbox: WindowsSandboxState {
                 prompt_after_trust: should_prompt_windows_sandbox_nux_at_startup,

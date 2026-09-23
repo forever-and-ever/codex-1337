@@ -236,7 +236,6 @@ mod ui_consts;
 mod unarchive_prompt;
 pub(crate) mod update_action;
 mod worktree_startup;
-pub use update_action::DaemonUpdateSource;
 pub use update_action::UpdateAction;
 #[cfg(not(debug_assertions))]
 pub use update_action::get_update_action;
@@ -1859,12 +1858,7 @@ async fn run_ratatui_app(
     #[cfg(not(target_os = "windows"))]
     let should_prompt_windows_sandbox_nux_at_startup = false;
 
-    let Cli {
-        prompt,
-        shared,
-        daemon_cli_executable,
-        ..
-    } = cli;
+    let Cli { prompt, shared, .. } = cli;
     let images = shared.into_inner().images;
 
     // Persistent app-server resumes may attach to an already-running thread,
@@ -1953,7 +1947,6 @@ async fn run_ratatui_app(
         daemon_startup_warning,
         startup_draft,
         managed_worktree,
-        daemon_cli_executable,
     ))
     .await;
 

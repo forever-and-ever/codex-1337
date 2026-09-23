@@ -3,13 +3,12 @@ source: tui/src/app/daemon_menu_tests.rs
 expression: "render_bottom_popup(&app.chat_widget, 80)"
 ---
   Daemon
-  Not connected to the local background server.
-  Codex 1337 updates come from the local fork, never the public release.
-  Install the new build first; update the service only at an all-stop.
-  Manage this server on its host. Local daemon updates are unavailable for
-  remote connections.
+  Remote shared service: v0.153.0
+  Codex 1337 does not replace the shared service from the TUI.
+  Install the fork build and adopt it only at an all-stop.
+  Manage the remote service on its host.
 
 
-›    Use this CLI build
+› 1. Close
 
   enter select · esc back

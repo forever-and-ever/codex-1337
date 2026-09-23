@@ -619,10 +619,6 @@ pub(crate) struct App {
     environment_manager: Arc<EnvironmentManager>,
     app_server_target: AppServerTarget,
     reconnect: reconnect::ReconnectState,
-    /// Set when the user confirms an update; propagated on exit.
-    daemon_cli_executable: Option<AbsolutePathBuf>,
-    pub(crate) pending_update_action: Option<UpdateAction>,
-
     /// Tracks the thread we intentionally shut down while exiting the app.
     ///
     /// When this matches the active thread, its `ShutdownComplete` should lead to
