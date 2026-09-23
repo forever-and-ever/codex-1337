@@ -30,13 +30,7 @@ impl Session {
             .await
             .as_ref()
             .and_then(|turn| turn.task.as_ref())
-            .map(|task| {
-                task.turn_context
-                    .current_settings
-                    .load_full()
-                    .model_info
-                    .clone()
-            })
+            .map(|task| task.turn_context.capture_current_model_info())
         {
             normalize_agent_service_tier(
                 requested,
@@ -100,13 +94,7 @@ impl Session {
             .await
             .as_ref()
             .and_then(|turn| turn.task.as_ref())
-            .map(|task| {
-                task.turn_context
-                    .current_settings
-                    .load_full()
-                    .model_info
-                    .clone()
-            });
+            .map(|task| task.turn_context.capture_current_model_info());
         let model = match active_model {
             Some(model) => model,
             None => Arc::new(

@@ -88,6 +88,20 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
             .chatgpt_user_id("alice"),
         AuthCredentialsStoreMode::File,
     )?;
+    Mock::given(method("GET"))
+        .and(path("/api/codex/accounts/check"))
+        .respond_with(|request: &wiremock::Request| {
+            let account_id = request.headers["chatgpt-account-id"]
+                .to_str()
+                .expect("workspace account header");
+            ResponseTemplate::new(200).set_body_json(json!({"accounts": [{
+                "id": account_id,
+                "workspace_backend_origin": "https://chatgpt.com",
+                "account_routing_override": "NO_CONSTRAINT"
+            }]}))
+        })
+        .mount(&server)
+        .await;
     for (thread, expected) in threads.iter().zip(["bob:bob", "alice:alice", "bob:bob"]) {
         let request = app
             .send_request("thread/account/list", Some(json!({"threadId": thread})))
@@ -96,6 +110,28 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
             timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
         assert_eq!(response.selected_account_id.as_deref(), Some(expected));
         assert_eq!(response.accounts.len(), 2);
+
+        let request = app
+            .send_get_account_request(GetAccountParams {
+                thread_id: Some(thread.clone()),
+                refresh_token: false,
+            })
+            .await?;
+        let response: GetAccountResponse =
+            timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
+        let id = expected.split_once(':').expect("account selector").0;
+        assert_eq!(
+            response,
+            GetAccountResponse {
+                account_id: Some(expected.to_string()),
+                account: Some(Account::Chatgpt {
+                    email: Some(format!("{id}@example.com")),
+                    plan_type: AccountPlanType::Pro,
+                }),
+                requires_openai_auth: true,
+                workspace_routing: expected_workspace_routing(id),
+            }
+        );
     }
 
     let mock = responses::mount_sse_once(

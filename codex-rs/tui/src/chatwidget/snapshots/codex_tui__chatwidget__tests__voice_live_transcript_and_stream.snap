@@ -1,6 +1,6 @@
 ---
 source: tui/src/chatwidget/tests/status_and_layout.rs
-expression: rendered
+expression: normalized_backend_snapshot(terminal.backend())
 ---
 "                                                            "
 "• Agent answer arriving                                     "
@@ -11,11 +11,10 @@ expression: rendered
 "                                                            "
 "                                                            "
 " voice ● listening              ctrl+x mute     /voice stop "
-"   mic ▁▁▁▁▁▁  codex ▁▁▁▁▁▁                                 "
 "                                                            "
 "› Ask Codex to do anything                                  "
 "                                                            "
 "────────────────────────────────────────────────────────────"
 "  Activity  —                                               "
 "────────────────────────────────────────────────────────────"
-"  gpt-5.6-sol default · /tmp/project                        "
+"  GPT-5.6-Sol default · /tmp/project                        "

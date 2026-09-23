@@ -9,4 +9,4 @@ expression: terminal.backend()
 "────────────────────────────────────────────────────────────────────────────────"
 "  Activity  —                                                                   "
 "────────────────────────────────────────────────────────────────────────────────"
-"  Side from main thread · main needs input · ctrl + / to switch · ctrl + c to cl"
+" Side from main thread · main needs input · ctrl+/ to switch · ctrl+c to close  "

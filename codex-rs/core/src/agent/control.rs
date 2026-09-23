@@ -2,11 +2,11 @@ use crate::TurnInputRequest;
 use crate::TurnInputSubmission;
 use crate::TurnStartOptions;
 use crate::agent::AgentStatus;
-use crate::agent::registry::AgentMetadata;
 use crate::agent::registry::AgentRegistry;
 use crate::agent::role::DEFAULT_ROLE_NAME;
 use crate::agent::role::resolve_role_config;
 use crate::agent::status::is_final;
+use crate::agent::types::AgentMetadata;
 use crate::agent_communication::AgentCommunicationContext;
 use crate::agent_communication::AgentCommunicationKind;
 use crate::codex_thread::ThreadConfigSnapshot;
@@ -16,7 +16,6 @@ use crate::context::SubagentNotification;
 use crate::environment_selection::TurnEnvironmentSnapshot;
 use crate::rollout_budget::RolloutBudget;
 use crate::session::emit_subagent_session_started;
-use crate::session::multi_agents::ResolvedMultiAgentV2UsageHints;
 use crate::session_prefix::format_inter_agent_completion_message;
 use crate::session_prefix::format_subagent_context_line;
 use crate::thread_manager::ResumeThreadWithHistoryOptions;
@@ -26,6 +25,7 @@ use crate::thread_manager::default_thread_id_generator;
 use crate::thread_rollout_truncation::truncate_rollout_to_last_n_fork_turns;
 use crate::turn_timing::now_unix_timestamp_ms;
 use arc_swap::ArcSwap;
+use codex_extension_api::ThreadInstructionsProvider;
 use codex_history::InitialHistory;
 use codex_history::ResumedHistory;
 use codex_history::RolloutItem;
@@ -52,8 +52,6 @@ use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
 use codex_protocol::protocol::ThreadHistoryMode;
 use codex_protocol::protocol::ThreadSource;
-use codex_protocol::protocol::TurnEnvironmentSelection;
-use codex_protocol::turn_input::CyberAccessProgram;
 use codex_protocol::user_input::UserInput;
 use codex_thread_store::LoadThreadHistoryParams;
 use codex_thread_store::ReadThreadParams;
@@ -62,54 +60,35 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::sync::Weak;
 use tokio::sync::watch;
 use tracing::warn;
 use uuid::Uuid;
 
-pub(crate) use self::execution::AgentExecutionGuard;
 use self::execution::AgentExecutionLimiter;
 use self::residency::V2Residency;
-pub(crate) use self::service_tier::AgentTierStatus;
-pub(crate) use self::service_tier::normalize_agent_service_tier;
 
+mod budget;
+mod completion;
+mod delivery;
 mod execution;
+mod inspection;
+mod interrupt;
 mod legacy;
 mod residency;
 mod retirement;
+mod sender_context;
 mod service_tier;
+pub(crate) use service_tier::AgentTierStatus;
+pub(crate) use service_tier::normalize_agent_service_tier;
 mod spawn;
+mod target;
 mod user_authorization;
 
 const MAX_ENVIRONMENT_SUBAGENTS: usize = 8;
 const MAX_ENVIRONMENT_SUBAGENT_BYTES: usize = 1_024;
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum SpawnAgentForkMode {
-    FullHistory,
-    LastNTurns(usize),
-}
-
-#[derive(Clone, Debug, Default)]
-pub(crate) struct SpawnAgentOptions {
-    pub(crate) fork_parent_spawn_call_id: Option<String>,
-    pub(crate) fork_mode: Option<SpawnAgentForkMode>,
-    pub(crate) parent_thread_id: Option<ThreadId>,
-    pub(crate) parent_turn_id: Option<String>,
-    pub(crate) root_turn_id: Option<String>,
-    pub(crate) environments: Option<Vec<TurnEnvironmentSelection>>,
-    pub(crate) multi_agent_v2_usage_hints: Option<ResolvedMultiAgentV2UsageHints>,
-    pub(crate) cyber_access_program: Option<CyberAccessProgram>,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct LiveAgent {
-    pub(crate) thread_id: ThreadId,
-    pub(crate) metadata: AgentMetadata,
-    pub(crate) status: AgentStatus,
-}
-
-#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[derive(Debug, Serialize)]
 pub(crate) struct ListedAgent {
     pub(crate) agent_name: String,
     /// None means retained but unloaded, not missing or retired.
@@ -119,13 +98,13 @@ pub(crate) struct ListedAgent {
 }
 
 /// Control-plane handle for multi-agent operations.
-/// `AgentControl` is held by each session (via `SessionServices`). It provides capability to
+/// `LocalAgentControl` is held by each session (via `SessionServices`). It provides capability to
 /// spawn new agents and the inter-agent communication layer.
-/// An `AgentControl` instance is intended to be created at most once per root thread/session
-/// tree. That same `AgentControl` is then shared with every sub-agent spawned from that root,
+/// An `LocalAgentControl` instance is intended to be created at most once per root thread/session
+/// tree. That same `LocalAgentControl` is then shared with every sub-agent spawned from that root,
 /// which keeps the registry scoped to that root thread rather than the entire `ThreadManager`.
 #[derive(Clone)]
-pub(crate) struct AgentControl {
+pub(crate) struct LocalAgentControl {
     /// session_id is equal to the root thread's ID.
     session_id: SessionId,
     /// Weak handle back to the global thread registry/state.
@@ -135,19 +114,19 @@ pub(crate) struct AgentControl {
     /// Captured at construction so delegates retain their manager's allocation policy.
     thread_id_generator: ThreadIdGenerator,
     state: Arc<AgentRegistry>,
-    /// Retirement excludes concurrent spawn, reload, and message admission.
     lifecycle: Arc<tokio::sync::RwLock<()>>,
     v2_residency: Arc<V2Residency>,
     agent_execution_limiter: Arc<AgentExecutionLimiter>,
     /// Session-scoped state shared by the root thread and every cloned sub-agent control handle.
     rollout_budget: Arc<RolloutBudget>,
+    /// The user-selected root routing tier, shared by the entire agent tree.
     service_tiers: Arc<ArcSwap<service_tier::TierTree>>,
-    /// Desired payer for this agent family. Each session applies it between steps;
-    /// an independent fork gets its own control and never follows later selections.
     pub(crate) account_selection: Arc<arc_swap::ArcSwapOption<String>>,
+    /// Retains the root's opt-in instruction provider even when the root is unloaded.
+    shared_thread_instructions_provider: Arc<OnceLock<Arc<dyn ThreadInstructionsProvider>>>,
 }
 
-impl Default for AgentControl {
+impl Default for LocalAgentControl {
     fn default() -> Self {
         Self::new(
             Weak::default(),
@@ -157,8 +136,8 @@ impl Default for AgentControl {
     }
 }
 
-impl AgentControl {
-    /// Construct a new `AgentControl` that can spawn/message agents via the given manager state.
+impl LocalAgentControl {
+    /// Construct a new `LocalAgentControl` that can spawn/message agents via the given manager state.
     pub(crate) fn new(
         manager: Weak<ThreadManagerState>,
         thread_id_generator: ThreadIdGenerator,
@@ -175,6 +154,7 @@ impl AgentControl {
             rollout_budget: Arc::default(),
             service_tiers: Arc::default(),
             account_selection: Arc::default(),
+            shared_thread_instructions_provider: Arc::default(),
         };
         if let Some(rollout_budget) = rollout_budget {
             control.rollout_budget.configure(rollout_budget);
@@ -196,14 +176,30 @@ impl AgentControl {
         (self.thread_id_generator)()
     }
 
-    pub(crate) fn rollout_budget(&self) -> &RolloutBudget {
-        self.rollout_budget.as_ref()
+    pub(crate) fn root_thread_instructions_provider(
+        &self,
+        root_thread_id: ThreadId,
+        provider: Option<Arc<dyn ThreadInstructionsProvider>>,
+    ) -> Option<Arc<dyn ThreadInstructionsProvider>> {
+        let provider = match self.manager.upgrade() {
+            Some(manager) => manager.shared_thread_instructions_provider(root_thread_id, provider),
+            None => provider,
+        };
+        if let Some(provider) = provider
+            .as_ref()
+            .filter(|provider| provider.share_with_subagents())
+        {
+            let _ = self
+                .shared_thread_instructions_provider
+                .set(Arc::clone(provider));
+        }
+        provider
     }
 
     /// Send rich user input items to an existing agent thread.
     #[expect(
         clippy::await_holding_invalid_type,
-        reason = "Retirement must exclude the complete async input admission."
+        reason = "Retirement must exclude input submission through turn admission."
     )]
     pub(crate) async fn send_input(
         &self,
@@ -216,7 +212,7 @@ impl AgentControl {
             .await
     }
 
-    // The caller owns lifecycle admission, including the initial input of a spawn.
+    // Spawn already holds the lifecycle admission read lock across its initial submission.
     async fn submit_agent_input(
         &self,
         agent_id: ThreadId,
@@ -248,7 +244,7 @@ impl AgentControl {
 
     #[expect(
         clippy::await_holding_invalid_type,
-        reason = "Retirement must exclude the complete async message admission."
+        reason = "Retirement must exclude communication through capacity check and delivery."
     )]
     pub(crate) async fn send_inter_agent_communication(
         &self,
@@ -264,7 +260,7 @@ impl AgentControl {
             self.ensure_execution_capacity_for_turn_start(&thread)
                 .await?;
         }
-        self.submit_inter_agent_communication(
+        self.send_inter_agent_communication_after_capacity_check(
             agent_id,
             &state,
             communication,
@@ -321,6 +317,24 @@ impl AgentControl {
                 .await;
         }
         Ok(())
+    }
+
+    async fn send_inter_agent_communication_after_capacity_check(
+        &self,
+        agent_id: ThreadId,
+        state: &Arc<ThreadManagerState>,
+        communication: InterAgentCommunication,
+        context: AgentCommunicationContext,
+        start_options: TurnStartOptions,
+    ) -> CodexResult<String> {
+        self.submit_inter_agent_communication(
+            agent_id,
+            state,
+            communication,
+            context,
+            start_options,
+        )
+        .await
     }
 
     async fn submit_inter_agent_communication(
@@ -399,9 +413,18 @@ impl AgentControl {
             .as_ref()
             .is_err_and(|err| matches!(err.details(), CodexErrorDetails::InternalAgentDied))
         {
+            // A dead V2 runtime is still a retained agent until its owner retires it.
+            let retain_metadata = if let Ok(thread) = state.get_thread(agent_id).await {
+                thread.multi_agent_version() == Some(MultiAgentVersion::V2)
+                    && !thread.config_snapshot().await.ephemeral
+            } else {
+                false
+            };
             let _ = state.remove_thread(&agent_id).await;
             self.forget_v2_residency(agent_id);
-            // A dead runtime does not retire its durable identity.
+            if !retain_metadata {
+                self.state.release_spawned_thread(agent_id);
+            }
         }
         result
     }
@@ -451,34 +474,10 @@ impl AgentControl {
         &self,
         agent_id: ThreadId,
     ) -> Option<ThreadConfigSnapshot> {
-        let Ok(state) = self.upgrade() else {
-            return None;
-        };
-        let Ok(thread) = state.get_thread(agent_id).await else {
-            return None;
-        };
-        Some(thread.config_snapshot().await)
-    }
-
-    pub(crate) async fn resolve_agent_reference(
-        &self,
-        _current_thread_id: ThreadId,
-        current_session_source: &SessionSource,
-        agent_reference: &str,
-    ) -> CodexResult<ThreadId> {
-        let current_agent_path = current_session_source
-            .get_agent_path()
-            .unwrap_or_else(AgentPath::root);
-        let agent_path = current_agent_path
-            .resolve(agent_reference)
-            .map_err(CodexErr::UnsupportedOperation)?;
-        if let Some(thread_id) = self.state.agent_id_for_path(&agent_path) {
-            return Ok(thread_id);
+        match self.inspect_agent(agent_id).await.ok()? {
+            crate::agent::api::AgentInfo::Loaded { config, .. } => Some(*config),
+            crate::agent::api::AgentInfo::Unloaded(_) => None,
         }
-        Err(CodexErr::UnsupportedOperation(format!(
-            "agent path `{}` not found",
-            agent_path.as_str()
-        )))
     }
 
     /// Subscribe to status updates for `agent_id`, yielding the latest value and changes.
@@ -576,8 +575,8 @@ impl AgentControl {
             })
             .transpose()?;
 
-        let mut retained_agents = self.state.retained_agents();
-        retained_agents.sort_by(|left, right| {
+        let mut live_agents = self.state.retained_agents();
+        live_agents.sort_by(|left, right| {
             left.agent_path
                 .as_deref()
                 .unwrap_or_default()
@@ -591,7 +590,7 @@ impl AgentControl {
         });
 
         let root_path = AgentPath::root();
-        let mut agents = Vec::with_capacity(retained_agents.len().saturating_add(1));
+        let mut agents = Vec::with_capacity(live_agents.len().saturating_add(1));
         if resolved_prefix
             .as_ref()
             .is_none_or(|prefix| agent_matches_prefix(Some(&root_path), prefix))
@@ -605,7 +604,7 @@ impl AgentControl {
             });
         }
 
-        for metadata in retained_agents {
+        for metadata in live_agents {
             let Some(thread_id) = metadata.agent_id else {
                 continue;
             };
@@ -623,13 +622,12 @@ impl AgentControl {
                 ),
                 Err(_) => (None, None),
             };
-            let agent_name = metadata
-                .agent_path
-                .as_ref()
-                .map(ToString::to_string)
-                .unwrap_or_else(|| thread_id.to_string());
             agents.push(ListedAgent {
-                agent_name,
+                agent_name: metadata
+                    .agent_path
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| thread_id.to_string()),
                 agent_status,
                 tier,
             });
@@ -905,13 +903,6 @@ impl AgentControl {
         let Some(agent_graph_store) = state.agent_graph_store() else {
             return;
         };
-        // Even an empty child must be reloadable after a crash. Persist the conversation
-        // before publishing its durable family membership, not on its first output.
-        child_thread.ensure_rollout_materialized().await;
-        if let Err(err) = child_thread.flush_rollout().await {
-            warn!(%child_thread_id, %err, "failed to persist spawned agent conversation");
-            return;
-        }
         if let Err(err) = agent_graph_store
             .upsert_thread_spawn_edge(
                 parent_thread_id,

@@ -1,0 +1,14 @@
+---
+source: tui/src/app/daemon_menu_tests.rs
+expression: "render_bottom_popup(&app.chat_widget, 80)"
+---
+  Daemon
+  Not connected to the local background server.
+  Codex 1337 updates come from the local fork, never the public release.
+  Install the new build first; update the service only at an all-stop.
+  Run the Codex CLI to manage the daemon from this menu.
+
+
+›    Use this CLI build
+
+  enter select · esc back

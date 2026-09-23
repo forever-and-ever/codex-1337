@@ -9,6 +9,7 @@ use std::io::Write as _;
 use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
+#[cfg(not(unix))]
 use tempfile::TempDir;
 use wiremock::Mock;
 use wiremock::MockServer;
@@ -133,6 +134,23 @@ async fn rejected_start(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn interactive_worktree_start_and_fork_bind_owner_before_turn() -> anyhow::Result<()> {
+    worktree_start_and_fork("embedded").await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[cfg_attr(
+    windows,
+    ignore = "requires a non-elevated terminal with daemon breakaway support"
+)]
+async fn daemon_worktree_start_and_fork_bind_owner_before_turn() -> anyhow::Result<()> {
+    worktree_start_and_fork("daemon").await
+}
+
+async fn worktree_start_and_fork(backend: &str) -> anyhow::Result<()> {
+    // Leave room for the local control socket on Unix platforms with short sun_path limits.
+    #[cfg(unix)]
+    let root = tempfile::Builder::new().tempdir_in("/tmp")?;
+    #[cfg(not(unix))]
     let root = TempDir::new()?;
     let root = codex_utils_absolute_path::AbsolutePathBuf::from_absolute_path(root.path())?
         .canonicalize()?
@@ -143,6 +161,12 @@ async fn interactive_worktree_start_and_fork_bind_owner_before_turn() -> anyhow:
     for path in [&home, &source, &launcher, &launcher.join("extra")] {
         fs::create_dir(path)?;
     }
+    // Forking without --cd must select the daemon using the resolved project, not this launcher.
+    fs::create_dir(launcher.join(".codex"))?;
+    fs::write(
+        launcher.join(".codex/config.toml"),
+        "features.auth_elicitation = false\n",
+    )?;
     fs::write(
         source.join("AGENTS.md"),
         "committed destination instructions",
@@ -165,8 +189,9 @@ async fn interactive_worktree_start_and_fork_bind_owner_before_turn() -> anyhow:
             r#"
 cli_auth_credentials_store = "file"
 chatgpt_base_url = "{}/source/backend-api"
-features.worktrees = true
+analytics.enabled = false
 check_for_update_on_startup = false
+features.daemon_auto_start = {}
 model_provider = "local"
 model = "test-model"
 sandbox_mode = "workspace-write"
@@ -184,6 +209,7 @@ trust_level = "trusted"
 trust_level = "trusted"
 "#,
             server.uri(),
+            backend == "daemon",
             server.uri(),
             server.uri(),
             serde_json::to_string(&source)?,
@@ -230,6 +256,41 @@ trust_level = "trusted"
     ] {
         env.remove(key);
     }
+    // Keep the managed package local; no installer or updater participates in this test.
+    struct StopDaemon(Command);
+    impl Drop for StopDaemon {
+        fn drop(&mut self) {
+            let _ = self.0.output();
+        }
+    }
+    let _daemon = if backend == "daemon" {
+        let bin = home.join("packages/app-server-daemon/current/bin");
+        fs::create_dir_all(&bin)?;
+        let managed = bin.join(if cfg!(windows) { "codex.exe" } else { "codex" });
+        fs::hard_link(&program, &managed).or_else(|_| fs::copy(&program, &managed).map(|_| ()))?;
+        fs::create_dir(home.join("app-server-daemon"))?;
+        fs::write(
+            home.join("app-server-daemon/settings.json"),
+            r#"{"shutdownGraceSeconds":0,"updater":{"autoUpdateEnabled":false}}"#,
+        )?;
+        let mut daemon_stop = Command::new(&program);
+        daemon_stop
+            .envs(&env)
+            .args(["app-server", "daemon", "stop"]);
+        Some(StopDaemon(daemon_stop))
+    } else {
+        None
+    };
+    // Every launch, including rejection cases, exercises the same CLI feature opt-in.
+    let worktree_args: Vec<String> = vec![
+        "--worktree".into(),
+        "--enable".into(),
+        "worktrees".into(),
+        "-c".into(),
+        "features.mcp_oauth_refresh_coordination=true".into(),
+        "-c".into(),
+        "suppress_unstable_features_warning=true".into(),
+    ];
     let mut owner = None;
     let mut previous: Vec<String> = Vec::new();
     for (fork, explicit_cd, analytics, auth_failure) in [
@@ -308,7 +369,10 @@ trust_level = "trusted"
             })
             .mount(&server)
             .await;
-        let mut args = vec!["--worktree".to_owned(), "--no-alt-screen".to_owned()];
+        let mut args = worktree_args.clone();
+        if backend == "daemon" && previous.is_empty() {
+            args.extend(["-c".into(), "features.auth_elicitation=true".into()]);
+        }
         if fork {
             args.extend([
                 "--add-dir".into(),
@@ -397,13 +461,12 @@ trust_level = "trusted"
             assert!(output.contains("The checkout was kept"), "{output}");
             continue;
         }
-        let renamed = if !fork && matches!(observed, Ok(Ok(_))) {
+        let renamed = if !fork && let Ok(Ok((_, _, metadata))) = &observed {
             tokio::time::timeout(Duration::from_secs(/*secs*/ 10), async {
                 session
                     .writer_sender()
                     .send(b"/rename managed-source\r".to_vec())
                     .await?;
-                let (_, _, metadata) = observed.as_ref().unwrap().as_ref().unwrap();
                 let thread_id = codex_protocol::ThreadId::from_string(
                     metadata["ownerThreadId"].as_str().context("owner id")?,
                 )?;
@@ -432,12 +495,47 @@ trust_level = "trusted"
         } else {
             Ok(())
         };
+        if backend == "daemon" && !analytics && matches!(observed, Ok(Ok(_))) {
+            session.writer_sender().send(b"/status\r".to_vec()).await?;
+            let mut screen = vt100::Parser::new(
+                /*rows*/ 40, /*cols*/ 120, /*scrollback_len*/ 0,
+            );
+            screen.process(output.as_bytes());
+            tokio::time::timeout(Duration::from_secs(/*secs*/ 10), async {
+                while !screen
+                    .screen()
+                    .contents()
+                    .chars()
+                    .filter(|c| !c.is_whitespace())
+                    .collect::<String>()
+                    .contains("Localbackgroundserver")
+                {
+                    let bytes = stdout
+                        .recv()
+                        .await
+                        .context("TUI exited before daemon status")?;
+                    output.push_str(&String::from_utf8_lossy(&bytes));
+                    screen.process(&bytes);
+                    let replies = queries.feed(&bytes);
+                    if !replies.is_empty() {
+                        session.writer_sender().send(replies).await?;
+                    }
+                }
+                Ok::<_, anyhow::Error>(())
+            })
+            .await
+            .with_context(|| format!("daemon status timed out: {output}"))??;
+        }
         if analytics {
             tokio::time::timeout(Duration::from_secs(/*secs*/ 10), metric_rx.recv())
                 .await?
                 .context("metrics export while the TUI is running")?;
         }
         let startup_result = observed.as_ref().map(|result| result.as_ref().map(|_| ()));
+        assert!(
+            !output.contains("Under-development features enabled:"),
+            "{output}"
+        );
         if !matches!(startup_result, Ok(Ok(()))) || renamed.is_err() {
             // Bypass libtest capture and report before tearing down the Windows PTY.
             let _ = writeln!(
@@ -460,7 +558,9 @@ trust_level = "trusted"
             }
         })
         .await;
-        assert_eq!(exit, 0, "{output}");
+        let elevated_handoff = cfg!(windows)
+            && output.contains("start the Windows daemon from a non-elevated terminal");
+        assert_eq!(exit, i32::from(elevated_handoff), "{output}");
         assert!(!output.contains("The checkout was kept"), "{output}");
         let metrics = server
             .received_requests()
@@ -471,11 +571,14 @@ trust_level = "trusted"
             .map(|request| serde_json::from_slice::<Value>(&request.body))
             .collect::<serde_json::Result<Vec<_>>>()?;
         if analytics {
-            let point = metrics
+            let exported = metrics
                 .iter()
                 .flat_map(|payload| payload["resourceMetrics"].as_array().into_iter().flatten())
                 .flat_map(|resource| resource["scopeMetrics"].as_array().into_iter().flatten())
                 .flat_map(|scope| scope["metrics"].as_array().into_iter().flatten())
+                .collect::<Vec<_>>();
+            let point = exported
+                .iter()
                 .filter(|metric| metric["name"] == "codex.tui.start")
                 .flat_map(|metric| metric["sum"]["dataPoints"].as_array().into_iter().flatten())
                 .next()
@@ -493,14 +596,32 @@ trust_level = "trusted"
                     ))
                 })
                 .collect::<anyhow::Result<HashMap<_, _>>>()?;
-            assert_eq!(
-                tags,
-                HashMap::from([
-                    ("app_server_mode", "in_process"),
-                    ("terminal_name", "unknown"),
-                    ("multiplexer", "none"),
-                ])
-            );
+            let mut expected_tags = HashMap::from([
+                ("app_server_mode", "in_process"),
+                ("terminal_name", "unknown"),
+                ("multiplexer", "none"),
+                ("daemon_selection_reason", "incompatible_option"),
+                (
+                    "daemon_auto_start",
+                    if backend == "daemon" {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    },
+                ),
+                ("auto_update", "disabled"),
+                ("auto_update_setting", "default"),
+                ("update_interval_setting", "default"),
+                ("shutdown_grace_setting", "default"),
+            ]);
+            if backend == "daemon" {
+                expected_tags.extend([
+                    ("auto_update", "disabled"),
+                    ("auto_update_setting", "configured"),
+                    ("shutdown_grace_setting", "configured"),
+                ]);
+            }
+            assert_eq!(tags, expected_tags);
         } else {
             assert!(metrics.is_empty(), "analytics disabled");
         }
@@ -598,7 +719,8 @@ trust_level = "trusted"
                 &program,
                 &[
                     "--worktree".into(),
-                    "--no-alt-screen".into(),
+                    "--enable".into(),
+                    "worktrees".into(),
                     "fork".into(),
                     next_owner.clone(),
                 ],
@@ -631,7 +753,8 @@ trust_level = "trusted"
                 &program,
                 &[
                     "--worktree".into(),
-                    "--no-alt-screen".into(),
+                    "--enable".into(),
+                    "worktrees".into(),
                     "--cd".into(),
                     source.join(".codex").display().to_string(),
                 ],
@@ -692,7 +815,8 @@ trust_level = "trusted"
         &program,
         &[
             "--worktree".into(),
-            "--no-alt-screen".into(),
+            "--enable".into(),
+            "worktrees".into(),
             "--cd".into(),
             source.display().to_string(),
         ],

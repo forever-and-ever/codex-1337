@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn service_tier_inheritance_stops_at_the_nearest_explicit_ancestor() {
     // A root-wide broadcast would erase the middle override; copying at spawn would miss resets.
-    let control = AgentControl::default();
+    let control = LocalAgentControl::default();
     let root = ThreadId::new();
     let parent = ThreadId::new();
     let child = ThreadId::new();

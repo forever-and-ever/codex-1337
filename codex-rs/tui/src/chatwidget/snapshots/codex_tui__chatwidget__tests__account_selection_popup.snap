@@ -5,7 +5,8 @@ expression: "render_bottom_popup(&chat, 100)"
   Select Account
   Conversation + agents; also the new-conversation default.
 
+
 › 1. work (current)   alice@example.com · pro · alice:personal
   2. bob@example.com  switch pending · pro · bob:personal
 
-  Press enter to confirm or esc to go back
+  enter select · esc back

@@ -4,7 +4,7 @@ use std::sync::atomic::Ordering;
 impl Session {
     pub(crate) fn can_retry_after_account_handoff(&self, error: &CodexErr) -> bool {
         self.pending_account_id().is_some()
-            && (error.is_retryable()
+            && (error.retry_delay(/*retry_count*/ 1).is_some()
                 || matches!(
                     error.details(),
                     CodexErrorDetails::RefreshTokenFailed(_)

@@ -221,6 +221,7 @@ if [[ -n "$voice_release_dir" ]]; then
   fi
   voice_package="${RUNNER_TEMP:-/tmp}/${archive_stem}-voice-${target}"
   rm -rf "$voice_package"
+  voice_helper="${voice_release_dir%/}/codex-voice-host${exe_suffix}"
   "$python_bin" "${repo_root}/third_party/voice/assemble_package.py" \
     --package "$package_dir" \
     --helper "${voice_release_dir%/}/codex-voice-host" \

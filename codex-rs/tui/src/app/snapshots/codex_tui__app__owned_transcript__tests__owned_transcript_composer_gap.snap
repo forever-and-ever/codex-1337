@@ -1,0 +1,66 @@
+---
+source: tui/src/app/owned_transcript_tests.rs
+expression: "snapshots.join(\"\\n\\n\")"
+---
+Latest
+Transcript row 38
+Transcript row 39
+Transcript row 40
+
+
+› draft
+
+────────────────────────────────────────────────────────────────────────────────
+  Activity  —
+────────────────────────────────────────────────────────────────────────────────
+  gpt-test default · /tmp/project
+
+
+Reading
+Transcript row 36
+Transcript row 37
+Transcript row 38
+                             ↓ Back to bottom · esc
+
+› draft
+
+────────────────────────────────────────────────────────────────────────────────
+  Activity  —
+────────────────────────────────────────────────────────────────────────────────
+  gpt-test default · /tmp/project
+  esc latest
+
+Resized multiline composer
+Transcript row 36
+         ↓ Back to bottom · esc
+
+› draft
+  second line
+  third line
+
+────────────────────────────────────────
+  Activity  —
+────────────────────────────────────────
+  gpt-test default · /tmp/project
+  esc latest
+
+Tiny terminal
+
+› draft
+
+  gpt-test default · /tmp/project
+  esc latest
+
+Detailed
+• Viewed image assets/detail-image.png
+
+
+
+
+› preserved draft
+
+────────────────────────────────────────────────────────────────────────────────
+  Activity  —
+────────────────────────────────────────────────────────────────────────────────
+  gpt-test default · /tmp/project
+  esc latest

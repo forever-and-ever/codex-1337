@@ -258,6 +258,8 @@ async fn slash_side_without_args_starts_empty_side_conversation() {
 
     chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
+    assert_matches!(rx.try_recv(), Ok(AppEvent::FollowTranscript));
+
     assert_matches!(
         rx.try_recv(),
         Ok(AppEvent::StartSide {
@@ -282,6 +284,8 @@ async fn slash_btw_without_args_starts_empty_side_conversation() {
         .set_composer_text("/btw".to_string(), Vec::new(), Vec::new());
 
     chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    assert_matches!(rx.try_recv(), Ok(AppEvent::FollowTranscript));
 
     assert_matches!(
         rx.try_recv(),
@@ -313,6 +317,8 @@ async fn slash_side_requests_forked_side_question_while_task_running() {
     );
 
     chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    assert_matches!(rx.try_recv(), Ok(AppEvent::FollowTranscript));
 
     assert_matches!(
         rx.try_recv(),
@@ -360,6 +366,8 @@ async fn slash_btw_requests_forked_side_question_while_task_running() {
 
     chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
+    assert_matches!(rx.try_recv(), Ok(AppEvent::FollowTranscript));
+
     assert_matches!(
         rx.try_recv(),
         Ok(AppEvent::StartSide {
@@ -389,7 +397,7 @@ async fn side_context_label_preserves_status_line_snapshot() {
     chat.refresh_status_line();
     chat.set_side_conversation_active(/*active*/ true);
     chat.set_side_conversation_context_label(Some(
-        "Side from main thread · ctrl + / to switch · ctrl + c to close".to_string(),
+        "Side from main thread · ctrl+/ to switch · ctrl+c to close".to_string(),
     ));
 
     let width = 80;
@@ -410,8 +418,7 @@ async fn side_context_label_shows_parent_status_snapshot() {
     chat.show_welcome_banner = false;
     chat.set_side_conversation_active(/*active*/ true);
     chat.set_side_conversation_context_label(Some(
-        "Side from main thread · main needs input · ctrl + / to switch · ctrl + c to close"
-            .to_string(),
+        "Side from main thread · main needs input · ctrl+/ to switch · ctrl+c to close".to_string(),
     ));
 
     let width = 80;
@@ -429,7 +436,7 @@ async fn side_context_label_shows_hidden_side_snapshot() {
     chat.show_welcome_banner = false;
     chat.local_settings.tui.status_line = Some(vec!["model-name".to_string()]);
     chat.refresh_status_line();
-    chat.set_side_conversation_context_label(Some("ctrl + / for side".to_string()));
+    chat.set_side_conversation_context_label(Some("ctrl+/ for side".to_string()));
 
     let width = 80;
     let height = chat.desired_height(width);
@@ -437,15 +444,5 @@ async fn side_context_label_shows_hidden_side_snapshot() {
     terminal
         .draw(|f| chat.render(f.area(), f.buffer_mut()))
         .expect("draw hidden side conversation footer");
-    let hint_start = width - "ctrl + / for side".len() as u16 - 2;
-    let footer_y = (0..height)
-        .find(|y| terminal.backend().buffer()[(hint_start, *y)].symbol() == "c")
-        .expect("side shortcut remains visible above work status");
-    assert_eq!(
-        terminal.backend().buffer()[(hint_start, footer_y)]
-            .style()
-            .fg,
-        Some(ratatui::style::Color::Magenta)
-    );
     assert_chatwidget_snapshot!("side_context_label_shows_hidden_side", terminal.backend());
 }

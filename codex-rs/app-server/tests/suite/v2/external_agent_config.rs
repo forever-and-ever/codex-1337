@@ -461,19 +461,16 @@ async fn external_agent_config_secondary_source_imports_session_and_plugin_end_t
     let project_root = codex_home.path().join("my-project");
     std::fs::create_dir_all(&project_root)?;
 
-    let encoded_project = project_root
-        .to_string_lossy()
-        .trim_start_matches(['/', '\\'])
-        .replace([':', '/', '\\'], "-");
     let session_path = source_home
         .join("projects")
-        .join(encoded_project)
+        .join("empty-window")
         .join("agent-transcripts/session-1/session-1.jsonl");
     std::fs::create_dir_all(session_path.parent().expect("session parent"))?;
     std::fs::write(
         &session_path,
         [
             serde_json::json!({
+                "cwd": project_root,
                 "role": "user",
                 "message": {
                     "content": [{

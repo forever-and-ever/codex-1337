@@ -1,0 +1,6 @@
+---
+source: tui/tests/suite/focus_palette.rs
+expression: failure.trim()
+---
+Error: daemon executable not found at [CODEX_HOME]/packages/app-server-daemon/current/bin/codex; repair the existing installation, or run `codex app-server daemon start` to install a missing daemon
+The shared app-server is required. Check the service and retry; emergency embedded mode requires CODEX_ALLOW_EMBEDDED_SERVER=1 --no-daemon.

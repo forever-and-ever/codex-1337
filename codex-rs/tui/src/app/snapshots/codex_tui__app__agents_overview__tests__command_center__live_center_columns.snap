@@ -1,0 +1,26 @@
+---
+source: tui/src/app/agent_center_tests.rs
+expression: "screen(&view, 160, 22)"
+---
+  Agent command center  Group: Project  ctrl+s
+   All 6   Needs you 2   Working 1   Ready 2   Inactive 1                                                                                 tab/shift+tab filter
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+      Tasks                                                                                   Status         Updated  │ Task details
+  /tmp/project  6                                                                                                     │
+    ■ Failed task                                                                             Error           1h ago  │ Current task
+    ■ Needs an answer                                                                         Needs input     2h ago  │ ■ Ready
+    ● Working task                                                                            Working         1d ago  │
+  › ■ Current task                                                                  current   Ready              now  │ Project
+    ■ A longer task title that uses the available column                                      Ready           5m ago  │ /tmp/project
+    △ Unloaded task                                                                           Inactive        2d ago  │ Model: Unknown
+                                                                                                                      │
+                                                                                                                      │ Prompt
+                                                                                                                      │ Current task
+                                                                                                                      │
+                                                                                                                      │
+                                                                                                                      │
+                                                                                                                      │
+                                                                                                                      │
+                                                                                                                      │
+                                                                                                                      │
+  ? help  esc back  ↑/↓ move  enter open  ctrl+n new

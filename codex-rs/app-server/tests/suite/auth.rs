@@ -7,6 +7,7 @@ use app_test_support::write_chatgpt_auth;
 use chrono::Duration;
 use chrono::Utc;
 use codex_app_server_protocol::Account;
+use codex_app_server_protocol::AccountRoutingOverride;
 use codex_app_server_protocol::AuthMode;
 use codex_app_server_protocol::GetAccountParams;
 use codex_app_server_protocol::GetAccountResponse;
@@ -16,6 +17,7 @@ use codex_app_server_protocol::JSONRPCError;
 use codex_app_server_protocol::JSONRPCResponse;
 use codex_app_server_protocol::LoginAccountResponse;
 use codex_app_server_protocol::RequestId;
+use codex_app_server_protocol::WorkspaceRouting;
 use codex_config::types::AuthCredentialsStoreMode;
 use codex_features::Feature;
 use codex_login::REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR;
@@ -163,6 +165,7 @@ async fn personal_access_token_without_email_supports_auth_status_and_account_re
 
     let authapi_base_url = server.uri();
     let mut mcp = TestAppServer::builder()
+        .with_mock_chatgpt_backend()
         .with_codex_home(codex_home.path())
         .without_auto_env()
         .with_env_overrides(&[
@@ -226,6 +229,11 @@ async fn personal_access_token_without_email_supports_auth_status_and_account_re
                 plan_type: AccountPlanType::EnterpriseCbpAutomation,
             }),
             requires_openai_auth: true,
+            workspace_routing: Some(WorkspaceRouting {
+                chatgpt_account_id: "account-123".to_string(),
+                backend_origin: "https://chatgpt.com".to_string(),
+                account_routing_override: AccountRoutingOverride::NoConstraint,
+            }),
         }
     );
 

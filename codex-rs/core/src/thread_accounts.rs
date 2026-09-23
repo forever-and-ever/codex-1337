@@ -7,7 +7,7 @@ impl ThreadManagerState {
         history: &InitialHistory,
         parent: Option<ThreadId>,
         auth: &Arc<AuthManager>,
-        agent_control: &AgentControl,
+        agent_control: &LocalAgentControl,
     ) -> CodexResult<Option<Arc<AuthManager>>> {
         let owner = match history {
             InitialHistory::Resumed(history) => Some(history.conversation_id),

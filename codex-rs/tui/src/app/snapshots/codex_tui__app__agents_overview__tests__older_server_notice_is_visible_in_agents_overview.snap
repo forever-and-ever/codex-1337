@@ -1,6 +1,5 @@
 ---
 source: tui/src/app/agents_overview_tests.rs
-expression: "rendered.lines().take(2).collect::<Vec<_>>().join(\"\\n\")"
+expression: rendered.lines().last().unwrap()
 ---
   Service v0.152.1 < Codex CLI v0.153.0
-  No sessions found.

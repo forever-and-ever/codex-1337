@@ -17,7 +17,7 @@ exec and hook running:
 "────────────────────────────────────────────────────────────────────────────────"
 "  Activity  —                                                                   "
 "────────────────────────────────────────────────────────────────────────────────"
-"  gpt-5.6-sol default · /tmp/project                                            "
+"  GPT-5.6-Sol default · /tmp/project                                            "
 history after exec:
 • Ran echo done
   └ done
@@ -32,7 +32,7 @@ hook running after exec:
 "────────────────────────────────────────────────────────────────────────────────"
 "  Activity  —                                                                   "
 "────────────────────────────────────────────────────────────────────────────────"
-"  gpt-5.6-sol default · /tmp/project                                            "
+"  GPT-5.6-Sol default · /tmp/project                                            "
 quiet hook completed:
 "                                                                                "
 "• Working (0s • esc to interrupt)                                               "
@@ -43,4 +43,4 @@ quiet hook completed:
 "────────────────────────────────────────────────────────────────────────────────"
 "  Activity  —                                                                   "
 "────────────────────────────────────────────────────────────────────────────────"
-"  gpt-5.6-sol default · /tmp/project                                            "
+"  GPT-5.6-Sol default · /tmp/project                                            "

@@ -475,7 +475,11 @@ unsafe fn dacl_has_deny_mask_for_sid(p_dacl: *mut ACL, psid: *mut c_void, deny_m
         if hdr.AceType != ACCESS_DENIED_ACE_TYPE {
             continue; // ACCESS_DENIED_ACE_TYPE
         }
-        if (hdr.AceFlags & INHERIT_ONLY_ACE) != 0 {
+        let ace = &*(p_ace as *const ACCESS_DENIED_ACE);
+        if let DenyAceScope::EffectiveForSid(psid) = scope
+            && ((hdr.AceFlags & INHERIT_ONLY_ACE) != 0
+                || EqualSid(std::ptr::addr_of!(ace.SidStart) as *mut c_void, psid) == 0)
+        {
             continue;
         }
         let ace = &*(p_ace as *const ACCESS_DENIED_ACE);
@@ -945,7 +949,11 @@ pub unsafe fn add_deny_read_ace(path: &Path, psid: *mut c_void) -> Result<bool> 
 #[path = "acl_tests.rs"]
 mod tests;
 
-pub unsafe fn revoke_ace(path: &Path, psid: *mut c_void) {
+/// Removes explicit ACEs for one SID and propagates the updated inherited ACL.
+///
+/// # Safety
+/// Caller must pass a valid SID pointer and have authority to edit the target DACL.
+pub unsafe fn revoke_ace(path: &Path, psid: *mut c_void) -> Result<()> {
     let mut p_sd: *mut c_void = std::ptr::null_mut();
     let mut p_dacl: *mut ACL = std::ptr::null_mut();
     let code = GetNamedSecurityInfoW(
@@ -962,7 +970,14 @@ pub unsafe fn revoke_ace(path: &Path, psid: *mut c_void) {
         if !p_sd.is_null() {
             LocalFree(p_sd as HLOCAL);
         }
-        return;
+        return acl_api_result(path, "GetNamedSecurityInfoW", code);
+    }
+    if p_dacl.is_null() {
+        // A null DACL has no ACE to revoke; replacing it with an empty ACL would deny access.
+        if !p_sd.is_null() {
+            LocalFree(p_sd as HLOCAL);
+        }
+        return Ok(());
     }
     let trustee = TRUSTEE_W {
         pMultipleTrustee: std::ptr::null_mut(),
@@ -977,9 +992,17 @@ pub unsafe fn revoke_ace(path: &Path, psid: *mut c_void) {
     explicit.grfInheritance = CONTAINER_INHERIT_ACE | OBJECT_INHERIT_ACE;
     explicit.Trustee = trustee;
     let mut p_new_dacl: *mut ACL = std::ptr::null_mut();
-    let code2 = SetEntriesInAclW(1, &explicit, p_dacl, &mut p_new_dacl);
-    if code2 == ERROR_SUCCESS {
-        let _ = SetNamedSecurityInfoW(
+    let result = acl_api_result(
+        path,
+        "SetEntriesInAclW",
+        SetEntriesInAclW(1, &explicit, p_dacl, &mut p_new_dacl),
+    )
+    .and_then(|()| {
+        // REVOKE_ACCESS only removes ACEs. An unchanged ACL must not propagate inheritance.
+        if (*p_new_dacl).AceCount == (*p_dacl).AceCount {
+            return Ok(());
+        }
+        let code = SetNamedSecurityInfoW(
             to_wide(path).as_ptr() as *mut u16,
             1,
             DACL_SECURITY_INFORMATION,
@@ -988,13 +1011,15 @@ pub unsafe fn revoke_ace(path: &Path, psid: *mut c_void) {
             p_new_dacl,
             std::ptr::null_mut(),
         );
-        if !p_new_dacl.is_null() {
-            LocalFree(p_new_dacl as HLOCAL);
-        }
+        acl_api_result(path, "SetNamedSecurityInfoW", code)
+    });
+    if !p_new_dacl.is_null() {
+        LocalFree(p_new_dacl as HLOCAL);
     }
     if !p_sd.is_null() {
         LocalFree(p_sd as HLOCAL);
     }
+    result
 }
 
 /// Grants RX to the null device for the given SID to support stdout/stderr redirection.

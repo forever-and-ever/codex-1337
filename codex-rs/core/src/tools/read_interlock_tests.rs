@@ -121,7 +121,7 @@ fn read_interlock_requires_retained_evidence_and_survives_neither_rewrites_nor_c
         100_000,
     );
     let retained = history.clone().into_annotated_items();
-    history.replace_compacted(retained);
+    history.replace_compacted(retained, /*reviewer_compaction_hash*/ None);
     assert_eq!(
         attempt(&history, "cat file")
             .process(&mut bank, &history, &mut output(&body))

@@ -2,9 +2,10 @@
 source: tui/src/app/agents_overview_tests.rs
 expression: rendered
 ---
-  Agent command center
-  No sessions found.
+  Agent command center  Group: Project  ctrl+s
+   All 0   Needs you 0   Working 0           ›
   ────────────────────────────────────────────
+  No tasks yet
 
 
 
@@ -18,11 +19,10 @@ expression: rendered
 
 
 
-  New task
 
-› Describe a new task
 
-  ↑↓ navigate ctrl+o resume → open
-  ctrl+n new task ctrl+f search ctrl+s group
-  ctrl+r rename ctrl+x stop ctrl+w hide
-  ctrl+a archive del delete esc back
+
+
+
+
+  ? help  esc back  ↑/↓ move  enter open  ctr…

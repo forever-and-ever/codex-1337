@@ -10,4 +10,4 @@ expression: normalized_backend_snapshot(terminal.backend())
 "  Goal      Keep improving the benchmark                                        "
 "  Activity  —                                                                   "
 "────────────────────────────────────────────────────────────────────────────────"
-"  gpt-5.4                                           Goal achieved (2d 23h 42m)  "
+"  GPT-5.4                                           Goal achieved (2d 23h 42m)  "

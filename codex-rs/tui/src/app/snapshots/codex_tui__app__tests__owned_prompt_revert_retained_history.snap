@@ -1,0 +1,16 @@
+---
+source: tui/src/app/tests.rs
+expression: transcript
+---
+
+› retained prompt
+
+
+
+  [Image #1]
+  [Image #2]
+
+› selected prompt [Image #1]
+
+
+• Conversation reverted to this point. File changes are unchanged.

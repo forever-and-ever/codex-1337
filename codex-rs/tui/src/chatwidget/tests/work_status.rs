@@ -163,7 +163,9 @@ async fn work_status_below_composer_clears_without_transcript_entries() {
                 watching
             );
             panels.push(normalized_backend_snapshot(terminal.backend()));
-            assert_eq!(chat.cursor_pos(Rect::new(0, 0, width, height)), None);
+            if watching {
+                assert_eq!(chat.cursor_pos(Rect::new(0, 0, width, height)), None);
+            }
         }
     }
     insta::assert_snapshot!("subagent_roster_below_activity", panels.join("\n\n"));

@@ -17,7 +17,7 @@ expression: "panels.join(\"\\n\\n\")"
 "› ● worker-8  Checking the parser and its integration tests               1.5M  "
 "  Ctrl+X retire · ↑↓ select · Enter open · Esc back                             "
 "────────────────────────────────────────────────────────────────────────────────"
-"  gpt-5.6-sol default · /tmp/project                                            "
+"  GPT-5.6-Sol default · /tmp/project                                            "
 
 
 "                              "
@@ -35,7 +35,7 @@ expression: "panels.join(\"\\n\\n\")"
 "› ● worker-8  Checking… 1.5M  "
 "  Ctrl+X retire · ↑↓ select   "
 "──────────────────────────────"
-"  gpt-5.6-sol default · /tmp/…"
+"  GPT-5.6-Sol default · /tmp/…"
 
 
 "                              "
@@ -45,7 +45,7 @@ expression: "panels.join(\"\\n\\n\")"
 "──────────────────────────────"
 "›↑● worker-8  Checking… 1.5M  "
 "──────────────────────────────"
-"  gpt-5.6-sol default · /tmp/…"
+"  GPT-5.6-Sol default · /tmp/…"
 
 
 "                                                                                "
@@ -61,7 +61,7 @@ expression: "panels.join(\"\\n\\n\")"
 " ↓■ worker-4  —                                                          12.3K  "
 "  Ctrl+X retire · ↑↓ select · Enter open · Esc back                             "
 "────────────────────────────────────────────────────────────────────────────────"
-"  gpt-5.6-sol default · /tmp/project                                            "
+"  GPT-5.6-Sol default · /tmp/project                                            "
 
 
 "                              "
@@ -79,7 +79,7 @@ expression: "panels.join(\"\\n\\n\")"
 " ↓■ worker-4  —        12.3K  "
 "  Ctrl+X retire · ↑↓ select   "
 "──────────────────────────────"
-"  gpt-5.6-sol default · /tmp/…"
+"  GPT-5.6-Sol default · /tmp/…"
 
 
 "                              "
@@ -89,4 +89,4 @@ expression: "panels.join(\"\\n\\n\")"
 "──────────────────────────────"
 " ↓● worker-8  Checking… 1.5M  "
 "──────────────────────────────"
-"  gpt-5.6-sol default · /tmp/…"
+"  GPT-5.6-Sol default · /tmp/…"

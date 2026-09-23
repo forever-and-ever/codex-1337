@@ -1,6 +1,6 @@
 //! Per-agent routing selections, captured atomically before each inference step.
 
-use super::AgentControl;
+use super::LocalAgentControl;
 use codex_protocol::ThreadId;
 use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
 use codex_protocol::config_types::ServiceTier;
@@ -69,7 +69,7 @@ impl TierTree {
     }
 }
 
-impl AgentControl {
+impl LocalAgentControl {
     pub(crate) fn root_service_tier(&self) -> Option<String> {
         self.service_tiers.load().root.clone()
     }

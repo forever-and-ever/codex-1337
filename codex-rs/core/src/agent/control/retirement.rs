@@ -3,7 +3,7 @@ use super::*;
 use crate::state::ActiveTurn;
 use codex_agent_graph_store::ThreadSpawnEdgeStatus;
 
-impl AgentControl {
+impl LocalAgentControl {
     /// Retire an idle descendant subtree. Accepted retirement finishes even if its caller leaves.
     pub(crate) async fn retire_agent(
         &self,

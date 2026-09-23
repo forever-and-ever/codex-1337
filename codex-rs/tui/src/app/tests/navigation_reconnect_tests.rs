@@ -6,6 +6,7 @@ use super::*;
 use crate::app::reconnect::ReconnectPresentation;
 use crate::app::reconnect::reconnect;
 use crate::app_event::AgentsOverviewThreadRefresh;
+use crate::app_event::WindowsSandboxEnableMode;
 use crate::app_server_session::ThreadParamsMode;
 use codex_app_server_client::AppServerEvent;
 use pretty_assertions::assert_eq;
@@ -142,20 +143,14 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
         );
         app.agents_overview.visible_thread_ids = view.thread_ids();
         app.chat_widget.show_bottom_pane_view(Box::new(view));
-        if previous_thread.is_some() {
-            app.agents_overview.view_state.lock().unwrap().input = "Keep this task draft".into();
-        } else {
-            app.chat_widget.handle_paste("Keep this task draft".into());
-        }
-        app.agents_overview.view_state.lock().unwrap().renaming = previous_thread.is_some();
-        let draft = |app: &App| {
-            let state = app.agents_overview.view_state.lock().unwrap();
-            if previous_thread.is_some() {
-                state.input.clone()
+        app.agents_overview.view_state.lock().unwrap().input = "Keep this task draft".into();
+        app.agents_overview.view_state.lock().unwrap().rename_target =
+            Some(if previous_thread.is_some() {
+                vanished
             } else {
-                state.composer.as_ref().unwrap().current_text_with_pending()
-            }
-        };
+                selected
+            });
+        let draft = |app: &App| app.agents_overview.view_state.lock().unwrap().input.clone();
         let stale_request = Uuid::new_v4();
         app.agents_overview.request_id = Some(stale_request);
         app.agents_overview.refresh_pending = true;
@@ -168,8 +163,21 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
             socket_path: codex_utils_absolute_path::AbsolutePathBuf::try_from(socket_path.clone())?,
         };
         app.app_server_target = AppServerTarget::LocalDaemon {
+            allow_embedded_fallback: true,
             endpoint: endpoint.clone(),
         };
+        let interrupted_setup = previous_thread.is_none() && !overview_initialized;
+        if interrupted_setup {
+            let preset = codex_utils_approval_presets::builtin_approval_presets()
+                .into_iter()
+                .find(|preset| preset.id == "auto")
+                .expect("auto preset");
+            app.windows_sandbox.pending_setup =
+                Some((WindowsSandboxEnableMode::Elevated, preset, None));
+            app.windows_sandbox.setup_started_at = Some(Instant::now());
+        } else if previous_thread.is_none() {
+            app.chat_widget.windows_sandbox_elevated_setup_complete = true;
+        }
         let available = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let server_available = Arc::clone(&available);
         let restored_previous = previous_thread
@@ -195,6 +203,7 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
                                 restored_previous.clone().unwrap()
                             };
                             if changed_child_permissions && thread.id != child.to_string() {
+                                thread.status = ThreadStatus::Active { active_flags: Vec::new() };
                                 thread.turns = vec![test_turn("saved", TurnStatus::InProgress, Vec::new())];
                             }
                             let (approval, sandbox) = if changed_child_permissions && thread.id != child.to_string() {
@@ -213,12 +222,19 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
                         }
                         "thread/loaded/list" => Some(json!({"result": {"data": [selected, added], "nextCursor": null}})),
                         "thread/list" => Some(json!({"result": {"data": [], "nextCursor": null}})),
+                        "thread/turns/list" if changed_child_permissions && child_opened && previous_thread.is_some_and(|id| request.params.as_ref().unwrap()["threadId"] == id.to_string()) => Some(json!({"result": {"data": [test_turn("saved", TurnStatus::InProgress, Vec::new())], "nextCursor": null}})),
                         "thread/turns/list" => Some(json!({"result": {"data": [], "nextCursor": null}})),
                         "thread/goal/get" => Some(json!({"result": {"goal": null}})),
+                        "thread/unsubscribe" => Some(json!({"result": {}})),
+                        "config/read" if request.params.as_ref().unwrap()["includeLayers"] == true => Some(json!({"result": {"config": {"projects": {"/tmp/project": {"trust_level": "trusted"}}}, "layers": []}})),
+                        "config/read" => Some(json!({"error": {"code": -32601, "message": "unknown method config/read"}})),
                         "thread/read" if request.params.as_ref().unwrap()["threadId"] == child.to_string() => Some(json!({"result": {"thread": child_thread}})),
                         "thread/read" if previous_thread.is_some_and(|id| request.params.as_ref().unwrap()["threadId"] == id.to_string()) => Some(if changed_child_permissions && child_opened {
                             let mut thread = restored_previous.clone().unwrap();
                             let status = if server_available.load(std::sync::atomic::Ordering::SeqCst) { TurnStatus::InProgress } else { TurnStatus::Completed };
+                            if matches!(status, TurnStatus::InProgress) {
+                                thread.status = ThreadStatus::Active { active_flags: Vec::new() };
+                            }
                             thread.turns = vec![test_turn("saved", status, Vec::new())];
                             json!({"result": {"thread": thread}})
                         } else if server_available.load(std::sync::atomic::Ordering::SeqCst) { json!({"result": {"thread": restored_previous}}) } else { json!({"error": {"code": -32600, "message": "thread no longer exists"}}) }),
@@ -314,6 +330,29 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
             CODEX_CLI_VERSION,
         )
         .await?;
+        if interrupted_setup {
+            assert!(app.windows_sandbox.pending_setup.is_none());
+            assert!(app.windows_sandbox.setup_started_at.is_none());
+            let mut retained = Vec::new();
+            let mut saw_warning = false;
+            while let Ok(event) = events.try_recv() {
+                if let AppEvent::InsertHistoryCell(cell) = &event {
+                    let rendered = lines_to_single_string(&cell.display_lines(/*width*/ 100));
+                    if rendered.contains("Windows sandbox setup was interrupted") {
+                        insta::assert_snapshot!(rendered, @"■ Windows sandbox setup was interrupted. Restart Codex before using Agent mode.");
+                        saw_warning = true;
+                        continue;
+                    }
+                }
+                retained.push(event);
+            }
+            assert!(saw_warning);
+            for event in retained {
+                app.app_event_tx.send(event);
+            }
+        } else if previous_thread.is_none() {
+            assert!(app.chat_widget.windows_sandbox_elevated_setup_complete);
+        }
         assert!(!app.reconnect.offline);
         assert_eq!(app.current_displayed_thread_id(), previous_thread);
 
@@ -377,7 +416,7 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
             .await?;
             assert!(
                 !std::iter::from_fn(|| events.try_recv().ok())
-                    .any(|event| matches!(event, AppEvent::DispatchAgentsOverviewTask { .. }))
+                    .any(|event| matches!(event, AppEvent::NewAgentsOverviewSession { .. }))
             );
         }
         assert!(
@@ -407,20 +446,6 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
             )
             .await?;
 
-            assert!(app.chat_widget.has_active_view());
-            app.handle_tui_event(
-                &mut tui,
-                &mut session,
-                TuiEvent::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
-            )
-            .await?;
-
-            assert!(app.chat_widget.has_active_view());
-            // Esc returns to the overview composer. Dismiss the retained view explicitly
-            // to inspect the unavailable conversation and its cached draft below.
-            app.agents_overview.view_state.lock().unwrap().completion =
-                Some(crate::bottom_pane::ViewCompletion::Accepted);
-            app.chat_widget.handle_key_event(KeyCode::Null.into());
             assert!(!app.chat_widget.has_active_view());
             assert_eq!(app.current_displayed_thread_id(), Some(id));
             let history = drain_history(&mut app, &mut tui, &mut session, &mut events).await?;
@@ -490,7 +515,7 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
                     .config_ref()
                     .permissions
                     .permission_profile(),
-                &PermissionProfile::Disabled
+                &PermissionProfile::read_only()
             );
             if changed_child_permissions {
                 app.runtime_approval_policy_override = Some(
