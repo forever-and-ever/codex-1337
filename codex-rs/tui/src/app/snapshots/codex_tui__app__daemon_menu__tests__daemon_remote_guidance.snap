@@ -5,7 +5,8 @@ expression: "render_bottom_popup(&app.chat_widget, 80)"
   Daemon
   Remote shared service: v0.153.0
   Codex 1337 does not replace the shared service from the TUI.
-  Install the fork build and adopt it only at an all-stop.
+  Production installs wait for an all-stop; staging installs restart
+  immediately.
   Manage the remote service on its host.
 
 

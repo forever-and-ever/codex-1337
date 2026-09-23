@@ -2,6 +2,7 @@
 
 import argparse
 import os
+import shlex
 import subprocess
 import tempfile
 from pathlib import Path
@@ -11,6 +12,7 @@ UNITS = (
     "codex-app-server-refresh.service",
     "codex-app-server-refresh.path",
 )
+STAGING_UNIT = "codex-app-server-staging.service"
 
 
 def xdg(name: str, fallback: str) -> Path:
@@ -27,6 +29,92 @@ def unit_path(path: Path) -> str:
     value = str(path).replace("%", "%%")
     value = value.replace("\\", "\\\\").replace('"', '\\"')
     return '"' + value.replace("\n", "\\n").replace("\r", "\\r") + '"'
+
+
+def write_unit(unit_dir: Path, name: str, contents: str) -> None:
+    with tempfile.NamedTemporaryFile(mode="w", dir=unit_dir, delete=False) as output:
+        temporary = Path(output.name)
+        try:
+            output.write(contents)
+            output.flush()
+            os.fsync(output.fileno())
+            temporary.replace(unit_dir / name)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+
+def launcher_contents(distributions: Path) -> str:
+    commands = {
+        channel: shlex.quote(str(distributions / channel / "bin/codex"))
+        for channel in ("current", "staging")
+    }
+    return (
+        "#!/bin/sh\n"
+        "# codex-1337 launcher\n"
+        "case ${CODEX_STAGING:-0} in\n"
+        f'    0) exec {commands["current"]} "$@" ;;\n'
+        f'    1) CODEX_HOME="$HOME/.codex" exec {commands["staging"]} "$@" ;;\n'
+        "    *) printf 'CODEX_STAGING must be 0 or 1\\n' >&2; exit 2 ;;\n"
+        "esac\n"
+    )
+
+
+def install_launcher(distributions: Path, launcher: Path) -> None:
+    if not distributions.is_absolute() or not launcher.is_absolute():
+        raise ValueError("launcher and distributions paths must be absolute")
+    if launcher.is_symlink():
+        if launcher.readlink() != distributions / "current/bin/codex":
+            raise FileExistsError(
+                f"refusing to replace an unowned launcher: {launcher}"
+            )
+    elif launcher.exists():
+        with launcher.open("rb") as existing:
+            existing.readline()
+            if existing.readline() != b"# codex-1337 launcher\n":
+                raise FileExistsError(
+                    f"refusing to replace an unowned launcher: {launcher}"
+                )
+    contents = launcher_contents(distributions)
+    with tempfile.NamedTemporaryFile(
+        mode="w", dir=launcher.parent, delete=False
+    ) as output:
+        temporary = Path(output.name)
+        try:
+            output.write(contents)
+            output.flush()
+            os.fsync(output.fileno())
+            temporary.chmod(0o755)
+            temporary.replace(launcher)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+
+def install_staging_launcher(distributions: Path, launcher: Path) -> None:
+    contents = launcher_contents(distributions)
+    if (
+        launcher.is_file()
+        and not launcher.is_symlink()
+        and launcher.stat().st_size == len(contents)
+        and launcher.read_text() == contents
+    ):
+        return
+    watcher = subprocess.run(
+        ["systemctl", "--user", "is-active", "--quiet", UNITS[2]],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if watcher.returncode not in (0, 3, 4):
+        raise RuntimeError(
+            f"cannot determine production watcher state: {watcher.stderr}"
+        )
+    if watcher.returncode == 0:
+        systemctl("stop", UNITS[2])
+    try:
+        install_launcher(distributions, launcher)
+    finally:
+        if watcher.returncode == 0:
+            systemctl("start", UNITS[2])
 
 
 def integrate(action: str, install_root: Path) -> None:
@@ -47,8 +135,10 @@ def integrate(action: str, install_root: Path) -> None:
         legacy_binary.unlink()
 
     if action == "uninstall":
+        if (unit_dir / STAGING_UNIT).exists():
+            systemctl("disable", "--now", STAGING_UNIT)
         systemctl("disable", "--now", UNITS[2], UNITS[0])
-        for name in UNITS:
+        for name in (*UNITS, STAGING_UNIT):
             (unit_dir / name).unlink(missing_ok=True)
         systemctl("daemon-reload")
         return
@@ -62,28 +152,55 @@ def integrate(action: str, install_root: Path) -> None:
             .replace("@CODEX@", unit_path(install_root / "bin/codex"))
             .replace("@CODEX_PATH@", str(install_root / "bin/codex").replace("%", "%%"))
         )
-        with tempfile.NamedTemporaryFile(
-            mode="w", dir=unit_dir, delete=False
-        ) as output:
-            temporary = Path(output.name)
-            try:
-                output.write(contents)
-                output.flush()
-                os.fsync(output.fileno())
-                temporary.replace(unit_dir / name)
-            finally:
-                temporary.unlink(missing_ok=True)
+        write_unit(unit_dir, name, contents)
     systemctl("daemon-reload")
     systemctl("enable", "--now", UNITS[0], UNITS[2])
     # Do not restart: adoption waits for idle without closing admission to new work.
     systemctl("start", UNITS[1])
 
 
+def integrate_staging(binary: Path) -> None:
+    if not binary.is_absolute() or any(c in str(binary) for c in "\r\n"):
+        raise ValueError("staging binary must be an absolute path without line breaks")
+    unit_dir = xdg("XDG_CONFIG_HOME", ".config") / "systemd/user"
+    unit_dir.mkdir(parents=True, exist_ok=True)
+    contents = (
+        (Path(__file__).parent / "systemd" / STAGING_UNIT)
+        .read_text()
+        .replace("@CODEX@", unit_path(binary))
+    )
+    write_unit(unit_dir, STAGING_UNIT, contents)
+    systemctl("daemon-reload")
+    systemctl("enable", STAGING_UNIT)
+    systemctl("restart", STAGING_UNIT)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("install", "uninstall"))
+    parser.add_argument(
+        "action",
+        choices=(
+            "install",
+            "install-staging",
+            "install-launcher",
+            "install-staging-launcher",
+            "uninstall",
+        ),
+    )
     parser.add_argument("install_root", type=Path)
+    parser.add_argument("launcher", nargs="?", type=Path)
     args = parser.parse_args()
     if not args.install_root.is_absolute():
         parser.error("install_root must be absolute")
-    integrate(args.action, args.install_root)
+    if args.action == "install-launcher":
+        if args.launcher is None:
+            parser.error("install-launcher requires a destination")
+        install_launcher(args.install_root, args.launcher)
+    elif args.action == "install-staging-launcher":
+        if args.launcher is None:
+            parser.error("install-staging-launcher requires a destination")
+        install_staging_launcher(args.install_root, args.launcher)
+    elif args.action == "install-staging":
+        integrate_staging(args.install_root)
+    else:
+        integrate(args.action, args.install_root)

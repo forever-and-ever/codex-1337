@@ -7,6 +7,12 @@ distribution_root="$data_home/codex-1337/distributions"
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 python3 "$root/scripts/local_integration.py" uninstall "$install_root"
 
+launcher="$install_root/bin/codex"
+if [ -f "$launcher" ] && [ ! -L "$launcher" ] \
+    && sed -n '2p' "$launcher" | grep -Fxq '# codex-1337 launcher'; then
+    rm -f -- "$launcher"
+fi
+
 for executable in codex codex-code-mode-host codex-wrangler-bridge codex-wrangler; do
     link="$install_root/bin/$executable"
     [ -L "$link" ] || continue

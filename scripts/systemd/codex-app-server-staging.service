@@ -1,0 +1,19 @@
+[Unit]
+Description=Disposable Codex staging app server
+
+[Service]
+Type=simple
+Environment=CODEX_STAGING=1
+Environment=CODEX_HOME=%h/.codex
+ExecStartPre=/usr/bin/install -d -m700 %h/.codex/staging
+ExecStart=:@CODEX@ app-server --listen unix://
+OOMPolicy=continue
+Restart=always
+RestartSec=1s
+KillMode=mixed
+TimeoutStopSec=5s
+UMask=0077
+Environment=PATH=%h/bin:%h/.cargo/bin:%h/.local/bin:/usr/local/bin:/usr/bin
+
+[Install]
+WantedBy=default.target

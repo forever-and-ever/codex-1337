@@ -1176,6 +1176,19 @@ async fn cli_main(
         mut interactive,
         subcommand,
     } = MultitoolCli::parse();
+    if codex_state::staging_enabled()
+        && matches!(
+            &subcommand,
+            Some(Subcommand::AppServer(AppServerCommand {
+                subcommand: Some(AppServerSubcommand::Daemon(_)),
+                ..
+            })) | Some(Subcommand::RemoteControl(_))
+        )
+    {
+        anyhow::bail!(
+            "the staging daemon is systemd-managed; use scripts/install-staging to replace it or systemctl --user to inspect it"
+        );
+    }
     if matches!(
         subcommand,
         Some(Subcommand::Debug(DebugCommand {
@@ -2860,11 +2873,13 @@ async fn run_interactive_tui(
         cloud_config::load_config(&interactive.config_overrides, LoaderOverrides::default())
             .await
             .map_err(std::io::Error::other)?;
-        codex_app_server_daemon::run(AppServerLifecycleCommand::Start)
-            .await
-            .map_err(|err| std::io::Error::other(format!(
-                "{err:#}\nThe agents overview requires the shared service. Start or repair it, then retry."
-            )))?;
+        if !codex_state::staging_enabled() {
+            codex_app_server_daemon::run(AppServerLifecycleCommand::Start)
+                .await
+                .map_err(|err| std::io::Error::other(format!(
+                    "{err:#}\nThe agents overview requires the shared service. Start or repair it, then retry."
+                )))?;
+        }
     }
 
     let remote_endpoint = match resolve_remote_endpoint(remote, remote_auth_token_env.clone()) {

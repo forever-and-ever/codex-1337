@@ -58,14 +58,14 @@ const APP_SERVER_STARTUP_LOCK_FILE_NAME: &str = "app-server-startup.lock";
 const DAEMON_RECOVERY_FILE_NAME: &str = "loaded-threads.json";
 
 pub fn daemon_recovery_file_path(codex_home: &Path) -> PathBuf {
-    codex_home
+    codex_state::daemon_state_home(codex_home)
         .join("app-server-daemon")
         .join(DAEMON_RECOVERY_FILE_NAME)
 }
 
 pub fn app_server_control_socket_path(codex_home: &Path) -> std::io::Result<AbsolutePathBuf> {
     AbsolutePathBuf::from_absolute_path(
-        codex_home
+        codex_state::daemon_state_home(codex_home)
             .join(APP_SERVER_CONTROL_SOCKET_DIR_NAME)
             .join(APP_SERVER_CONTROL_SOCKET_FILE_NAME),
     )
@@ -73,7 +73,7 @@ pub fn app_server_control_socket_path(codex_home: &Path) -> std::io::Result<Abso
 
 pub fn app_server_startup_lock_path(codex_home: &Path) -> std::io::Result<AbsolutePathBuf> {
     AbsolutePathBuf::from_absolute_path(
-        codex_home
+        codex_state::daemon_state_home(codex_home)
             .join(APP_SERVER_CONTROL_SOCKET_DIR_NAME)
             .join(APP_SERVER_STARTUP_LOCK_FILE_NAME),
     )

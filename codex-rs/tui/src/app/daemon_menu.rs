@@ -48,7 +48,7 @@ impl App {
             "Codex 1337 does not replace the shared service from the TUI.".dim(),
         ));
         header.push(Line::from(
-            "Install the fork build and adopt it only at an all-stop.".dim(),
+            "Production installs wait for an all-stop; staging installs restart immediately.".dim(),
         ));
         if matches!(self.app_server_target, AppServerTarget::Remote { .. }) {
             header.push(Line::from("Manage the remote service on its host.".dim()));

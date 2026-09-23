@@ -123,6 +123,22 @@ pub const PINNED_THREAD_SECTION_NAME: &str = "Pinned";
 /// Environment variable for overriding the SQLite state database home directory.
 pub const SQLITE_HOME_ENV: &str = "CODEX_SQLITE_HOME";
 
+/// Select the disposable local daemon without changing the shared Codex home.
+pub const STAGING_ENV: &str = "CODEX_STAGING";
+
+pub fn staging_enabled() -> bool {
+    std::env::var_os(STAGING_ENV).is_some_and(|value| value == "1")
+}
+
+/// Keep daemon-owned state separate while config, credentials, and rollouts stay shared.
+pub fn daemon_state_home(home: &std::path::Path) -> std::path::PathBuf {
+    if staging_enabled() {
+        home.join("staging")
+    } else {
+        home.to_path_buf()
+    }
+}
+
 /// Errors encountered during DB operations. Tags: [stage]
 pub const DB_ERROR_METRIC: &str = "codex.db.error";
 /// Metrics on backfill process. Tags: [status]

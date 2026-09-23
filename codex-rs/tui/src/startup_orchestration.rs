@@ -469,7 +469,8 @@ pub(super) async fn run_main_inner(
     } else {
         None
     };
-    let auto_start_daemon = config.features.enabled(Feature::DaemonAutoStart)
+    let auto_start_daemon = !codex_state::staging_enabled()
+        && config.features.enabled(Feature::DaemonAutoStart)
         && !cli.agents_overview
         && !cli.no_daemon
         && !app_server_target.uses_remote_workspace();
