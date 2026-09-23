@@ -1157,8 +1157,10 @@ fi
     );
 
     let cwd = AbsolutePathBuf::try_from(subdir.as_path()).expect("cwd should be absolute");
+    let writable_tmp_root =
+        AbsolutePathBuf::try_from(tmpdir.path()).expect("temp root should be absolute");
     let permission_profile = PermissionProfile::workspace_write_with(
-        std::slice::from_ref(&cwd),
+        &[cwd.clone(), writable_tmp_root],
         NetworkSandboxPolicy::Enabled,
         /*exclude_tmpdir_env_var*/ false,
         /*exclude_slash_tmp*/ false,

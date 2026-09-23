@@ -16,6 +16,21 @@ from types import FrameType
 
 
 def main() -> int:
+    full_workspace = not sys.argv[1:] or "--workspace" in sys.argv[1:]
+    if full_workspace:
+        # The fork publishes its own checked V8 archive; rusty_v8's upstream
+        # archive for this version is absent. Keep scoped crate runs lean.
+        os.environ.setdefault(
+            "CODEX_REPO_ROOT", str(Path(__file__).resolve().parents[1])
+        )
+        from codex_package.targets import TARGET_SPECS
+        from codex_package.v8 import resolve_codex_v8_cargo_env
+
+        host = subprocess.check_output(
+            ["rustc", "--print", "host-tuple"], text=True
+        ).strip()
+        v8_environment = resolve_codex_v8_cargo_env(TARGET_SPECS[host])
+
     root = Path(os.environ.get("CODEX_TEST_TMP_ROOT", "/var/tmp")).resolve()
     root.mkdir(parents=True, exist_ok=True)
     if sys.platform == "linux":
@@ -25,8 +40,10 @@ def main() -> int:
         if filesystem in {"tmpfs", "ramfs"}:
             sys.exit("CODEX_TEST_TMP_ROOT must be disk-backed, not tmpfs/ramfs")
 
-    with tempfile.TemporaryDirectory(prefix="codex-test-", dir=root) as scratch:
+    with tempfile.TemporaryDirectory(prefix="codex_test_", dir=root) as scratch:
         environment = os.environ | dict.fromkeys(("TMPDIR", "TMP", "TEMP"), scratch)
+        if full_workspace:
+            environment.update(v8_environment)
         child: subprocess.Popen[bytes] | None = None
         pending: list[int] = []
 

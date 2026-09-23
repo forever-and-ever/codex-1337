@@ -1357,6 +1357,7 @@ mod tests {
                         account_id: None,
                         account: None,
                         requires_openai_auth: false,
+                        workspace_routing: None,
                     })
                     .expect("response should serialize"),
                 }),
@@ -1413,6 +1414,7 @@ mod tests {
                         account_id: None,
                         account: None,
                         requires_openai_auth: false,
+                        workspace_routing: None,
                     })
                     .expect("response should serialize"),
                 }),
@@ -1492,6 +1494,7 @@ mod tests {
                 account_id: None,
                 account: None,
                 requires_openai_auth: false,
+                workspace_routing: None,
             }
         );
 
@@ -1596,6 +1599,7 @@ mod tests {
                         account_id: None,
                         account: None,
                         requires_openai_auth: false,
+                        workspace_routing: None,
                     })
                     .expect("response should serialize"),
                 }),
@@ -1652,6 +1656,7 @@ mod tests {
                 account_id: None,
                 account: None,
                 requires_openai_auth: false,
+                workspace_routing: None,
             }
         );
 

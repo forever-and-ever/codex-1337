@@ -27,6 +27,12 @@ inherits = "default"
 filter = 'test(snapshot_discovers_and_redacts_shell_initialized_credentials) | test(feedback_upload_delivers_whole_files_or_marked_prefixes)'
 slow-timeout = { period = "1m", terminate-after = 5 }
 
+[[profile.local.overrides]]
+# These code-mode integration cases pass alone but can exceed 60s in the full
+# workspace fanout on a loaded developer machine.
+filter = 'package(codex-core) & (test(code_mode_excludes_mcp_servers_using_their_configured_identity) | test(mcp_code_mode_exclusion_does_not_change_direct_mode_tool_exposure))'
+slow-timeout = { period = "1m", terminate-after = 3 }
+
 [test-groups.app_server_protocol_codegen]
 max-threads = 1
 

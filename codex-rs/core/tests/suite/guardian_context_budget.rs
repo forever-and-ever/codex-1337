@@ -35,10 +35,10 @@ use test_case::test_case;
 
 use super::image_rollout::RecordingFileAttachmentStore;
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[test_case(160_000, &[0, 0]; "complete_instructions_fit")]
 #[test_case(28_000, &[0, 1]; "oversized_history_compacts_then_truncates")]
 #[test_case(16_000, &[1]; "first_review_can_shorten_oversized_instructions")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn review_preserves_user_instructions_until_request_budgeting(
     window: i64,
     compactions_per_turn: &[usize],
@@ -207,13 +207,13 @@ enum ReviewerResponse {
     NextReview,
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[test_case(1, ReviewerResponse::Decision; "required_context_fails_closed")]
 #[test_case(4_500, ReviewerResponse::ToolContinuation; "oversized_tool_continuation_compacts")]
 #[test_case(4_500, ReviewerResponse::FileImageContinuation; "uploaded_original_image_history_compacts")]
 #[test_case(4_500, ReviewerResponse::UncompactableContinuation; "ineffective_compaction_fails_closed")]
 #[test_case(4_500, ReviewerResponse::CompactionError; "compaction_service_error_does_not_request_user_approval")]
 #[test_case(6_000, ReviewerResponse::NextReview; "incoming_review_compacts_existing_history")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn review_respects_complete_context_budget(
     window: i64,
     reviewer_response: ReviewerResponse,
