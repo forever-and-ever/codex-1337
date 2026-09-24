@@ -43,16 +43,7 @@ impl App {
                 "Not connected to the local shared service.".to_string()
             }
         };
-        let mut header = vec![Line::from("Daemon".bold()), Line::from(status.dim())];
-        header.push(Line::from(
-            "Codex 1337 does not replace the shared service from the TUI.".dim(),
-        ));
-        header.push(Line::from(
-            "Production installs wait for an all-stop; staging installs restart immediately.".dim(),
-        ));
-        if matches!(self.app_server_target, AppServerTarget::Remote { .. }) {
-            header.push(Line::from("Manage the remote service on its host.".dim()));
-        }
+        let header = vec![Line::from("Daemon".bold()), Line::from(status.dim())];
         self.chat_widget.show_selection_view(SelectionViewParams {
             header: Box::new(DaemonMenuHeader(header)),
             items: vec![SelectionItem {

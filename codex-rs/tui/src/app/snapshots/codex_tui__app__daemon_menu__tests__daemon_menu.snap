@@ -4,9 +4,6 @@ expression: "render_bottom_popup(&app.chat_widget, 80)"
 ---
   Daemon
   Local shared service: v0.156.0
-  Codex 1337 does not replace the shared service from the TUI.
-  Production installs wait for an all-stop; staging installs restart
-  immediately.
 
 
 › 1. Close

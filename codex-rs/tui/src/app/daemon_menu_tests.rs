@@ -98,7 +98,7 @@ async fn daemon_menu_reports_local_status_without_update_actions() {
 }
 
 #[tokio::test]
-async fn remote_daemon_menu_offers_guidance_without_update_actions() {
+async fn remote_daemon_menu_reports_status_without_update_actions() {
     let mut app = make_test_app().await;
     let (chat, _, mut rx, _) = make_chatwidget_manual_with_sender().await;
     app.chat_widget = chat;
@@ -115,7 +115,7 @@ async fn remote_daemon_menu_offers_guidance_without_update_actions() {
     });
     app.open_daemon_menu();
     insta::assert_snapshot!(
-        "daemon_remote_guidance",
+        "daemon_remote_status",
         render_bottom_popup(&app.chat_widget, /*width*/ 80)
     );
     app.chat_widget.handle_key_event(KeyCode::Enter.into());
