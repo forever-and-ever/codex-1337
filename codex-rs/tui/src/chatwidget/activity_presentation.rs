@@ -57,6 +57,9 @@ impl ChatWidget {
             activity,
             auxiliary,
             has_hidden_details,
+            tool_output_bytes: (self.config.model_provider_id == "openai")
+                .then(|| active.and_then(HistoryCell::tool_output_text_bytes))
+                .flatten(),
         })
     }
 }

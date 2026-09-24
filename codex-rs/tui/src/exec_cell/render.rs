@@ -292,6 +292,18 @@ impl HistoryCell for ExecCell {
             .collect()
     }
 
+    fn tool_output_text_bytes(&self) -> Option<usize> {
+        self.group.calls.iter().try_fold(0usize, |bytes, call| {
+            if call.is_user_shell_command() || call.is_unified_exec_interaction() {
+                return None;
+            }
+            call.output
+                .as_ref()
+                .filter(|_| call.duration.is_some())
+                .map(|output| bytes.saturating_add(output.aggregated_output.len()))
+        })
+    }
+
     fn raw_lines(&self) -> Vec<Line<'static>> {
         plain_lines(visible_lines(
             self.detailed_hyperlink_lines(u16::MAX, HistoryRenderMode::Raw),

@@ -94,6 +94,10 @@ impl HistoryCell for PatchFailureCell {
         vec![self.activity_id.clone()]
     }
 
+    fn tool_output_text_bytes(&self) -> Option<usize> {
+        (!self.stderr.trim().is_empty()).then_some(self.stderr.len())
+    }
+
     fn compact_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         let mut lines = self.transcript_hyperlink_lines(width);
         lines.truncate(1 + super::activity_preview::DETAIL_PREVIEW_LINES);

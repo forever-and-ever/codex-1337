@@ -287,6 +287,10 @@ impl HistoryCell for ActivityCell {
     fn activity_ids(&self) -> Vec<String> {
         vec!["sample-activity".into()]
     }
+
+    fn tool_output_text_bytes(&self) -> Option<usize> {
+        Some(5_120)
+    }
 }
 
 #[test]
@@ -294,6 +298,7 @@ fn activity_alternative_focuses_details_and_hints_follow_configured_chords() {
     let mut cells: Vec<Arc<dyn HistoryCell>> = Vec::new();
     let cell = Arc::new(ActivityCell::default());
     let mut view = TranscriptView::default();
+    view.set_output_estimates_enabled(true);
     let render_live = |view: &mut TranscriptView| {
         let expanded = view.sync_live_activity(&cells, cell.activity_ids());
         view.sync_live_activity_tail(/*width*/ 32, /*key*/ None, expanded, |width| {
@@ -305,6 +310,7 @@ fn activity_alternative_focuses_details_and_hints_follow_configured_chords() {
                 },
                 auxiliary: Vec::new(),
                 has_hidden_details: true,
+                tool_output_bytes: cell.tool_output_text_bytes(),
             })
         });
         render(view, &[])

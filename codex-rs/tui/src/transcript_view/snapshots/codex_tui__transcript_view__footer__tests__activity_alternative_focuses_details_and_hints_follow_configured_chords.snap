@@ -7,7 +7,7 @@ Buffer {
     area: Rect { x: 0, y: 0, width: 32, height: 3 },
     content: [
         "Activity summary                ",
-        "    + Show details              ",
+        "    + Details (≈1,280 tokens)   ",
         "                                ",
     ],
     styles: [
@@ -24,14 +24,14 @@ Buffer {
     area: Rect { x: 0, y: 0, width: 32, height: 3 },
     content: [
         "Activity summary                ",
-        "    + Show details              ",
+        "    + Details (≈1,280 tokens)   ",
         "                                ",
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: UNDERLINED,
         x: 0, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
         x: 4, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
-        x: 18, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 29, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
         x: 0, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }
@@ -41,14 +41,14 @@ Buffer {
     content: [
         "Activity summary                ",
         "Hidden details                  ",
-        "    − Show less                 ",
+        "    − Less (≈1,280 tokens)      ",
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: UNDERLINED,
         x: 0, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 0, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
         x: 4, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
-        x: 15, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 26, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
     ]
 }
 "ctrl-x t": ctrl+x t inspect activity

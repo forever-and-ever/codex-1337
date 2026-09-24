@@ -4,6 +4,7 @@
 //! Stable cells also invalidate when animation ticks, syntax themes, or terminal colors change.
 
 use std::sync::Weak;
+use unicode_width::UnicodeWidthStr;
 
 use super::*;
 
@@ -15,6 +16,7 @@ pub(crate) struct ActivityTranscriptLines {
     pub(crate) activity: Vec<HyperlinkLine>,
     pub(crate) auxiliary: Vec<HyperlinkLine>,
     pub(crate) has_hidden_details: bool,
+    pub(crate) tool_output_bytes: Option<usize>,
 }
 
 /// Keep disclosure controls outside selectable source without rendering hidden details.
@@ -35,8 +37,28 @@ pub(super) fn activity_layout(
         "− Show less"
     } else {
         "+ Show details"
-    }
-    .to_owned();
+    };
+    let label = if let Some(bytes) = lines.tool_output_bytes.filter(|bytes| *bytes > 0) {
+        let tokens = codex_utils_string::approx_tokens_from_byte_count(bytes);
+        let tokens = codex_protocol::num_format::format_with_separators(
+            i64::try_from(tokens).unwrap_or(i64::MAX),
+        );
+        let full = format!("{label} (≈{tokens} total tokens of output)");
+        let short = format!(
+            "{} (≈{tokens} tokens)",
+            if expanded { "− Less" } else { "+ Details" }
+        );
+        let available = usize::from(width.saturating_sub(4));
+        if UnicodeWidthStr::width(full.as_str()) <= available {
+            full
+        } else if UnicodeWidthStr::width(short.as_str()) <= available {
+            short
+        } else {
+            label.to_owned()
+        }
+    } else {
+        label.to_owned()
+    };
     match source_offset {
         Some(offset) => layout.with_disclosure_control_at(label, offset),
         None => layout.with_disclosure_control(label),
@@ -75,6 +97,14 @@ pub(super) struct CellPresentation {
 }
 
 impl TranscriptView {
+    pub(crate) fn set_output_estimates_enabled(&mut self, enabled: bool) {
+        if self.output_estimates_enabled != enabled {
+            self.output_estimates_enabled = enabled;
+            self.cache.clear();
+            self.live_key = None;
+        }
+    }
+
     pub(super) fn layout(
         &mut self,
         cells: &[Arc<dyn HistoryCell>],
@@ -139,6 +169,7 @@ impl TranscriptView {
             expanded,
             disclosure,
         };
+        let output_estimates_enabled = self.output_estimates_enabled;
         Some(self.cache.get(cell, width, presentation, || {
             if disclosure {
                 activity_layout(
@@ -150,6 +181,9 @@ impl TranscriptView {
                         },
                         auxiliary: Vec::new(),
                         has_hidden_details: cell.has_hidden_activity_details(width),
+                        tool_output_bytes: output_estimates_enabled
+                            .then(|| cell.tool_output_text_bytes())
+                            .flatten(),
                     },
                     width,
                     expanded,

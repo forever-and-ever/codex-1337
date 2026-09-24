@@ -261,6 +261,16 @@ impl HistoryCell for ComputerActivityCell {
         self.call_ids().map(|id| format!("mcp:{id}")).collect()
     }
 
+    fn tool_output_text_bytes(&self) -> Option<usize> {
+        if self.is_active() {
+            return None;
+        }
+        self.group.calls.iter().try_fold(0usize, |bytes, call| {
+            call.tool_output_text_bytes()
+                .map(|output| bytes.saturating_add(output))
+        })
+    }
+
     fn raw_lines(&self) -> Vec<Line<'static>> {
         plain_lines(visible_lines(
             self.detailed_hyperlink_lines(u16::MAX, HistoryRenderMode::Raw),

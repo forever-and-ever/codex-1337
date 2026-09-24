@@ -252,6 +252,12 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
         Vec::new()
     }
 
+    /// Raw text bytes returned by completed tool activity, before model-context truncation.
+    /// Unavailable for media or pending work; this is not billable model input.
+    fn tool_output_text_bytes(&self) -> Option<usize> {
+        None
+    }
+
     /// Available activity details, preserving source order and any upstream truncation notices.
     fn expanded_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         self.transcript_hyperlink_lines(width)

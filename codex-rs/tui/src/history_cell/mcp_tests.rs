@@ -359,6 +359,7 @@ fn projected_content_preserves_full_rendering() {
         ]),
         McpResultKind::Standard,
     );
+    assert_eq!(projected.text_output_bytes(), None);
 
     let format_text = |text: &str| format_json_compact(text).unwrap_or_else(|| text.to_owned());
     assert_eq!(
@@ -638,6 +639,7 @@ fn mcp_result_preview_preserves_source_text_and_excludes_tree_gutters() {
         Duration::ZERO,
         Ok(result(vec![json!({"type": "text", "text": text})])),
     );
+    assert_eq!(cell.tool_output_text_bytes(), Some(text.len()));
     for width in [16, 24, 40, 80] {
         let lines = cell.display_hyperlink_lines(width);
         let backed = lines

@@ -33,6 +33,26 @@ impl HistoryCell for Cell {
 }
 
 #[test]
+fn tool_output_disclosure_shows_full_estimate_when_it_fits() {
+    let layout = activity_layout(
+        ActivityTranscriptLines {
+            activity: vec![HyperlinkLine::from("Called tool")],
+            auxiliary: Vec::new(),
+            has_hidden_details: true,
+            tool_output_bytes: Some(5_120),
+        },
+        /*width*/ 80,
+        /*expanded*/ false,
+    );
+    let area = Rect::new(
+        /*x*/ 0, /*y*/ 0, /*width*/ 80, /*height*/ 2,
+    );
+    let mut buffer = Buffer::empty(area);
+    layout.render(area, &mut buffer, /*start_row*/ 0);
+    insta::assert_snapshot!(format!("{buffer:?}"));
+}
+
+#[test]
 fn layouts_refresh_for_width_animation_and_mutable_frames() {
     for mutable in [false, true] {
         let cell = Arc::new(Cell {
