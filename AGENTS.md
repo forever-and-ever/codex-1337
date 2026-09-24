@@ -164,6 +164,10 @@ See `codex-rs/tui/styles.md`.
 
 ## Tests
 
+After a test run, remove the temporary files and directories it created, including
+Codex test debris in `/tmp`. Verify ownership and that no process still uses a
+candidate before deleting it; never sweep another live run or daemon socket.
+
 ### Test module organization
 
 - When adding a new test module, define its contents in a separate sibling file rather than inline in the implementation file.
