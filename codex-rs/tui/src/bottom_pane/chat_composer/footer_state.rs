@@ -1,6 +1,7 @@
 //! Footer and status-row presentation state for the chat composer.
 //! Owners schedule flash expiry redraws; replacing a draft clears its flash.
-//! One resolved layout supplies the status, input, popup, and hint rectangles to each consumer.
+//! One resolved layout supplies the status, input, and popup rectangles to each consumer.
+//! Hint content is shared with the fullscreen header, which owns its rectangle and cursor.
 //! Slash-command and unified mention suggestions preserve passive footer content while keeping input.
 //! Interactive transcript footers keep focus over nonempty composer hints. Their owner projects
 //! actual pending chord hints; unrelated hints resume when the transcript interaction closes.
@@ -43,11 +44,18 @@ pub(super) struct ComposerLayout {
     pub(super) footer: Rect,
 }
 
-/// Per-frame transcript content; the composer remains the only footer layout owner.
+/// Per-frame transcript hints, shown beside the composer or above the owned transcript.
 pub(crate) struct TranscriptFooter {
     pub(crate) text: Text<'static>,
     pub(crate) cursor_column: Option<u16>,
     pub(crate) is_interactive: bool,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum ComposerHintPlacement {
+    #[default]
+    BelowComposer,
+    ScreenHeader,
 }
 
 /// Whether composer suggestions reserve space, cover transcript rows, or stay hidden.
@@ -65,8 +73,9 @@ pub(crate) enum CommandPopupPlacement {
 pub(crate) struct ComposerRenderOptions<'a> {
     pub(crate) warning_count: usize,
     pub(crate) textarea_right_reserve: u16,
-    /// Keep configured status below the composer while hints occupy the final row.
+    /// Keep configured status below the composer, separate from hints.
     pub(crate) separate_status_line: bool,
+    pub(crate) hint_placement: ComposerHintPlacement,
     pub(crate) command_popup_placement: CommandPopupPlacement,
     pub(crate) footer: Option<&'a TranscriptFooter>,
     /// A fork-owned ruled section between the editor and its status rows.
@@ -131,6 +140,17 @@ impl super::ChatComposer {
     }
 
     pub(super) fn footer_hint_height(&self, width: u16, options: ComposerRenderOptions<'_>) -> u16 {
+        match options.hint_placement {
+            ComposerHintPlacement::BelowComposer => self.hint_content_height(width, options),
+            ComposerHintPlacement::ScreenHeader => 0,
+        }
+    }
+
+    pub(super) fn hint_content_height(
+        &self,
+        width: u16,
+        options: ComposerRenderOptions<'_>,
+    ) -> u16 {
         if self.show_warning_notice(options) || self.shortcuts_above_composer(options) {
             return 1;
         }

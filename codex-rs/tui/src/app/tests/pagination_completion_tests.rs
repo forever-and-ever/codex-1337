@@ -227,13 +227,18 @@ async fn beginning_navigation_holds_the_view_until_the_last_page_arrives() -> Re
             let bottom = app.render_owned_transcript(tui, size)?;
             let area = Rect::new(
                 /*x*/ 0,
-                /*y*/ 0,
+                /*y*/ 2, // The screen help and its separator are not transcript rows.
                 size.width,
-                bottom.y.saturating_sub(/*rhs*/ 1),
+                bottom.y.saturating_sub(/*rhs*/ 3),
             );
             let mut buffer = Buffer::empty(area);
-            app.transcript_view
-                .render(area, &mut buffer, &app.transcript_cells);
+            let rendered =
+                crate::custom_terminal::test_support::last_rendered_buffer(&tui.terminal);
+            for y in area.y..area.bottom() {
+                for x in area.x..area.right() {
+                    buffer[(x, y)] = rendered[(x, y)].clone();
+                }
+            }
             Ok(buffer)
         };
         render(&mut app, &mut tui)?;

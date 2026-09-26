@@ -2,7 +2,8 @@
 source: tui/src/app/owned_transcript_tests.rs
 expression: open_text
 ---
-Transcript row 33: content behind the menu
+  model high · fast
+────────────────────────────────────────────────────────────────────────────────
 Transcript row 34: content behind the menu
 › /model     choose what model and reasoning effort to use
   /memories  configure memory use and generation
@@ -15,4 +16,3 @@ Transcript row 34: content behind the menu
   Activity  —
 ────────────────────────────────────────────────────────────────────────────────
   gpt-test default · /tmp/project
-  model high · fast

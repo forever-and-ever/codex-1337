@@ -3,6 +3,7 @@ source: tui/src/app/composer_hints_tests.rs
 expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(snapshots.join(\"\\n\\n\"))"
 ---
 80 columns, running=false
+  ? for shortcuts                                      ⚠ 1 warning · f2 to view
   breakdown.
                                                   ⚠ 5h limit: 8% left · /status
 
@@ -12,9 +13,9 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(snapsho
   Activity  —
 ────────────────────────────────────────────────────────────────────────────────
   GPT-5.6-Sol default · /tmp/project
-  ? for shortcuts                                      ⚠ 1 warning · f2 to view
 
 32 columns, running=true
+      ⚠ 5h limit: only <1% left
 • Working (0s • ctrl+c to inter…
 
 
@@ -24,9 +25,9 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(snapsho
   Activity  —
 ────────────────────────────────
   GPT-5.6-Sol default · /tmp/pr…
-  tab to queue message
 
 18 columns, running=true
+     ⚠ 5h 5% left
 • Working (0s • c…
 
 
@@ -36,4 +37,3 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(snapsho
   Activity  —
 ──────────────────
   GPT-5.6-Sol def…
-  tab to queue mes

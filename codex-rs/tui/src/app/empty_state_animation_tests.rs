@@ -310,7 +310,7 @@ async fn empty_state_animation_survives_plain_transcript_clicks() -> Result<()> 
             MouseEvent {
                 kind,
                 column,
-                row: 1,
+                row: 3, // Below the screen help and its separator.
                 modifiers: KeyModifiers::NONE,
             },
             &app.transcript_cells,

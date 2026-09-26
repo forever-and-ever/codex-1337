@@ -125,6 +125,7 @@ impl ChatWidget {
             return self.bottom_pane_renderable(
                 /*footer*/ None,
                 crate::bottom_pane::CommandPopupPlacement::AboveComposer,
+                crate::bottom_pane::ComposerHintPlacement::BelowComposer,
             );
         }
 
@@ -189,6 +190,7 @@ impl ChatWidget {
             self.bottom_pane_renderable(
                 /*footer*/ None,
                 crate::bottom_pane::CommandPopupPlacement::AboveComposer,
+                crate::bottom_pane::ComposerHintPlacement::BelowComposer,
             )
             .inset(Insets::tlbr(
                 /*top*/ 1, /*left*/ 0, /*bottom*/ 0, /*right*/ 0,
@@ -205,6 +207,7 @@ impl ChatWidget {
         &'a self,
         footer: Option<&'a crate::bottom_pane::TranscriptFooter>,
         command_popup_placement: crate::bottom_pane::CommandPopupPlacement,
+        hint_placement: crate::bottom_pane::ComposerHintPlacement,
     ) -> RenderableItem<'a> {
         if self.external_writer_view && !self.bottom_pane.has_active_view() {
             RenderableItem::Owned(Box::new(ExternalWriterNotice {
@@ -228,6 +231,7 @@ impl ChatWidget {
                     separate_status_line: command_popup_placement
                         != crate::bottom_pane::CommandPopupPlacement::AboveComposer,
                     command_popup_placement,
+                    hint_placement,
                     footer,
                     ..Default::default()
                 },
@@ -248,6 +252,25 @@ impl ChatWidget {
                 ))),
             )
         }
+    }
+
+    pub(crate) fn screen_hint_renderable<'a>(
+        &'a self,
+        footer: Option<&'a crate::bottom_pane::TranscriptFooter>,
+        command_popup_placement: crate::bottom_pane::CommandPopupPlacement,
+    ) -> Option<RenderableItem<'a>> {
+        if self.external_writer_view {
+            return None;
+        }
+        self.bottom_pane
+            .hint_renderable(crate::bottom_pane::ComposerRenderOptions {
+                warning_count: self.warning_display_state.count,
+                separate_status_line: true,
+                hint_placement: crate::bottom_pane::ComposerHintPlacement::ScreenHeader,
+                command_popup_placement,
+                footer,
+                ..Default::default()
+            })
     }
 
     /// Returns compact live-history lines using the current rich or raw presentation.

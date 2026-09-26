@@ -167,12 +167,13 @@ impl ChatComposer {
         options: ComposerRenderOptions<'_>,
     ) -> Option<(u16, u16)> {
         let layout = self.layout_with_options(area, options);
-        if let Some(footer) = options.footer.filter(|footer| footer.is_interactive) {
-            let area = inset_footer_hint_area(layout.footer);
-            return footer
-                .cursor_column
-                .filter(|column| *column < area.width && area.height > 0)
-                .map(|column| (area.x + column, area.y));
+        if options.footer.is_some_and(|footer| footer.is_interactive) {
+            return match options.hint_placement {
+                ComposerHintPlacement::BelowComposer => {
+                    self.hint_cursor_pos(layout.footer, options)
+                }
+                ComposerHintPlacement::ScreenHeader => None,
+            };
         }
         if !self.draft.input_enabled
             || self.blocks_direct_input
@@ -181,11 +182,13 @@ impl ChatComposer {
             return None;
         }
 
-        if let Some(pos) = self
-            .vim_search_cursor_pos(layout.footer)
-            .or_else(|| self.history_search_cursor_pos(layout.footer))
-        {
-            return Some(pos);
+        if self.draft.textarea.vim_query().is_some() || self.history_search.is_some() {
+            return match options.hint_placement {
+                ComposerHintPlacement::BelowComposer => {
+                    self.hint_cursor_pos(layout.footer, options)
+                }
+                ComposerHintPlacement::ScreenHeader => None,
+            };
         }
 
         let state = *self.draft.textarea_state.borrow();

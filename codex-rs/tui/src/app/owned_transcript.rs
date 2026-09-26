@@ -1,4 +1,4 @@
-//! Compose the owned transcript above the composer and route their selection gestures.
+//! Compose screen-top hints, the owned transcript, and the composer with shared cursor geometry.
 //! Reserve a cleared row between transcript content and the composer. Slash suggestions overlay
 //! already-painted rows so opening or closing them leaves transcript geometry unchanged.
 //! Plain Enter returns an empty composer to latest after transcript interactions and prompt editing.
@@ -106,13 +106,15 @@ impl App {
             /*height*/ 1,
         ));
         let footer = view.footer_with_navigation(footer_area.width, motion, latest_navigation);
+        let popup_placement = if view.has_active_interaction() {
+            crate::bottom_pane::CommandPopupPlacement::Hidden
+        } else {
+            crate::bottom_pane::CommandPopupPlacement::Overlay
+        };
         let bottom = chat_widget.bottom_pane_renderable(
             prompt_footer.as_ref().or(footer.as_ref()),
-            if view.has_active_interaction() {
-                crate::bottom_pane::CommandPopupPlacement::Hidden
-            } else {
-                crate::bottom_pane::CommandPopupPlacement::Overlay
-            },
+            popup_placement,
+            crate::bottom_pane::ComposerHintPlacement::ScreenHeader,
         );
         let dashboard_visible = chat_widget
             .selected_index_for_present_view(AGENTS_OVERVIEW_VIEW_ID)
@@ -126,6 +128,12 @@ impl App {
         };
         drop(bottom);
         let available = screen_size.height.saturating_sub(bottom_height);
+        let header_height = chat_widget
+            .screen_hint_renderable(prompt_footer.as_ref().or(footer.as_ref()), popup_placement)
+            .map_or(0, |header| header.desired_height(screen_size.width))
+            // Keep a transcript row and its composer gap on short terminals.
+            .min(available.saturating_sub(/*rhs*/ 2));
+        let header_area = Rect::new(/*x*/ 0, /*y*/ 0, screen_size.width, header_height);
         let bottom_area = Rect::new(
             /*x*/ 0,
             screen_size.height.saturating_sub(bottom_height),
@@ -143,15 +151,17 @@ impl App {
             view.render(
                 Rect::new(
                     /*x*/ 0,
-                    /*y*/ 0,
+                    header_height,
                     transcript_width,
-                    available.saturating_sub(/*rhs*/ 1),
+                    available
+                        .saturating_sub(header_height)
+                        .saturating_sub(/*rhs*/ 1),
                 ),
                 frame.buffer,
                 &self.transcript_cells,
             );
-            let follow_area =
-                (available > 0 && chat_widget.no_modal_or_popup_active()).then(|| {
+            let follow_area = (available > header_height && chat_widget.no_modal_or_popup_active())
+                .then(|| {
                     Rect::new(
                         /*x*/ 0,
                         available - 1,
@@ -178,11 +188,8 @@ impl App {
             }
             let bottom = chat_widget.bottom_pane_renderable(
                 prompt_footer.as_ref().or(footer.as_ref()),
-                if view.has_active_interaction() {
-                    crate::bottom_pane::CommandPopupPlacement::Hidden
-                } else {
-                    crate::bottom_pane::CommandPopupPlacement::Overlay
-                },
+                popup_placement,
+                crate::bottom_pane::ComposerHintPlacement::ScreenHeader,
             );
             footer_height_changed = !dashboard_visible
                 && bottom
@@ -192,8 +199,22 @@ impl App {
             bottom.render(bottom_area, frame.buffer);
             chat_widget.note_rendered_width(screen_size.width);
             rendered_cursor = bottom.cursor_pos(bottom_area);
+            let mut cursor_style = bottom.cursor_style(bottom_area);
+            if let Some(header) = chat_widget
+                .screen_hint_renderable(prompt_footer.as_ref().or(footer.as_ref()), popup_placement)
+            {
+                footer_height_changed |= header
+                    .desired_height(screen_size.width)
+                    .min(available.saturating_sub(/*rhs*/ 2))
+                    != header_height;
+                header.render(header_area, frame.buffer);
+                if let Some(position) = header.cursor_pos(header_area) {
+                    rendered_cursor = Some(position);
+                    cursor_style = header.cursor_style(header_area);
+                }
+            }
             if let Some(position) = rendered_cursor {
-                frame.set_cursor_style(bottom.cursor_style(bottom_area));
+                frame.set_cursor_style(cursor_style);
                 frame.set_cursor_position(position);
             }
         })?;

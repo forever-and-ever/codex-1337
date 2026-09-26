@@ -16,6 +16,7 @@
 //! Inline banners sit above the composer. Number shortcuts apply only to an empty, idle composer;
 //! drafts, paste bursts, and active dialogs keep their normal input routing.
 pub(crate) use chat_composer::CommandPopupPlacement;
+pub(crate) use chat_composer::ComposerHintPlacement;
 pub(crate) use chat_composer::ComposerRenderOptions;
 pub(crate) use chat_composer::TranscriptFooter;
 pub(crate) use footer::footer_hint_items_line;
@@ -2113,6 +2114,21 @@ impl BottomPane {
         options: ComposerRenderOptions<'a>,
     ) -> RenderableItem<'a> {
         self.as_renderable_with_extension(options, None)
+    }
+
+    pub(crate) fn hint_renderable<'a>(
+        &'a self,
+        options: ComposerRenderOptions<'a>,
+    ) -> Option<RenderableItem<'a>> {
+        if self.has_active_view() || self.questions.as_ref().is_some_and(|q| q.expanded) {
+            return None;
+        }
+        Some(RenderableItem::Owned(Box::new(
+            chat_composer::ComposerHints {
+                composer: &self.composer,
+                options: self.composer.resolve_render_options(options),
+            },
+        )))
     }
 
     pub(crate) fn as_renderable_with_extension<'a>(

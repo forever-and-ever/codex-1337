@@ -120,7 +120,7 @@ async fn list_spacing_completion_preserves_the_scrolled_reader() -> Result<()> {
 }
 
 #[tokio::test]
-async fn older_page_loading_uses_the_status_row_without_moving_content_or_cursor() -> Result<()> {
+async fn older_page_loading_uses_the_header_without_moving_content_or_cursor() -> Result<()> {
     let mut app = crate::app::test_support::make_test_app().await;
     attach_thread(&mut app, ThreadId::new());
     app.local_settings.tui.animations = false;
@@ -157,25 +157,22 @@ async fn older_page_loading_uses_the_status_row_without_moving_content_or_cursor
                 (actual_bottom, tui.terminal.last_known_cursor_pos),
                 (bottom, cursor)
             );
-            let status_start = buffer.index_of(/*x*/ 0, size.height - 1);
+            let content_start = buffer.index_of(/*x*/ 0, /*y*/ 1);
             assert_eq!(
-                &buffer.content()[..status_start],
-                &before.content()[..status_start]
+                &buffer.content()[content_start..],
+                &before.content()[content_start..]
             );
             if state == TranscriptHistoryState::Complete {
                 assert_eq!(
-                    buffer_text(buffer).lines().last().unwrap().trim(),
+                    buffer_text(buffer).lines().next().unwrap().trim(),
                     "esc latest",
                 );
             }
             if state == TranscriptHistoryState::LoadingOlder {
-                assert_eq!(
-                    buffer[(2, size.height - 1)].fg,
-                    crate::style::accent_color()
-                );
+                assert_eq!(buffer[(2, 0)].fg, crate::style::accent_color());
             }
             let rendered = buffer_text(buffer);
-            let rendered = rendered.lines().last().unwrap();
+            let rendered = rendered.lines().next().unwrap();
             snapshots.push(format!("{width} columns · {state:?}\n{rendered}"));
         }
     }
@@ -375,6 +372,7 @@ async fn owned_details_keep_the_composer_cursor_and_screen() -> Result<()> {
         .bottom_pane_renderable(
             /*footer*/ None,
             crate::bottom_pane::CommandPopupPlacement::Overlay,
+            crate::bottom_pane::ComposerHintPlacement::ScreenHeader,
         )
         .cursor_pos(bottom_area)
         .expect("composer cursor");
@@ -431,7 +429,9 @@ async fn owned_transcript_keeps_text_out_of_the_pet_columns() -> Result<()> {
     let bottom = app.render_owned_transcript(&mut tui, size)?;
     let buffer = crate::custom_terminal::test_support::last_rendered_buffer(&tui.terminal);
     assert!(buffer_text(buffer).contains(&"x".repeat(/*n*/ 60)));
-    for y in 0..bottom.y {
+    // The screen header and separator span the terminal; only transcript text
+    // reserves the pet columns.
+    for y in 2..bottom.y {
         for x in width..size.width {
             assert_eq!(buffer[(x, y)].symbol(), " ");
         }
@@ -783,22 +783,27 @@ async fn find_owns_editor_chords_without_changing_the_composer_draft() -> Result
                     crate::custom_terminal::test_support::last_rendered_buffer(&tui.terminal),
                 );
                 let cursor = tui.terminal.last_known_cursor_pos;
+                if owned {
+                    assert_eq!(cursor.y, 0, "transcript search owns the header cursor");
+                }
                 let query_row = rendered
                     .lines()
                     .nth(usize::from(cursor.y))
                     .expect("visible query caret");
                 assert_eq!(query_row.trim(), "Find: alpha betax");
                 assert!(rendered.contains("h move line start"));
-                insta::assert_snapshot!(
-                    "owned_find_pending_chord_footer",
-                    rendered
-                        .lines()
-                        .skip(usize::from(cursor.y))
-                        .take(/*n*/ 2)
-                        .map(str::trim)
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                );
+                if owned {
+                    insta::assert_snapshot!(
+                        "owned_find_pending_chord_footer",
+                        rendered
+                            .lines()
+                            .skip(usize::from(cursor.y))
+                            .take(/*n*/ 3)
+                            .map(str::trim)
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    );
+                }
             }
         }
         app.handle_tui_event(&mut tui, &mut app_server, TuiEvent::Draw)
