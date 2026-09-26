@@ -1997,7 +1997,7 @@ async fn exec_command_clamps_model_requested_max_output_tokens_to_policy() -> Re
             ev_completed("resp-2"),
         ]),
     ];
-    mount_sse_sequence(&server, responses).await;
+    let response_mock = mount_sse_sequence(&server, responses).await;
 
     submit_unified_exec_turn(
         &test,
@@ -2015,10 +2015,32 @@ async fn exec_command_clamps_model_requested_max_output_tokens_to_policy() -> Re
     );
     assert_eq!(output_text.matches("tokens truncated").count(), 1);
 
+    let measured = wait_for_event_match(&test.codex, |event| match event {
+        EventMsg::ItemCompleted(event) => match &event.item {
+            codex_protocol::items::TurnItem::ToolOutputTokens(item) if item.call_id == call_id => {
+                Some(item.tokens)
+            }
+            _ => None,
+        },
+        _ => None,
+    })
+    .await;
+
     wait_for_event(&test.codex, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
+
+    // The count must describe the actual next model input, not the raw exec event or preview.
+    let delivered = response_mock.requests()[1]
+        .function_call_output_text(call_id)
+        .expect("tool output in next request");
+    assert_eq!(
+        measured,
+        codex_utils_output_truncation::count_o200k_text_tokens(
+            &codex_protocol::models::FunctionCallOutputBody::Text(delivered)
+        ),
+    );
 
     Ok(())
 }

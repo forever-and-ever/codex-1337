@@ -285,11 +285,7 @@ impl HistoryCell for ActivityCell {
     }
 
     fn activity_ids(&self) -> Vec<String> {
-        vec!["sample-activity".into()]
-    }
-
-    fn tool_output_text_bytes(&self) -> Option<usize> {
-        Some(5_120)
+        vec!["exec:sample-activity".into()]
     }
 }
 
@@ -301,6 +297,7 @@ fn activity_alternative_focuses_details_and_hints_follow_configured_chords() {
     view.set_output_estimates_enabled(true);
     let render_live = |view: &mut TranscriptView| {
         let expanded = view.sync_live_activity(&cells, cell.activity_ids());
+        let tool_output_tokens = view.activity_output_tokens(&cell.activity_ids());
         view.sync_live_activity_tail(/*width*/ 32, /*key*/ None, expanded, |width| {
             Some(ActivityTranscriptLines {
                 activity: if expanded {
@@ -310,13 +307,20 @@ fn activity_alternative_focuses_details_and_hints_follow_configured_chords() {
                 },
                 auxiliary: Vec::new(),
                 has_hidden_details: true,
-                tool_output_bytes: cell.tool_output_text_bytes(),
+                tool_output_tokens,
             })
         });
         render(view, &[])
     };
+    let pending = render_live(&mut view);
+    // Multiple outputs belong to one call; replaying the same measurement must not double it.
+    for (id, tokens) in [("first", 1_000), ("second", 280), ("first", 1_000)] {
+        view.record_tool_output_tokens(id.into(), "sample-activity".into(), Some(tokens));
+    }
     let collapsed = render_live(&mut view);
-    let mut hints = vec![format!("collapsed\n{collapsed:?}")];
+    let mut hints = vec![format!(
+        "awaiting measurement\n{pending:?}\ncollapsed\n{collapsed:?}"
+    )];
     for width in [20, 32, 80] {
         hints.push(format!(
             "{width} columns: {}",
@@ -327,7 +331,7 @@ fn activity_alternative_focuses_details_and_hints_follow_configured_chords() {
     assert!(view.is_activity_focused());
     hints.push(format!("focused\n{:?}", render_live(&mut view)));
     view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), &cells);
-    assert!(view.disclosure.is_expanded(&["sample-activity".to_owned()]));
+    assert!(view.disclosure.is_expanded(&cell.activity_ids()));
     let expanded = render_live(&mut view);
     hints.push(format!("expanded\n{expanded:?}"));
     let hidden = Rect::new(

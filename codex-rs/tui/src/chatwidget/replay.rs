@@ -467,6 +467,20 @@ impl ChatWidget {
                 }
             }
             ThreadItem::HookPrompt { .. } => {}
+            ThreadItem::ToolOutputTokens {
+                id,
+                call_id,
+                tokens,
+            } => {
+                if let Some(thread_id) = self.thread_id() {
+                    self.app_event_tx.send(AppEvent::RecordToolOutputTokens {
+                        thread_id,
+                        id,
+                        call_id,
+                        tokens,
+                    });
+                }
+            }
             ThreadItem::CollabAgentToolCall {
                 id,
                 tool,

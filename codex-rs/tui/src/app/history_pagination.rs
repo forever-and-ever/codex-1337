@@ -225,6 +225,20 @@ impl App {
         cwd: &AbsolutePathBuf,
         visibility: RawReasoningVisibility,
     ) -> Vec<Arc<dyn HistoryCell>> {
+        for item in &items {
+            if let ThreadItem::ToolOutputTokens {
+                id,
+                call_id,
+                tokens,
+            } = item
+            {
+                self.transcript_view.record_tool_output_tokens(
+                    id.clone(),
+                    call_id.clone(),
+                    *tokens,
+                );
+            }
+        }
         let mut cells = Vec::new();
         for (items, completed_turn) in completion::group_completed_turn_items(items, turns) {
             // Internal prompts stay invisible, but still separate adjacent tool groups.

@@ -3555,7 +3555,7 @@ async fn code_mode_exec_outer_limit_truncates_emitted_output() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
-    let (_test, second_mock) = run_code_mode_turn(
+    let (test, second_mock) = run_code_mode_turn(
         &server,
         "use exec_command from code mode",
         r#"// @exec: {"max_output_tokens": 5}
@@ -3574,6 +3574,52 @@ text(result.output);
         ),
         "Warning: truncated output (original token count: 10)\nTotal output lines: 1\n\n0123456789…5 tokens truncated…0123456789"
     );
+
+    let measured_item = wait_for_event_match(&test.codex, |event| match event {
+        EventMsg::ItemCompleted(event) => match &event.item {
+            codex_protocol::items::TurnItem::ToolOutputTokens(item) if item.call_id == "call-1" => {
+                Some(item.clone())
+            }
+            _ => None,
+        },
+        _ => None,
+    })
+    .await;
+    test.codex.flush_rollout().await?;
+    let (items, _, _) = codex_rollout::RolloutRecorder::load_rollout_items(
+        test.session_configured
+            .rollout_path
+            .as_ref()
+            .expect("persisted rollout"),
+    )
+    .await?;
+    let measured = items
+        .into_iter()
+        .filter_map(|item| match item {
+            codex_rollout::RolloutItem::EventMsg(EventMsg::ItemCompleted(event)) => {
+                match event.item {
+                    codex_protocol::items::TurnItem::ToolOutputTokens(item) => {
+                        Some((item.call_id, item.tokens))
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let delivered = serde_json::from_value(
+        second_mock
+            .single_request()
+            .custom_tool_call_output("call-1")["output"]
+            .clone(),
+    )?;
+    // Only emitted/truncated outer output is counted, never the raw nested shell result.
+    let expected = codex_utils_output_truncation::count_o200k_text_tokens(&delivered);
+    assert_eq!(
+        (measured_item.call_id, measured_item.tokens),
+        ("call-1".into(), expected)
+    );
+    assert_eq!(measured, vec![("call-1".into(), expected)]);
 
     Ok(())
 }

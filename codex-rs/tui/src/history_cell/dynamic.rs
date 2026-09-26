@@ -32,7 +32,6 @@ struct DynamicToolCallData {
     status: DynamicToolCallStatus,
     interrupted: bool,
     output: Option<Vec<String>>,
-    output_text_bytes: Option<usize>,
     duration_ms: Option<i64>,
 }
 
@@ -102,15 +101,6 @@ impl DynamicToolCallData {
         else {
             return None;
         };
-        let output_text_bytes = content_items.as_ref().and_then(|items| {
-            items.iter().try_fold(0usize, |bytes, item| match item {
-                DynamicToolCallOutputContentItem::InputText { text } => {
-                    Some(bytes.saturating_add(text.len()))
-                }
-                DynamicToolCallOutputContentItem::InputImage { .. }
-                | DynamicToolCallOutputContentItem::InputAudio { .. } => None,
-            })
-        });
         Some((
             id,
             Self {
@@ -137,7 +127,6 @@ impl DynamicToolCallData {
                         })
                         .collect()
                 }),
-                output_text_bytes,
                 duration_ms,
             },
         ))
@@ -190,18 +179,6 @@ impl HistoryCell for DynamicToolCallCell {
 
     fn activity_ids(&self) -> Vec<String> {
         vec![format!("dynamic:{}", self.call_id)]
-    }
-
-    fn tool_output_text_bytes(&self) -> Option<usize> {
-        let data = self
-            .data
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if data.is_active() || data.interrupted {
-            None
-        } else {
-            data.output_text_bytes
-        }
     }
 
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {

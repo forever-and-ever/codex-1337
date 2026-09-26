@@ -101,6 +101,7 @@ pub fn should_persist_event_msg(ev: &EventMsg, history_mode: ThreadHistoryMode) 
                 || matches!(
                     event.item,
                     TurnItem::FunctionCallOutput(_)
+                        | TurnItem::ToolOutputTokens(_)
                         | TurnItem::Plan(_)
                         | TurnItem::Extension(ExtensionItem::Sleep(_))
                 )

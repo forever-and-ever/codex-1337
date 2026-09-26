@@ -46,6 +46,7 @@ impl App {
         let active_key = chat_widget.active_cell_transcript_key();
         let detailed = view.is_detailed();
         let active_ids = chat_widget.active_activity_ids();
+        let tool_output_tokens = view.activity_output_tokens(&active_ids);
         let expanded = view.sync_live_activity(&self.transcript_cells, active_ids)
             && chat_widget.history_render_mode() == HistoryRenderMode::Rich;
         if detailed {
@@ -54,7 +55,12 @@ impl App {
             })
         } else {
             view.sync_live_activity_tail(transcript_width, active_key, expanded, |width| {
-                chat_widget.active_cell_owned_transcript_lines(width, expanded)
+                chat_widget
+                    .active_cell_owned_transcript_lines(width, expanded)
+                    .map(|mut lines| {
+                        lines.tool_output_tokens = tool_output_tokens;
+                        lines
+                    })
             })
         }
     }

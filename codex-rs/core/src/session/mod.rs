@@ -257,6 +257,7 @@ pub(crate) mod step_settings;
 mod thread_settings;
 pub(crate) mod time_reminder;
 mod token_budget;
+mod tool_output_tokens;
 pub(crate) mod turn;
 pub(crate) mod turn_context;
 mod turn_input;
@@ -3582,7 +3583,7 @@ impl Session {
             .iter()
             .map(|envelope| envelope.item.clone())
             .collect::<Vec<_>>();
-        {
+        let tool_outputs = {
             let mut state = self.state.lock().await;
             state
                 .current_time_reminder
@@ -3603,10 +3604,31 @@ impl Session {
                     }
                 }
             }
+            let previous_len = state.history.raw_items().len();
             state
                 .history
                 .record_annotated_items(&items, model_info.truncation_policy.into());
-        }
+            if turn_context.config.model_provider_id == "openai" {
+                state
+                    .history
+                    .raw_items()
+                    .skip(previous_len)
+                    .filter_map(|item| match item {
+                        ResponseItem::FunctionCallOutput {
+                            call_id: Some(call_id),
+                            output,
+                            ..
+                        }
+                        | ResponseItem::CustomToolCallOutput {
+                            call_id, output, ..
+                        } => Some((call_id.clone(), output.body.clone())),
+                        _ => None,
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            }
+        };
         for image in image_preparations {
             self.services
                 .analytics_events_client
@@ -3627,6 +3649,7 @@ impl Session {
         }
         self.send_raw_response_items(turn_context, &response_items)
             .await;
+        self.record_tool_output_tokens(turn_context, tool_outputs);
     }
 
     pub(crate) async fn record_step_world_state_if_changed(

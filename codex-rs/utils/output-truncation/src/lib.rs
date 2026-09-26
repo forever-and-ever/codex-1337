@@ -1,5 +1,8 @@
 //! Shared byte/token truncation for tool and exec output.
 
+mod token_count;
+pub use token_count::count_o200k_text_tokens;
+
 use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::FunctionCallOutputPayload;

@@ -1124,6 +1124,40 @@
           "type": "object"
         },
         {
+          "description": "Measurement metadata, not another tool call or model-context item.",
+          "properties": {
+            "callId": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "tokens": {
+              "description": "Approximate text tokens after truncation, measured with local o200k_base.",
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "type": {
+              "enum": [
+                "toolOutputTokens"
+              ],
+              "title": "ToolOutputTokensThreadItemType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "callId",
+            "id",
+            "type"
+          ],
+          "title": "ToolOutputTokensThreadItem",
+          "type": "object"
+        },
+        {
           "description": "EXPERIMENTAL - proposed plan item content. The completed plan item is authoritative and may not match the concatenation of `PlanDelta` text.",
           "properties": {
             "id": {

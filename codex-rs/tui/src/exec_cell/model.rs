@@ -21,7 +21,7 @@ use itertools::Either;
 pub(crate) struct CommandOutput {
     pub(crate) exit_code: i32,
     /// The finalized, interleaved stderr and stdout that replaces any streamed preview.
-    pub(super) aggregated_output: String,
+    aggregated_output: String,
     /// The live preview while command-output deltas are still arriving.
     live_output: Option<LiveCommandOutput>,
 }

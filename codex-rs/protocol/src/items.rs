@@ -46,6 +46,7 @@ use ts_rs::TS;
 pub enum TurnItem {
     UserMessage(UserMessageItem),
     FunctionCallOutput(FunctionCallOutputItem),
+    ToolOutputTokens(ToolOutputTokensItem),
     HookPrompt(HookPromptItem),
     AgentMessage(AgentMessageItem),
     Plan(PlanItem),
@@ -94,6 +95,17 @@ pub struct FunctionCallOutputItem {
     #[ts(optional)]
     pub namespace: Option<String>,
     pub output: FunctionCallOutputBody,
+}
+
+/// Non-content transcript metadata: o200k text tokens retained after history truncation.
+/// This is neither model-generated output usage nor a billable input-token measurement.
+#[derive(Debug, Clone, Deserialize, Serialize, TS, JsonSchema)]
+pub struct ToolOutputTokensItem {
+    pub id: String,
+    pub call_id: String,
+    /// Absent for output containing media or opaque encrypted content.
+    #[ts(type = "number | null")]
+    pub tokens: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, TS, JsonSchema, PartialEq, Eq)]
@@ -746,6 +758,7 @@ impl TurnItem {
         match self {
             TurnItem::UserMessage(item) => item.id.clone(),
             TurnItem::FunctionCallOutput(item) => item.id.clone(),
+            TurnItem::ToolOutputTokens(item) => item.id.clone(),
             TurnItem::HookPrompt(item) => item.id.clone(),
             TurnItem::AgentMessage(item) => item.id.clone(),
             TurnItem::Plan(item) => item.id.clone(),

@@ -362,13 +362,6 @@ impl HistoryCell for McpToolCallCell {
         vec![format!("mcp:{}", self.call_id)]
     }
 
-    fn tool_output_text_bytes(&self) -> Option<usize> {
-        match self.result.as_ref()? {
-            Ok(result) => result.text_output_bytes(),
-            Err(error) => Some(error.len()),
-        }
-    }
-
     fn compact_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         self.compact_mcp_lines(width)
     }

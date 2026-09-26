@@ -39,7 +39,7 @@ fn tool_output_disclosure_shows_full_estimate_when_it_fits() {
             activity: vec![HyperlinkLine::from("Called tool")],
             auxiliary: Vec::new(),
             has_hidden_details: true,
-            tool_output_bytes: Some(5_120),
+            tool_output_tokens: Some(1_280),
         },
         /*width*/ 80,
         /*expanded*/ false,

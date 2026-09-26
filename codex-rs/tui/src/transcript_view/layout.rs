@@ -16,7 +16,7 @@ pub(crate) struct ActivityTranscriptLines {
     pub(crate) activity: Vec<HyperlinkLine>,
     pub(crate) auxiliary: Vec<HyperlinkLine>,
     pub(crate) has_hidden_details: bool,
-    pub(crate) tool_output_bytes: Option<usize>,
+    pub(crate) tool_output_tokens: Option<u64>,
 }
 
 /// Keep disclosure controls outside selectable source without rendering hidden details.
@@ -38,8 +38,7 @@ pub(super) fn activity_layout(
     } else {
         "+ Show details"
     };
-    let label = if let Some(bytes) = lines.tool_output_bytes.filter(|bytes| *bytes > 0) {
-        let tokens = codex_utils_string::approx_tokens_from_byte_count(bytes);
+    let label = if let Some(tokens) = lines.tool_output_tokens {
         let tokens = codex_protocol::num_format::format_with_separators(
             i64::try_from(tokens).unwrap_or(i64::MAX),
         );
@@ -160,6 +159,7 @@ impl TranscriptView {
         let ids = cell.activity_ids();
         let disclosure = !detailed && mode == HistoryRenderMode::Rich && !ids.is_empty();
         let expanded = disclosure && self.disclosure.is_expanded(&ids);
+        let tool_output_tokens = self.activity_output_tokens(&ids);
         if expanded {
             self.disclosure.expanded.extend(ids);
         }
@@ -169,7 +169,6 @@ impl TranscriptView {
             expanded,
             disclosure,
         };
-        let output_estimates_enabled = self.output_estimates_enabled;
         Some(self.cache.get(cell, width, presentation, || {
             if disclosure {
                 activity_layout(
@@ -181,9 +180,7 @@ impl TranscriptView {
                         },
                         auxiliary: Vec::new(),
                         has_hidden_details: cell.has_hidden_activity_details(width),
-                        tool_output_bytes: output_estimates_enabled
-                            .then(|| cell.tool_output_text_bytes())
-                            .flatten(),
+                        tool_output_tokens,
                     },
                     width,
                     expanded,

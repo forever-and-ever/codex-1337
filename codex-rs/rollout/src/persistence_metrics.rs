@@ -264,6 +264,7 @@ fn turn_item_type(item: &TurnItem) -> &'static str {
     match item {
         TurnItem::UserMessage(_) => "user_message",
         TurnItem::FunctionCallOutput(_) => "function_call_output",
+        TurnItem::ToolOutputTokens(_) => "tool_output_tokens",
         TurnItem::HookPrompt(_) => "hook_prompt",
         TurnItem::AgentMessage(_) => "agent_message",
         TurnItem::Plan(_) => "plan",

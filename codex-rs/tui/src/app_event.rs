@@ -1107,6 +1107,12 @@ pub(crate) enum AppEvent {
     FollowTranscript,
 
     InsertHistoryCell(Box<dyn HistoryCell>),
+    RecordToolOutputTokens {
+        thread_id: ThreadId,
+        id: String,
+        call_id: String,
+        tokens: Option<u64>,
+    },
 
     /// Move visible completed voice captions into history in one app event.
     CommitRealtimeTranscriptHistory,

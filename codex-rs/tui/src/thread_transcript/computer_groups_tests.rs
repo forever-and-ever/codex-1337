@@ -151,11 +151,16 @@ fn joins_respect_actual_turns_and_intervening_items() {
                 summary: Vec::new(),
                 content: Vec::new(),
             },
+            ThreadItem::ToolOutputTokens {
+                id: "tool-output-tokens:first".into(),
+                call_id: "first".into(),
+                tokens: Some(12),
+            },
             last,
         ],
     )];
     let joined = join_computer_groups(&older[0], &newer[0], &turns)
-        .expect("hidden reasoning retains the adjacent computer group");
+        .expect("hidden reasoning and output measurements retain the adjacent computer group");
     let expected = project(&turns[0].items);
     assert_eq!(
         joined.transcript_lines(/*width*/ 80),

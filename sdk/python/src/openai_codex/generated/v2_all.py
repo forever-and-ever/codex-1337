@@ -5390,6 +5390,22 @@ class HookPromptThreadItem(BaseModel):
     type: Annotated[Literal["hookPrompt"], Field(title="HookPromptThreadItemType")]
 
 
+class ToolOutputTokensThreadItem(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    call_id: Annotated[str, Field(alias="callId")]
+    id: str
+    tokens: Annotated[
+        int | None,
+        Field(
+            description="Approximate text tokens after truncation, measured with local o200k_base.",
+            ge=0,
+        ),
+    ] = None
+    type: Annotated[Literal["toolOutputTokens"], Field(title="ToolOutputTokensThreadItemType")]
+
+
 class PlanThreadItem(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -11407,6 +11423,7 @@ class ThreadItem(
         | HookPromptThreadItem
         | AgentMessageThreadItem
         | FunctionCallOutputThreadItem
+        | ToolOutputTokensThreadItem
         | PlanThreadItem
         | ReasoningThreadItem
         | CommandExecutionThreadItem
@@ -11432,6 +11449,7 @@ class ThreadItem(
         | HookPromptThreadItem
         | AgentMessageThreadItem
         | FunctionCallOutputThreadItem
+        | ToolOutputTokensThreadItem
         | PlanThreadItem
         | ReasoningThreadItem
         | CommandExecutionThreadItem

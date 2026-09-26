@@ -48,10 +48,6 @@ fn raw_grouped_history_retains_terminal_input_and_omits_reasoning() {
     group
         .append_completed(completed_read("second.txt", "second output"))
         .expect("adjacent reads stay grouped");
-    assert_eq!(
-        group.tool_output_text_bytes(),
-        Some("first output".len() + "second output".len())
-    );
 
     let raw = group
         .raw_lines()

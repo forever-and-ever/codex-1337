@@ -269,6 +269,16 @@ pub enum ThreadItem {
         namespace: Option<String>,
         output: FunctionCallOutputBody,
     },
+    /// Measurement metadata, not another tool call or model-context item.
+    #[serde(rename_all = "camelCase")]
+    #[ts(rename_all = "camelCase")]
+    ToolOutputTokens {
+        id: String,
+        call_id: String,
+        /// Approximate text tokens after truncation, measured with local o200k_base.
+        #[ts(type = "number | null")]
+        tokens: Option<u64>,
+    },
     #[serde(rename_all = "camelCase")]
     #[ts(rename_all = "camelCase")]
     /// EXPERIMENTAL - proposed plan item content. The completed plan item is
@@ -453,6 +463,7 @@ impl ThreadItem {
             | ThreadItem::HookPrompt { id, .. }
             | ThreadItem::AgentMessage { id, .. }
             | ThreadItem::FunctionCallOutput { id, .. }
+            | ThreadItem::ToolOutputTokens { id, .. }
             | ThreadItem::Plan { id, .. }
             | ThreadItem::Reasoning { id, .. }
             | ThreadItem::CommandExecution { id, .. }
@@ -903,6 +914,11 @@ impl From<CoreTurnItem> for ThreadItem {
                 name: output.name,
                 namespace: output.namespace,
                 output: output.output,
+            },
+            CoreTurnItem::ToolOutputTokens(output) => ThreadItem::ToolOutputTokens {
+                id: output.id,
+                call_id: output.call_id,
+                tokens: output.tokens,
             },
             CoreTurnItem::Plan(plan) => ThreadItem::Plan {
                 id: plan.id,

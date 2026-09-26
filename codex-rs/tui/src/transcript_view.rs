@@ -18,6 +18,7 @@ mod search;
 mod selection;
 mod snapshot;
 mod text;
+mod tool_output_tokens;
 
 use std::sync::Arc;
 
@@ -109,6 +110,8 @@ pub(crate) struct TranscriptView {
     last_click: Option<(std::time::Instant, u16, u16, u8)>,
     disclosure: disclosure::Disclosure,
     output_estimates_enabled: bool,
+    tool_output_tokens:
+        std::collections::HashMap<String, std::collections::HashMap<String, Option<u64>>>,
 }
 
 impl Default for TranscriptView {
@@ -140,6 +143,7 @@ impl Default for TranscriptView {
             last_click: None,
             disclosure: disclosure::Disclosure::default(),
             output_estimates_enabled: false,
+            tool_output_tokens: Default::default(),
         }
     }
 }

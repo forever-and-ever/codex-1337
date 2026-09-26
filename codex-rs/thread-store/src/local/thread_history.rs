@@ -519,6 +519,7 @@ WHERE thread_id = ?
             }
             | ThreadItem::HookPrompt { .. }
             | ThreadItem::FunctionCallOutput { .. }
+            | ThreadItem::ToolOutputTokens { .. }
             | ThreadItem::Plan { .. }
             | ThreadItem::Reasoning { .. }
             | ThreadItem::CommandExecution { .. }

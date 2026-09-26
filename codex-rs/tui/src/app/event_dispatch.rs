@@ -38,6 +38,7 @@ impl App {
                     | AppEvent::OpenWarnings
                     | AppEvent::CopyWarning(_)
                     | AppEvent::InsertHistoryCell(_)
+                    | AppEvent::RecordToolOutputTokens { .. }
                     | AppEvent::CommitRealtimeTranscriptHistory
                     | AppEvent::ResetTranscriptForThreadSwitch
                     | AppEvent::FinishPromptRevert { .. }
@@ -764,6 +765,12 @@ impl App {
             }
             AppEvent::InsertHistoryCell(cell) => {
                 self.insert_history_cell(tui, cell);
+            }
+            AppEvent::RecordToolOutputTokens { thread_id, id, call_id, tokens } => {
+                if self.chat_widget.thread_id() == Some(thread_id) {
+                    self.transcript_view.record_tool_output_tokens(id, call_id, tokens);
+                    tui.frame_requester().schedule_frame();
+                }
             }
             AppEvent::EndInitialHistoryReplayBuffer => {
                 self.scrollback_has_older_history = self

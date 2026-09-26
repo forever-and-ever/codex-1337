@@ -44,18 +44,6 @@ enum McpContentDisplay {
 }
 
 impl McpToolResult {
-    pub(super) fn text_output_bytes(&self) -> Option<usize> {
-        self.content.iter().try_fold(0usize, |bytes, block| {
-            let text = match &block.display {
-                McpContentDisplay::Text(text) | McpContentDisplay::Json(text) => {
-                    block.original_text.as_deref().unwrap_or(text)
-                }
-                McpContentDisplay::Summary(_) => return None,
-            };
-            Some(bytes.saturating_add(text.len()))
-        })
-    }
-
     /// Consumes a wire result, dropping bodies represented only by media or resource summaries.
     ///
     /// Canonical MCP deserialization preserves full text and the exact JSON fallback for malformed

@@ -333,6 +333,7 @@ fn searchable_text(item: &ThreadItem) -> Option<Cow<'_, str>> {
         }
         ThreadItem::HookPrompt { .. }
         | ThreadItem::FunctionCallOutput { .. }
+        | ThreadItem::ToolOutputTokens { .. }
         | ThreadItem::Plan { .. }
         | ThreadItem::Reasoning { .. }
         | ThreadItem::CommandExecution { .. }
