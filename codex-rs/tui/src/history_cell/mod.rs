@@ -121,6 +121,7 @@ mod session;
 mod spoken_artifacts;
 mod startup_warnings;
 mod timestamp;
+mod tool_output;
 mod warnings;
 
 pub(crate) use activity_details::ActivityDetails;
@@ -143,6 +144,7 @@ pub(crate) use session::*;
 pub(crate) use startup_warnings::StartupWarningsCell;
 pub(crate) use timestamp::HistoryTimestamp;
 pub(crate) use timestamp::agent_prefix;
+pub(crate) use tool_output::ToolOutputCell;
 pub(crate) use warnings::WarningEntry;
 pub(crate) use warnings::WarningHistoryCell;
 pub(crate) use warnings::WarningId;

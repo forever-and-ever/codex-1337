@@ -277,12 +277,19 @@ fn item_to_cells(
             }
         }
         ThreadItem::FunctionCallOutput {
+            id,
             name,
             namespace,
             output,
-            ..
         } => {
-            if let Some((source_thread_id, prompt)) =
+            if let Some(cell) = crate::history_cell::ToolOutputCell::from_output(
+                &id,
+                &name,
+                namespace.as_deref(),
+                &output,
+            ) {
+                cells.push(Arc::new(cell));
+            } else if let Some((source_thread_id, prompt)) =
                 crate::dynamic_tools::parse_delegated_tool_output(
                     &name,
                     namespace.as_deref(),

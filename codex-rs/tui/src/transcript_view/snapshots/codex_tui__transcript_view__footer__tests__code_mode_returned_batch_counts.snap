@@ -1,0 +1,51 @@
+---
+source: tui/src/transcript_view/footer_tests.rs
+expression: "snapshots.join(\"\\n\")"
+---
+expanded=false
+Buffer {
+    area: Rect { x: 0, y: 0, width: 80, height: 10 },
+    content: [
+        "  Tool output                                                                   ",
+        "    + Show details (≈1,000 total tokens of output)                              ",
+        "  Tool output                                                                   ",
+        "    + Show details (≈280 total tokens of output)                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+    ],
+    styles: [
+        x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 13, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 13, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 0, y: 4, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+    ]
+}
+expanded=true
+Buffer {
+    area: Rect { x: 0, y: 0, width: 80, height: 10 },
+    content: [
+        "  first returned batch                                                          ",
+        "  Only emitted text, after truncation.                                          ",
+        "    − Show less (≈1,000 total tokens of output)                                 ",
+        "  second returned batch                                                         ",
+        "  Only emitted text, after truncation.                                          ",
+        "    − Show less (≈280 total tokens of output)                                   ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+    ],
+    styles: [
+        x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 0, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 5, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 0, y: 6, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+    ]
+}

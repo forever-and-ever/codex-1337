@@ -2,25 +2,114 @@
 
 use super::Session;
 use super::TurnContext;
+use crate::context_manager::ContextManager;
+use codex_protocol::items::FunctionCallOutputItem;
 use codex_protocol::items::ToolOutputTokensItem;
 use codex_protocol::items::TurnItem;
 use codex_protocol::models::FunctionCallOutputBody;
+use codex_protocol::models::FunctionCallOutputContentItem;
+use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::Event;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::ItemCompletedEvent;
 use codex_rollout::RolloutItem;
 
+pub(super) struct CapturedOutput {
+    id: String,
+    call_id: String,
+    body: FunctionCallOutputBody,
+    batch_tool: Option<String>,
+}
+
+pub(super) fn capture(history: &ContextManager, previous_len: usize) -> Vec<CapturedOutput> {
+    history
+        .raw_items()
+        .skip(previous_len)
+        .filter_map(|item| {
+            let (call_id, body, name) = match item {
+                ResponseItem::FunctionCallOutput {
+                    call_id: Some(call_id),
+                    output,
+                    ..
+                } => (call_id, &output.body, None),
+                ResponseItem::CustomToolCallOutput {
+                    call_id,
+                    output,
+                    name,
+                    ..
+                } => (
+                    call_id,
+                    &output.body,
+                    name.as_ref().filter(|name| name.as_str() == "exec"),
+                ),
+                _ => return None,
+            };
+            // notify() retains its tool name even if compaction removed the original exec.
+            let batch_tool = name.cloned().or_else(|| {
+                history.raw_items().rev().find_map(|call| match call {
+                    ResponseItem::CustomToolCall {
+                        call_id: id, name, ..
+                    } if id == call_id && name == "exec" => Some(name.clone()),
+                    ResponseItem::FunctionCall {
+                        call_id: id,
+                        name,
+                        namespace: None,
+                        ..
+                    } if id == call_id && name == "wait" => Some(name.clone()),
+                    _ => None,
+                })
+            });
+            Some(CapturedOutput {
+                id: item.id()?.to_string(),
+                call_id: call_id.clone(),
+                body: body.clone(),
+                batch_tool,
+            })
+        })
+        .collect()
+}
+
 impl Session {
-    pub(super) fn record_tool_output_tokens(
+    pub(super) async fn record_tool_output_tokens(
         &self,
         turn: &TurnContext,
-        outputs: Vec<(String, FunctionCallOutputBody)>,
+        outputs: Vec<CapturedOutput>,
     ) {
         if outputs.is_empty() {
             return;
         }
         let thread_id = self.thread_id;
         let turn_id = turn.sub_id.clone();
+        // Nested tool rows describe execution, not the text JavaScript chose to emit.
+        // Publish that returned batch before asynchronous counting so its footer has
+        // a stable transcript position even when counting finishes after the turn.
+        for output in &outputs {
+            if let Some(name) = &output.batch_tool
+                && match &output.body {
+                    FunctionCallOutputBody::Text(_) => true,
+                    FunctionCallOutputBody::ContentItems(items) => items.iter().all(|item| {
+                        matches!(item, FunctionCallOutputContentItem::InputText { .. })
+                    }),
+                }
+            {
+                self.send_event(
+                    turn,
+                    EventMsg::ItemCompleted(ItemCompletedEvent {
+                        thread_id,
+                        turn_id: turn_id.clone(),
+                        item: TurnItem::FunctionCallOutput(FunctionCallOutputItem {
+                            id: output.id.clone(),
+                            name: name.clone(),
+                            namespace: None,
+                            output: output.body.clone(),
+                        }),
+                        started_at_ms: None,
+                        completed_at_ms: super::now_unix_timestamp_ms(),
+                    }),
+                )
+                .await;
+            }
+        }
         let live_thread = self.live_thread().cloned();
         let tx_event = self.get_tx_event();
         // These are observations, not execution barriers. In particular cold vocabulary
@@ -29,14 +118,15 @@ impl Session {
             let counts = tokio::task::spawn_blocking(move || {
                 outputs
                     .into_iter()
-                    .enumerate()
-                    .map(|(index, (call_id, body))| {
+                    .map(|output| {
                         ToolOutputTokensItem {
                             // A code-mode call can return multiple outputs through notify(). Each
                             // measurement needs its own persisted identity for idempotent replay.
-                            id: format!("tool-output-tokens:{call_id}:{index}"),
-                            call_id,
-                            tokens: codex_utils_output_truncation::count_o200k_text_tokens(&body),
+                            id: format!("tool-output-tokens:{}", output.id),
+                            call_id: output.call_id,
+                            tokens: codex_utils_output_truncation::count_o200k_text_tokens(
+                                &output.body,
+                            ),
                         }
                     })
                     .collect::<Vec<_>>()

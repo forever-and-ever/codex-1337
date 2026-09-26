@@ -290,6 +290,69 @@ impl HistoryCell for ActivityCell {
 }
 
 #[test]
+fn code_mode_batches_display_their_own_counts_and_replay_without_double_counting() {
+    use crate::test_support::PathBufExt;
+    use codex_app_server_protocol::ThreadItem;
+    use codex_protocol::models::FunctionCallOutputBody;
+
+    let cwd = crate::test_support::test_path_buf("/project").abs();
+    let items = ["first", "second"].map(|id| ThreadItem::FunctionCallOutput {
+        id: id.into(),
+        name: "exec".into(),
+        namespace: None,
+        output: FunctionCallOutputBody::Text(format!(
+            "{id} returned batch\nOnly emitted text, after truncation."
+        )),
+    });
+    // Use production history projection: counts belong to outer outputs, not
+    // the differently identified commands hidden inside functions.exec.
+    let cells = crate::thread_transcript::thread_items_to_transcript_cells(
+        /*thread_id*/ None,
+        &cwd,
+        items,
+        crate::thread_transcript::RawReasoningVisibility::Hidden,
+        /*config*/ None,
+    );
+    assert_eq!(cells.len(), 2);
+    let mut view = TranscriptView::default();
+    view.set_output_estimates_enabled(/*enabled*/ true);
+    for (id, tokens) in [("first", 1_000), ("second", 280), ("first", 1_000)] {
+        view.record_tool_output_tokens(
+            format!("tool-output-tokens:{id}"),
+            "outer-exec".into(),
+            Some(tokens),
+        );
+    }
+    assert_eq!(
+        view.activity_output_tokens(&cells[0].activity_ids()),
+        Some(1_000)
+    );
+    assert_eq!(
+        view.activity_output_tokens(&cells[1].activity_ids()),
+        Some(280)
+    );
+    assert_eq!(
+        view.activity_output_tokens(&["exec:outer-exec".into()]),
+        Some(1_280)
+    );
+    let mut snapshots = Vec::new();
+    for expanded in [false, true] {
+        if expanded {
+            view.disclosure
+                .expanded
+                .extend(cells.iter().flat_map(|cell| cell.activity_ids()));
+        }
+        let area = Rect::new(
+            /*x*/ 0, /*y*/ 0, /*width*/ 80, /*height*/ 10,
+        );
+        let mut buffer = Buffer::empty(area);
+        view.render(area, &mut buffer, &cells);
+        snapshots.push(format!("expanded={expanded}\n{buffer:?}"));
+    }
+    insta::assert_snapshot!("code_mode_returned_batch_counts", snapshots.join("\n"));
+}
+
+#[test]
 fn activity_alternative_focuses_details_and_hints_follow_configured_chords() {
     let mut cells: Vec<Arc<dyn HistoryCell>> = Vec::new();
     let cell = Arc::new(ActivityCell::default());

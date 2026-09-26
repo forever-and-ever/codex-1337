@@ -3609,22 +3609,7 @@ impl Session {
                 .history
                 .record_annotated_items(&items, model_info.truncation_policy.into());
             if turn_context.config.model_provider_id == "openai" {
-                state
-                    .history
-                    .raw_items()
-                    .skip(previous_len)
-                    .filter_map(|item| match item {
-                        ResponseItem::FunctionCallOutput {
-                            call_id: Some(call_id),
-                            output,
-                            ..
-                        }
-                        | ResponseItem::CustomToolCallOutput {
-                            call_id, output, ..
-                        } => Some((call_id.clone(), output.body.clone())),
-                        _ => None,
-                    })
-                    .collect()
+                tool_output_tokens::capture(&state.history, previous_len)
             } else {
                 Vec::new()
             }
@@ -3649,7 +3634,8 @@ impl Session {
         }
         self.send_raw_response_items(turn_context, &response_items)
             .await;
-        self.record_tool_output_tokens(turn_context, tool_outputs);
+        self.record_tool_output_tokens(turn_context, tool_outputs)
+            .await;
     }
 
     pub(crate) async fn record_step_world_state_if_changed(

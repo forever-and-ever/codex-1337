@@ -447,12 +447,19 @@ impl ChatWidget {
                 self.on_context_compaction_completed(&id, from_replay);
             }
             ThreadItem::FunctionCallOutput {
+                id,
                 name,
                 namespace,
                 output,
-                ..
             } => {
-                if let Some((source_thread_id, prompt)) =
+                if let Some(cell) = history_cell::ToolOutputCell::from_output(
+                    &id,
+                    &name,
+                    namespace.as_deref(),
+                    &output,
+                ) {
+                    self.add_to_history(cell);
+                } else if let Some((source_thread_id, prompt)) =
                     crate::dynamic_tools::parse_delegated_tool_output(
                         &name,
                         namespace.as_deref(),

@@ -2015,21 +2015,23 @@ async fn exec_command_clamps_model_requested_max_output_tokens_to_policy() -> Re
     );
     assert_eq!(output_text.matches("tokens truncated").count(), 1);
 
-    let measured = wait_for_event_match(&test.codex, |event| match event {
-        EventMsg::ItemCompleted(event) => match &event.item {
-            codex_protocol::items::TurnItem::ToolOutputTokens(item) if item.call_id == call_id => {
-                Some(item.tokens)
+    // Measurement runs off-thread and may arrive after turn completion.
+    let mut measured = None;
+    let mut completed = false;
+    while measured.is_none() || !completed {
+        match wait_for_event(&test.codex, |_| true).await {
+            EventMsg::ItemCompleted(event) => {
+                if let codex_protocol::items::TurnItem::ToolOutputTokens(item) = &event.item
+                    && item.call_id == call_id
+                {
+                    measured = Some(item.tokens);
+                }
             }
-            _ => None,
-        },
-        _ => None,
-    })
-    .await;
-
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
+            EventMsg::TurnComplete(_) => completed = true,
+            _ => {}
+        }
+    }
+    let measured = measured.expect("measurement received");
 
     // The count must describe the actual next model input, not the raw exec event or preview.
     let delivered = response_mock.requests()[1]

@@ -3575,16 +3575,9 @@ text(result.output);
         "Warning: truncated output (original token count: 10)\nTotal output lines: 1\n\n0123456789…5 tokens truncated…0123456789"
     );
 
-    let measured_item = wait_for_event_match(&test.codex, |event| match event {
-        EventMsg::ItemCompleted(event) => match &event.item {
-            codex_protocol::items::TurnItem::ToolOutputTokens(item) if item.call_id == "call-1" => {
-                Some(item.clone())
-            }
-            _ => None,
-        },
-        _ => None,
-    })
-    .await;
+    let measured_item = tool_output_measurements(&test, /*count*/ 1)
+        .await?
+        .remove(0);
     test.codex.flush_rollout().await?;
     let (items, _, _) = codex_rollout::RolloutRecorder::load_rollout_items(
         test.session_configured
@@ -3593,6 +3586,19 @@ text(result.output);
             .expect("persisted rollout"),
     )
     .await?;
+    let batches = items
+        .iter()
+        .filter_map(|item| match item {
+            codex_rollout::RolloutItem::EventMsg(EventMsg::ItemCompleted(event)) => {
+                if let codex_protocol::items::TurnItem::FunctionCallOutput(item) = &event.item {
+                    Some((item.id.clone(), item.name.clone(), item.output.clone()))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
     let measured = items
         .into_iter()
         .filter_map(|item| match item {
@@ -3615,6 +3621,19 @@ text(result.output);
     )?;
     // Only emitted/truncated outer output is counted, never the raw nested shell result.
     let expected = codex_utils_output_truncation::count_o200k_text_tokens(&delivered);
+    // The displayed batch and the count must describe the same post-truncation bytes.
+    assert_eq!(
+        batches,
+        vec![(
+            measured_item
+                .id
+                .strip_prefix("tool-output-tokens:")
+                .unwrap()
+                .to_owned(),
+            "exec".into(),
+            delivered
+        )]
+    );
     assert_eq!(
         (measured_item.call_id, measured_item.tokens),
         ("call-1".into(), expected)
@@ -5332,11 +5351,12 @@ async fn code_mode_notify_injects_additional_exec_tool_output_into_active_contex
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
-    let (_test, second_mock) = run_code_mode_turn(
+    let (test, second_mock) = run_code_mode_turn(
         &server,
         "use exec notify helper",
         r#"
 notify("code_mode_notify_marker");
+notify("second marker");
 text("done");
 "#,
     )
@@ -5357,10 +5377,72 @@ text("done");
     assert!(
         has_notify_output,
         "expected notify marker in custom_tool_call_output item: {:?}",
-        req.input()
+        req.inputs_of_type("custom_tool_call_output")
     );
 
+    // Each notify is recorded independently. Per-batch indexes restart at zero
+    // and would overwrite earlier measurements for the same exec call.
+    let mut actual = tool_output_measurements(&test, /*count*/ 3)
+        .await?
+        .into_iter()
+        .map(|item| item.tokens)
+        .collect::<Vec<_>>();
+    let mut expected = req
+        .inputs_of_type("custom_tool_call_output")
+        .into_iter()
+        .map(|item| {
+            codex_utils_output_truncation::count_o200k_text_tokens(
+                &serde_json::from_value(item["output"].clone()).unwrap(),
+            )
+        })
+        .collect::<Vec<_>>();
+    actual.sort();
+    expected.sort();
+    assert_eq!(actual, expected);
+
     Ok(())
+}
+
+async fn tool_output_measurements(
+    test: &TestCodex,
+    count: usize,
+) -> Result<Vec<codex_protocol::items::ToolOutputTokensItem>> {
+    // submit_turn consumes events through TurnComplete. Counting is asynchronous:
+    // recover measurements already consumed, then wait for any still outstanding.
+    test.codex.flush_rollout().await?;
+    let (items, _, _) = codex_rollout::RolloutRecorder::load_rollout_items(
+        test.session_configured
+            .rollout_path
+            .as_ref()
+            .expect("persisted rollout"),
+    )
+    .await?;
+    let mut measured = items
+        .into_iter()
+        .filter_map(|item| match item {
+            codex_rollout::RolloutItem::EventMsg(EventMsg::ItemCompleted(event)) => {
+                match event.item {
+                    codex_protocol::items::TurnItem::ToolOutputTokens(item) => {
+                        Some((item.id.clone(), item))
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
+        })
+        .collect::<HashMap<_, _>>();
+    while measured.len() < count {
+        let item = wait_for_event_match(&test.codex, |event| match event {
+            EventMsg::ItemCompleted(event) => match &event.item {
+                codex_protocol::items::TurnItem::ToolOutputTokens(item) => Some(item.clone()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .await;
+        measured.insert(item.id.clone(), item);
+    }
+    Ok(measured.into_values().collect())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
