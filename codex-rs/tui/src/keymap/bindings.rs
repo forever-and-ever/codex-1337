@@ -17,6 +17,8 @@ pub(crate) enum KeymapContext {
     Chat,
     /// Voice-only chat action, inactive in pagers and other overlays.
     Voice,
+    /// Steering edits are inactive when there is no pending message.
+    PendingSteer,
     Composer,
     Editor,
     VimNormal,
@@ -33,7 +35,7 @@ impl KeymapContext {
     pub(crate) const fn config_name(self) -> &'static str {
         match self {
             Self::Global => "global",
-            Self::Chat | Self::Voice => "chat",
+            Self::Chat | Self::Voice | Self::PendingSteer => "chat",
             Self::Composer => "composer",
             Self::Editor => "editor",
             Self::VimNormal => "vim_normal",
@@ -79,7 +81,7 @@ impl KeymapContext {
     const fn is_shared_main(self) -> bool {
         matches!(
             self,
-            Self::Global | Self::Chat | Self::Voice | Self::Composer
+            Self::Global | Self::Chat | Self::Voice | Self::PendingSteer | Self::Composer
         )
     }
 
@@ -294,6 +296,7 @@ define_runtime_action_bindings! {
         skip_question,
     ],
     "chat" => Voice, chat, chat [toggle_voice_mute],
+    "chat" => PendingSteer, chat, chat [edit_pending_steer, remove_pending_steer],
     "composer" => Composer, composer, composer [
         submit,
         queue,

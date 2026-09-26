@@ -11,7 +11,7 @@ Buffer {
         "    Second line                                 ",
         "    Third line                                  ",
         "    …                                           ",
-        "    ⌥+e edit · ⌥+x remove                       ",
+        "    ⌥+e edit · ⌥+x cancel                       ",
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,

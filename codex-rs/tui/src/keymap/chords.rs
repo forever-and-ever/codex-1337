@@ -126,6 +126,7 @@ const fn context_bit(context: KeymapContext) -> u32 {
         KeymapContext::Agents => 10,
         KeymapContext::VimSearch => 11,
         KeymapContext::Voice => 12,
+        KeymapContext::PendingSteer => 17,
     }
 }
 
@@ -651,6 +652,7 @@ Choose a different chord and retry.",
         KeymapContext::Global
         | KeymapContext::Chat
         | KeymapContext::Voice
+        | KeymapContext::PendingSteer
         | KeymapContext::Composer
         | KeymapContext::Editor
         | KeymapContext::VimNormal

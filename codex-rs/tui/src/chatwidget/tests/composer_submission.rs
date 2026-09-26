@@ -1782,6 +1782,19 @@ async fn pending_steer_interrupt_uses_remapped_binding() {
 async fn pending_steer_edit_and_remove_shortcuts_cancel_the_single_slot() {
     let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.input_queue.pending_steer = Some(pending_steer("edit me"));
+    // Production resolves hints through the keymap inventory; standalone preview
+    // defaults can conceal a missing action in that inventory.
+    chat.bottom_pane
+        .set_keymap_bindings(&crate::keymap::RuntimeKeymap::defaults());
+    chat.refresh_pending_input_preview();
+    assert!(
+        chat.keymap_contexts()
+            .contains(crate::keymap::KeymapContext::PendingSteer)
+    );
+    assert_chatwidget_snapshot!(
+        "pending_steer_edit_and_cancel_hints",
+        render_bottom_popup(&chat, /*width*/ 80)
+    );
 
     chat.handle_key_event(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::ALT));
     assert_matches!(
@@ -1812,6 +1825,11 @@ async fn pending_steer_edit_and_remove_shortcuts_cancel_the_single_slot() {
     );
     assert!(chat.input_queue.pending_steer.is_none());
     assert_eq!(chat.bottom_pane.composer_text(), "edit me");
+    assert!(
+        !chat
+            .keymap_contexts()
+            .contains(crate::keymap::KeymapContext::PendingSteer)
+    );
 }
 
 #[tokio::test]

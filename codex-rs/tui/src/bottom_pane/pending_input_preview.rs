@@ -13,13 +13,12 @@ use crate::wrapping::adaptive_wrap_lines;
 /// Widget that displays the pending steer plus follow-up inputs held during a turn.
 ///
 /// The widget renders the pending steer first, then rejected steers that will be
-/// resubmitted at end of turn, then ordinary queued user messages. Pending
-/// The steer explains that it will be submitted after the next tool/result
-/// boundary unless the user invokes the interrupt binding to send it
-/// immediately. The edit hint at the bottom only appears when there are actual
-/// queued user inputs to pop back into the composer. Because some terminals
-/// intercept certain modifier-key combinations, the displayed binding is
-/// configurable via [`set_edit_binding`](Self::set_edit_binding).
+/// resubmitted at end of turn, then ordinary queued user messages. The steer
+/// shows shortcuts to edit or cancel it, or interrupt and send immediately
+/// rather than wait for the next tool/result boundary. The queued-message edit
+/// hint only appears when there are inputs to restore to the composer. Its binding
+/// is configurable via [`set_edit_binding`](Self::set_edit_binding) for terminals
+/// that intercept modifier-key combinations.
 pub(crate) struct PendingInputPreview {
     pub pending_steer: Option<String>,
     pub rejected_steers: Vec<String>,
@@ -135,7 +134,7 @@ impl PendingInputPreview {
                 if hint.len() > 1 {
                     hint.push(" · ".into());
                 }
-                hint.extend([binding.into(), " remove".into()]);
+                hint.extend([binding.into(), " cancel".into()]);
             }
             if hint.len() > 1 {
                 lines.push(Line::from(hint).dim());

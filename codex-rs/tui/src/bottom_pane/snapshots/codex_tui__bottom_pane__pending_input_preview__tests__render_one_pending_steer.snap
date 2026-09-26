@@ -8,7 +8,7 @@ Buffer {
         "• Message to be submitted after next tool call  ",
         "  (press esc to interrupt and send immediately) ",
         "  ↳ Please continue.                            ",
-        "    ⌥+e edit · ⌥+x remove                       ",
+        "    ⌥+e edit · ⌥+x cancel                       ",
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,

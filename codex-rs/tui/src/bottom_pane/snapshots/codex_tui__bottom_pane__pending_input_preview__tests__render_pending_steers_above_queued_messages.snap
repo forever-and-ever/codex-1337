@@ -9,7 +9,7 @@ Buffer {
         "  (press esc to interrupt and send immediately)     ",
         "  ↳ Please continue.                                ",
         "    Check the last command output.                  ",
-        "    ⌥+e edit · ⌥+x remove                           ",
+        "    ⌥+e edit · ⌥+x cancel                           ",
         "                                                    ",
         "• Messages to be submitted at end of turn           ",
         "  ↳ Rejected steer that will be retried.            ",

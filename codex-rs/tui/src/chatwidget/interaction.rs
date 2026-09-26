@@ -30,7 +30,12 @@ impl ChatWidget {
     }
 
     pub(crate) fn keymap_contexts(&self) -> crate::keymap::KeymapContextSet {
-        self.bottom_pane.keymap_contexts()
+        let contexts = self.bottom_pane.keymap_contexts();
+        if self.input_queue.pending_steer.is_some() && self.bottom_pane.no_modal_or_popup_active() {
+            contexts.with(crate::keymap::KeymapContext::PendingSteer)
+        } else {
+            contexts
+        }
     }
 
     pub(crate) fn handle_key_event(&mut self, key_event: KeyEvent) {
