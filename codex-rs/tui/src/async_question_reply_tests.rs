@@ -22,6 +22,69 @@ fn desktop_question_reply_accepts_single_and_batched_envelopes() {
 }
 
 #[test]
+fn coalescing_preserves_question_identity_attachments_and_latest_ide_context() {
+    use codex_context_fragments::AnsweredQuestion;
+    use codex_context_fragments::ContextualUserFragment;
+
+    let first = AnsweredQuestion::new("one", "First?", "Yes").render();
+    let second = AnsweredQuestion::new("two", "Second?", "No").render();
+    let first = append(&first, &second).unwrap();
+    let prefix =
+        "# Context from my IDE setup:\n\n## Open tabs:\n- lib.rs\n\n## My request for Codex:\n";
+    let input = vec![UserInput::Text {
+        text: first,
+        text_elements: Vec::new(),
+    }];
+    let skill = UserInput::Skill {
+        name: "route".into(),
+        path: "/tmp/route/SKILL.md".into(),
+    };
+    let image = UserInput::LocalImage {
+        path: "/tmp/diagram.png".into(),
+        detail: None,
+    };
+    let appended = vec![
+        image.clone(),
+        UserInput::Text {
+            text: format!("{prefix}Actually, \"yes\" — use $route.\nSee diagram."),
+            text_elements: Vec::new(),
+        },
+        skill.clone(),
+    ];
+    let merged = append_input(&input, &appended).unwrap();
+    let UserInput::Text { text, .. } = &merged[0] else {
+        panic!("reply envelope")
+    };
+    assert!(text.starts_with(prefix));
+    assert_eq!(
+        parse(text),
+        Some(vec![
+            AsyncQuestionReply {
+                question_item_id: "one".into(),
+                question: "First?".into(),
+                answer: "Yes".into()
+            },
+            AsyncQuestionReply {
+                question_item_id: "two".into(),
+                question: "Second?".into(),
+                answer: "No\nActually, \"yes\" — use $route.\nSee diagram.".into()
+            },
+        ])
+    );
+    assert_eq!(
+        merged,
+        vec![
+            UserInput::Text {
+                text: text.clone(),
+                text_elements: Vec::new()
+            },
+            image,
+            skill
+        ]
+    );
+}
+
+#[test]
 fn malformed_or_embedded_question_envelopes_remain_ordinary_text() {
     for text in [
         "> Which environment?\n\nStaging",

@@ -1,0 +1,19 @@
+---
+source: tui/src/chatwidget/tests/questions_tests.rs
+expression: "render_bottom_popup(&chat, 100)"
+---
+• Working (0s • esc to interrupt)
+
+• Message to be submitted after next tool call (press esc to interrupt and send immediately)
+  ↳ > Which terminal?
+
+    alacritty-1337
+    …
+    ⌥+e edit · ⌥+x cancel
+
+› Ask Codex to do anything
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  Activity  —
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  GPT-5.6-Sol default · /tmp/project

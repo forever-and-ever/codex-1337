@@ -62,6 +62,104 @@ async fn accepted_question_answer_uses_existing_delivery_and_keeps_main_draft() 
 }
 
 #[tokio::test]
+async fn pending_question_reply_coalesces_follow_up_inside_the_answer() {
+    use codex_context_fragments::AnsweredQuestion;
+    use codex_context_fragments::ContextualUserFragment;
+
+    let (mut chat, mut rx, mut ops) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.thread_id = Some(ThreadId::new());
+    chat.on_task_started();
+    chat.add_async_questions("terminal", &[question("Which terminal?", /*options*/ None)]);
+    chat.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::ALT));
+    chat.bottom_pane.handle_paste("alacritty-1337".into());
+    chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
+    let Op::UserTurn {
+        client_user_message_id,
+        ..
+    } = next_submit_op(&mut ops)
+    else {
+        panic!("question answer")
+    };
+    let mut answer = "alacritty-1337".to_string();
+    let id = serde_json::json!(["request_user_input_async", "terminal", 0]).to_string();
+    // Concatenating serialized text invalidates the reply envelope. Exercise the
+    // replacement request, preview, restoration and authoritative echo together.
+    for suffix in ["\"same terminal\" basically", "tmux rarely to never"] {
+        chat.bottom_pane
+            .set_composer_text(suffix.into(), Vec::new(), Vec::new());
+        chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
+        let Op::UserTurn {
+            items,
+            pending_steer_replacement,
+            ..
+        } = next_submit_op(&mut ops)
+        else {
+            panic!("follow-up")
+        };
+        // If replacement loses the consumption race, only the new suffix is sent.
+        assert_eq!(
+            items,
+            vec![UserInput::Text {
+                text: suffix.into(),
+                text_elements: Vec::new(),
+            }]
+        );
+        answer.push('\n');
+        answer.push_str(suffix);
+        let expected = AnsweredQuestion::new(&id, "Which terminal?", &answer).render();
+        let replacement = pending_steer_replacement.unwrap();
+        assert_eq!(replacement.client_user_message_id, client_user_message_id);
+        let [
+            UserInput::Text {
+                text,
+                text_elements,
+            },
+        ] = replacement.input.as_slice()
+        else {
+            panic!("single reply envelope")
+        };
+        assert_eq!(
+            crate::async_question_reply::parse(text),
+            crate::async_question_reply::parse(&expected)
+        );
+        assert!(text_elements.is_empty());
+        let pending = chat.input_queue.pending_steer.as_ref().unwrap();
+        assert_eq!(pending.items, replacement.input);
+        assert_eq!(pending.user_message.text, *text);
+        let visible = format!("> Which terminal?\n\n{answer}");
+        assert_eq!(
+            user_message_preview_text(&pending.user_message, Some(&pending.history_record)),
+            visible
+        );
+        assert_eq!(
+            user_message_for_restore(pending.user_message.clone(), &pending.history_record).text,
+            visible
+        );
+        chat.finish_pending_steer_replacement(/*replaced*/ true);
+    }
+    insta::assert_snapshot!(
+        "coalesced_question_reply_pending",
+        render_bottom_popup(&chat, /*width*/ 100)
+    );
+    let items = chat
+        .input_queue
+        .pending_steer
+        .as_ref()
+        .unwrap()
+        .items
+        .clone();
+    drain_insert_history(&mut rx);
+    complete_user_message_for_inputs(&mut chat, "answer", items);
+    assert!(chat.input_queue.pending_steer.is_none());
+    let history = drain_insert_history(&mut rx);
+    assert_eq!(history.len(), 1);
+    insta::assert_snapshot!(
+        "coalesced_question_reply_delivered",
+        lines_to_single_string(&history[0])
+    );
+}
+
+#[tokio::test]
 async fn async_question_answers_preserve_ambiguous_skill_selection_and_dismiss_remotely() {
     use codex_context_fragments::AnsweredQuestion;
     use codex_context_fragments::ContextualUserFragment;

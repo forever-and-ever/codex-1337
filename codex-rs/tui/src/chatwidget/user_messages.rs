@@ -201,12 +201,16 @@ pub(super) struct PendingSteerReplacement {
 
 impl PendingSteer {
     pub(super) fn append(&self, appended: &Self) -> Self {
-        let mut items = self.items.clone();
-        items.push(UserInput::Text {
-            text: "\n".to_string(),
-            text_elements: Vec::new(),
-        });
-        items.extend(appended.items.clone());
+        let items = crate::async_question_reply::append_input(&self.items, &appended.items)
+            .unwrap_or_else(|| {
+                let mut items = self.items.clone();
+                items.push(UserInput::Text {
+                    text: "\n".to_string(),
+                    text_elements: Vec::new(),
+                });
+                items.extend(appended.items.clone());
+                items
+            });
         let (user_message, history_record) = merge_user_messages_with_history_record(vec![
             (self.user_message.clone(), self.history_record.clone()),
             (
@@ -466,9 +470,6 @@ fn merge_remapped_user_messages(messages: impl IntoIterator<Item = UserMessage>)
     };
 
     for (idx, message) in messages.into_iter().enumerate() {
-        if idx > 0 {
-            combined.text.push('\n');
-        }
         let UserMessage {
             text,
             text_elements,
@@ -476,12 +477,20 @@ fn merge_remapped_user_messages(messages: impl IntoIterator<Item = UserMessage>)
             remote_image_urls,
             mention_bindings,
         } = message;
-        append_text_with_rebased_elements(
-            &mut combined.text,
-            &mut combined.text_elements,
-            &text,
-            text_elements,
-        );
+        if let Some(reply) = crate::async_question_reply::append(&combined.text, &text) {
+            combined.text = reply;
+            combined.text_elements.clear();
+        } else {
+            if idx > 0 {
+                combined.text.push('\n');
+            }
+            append_text_with_rebased_elements(
+                &mut combined.text,
+                &mut combined.text_elements,
+                &text,
+                text_elements,
+            );
+        }
         combined.local_images.extend(local_images);
         combined.remote_image_urls.extend(remote_image_urls);
         combined.mention_bindings.extend(mention_bindings);
@@ -578,7 +587,11 @@ pub(super) fn merge_user_messages_with_history_record(
                 UserMessageHistoryRecord::Override(_) if message.text.is_empty() => {}
                 UserMessageHistoryRecord::Override(_)
                 | UserMessageHistoryRecord::UserMessageText => {
-                    append_history_segment(&message.text, message.text_elements.clone());
+                    if let Some(text) = crate::async_question_reply::display_text(&message.text) {
+                        append_history_segment(&text, Vec::new());
+                    } else {
+                        append_history_segment(&message.text, message.text_elements.clone());
+                    }
                 }
             }
         }
