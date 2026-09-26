@@ -32,7 +32,7 @@ expression: normalize_snapshot_paths(term.backend().vt100().screen().contents())
   └ Search Change Approved
     Read diff_render.rs (whole file)
 
-• Working (0s • esc to interrupt)
+• Working (0s • ctrl+c to interrupt)
 
 
 › Summarize recent commits

@@ -1775,7 +1775,7 @@ mod tests {
             auto_resolution_ms: None,
         });
 
-        overlay.handle_key_event(KeyEvent::from(KeyCode::Esc));
+        overlay.handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
 
         assert!(overlay.done, "expected overlay to be done");
         expect_interrupt_only(&mut rx);
@@ -2440,7 +2440,7 @@ mod tests {
                 "tab to add notes",
                 "enter to submit answer",
                 "←/→ to navigate questions",
-                "esc to interrupt",
+                "ctrl+c to interrupt",
             ]
         );
 
@@ -2449,7 +2449,11 @@ mod tests {
         let tip_texts = tips.iter().map(ToString::to_string).collect::<Vec<_>>();
         assert_eq!(
             tip_texts,
-            vec!["tab or esc to clear notes", "enter to submit answer",]
+            vec![
+                "tab or esc to clear notes",
+                "enter to submit answer",
+                "ctrl+c to interrupt"
+            ]
         );
     }
 
@@ -2478,7 +2482,7 @@ mod tests {
             vec![
                 "enter to submit all",
                 "ctrl+p / ctrl+n change question",
-                "esc to interrupt",
+                "ctrl+c to interrupt",
             ]
         );
     }
@@ -2501,7 +2505,7 @@ mod tests {
         let tip_texts = tips.iter().map(ToString::to_string).collect::<Vec<_>>();
         assert_eq!(
             tip_texts,
-            vec!["ctrl+j to submit answer", "esc to interrupt"]
+            vec!["ctrl+j to submit answer", "ctrl+c to interrupt"]
         );
     }
 
@@ -2510,21 +2514,21 @@ mod tests {
         for (specs, expected_tips) in [
             (
                 KeybindingsSpec::One(KeybindingSpec("ctrl-x enter".to_string())),
-                vec!["ctrl+x enter to submit answer", "esc to interrupt"],
+                vec!["ctrl+x enter to submit answer", "ctrl+c to interrupt"],
             ),
             (
                 KeybindingsSpec::Many(vec![
                     KeybindingSpec("ctrl-enter".to_string()),
                     KeybindingSpec("ctrl-x enter".to_string()),
                 ]),
-                vec!["ctrl+enter to submit answer", "esc to interrupt"],
+                vec!["ctrl+enter to submit answer", "ctrl+c to interrupt"],
             ),
             (
                 KeybindingsSpec::Many(vec![
                     KeybindingSpec("ctrl-x enter".to_string()),
                     KeybindingSpec("ctrl-enter".to_string()),
                 ]),
-                vec!["ctrl+x enter to submit answer", "esc to interrupt"],
+                vec!["ctrl+x enter to submit answer", "ctrl+c to interrupt"],
             ),
         ] {
             let (tx, _rx) = test_sender();
@@ -2672,7 +2676,7 @@ mod tests {
     }
 
     #[test]
-    fn esc_in_notes_mode_without_options_interrupts() {
+    fn interrupt_in_notes_mode_without_options() {
         let (tx, mut rx) = test_sender();
         let mut overlay = RequestUserInputOverlay::new(
             request_event("turn-1", vec![question_without_options("q1", "Notes")]),
@@ -2682,14 +2686,14 @@ mod tests {
             /*disable_paste_burst*/ false,
         );
 
-        overlay.handle_key_event(KeyEvent::from(KeyCode::Esc));
+        overlay.handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
 
         assert_eq!(overlay.done, true);
         expect_interrupt_only(&mut rx);
     }
 
     #[test]
-    fn esc_in_options_mode_interrupts() {
+    fn interrupt_in_options_mode() {
         let (tx, mut rx) = test_sender();
         let mut overlay = RequestUserInputOverlay::new(
             request_event("turn-1", vec![question_with_options("q1", "Pick one")]),
@@ -2699,7 +2703,7 @@ mod tests {
             /*disable_paste_burst*/ false,
         );
 
-        overlay.handle_key_event(KeyEvent::from(KeyCode::Esc));
+        overlay.handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
 
         assert_eq!(overlay.done, true);
         expect_interrupt_only(&mut rx);
@@ -2763,7 +2767,7 @@ mod tests {
     }
 
     #[test]
-    fn esc_drops_committed_answers() {
+    fn interrupt_drops_committed_answers() {
         let (tx, mut rx) = test_sender();
         let mut overlay = RequestUserInputOverlay::new(
             request_event(
@@ -2785,7 +2789,7 @@ mod tests {
             "unexpected AppEvent before interruption"
         );
 
-        overlay.handle_key_event(KeyEvent::from(KeyCode::Esc));
+        overlay.handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
 
         expect_interrupt_only(&mut rx);
     }
@@ -3753,7 +3757,7 @@ mod tests {
 
 
 
-          ctrl+x enter to submit answer | esc to interrupt
+          ctrl+x enter to submit answer | ctrl+c to interrupt
         ");
     }
 

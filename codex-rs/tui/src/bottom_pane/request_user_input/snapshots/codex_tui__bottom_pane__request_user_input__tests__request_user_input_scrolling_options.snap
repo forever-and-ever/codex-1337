@@ -12,4 +12,4 @@ expression: "render_snapshot(&overlay, area)"
   › 4. Refactor                             Tighten structure and remove dead code.                                     
     5. Ship it                              Finalize and open a PR.                                                     
                                                                                                                         
-  tab to add notes | enter to submit answer | esc to interrupt
+  tab to add notes | enter to submit answer | ctrl+c to interrupt

@@ -1666,7 +1666,7 @@ fn interrupted_history(
 }
 
 #[tokio::test]
-async fn output_free_esc_interrupt_keeps_prompt_and_opens_blank_composer() {
+async fn output_free_remapped_interrupt_keeps_prompt_and_opens_blank_composer() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     let prompt = "revise this prompt";
     chat.thread_id = Some(ThreadId::new());
@@ -1675,9 +1675,13 @@ async fn output_free_esc_interrupt_keeps_prompt_and_opens_blank_composer() {
     handle_turn_started(&mut chat, "turn-1");
     chat.bottom_pane.ensure_status_indicator();
 
-    let esc = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
-    assert!(chat.bottom_pane.should_interrupt_running_task(esc));
-    chat.handle_key_event(esc);
+    let mut keymap = crate::keymap::RuntimeKeymap::defaults();
+    keymap.chat.interrupt_turn = vec![crate::key_hint::plain(KeyCode::F(12))];
+    chat.chat_keymap = keymap.chat.clone();
+    chat.bottom_pane.set_keymap_bindings(&keymap);
+    let interrupt = KeyEvent::new(KeyCode::F(12), KeyModifiers::NONE);
+    assert!(chat.bottom_pane.should_interrupt_running_task(interrupt));
+    chat.handle_key_event(interrupt);
 
     let mut saw_prompt = false;
     loop {
@@ -1690,7 +1694,7 @@ async fn output_free_esc_interrupt_keeps_prompt_and_opens_blank_composer() {
             }
             Ok(AppEvent::CodexOp(Op::Interrupt)) => break,
             Ok(_) => {}
-            Err(error) => panic!("expected Esc interrupt command, got {error:?}"),
+            Err(error) => panic!("expected remapped interrupt command, got {error:?}"),
         }
     }
 
@@ -1728,7 +1732,7 @@ async fn output_free_ctrl_c_interrupt_keeps_prompt_and_opens_blank_composer() {
 }
 
 #[tokio::test]
-async fn pending_steer_esc_does_not_steal_vim_insert_escape() {
+async fn pending_steer_interrupt_preserves_vim_escape_and_draft_precedence() {
     let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     let esc = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
 
@@ -1746,7 +1750,16 @@ async fn pending_steer_esc_does_not_steal_vim_insert_escape() {
     assert!(op_rx.try_recv().is_err());
 
     chat.handle_key_event(esc);
+    assert!(op_rx.try_recv().is_err());
 
+    chat.bottom_pane
+        .set_composer_text("draft".into(), Vec::new(), Vec::new());
+    chat.handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+    assert!(op_rx.try_recv().is_err());
+    assert!(!chat.input_queue.submit_pending_steer_after_interrupt);
+    assert!(chat.bottom_pane.composer_is_empty());
+
+    chat.handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
     match op_rx.try_recv() {
         Ok(Op::Interrupt) => {}
         other => panic!("expected Op::Interrupt, got {other:?}"),
@@ -2466,7 +2479,7 @@ async fn interrupt_restores_queued_messages_into_composer() {
         .push_back(UserMessage::from("second queued".to_string()).into());
     chat.refresh_pending_input_preview();
 
-    // Deliver an interrupted turn notification as if Esc was pressed.
+    // Deliver an interrupted turn notification as if Ctrl+C was pressed.
     handle_turn_interrupted(&mut chat, "turn-1");
 
     // Composer should now contain the queued messages joined by newlines, in order.
@@ -2775,7 +2788,6 @@ fn image_preparation_keeps_input_responsive_and_preserves_pending_input() {
         "interrupt",
         "parent_owned",
         "external_writer",
-        "escape",
         "ctrl_c",
     ] {
         tokio::runtime::Builder::new_current_thread()
@@ -2850,24 +2862,15 @@ fn image_preparation_keeps_input_responsive_and_preserves_pending_input() {
                     chat.model_catalog = Arc::new(ModelCatalog::new(models));
                     chat.on_images_prepared(id);
                     assert_eq!(chat.bottom_pane.composer_text(), "describe\nnew draft");
-                } else if scenario == "escape" || scenario == "ctrl_c" {
+                } else if scenario == "ctrl_c" {
                     chat.on_task_started();
-                    chat.handle_key_event(if scenario == "escape" {
-                        KeyEvent::from(KeyCode::Esc)
-                    } else {
-                        KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)
-                    });
+                    chat.handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
                     next_interrupt_op(&mut ops);
-                    if scenario == "escape" {
-                        chat.on_interrupted_turn(TurnAbortReason::Interrupted);
-                        assert_eq!(chat.bottom_pane.composer_text(), "describe\nx");
-                    } else {
-                        chat.on_task_complete(
-                            /*last_agent_message*/ None, /*completion*/ None,
-                            /*from_replay*/ false,
-                        );
-                        assert_eq!(chat.input_queue.queued_user_messages.len(), 2);
-                    }
+                    chat.on_task_complete(
+                        /*last_agent_message*/ None, /*completion*/ None,
+                        /*from_replay*/ false,
+                    );
+                    assert_eq!(chat.input_queue.queued_user_messages.len(), 2);
                     chat.on_images_prepared(id);
                 } else if scenario == "parent_owned" || scenario == "external_writer" {
                     chat.codex_op_target = CodexOpTarget::AppEvent;

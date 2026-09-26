@@ -286,8 +286,9 @@ async fn steer_rejection_queues_review_follow_up_before_existing_queued_messages
 }
 
 #[tokio::test]
-async fn esc_with_review_queued_steers_shows_warning_and_does_not_interrupt() {
+async fn configured_escape_with_review_queued_steers_shows_warning_and_does_not_interrupt() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.chat_keymap.interrupt_turn = vec![crate::key_hint::plain(KeyCode::Esc)];
     chat.thread_id = Some(ThreadId::new());
     handle_turn_started(&mut chat, "turn-1");
     handle_entered_review_mode(&mut chat, "feature branch");
@@ -844,8 +845,9 @@ async fn manual_interrupt_restores_pending_steer_to_composer() {
 }
 
 #[tokio::test]
-async fn esc_interrupt_sends_all_pending_steer_immediately_and_keeps_existing_draft() {
+async fn configured_escape_sends_pending_steer_immediately_and_keeps_existing_draft() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.chat_keymap.interrupt_turn = vec![crate::key_hint::plain(KeyCode::Esc)];
     chat.thread_id = Some(ThreadId::new());
     chat.on_task_started();
     chat.on_agent_message_delta("Final answer line\n".to_string());
@@ -924,8 +926,9 @@ async fn esc_interrupt_sends_all_pending_steer_immediately_and_keeps_existing_dr
 }
 
 #[tokio::test]
-async fn esc_with_pending_steer_overrides_agent_command_interrupt_behavior() {
+async fn configured_escape_with_pending_steer_overrides_agent_command_interrupt_behavior() {
     let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.chat_keymap.interrupt_turn = vec![crate::key_hint::plain(KeyCode::Esc)];
     chat.thread_id = Some(ThreadId::new());
     chat.on_task_started();
 

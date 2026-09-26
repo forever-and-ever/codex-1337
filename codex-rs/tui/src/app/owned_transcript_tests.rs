@@ -441,13 +441,11 @@ async fn owned_transcript_keeps_text_out_of_the_pet_columns() -> Result<()> {
 }
 
 #[tokio::test]
-async fn owned_details_escape_interrupts_work_without_starting_backtrack() -> Result<()> {
-    let (mut app, mut events, _operations) = make_test_app_with_channels().await;
+async fn owned_details_ctrl_c_interrupts_work_without_starting_backtrack() -> Result<()> {
+    let (mut app, mut events, mut operations) = make_test_app_with_channels().await;
     let thread_id = ThreadId::new();
     attach_thread(&mut app, thread_id);
     app.transcript_cells = vec![user_cell("historical prompt")];
-    app.chat_widget
-        .apply_external_edit("draft survives interrupt".to_string());
     let mut app_server = Box::pin(crate::start_embedded_app_server_for_picker(&app.config)).await?;
     let mut tui = crate::tui::test_support::make_test_tui()?;
     tui.set_owned_screen(/*owned*/ true)?;
@@ -471,12 +469,15 @@ async fn owned_details_escape_interrupts_work_without_starting_backtrack() -> Re
     app.handle_tui_event(
         &mut tui,
         &mut app_server,
-        TuiEvent::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        TuiEvent::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),
     )
     .await?;
     let interrupts = std::iter::from_fn(|| events.try_recv().ok())
         .filter(|event| matches!(event, AppEvent::CodexOp(AppCommand::Interrupt)))
-        .count();
+        .count()
+        + std::iter::from_fn(|| operations.try_recv().ok())
+            .filter(|op| matches!(op, AppCommand::Interrupt))
+            .count();
     assert_eq!(
         (
             interrupts,
@@ -484,7 +485,7 @@ async fn owned_details_escape_interrupts_work_without_starting_backtrack() -> Re
             app.transcript_view.is_detailed(),
             app.chat_widget.composer_text_with_pending(),
         ),
-        (1, false, true, "draft survives interrupt".to_string()),
+        (1, false, true, String::new()),
     );
     tui.set_owned_screen(/*owned*/ false)?;
     app_server.shutdown().await?;

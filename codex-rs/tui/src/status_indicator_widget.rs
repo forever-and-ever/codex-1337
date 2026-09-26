@@ -103,7 +103,7 @@ impl StatusIndicatorWidget {
             inline_message: None,
             hook_status_message: None,
             show_interrupt_hint: true,
-            interrupt_binding: Some(key_hint::plain(KeyCode::Esc).into()),
+            interrupt_binding: Some(key_hint::ctrl(KeyCode::Char('c')).into()),
             app_event_tx,
             frame_requester,
             animations_enabled,
@@ -449,7 +449,7 @@ mod tests {
             .map(ratatui::buffer::Cell::symbol)
             .collect::<String>();
 
-        assert!(line.starts_with("Working (0s • esc to interrupt)"));
+        assert!(line.starts_with("Working (0s • ctrl+c to interrupt)"));
     }
 
     #[test]
@@ -499,7 +499,7 @@ mod tests {
             ),
         ] {
             w.update_inline_message(background.map(str::to_string));
-            let mut expected = "Working (0s • esc to interrupt)".to_string();
+            let mut expected = "Working (0s • ctrl+c to interrupt)".to_string();
             if let Some(background) = background {
                 expected.push_str(&format!(" · {background}"));
             }

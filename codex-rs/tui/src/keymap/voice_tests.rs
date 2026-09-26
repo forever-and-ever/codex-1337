@@ -40,7 +40,7 @@ fn voice_mute_default_yields_to_existing_shortcuts_and_chord_prefixes() {
     }
     for (binding, conflict) in [
         ("ctrl-k", "kill_line_end"),
-        ("ctrl-c", "fixed.interrupt_or_quit"),
+        ("ctrl-c", "chat.interrupt_turn"),
     ] {
         let config =
             toml::from_str::<TuiKeymap>(&format!("[chat]\ntoggle_voice_mute = '{binding}'"))
@@ -117,7 +117,7 @@ fn voice_toggle_default_yields_to_existing_shortcuts_and_chord_prefixes() {
     }
     for (binding, conflict) in [
         ("ctrl-k", "kill_line_end"),
-        ("ctrl-c", "fixed.interrupt_or_quit"),
+        ("ctrl-c", "chat.interrupt_turn"),
         ("ctrl-t", "open_transcript"),
         #[cfg(unix)]
         ("ctrl-z", "ctrl-z is reserved for suspend"),

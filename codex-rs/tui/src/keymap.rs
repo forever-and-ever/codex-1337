@@ -1677,7 +1677,7 @@ impl RuntimeKeymap {
                 toggle_voice: default_bindings![plain(KeyCode::F(8))],
                 toggle_voice_mute: default_bindings![ctrl(KeyCode::Char('x'))],
                 chord_hints: Arc::default(),
-                interrupt_turn: default_bindings![plain(KeyCode::Esc)],
+                interrupt_turn: default_bindings![ctrl(KeyCode::Char('c'))],
                 decrease_reasoning_effort: default_bindings![
                     alt(KeyCode::Char(',')),
                     shift(KeyCode::Down)
@@ -2096,11 +2096,18 @@ impl RuntimeKeymap {
             "main",
             main_bindings,
             MAIN_RESERVED_BINDINGS,
-            [(
-                "chat.interrupt_turn",
-                "fixed.backtrack",
-                key_hint::plain(KeyCode::Esc),
-            )],
+            [
+                (
+                    "chat.interrupt_turn",
+                    "fixed.backtrack",
+                    key_hint::plain(KeyCode::Esc),
+                ),
+                (
+                    "chat.interrupt_turn",
+                    "fixed.interrupt_or_quit",
+                    key_hint::ctrl(KeyCode::Char('c')),
+                ),
+            ],
         )?;
 
         let approval_overlay_bindings = [
@@ -2952,7 +2959,7 @@ mod tests {
         assert_eq!(runtime.app.toggle_fast_mode, Vec::new());
         assert_eq!(
             runtime.chat.interrupt_turn,
-            vec![key_hint::plain(KeyCode::Esc)]
+            vec![key_hint::ctrl(KeyCode::Char('c'))]
         );
         assert_eq!(
             runtime.chat.decrease_reasoning_effort,
@@ -3838,13 +3845,16 @@ mod tests {
     }
 
     #[test]
-    fn interrupt_turn_allows_backtrack_escape_and_can_be_remapped_or_unbound() {
+    fn interrupt_turn_can_share_fixed_controls_be_remapped_or_unbound() {
         let mut keymap = TuiKeymap::default();
         let runtime = RuntimeKeymap::from_config(&keymap).expect("default keymap should parse");
         assert_eq!(
             runtime.chat.interrupt_turn,
-            vec![key_hint::plain(KeyCode::Esc)]
+            vec![key_hint::ctrl(KeyCode::Char('c'))]
         );
+
+        keymap.chat.interrupt_turn = Some(one("esc"));
+        assert!(RuntimeKeymap::from_config(&keymap).is_ok());
 
         keymap.chat.interrupt_turn = Some(one("f12"));
         let runtime = RuntimeKeymap::from_config(&keymap).expect("remapped keymap should parse");

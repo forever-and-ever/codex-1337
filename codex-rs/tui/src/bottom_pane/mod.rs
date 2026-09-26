@@ -3651,7 +3651,7 @@ mod tests {
     }
 
     #[test]
-    fn esc_interrupts_running_task_when_no_popup() {
+    fn interrupt_binding_works_without_a_popup_or_status_indicator() {
         let (tx_raw, mut rx) = unbounded_channel::<AppEvent>();
         let tx = AppEventSender::new(tx_raw);
         let mut pane = BottomPane::new(BottomPaneParams {
@@ -3668,15 +3668,14 @@ mod tests {
 
         pane.set_task_running(/*running*/ true);
 
-        pane.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-
-        assert!(
-            matches!(rx.try_recv(), Ok(AppEvent::CodexOp(Op::Interrupt))),
-            "expected Esc to send Op::Interrupt while a task is running"
-        );
+        pane.handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(AppEvent::CodexOp(Op::Interrupt))
+        ));
 
         pane.hide_status_indicator();
-        pane.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        pane.handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
         assert!(matches!(
             rx.try_recv(),
             Ok(AppEvent::CodexOp(Op::Interrupt))

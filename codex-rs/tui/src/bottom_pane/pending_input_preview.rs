@@ -46,7 +46,7 @@ impl PendingInputPreview {
             rejected_steers: Vec::new(),
             queued_messages: Vec::new(),
             edit_binding: Some(key_hint::alt(KeyCode::Up).into()),
-            interrupt_binding: Some(key_hint::plain(KeyCode::Esc).into()),
+            interrupt_binding: Some(key_hint::ctrl(KeyCode::Char('c')).into()),
             edit_pending_steer_binding: Some(key_hint::alt(KeyCode::Char('e')).into()),
             remove_pending_steer_binding: Some(key_hint::alt(KeyCode::Char('x')).into()),
         }

@@ -646,6 +646,8 @@ impl ChatWidget {
                 self.quit_shortcut_key = None;
                 self.bottom_pane.clear_quit_shortcut_hint();
                 if self.submit_op(AppCommand::interrupt()) {
+                    self.input_queue.submit_pending_steer_after_interrupt =
+                        !self.review.is_review_mode && self.input_queue.pending_steer.is_some();
                     self.pause_active_goal_for_interrupt();
                 }
             } else {
@@ -664,6 +666,8 @@ impl ChatWidget {
         self.arm_quit_shortcut(key);
 
         if self.is_cancellable_work_active() && self.submit_op(AppCommand::interrupt()) {
+            self.input_queue.submit_pending_steer_after_interrupt =
+                !self.review.is_review_mode && self.input_queue.pending_steer.is_some();
             self.pause_active_goal_for_interrupt();
         }
     }

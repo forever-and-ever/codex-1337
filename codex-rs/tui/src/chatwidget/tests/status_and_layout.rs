@@ -2180,12 +2180,16 @@ async fn ctrl_c_interrupt_pauses_active_goal_turn() {
 }
 
 #[tokio::test]
-async fn esc_interrupt_pauses_active_goal_turn() {
+async fn remapped_interrupt_pauses_active_goal_turn() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.show_welcome_banner = false;
     let thread_id = start_active_goal_turn(&mut chat);
 
-    chat.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    let mut keymap = crate::keymap::RuntimeKeymap::defaults();
+    keymap.chat.interrupt_turn = vec![crate::key_hint::plain(KeyCode::F(12))];
+    chat.chat_keymap = keymap.chat.clone();
+    chat.bottom_pane.set_keymap_bindings(&keymap);
+    chat.handle_key_event(KeyEvent::new(KeyCode::F(12), KeyModifiers::NONE));
 
     assert_matches!(rx.try_recv(), Ok(AppEvent::CodexOp(Op::Interrupt)));
     assert_goal_paused_event(&mut rx, thread_id);
@@ -2208,10 +2212,7 @@ async fn esc_interrupt_pauses_active_goal_turn() {
 
 #[tokio::test]
 async fn request_user_input_interrupt_pauses_active_goal_turn() {
-    for key_event in [
-        KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
-        KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
-    ] {
+    for key_event in [KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)] {
         let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
         let thread_id = start_active_goal_turn(&mut chat);
         chat.handle_request_user_input_now(ToolRequestUserInputParams {
