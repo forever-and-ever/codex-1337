@@ -43,6 +43,13 @@ pub(crate) use exploration_groups::older_exploration_group;
 
 pub(crate) type TranscriptCells = Vec<Arc<dyn HistoryCell>>;
 
+fn is_activity_metadata(item: &ThreadItem) -> bool {
+    matches!(
+        item,
+        ThreadItem::Reasoning { .. } | ThreadItem::ToolOutputTokens { .. }
+    ) || crate::history_cell::ToolOutputCell::is_item(item)
+}
+
 enum PendingActivity {
     Computer(crate::history_cell::ComputerActivityCell),
     Exploration(crate::exec_cell::ExecCell),
@@ -134,7 +141,8 @@ pub(crate) fn thread_items_to_transcript_cells(
     let mut cells: TranscriptCells = Vec::new();
     let mut pending = None;
     for item in items {
-        if matches!(item, ThreadItem::Reasoning { .. })
+        if (matches!(item, ThreadItem::Reasoning { .. })
+            || crate::history_cell::ToolOutputCell::is_item(&item))
             && let Some(group) = &mut pending
         {
             for cell in item_to_cells(
@@ -209,7 +217,16 @@ pub(crate) fn thread_items_to_transcript_cells(
                 );
                 if !projected.is_empty() {
                     PendingActivity::flush(&mut pending, &mut cells);
-                    cells.extend(projected);
+                    for cell in projected {
+                        if let Some((start, group)) =
+                            crate::history_cell::ToolOutputGroup::attach(&cells, Arc::clone(&cell))
+                        {
+                            cells.truncate(start);
+                            cells.push(group);
+                        } else {
+                            cells.push(cell);
+                        }
+                    }
                 }
             }
         }

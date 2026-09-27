@@ -33,12 +33,7 @@ pub(crate) fn older_exploration_group(
     let items = adjacent_items(older, newer, turns)?;
     let older_items = items
         .iter()
-        .filter(|item| {
-            !matches!(
-                item,
-                ThreadItem::Reasoning { .. } | ThreadItem::ToolOutputTokens { .. }
-            )
-        })
+        .filter(|item| !super::is_activity_metadata(item))
         .take(older.group.calls.len())
         .cloned()
         .collect::<Vec<_>>();
@@ -66,10 +61,7 @@ fn adjacent_items<'a>(
 pub(super) fn completed_group(items: &[ThreadItem]) -> Option<ExecCell> {
     let mut group: Option<ExecCell> = None;
     for item in items {
-        if matches!(
-            item,
-            ThreadItem::Reasoning { .. } | ThreadItem::ToolOutputTokens { .. }
-        ) {
+        if super::is_activity_metadata(item) {
             continue;
         }
         let call = CommandHistory::from_item(item.clone())?.into_cell();

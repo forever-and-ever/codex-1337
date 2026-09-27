@@ -258,7 +258,21 @@ impl HistoryCell for ComputerActivityCell {
     }
 
     fn activity_ids(&self) -> Vec<String> {
-        self.call_ids().map(|id| format!("mcp:{id}")).collect()
+        self.call_ids()
+            .map(|id| format!("mcp:{id}"))
+            .chain(self.group.details.output_ids())
+            .collect()
+    }
+
+    fn expanded_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        if let Some(output) = self.group.details.output_lines(width) {
+            let mut lines = self.compact_hyperlink_lines(width);
+            lines.push("".into());
+            lines.extend(output);
+            lines
+        } else {
+            self.transcript_hyperlink_lines(width)
+        }
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {

@@ -66,6 +66,165 @@ fn project(app: &App, items: &[ThreadItem]) -> Vec<Arc<dyn HistoryCell>> {
 }
 
 #[tokio::test]
+async fn returned_batches_keep_one_disclosure_and_bill_across_live_replay_and_pages() {
+    use crate::chatwidget::ReplayKind;
+    use codex_protocol::models::FunctionCallOutputBody;
+
+    let output = |id: &str| ThreadItem::FunctionCallOutput {
+        id: id.to_owned(),
+        name: "exec".into(),
+        namespace: None,
+        output: FunctionCallOutputBody::Text(format!("Returned {id}\nOnly model-visible text.")),
+    };
+    let rendered = |cells: &[Arc<dyn HistoryCell>]| {
+        cells
+            .iter()
+            .map(|cell| {
+                (
+                    cell.compact_hyperlink_lines(80),
+                    cell.expanded_hyperlink_lines(80),
+                    cell.activity_ids(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let mut snapshots = Vec::new();
+    for (kind, ordinary) in [
+        (ActivityKind::Exploration, false),
+        (ActivityKind::Computer, false),
+        (ActivityKind::Exploration, true),
+    ] {
+        let (mut app, mut rx, _) = crate::app::tests::make_test_app_with_channels().await;
+        let mut tui = crate::tui::test_support::make_test_tui().unwrap();
+        tui.set_owned_screen(/*owned*/ true).unwrap();
+        let command = |id| {
+            let mut item = call(id, kind, "completed");
+            if ordinary
+                && let ThreadItem::CommandExecution {
+                    command,
+                    command_actions,
+                    ..
+                } = &mut item
+            {
+                *command = "cargo check".to_owned();
+                command_actions.clear();
+            }
+            item
+        };
+        let current = turn(vec![
+            command("first"),
+            output("a"),
+            reasoning("between-outputs"),
+            output("b"),
+            command("second"),
+            output("c"),
+        ]);
+        let expected = project(&app, &current.items);
+        assert_eq!(expected.len(), if ordinary { 2 } else { 1 });
+
+        // Completion events use the live widget path; output must not flush an open exploration.
+        for item in &current.items {
+            app.chat_widget.replay_thread_item(
+                item.clone(),
+                current.id.clone(),
+                ReplayKind::ResumeInitialMessages,
+            );
+            while let Ok(event) = rx.try_recv() {
+                if let AppEvent::InsertHistoryCell(cell) = event {
+                    app.insert_history_cell(&mut tui, cell);
+                }
+            }
+        }
+        let separator: Arc<dyn HistoryCell> =
+            Arc::new(history_cell::PlainHistoryCell::new(vec!["Answer".into()]));
+        app.chat_widget
+            .add_to_history(history_cell::PlainHistoryCell::new(vec!["Answer".into()]));
+        while let Ok(event) = rx.try_recv() {
+            if let AppEvent::InsertHistoryCell(cell) = event {
+                app.insert_history_cell(&mut tui, cell);
+            }
+        }
+        assert_eq!(
+            rendered(&app.transcript_cells[..app.transcript_cells.len() - 1]),
+            rendered(&expected),
+            "live {kind:?} ordinary={ordinary}"
+        );
+
+        for split in 1..current.items.len() {
+            let older = project(&app, &current.items[..split]);
+            let boundary = older.len();
+            app.transcript_cells = older
+                .into_iter()
+                .chain(project(&app, &current.items[split..]))
+                .chain([Arc::clone(&separator)])
+                .collect();
+            app.join_older_activity_group(boundary, std::slice::from_ref(&current));
+            assert_eq!(
+                rendered(&app.transcript_cells[..app.transcript_cells.len() - 1]),
+                rendered(&expected),
+                "page {kind:?} ordinary={ordinary} split={split}"
+            );
+        }
+        app.transcript_view
+            .set_output_estimates_enabled(/*enabled*/ true);
+        for (id, count) in [("a", 1000), ("b", 280), ("c", 20), ("a", 1000)] {
+            app.transcript_view.record_tool_output_tokens(
+                format!("tool-output-tokens:{id}"),
+                "outer-exec".into(),
+                Some(count),
+            );
+        }
+        assert_eq!(
+            expected
+                .iter()
+                .map(|cell| app
+                    .transcript_view
+                    .activity_output_tokens(&cell.activity_ids()))
+                .collect::<Vec<_>>(),
+            if ordinary {
+                vec![Some(1280), Some(20)]
+            } else {
+                vec![Some(1300)]
+            }
+        );
+        for expanded in [false, true] {
+            if expanded {
+                app.transcript_view
+                    .handle_key(KeyEvent::new(KeyCode::F(4), KeyModifiers::NONE), &expected);
+                for _ in &expected {
+                    app.transcript_view
+                        .handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE), &expected);
+                    app.transcript_view
+                        .handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE), &expected);
+                }
+                app.transcript_view.clear_activity_focus();
+            }
+            app.transcript_view.jump_to_latest();
+            let area = Rect::new(
+                /*x*/ 0, /*y*/ 0, /*width*/ 100, /*height*/ 32,
+            );
+            let mut buffer = ratatui::buffer::Buffer::empty(area);
+            app.transcript_view.render(area, &mut buffer, &expected);
+            let lines = (0..area.height)
+                .map(|y| {
+                    (0..area.width)
+                        .map(|x| buffer[(x, y)].symbol())
+                        .collect::<String>()
+                        .trim_end()
+                        .to_owned()
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            snapshots.push(format!(
+                "{kind:?} ordinary={ordinary} expanded={expanded}\n{}",
+                lines.trim()
+            ));
+        }
+    }
+    insta::assert_snapshot!("coalesced_returned_batches", snapshots.join("\n\n"));
+}
+
+#[tokio::test]
 async fn older_page_hydration_keeps_pending_computer_and_exploration_completion() {
     for kind in [ActivityKind::Computer, ActivityKind::Exploration] {
         let mut app = make_test_app().await;

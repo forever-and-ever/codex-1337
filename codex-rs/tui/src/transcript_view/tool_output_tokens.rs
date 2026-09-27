@@ -36,12 +36,19 @@ impl TranscriptView {
         }
         let counts = &self.tool_output_tokens;
         let mut outputs = HashSet::new();
+        // Returned batches own the bill. Nested execution IDs have no model-visible output of
+        // their own; direct-call measurements, when present, still join the same deduplicated sum.
+        let has_batches = ids.iter().any(|id| id.starts_with("output:"));
         for id in ids {
             let (kind, id) = id.split_once(':')?;
             if kind == "output" {
                 outputs.insert(id);
             } else {
-                outputs.extend(counts.by_call.get(id)?.iter().map(String::as_str));
+                match counts.by_call.get(id) {
+                    Some(ids) => outputs.extend(ids.iter().map(String::as_str)),
+                    None if has_batches => {}
+                    None => return None,
+                }
             }
         }
         outputs.into_iter().try_fold(0u64, |total, id| {

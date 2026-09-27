@@ -1,4 +1,4 @@
-//! Retain hidden reasoning between activity calls without breaking their compact group.
+//! Retain reasoning and returned batches without breaking their enclosing activity group.
 //!
 //! Positions count preceding calls. Prepending history shifts those positions while sharing the
 //! original immutable detail cells, so expanded output keeps its chronological source content.
@@ -6,6 +6,7 @@
 
 use super::HistoryCell;
 use super::HistoryRenderMode;
+use super::ToolOutputCell;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::terminal_hyperlinks::plain_hyperlink_lines;
 use std::sync::Arc;
@@ -17,7 +18,40 @@ pub(crate) struct ActivityDetails {
 
 impl ActivityDetails {
     pub(crate) fn push(&mut self, after_calls: usize, cell: Arc<dyn HistoryCell>) {
+        if let Some(output) = cell.as_any().downcast_ref::<ToolOutputCell>()
+            && self.entries.iter().any(|(_, retained)| {
+                retained
+                    .as_any()
+                    .downcast_ref::<ToolOutputCell>()
+                    .is_some_and(|old| old.id() == output.id())
+            })
+        {
+            return;
+        }
         self.entries.push((after_calls, cell));
+    }
+
+    pub(crate) fn output_ids(&self) -> Vec<String> {
+        self.entries
+            .iter()
+            .filter(|(_, cell)| cell.as_any().is::<ToolOutputCell>())
+            .flat_map(|(_, cell)| cell.activity_ids())
+            .collect()
+    }
+
+    /// The batch returned to the model replaces raw nested results in the disclosure, not in raw history.
+    pub(crate) fn output_lines(&self, width: u16) -> Option<Vec<HyperlinkLine>> {
+        let mut output = None;
+        for (_, cell) in &self.entries {
+            if cell.as_any().is::<ToolOutputCell>() {
+                let lines: &mut Vec<HyperlinkLine> = output.get_or_insert_default();
+                if !lines.is_empty() {
+                    lines.push("".into());
+                }
+                lines.extend(cell.transcript_hyperlink_lines(width));
+            }
+        }
+        output
     }
 
     pub(crate) fn prepend(&mut self, mut older: Self, older_calls: usize) {

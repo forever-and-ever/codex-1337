@@ -38,6 +38,22 @@ impl App {
         }
         let is_session_header = cell.as_any().is::<history_cell::SessionInfoCell>();
         let cell: Arc<dyn HistoryCell> = cell.into();
+        if let Some((start, group)) =
+            history_cell::ToolOutputGroup::attach(&self.transcript_cells, Arc::clone(&cell))
+        {
+            let range = start..self.transcript_cells.len();
+            self.native_history
+                .consolidate(&self.transcript_cells[range.clone()], &group);
+            self.transcript_view
+                .replace_group(&self.transcript_cells, range.clone(), &group);
+            if let Some(Overlay::Transcript(overlay)) = self.overlay.as_mut() {
+                overlay.regroup_cells(range.clone(), Arc::clone(&group));
+            }
+            self.transcript_cells.splice(range, [group]);
+            tui.frame_requester().schedule_frame();
+            self.chat_widget.request_pending_usage_output_insertion();
+            return;
+        }
         if let Some(Overlay::Transcript(t)) = &mut self.overlay {
             t.insert_cell(cell.clone());
             tui.frame_requester().schedule_frame();

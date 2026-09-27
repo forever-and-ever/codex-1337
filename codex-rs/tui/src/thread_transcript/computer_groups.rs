@@ -40,12 +40,7 @@ pub(crate) fn older_computer_group(
     let items = adjacent_items(older, newer, turns)?;
     let older_items = items
         .iter()
-        .filter(|item| {
-            !matches!(
-                item,
-                ThreadItem::Reasoning { .. } | ThreadItem::ToolOutputTokens { .. }
-            )
-        })
+        .filter(|item| !super::is_activity_metadata(item))
         .take(older.call_ids().count())
         .cloned()
         .collect::<Vec<_>>();
@@ -78,10 +73,7 @@ pub(super) fn adjacent_activity_items<'a>(
     let mut matched = 0;
     for (offset, item) in turn.items[start..].iter().enumerate() {
         if item.id() != ids[matched] {
-            if matches!(
-                item,
-                ThreadItem::Reasoning { .. } | ThreadItem::ToolOutputTokens { .. }
-            ) {
+            if super::is_activity_metadata(item) {
                 continue;
             }
             return None;
@@ -97,10 +89,7 @@ pub(super) fn adjacent_activity_items<'a>(
 pub(super) fn completed_group(items: &[ThreadItem]) -> Option<ComputerActivityCell> {
     let mut group = None;
     for item in items {
-        if matches!(
-            item,
-            ThreadItem::Reasoning { .. } | ThreadItem::ToolOutputTokens { .. }
-        ) {
+        if super::is_activity_metadata(item) {
             continue;
         }
         let call = McpHistory::from_item(item.clone())?;

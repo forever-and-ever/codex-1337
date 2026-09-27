@@ -13,6 +13,7 @@ impl ChatWidget {
             .downcast_ref::<history_cell::ReasoningSummaryCell>()
             .is_some_and(history_cell::ReasoningSummaryCell::is_transcript_only);
         if !hidden_reasoning
+            && !cell.as_any().is::<history_cell::ToolOutputCell>()
             && !cell
                 .as_any()
                 .is::<history_cell::UnifiedExecInteractionCell>()

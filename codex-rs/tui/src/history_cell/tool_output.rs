@@ -16,6 +16,14 @@ pub(crate) struct ToolOutputCell {
 }
 
 impl ToolOutputCell {
+    pub(crate) fn id(&self) -> &str {
+        &self.id
+    }
+
+    pub(crate) fn is_item(item: &codex_app_server_protocol::ThreadItem) -> bool {
+        matches!(item, codex_app_server_protocol::ThreadItem::FunctionCallOutput { name, namespace: None, .. } if matches!(name.as_str(), "exec" | "wait"))
+    }
+
     pub(crate) fn from_output(
         id: &str,
         name: &str,

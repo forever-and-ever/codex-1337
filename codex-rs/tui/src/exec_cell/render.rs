@@ -289,7 +289,23 @@ impl HistoryCell for ExecCell {
     fn activity_ids(&self) -> Vec<String> {
         self.iter_calls()
             .map(|call| format!("exec:{}", call.call_id))
+            .chain(self.group.details.output_ids())
             .collect()
+    }
+
+    fn expanded_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        if let Some(output) = self.group.details.output_lines(width) {
+            let mut lines = if self.is_exploring_cell() {
+                self.exploring_display_lines(width)
+            } else {
+                self.compact_hyperlink_lines(width)
+            };
+            lines.push("".into());
+            lines.extend(output);
+            lines
+        } else {
+            self.transcript_hyperlink_lines(width)
+        }
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {

@@ -70,6 +70,9 @@ impl App {
         };
         let Some(group) = join_computer_groups(&self.transcript_cells[start], newer, turns)
             .or_else(|| join_exploration_groups(&self.transcript_cells[start], newer, turns))
+            .or_else(|| {
+                history_cell::ToolOutputGroup::join(&self.transcript_cells[start], newer, turns)
+            })
         else {
             return;
         };

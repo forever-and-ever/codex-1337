@@ -1,0 +1,70 @@
+---
+source: tui/src/app/activity_groups_tests.rs
+expression: "snapshots.join(\"\\n\\n\")"
+---
+Exploration ordinary=false expanded=false
+• Explored
+  └ Read first.rs (whole file), second.rs (whole file)
+    + Show details (≈1,300 total tokens of output)
+
+Exploration ordinary=false expanded=true
+• Explored
+  └ Read first.rs (whole file), second.rs (whole file)
+
+  Returned a
+  Only model-visible text.
+
+  Returned b
+  Only model-visible text.
+
+  Returned c
+  Only model-visible text.
+    − Show less (≈1,300 total tokens of output)
+
+Computer ordinary=false expanded=false
+• Used computer · 2 actions
+  ├ Inspect first
+  └ Inspect second
+    + Show details (≈1,300 total tokens of output)
+
+Computer ordinary=false expanded=true
+• Used computer · 2 actions
+  ├ Inspect first
+  └ Inspect second
+
+  Returned a
+  Only model-visible text.
+
+  Returned b
+  Only model-visible text.
+
+  Returned c
+  Only model-visible text.
+    − Show less (≈1,300 total tokens of output)
+
+Exploration ordinary=true expanded=false
+• Ran cargo check
+  └ Result first
+    + Show details (≈1,280 total tokens of output)
+
+• Ran cargo check
+  └ Result second
+    + Show details (≈20 total tokens of output)
+
+Exploration ordinary=true expanded=true
+• Ran cargo check
+  └ Result first
+
+  Returned a
+  Only model-visible text.
+
+  Returned b
+  Only model-visible text.
+    − Show less (≈1,280 total tokens of output)
+
+• Ran cargo check
+  └ Result second
+
+  Returned c
+  Only model-visible text.
+    − Show less (≈20 total tokens of output)
