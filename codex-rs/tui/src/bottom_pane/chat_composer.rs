@@ -62,11 +62,10 @@
 //!
 //! # History Navigation (↑/↓)
 //!
-//! The Up/Down history path is managed by [`ChatComposerHistory`]. It merges:
-//!
-//! - Persistent cross-session history (text-only storage; task links recover element ranges and
-//!   mention bindings, but attachments cannot be restored).
-//! - Local in-session history (full text + text elements + local/remote image attachments).
+//! [`ChatComposerHistory`] keeps Up/Down within the current conversation: replayed prompts
+//! (including inherited fork history) and local submissions retain text, elements, and attachments.
+//! Ctrl+R additionally searches persistent cross-session history, whose text-only entries recover
+//! task-link elements and mention bindings, but not attachments.
 //!
 //! Plain-text history recall strips images and their placeholders.
 //! When recalling a persistent entry, encoded task links restore atomic elements and bindings.
@@ -1120,7 +1119,7 @@ impl ChatComposer {
         self.draft.textarea.is_empty() && !self.draft.is_bash_mode && self.attachments.is_empty()
     }
 
-    /// Record local persistent-history metadata so the composer can navigate
+    /// Record local persistent-history metadata so Ctrl+R can search
     /// cross-session history.
     pub(crate) fn set_history_metadata(
         &mut self,
@@ -1131,12 +1130,7 @@ impl ChatComposer {
         self.history.set_metadata(thread_id, log_id, entry_count);
     }
 
-    /// Integrate an asynchronous response to an on-demand history lookup.
-    ///
-    /// If the entry is present and the offset still matches the active history cursor, the
-    /// composer rehydrates the entry immediately. This path intentionally routes through
-    /// [`Self::apply_history_entry`] so cursor placement remains aligned with keyboard history
-    /// recall semantics.
+    /// Integrate an asynchronous lookup for global Ctrl+R search.
     pub(crate) fn on_history_entry_response(
         &mut self,
         log_id: u64,
@@ -1147,12 +1141,6 @@ impl ChatComposer {
             .history
             .on_entry_response(log_id, offset, entry, &self.app_event_tx)
         {
-            HistoryEntryResponse::Found(entry) => {
-                // Persistent ↑/↓ history is text-only (backwards-compatible and avoids persisting
-                // attachments), but local in-session ↑/↓ history can rehydrate elements and image paths.
-                self.apply_history_entry(entry);
-                true
-            }
             HistoryEntryResponse::Search(result) => {
                 self.apply_history_search_result(result);
                 true
@@ -1202,7 +1190,7 @@ impl ChatComposer {
     }
 
     pub(crate) fn record_replayed_user_message_history(&mut self, entry: HistoryEntry) {
-        self.history.record_replayed_submission(entry);
+        self.history.record_local_submission(entry);
     }
 
     pub fn handle_paste_image_path(&mut self, pasted: &str) -> bool {
@@ -3558,9 +3546,9 @@ impl ChatComposer {
                 )
             {
                 let replace_entry = if history_up_pressed {
-                    self.history.navigate_up(&self.app_event_tx)
+                    self.history.navigate_up()
                 } else {
-                    self.history.navigate_down(&self.app_event_tx)
+                    self.history.navigate_down()
                 };
                 if let Some(entry) = replace_entry {
                     self.apply_history_entry(entry);
@@ -3573,7 +3561,6 @@ impl ChatComposer {
             if key_event.code == KeyCode::Down
                 && key_event.modifiers.is_empty()
                 && !pending_paste
-                && !self.history.navigation_pending()
                 && self.draft.textarea.cursor() == cursor
             {
                 return (InputResult::NavigationDownBoundary, result.1);
@@ -6101,7 +6088,7 @@ mod tests {
         assert!(composer.is_empty());
 
         assert_eq!(
-            composer.history.navigate_up(&composer.app_event_tx),
+            composer.history.navigate_up(),
             Some(HistoryEntry::new("draft text".to_string()))
         );
     }
@@ -6137,7 +6124,7 @@ mod tests {
 
         let history_entry = composer
             .history
-            .navigate_up(&composer.app_event_tx)
+            .navigate_up()
             .expect("expected history entry");
         let text_elements = vec![TextElement::new(
             (0..placeholder.len()).into(),
@@ -6414,7 +6401,7 @@ mod tests {
 
         let history_entry = composer
             .history
-            .navigate_up(&composer.app_event_tx)
+            .navigate_up()
             .expect("expected history entry");
         let text_elements = vec![TextElement::new(
             (0..placeholder.len()).into(),
@@ -6470,7 +6457,7 @@ mod tests {
         assert_eq!(composer.clear_for_ctrl_c(), Some(expected_text.clone()));
 
         assert_eq!(
-            composer.history.navigate_up(&composer.app_event_tx),
+            composer.history.navigate_up(),
             Some(HistoryEntry::with_pending_and_remote(
                 expected_text,
                 expected_elements,

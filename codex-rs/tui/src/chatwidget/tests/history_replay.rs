@@ -1,6 +1,5 @@
 use super::helpers::drain_insert_history_transcript;
 use super::*;
-use crate::app_event::HistoryLookupResponse;
 use codex_app_server_protocol::ImageReference;
 use codex_app_server_protocol::NetworkAccess;
 use codex_app_server_protocol::SandboxPolicy;
@@ -228,32 +227,13 @@ async fn replayed_user_messages_seed_composer_history() {
         }]
     );
 
-    let mut next_lookup_offset = || {
-        let AppEvent::LookupMessageHistoryEntry { offset, .. } =
-            rx.try_recv().expect("expected lookup")
-        else {
-            panic!("unexpected event variant");
-        };
-        offset
-    };
-    let response = |offset, entry: &str| HistoryLookupResponse::Entry {
-        offset,
-        log_id: 1,
-        entry: Some(entry.to_string()),
-    };
-
     chat.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
-    chat.handle_history_entry_response(response(
-        next_lookup_offset(),
-        "use [$google-calendar](app://google_calendar)",
-    ));
-
-    assert_eq!(next_lookup_offset(), 1);
-    chat.handle_history_entry_response(response(1, "use [$sample](plugin://sample@test)"));
-
-    assert_eq!(next_lookup_offset(), 0);
-    chat.handle_history_entry_response(response(0, "/rename smoke-1"));
-    assert_eq!(chat.bottom_pane.composer_text(), "/rename smoke-1");
+    assert_eq!(chat.bottom_pane.composer_text(), "use $sample");
+    assert!(rx.try_recv().is_err());
+    insta::assert_snapshot!(
+        "conversation_prompt_recall_boundary",
+        render_bottom_popup(&chat, /*width*/ 80)
+    );
 }
 
 #[tokio::test]
