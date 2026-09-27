@@ -286,9 +286,8 @@ async fn steer_rejection_queues_review_follow_up_before_existing_queued_messages
 }
 
 #[tokio::test]
-async fn configured_escape_with_review_queued_steers_shows_warning_and_does_not_interrupt() {
+async fn immediate_steer_during_review_shows_warning_and_does_not_interrupt() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    chat.chat_keymap.interrupt_turn = vec![crate::key_hint::plain(KeyCode::Esc)];
     chat.thread_id = Some(ThreadId::new());
     handle_turn_started(&mut chat, "turn-1");
     handle_entered_review_mode(&mut chat, "feature branch");
@@ -296,7 +295,7 @@ async fn configured_escape_with_review_queued_steers_shows_warning_and_does_not_
     chat.input_queue.pending_steer = Some(pending_steer("review follow-up"));
     chat.refresh_pending_input_preview();
 
-    chat.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    chat.handle_key_event(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::ALT));
 
     assert!(!chat.input_queue.submit_pending_steer_after_interrupt);
     assert_eq!(chat.input_queue.pending_steer.iter().count(), 1);
@@ -845,9 +844,8 @@ async fn manual_interrupt_restores_pending_steer_to_composer() {
 }
 
 #[tokio::test]
-async fn configured_escape_sends_pending_steer_immediately_and_keeps_existing_draft() {
+async fn alt_i_sends_pending_steer_immediately_and_keeps_existing_draft() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    chat.chat_keymap.interrupt_turn = vec![crate::key_hint::plain(KeyCode::Esc)];
     chat.thread_id = Some(ThreadId::new());
     chat.on_task_started();
     chat.on_agent_message_delta("Final answer line\n".to_string());
@@ -888,7 +886,7 @@ async fn configured_escape_sends_pending_steer_immediately_and_keeps_existing_dr
     chat.bottom_pane
         .set_composer_text("still editing".to_string(), Vec::new(), Vec::new());
 
-    chat.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    chat.handle_key_event(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::ALT));
     next_interrupt_op(&mut op_rx);
 
     chat.on_interrupted_turn(TurnAbortReason::Interrupted);
@@ -926,9 +924,8 @@ async fn configured_escape_sends_pending_steer_immediately_and_keeps_existing_dr
 }
 
 #[tokio::test]
-async fn configured_escape_with_pending_steer_overrides_agent_command_interrupt_behavior() {
+async fn alt_i_with_pending_steer_preserves_agent_command_draft() {
     let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    chat.chat_keymap.interrupt_turn = vec![crate::key_hint::plain(KeyCode::Esc)];
     chat.thread_id = Some(ThreadId::new());
     chat.on_task_started();
 
@@ -942,14 +939,14 @@ async fn configured_escape_with_pending_steer_overrides_agent_command_interrupt_
 
     chat.bottom_pane
         .set_composer_text("/subagents ".to_string(), Vec::new(), Vec::new());
-    chat.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    chat.handle_key_event(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::ALT));
 
     next_interrupt_op(&mut op_rx);
     assert_eq!(chat.bottom_pane.composer_text(), "/subagents ");
 }
 
 #[tokio::test]
-async fn manual_interrupt_restores_pending_steer_mention_bindings_to_composer() {
+async fn ctrl_c_restores_pending_steer_mention_bindings_to_composer() {
     let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.thread_id = Some(ThreadId::new());
     chat.on_task_started();
@@ -984,6 +981,8 @@ async fn manual_interrupt_restores_pending_steer_mention_bindings_to_composer() 
         other => panic!("expected Op::UserTurn, got {other:?}"),
     }
 
+    chat.handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+    next_interrupt_op(&mut op_rx);
     chat.on_interrupted_turn(TurnAbortReason::Interrupted);
 
     assert_eq!(chat.bottom_pane.composer_text(), "please use $figma");
@@ -992,7 +991,7 @@ async fn manual_interrupt_restores_pending_steer_mention_bindings_to_composer() 
 }
 
 #[tokio::test]
-async fn manual_interrupt_restores_pending_steer_before_queued_messages() {
+async fn ctrl_c_restores_pending_steer_before_queued_messages_and_draft() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.thread_id = Some(ThreadId::new());
     chat.on_task_started();
@@ -1022,6 +1021,10 @@ async fn manual_interrupt_restores_pending_steer_before_queued_messages() {
     }
     assert!(drain_insert_history(&mut rx).is_empty());
 
+    chat.bottom_pane
+        .set_composer_text("still editing".to_string(), Vec::new(), Vec::new());
+    chat.handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+    next_interrupt_op(&mut op_rx);
     chat.on_interrupted_turn(TurnAbortReason::Interrupted);
 
     assert!(chat.input_queue.pending_steer.is_none());
@@ -1029,7 +1032,7 @@ async fn manual_interrupt_restores_pending_steer_before_queued_messages() {
     assert_eq!(
         chat.bottom_pane.composer_text(),
         "pending steer
-queued draft"
+queued draft\nstill editing"
     );
     assert_no_submit_op(&mut op_rx);
 }

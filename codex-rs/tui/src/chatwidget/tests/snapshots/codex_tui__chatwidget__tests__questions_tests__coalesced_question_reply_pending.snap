@@ -4,7 +4,7 @@ expression: "render_bottom_popup(&chat, 100)"
 ---
 • Working (0s • ctrl+c to interrupt)
 
-• Message to be submitted after next tool call (press ctrl+c to interrupt and send immediately)
+• Message to be submitted after next tool call (press ⌥+i to interrupt and send immediately)
   ↳ > Which terminal?
 
     alacritty-1337

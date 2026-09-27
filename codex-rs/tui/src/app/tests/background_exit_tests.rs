@@ -567,7 +567,7 @@ async fn non_daemon_ctrl_c_keeps_interrupt_behavior() -> Result<()> {
 }
 
 #[tokio::test]
-async fn daemon_ctrl_c_with_draft_preserves_composer_cancellation() -> Result<()> {
+async fn daemon_ctrl_c_cancels_work_without_discarding_draft() -> Result<()> {
     let (mut app, mut app_event_rx, mut op_rx) = make_test_app_with_channels().await;
     prepare_running_local_daemon(&mut app)?;
     app.chat_widget.apply_external_edit("draft".to_string());
@@ -577,12 +577,9 @@ async fn daemon_ctrl_c_with_draft_preserves_composer_cancellation() -> Result<()
     open_running_task_exit_menu(&mut app, &mut tui, &mut app_server).await;
 
     assert!(app.chat_widget.no_modal_or_popup_active());
-    assert!(app.chat_widget.composer_is_empty());
-    assert!(op_rx.try_recv().is_err());
-    assert_matches!(
-        app_event_rx.try_recv(),
-        Ok(AppEvent::AppendMessageHistoryEntry { text, .. }) if text == "draft"
-    );
+    assert_eq!(app.chat_widget.composer_text_with_pending(), "draft");
+    assert_matches!(op_rx.try_recv(), Ok(Op::Interrupt));
+    assert!(app_event_rx.try_recv().is_err());
     Ok(())
 }
 

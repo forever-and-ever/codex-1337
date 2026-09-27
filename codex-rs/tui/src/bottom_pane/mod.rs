@@ -509,8 +509,9 @@ impl BottomPane {
             questions.set_keymap(keymap);
         }
         let interrupt_binding = keymap.primary_hint(KeymapContext::Chat, "interrupt_turn");
-        self.pending_input_preview
-            .set_interrupt_binding(interrupt_binding);
+        self.pending_input_preview.set_send_pending_steer_binding(
+            keymap.primary_hint(KeymapContext::Chat, "send_pending_steer"),
+        );
         self.pending_input_preview.set_pending_steer_bindings(
             keymap.primary_hint(KeymapContext::Chat, "edit_pending_steer"),
             keymap.primary_hint(KeymapContext::Chat, "remove_pending_steer"),

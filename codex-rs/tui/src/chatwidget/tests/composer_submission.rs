@@ -1732,7 +1732,7 @@ async fn output_free_ctrl_c_interrupt_keeps_prompt_and_opens_blank_composer() {
 }
 
 #[tokio::test]
-async fn pending_steer_interrupt_preserves_vim_escape_and_draft_precedence() {
+async fn pending_steer_cancel_preserves_vim_escape_and_draft() {
     let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     let esc = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
 
@@ -1755,23 +1755,19 @@ async fn pending_steer_interrupt_preserves_vim_escape_and_draft_precedence() {
     chat.bottom_pane
         .set_composer_text("draft".into(), Vec::new(), Vec::new());
     chat.handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
-    assert!(op_rx.try_recv().is_err());
     assert!(!chat.input_queue.submit_pending_steer_after_interrupt);
-    assert!(chat.bottom_pane.composer_is_empty());
-
-    chat.handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+    assert_eq!(chat.bottom_pane.composer_text(), "draft");
     match op_rx.try_recv() {
         Ok(Op::Interrupt) => {}
         other => panic!("expected Op::Interrupt, got {other:?}"),
     }
-    assert!(chat.input_queue.submit_pending_steer_after_interrupt);
 }
 
 #[tokio::test]
 async fn pending_steer_interrupt_uses_remapped_binding() {
     let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     let mut keymap = crate::keymap::RuntimeKeymap::defaults();
-    keymap.chat.interrupt_turn = vec![crate::key_hint::plain(KeyCode::F(12))];
+    keymap.chat.send_pending_steer = vec![crate::key_hint::plain(KeyCode::F(12))];
     chat.chat_keymap = keymap.chat.clone();
     chat.bottom_pane.set_keymap_bindings(&keymap);
     chat.bottom_pane.set_task_running(/*running*/ true);

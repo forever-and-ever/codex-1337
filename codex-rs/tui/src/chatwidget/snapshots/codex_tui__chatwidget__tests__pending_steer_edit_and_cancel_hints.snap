@@ -2,8 +2,8 @@
 source: tui/src/chatwidget/tests/composer_submission.rs
 expression: "render_bottom_popup(&chat, 80)"
 ---
-• Message to be submitted after next tool call (press ctrl+c to interrupt and
-  send immediately)
+• Message to be submitted after next tool call (press ⌥+i to interrupt and send
+  immediately)
   ↳ edit me
     ⌥+e edit · ⌥+x cancel
 

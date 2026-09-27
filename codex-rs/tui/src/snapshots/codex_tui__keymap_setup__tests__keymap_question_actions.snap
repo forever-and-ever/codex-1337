@@ -5,7 +5,7 @@ expression: "render_picker(params, 120)"
 
   Keymap
   All configurable shortcuts.
-  152 actions, 0 customized, 5 unbound.
+  153 actions, 0 customized, 5 unbound.
 
    All   Common   Customized (0)   Unbound (5)   App   Composer   Editor   Vim   Navigation   Agents   Approval      ›
 
@@ -27,6 +27,7 @@ expression: "render_picker(params, 120)"
   Chat         - Previous Permission Mode   unbound
   Chat         - Next Permission Mode       unbound
   Chat           Edit Queued Message        alt-up, shift-left
+  Chat           Send Pending Steer         alt-i
   Chat           Edit Pending Steer         alt-e
   Chat           Remove Pending Steer       alt-x
   Chat           Prompt Stack Back          alt-down, shift-right
@@ -34,6 +35,5 @@ expression: "render_picker(params, 120)"
   Chat           Toggle Voice               f8
   Chat           Toggle Voice Mute          ctrl-x
   Composer       Submit                     enter
-  Composer       Queue                      tab
 ↓
   left/right group · enter edit shortcut · * custom · - unbound · esc close

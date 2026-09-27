@@ -367,7 +367,7 @@ impl ChatWidget {
         true
     }
 
-    /// Handle a turn aborted due to user interrupt (Esc), budget exhaustion,
+    /// Handle a turn aborted due to user interrupt, budget exhaustion,
     /// or review completion.
     /// When there are queued user messages, restore them into the composer
     /// separated by newlines rather than auto-submitting the next one.

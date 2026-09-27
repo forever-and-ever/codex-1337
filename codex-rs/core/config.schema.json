@@ -4273,6 +4273,7 @@
               "previous_permission_mode": null,
               "prompt_stack_back": null,
               "remove_pending_steer": null,
+              "send_pending_steer": null,
               "skip_question": null,
               "toggle_voice": null,
               "toggle_voice_mute": null
@@ -4804,6 +4805,14 @@
           ],
           "description": "Remove the steer waiting for the next model-input boundary."
         },
+        "send_pending_steer": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/KeybindingsSpec"
+            }
+          ],
+          "description": "Interrupt the turn and send the pending steer immediately."
+        },
         "skip_question": {
           "allOf": [
             {
@@ -5233,6 +5242,7 @@
             "previous_permission_mode": null,
             "prompt_stack_back": null,
             "remove_pending_steer": null,
+            "send_pending_steer": null,
             "skip_question": null,
             "toggle_voice": null,
             "toggle_voice_mute": null

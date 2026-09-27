@@ -143,6 +143,8 @@ pub struct TuiChatKeymap {
     pub next_permission_mode: Option<KeybindingsSpec>,
     /// Move up through pending async questions, then edit the most recently queued message.
     pub edit_queued_message: Option<KeybindingsSpec>,
+    /// Interrupt the turn and send the pending steer immediately.
+    pub send_pending_steer: Option<KeybindingsSpec>,
     /// Edit the steer waiting for the next model-input boundary.
     pub edit_pending_steer: Option<KeybindingsSpec>,
     /// Remove the steer waiting for the next model-input boundary.

@@ -296,7 +296,7 @@ define_runtime_action_bindings! {
         skip_question,
     ],
     "chat" => Voice, chat, chat [toggle_voice_mute],
-    "chat" => PendingSteer, chat, chat [edit_pending_steer, remove_pending_steer],
+    "chat" => PendingSteer, chat, chat [send_pending_steer, edit_pending_steer, remove_pending_steer],
     "composer" => Composer, composer, composer [
         submit,
         queue,

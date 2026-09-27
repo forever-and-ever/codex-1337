@@ -27,7 +27,7 @@ pub(crate) struct PendingInputPreview {
     /// be overridden for terminals where that chord is unavailable.
     pub(super) edit_binding: Option<key_hint::ShortcutHint>,
     /// Key combination rendered for immediately interrupting and sending steers.
-    interrupt_binding: Option<key_hint::ShortcutHint>,
+    send_pending_steer_binding: Option<key_hint::ShortcutHint>,
     edit_pending_steer_binding: Option<key_hint::ShortcutHint>,
     remove_pending_steer_binding: Option<key_hint::ShortcutHint>,
 }
@@ -46,7 +46,7 @@ impl PendingInputPreview {
             rejected_steers: Vec::new(),
             queued_messages: Vec::new(),
             edit_binding: Some(key_hint::alt(KeyCode::Up).into()),
-            interrupt_binding: Some(key_hint::ctrl(KeyCode::Char('c')).into()),
+            send_pending_steer_binding: Some(key_hint::alt(KeyCode::Char('i')).into()),
             edit_pending_steer_binding: Some(key_hint::alt(KeyCode::Char('e')).into()),
             remove_pending_steer_binding: Some(key_hint::alt(KeyCode::Char('x')).into()),
         }
@@ -59,8 +59,11 @@ impl PendingInputPreview {
         self.edit_binding = binding;
     }
 
-    pub(crate) fn set_interrupt_binding(&mut self, binding: Option<key_hint::ShortcutHint>) {
-        self.interrupt_binding = binding;
+    pub(crate) fn set_send_pending_steer_binding(
+        &mut self,
+        binding: Option<key_hint::ShortcutHint>,
+    ) {
+        self.send_pending_steer_binding = binding;
     }
 
     pub(crate) fn set_pending_steer_bindings(
@@ -108,9 +111,9 @@ impl PendingInputPreview {
 
         if let Some(steer) = &self.pending_steer {
             let mut header = vec!["Message to be submitted after next tool call".into()];
-            if let Some(interrupt_binding) = self.interrupt_binding {
+            if let Some(send_pending_steer_binding) = self.send_pending_steer_binding {
                 header.push(" (press ".dim());
-                header.extend(interrupt_binding.spans());
+                header.extend(send_pending_steer_binding.spans());
                 header.push(" to interrupt and send immediately)".dim());
             }
             Self::push_section_header(&mut lines, width, Line::from(header));
@@ -388,16 +391,16 @@ mod tests {
     }
 
     #[test]
-    fn render_one_pending_steer_with_remapped_interrupt_binding() {
+    fn render_one_pending_steer_with_remapped_binding() {
         let mut queue = PendingInputPreview::new();
         queue.pending_steer = Some("Please continue.".to_string());
-        queue.set_interrupt_binding(Some(key_hint::plain(KeyCode::F(12)).into()));
+        queue.set_send_pending_steer_binding(Some(key_hint::plain(KeyCode::F(12)).into()));
         let width = 48;
         let height = queue.desired_height(width);
         let mut buf = Buffer::empty(Rect::new(0, 0, width, height));
         queue.render(Rect::new(0, 0, width, height), &mut buf);
         assert_snapshot!(
-            "render_one_pending_steer_with_remapped_interrupt_binding",
+            "render_one_pending_steer_with_remapped_binding",
             format!("{buf:?}")
         );
     }

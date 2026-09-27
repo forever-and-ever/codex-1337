@@ -83,6 +83,7 @@ impl ChatWidget {
             && !self.should_handle_vim_insert_escape(key_event)
             && self.pending_image_submission.is_some()
         {
+            self.input_queue.submit_pending_steer_after_interrupt = false;
             if self.is_cancellable_work_active() {
                 self.requeue_image_submission();
                 self.input_queue.recovered_queue = true;
@@ -232,7 +233,7 @@ impl ChatWidget {
 
         const REVIEW_STEER_UNAVAILABLE_MESSAGE: &str = "Steer messages aren't supported during /review. Press Ctrl+C now to cancel the review.";
 
-        if self.chat_keymap.interrupt_turn.is_pressed(key_event)
+        if self.chat_keymap.send_pending_steer.is_pressed(key_event)
             && self.review.is_review_mode
             && (self.input_queue.pending_steer.is_some()
                 || !self.input_queue.rejected_steers_queue.is_empty())
@@ -244,7 +245,7 @@ impl ChatWidget {
             return;
         }
 
-        if self.chat_keymap.interrupt_turn.is_pressed(key_event)
+        if self.chat_keymap.send_pending_steer.is_pressed(key_event)
             && self.input_queue.pending_steer.is_some()
             && self.bottom_pane.is_task_running()
             && self.bottom_pane.no_modal_or_popup_active()
@@ -596,13 +597,13 @@ impl ChatWidget {
 
     /// Handles a Ctrl+C press at the chat-widget layer.
     ///
-    /// The first press arms a time-bounded quit shortcut and shows a footer hint via the bottom
-    /// pane. If cancellable work is active, Ctrl+C also submits `Op::Interrupt` after the shortcut
-    /// is armed.
+    /// Active work is cancelled without sending pending steering. The abort notification restores
+    /// pending input alongside the untouched draft. Modals retain their own cancellation behavior.
     ///
     /// When the double-press quit shortcut is enabled, pressing the same shortcut again before
-    /// expiry requests a shutdown-first quit.
+    /// expiry requests a shutdown-first quit; otherwise an idle, empty composer quits immediately.
     pub(super) fn on_ctrl_c(&mut self) {
+        self.input_queue.submit_pending_steer_after_interrupt = false;
         let key = key_hint::ctrl(KeyCode::Char('c'));
         let modal_or_popup_active = !self.bottom_pane.no_modal_or_popup_active();
         let should_pause_active_goal = self
@@ -611,7 +612,9 @@ impl ChatWidget {
                 KeyCode::Char('c'),
                 KeyModifiers::CONTROL,
             ));
-        if self.bottom_pane.on_ctrl_c() == CancellationEvent::Handled {
+        if (modal_or_popup_active || !self.is_cancellable_work_active())
+            && self.bottom_pane.on_ctrl_c() == CancellationEvent::Handled
+        {
             self.refresh_startup_recovery();
             if DOUBLE_PRESS_QUIT_SHORTCUT_ENABLED {
                 if modal_or_popup_active {
@@ -646,8 +649,6 @@ impl ChatWidget {
                 self.quit_shortcut_key = None;
                 self.bottom_pane.clear_quit_shortcut_hint();
                 if self.submit_op(AppCommand::interrupt()) {
-                    self.input_queue.submit_pending_steer_after_interrupt =
-                        !self.review.is_review_mode && self.input_queue.pending_steer.is_some();
                     self.pause_active_goal_for_interrupt();
                 }
             } else {
@@ -666,8 +667,6 @@ impl ChatWidget {
         self.arm_quit_shortcut(key);
 
         if self.is_cancellable_work_active() && self.submit_op(AppCommand::interrupt()) {
-            self.input_queue.submit_pending_steer_after_interrupt =
-                !self.review.is_review_mode && self.input_queue.pending_steer.is_some();
             self.pause_active_goal_for_interrupt();
         }
     }

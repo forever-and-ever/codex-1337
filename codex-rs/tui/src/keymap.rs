@@ -142,6 +142,8 @@ pub(crate) struct ChatKeymap {
     pub(crate) next_permission_mode: Vec<KeyBinding>,
     /// Move up through async questions, then edit the most recently queued message.
     pub(crate) edit_queued_message: Vec<KeyBinding>,
+    /// Interrupt the turn and send the pending steer immediately.
+    pub(crate) send_pending_steer: Vec<KeyBinding>,
     /// Edit the pending steer.
     pub(crate) edit_pending_steer: Vec<KeyBinding>,
     /// Remove the pending steer.
@@ -800,6 +802,7 @@ impl RuntimeKeymap {
                 &defaults.chat.edit_queued_message,
                 "tui.keymap.chat.edit_queued_message",
             )?,
+            send_pending_steer: resolve_local!(keymap, defaults, chat, send_pending_steer),
             edit_pending_steer: resolve_bindings(
                 keymap.chat.edit_pending_steer.as_ref(),
                 &defaults.chat.edit_pending_steer,
@@ -1689,6 +1692,7 @@ impl RuntimeKeymap {
                 previous_permission_mode: default_bindings![],
                 next_permission_mode: default_bindings![],
                 edit_queued_message: default_bindings![alt(KeyCode::Up), shift(KeyCode::Left)],
+                send_pending_steer: default_bindings![alt(KeyCode::Char('i'))],
                 edit_pending_steer: default_bindings![alt(KeyCode::Char('e'))],
                 remove_pending_steer: default_bindings![alt(KeyCode::Char('x'))],
                 prompt_stack_back: default_bindings![alt(KeyCode::Down), shift(KeyCode::Right)],
@@ -2061,6 +2065,10 @@ impl RuntimeKeymap {
             (
                 "chat.edit_queued_message",
                 self.chat.edit_queued_message.as_slice(),
+            ),
+            (
+                "chat.send_pending_steer",
+                self.chat.send_pending_steer.as_slice(),
             ),
             (
                 "chat.edit_pending_steer",
