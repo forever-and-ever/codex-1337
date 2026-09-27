@@ -5,6 +5,8 @@ expression: snapshot
 width 60
 • 13:04:05 Ran echo hello
   └ hello
+• 13:04:05 Explored
+  └ Read lib.rs (whole file)
 • 13:04:05 A reply with a table and enough prose to wrap.
 
    Name     Value
@@ -13,6 +15,8 @@ width 60
 width 32
 • 13:04:05 Ran echo hello
   └ hello
+• 13:04:05 Explored
+  └ Read lib.rs (whole file)
 • 13:04:05 A reply with a table
   and enough prose to
   wrap.
@@ -23,6 +27,8 @@ width 32
 width 60
 • 13:04:05 Ran echo hello
   └ hello
+• 13:04:05 Explored
+  └ Read lib.rs (whole file)
 • 13:04:05 A reply with a table and enough prose to wrap.
 
    Name     Value

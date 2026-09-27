@@ -7,6 +7,7 @@ use crate::history_cell::HistoryRenderMode;
 use crate::streaming::controller::StreamController;
 use crate::terminal_hyperlinks::plain_hyperlink_lines;
 use codex_app_server_protocol::CommandExecutionSource;
+use codex_protocol::parse_command::ParsedCommand;
 use pretty_assertions::assert_eq;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -63,11 +64,27 @@ fn timestamp_gutter_survives_stream_finalization_and_reflow() {
         Duration::from_secs(1),
     );
 
+    let mut exploration = new_active_exec_command(
+        "read".into(),
+        vec!["cat".into(), "src/lib.rs".into()],
+        vec![ParsedCommand::Read {
+            name: "lib.rs".into(),
+            cmd: "cat src/lib.rs".into(),
+            path: "src/lib.rs".into(),
+        }],
+        CommandExecutionSource::Agent,
+        /*interaction_input*/ None,
+        /*animations_enabled*/ false,
+    );
+    exploration.completed_at = Some(timestamp);
+    exploration.complete_call("read", CommandOutput::default(), Duration::from_secs(1));
+
     let mut snapshot = String::new();
     for width in [60, 32, 60] {
         snapshot.push_str(&format!("width {width}\n"));
         for line in plain_hyperlink_lines(command.display_lines(width))
             .into_iter()
+            .chain(plain_hyperlink_lines(exploration.display_lines(width)))
             .chain(completed.display_hyperlink_lines(width))
         {
             assert!(line.line.width() <= usize::from(width));

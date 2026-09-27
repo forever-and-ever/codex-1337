@@ -318,11 +318,6 @@ impl ExecCell {
                 "•".dim()
             },
             " ".into(),
-            if self.is_active() {
-                "Exploring".bold()
-            } else {
-                "Explored".bold()
-            },
         ];
         if !self.is_active() {
             header.extend(
@@ -330,6 +325,11 @@ impl ExecCell {
                     .map(crate::history_cell::HistoryTimestamp::span),
             );
         }
+        header.push(if self.is_active() {
+            "Exploring".bold()
+        } else {
+            "Explored".bold()
+        });
         out.push(Line::from(header).into());
 
         let mut calls = self.group.calls.as_slice();
