@@ -567,7 +567,7 @@ async fn non_daemon_ctrl_c_keeps_interrupt_behavior() -> Result<()> {
 }
 
 #[tokio::test]
-async fn daemon_ctrl_c_cancels_work_without_discarding_draft() -> Result<()> {
+async fn daemon_ctrl_c_clears_draft_without_interrupting() -> Result<()> {
     let (mut app, mut app_event_rx, mut op_rx) = make_test_app_with_channels().await;
     prepare_running_local_daemon(&mut app)?;
     app.chat_widget.apply_external_edit("draft".to_string());
@@ -577,14 +577,17 @@ async fn daemon_ctrl_c_cancels_work_without_discarding_draft() -> Result<()> {
     open_running_task_exit_menu(&mut app, &mut tui, &mut app_server).await;
 
     assert!(app.chat_widget.no_modal_or_popup_active());
-    assert_eq!(app.chat_widget.composer_text_with_pending(), "draft");
-    assert_matches!(op_rx.try_recv(), Ok(Op::Interrupt));
-    assert!(app_event_rx.try_recv().is_err());
+    assert!(app.chat_widget.composer_is_empty());
+    assert!(app.chat_widget.is_task_running_for_test());
+    assert!(op_rx.try_recv().is_err());
+    while let Ok(event) = app_event_rx.try_recv() {
+        assert_matches!(event, AppEvent::AppendMessageHistoryEntry { .. });
+    }
     Ok(())
 }
 
 #[tokio::test]
-async fn daemon_ctrl_c_during_paste_burst_does_not_show_exit_menu() -> Result<()> {
+async fn daemon_ctrl_c_clears_paste_burst_without_interrupting() -> Result<()> {
     let (mut app, mut app_event_rx, mut op_rx) = make_test_app_with_channels().await;
     prepare_running_local_daemon(&mut app)?;
     app.chat_widget
@@ -597,9 +600,12 @@ async fn daemon_ctrl_c_during_paste_burst_does_not_show_exit_menu() -> Result<()
     open_running_task_exit_menu(&mut app, &mut tui, &mut app_server).await;
 
     assert!(app.chat_widget.no_modal_or_popup_active());
-    assert!(!app.chat_widget.composer_is_empty());
-    assert_matches!(op_rx.try_recv(), Ok(Op::Interrupt));
-    assert!(app_event_rx.try_recv().is_err());
+    assert!(app.chat_widget.composer_is_empty());
+    assert!(app.chat_widget.is_task_running_for_test());
+    assert!(op_rx.try_recv().is_err());
+    while let Ok(event) = app_event_rx.try_recv() {
+        assert_matches!(event, AppEvent::AppendMessageHistoryEntry { .. });
+    }
     Ok(())
 }
 

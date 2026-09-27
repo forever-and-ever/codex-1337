@@ -77,8 +77,15 @@ impl ChatWidget {
             return;
         }
 
-        if (self.chat_keymap.interrupt_turn.is_pressed(key_event)
-            || key_hint::ctrl(KeyCode::Char('c')).is_press(key_event))
+        if matches!(key_event, KeyEvent {
+            code: KeyCode::Char(c), modifiers, kind: KeyEventKind::Press, ..
+        } if modifiers.contains(KeyModifiers::CONTROL) && c.eq_ignore_ascii_case(&'c'))
+        {
+            self.on_ctrl_c();
+            return;
+        }
+
+        if self.chat_keymap.interrupt_turn.is_pressed(key_event)
             && self.bottom_pane.no_modal_or_popup_active()
             && !self.should_handle_vim_insert_escape(key_event)
             && self.pending_image_submission.is_some()
@@ -126,15 +133,6 @@ impl ChatWidget {
         }
 
         match key_event {
-            KeyEvent {
-                code: KeyCode::Char(c),
-                modifiers,
-                kind: KeyEventKind::Press,
-                ..
-            } if modifiers.contains(KeyModifiers::CONTROL) && c.eq_ignore_ascii_case(&'c') => {
-                self.on_ctrl_c();
-                return;
-            }
             KeyEvent {
                 code: KeyCode::Char(c),
                 modifiers,
@@ -597,13 +595,12 @@ impl ChatWidget {
 
     /// Handles a Ctrl+C press at the chat-widget layer.
     ///
-    /// Active work is cancelled without sending pending steering. The abort notification restores
-    /// pending input alongside the untouched draft. Modals retain their own cancellation behavior.
+    /// Modals, search, and draft clearing take precedence over cancelling active work. With an
+    /// empty entry, interruption restores pending input without sending pending steering.
     ///
     /// When the double-press quit shortcut is enabled, pressing the same shortcut again before
     /// expiry requests a shutdown-first quit; otherwise an idle, empty composer quits immediately.
     pub(super) fn on_ctrl_c(&mut self) {
-        self.input_queue.submit_pending_steer_after_interrupt = false;
         let key = key_hint::ctrl(KeyCode::Char('c'));
         let modal_or_popup_active = !self.bottom_pane.no_modal_or_popup_active();
         let should_pause_active_goal = self
@@ -612,9 +609,7 @@ impl ChatWidget {
                 KeyCode::Char('c'),
                 KeyModifiers::CONTROL,
             ));
-        if (modal_or_popup_active || !self.is_cancellable_work_active())
-            && self.bottom_pane.on_ctrl_c() == CancellationEvent::Handled
-        {
+        if self.bottom_pane.on_ctrl_c() == CancellationEvent::Handled {
             self.refresh_startup_recovery();
             if DOUBLE_PRESS_QUIT_SHORTCUT_ENABLED {
                 if modal_or_popup_active {
@@ -626,6 +621,7 @@ impl ChatWidget {
                 }
             }
             if should_pause_active_goal {
+                self.input_queue.submit_pending_steer_after_interrupt = false;
                 self.pause_active_goal_for_interrupt();
             }
             if modal_or_popup_active && self.bottom_pane.no_modal_or_popup_active() {
@@ -634,6 +630,7 @@ impl ChatWidget {
             return;
         }
 
+        self.input_queue.submit_pending_steer_after_interrupt = false;
         if self
             .bottom_pane
             .selected_index_for_active_view(crate::app::AGENTS_OVERVIEW_VIEW_ID)
@@ -641,6 +638,16 @@ impl ChatWidget {
         {
             self.request_quit_without_confirmation();
             return;
+        }
+
+        if self.pending_image_submission.is_some() {
+            if self.is_cancellable_work_active() {
+                self.requeue_image_submission();
+                self.input_queue.recovered_queue = true;
+            } else {
+                self.cancel_image_submission();
+                return;
+            }
         }
 
         if !DOUBLE_PRESS_QUIT_SHORTCUT_ENABLED {

@@ -2863,6 +2863,11 @@ fn image_preparation_keeps_input_responsive_and_preserves_pending_input() {
                     assert_eq!(chat.bottom_pane.composer_text(), "describe\nnew draft");
                 } else if scenario == "ctrl_c" {
                     chat.on_task_started();
+                    chat.handle_paste("still editing".into());
+                    chat.handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+                    assert_eq!(chat.bottom_pane.composer_text(), "");
+                    assert!(chat.pending_image_submission.is_some());
+                    assert_no_submit_op(&mut ops);
                     chat.handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
                     next_interrupt_op(&mut ops);
                     chat.on_task_complete(

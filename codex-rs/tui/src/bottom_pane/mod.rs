@@ -8,8 +8,8 @@
 //! composer), while higher-level intent such as "interrupt" or "quit" is decided by the parent
 //! widget (`ChatWidget`). This split matters for Ctrl+C/Ctrl+D: the bottom pane gives the active
 //! view the first chance to consume Ctrl+C (typically to dismiss itself), then lets an active
-//! composer history search consume Ctrl+C as cancellation, and `ChatWidget` may treat an unhandled
-//! Ctrl+C as an interrupt or as the first press of a double-press quit shortcut.
+//! composer history search consume Ctrl+C as cancellation, then clears draft input (including
+//! buffered paste). Only an unhandled Ctrl+C reaches `ChatWidget`'s interrupt/quit handling.
 //!
 //! Some UI is time-based rather than input-based, such as the transient "press again to quit"
 //! hint. The pane schedules redraws so those hints can expire even when the UI is otherwise idle.
@@ -921,7 +921,7 @@ impl BottomPane {
     ///
     /// An active modal view is given the first chance to consume the key (typically to dismiss
     /// itself). If no view is active, Ctrl+C cancels active history search before falling back to
-    /// clearing draft composer input.
+    /// clearing draft composer input, including typing retained in the paste-burst buffer.
     ///
     /// This method may show the quit shortcut hint as a user-visible acknowledgement that Ctrl+C
     /// was received, but it does not decide whether the process should exit; `ChatWidget` owns the
@@ -952,7 +952,7 @@ impl BottomPane {
         } else if self.composer.cancel_vim_search() || self.composer.cancel_history_search() {
             self.request_redraw();
             CancellationEvent::Handled
-        } else if self.composer_is_empty() {
+        } else if self.composer_is_empty() && !self.composer.is_in_paste_burst() {
             CancellationEvent::NotHandled
         } else {
             self.view_stack.pop();

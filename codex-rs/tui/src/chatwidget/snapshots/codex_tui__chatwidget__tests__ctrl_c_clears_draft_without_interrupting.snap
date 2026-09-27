@@ -1,0 +1,21 @@
+---
+source: tui/src/chatwidget/tests/review_mode.rs
+expression: "normalize_snapshot_paths(render_bottom_popup(&chat, 80))"
+---
+• Working (0s • ctrl+c to interrupt)
+
+• Message to be submitted after next tool call (press ⌥+i to interrupt and send
+  immediately)
+  ↳ pending steer
+    ⌥+e edit · ⌥+x cancel
+
+• Queued follow-up inputs
+  ↳ queued draft
+    ⌥+↑ edit last queued message
+
+› Ask Codex to do anything
+
+────────────────────────────────────────────────────────────────────────────────
+  Activity  —
+────────────────────────────────────────────────────────────────────────────────
+  GPT-5.6-Sol default · /tmp/project

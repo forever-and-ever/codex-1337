@@ -991,7 +991,7 @@ async fn ctrl_c_restores_pending_steer_mention_bindings_to_composer() {
 }
 
 #[tokio::test]
-async fn ctrl_c_restores_pending_steer_before_queued_messages_and_draft() {
+async fn ctrl_c_clears_draft_before_interrupting_and_restoring_pending_input() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.thread_id = Some(ThreadId::new());
     chat.on_task_started();
@@ -1024,6 +1024,18 @@ async fn ctrl_c_restores_pending_steer_before_queued_messages_and_draft() {
     chat.bottom_pane
         .set_composer_text("still editing".to_string(), Vec::new(), Vec::new());
     chat.handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+    // Clearing an edit must not interrupt the turn or consume already-pending input.
+    assert_eq!(chat.bottom_pane.composer_text(), "");
+    assert!(chat.bottom_pane.is_task_running());
+    assert!(chat.input_queue.pending_steer.is_some());
+    assert_eq!(chat.input_queue.queued_user_messages.len(), 1);
+    assert_no_submit_op(&mut op_rx);
+    assert_chatwidget_snapshot!(
+        "ctrl_c_clears_draft_without_interrupting",
+        normalize_snapshot_paths(render_bottom_popup(&chat, /*width*/ 80))
+    );
+
+    chat.handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
     next_interrupt_op(&mut op_rx);
     chat.on_interrupted_turn(TurnAbortReason::Interrupted);
 
@@ -1031,8 +1043,7 @@ async fn ctrl_c_restores_pending_steer_before_queued_messages_and_draft() {
     assert!(chat.input_queue.queued_user_messages.is_empty());
     assert_eq!(
         chat.bottom_pane.composer_text(),
-        "pending steer
-queued draft\nstill editing"
+        "pending steer\nqueued draft"
     );
     assert_no_submit_op(&mut op_rx);
 }
