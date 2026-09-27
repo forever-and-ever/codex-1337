@@ -1,0 +1,7 @@
+---
+source: tui/tests/suite/ui_reload.rs
+assertion_line: 154
+expression: recovery_screen
+---
+UI reload failed. Drafts are retained.
+R: retry update   B: previous UI   Ctrl+C: exit

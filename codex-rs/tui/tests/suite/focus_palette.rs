@@ -219,24 +219,7 @@ fn owned_screen_entry_paints_before_sync_ends_and_exit_clears_inline_draft() -> 
         (1, (u16::try_from(composer_row)?, 2), false),
         "first owned-screen frame must contain one composer with its visible cursor"
     );
-    terminal.write_input(b"\x1b[99;5u")?;
-    let deadline = Instant::now() + STARTUP_TIMEOUT;
-    loop {
-        terminal.read_output(Duration::from_millis(/*millis*/ 50))?;
-        if let Some(status) = terminal.child.try_wait()? {
-            ensure!(status.success(), "owned screen exited with {status}");
-            break;
-        }
-        ensure!(
-            Instant::now() < deadline,
-            "owned screen did not exit; screen:\n{}",
-            terminal.screen_contents()
-        );
-    }
-    ensure!(
-        !terminal.parser.screen().alternate_screen(),
-        "alternate screen was not restored"
-    );
+    terminal.exit_with_input(b"\x1b[99;5u")?;
     ensure!(
         !terminal
             .screen_contents()
@@ -485,6 +468,29 @@ impl PtyCodex {
 
     pub(super) fn screen_contents(&self) -> String {
         self.parser.screen().contents()
+    }
+
+    pub(super) fn exit_with_input(&mut self, input: &[u8]) -> Result<()> {
+        self.write_input(input)?;
+        let deadline = Instant::now() + STARTUP_TIMEOUT;
+        loop {
+            self.read_output(Duration::from_millis(/*millis*/ 50))?;
+            if let Some(status) = self.child.try_wait()? {
+                ensure!(status.success(), "owned screen exited with {status}");
+                self.read_output(Duration::ZERO)?;
+                break;
+            }
+            ensure!(
+                Instant::now() < deadline,
+                "owned screen did not exit; screen:\n{}",
+                self.screen_contents()
+            );
+        }
+        ensure!(
+            !self.parser.screen().alternate_screen(),
+            "alternate screen was not restored"
+        );
+        Ok(())
     }
 
     pub(super) fn wait_for_screen(&mut self, text: &str) -> Result<()> {

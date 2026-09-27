@@ -18,9 +18,13 @@ Use `codex agents` for the session dashboard. The graphical Wrangler is retired.
 The distribution owns its systemd user units; upgrades drain active turns rather
 than forcibly restarting the shared server. The federation bridge remains bundled.
 
-Idle Linux root views on the local daemon refresh to compatible installed bundles
-after five quiet minutes following a turn. Drafts, queued input, and open prompts
-defer replacement. The same thread and terminal are kept; server work continues.
+`/reload` replaces the Linux UI without detaching its server connection or stopping
+agents. Drafts, attachments, queued input, steering, inline answers, and the cut
+buffer survive; the view is rebuilt. Replacement and fallback share a five-second
+deadline, then offer retry/recovery. Open dialogs and unsettled UI actions defer
+replacement. Compatible installed updates use the same handoff after five quiet
+minutes. Older clients need one ordinary restart to acquire the reload host;
+host/protocol upgrades also require an ordinary restart.
 
 Subagent navigation is keyboard-only: Down at the end of the composer enters the
 list, Enter opens an agent, and Esc returns to the main agent. Mouse selection and
