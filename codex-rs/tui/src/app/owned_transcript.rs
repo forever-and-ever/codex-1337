@@ -11,6 +11,8 @@ use crate::keymap::keymap_action_ids;
 use crate::motion::MotionMode;
 use crate::pager_overlay::TranscriptHistoryState;
 use crate::transcript_view::ViewAction;
+use crossterm::event::MouseButton;
+use crossterm::event::MouseEventKind;
 use ratatui::widgets::Widget;
 
 impl App {
@@ -29,7 +31,11 @@ impl App {
                 .copy_composer_selection(event, |text| copy(tui, text))
         {
             self.cancel_pending_key_chord();
-            self.transcript_view.show_copy_feedback(&result, char_count);
+            if !matches!(event, TuiEvent::Mouse(mouse) if mouse.kind == MouseEventKind::Up(MouseButton::Left))
+                || result.is_err()
+            {
+                self.transcript_view.show_copy_feedback(&result, char_count);
+            }
             tui.frame_requester().schedule_frame();
             return true;
         }
@@ -277,11 +283,12 @@ impl App {
         }
         if let TuiEvent::Mouse(mouse) = event {
             let composer_ready = self.chat_widget.prepare_composer_mouse(*mouse);
-            if mouse.kind != crossterm::event::MouseEventKind::Moved {
+            if mouse.kind != MouseEventKind::Moved {
                 let size = tui.prepare_draw_size()?;
                 self.render_owned_transcript(tui, size)?;
             }
             if composer_ready
+                && mouse.kind != MouseEventKind::Up(MouseButton::Left)
                 && self.handle_composer_copy_event(tui, event, tui::Tui::copy_transcript_selection)
             {
                 return Ok(true);
@@ -290,6 +297,13 @@ impl App {
                 self.transcript_view.end_selection(&self.transcript_cells);
                 self.transcript_view.cancel_search();
                 self.transcript_view.clear_activity_focus();
+                if mouse.kind == MouseEventKind::Up(MouseButton::Left) {
+                    self.handle_composer_copy_event(
+                        tui,
+                        event,
+                        tui::Tui::publish_primary_selection,
+                    );
+                }
                 tui.frame_requester().schedule_frame();
                 return Ok(true);
             }
@@ -303,7 +317,7 @@ impl App {
             self.render_owned_transcript(tui, size)?;
         }
         if matches!(event, TuiEvent::Key(_))
-            || matches!(event, TuiEvent::Mouse(mouse) if matches!(mouse.kind, crossterm::event::MouseEventKind::Down(_)))
+            || matches!(event, TuiEvent::Mouse(mouse) if matches!(mouse.kind, MouseEventKind::Down(_)))
         {
             self.chat_widget.end_composer_drag();
         }
@@ -438,6 +452,13 @@ impl App {
         let resume_following = matches!(action, ViewAction::CopyAndFollow(_));
         match action {
             ViewAction::Changed => {}
+            ViewAction::PublishPrimary(text) => {
+                let result = tui.publish_primary_selection(&text);
+                if result.is_err() {
+                    self.transcript_view
+                        .show_copy_feedback(&result, text.chars().count());
+                }
+            }
             ViewAction::Copy(text) | ViewAction::CopyAndFollow(text) => {
                 let result = self.transcript_view.copy_selected_text_with(
                     &self.transcript_cells,

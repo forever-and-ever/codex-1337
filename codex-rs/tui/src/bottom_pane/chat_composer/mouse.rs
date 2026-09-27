@@ -2,6 +2,7 @@
 //! editable text using the textarea's last rendered viewport and hides completion suggestions.
 //! Double/triple clicks select words/logical lines using the transcript's shared gesture rules.
 //! Copy preserves the draft; confirmed right-click copies clear selection, keyboard copies retain it.
+//! Left release publishes PRIMARY without clearing selection or touching CLIPBOARD.
 
 use super::*;
 use crate::clipboard_copy::CopyStatus;
@@ -17,6 +18,7 @@ impl ChatComposer {
         copy: impl FnOnce(&str) -> Result<CopyStatus, String>,
     ) -> Option<(usize, Result<CopyStatus, String>)> {
         let copy_requested = matches!(event, TuiEvent::Key(key) if crate::text_selection::is_copy_key(*key))
+            || matches!(event, TuiEvent::Mouse(mouse) if mouse.kind == MouseEventKind::Up(MouseButton::Left))
             || matches!(event, TuiEvent::Mouse(mouse)
                     if mouse.kind == MouseEventKind::Down(MouseButton::Right)
                         && self.draft.textarea.contains_mouse(*mouse));
@@ -36,7 +38,9 @@ impl ChatComposer {
         let text = &self.draft.textarea.text()[range];
         let char_count = text.chars().count();
         let result = copy(text);
-        if matches!(event, TuiEvent::Mouse(_)) && result == Ok(CopyStatus::Confirmed) {
+        if matches!(event, TuiEvent::Mouse(mouse) if mouse.kind == MouseEventKind::Down(MouseButton::Right))
+            && result == Ok(CopyStatus::Confirmed)
+        {
             self.draft.textarea.set_cursor(self.draft.textarea.cursor());
         }
         Some((char_count, result))

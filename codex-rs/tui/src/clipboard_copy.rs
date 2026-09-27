@@ -18,6 +18,8 @@
 //! fallbacks retain the original text. Terminal writes are unacknowledged requests,
 //! so callers must distinguish them from confirmed native clipboard writes.
 //! Image paste lives in `clipboard_paste`.
+//! Mouse selection publishes PRIMARY through the terminal output stream only; it never replaces
+//! CLIPBOARD or acquires a clipboard owner on a remote SSH host.
 
 mod tmux;
 
@@ -97,7 +99,7 @@ pub(crate) fn copy_to_clipboard(text: &str, format: CopyFormat) -> Result<CopyOu
             tmux_session: is_tmux_session(),
         },
         tmux_clipboard_copy,
-        osc52_copy,
+        |text| osc52_copy(text, SelectionTarget::Clipboard),
         arboard_copy,
         wsl_clipboard_copy,
     )
@@ -376,8 +378,8 @@ impl SuppressStderr {
 }
 
 /// Write text to the clipboard via the OSC 52 terminal escape sequence.
-fn osc52_copy(text: &str) -> Result<(), String> {
-    let sequence = osc52_sequence(text, std::env::var_os("TMUX").is_some())?;
+fn osc52_copy(text: &str, target: SelectionTarget) -> Result<(), String> {
+    let sequence = osc52_sequence(text, target, std::env::var_os("TMUX").is_some())?;
     #[cfg(unix)]
     {
         match std::fs::OpenOptions::new().write(true).open("/dev/tty") {
@@ -405,7 +407,24 @@ fn write_osc52_to_writer(mut writer: impl Write, sequence: &str) -> Result<(), S
         .map_err(|e| format!("failed to flush OSC 52: {e}"))
 }
 
-fn osc52_sequence(text: &str, tmux: bool) -> Result<String, String> {
+#[derive(Clone, Copy)]
+enum SelectionTarget {
+    Clipboard,
+    Primary,
+}
+
+/// Publish the selection to the user's terminal, including over SSH, without replacing CLIPBOARD.
+pub(crate) fn publish_primary(text: &str, writer: impl Write) -> Result<CopyStatus, String> {
+    let sequence = osc52_sequence(
+        text,
+        SelectionTarget::Primary,
+        std::env::var_os("TMUX").is_some(),
+    )?;
+    write_osc52_to_writer(writer, &sequence)?;
+    Ok(CopyStatus::Unconfirmed)
+}
+
+fn osc52_sequence(text: &str, target: SelectionTarget, tmux: bool) -> Result<String, String> {
     let raw_bytes = text.len();
     if raw_bytes > OSC52_MAX_RAW_BYTES {
         return Err(format!(
@@ -414,10 +433,16 @@ fn osc52_sequence(text: &str, tmux: bool) -> Result<String, String> {
     }
 
     let encoded = base64::engine::general_purpose::STANDARD.encode(text.as_bytes());
+    let target = match target {
+        SelectionTarget::Clipboard => 'c',
+        SelectionTarget::Primary => 'p',
+    };
     if tmux {
-        Ok(format!("\x1bPtmux;\x1b\x1b]52;c;{encoded}\x07\x1b\\"))
+        Ok(format!(
+            "\x1bPtmux;\x1b\x1b]52;{target};{encoded}\x07\x1b\\"
+        ))
     } else {
-        Ok(format!("\x1b]52;c;{encoded}\x07"))
+        Ok(format!("\x1b]52;{target};{encoded}\x07"))
     }
 }
 
@@ -430,6 +455,7 @@ mod tests {
     use super::CopyFormat;
     use super::CopyOutcome;
     use super::OSC52_MAX_RAW_BYTES;
+    use super::SelectionTarget;
     use super::copy_to_clipboard_with;
     use super::osc52_sequence;
     use super::write_osc52_to_writer;
@@ -468,21 +494,27 @@ mod tests {
     fn osc52_encoding_roundtrips() {
         use base64::Engine;
         let text = "# Hello\n\n```rust\nfn main() {}\n```\n";
-        let sequence = osc52_sequence(text, /*tmux*/ false).expect("OSC 52 sequence");
-        let encoded = sequence
-            .trim_start_matches("\u{1b}]52;c;")
-            .trim_end_matches('\u{7}');
-        let decoded = base64::engine::general_purpose::STANDARD
-            .decode(encoded)
-            .unwrap();
-        assert_eq!(decoded, text.as_bytes());
+        for (target, prefix) in [
+            (SelectionTarget::Clipboard, "\x1b]52;c;"),
+            (SelectionTarget::Primary, "\x1b]52;p;"),
+        ] {
+            let sequence = osc52_sequence(text, target, /*tmux*/ false).expect("OSC 52 sequence");
+            let encoded = sequence
+                .strip_prefix(prefix)
+                .unwrap()
+                .trim_end_matches('\u{7}');
+            let decoded = base64::engine::general_purpose::STANDARD
+                .decode(encoded)
+                .unwrap();
+            assert_eq!(decoded, text.as_bytes());
+        }
     }
 
     #[test]
     fn osc52_rejects_payload_larger_than_limit() {
         let text = "x".repeat(OSC52_MAX_RAW_BYTES + 1);
         assert_eq!(
-            osc52_sequence(&text, /*tmux*/ false),
+            osc52_sequence(&text, SelectionTarget::Clipboard, /*tmux*/ false),
             Err(format!(
                 "OSC 52 payload too large ({} bytes; max {OSC52_MAX_RAW_BYTES})",
                 OSC52_MAX_RAW_BYTES + 1
@@ -493,7 +525,7 @@ mod tests {
     #[test]
     fn osc52_wraps_tmux_passthrough() {
         assert_eq!(
-            osc52_sequence("hello", /*tmux*/ true),
+            osc52_sequence("hello", SelectionTarget::Clipboard, /*tmux*/ true),
             Ok("\u{1b}Ptmux;\u{1b}\u{1b}]52;c;aGVsbG8=\u{7}\u{1b}\\".to_string())
         );
     }

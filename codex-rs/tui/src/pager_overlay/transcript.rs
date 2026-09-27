@@ -428,6 +428,11 @@ impl TranscriptOverlay {
         let resume_following = matches!(action, ViewAction::CopyAndFollow(_));
         match action {
             ViewAction::Changed => {}
+            ViewAction::PublishPrimary(text) => {
+                if let Err(error) = tui.publish_primary_selection(&text) {
+                    self.notice = Some(error);
+                }
+            }
             ViewAction::Copy(text) | ViewAction::CopyAndFollow(text) => {
                 let result = self
                     .view

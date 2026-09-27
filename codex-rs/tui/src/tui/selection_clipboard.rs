@@ -6,6 +6,10 @@ use crate::clipboard_copy::CopyOutcome;
 use crate::clipboard_copy::CopyStatus;
 
 impl Tui {
+    pub(crate) fn publish_primary_selection(&mut self, text: &str) -> Result<CopyStatus, String> {
+        crate::clipboard_copy::publish_primary(text, self.terminal.backend_mut())
+    }
+
     pub(crate) fn copy_transcript_selection(&mut self, text: &str) -> Result<CopyStatus, String> {
         self.copy_transcript_selection_with(text, |text| {
             crate::clipboard_copy::copy_to_clipboard(text, CopyFormat::PlainText)

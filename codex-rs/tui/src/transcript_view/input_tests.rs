@@ -97,7 +97,14 @@ fn dragging_a_link_selects_text_and_never_opens_it() {
             ),
             &cells,
         );
-        assert!(matches!(action, Some(ViewAction::Changed)));
+        if return_to_origin {
+            assert!(matches!(action, Some(ViewAction::Changed)));
+        } else {
+            let Some(ViewAction::PublishPrimary(text)) = action else {
+                panic!("selection release must publish PRIMARY");
+            };
+            assert_eq!(text, "doc");
+        }
         assert_eq!(
             view.selected_text(&cells).as_deref(),
             (!return_to_origin).then_some("doc")

@@ -15,6 +15,7 @@ use super::*;
 
 pub(crate) enum ViewAction {
     Changed,
+    PublishPrimary(String),
     Copy(String),
     CopyAndFollow(String),
     OpenLink(String),
@@ -257,12 +258,14 @@ impl TranscriptView {
                     self.extend_selection(event.column, event.row);
                 }
                 self.end_drag();
-                if self.selected_text(cells).is_none() {
-                    self.end_selection(cells);
-                }
                 if let Some(link) = link {
+                    self.end_selection(cells);
                     return Some(ViewAction::OpenLink(link));
                 }
+                if let Some(text) = self.selected_text(cells) {
+                    return Some(ViewAction::PublishPrimary(text));
+                }
+                self.end_selection(cells);
             }
             _ => return None,
         }

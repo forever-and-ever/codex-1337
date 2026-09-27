@@ -130,6 +130,20 @@ fn right_click_copy_uses_the_refreshed_editor_bounds() {
         modifiers: KeyModifiers::NONE,
     };
     assert_eq!(
+        composer.copy_selection(
+            &TuiEvent::Mouse(MouseEvent {
+                kind: Up(Left),
+                ..click
+            }),
+            |text| {
+                assert_eq!(text, "hello");
+                Ok(CopyStatus::Unconfirmed)
+            }
+        ),
+        Some((5, Ok(CopyStatus::Unconfirmed)))
+    );
+    assert_eq!(composer.draft.textarea.mouse_selection_range(), Some(0..5));
+    assert_eq!(
         composer.copy_selection(&TuiEvent::Mouse(click), |text| {
             assert_eq!(text, "hello");
             Ok(CopyStatus::Unconfirmed)
