@@ -14,6 +14,12 @@ use super::HistoryEntry;
 use crate::key_hint::KeyBindingListExt;
 
 impl BottomPane {
+    /// Popup previews may hide an original draft. Defer replacement rather than
+    /// serialize that presentation state; inline question drafts are retained separately.
+    pub(crate) fn reload_ready(&self) -> bool {
+        !self.has_active_modal() && !self.composer.popup_active()
+    }
+
     /// Use the effective submit binding for startup confirmation as soon as config is loaded.
     pub(crate) fn is_startup_submit_key(&self, key_event: KeyEvent) -> bool {
         self.keymap.composer.submit.is_pressed(key_event)

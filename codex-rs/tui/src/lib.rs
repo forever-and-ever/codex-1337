@@ -76,6 +76,12 @@ use crossterm::SynchronizedUpdate;
 use cwd_prompt::CwdPromptAction;
 pub use idle_restart::IDLE_RESTART_PROTOCOL;
 pub use idle_restart::apply_handoff as apply_idle_restart_handoff;
+#[cfg(target_os = "linux")]
+pub use reload::run_host as run_ui_host;
+#[cfg(target_os = "linux")]
+pub use reload::worker::initialize as initialize_ui_worker;
+#[cfg(target_os = "linux")]
+pub use reload::worker::should_host as should_host_ui;
 pub use session_archive_commands::DeleteConfirmation;
 pub use session_archive_commands::SessionArchiveAction;
 pub use session_archive_commands::SessionArchiveCommandOptions;
@@ -167,6 +173,8 @@ mod local_settings;
 pub use live_wrap::RowBuilder;
 mod agent_status;
 mod idle_restart;
+mod reload;
+pub use reload::PROTOCOL as UI_RELOAD_PROTOCOL;
 mod local_chatgpt_auth;
 mod managed_new_thread_defaults;
 mod markdown;
@@ -457,6 +465,8 @@ pub fn remote_addr_supports_auth_token(endpoint: &RemoteAppServerEndpoint) -> bo
 async fn connect_remote_app_server(
     endpoint: RemoteAppServerEndpoint,
 ) -> color_eyre::Result<AppServerClient> {
+    #[cfg(target_os = "linux")]
+    let endpoint = reload::worker::proxy(endpoint).await?;
     let app_server = RemoteAppServerClient::connect(RemoteAppServerConnectArgs {
         endpoint,
         client_name: "codex-tui".to_string(),

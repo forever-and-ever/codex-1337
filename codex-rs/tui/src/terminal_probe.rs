@@ -24,7 +24,7 @@ mod windows_replay;
 pub(crate) const DEFAULT_TIMEOUT: Duration = Duration::from_millis(/*millis*/ 250);
 
 /// Default terminal foreground and background colors reported by OSC 10 and OSC 11.
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct DefaultColors {
     /// Default foreground color as an 8-bit RGB tuple.
     pub(crate) fg: (u8, u8, u8),
@@ -273,6 +273,10 @@ mod imp {
         timeout: Duration,
         keyboard_probe: StartupKeyboardEnhancementProbe,
     ) -> io::Result<StartupProbe> {
+        #[cfg(target_os = "linux")]
+        if let Some(probe) = crate::reload::worker::cached_terminal_probe() {
+            return Ok(probe);
+        }
         let mut tty = Tty::open()?;
         match keyboard_probe {
             StartupKeyboardEnhancementProbe::Query => {
@@ -285,6 +289,10 @@ mod imp {
 
         let mut buffer = Vec::new();
         let result = read_startup_probe(&mut tty, timeout, keyboard_probe, &mut buffer);
+        #[cfg(target_os = "linux")]
+        if let Ok(probe) = &result {
+            crate::reload::worker::note_terminal_probe(probe);
+        }
         crossterm::event::buffer_input(&startup_replay_input(&buffer))?;
         result
     }

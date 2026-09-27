@@ -232,6 +232,7 @@ mod managed_worktree_creation;
 mod misalignment_policy;
 mod model_defaults;
 mod new_session;
+mod ui_reload;
 pub(crate) use new_session::has_launch_setting;
 mod native_history;
 mod owned_transcript;
@@ -553,6 +554,7 @@ struct InitialHistoryReplayBuffer {
 }
 
 pub(crate) struct App {
+    pub(super) reload_requested: bool,
     feature_write_lock: Arc<tokio::sync::Mutex<()>>,
     model_catalog: Arc<ModelCatalog>,
     pub(crate) session_telemetry: SessionTelemetry,

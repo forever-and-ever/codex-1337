@@ -1,4 +1,5 @@
-//! Idle client replacement for the immutable, locally installed Linux bundles.
+//! Quiet-time detection of new immutable Linux bundles. Hosted UIs hand off their
+//! input to the renderer supervisor; unhosted clients use the older exec path.
 //!
 //! A PID-scoped, single-use handoff keeps original launch options without replaying
 //! the original prompt, fork, or picker. The shared server is never shut down.
@@ -50,7 +51,10 @@ pub fn apply_handoff(cli: &mut Cli) -> io::Result<()> {
     };
     let handoff: Handoff = serde_json::from_str(&value.to_string_lossy())?;
     // Helpers inherit the environment, but must not inherit the resume action.
-    if handoff.pid == std::process::id() && REJOINING_THREAD.set(handoff.thread).is_ok() {
+    let owns_handoff = handoff.pid == std::process::id();
+    #[cfg(target_os = "linux")]
+    let owns_handoff = owns_handoff || crate::reload::worker::adopts_legacy_handoff(handoff.pid);
+    if owns_handoff && REJOINING_THREAD.set(handoff.thread).is_ok() {
         handoff.apply(cli);
     }
     Ok(())
@@ -58,6 +62,10 @@ pub fn apply_handoff(cli: &mut Cli) -> io::Result<()> {
 
 /// Startup recovery must reattach without replaying stale launch-time settings.
 pub(crate) fn rejoins(thread: ThreadId) -> bool {
+    #[cfg(target_os = "linux")]
+    if crate::reload::worker::rejoins(thread) {
+        return true;
+    }
     REJOINING_THREAD.get() == Some(&thread)
 }
 

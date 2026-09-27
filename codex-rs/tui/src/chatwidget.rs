@@ -351,6 +351,7 @@ mod input_submission;
 mod interrupts;
 mod questions;
 mod startup_submission;
+mod ui_reload;
 pub(crate) use self::interrupts::CompletedItem;
 use self::interrupts::InterruptManager;
 mod keymap_picker;

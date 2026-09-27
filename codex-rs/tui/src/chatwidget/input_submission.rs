@@ -139,7 +139,11 @@ impl ChatWidget {
             return (false, None);
         }
         self.empty_state_animation.borrow_mut().dismiss();
-        if self.input_queue.rate_limit_recovery_pending || self.pending_image_submission.is_some() {
+        let hold_submission =
+            self.input_queue.rate_limit_recovery_pending || self.pending_image_submission.is_some();
+        #[cfg(target_os = "linux")]
+        let hold_submission = hold_submission || crate::reload::worker::is_activating();
+        if hold_submission {
             let model_prompt = source == UserMessageSource::Prompt
                 && (shell_escape_policy == ShellEscapePolicy::Disallow
                     || !user_message.text.starts_with('!'));

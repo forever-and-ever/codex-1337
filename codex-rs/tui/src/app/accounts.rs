@@ -9,7 +9,7 @@ use codex_app_server_protocol::ThreadAccountSelectResponse;
 pub(super) struct AccountUi {
     serial: u64,
     picker_request: Option<uuid::Uuid>,
-    selection_request: Option<ThreadId>,
+    pub(super) selection_request: Option<ThreadId>,
     pending: std::collections::HashMap<ThreadId, String>,
     pub(super) displayed: Option<(ThreadId, codex_app_server_protocol::GetAccountResponse)>,
 }

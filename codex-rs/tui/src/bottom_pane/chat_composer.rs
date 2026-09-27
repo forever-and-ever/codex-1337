@@ -508,6 +508,7 @@ fn parent_owned_command_is_allowed(command: SlashCommand, args: &str) -> bool {
                 | SlashCommand::Status
                 | SlashCommand::Warnings
                 | SlashCommand::Daemon
+                | SlashCommand::Reload
                 | SlashCommand::Usage
                 | SlashCommand::Ide
                 | SlashCommand::DebugConfig
@@ -526,7 +527,7 @@ fn parent_owned_command_is_allowed(command: SlashCommand, args: &str) -> bool {
         )
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum QueuedInputAction {
     Plain,
     /// Preserve model-input provenance when paste expansion reveals a leading shell sigil.
@@ -650,7 +651,7 @@ struct MentionCompletionTarget {
     prebuilt_mentions: Option<Vec<MentionItem>>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(super) struct ComposerDraft {
     pub(super) text: String,
     text_elements: Vec<TextElement>,

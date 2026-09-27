@@ -334,6 +334,7 @@ pub(crate) struct AppServerSession {
     managed_new_thread_defaults: Option<NewThreadModelDefaults>,
     external_agent_config_import_completion_pending: AtomicBool,
     dynamic_tool_mcp: Option<Arc<DynamicToolMcpServer>>,
+    hosted_task_tools: Option<serde_json::Value>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -444,6 +445,7 @@ impl AppServerSession {
             managed_new_thread_defaults: None,
             external_agent_config_import_completion_pending: AtomicBool::new(false),
             dynamic_tool_mcp: None,
+            hosted_task_tools: None,
         }
     }
 
@@ -489,6 +491,18 @@ impl AppServerSession {
             self.remote_cwd_override(),
             /*session_start_source*/ None,
         );
+        #[cfg(target_os = "linux")]
+        if crate::reload::worker::is_hosted() {
+            self.hosted_task_tools = Some(
+                crate::reload::worker::start_tools(
+                    thread_start_params,
+                    managed_requirement.cloned(),
+                    app_event_tx,
+                )
+                .await?,
+            );
+            return Ok(());
+        }
         self.dynamic_tool_mcp = Some(Arc::new(
             DynamicToolMcpServer::start(
                 self.request_handle(),
@@ -505,6 +519,8 @@ impl AppServerSession {
     pub(crate) fn thread_tool_transport(&self) -> ThreadToolTransport {
         if self.uses_embedded_app_server() {
             ThreadToolTransport::Disabled
+        } else if let Some(config) = &self.hosted_task_tools {
+            ThreadToolTransport::Hosted(config.clone())
         } else if let Some(server) = self.dynamic_tool_mcp.as_ref() {
             ThreadToolTransport::Mcp(Arc::clone(server))
         } else {
@@ -513,6 +529,9 @@ impl AppServerSession {
     }
 
     pub(crate) fn with_thread_tool_transport(mut self, transport: ThreadToolTransport) -> Self {
+        if let ThreadToolTransport::Hosted(config) = &transport {
+            self.hosted_task_tools = Some(config.clone());
+        }
         if let ThreadToolTransport::Mcp(server) = transport {
             self.dynamic_tool_mcp = Some(server);
         }

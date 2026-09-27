@@ -4,6 +4,10 @@ use super::*;
 
 impl App {
     pub(super) fn ready_for_idle_restart(&self) -> bool {
+        #[cfg(target_os = "linux")]
+        if crate::reload::worker::is_hosted() {
+            return self.can_reload_ui();
+        }
         matches!(self.app_server_target, AppServerTarget::LocalDaemon { .. })
             && !self.reconnect.offline
             && self.primary_thread_id.is_some()
@@ -29,6 +33,13 @@ impl App {
     ) {
         if !self.ready_for_idle_restart() {
             restart.postpone();
+            return;
+        }
+        #[cfg(target_os = "linux")]
+        if crate::reload::worker::is_hosted() {
+            if restart.replacement().await.is_some() {
+                self.reload_ui().await;
+            }
             return;
         }
         // A draft in another viewed thread is just as irreplaceable as the

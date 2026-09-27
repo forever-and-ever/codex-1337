@@ -35,6 +35,8 @@ fn replay_preserves_drafts_and_does_not_reopen_handled_questions() {
     original.accept_answer();
     original.handle_key_event(KeyEvent::from(KeyCode::Char('2')));
     let saved = original.capture();
+    let wire = serde_json::to_vec(&saved).unwrap();
+    let saved: QuestionState = serde_json::from_slice(&wire).unwrap();
     for replay_first in [false, true] {
         let mut restored = editor();
         if !replay_first {

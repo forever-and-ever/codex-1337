@@ -13,7 +13,6 @@ use crossterm::Command;
 use crossterm::event::DisableMouseCapture;
 #[cfg(windows)]
 use crossterm::event::EnableMouseCapture;
-use crossterm::event::PopKeyboardEnhancementFlags;
 use crossterm::execute;
 use crossterm::queue;
 use crossterm::terminal::EnterAlternateScreen;
@@ -129,7 +128,7 @@ impl AlternateScreen {
         } else {
             // modifyOtherKeys is not stacked per screen; keep the main screen's fallback enabled
             // until terminal handoff restores its keyboard modes too.
-            execute!(writer, PopKeyboardEnhancementFlags)
+            keyboard_modes::pop_keyboard_frame(writer)
         };
         let scroll_result = execute!(writer, DisableAlternateScroll);
         // A failed earlier cleanup write must not prevent the actual screen transition.

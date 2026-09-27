@@ -204,6 +204,15 @@ impl PreparedResumeAction {
 fn suspend_process() -> Result<()> {
     super::restore()?;
     super::terminal_stderr::pause()?;
+    #[cfg(target_os = "linux")]
+    if crate::reload::worker::is_hosted() {
+        crate::reload::worker::suspend_host()?;
+    } else {
+        unsafe {
+            libc::kill(/*pid*/ 0, libc::SIGTSTP)
+        };
+    }
+    #[cfg(not(target_os = "linux"))]
     unsafe {
         libc::kill(/*pid*/ 0, libc::SIGTSTP)
     };

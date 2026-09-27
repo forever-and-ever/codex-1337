@@ -52,6 +52,7 @@ pub enum SlashCommand {
     Mention,
     Status,
     Daemon,
+    Reload,
     Warnings,
     Cd,
     #[strum(to_string = "pwd", serialize = "cwd")]
@@ -113,6 +114,7 @@ impl SlashCommand {
             SlashCommand::Import => "import setup, this project, and recent chats from Claude Code",
             SlashCommand::Hooks => "view and manage lifecycle hooks",
             SlashCommand::Daemon => "Manage the local background server.",
+            SlashCommand::Reload => "reload the UI without interrupting your agents",
             SlashCommand::Warnings => "view retained warnings and diagnostic details",
             SlashCommand::Status => "show current session configuration and token usage",
             SlashCommand::Cd => "change the current working directory",
@@ -204,6 +206,7 @@ impl SlashCommand {
                 | SlashCommand::Mention
                 | SlashCommand::Status
                 | SlashCommand::Daemon
+                | SlashCommand::Reload
                 | SlashCommand::Warnings
                 | SlashCommand::Pwd
                 | SlashCommand::Usage
@@ -276,6 +279,7 @@ impl SlashCommand {
             | SlashCommand::Hooks
             | SlashCommand::Status
             | SlashCommand::Daemon
+            | SlashCommand::Reload
             | SlashCommand::Warnings
             | SlashCommand::Pwd
             | SlashCommand::Usage

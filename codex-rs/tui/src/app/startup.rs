@@ -746,6 +746,7 @@ See the Codex keymap documentation for supported actions and examples."
         let upgrade_version = crate::updates::get_upgrade_version(&config);
 
         let mut app = Self {
+            reload_requested: false,
             feature_write_lock: Arc::default(),
             model_catalog,
             session_telemetry: session_telemetry.clone(),
@@ -869,6 +870,10 @@ See the Codex keymap documentation for supported actions and examples."
         }
         app.update_visible_history_rows(tui.terminal.last_known_screen_size);
         let initial_session_started_at = Instant::now();
+        #[cfg(target_os = "linux")]
+        if crate::reload::worker::has_unattached_input() {
+            app.restore_reload_input(None).await;
+        }
         if let Some(started) = initial_started_thread {
             let thread_id = started.session.thread_id;
             app.chat_widget
@@ -999,6 +1004,8 @@ See the Codex keymap documentation for supported actions and examples."
         }
 
         let mut listen_for_app_server_events = true;
+        #[cfg(target_os = "linux")]
+        let mut ui_host_ready = !crate::reload::worker::is_hosted();
         let mut idle_restart = crate::idle_restart::IdleRestart::new();
         let mut reconnect = None;
         let mut waiting_for_initial_session_configured = wait_for_initial_session_configured;
@@ -1090,7 +1097,25 @@ See the Codex keymap documentation for supported actions and examples."
                 // Replay queues history and operations. A buffered closure must not switch
                 // widgets before those app events have been applied.
                 let has_pending_app_events = !app_event_rx.is_empty();
-                idle_restart.set_ready(app.ready_for_idle_restart());
+                if !has_pending_app_events {
+                    if std::mem::take(&mut app.reload_requested) {
+                        if pending_startup_draft.is_some() {
+                            app.chat_widget.add_error_message("Finish the startup dialog before reloading; your draft is still held there.".into());
+                        } else {
+                            app.reload_ui().await;
+                        }
+                    }
+                    #[cfg(target_os = "linux")]
+                    if !ui_host_ready && !waiting_for_initial_session_configured {
+                        app.render_startup_frame(tui, &app_event_rx)?;
+                        crate::reload::worker::ready().await?;
+                        app.chat_widget.set_queue_autosend_suppressed(false);
+                        app.chat_widget.maybe_send_next_queued_input();
+                        ui_host_ready = true;
+                    }
+                }
+                idle_restart
+                    .set_ready(pending_startup_draft.is_none() && app.ready_for_idle_restart());
                 let initial_session_header_pending = waiting_for_initial_session_header
                     && app.primary_session_configured.is_some()
                     && has_pending_app_events;

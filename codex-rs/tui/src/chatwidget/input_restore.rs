@@ -573,6 +573,7 @@ impl ChatWidget {
 
     pub(crate) fn capture_thread_input_state(&mut self) -> Option<ThreadInputState> {
         self.cancel_image_submission();
+        self.bottom_pane.flush_composer_paste_burst();
         let draft = self.bottom_pane.composer_draft_snapshot();
         let composer = ThreadComposerState {
             text: draft.text,
@@ -703,6 +704,8 @@ impl ChatWidget {
     }
 
     pub(crate) fn set_queue_autosend_suppressed(&mut self, suppressed: bool) {
+        #[cfg(target_os = "linux")]
+        let suppressed = suppressed || crate::reload::worker::is_activating();
         self.input_queue.suppress_queue_autosend = suppressed;
     }
 }

@@ -269,6 +269,9 @@ enum DebugSubcommand {
     /// Internal client-replacement protocol negotiation.
     #[clap(hide = true)]
     TuiRestartProbe,
+    /// Internal persistent-host protocol negotiation.
+    #[clap(hide = true)]
+    TuiReloadProbe,
     /// Render the raw model catalog as JSON.
     Models(DebugModelsCommand),
 
@@ -1198,6 +1201,15 @@ async fn cli_main(
         println!("{}", codex_tui::IDLE_RESTART_PROTOCOL);
         return Ok(());
     }
+    if matches!(
+        subcommand,
+        Some(Subcommand::Debug(DebugCommand {
+            subcommand: DebugSubcommand::TuiReloadProbe,
+        }))
+    ) {
+        println!("{}", codex_tui::UI_RELOAD_PROTOCOL);
+        return Ok(());
+    }
     reject_unsupported_worktree_for_subcommand(interactive.shared.worktree, &subcommand)?;
     // Fold --enable/--disable into config overrides so they flow to all subcommands.
     let toggle_overrides = feature_toggles.to_overrides()?;
@@ -1864,7 +1876,7 @@ async fn cli_main(
             }
         }
         Some(Subcommand::Debug(DebugCommand { subcommand })) => match subcommand {
-            DebugSubcommand::TuiRestartProbe => {
+            DebugSubcommand::TuiRestartProbe | DebugSubcommand::TuiReloadProbe => {
                 unreachable!(
                     "the restart probe is handled before configuration and authentication"
                 );
@@ -2828,6 +2840,14 @@ async fn run_interactive_tui(
     remote_auth_token_env: Option<String>,
     arg0_paths: Arg0DispatchPaths,
 ) -> std::io::Result<AppExitInfo> {
+    #[cfg(target_os = "linux")]
+    {
+        if !interactive.no_daemon && codex_tui::should_host_ui() {
+            let status = codex_tui::run_ui_host().await?;
+            std::process::exit(status);
+        }
+        codex_tui::initialize_ui_worker(&mut interactive).await?;
+    }
     if interactive.no_daemon && interactive.agents_overview {
         return Ok(AppExitInfo::fatal(
             "--no-daemon cannot be used with codex agents.",

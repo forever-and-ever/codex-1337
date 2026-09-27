@@ -55,6 +55,7 @@ pub(crate) enum ThreadToolTransport {
     Disabled,
     Dynamic,
     Mcp(Arc<DynamicToolMcpServer>),
+    Hosted(Value),
 }
 
 impl ThreadToolTransport {
@@ -64,7 +65,7 @@ impl ThreadToolTransport {
             Self::Dynamic => {
                 params.dynamic_tools = Some(dynamic_tools::non_delegation_tool_specs());
             }
-            Self::Mcp(_) => {
+            Self::Mcp(_) | Self::Hosted(_) => {
                 params.dynamic_tools = None;
                 self.configure_mcp(&mut params.config);
             }
@@ -72,12 +73,15 @@ impl ThreadToolTransport {
     }
 
     pub(crate) fn configure_mcp(&self, config: &mut Option<HashMap<String, Value>>) {
-        if let Self::Mcp(server) = self {
-            config.get_or_insert_default().insert(
-                format!("mcp_servers.{}", dynamic_tools::NAMESPACE),
-                server.config.clone(),
-            );
-        }
+        let config_value = match self {
+            Self::Mcp(server) => &server.config,
+            Self::Hosted(config) => config,
+            Self::Disabled | Self::Dynamic => return,
+        };
+        config.get_or_insert_default().insert(
+            format!("mcp_servers.{}", dynamic_tools::NAMESPACE),
+            config_value.clone(),
+        );
     }
 }
 
@@ -90,6 +94,9 @@ pub(crate) struct DynamicToolMcpServer {
 }
 
 impl DynamicToolMcpServer {
+    pub(crate) fn config(&self) -> Value {
+        self.config.clone()
+    }
     pub(crate) fn suspend(&self) {
         *self
             .connection

@@ -218,15 +218,24 @@ pub(super) fn enable_keyboard_enhancement(writer: &mut impl Write) {
         None
     };
 
-    let _ = execute!(
-        writer,
-        DisableModifyOtherKeys,
-        PushKeyboardEnhancementFlags(keyboard_enhancement_flags(
-            terminal_info().name,
-            running_in_tmux_session,
-            tmux_extended_keys_format.as_deref()
-        ))
+    let flags = keyboard_enhancement_flags(
+        terminal_info().name,
+        running_in_tmux_session,
+        tmux_extended_keys_format.as_deref(),
     );
+    let _ = execute!(writer, DisableModifyOtherKeys);
+    #[cfg(target_os = "linux")]
+    let hosted = crate::reload::worker::is_hosted();
+    #[cfg(not(target_os = "linux"))]
+    let hosted = false;
+    if hosted {
+        // Killed renderers cannot pop a stack. The terminal host leases the modes;
+        // workers replace the current frame instead of accumulating pushed frames.
+        let _ = write!(writer, "\x1b[={}u", flags.bits());
+        let _ = writer.flush();
+    } else {
+        let _ = execute!(writer, PushKeyboardEnhancementFlags(flags));
+    }
 
     if tmux_should_enable_modify_other_keys_for(
         running_in_tmux_session,
@@ -310,16 +319,31 @@ fn read_tmux_extended_keys_format() -> Option<String> {
 }
 
 pub(super) fn restore_keyboard_enhancement_stack(writer: &mut impl Write) {
-    let _ = execute!(writer, PopKeyboardEnhancementFlags, DisableModifyOtherKeys);
+    let _ = pop_keyboard_frame(writer);
+    let _ = execute!(writer, DisableModifyOtherKeys);
 }
 
 pub(super) fn reset_keyboard_reporting_after_exit(writer: &mut impl Write) {
+    #[cfg(target_os = "linux")]
+    if crate::reload::worker::is_hosted() {
+        restore_keyboard_enhancement_stack(writer);
+        return;
+    }
     let _ = execute!(
         writer,
         PopKeyboardEnhancementFlags,
         ResetKeyboardEnhancementFlags,
         DisableModifyOtherKeys
     );
+}
+
+pub(super) fn pop_keyboard_frame(writer: &mut impl Write) -> std::io::Result<()> {
+    #[cfg(target_os = "linux")]
+    if crate::reload::worker::is_hosted() {
+        writer.write_all(b"\x1b[=0u")?;
+        return writer.flush();
+    }
+    execute!(writer, PopKeyboardEnhancementFlags)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -115,13 +115,13 @@ pub(crate) use voice_strip::VoiceStripState;
 mod bottom_pane_view;
 mod effort_ignition;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct LocalImageAttachment {
     pub(crate) placeholder: String,
     pub(crate) path: PathBuf,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct MentionBinding {
     /// Visible mention sigil (`$` or `@`).
     pub(crate) sigil: char,

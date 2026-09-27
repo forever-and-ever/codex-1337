@@ -172,7 +172,7 @@ pub(crate) struct TextAreaState {
     scroll: u16,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 enum KillBufferKind {
     /// Characterwise kills and yanks paste at the cursor.
     Characterwise,
@@ -181,6 +181,7 @@ enum KillBufferKind {
 }
 
 /// The last editor kill or Vim yank, carried between chat composers in the same TUI session.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct KillBufferSnapshot {
     text: String,
     kind: KillBufferKind,

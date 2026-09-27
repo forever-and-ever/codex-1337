@@ -33,18 +33,21 @@ const OTHER_OPTION_LABEL: &str = "Other";
 pub(super) const TIP_SEPARATOR: &str = "   ";
 pub(super) const DESIRED_SPACERS_BETWEEN_SECTIONS: u16 = 2;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 struct PendingQuestion {
     message_id: String,
     question_id: String,
     question: AsyncUserInputQuestion,
     options_state: ScrollState,
     draft: ComposerDraft,
+    // A replacement must not auto-answer while the user cannot see the question.
+    #[serde(skip)]
     expires_at: Option<Instant>,
 }
 
 /// Locally retained async questions; replayed message IDs cannot resurrect handled answers.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct QuestionState {
     pending: Vec<PendingQuestion>,
     current_idx: usize,

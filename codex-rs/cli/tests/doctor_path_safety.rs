@@ -441,8 +441,15 @@ async fn interactive_tmux_startup_does_not_execute_workspace_helpers() -> Result
             output.chars().take(/*n*/ 4000).collect::<String>()
         )
     })??;
+    // Replaceable Linux renderers lease the host's frame instead of pushing
+    // terminal-stack entries that a killed process could never pop.
+    let safe_flags = if cfg!(target_os = "linux") {
+        "\x1b[=5u"
+    } else {
+        "\x1b[>5u"
+    };
     assert!(
-        output.contains("\x1b[>5u"),
+        output.contains(safe_flags),
         "expected safe Ghostty/tmux keyboard flags: {output}"
     );
     assert!(

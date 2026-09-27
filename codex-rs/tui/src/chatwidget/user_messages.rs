@@ -28,7 +28,8 @@ use codex_utils_plugins::mention_syntax::TOOL_MENTION_SIGIL;
 
 use super::ChatWidget;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct UserMessage {
     pub(crate) text: String,
     pub(crate) local_images: Vec<LocalImageAttachment>,
@@ -42,13 +43,13 @@ pub(crate) struct UserMessage {
     pub(crate) mention_bindings: Vec<MentionBinding>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(super) enum UserMessageHistoryRecord {
     UserMessageText,
     Override(UserMessageHistoryOverride),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(super) struct UserMessageHistoryOverride {
     pub(super) text: String,
     pub(super) text_elements: Vec<TextElement>,
@@ -60,13 +61,13 @@ pub(super) enum ShellEscapePolicy {
     Disallow,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(super) enum UserMessageSource {
     Prompt,
     QuestionAnswer,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(super) struct QueuedUserMessage {
     pub(super) user_message: UserMessage,
     pub(super) action: QueuedInputAction,
@@ -109,7 +110,8 @@ pub(super) enum QueueDrain {
     Stop,
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct ThreadComposerState {
     pub(super) text: String,
     pub(super) local_images: Vec<LocalImageAttachment>,
@@ -130,7 +132,8 @@ impl ThreadComposerState {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct ThreadInputState {
     pub(crate) questions: Option<crate::bottom_pane::QuestionState>,
     pub(super) composer: Option<ThreadComposerState>,
@@ -183,7 +186,8 @@ impl From<&str> for UserMessage {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct PendingSteer {
     pub(crate) client_id: String,
     pub(super) items: Vec<UserInput>,
@@ -729,7 +733,7 @@ pub(crate) fn mention_bindings_from_user_inputs(
     mention_bindings
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(super) struct PendingSteerCompareKey {
     pub(super) message: String,
     pub(super) image_count: usize,

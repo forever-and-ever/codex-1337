@@ -1884,8 +1884,11 @@ async fn restore_thread_input_state_applies_running_state_policy() {
         task_running: true,
         agent_turn_running: true,
     };
+    let wire = serde_json::to_vec(&input_state).unwrap();
+    let retained: ThreadInputState = serde_json::from_slice(&wire).unwrap();
+    assert_eq!(retained, input_state);
     chat.restore_thread_input_state(
-        Some(input_state.clone()),
+        Some(retained),
         ThreadInputStateRestoreMode {
             preserve_in_flight_turn: true,
         },
