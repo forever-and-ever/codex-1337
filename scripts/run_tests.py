@@ -3,7 +3,7 @@
 Some fixtures return unowned paths; killed test processes also
 skip destructors. The runner therefore owns cleanup, including failed runs.
 SIGKILL of this runner cannot be cleaned up, but any leftovers stay off tmpfs.
-No other run's directories are inspected or removed.
+No other run's directories are inspected or removed. Requires Python 3.12+.
 """
 
 import os
@@ -11,8 +11,37 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from types import FrameType
+
+
+def reap_orphans() -> bool:
+    """Reap only this Linux subreaper's descendants, before deleting their scratch."""
+    deadline = time.monotonic() + 5
+    gentle_until = time.monotonic() + 1
+    signalled: set[tuple[int, int]] = set()
+    children = Path(f"/proc/self/task/{os.getpid()}/children")
+    while True:
+        try:
+            while os.waitpid(-1, os.WNOHANG)[0]:
+                pass
+        except ChildProcessError:
+            return True
+        now = time.monotonic()
+        if now >= deadline:
+            return False
+        sig = signal.SIGTERM if now < gentle_until else signal.SIGKILL
+        for pid in map(int, children.read_text().split()):
+            if (pid, sig) not in signalled:
+                # Only this process can reap its direct children. Their PIDs
+                # cannot be reused between the ownership check and this signal.
+                try:
+                    os.kill(pid, sig)
+                except ProcessLookupError:
+                    pass
+                signalled.add((pid, sig))
+        time.sleep(0.02)
 
 
 def main() -> int:
@@ -39,8 +68,20 @@ def main() -> int:
         ).strip()
         if filesystem in {"tmpfs", "ramfs"}:
             sys.exit("CODEX_TEST_TMP_ROOT must be disk-backed, not tmpfs/ramfs")
+        # Detached fixture daemons otherwise escape to PID 1 when nextest kills
+        # a timed-out test. Adoption retains ownership without scanning the host.
+        import ctypes
 
-    with tempfile.TemporaryDirectory(prefix="codex_test_", dir=root) as scratch:
+        libc = ctypes.CDLL(None, use_errno=True)
+        if libc.prctl(36, 1, 0, 0, 0) != 0:  # PR_SET_CHILD_SUBREAPER
+            raise OSError(ctypes.get_errno(), "cannot own test descendants")
+
+    directory = tempfile.TemporaryDirectory(
+        prefix="codex_test_", dir=root, delete=False
+    )
+    scratch = directory.name
+    clean = True
+    try:
         environment = os.environ | dict.fromkeys(("TMPDIR", "TMP", "TEMP"), scratch)
         if full_workspace:
             environment.update(v8_environment)
@@ -68,12 +109,46 @@ def main() -> int:
                 env=environment,
                 start_new_session=True,
             ) as child:
-                for sig in pending:
-                    forward(sig, None)
-                status = child.wait()
+
+                def reap_exited(_signum: int, _frame: FrameType | None) -> None:
+                    # Adoption also transfers zombie-reaping responsibility during
+                    # the run. Leave Cargo's exit status to its Popen owner.
+                    children = Path(f"/proc/self/task/{os.getpid()}/children")
+                    for pid in map(int, children.read_text().split()):
+                        if pid != child.pid:
+                            try:
+                                os.waitpid(pid, os.WNOHANG)
+                            except ChildProcessError:
+                                pass
+
+                if sys.platform == "linux":
+                    # Install only after Popen owns its PID: a child exiting during
+                    # construction must not be mistaken for an adopted fixture.
+                    previous_child = signal.signal(signal.SIGCHLD, reap_exited)
+                    reap_exited(signal.SIGCHLD, None)
+                try:
+                    for sig in pending:
+                        forward(sig, None)
+                    status = child.wait()
+                finally:
+                    if sys.platform == "linux":
+                        signal.signal(signal.SIGCHLD, previous_child)
         finally:
+            if sys.platform == "linux":
+                clean = False
+                clean = reap_orphans()
             for sig, handler in previous.items():
                 signal.signal(sig, handler)
+    finally:
+        if clean:
+            directory.cleanup()
+        else:
+            print(
+                f"Test descendants did not exit; retained scratch: {scratch}",
+                file=sys.stderr,
+            )
+    if not clean:
+        return 1
     return status if status >= 0 else 128 - status
 
 

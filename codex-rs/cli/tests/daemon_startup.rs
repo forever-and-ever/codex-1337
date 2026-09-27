@@ -39,9 +39,6 @@ async fn daemon_startup(command: &str) -> Result<()> {
     let codex = codex_utils_cargo_bin::cargo_bin("codex")?.canonicalize()?;
     let workspace = tempfile::tempdir()?;
     let workspace_path = workspace.path().canonicalize()?;
-    #[cfg(unix)]
-    let home = tempfile::Builder::new().tempdir_in("/tmp")?;
-    #[cfg(not(unix))]
     let home = tempfile::tempdir()?;
     fs::write(
         home.path().join("config.toml"),

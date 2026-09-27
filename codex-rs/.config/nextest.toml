@@ -22,6 +22,12 @@ path = "junit.xml"
 inherits = "default"
 
 [[profile.local.overrides]]
+# Each case performs five full TUI launches/forks plus daemon and checkout setup.
+# The per-launch deadlines remain authoritative; 60s cuts off a healthy sequence.
+filter = 'package(codex-cli) & binary(worktree) & test(worktree_start_and_fork_bind_owner_before_turn)'
+slow-timeout = { period = "1m", terminate-after = 3 }
+
+[[profile.local.overrides]]
 # Large credential-discovery and attachment-compression fixtures are CPU-bound
 # in unoptimized builds, especially alongside the full local suite.
 filter = 'test(snapshot_discovers_and_redacts_shell_initialized_credentials) | test(feedback_upload_delivers_whole_files_or_marked_prefixes)'

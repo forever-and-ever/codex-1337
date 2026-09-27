@@ -19,7 +19,9 @@ struct TestDaemon {
 
 impl TestDaemon {
     fn new() -> Result<Self> {
-        let home = tempfile::Builder::new().tempdir_in("/tmp")?;
+        // Package fixtures contain full debug executables. Honor the runner's
+        // disk-backed scratch instead of silently copying gigabytes into tmpfs.
+        let home = tempfile::tempdir()?;
         let codex = codex_utils_cargo_bin::cargo_bin("codex")?;
         let codex_source = std::fs::canonicalize(&codex)?;
         let target = if cfg!(target_os = "macos") {

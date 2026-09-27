@@ -6,12 +6,13 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
 
 LAUNCHER = Path(__file__).with_name("run_tests.py")
-PROBE = """import json, os, signal, sys
+PROBE = """import json, os, signal, subprocess, sys
 from pathlib import Path
 
 root = Path(os.environ['TMPDIR'])
@@ -26,7 +27,18 @@ def stop(sig, _):
     sys.exit(128 + sig)
 for sig in (signal.SIGTERM, signal.SIGINT):
     signal.signal(sig, stop)
-print(json.dumps([str(root), sys.argv[1:], os.environ['TEMP'], os.environ['TMP']]), flush=True)
+orphan = None
+finished = None
+if sys.platform == 'linux':
+    # A setsid fixture survives both its parent and process-group cancellation.
+    # Ignore TERM to exercise the runner's bounded escalation and reap path.
+    orphan = subprocess.Popen([sys.executable, '-c',
+        "import signal,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); print('ready',flush=True); time.sleep(120)"],
+        start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    assert orphan.stdout.readline() == b'ready\\n'
+    finished = int(subprocess.check_output([sys.executable, '-c',
+        "import subprocess; print(subprocess.Popen(['/bin/sleep', '0.05'], stdout=subprocess.DEVNULL).pid)"], text=True))
+print(json.dumps([str(root), sys.argv[1:], os.environ['TEMP'], os.environ['TMP'], orphan.pid if orphan else None, finished]), flush=True)
 action = sys.stdin.readline().strip()
 if action == 'kill':
     os.kill(os.getpid(), signal.SIGKILL)
@@ -80,13 +92,30 @@ class TestScratchLifecycle(unittest.TestCase):
                         ) as run,
                     ):
                         assert run.stdout is not None
-                        scratch, args, temp, tmp = json.loads(run.stdout.readline())
+                        scratch, args, temp, tmp, orphan, finished = json.loads(
+                            run.stdout.readline()
+                        )
                         self.assertEqual(
                             args,
                             ["nextest", "run", "--no-fail-fast", "-E", "test(a b)"],
                         )
                         self.assertEqual((temp, tmp), (scratch, scratch))
                         self.assertNotEqual(Path(scratch), retained)
+                        if finished is not None:
+                            # Reap exited adoptees before Cargo finishes, without
+                            # consuming Cargo's status or killing its live orphan.
+                            deadline = time.monotonic() + 2
+                            while time.monotonic() < deadline:
+                                try:
+                                    os.kill(finished, 0)
+                                except ProcessLookupError:
+                                    break
+                                time.sleep(0.01)
+                            else:
+                                self.fail(
+                                    "exited fixture was not reaped during the run"
+                                )
+                            os.kill(orphan, 0)
                         if interruption is not None:
                             run.send_signal(interruption)
                             run.wait(timeout=10)
@@ -96,6 +125,9 @@ class TestScratchLifecycle(unittest.TestCase):
                             _, errors = run.communicate(f"{action}\n", timeout=10)
                         self.assertEqual((run.returncode, errors), (status, ""))
                         self.assertFalse(Path(scratch).exists())
+                        if orphan is not None:
+                            with self.assertRaises(ProcessLookupError):
+                                os.kill(orphan, 0)
                         self.assertTrue(retained.is_dir())
                         self.assertEqual(sentinel.read_text(), "keep")
                 _, errors = survivor.communicate("0\n", timeout=10)
