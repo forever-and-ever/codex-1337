@@ -10,7 +10,7 @@ fn i3_visibility_distinguishes_hidden_workspaces_and_tabs_from_unknown_windows()
             {"type": "workspace", "id": 10, "nodes": [
                 {"window": 101, "nodes": [], "floating_nodes": []}
             ], "floating_nodes": []},
-            {"type": "workspace", "id": 20, "layout": "tabbed", "focus": [2, 3],
+            {"type": "workspace", "id": 20, "layout": "tabbed", "focus": [4, 2, 3],
                 "nodes": [
                     {"id": 2, "window": 102, "nodes": [], "floating_nodes": []},
                     {"id": 3, "window": 103, "nodes": [], "floating_nodes": []}

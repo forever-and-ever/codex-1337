@@ -294,13 +294,20 @@ fn window_visibility(
     if node["window"].as_u64() == Some(window_id) {
         return visible;
     }
+    // A focused floating child leads i3's focus list without replacing the visible tab.
+    let selected_tiled = node["nodes"].as_array().and_then(|children| {
+        node["focus"].as_array().and_then(|focus| {
+            focus
+                .iter()
+                .find(|id| children.iter().any(|child| child.get("id") == Some(*id)))
+        })
+    });
     for key in ["nodes", "floating_nodes"] {
         if let Some(children) = node[key].as_array() {
             for child in children {
                 let tab_hidden = key == "nodes"
                     && matches!(node["layout"].as_str(), Some("tabbed" | "stacked"))
-                    && node["focus"].as_array().and_then(|focus| focus.first())
-                        != Some(&child["id"]);
+                    && selected_tiled.is_some_and(|id| id != &child["id"]);
                 let child_visible = if tab_hidden { Some(false) } else { visible };
                 if let Some(visible) =
                     window_visibility(child, window_id, child_visible, visible_workspaces)
