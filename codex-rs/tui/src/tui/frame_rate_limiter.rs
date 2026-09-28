@@ -21,11 +21,19 @@ pub(super) struct FrameRateLimiter {
 impl FrameRateLimiter {
     /// Returns `requested`, clamped forward if it would exceed the maximum frame rate.
     pub(super) fn clamp_deadline(&self, requested: Instant) -> Instant {
+        self.clamp_deadline_with_interval(requested, MIN_FRAME_INTERVAL)
+    }
+
+    pub(super) fn clamp_deadline_with_interval(
+        &self,
+        requested: Instant,
+        interval: Duration,
+    ) -> Instant {
         let Some(last_emitted_at) = self.last_emitted_at else {
             return requested;
         };
         let min_allowed = last_emitted_at
-            .checked_add(MIN_FRAME_INTERVAL)
+            .checked_add(interval)
             .unwrap_or(last_emitted_at);
         requested.max(min_allowed)
     }
