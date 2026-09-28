@@ -437,7 +437,7 @@ impl StartupDraftPump {
         }
         if self.bottom_pane.is_in_paste_burst() {
             tui.frame_requester()
-                .schedule_frame_in(ChatComposer::recommended_paste_flush_delay());
+                .schedule_maintenance_in(ChatComposer::recommended_paste_flush_delay());
         }
         self.bottom_pane.pre_draw_tick();
         let owned = tui.is_owned_screen();

@@ -162,7 +162,7 @@ async fn voice_meters_do_not_sample_again_on_early_redraws() {
         let deadline = frame_requests
             .try_recv()
             .expect("early redraw re-arms sampling");
-        assert!((before_redraw + remaining..=after_redraw + remaining).contains(&deadline));
+        assert!((before_redraw + remaining..=after_redraw + remaining).contains(&deadline.at));
         assert!(frame_requests.try_recv().is_err());
     }
     assert_eq!(

@@ -70,7 +70,7 @@ impl App {
             .map(|fetched| fetched.elapsed())
             && age < REFRESH_INTERVAL
         {
-            frame_requester.schedule_frame_in(REFRESH_INTERVAL - age);
+            frame_requester.schedule_maintenance_in(REFRESH_INTERVAL - age);
             return;
         }
         let request_id = Uuid::new_v4();

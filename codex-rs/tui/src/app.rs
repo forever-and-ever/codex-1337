@@ -243,6 +243,7 @@ mod permission_shortcuts;
 mod pets;
 mod platform_actions;
 mod plugin_mentions;
+mod presentation;
 mod rate_limit_refresh;
 mod realtime_delivery;
 mod realtime_settings;
@@ -869,6 +870,22 @@ impl App {
         app_server: &mut AppServerSession,
         event: TuiEvent,
     ) -> Result<AppRunControl> {
+        if matches!(
+            &event,
+            TuiEvent::Key(_) | TuiEvent::Mouse(_) | TuiEvent::Paste(_)
+        ) {
+            let previous = tui.presentation_mode();
+            tui.note_terminal_input();
+            self.apply_presentation_transition(tui, previous)?;
+            if tui.presentation_mode() == tui::PresentationMode::Reduced
+                && (matches!(&event, TuiEvent::Key(_) | TuiEvent::Paste(_))
+                    || matches!(&event, TuiEvent::Mouse(mouse)
+                        if mouse.kind != crossterm::event::MouseEventKind::Moved))
+            {
+                tui.frame_requester().schedule_interactive_frame();
+            }
+        }
+        let scheduled_draw = matches!(event, TuiEvent::Draw);
         self.invalidate_right_click_paste(&event);
         self.finish_clipboard(tui);
         let event = self.finish_right_click_paste(tui, event);
@@ -1049,6 +1066,9 @@ impl App {
 
         match &event {
             TuiEvent::FocusLost => {
+                let previous = tui.presentation_mode();
+                tui.reconcile_presentation();
+                self.apply_presentation_transition(tui, previous)?;
                 self.chat_widget
                     .set_sparkle_terminal_focus(/*focused*/ false);
                 let now = Instant::now();
@@ -1061,6 +1081,10 @@ impl App {
                 }
             }
             TuiEvent::FocusGained => {
+                let previous = tui.presentation_mode();
+                tui.note_terminal_input();
+                tui.reconcile_presentation();
+                self.apply_presentation_transition(tui, previous)?;
                 self.recap.note_focus_gained();
             }
             _ => {}
@@ -1128,6 +1152,9 @@ impl App {
                     }
                     self.chat_widget.pre_draw_tick();
                     self.refresh_agents_overview_usage(app_server, tui.frame_requester());
+                    if scheduled_draw && !tui.should_render_scheduled_frame() {
+                        return Ok(AppRunControl::Continue);
+                    }
                     let rendered_area = self.render_chat_widget_frame(tui, screen_size)?;
                     if tui.is_owned_screen()
                         && self.transcript_view.history

@@ -27,7 +27,7 @@ impl Tui {
         {
             let now = Instant::now();
             if now < deadline {
-                self.frame_requester.schedule_frame_in(deadline - now);
+                self.frame_requester.schedule_maintenance_in(deadline - now);
             } else {
                 return self.screen_size_for_event(&TuiEvent::Resume);
             }
@@ -67,7 +67,7 @@ impl Tui {
     /// Schedule one backend sample after a resize, reflow, or external program.
     pub(crate) fn schedule_screen_size_recheck(&mut self, delay: Duration) {
         self.screen_size.pending_recheck_at = Some(Instant::now() + delay);
-        self.frame_requester.schedule_frame_in(delay);
+        self.frame_requester.schedule_maintenance_in(delay);
     }
 
     pub(crate) fn defer_screen_size(&mut self, size: Size) {

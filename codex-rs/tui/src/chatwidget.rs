@@ -1146,16 +1146,22 @@ impl ChatWidget {
         self.schedule_hook_timer_if_needed();
         self.bottom_pane.pre_draw_tick();
         self.flush_realtime_transcript_history();
-        self.refresh_realtime_microphone_level();
-        if let Some(pet) = self.ambient_pet.as_ref() {
-            pet.schedule_next_frame();
+        if self.frame_requester.mode() == crate::tui::PresentationMode::Normal {
+            self.refresh_realtime_microphone_level();
+            if let Some(pet) = self.ambient_pet.as_ref() {
+                pet.schedule_next_frame();
+            }
+            self.refresh_goal_status_indicator_for_time_tick();
         }
-        self.refresh_goal_status_indicator_for_time_tick();
-        if self.terminal_title_shows_action_required() != self.last_terminal_title_requires_action {
+        if self.frame_requester.mode() != crate::tui::PresentationMode::Frozen
+            && self.terminal_title_shows_action_required()
+                != self.last_terminal_title_requires_action
+        {
             self.refresh_terminal_title();
         }
-        if self.should_animate_terminal_title_spinner()
-            || self.should_animate_terminal_title_action_required()
+        if self.frame_requester.mode() == crate::tui::PresentationMode::Normal
+            && (self.should_animate_terminal_title_spinner()
+                || self.should_animate_terminal_title_action_required())
         {
             self.refresh_terminal_title();
         }

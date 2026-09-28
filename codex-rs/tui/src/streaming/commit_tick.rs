@@ -33,6 +33,8 @@ pub(crate) enum CommitTickScope {
     AnyMode,
     /// Run model transitions and policy updates, but commit lines only in `CatchUp`.
     CatchUpOnly,
+    /// Drain the entire queue without display pacing while presentation is unattended.
+    Unpaced,
 }
 
 /// Describes what a single commit tick produced.
@@ -84,7 +86,11 @@ pub(crate) fn run_commit_tick(
     }
 
     apply_commit_tick_plan(
-        decision.drain_plan,
+        if scope == CommitTickScope::Unpaced {
+            DrainPlan::Batch(snapshot.queued_lines.max(1))
+        } else {
+            decision.drain_plan
+        },
         stream_controller,
         plan_stream_controller,
     )

@@ -82,8 +82,11 @@ impl App {
     ) -> Result<Rect> {
         self.chat_widget.sync_warnings(&self.transcript_cells);
         let motion = MotionMode::from_animations_enabled(
-            self.local_settings.tui.animations && self.local_settings.tui.effects.shimmer,
+            self.local_settings.tui.animations
+                && self.local_settings.tui.effects.shimmer
+                && tui.presentation_mode() == crate::tui::PresentationMode::Normal,
         );
+        let presentation_animated = tui.presentation_mode() == crate::tui::PresentationMode::Normal;
         let composer = self.first_screen_composer();
         let latest_navigation = if self.enter_returns_to_latest() {
             "enter/esc latest"
@@ -245,7 +248,9 @@ impl App {
                     },
                     frame.buffer,
                     composer,
-                    MotionMode::from_animations_enabled(self.local_settings.tui.animations),
+                    MotionMode::from_animations_enabled(
+                        self.local_settings.tui.animations && presentation_animated,
+                    ),
                 );
             bottom.render(bottom_area, frame.buffer);
             if let (Some(tip), Some(area)) = (completion_tip, completion_tip_area) {

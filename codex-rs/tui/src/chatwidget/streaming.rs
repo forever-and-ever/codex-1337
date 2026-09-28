@@ -244,7 +244,7 @@ impl ChatWidget {
         }
         if changed {
             self.app_event_tx.send(AppEvent::StartCommitAnimation);
-            self.run_catch_up_commit_tick();
+            self.run_presentation_commit_tick();
         }
     }
 
@@ -473,6 +473,18 @@ impl ChatWidget {
         self.run_commit_tick_with_scope(CommitTickScope::CatchUpOnly);
     }
 
+    pub(crate) fn drain_unpaced_commit_tick(&mut self) {
+        self.run_commit_tick_with_scope(CommitTickScope::Unpaced);
+    }
+
+    fn run_presentation_commit_tick(&mut self) {
+        if self.frame_requester.mode() == crate::tui::PresentationMode::Normal {
+            self.run_catch_up_commit_tick();
+        } else {
+            self.drain_unpaced_commit_tick();
+        }
+    }
+
     /// Runs a commit tick for the current stream queue snapshot.
     ///
     /// `scope` controls whether this call may commit in smooth mode or only when catch-up
@@ -496,7 +508,7 @@ impl ChatWidget {
             self.sync_active_stream_tail();
         }
 
-        if (scope == CommitTickScope::AnyMode || outcome.has_controller) && outcome.all_idle {
+        if (scope != CommitTickScope::CatchUpOnly || outcome.has_controller) && outcome.all_idle {
             self.maybe_restore_status_indicator_after_stream_idle();
             self.app_event_tx.send(AppEvent::StopCommitAnimation);
         }
@@ -584,7 +596,7 @@ impl ChatWidget {
         }
         if changed {
             self.app_event_tx.send(AppEvent::StartCommitAnimation);
-            self.run_catch_up_commit_tick();
+            self.run_presentation_commit_tick();
         }
     }
 

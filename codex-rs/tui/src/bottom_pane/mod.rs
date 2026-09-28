@@ -413,7 +413,9 @@ impl BottomPane {
     /// visible frame can play a one-shot Max/Ultra effect.
     pub(crate) fn set_active_reasoning_effort(&mut self, effort: Option<&ReasoningEffort>) {
         let animations_enabled = effort_ignition::effort_animation_enabled(
-            self.animations_enabled && self.effects.effort,
+            self.animations_enabled
+                && self.effects.effort
+                && self.frame_requester.mode() == crate::tui::PresentationMode::Normal,
             effective_stdout_color_level(),
         );
         if self
@@ -755,7 +757,7 @@ impl BottomPane {
         if self.has_pending_approval()
             && let Some(delay) = self.approval_prompt_delay_remaining(now)
         {
-            self.request_redraw_in(delay);
+            self.frame_requester.schedule_maintenance_in(delay);
         }
     }
 
@@ -764,7 +766,7 @@ impl BottomPane {
             return;
         }
         if let Some(delay) = self.approval_prompt_delay_remaining(now) {
-            self.request_redraw_in(delay);
+            self.frame_requester.schedule_maintenance_in(delay);
             return;
         }
 
@@ -882,12 +884,14 @@ impl BottomPane {
                 if let Some(next_view) = self.view_stack.last()
                     && next_view.is_in_paste_burst()
                 {
-                    self.request_redraw_in(ChatComposer::recommended_paste_flush_delay());
+                    self.frame_requester
+                        .schedule_maintenance_in(ChatComposer::recommended_paste_flush_delay());
                 }
             } else if view_complete {
                 self.pop_active_view_with_completion(completion);
             } else if view_in_paste_burst {
-                self.request_redraw_in(ChatComposer::recommended_paste_flush_delay());
+                self.frame_requester
+                    .schedule_maintenance_in(ChatComposer::recommended_paste_flush_delay());
             }
             self.request_redraw();
             InputResult::None
@@ -915,7 +919,8 @@ impl BottomPane {
                 self.request_redraw();
             }
             if self.composer.is_in_paste_burst() {
-                self.request_redraw_in(ChatComposer::recommended_paste_flush_delay());
+                self.frame_requester
+                    .schedule_maintenance_in(ChatComposer::recommended_paste_flush_delay());
             }
             input_result
         }
@@ -1055,16 +1060,18 @@ impl BottomPane {
     fn schedule_active_view_frame(&self) {
         if let Some(questions) = &self.questions {
             if let Some(delay) = questions.next_frame_delay() {
-                self.request_redraw_in(delay);
+                self.frame_requester.schedule_maintenance_in(delay);
             }
             if questions.is_in_paste_burst() {
-                self.request_redraw_in(ChatComposer::recommended_paste_flush_delay());
+                self.frame_requester
+                    .schedule_maintenance_in(ChatComposer::recommended_paste_flush_delay());
             }
         }
-        if let Some(delay) = self.active_view().map_or_else(
-            || self.composer.footer_flash_delay(),
-            BottomPaneView::next_frame_delay,
-        ) {
+        if let Some(view) = self.active_view() {
+            if let Some(delay) = view.next_frame_delay() {
+                self.frame_requester.schedule_maintenance_in(delay);
+            }
+        } else if let Some(delay) = self.composer.footer_flash_delay() {
             self.request_redraw_in(delay);
         }
     }
@@ -2221,7 +2228,9 @@ impl BottomPane {
                     /*flex*/ 0,
                     RenderableItem::Owned(Box::new(hook_status::HookStatus {
                         message,
-                        animations_enabled: self.animations_enabled && self.effects.shimmer,
+                        animations_enabled: self.animations_enabled
+                            && self.effects.shimmer
+                            && self.frame_requester.mode() == crate::tui::PresentationMode::Normal,
                     })),
                 );
             }

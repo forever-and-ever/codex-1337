@@ -576,7 +576,9 @@ impl App {
                             ));
                         }
                     }
-                    if from_locked_thread {
+                    if from_locked_thread
+                        && tui.presentation_mode() != crate::tui::PresentationMode::Frozen
+                    {
                         // Repeated locked-view shortcuts must not act on the resulting view.
                         if let Err(err) = tui.discard_pending_input_before_interactive_screen() {
                             tracing::warn!(%err, "failed to discard input after forking");
@@ -889,14 +891,18 @@ impl App {
                 self.insert_pending_usage_output_after_stream_shutdown(tui);
             }
             AppEvent::StartCommitAnimation => {
-                self.commit_animation.get_or_insert_with(|| {
+                if tui.presentation_mode() != crate::tui::PresentationMode::Normal {
+                    self.chat_widget.drain_unpaced_commit_tick();
+                } else {
+                    self.commit_animation.get_or_insert_with(|| {
                     let mut interval = tokio::time::interval_at(
                         tokio::time::Instant::now() + COMMIT_ANIMATION_TICK,
                         COMMIT_ANIMATION_TICK,
                     );
                     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
                     interval
-                });
+                    });
+                }
             }
             AppEvent::StopCommitAnimation => {
                 self.commit_animation = None;

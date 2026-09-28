@@ -227,10 +227,10 @@ impl StatusIndicator<'_> {
             |started_at| now.saturating_duration_since(started_at),
         );
         let pretty_elapsed = fmt_elapsed_compact(elapsed_duration.as_secs());
-        let progress =
-            MotionMode::from_animations_enabled(row.animations_enabled && row.effects.progress);
-        let shimmer =
-            MotionMode::from_animations_enabled(row.animations_enabled && row.effects.shimmer);
+        let animated = row.animations_enabled
+            && row.frame_requester.mode() == crate::tui::PresentationMode::Normal;
+        let progress = MotionMode::from_animations_enabled(animated && row.effects.progress);
+        let shimmer = MotionMode::from_animations_enabled(animated && row.effects.shimmer);
 
         let mut spans = Vec::with_capacity(5);
         if let Some(indicator) = activity_indicator(
@@ -299,7 +299,9 @@ impl Renderable for StatusIndicator<'_> {
         if area.is_empty() {
             return;
         }
-        if self.row.animations_enabled || self.timer.display_started_at.is_some() {
+        if self.row.frame_requester.mode() == crate::tui::PresentationMode::Normal
+            && (self.row.animations_enabled || self.timer.display_started_at.is_some())
+        {
             let interval_ms = if self.row.animations_enabled
                 && (self.row.effects.progress || self.row.effects.shimmer)
             {

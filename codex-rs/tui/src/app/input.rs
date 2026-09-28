@@ -143,7 +143,7 @@ impl App {
                     tui.terminal.last_known_screen_size.width,
                 ));
                 tui.frame_requester()
-                    .schedule_frame_in(crate::keymap::KEY_CHORD_TIMEOUT);
+                    .schedule_maintenance_in(crate::keymap::KEY_CHORD_TIMEOUT);
                 None
             }
             crate::keymap::KeyChordMatch::Completed(dispatch_event) => {

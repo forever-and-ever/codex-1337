@@ -391,6 +391,15 @@ impl App {
         // Drop queued history insertions so stale transcript lines cannot be flushed after /clear.
         tui.clear_pending_history_lines();
 
+        if tui.presentation_mode() == crate::tui::PresentationMode::Frozen {
+            tui.defer_thread_switch_clear();
+            self.has_emitted_history_lines = false;
+            if redraw_header {
+                self.queue_clear_ui_header(tui);
+            }
+            return Ok(());
+        }
+
         if tui.is_owned_screen() || is_alt_screen_active {
             tui.terminal.clear_visible_screen()?;
         } else {

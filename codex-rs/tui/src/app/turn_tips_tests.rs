@@ -103,6 +103,7 @@ async fn working_deadline_rearms_and_hidden_rows_do_not_spend_exposure() {
         let remaining = requests
             .try_recv()
             .unwrap()
+            .at
             .saturating_duration_since(Instant::now());
         assert!(remaining <= WORKING_DELAY - Duration::from_secs(elapsed));
         assert!(remaining > WORKING_DELAY - Duration::from_secs(elapsed + 1));

@@ -144,10 +144,10 @@ async fn persisted_default_loads_and_renders_without_animation() -> anyhow::Resu
             .with_timer(&timer)
             .render(frame.area(), frame.buffer_mut())
     })?;
-    assert_eq!(
+    assert!(matches!(
         frames.try_recv(),
         Err(tokio::sync::mpsc::error::TryRecvError::Empty)
-    );
+    ));
     insta::assert_snapshot!(terminal.backend());
     Ok(())
 }

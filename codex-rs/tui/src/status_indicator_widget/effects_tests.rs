@@ -55,3 +55,43 @@ fn shimmer_and_progress_are_independent_and_obey_master_switch() {
         },
     );
 }
+
+#[test]
+fn reduced_presentation_keeps_status_readable_without_activity_animation() {
+    with_test_default_colors(
+        DefaultColors {
+            fg: (240, 240, 240),
+            bg: (16, 16, 16),
+        },
+        || {
+            let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<AppEvent>();
+            let frames = FrameRequester::test_dummy();
+            frames.set_mode(crate::tui::PresentationMode::Reduced);
+            let mut row = StatusIndicatorWidget::new(
+                AppEventSender::new(tx),
+                frames,
+                /*animations_enabled*/ true,
+                codex_config::types::TuiEffects {
+                    shimmer: true,
+                    progress: true,
+                    ..Default::default()
+                },
+            );
+            let start = Instant::now() + Duration::from_secs(/*secs*/ 3600);
+            row.header_started_at = start;
+            let timer = StatusTimer {
+                last_resume_at: start,
+                ..Default::default()
+            };
+            insta::assert_snapshot!(
+                "status_indicator_reduced_presentation",
+                StatusIndicator {
+                    row: &row,
+                    timer: &timer
+                }
+                .lines(/*width*/ 80)[0]
+                    .to_string()
+            );
+        },
+    );
+}

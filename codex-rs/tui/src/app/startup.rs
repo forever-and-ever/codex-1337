@@ -113,6 +113,9 @@ impl App {
             return Ok(());
         }
         self.chat_widget.pre_draw_tick();
+        if tui.presentation_mode() == crate::tui::PresentationMode::Frozen {
+            return Ok(());
+        }
         self.render_chat_widget_frame(tui, tui.terminal.last_known_screen_size)?;
         if self.chat_widget.has_active_modal() && self.startup_protected_input_boundary {
             tui.discard_pending_input_before_interactive_screen()?;
@@ -981,6 +984,8 @@ See the Codex keymap documentation for supported actions and examples."
         }
         let tui_events = tui.event_stream();
         tokio::pin!(tui_events);
+        #[cfg(target_os = "linux")]
+        let mut desktop_attention = tui.desktop_attention_receiver();
         tracing::info!(
             duration_ms = %(startup_elapsed_before_app + startup_started_at.elapsed()).as_millis(),
             bootstrap_ms = %bootstrap_ms,
@@ -1142,6 +1147,36 @@ See the Codex keymap documentation for supported actions and examples."
                     .rate_limit_refresh_interval()
                     .and_then(|interval| app.rate_limit_refresh_state.poll_deadline(interval));
                 let control = select! {
+                    result = async {
+                        #[cfg(target_os = "linux")]
+                        {
+                        match desktop_attention.as_mut() {
+                            Some(receiver) => receiver.changed().await,
+                            None => std::future::pending().await,
+                        }
+                        }
+                        #[cfg(not(target_os = "linux"))]
+                        std::future::pending::<std::result::Result<(), tokio::sync::watch::error::RecvError>>().await
+                    } => {
+                        #[cfg(target_os = "linux")]
+                        {
+                        let previous = tui.presentation_mode();
+                        if result.is_ok() && let Some(receiver) = desktop_attention.as_mut() {
+                            let state = *receiver.borrow_and_update();
+                            tui.set_desktop_attention(state.idle, state.visible);
+                        } else {
+                            desktop_attention = None;
+                            tui.set_desktop_attention(/*idle*/ false, /*visible*/ None);
+                        }
+                        app.apply_presentation_transition(tui, previous)?;
+                        AppRunControl::Continue
+                        }
+                        #[cfg(not(target_os = "linux"))]
+                        {
+                            let _ = result;
+                            AppRunControl::Continue
+                        }
+                    }
                     Some(event) = app_event_rx.recv() => {
                         let is_initial_session_header = matches!(
                             &event,
@@ -1271,7 +1306,7 @@ See the Codex keymap documentation for supported actions and examples."
                             }
                             None => std::future::pending().await,
                         }
-                    } => {
+                    }, if tui.presentation_mode() == crate::tui::PresentationMode::Normal => {
                         app.chat_widget.refresh_goal_status_indicator_for_time_tick();
                         app.chat_widget.refresh_thread_title_progress_for_time_tick();
                         app.chat_widget.refresh_terminal_title();
@@ -1284,7 +1319,8 @@ See the Codex keymap documentation for supported actions and examples."
                             }
                             None => std::future::pending().await,
                         }
-                    }, if !has_pending_app_events => {
+                    }, if !has_pending_app_events
+                        && tui.presentation_mode() == crate::tui::PresentationMode::Normal => {
                         crate::session_log::log_commit_tick();
                         app.chat_widget.on_commit_tick();
                         AppRunControl::Continue

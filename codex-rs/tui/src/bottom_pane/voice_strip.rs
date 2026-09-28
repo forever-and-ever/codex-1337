@@ -90,8 +90,11 @@ impl Renderable for VoiceStrip {
             return;
         }
         let connecting = self.state.phase == VoiceStripPhase::Connecting;
-        let mode =
-            MotionMode::from_animations_enabled(self.state.animations && self.state.progress);
+        let mode = MotionMode::from_animations_enabled(
+            self.state.animations
+                && self.state.progress
+                && self.frame_requester.mode() == crate::tui::PresentationMode::Normal,
+        );
         if connecting && mode == MotionMode::Animated {
             self.frame_requester
                 .schedule_frame_in(Duration::from_millis(100));

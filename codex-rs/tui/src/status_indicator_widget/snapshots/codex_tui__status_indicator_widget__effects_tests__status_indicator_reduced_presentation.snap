@@ -1,0 +1,5 @@
+---
+source: tui/src/status_indicator_widget/effects_tests.rs
+expression: "StatusIndicator { row: &row, timer: &timer }.lines(80)[0].to_string()"
+---
+Working (0s • ctrl+c to interrupt)

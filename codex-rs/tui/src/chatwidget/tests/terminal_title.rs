@@ -41,10 +41,10 @@ async fn goal_clock_refresh_redraws_only_when_elapsed_label_changes() {
 
     chat.refresh_goal_status_indicator_for_time_tick();
     chat.refresh_terminal_title();
-    assert_eq!(
+    assert!(matches!(
         draw_rx.try_recv(),
         Err(tokio::sync::mpsc::error::TryRecvError::Empty)
-    );
+    ));
     let labels = [
         initial_indicator.as_ref(),
         chat.current_goal_status_indicator.as_ref(),
@@ -75,10 +75,10 @@ async fn terminal_title_shows_action_required_while_exec_approval_is_pending() {
         (before_refresh + spinner_interval..=Instant::now() + spinner_interval)
             .contains(&chat.terminal_title_next_refresh.expect("spinner deadline"))
     );
-    assert_eq!(
+    assert!(matches!(
         draw_rx.try_recv(),
         Err(tokio::sync::mpsc::error::TryRecvError::Empty)
-    );
+    ));
 
     let request = ExecApprovalRequestEvent {
         kind: Default::default(),
@@ -352,6 +352,25 @@ async fn thread_title_progress_animates_when_main_turn_is_idle() {
     chat.set_thread_title_generation_pending(/*pending*/ false);
     assert_eq!(chat.last_terminal_title, None);
     assert!(chat.terminal_title_next_refresh.is_none());
+}
+
+#[tokio::test]
+async fn reduced_title_keeps_progress_glyph_static_across_state_updates() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    let frames = FrameRequester::test_dummy();
+    frames.set_mode(crate::tui::PresentationMode::Reduced);
+    chat.frame_requester = frames;
+    chat.local_settings.tui.terminal_title = Some(vec!["spinner".into(), "status".into()]);
+    chat.bottom_pane.set_task_running(/*running*/ true);
+
+    let mut titles = Vec::new();
+    for age in [0, 150] {
+        chat.terminal_title_animation_origin = Instant::now() - Duration::from_millis(age);
+        chat.refresh_terminal_title();
+        titles.push(chat.last_terminal_title.clone().expect("present title"));
+        assert!(chat.terminal_title_next_refresh.is_none());
+    }
+    insta::assert_snapshot!(titles.join("\n"));
 }
 
 #[tokio::test]

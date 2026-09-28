@@ -250,7 +250,9 @@ impl ChatWidget {
     /// Animated titles record their next refresh for the foreground loop, independently
     /// of full TUI redraws.
     fn refresh_terminal_title_from_selections(&mut self, selections: &StatusSurfaceSelections) {
-        if self.app_event_tx.voice_only.load(Ordering::Relaxed) {
+        if self.app_event_tx.voice_only.load(Ordering::Relaxed)
+            || self.frame_requester.mode() == crate::tui::PresentationMode::Frozen
+        {
             return;
         }
         self.last_terminal_title_requires_action =
@@ -258,6 +260,7 @@ impl ChatWidget {
         let now = Instant::now();
         self.terminal_title_next_refresh = self
             .terminal_title_animation_interval_with_selections(selections)
+            .filter(|_| self.frame_requester.mode() == crate::tui::PresentationMode::Normal)
             .map(|interval| now + interval);
         if selections.terminal_title_items.is_empty() {
             if let Err(err) = self.clear_managed_terminal_title() {
@@ -371,7 +374,9 @@ impl ChatWidget {
     }
 
     fn action_required_terminal_title_prefix_at(&self, now: Instant) -> &'static str {
-        if !(self.local_settings.tui.animations && self.local_settings.tui.effects.title) {
+        if self.frame_requester.mode() != crate::tui::PresentationMode::Normal
+            || !(self.local_settings.tui.animations && self.local_settings.tui.effects.title)
+        {
             return TERMINAL_TITLE_ACTION_REQUIRED_PREFIX;
         }
 
@@ -697,8 +702,9 @@ impl ChatWidget {
                 .0
                 .contains(&StatusLineItem::WorkspaceHeadline)
         {
-            self.frame_requester
-                .schedule_frame_in(crate::workspace_messages::WORKSPACE_HEADLINE_REFRESH_INTERVAL);
+            self.frame_requester.schedule_maintenance_in(
+                crate::workspace_messages::WORKSPACE_HEADLINE_REFRESH_INTERVAL,
+            );
         }
         self.refresh_status_line();
         true
@@ -1027,6 +1033,9 @@ impl ChatWidget {
     }
 
     pub(super) fn terminal_title_spinner_frame_at(&self, now: Instant) -> &'static str {
+        if self.frame_requester.mode() != crate::tui::PresentationMode::Normal {
+            return TERMINAL_TITLE_SPINNER_FRAMES[0];
+        }
         let elapsed = now.saturating_duration_since(self.terminal_title_animation_origin);
         let frame_index =
             (elapsed.as_millis() / TERMINAL_TITLE_SPINNER_INTERVAL.as_millis()) as usize;

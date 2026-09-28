@@ -171,7 +171,7 @@ impl App {
                 let remaining =
                     WORKING_DELAY.saturating_sub(now.saturating_duration_since(current.started_at));
                 if !remaining.is_zero() {
-                    frame_requester.schedule_frame_in(remaining);
+                    frame_requester.schedule_content_in(remaining);
                     return None;
                 }
                 TipSurface::Working

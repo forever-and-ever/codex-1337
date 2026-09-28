@@ -692,15 +692,15 @@ async fn early_draw_rearms_thread_usage_retry_after_immediate_redraw() {
         .retry_due_at
         .expect("temporary failures schedule a retry");
     let scheduled = std::iter::from_fn(|| frame_rx.try_recv().ok()).collect::<Vec<_>>();
-    assert!(scheduled.iter().any(|deadline| *deadline >= retry_due_at));
-    assert!(scheduled.iter().any(|deadline| *deadline < retry_due_at));
+    assert!(scheduled.iter().any(|deadline| deadline.at >= retry_due_at));
+    assert!(scheduled.iter().any(|deadline| deadline.at < retry_due_at));
 
     chat.pre_draw_tick();
 
     let rearmed = std::iter::from_fn(|| frame_rx.try_recv().ok())
-        .find(|deadline| *deadline >= retry_due_at)
+        .find(|deadline| deadline.at >= retry_due_at)
         .expect("the immediate redraw must re-arm the pending billing retry");
-    assert!(rearmed.duration_since(retry_due_at) < Duration::from_secs(/*secs*/ 1));
+    assert!(rearmed.at.duration_since(retry_due_at) < Duration::from_secs(/*secs*/ 1));
 }
 
 #[tokio::test]
@@ -809,20 +809,20 @@ async fn early_draw_rearms_thread_usage_settlement_after_immediate_redraw() {
     assert!(
         scheduled
             .iter()
-            .any(|deadline| *deadline >= settlement_due_at)
+            .any(|deadline| deadline.at >= settlement_due_at)
     );
     assert!(
         scheduled
             .iter()
-            .any(|deadline| *deadline < settlement_due_at)
+            .any(|deadline| deadline.at < settlement_due_at)
     );
 
     chat.pre_draw_tick();
 
     let rearmed = std::iter::from_fn(|| frame_rx.try_recv().ok())
-        .find(|deadline| *deadline >= settlement_due_at)
+        .find(|deadline| deadline.at >= settlement_due_at)
         .expect("the immediate redraw must re-arm the pending billing settlement");
-    assert!(rearmed.duration_since(settlement_due_at) < Duration::from_secs(/*secs*/ 1));
+    assert!(rearmed.at.duration_since(settlement_due_at) < Duration::from_secs(/*secs*/ 1));
 }
 
 #[tokio::test]

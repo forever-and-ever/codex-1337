@@ -403,7 +403,7 @@ impl App {
             if self.schedule_resize_reflow(target_width) {
                 frame_requester.schedule_frame();
             } else {
-                frame_requester.schedule_frame_in(TRANSCRIPT_REFLOW_DEBOUNCE);
+                frame_requester.schedule_maintenance_in(TRANSCRIPT_REFLOW_DEBOUNCE);
             }
         }
         if size != last_known_screen_size {
@@ -431,6 +431,11 @@ impl App {
         tui: &mut tui::Tui,
         size: ratatui::layout::Size,
     ) -> Result<()> {
+        if tui.presentation_mode() == crate::tui::PresentationMode::Frozen {
+            self.transcript_reflow.schedule_immediate();
+            self.chat_widget.on_terminal_resize(size.width);
+            return Ok(());
+        }
         self.flush_native_history(tui);
         if tui.is_owned_screen() {
             let width = self.transcript_reflow.note_width(size.width);
@@ -482,7 +487,8 @@ impl App {
             // delayed draws to the earliest requested instant. If an early draw arrives before the
             // latest quiet-period deadline, re-arm the draw so the pending reflow cannot get stuck
             // until the next keypress.
-            tui.frame_requester().schedule_frame_in(deadline - now);
+            tui.frame_requester()
+                .schedule_maintenance_in(deadline - now);
             return Ok(());
         }
         if self.overlay.is_some() {

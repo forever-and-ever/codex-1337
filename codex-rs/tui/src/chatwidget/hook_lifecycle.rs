@@ -113,6 +113,7 @@ impl ChatWidget {
         let now = Instant::now();
         if cell.advance_time(now) {
             self.bump_active_cell_revision();
+            self.frame_requester.schedule_frame();
         }
         self.finish_active_hook_cell_if_idle();
         self.sync_hook_status_message();
@@ -146,6 +147,6 @@ impl ChatWidget {
             return;
         };
         let delay = deadline.saturating_duration_since(Instant::now());
-        self.frame_requester.schedule_frame_in(delay);
+        self.frame_requester.schedule_maintenance_in(delay);
     }
 }

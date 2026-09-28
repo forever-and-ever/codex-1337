@@ -124,7 +124,7 @@ impl ChatWidget {
             .min()
             {
                 self.frame_requester
-                    .schedule_frame_in(next_due_at.saturating_duration_since(now));
+                    .schedule_maintenance_in(next_due_at.saturating_duration_since(now));
             }
             return;
         }
@@ -414,7 +414,7 @@ impl ChatWidget {
         };
         self.thread_usage.settlement_attempts += 1;
         self.thread_usage.settlement_refresh_due_at = Some(Instant::now() + delay);
-        self.frame_requester.schedule_frame_in(delay);
+        self.frame_requester.schedule_maintenance_in(delay);
     }
 
     fn schedule_thread_usage_retry(&mut self) {
@@ -430,7 +430,7 @@ impl ChatWidget {
         };
         self.thread_usage.retry_attempts += 1;
         self.thread_usage.retry_due_at = Some(Instant::now() + delay);
-        self.frame_requester.schedule_frame_in(delay);
+        self.frame_requester.schedule_maintenance_in(delay);
     }
 }
 

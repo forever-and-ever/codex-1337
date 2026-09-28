@@ -62,9 +62,14 @@ use codex_config::types::NotificationCondition;
 use codex_config::types::NotificationMethod;
 
 mod alternate_screen;
+#[cfg(target_os = "linux")]
+#[cfg_attr(test, allow(dead_code))]
+// Unit tests inject attention; they never contact the live desktop.
+mod desktop_attention;
 mod event_stream;
 mod frame_rate_limiter;
 mod frame_requester;
+pub(crate) use frame_requester::PresentationMode;
 mod history_tail;
 mod input_boundary;
 #[cfg(unix)]
@@ -76,6 +81,7 @@ mod owned_screen_tests;
 #[cfg(all(test, unix))]
 #[path = "tui_panic_tests.rs"]
 mod panic_tests;
+mod presentation;
 mod screen_size;
 mod scrollback;
 mod selection_clipboard;
@@ -633,6 +639,11 @@ impl OverlayInput {
 
 pub struct Tui {
     frame_requester: FrameRequester,
+    presentation_over_ssh: bool,
+    desktop_idle: bool,
+    window_visible: Option<bool>,
+    #[cfg(target_os = "linux")]
+    desktop_attention: Option<tokio::sync::watch::Receiver<desktop_attention::DesktopAttention>>,
     draw_tx: broadcast::Sender<()>,
     event_broker: Arc<EventBroker>,
     pub(crate) terminal: Terminal,
@@ -694,6 +705,10 @@ impl Tui {
     ) -> Self {
         let (draw_tx, _) = broadcast::channel(1);
         let frame_requester = FrameRequester::new(draw_tx.clone());
+        let presentation_over_ssh = crate::clipboard_copy::is_ssh_session();
+        if presentation_over_ssh {
+            frame_requester.set_mode(PresentationMode::Reduced);
+        }
 
         // Cache this to avoid contention with the event reader.
         supports_color::on_cached(supports_color::Stream::Stdout);
@@ -709,6 +724,13 @@ impl Tui {
 
         Self {
             frame_requester,
+            presentation_over_ssh,
+            desktop_idle: false,
+            window_visible: None,
+            #[cfg(all(target_os = "linux", not(test)))]
+            desktop_attention: (!presentation_over_ssh).then(desktop_attention::start),
+            #[cfg(all(target_os = "linux", test))]
+            desktop_attention: None,
             draw_tx,
             event_broker: Arc::new(event_broker),
             terminal,
@@ -1113,6 +1135,11 @@ impl Tui {
     }
 
     pub(crate) fn clear_for_thread_switch(&mut self) -> Result<()> {
+        if self.presentation_mode() == PresentationMode::Frozen {
+            self.clear_thread_switch_on_draw = true;
+            self.terminal.invalidate_viewport();
+            return Ok(());
+        }
         self.clear_thread_switch_on_draw = false;
         if self.is_alt_screen_active() {
             self.leave_alt_screen()?;
@@ -1214,6 +1241,10 @@ impl Tui {
         height: u16,
         draw_fn: impl FnOnce(&mut custom_terminal::Frame),
     ) -> Result<()> {
+        if self.presentation_mode() == PresentationMode::Frozen {
+            return Ok(());
+        }
+        self.frame_requester.take_dirty();
         let screen_size = self.take_event_screen_size()?;
         // If we are resuming from ^Z, we need to prepare the resume action now so we can apply it
         // in the synchronized update.
@@ -1307,6 +1338,9 @@ impl Tui {
         &mut self,
         request: Option<crate::pets::AmbientPetDraw>,
     ) -> std::result::Result<(), crate::pets::PetImageRenderError> {
+        if self.presentation_mode() == PresentationMode::Frozen {
+            return Ok(());
+        }
         if let Err(err) = ensure_virtual_terminal_processing() {
             return Err(crate::pets::PetImageRenderError::Terminal(err));
         }
@@ -1326,6 +1360,9 @@ impl Tui {
         &mut self,
         request: Option<crate::pets::AmbientPetDraw>,
     ) -> std::result::Result<(), crate::pets::PetImageRenderError> {
+        if self.presentation_mode() == PresentationMode::Frozen {
+            return Ok(());
+        }
         if let Err(err) = ensure_virtual_terminal_processing() {
             return Err(crate::pets::PetImageRenderError::Terminal(err));
         }
@@ -1370,6 +1407,10 @@ impl Tui {
         screen_size: Size,
         draw_fn: impl FnOnce(&mut custom_terminal::Frame),
     ) -> Result<()> {
+        if self.presentation_mode() == PresentationMode::Frozen {
+            return Ok(());
+        }
+        self.frame_requester.take_dirty();
         // If we are resuming from ^Z, we need to prepare the resume action now so we can apply it
         // in the synchronized update.
         #[cfg(unix)]

@@ -9808,6 +9808,35 @@ async fn start_config_write_test_app_server(app: &App) -> Result<AppServerSessio
     Box::pin(crate::start_embedded_app_server_for_picker(&app.config)).await
 }
 
+#[tokio::test]
+async fn observer_freeze_retires_presentation_clocks_without_suspending_input() -> Result<()> {
+    let mut app = make_test_app().await;
+    let mut tui = crate::tui::test_support::make_test_tui()?;
+    assert_eq!(tui.presentation_mode(), tui::PresentationMode::Normal);
+    app.commit_animation = Some(tokio::time::interval(Duration::from_millis(
+        /*millis*/ 8,
+    )));
+    app.chat_widget.terminal_title_next_refresh = Some(Instant::now() + Duration::from_secs(1));
+
+    let previous = tui.presentation_mode();
+    tui.set_desktop_attention(/*idle*/ true, /*visible*/ None);
+    app.apply_presentation_transition(&mut tui, previous)?;
+    assert_eq!(
+        (
+            tui.presentation_mode(),
+            app.commit_animation.is_some(),
+            app.chat_widget.terminal_title_next_refresh,
+        ),
+        (tui::PresentationMode::Frozen, false, None),
+    );
+
+    let previous = tui.presentation_mode();
+    tui.note_terminal_input();
+    app.apply_presentation_transition(&mut tui, previous)?;
+    assert_eq!(tui.presentation_mode(), tui::PresentationMode::Normal);
+    Ok(())
+}
+
 #[path = "tests/active_reconnect_tests.rs"]
 mod active_reconnect;
 

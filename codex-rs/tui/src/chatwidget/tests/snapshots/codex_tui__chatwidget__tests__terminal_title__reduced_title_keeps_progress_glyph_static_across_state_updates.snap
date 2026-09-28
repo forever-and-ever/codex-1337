@@ -1,0 +1,6 @@
+---
+source: tui/src/chatwidget/tests/terminal_title.rs
+expression: "titles.join(\"\\n\")"
+---
+⠋ Working
+⠋ Working

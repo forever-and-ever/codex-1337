@@ -61,7 +61,7 @@ impl CopySetup {
         if let Setup::Pending(deadline) = *setup {
             // Earlier draws consume scheduled frames, so re-arm after every UI poll.
             self.frames
-                .schedule_frame_in(deadline.saturating_duration_since(Instant::now()));
+                .schedule_maintenance_in(deadline.saturating_duration_since(Instant::now()));
         }
         timed_out
     }
@@ -140,7 +140,7 @@ impl ClipboardWorker {
         self.pending = Some((id, setup));
         // Retain the last completion while a newer request runs so a temporarily hidden
         // view can still finish its feedback. Consumers already match request IDs.
-        frames.schedule_frame_in(SETUP_TIMEOUT);
+        frames.schedule_maintenance_in(SETUP_TIMEOUT);
         Ok(CopyStatus::Pending(id))
     }
 
@@ -193,7 +193,7 @@ impl ClipboardWorker {
             expired: false,
         });
         self.read_result = None;
-        frames.schedule_frame_in(SETUP_TIMEOUT);
+        frames.schedule_maintenance_in(SETUP_TIMEOUT);
         Ok(true)
     }
 
@@ -285,7 +285,7 @@ impl ClipboardWorker {
                 }
                 Err(mpsc::TryRecvError::Empty) => {
                     if !read.expired {
-                        read.frames.schedule_frame_in(
+                        read.frames.schedule_maintenance_in(
                             read.deadline.saturating_duration_since(Instant::now()),
                         );
                     }

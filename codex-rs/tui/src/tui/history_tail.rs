@@ -1,5 +1,6 @@
 //! Update visible terminal-history tails without discarding terminal scrollback.
 
+use super::PresentationMode;
 use super::Tui;
 use crate::custom_terminal::Terminal as CustomTerminal;
 use crate::insert_history::HistoryLineWrapPolicy;
@@ -19,6 +20,10 @@ impl Tui {
         replacement: &[HyperlinkLine],
         wrap_policy: HistoryLineWrapPolicy,
     ) -> io::Result<bool> {
+        if self.presentation_mode() == PresentationMode::Frozen {
+            self.frame_requester().schedule_frame();
+            return Ok(false);
+        }
         let screen_size = self.terminal.last_known_screen_size;
         Self::flush_pending_history_lines(
             &mut self.terminal,
