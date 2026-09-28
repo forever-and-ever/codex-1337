@@ -4017,11 +4017,9 @@ async fn reasoning_shortcut_is_ignored_with_model_popup_open() {
 }
 
 #[tokio::test]
-async fn reasoning_up_shortcut_does_not_silently_enter_advanced_effort() {
-    for (model, model_path) in [
-        ("gpt-5.5", "All models → gpt-5.5"),
-        ("codex-auto-test", "codex-auto-test"),
-    ] {
+async fn reasoning_up_shortcuts_reach_max_and_keep_ultra_explicit() {
+    let mut snapshots = Vec::new();
+    for model in ["gpt-5.5", "codex-auto-test"] {
         let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.5")).await;
         chat.thread_id = Some(ThreadId::new());
         let mut preset = get_available_model(&chat, "gpt-5.5");
@@ -4041,32 +4039,43 @@ async fn reasoning_up_shortcut_does_not_silently_enter_advanced_effort() {
         chat.model_catalog = std::sync::Arc::new(ModelCatalog::new(vec![preset]));
         chat.set_model(model);
 
-        for effort in [ReasoningEffortConfig::XHigh, ReasoningEffortConfig::Max] {
-            chat.set_reasoning_effort(Some(effort));
-            chat.handle_key_event(KeyEvent::new(KeyCode::Char('.'), KeyModifiers::ALT));
-
+        for key in [
+            KeyEvent::new(KeyCode::Up, KeyModifiers::SHIFT),
+            KeyEvent::new(KeyCode::Char('.'), KeyModifiers::ALT),
+        ] {
+            chat.set_reasoning_effort(Some(ReasoningEffortConfig::XHigh));
+            chat.handle_key_event(key);
             let events = std::iter::from_fn(|| rx.try_recv().ok()).collect::<Vec<_>>();
-            assert!(events.iter().all(|event| !matches!(
-                event,
-                AppEvent::UpdateReasoningEffort(_) | AppEvent::ApplyAdvancedReasoning { .. }
-            )));
-            let messages = events
-                .into_iter()
-                .filter_map(|event| match event {
-                    AppEvent::InsertHistoryCell(cell) => {
-                        Some(lines_to_single_string(&cell.display_lines(/*width*/ 140)))
-                    }
-                    _ => None,
-                })
-                .collect::<Vec<_>>();
-            assert_eq!(
-                messages,
-                vec![format!(
-                    "• Max and Ultra are available under /model → {model_path} → More reasoning…\n"
-                )]
+            assert_matches!(
+                events.as_slice(),
+                [AppEvent::UpdateReasoningEffort(Some(
+                    ReasoningEffortConfig::Max
+                ))]
             );
         }
+
+        chat.set_reasoning_effort(Some(ReasoningEffortConfig::Max));
+        chat.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::SHIFT));
+        let events = std::iter::from_fn(|| rx.try_recv().ok()).collect::<Vec<_>>();
+        assert!(events.iter().all(|event| !matches!(
+            event,
+            AppEvent::UpdateReasoningEffort(_) | AppEvent::ApplyAdvancedReasoning { .. }
+        )));
+        let messages = events
+            .into_iter()
+            .filter_map(|event| match event {
+                AppEvent::InsertHistoryCell(cell) => {
+                    Some(lines_to_single_string(&cell.display_lines(/*width*/ 140)))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        snapshots.push(format!("{model}: {}", messages.join("").trim_end()));
     }
+    insta::assert_snapshot!(snapshots.join("\n"), @r"
+    gpt-5.5: • Ultra is available under /model → All models → gpt-5.5 → More reasoning…
+    codex-auto-test: • Ultra is available under /model → codex-auto-test → More reasoning…
+    ");
 }
 
 #[tokio::test]
