@@ -78,6 +78,9 @@ impl ChatWidget {
                     .send(AppEvent::ConsolidateProposedPlan(source));
             }
             self.request_pending_usage_output_insertion_after_stream_shutdown();
+            if self.stream_controllers_idle() {
+                self.app_event_tx.send(AppEvent::StopCommitAnimation);
+            }
         }
     }
 
@@ -298,6 +301,9 @@ impl ChatWidget {
             self.status_state.pending_status_indicator_restore = true;
             self.maybe_restore_status_indicator_after_stream_idle();
             self.request_pending_usage_output_insertion_after_stream_shutdown();
+            if self.stream_controllers_idle() {
+                self.app_event_tx.send(AppEvent::StopCommitAnimation);
+            }
         }
     }
 
@@ -490,7 +496,7 @@ impl ChatWidget {
             self.sync_active_stream_tail();
         }
 
-        if outcome.has_controller && outcome.all_idle {
+        if (scope == CommitTickScope::AnyMode || outcome.has_controller) && outcome.all_idle {
             self.maybe_restore_status_indicator_after_stream_idle();
             self.app_event_tx.send(AppEvent::StopCommitAnimation);
         }

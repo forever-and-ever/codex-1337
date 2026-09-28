@@ -1155,6 +1155,37 @@ async fn plan_completion_restores_status_indicator_after_streaming_plan_output()
 }
 
 #[tokio::test]
+async fn finalizing_plan_before_first_commit_tick_stops_stream_interval() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.set_feature_enabled(Feature::CollaborationModes, /*enabled*/ true);
+    let plan_mask = collaboration_modes::mask_for_kind(chat.model_catalog.as_ref(), ModeKind::Plan)
+        .expect("expected plan collaboration mask");
+    chat.set_collaboration_mask(plan_mask);
+    while rx.try_recv().is_ok() {}
+
+    // A plan can finish before its first scheduled 8 ms commit tick. Taking its controller
+    // must stop the already-enqueued interval; otherwise a controller-free tick ran forever.
+    chat.on_plan_delta("- Step 1\n".to_string());
+    let pending = std::iter::from_fn(|| rx.try_recv().ok()).collect::<Vec<_>>();
+    assert!(pending.iter().any(|event| matches!(event, AppEvent::StartCommitAnimation)));
+    assert!(
+        !pending.iter().any(|event| matches!(event, AppEvent::StopCommitAnimation)),
+        "the catch-up probe must not stop a smooth stream: {pending:?}"
+    );
+    chat.on_plan_item_completed("- Step 1\n".to_string());
+    let events = std::iter::from_fn(|| rx.try_recv().ok()).collect::<Vec<_>>();
+    assert!(
+        events.iter().any(|event| matches!(event, AppEvent::StopCommitAnimation)),
+        "plan completion stopped the interval: {events:?}"
+    );
+
+    // A tick already queued before finalization must also stop, not reinstate the orphan.
+    chat.run_commit_tick();
+    assert!(std::iter::from_fn(|| rx.try_recv().ok())
+        .any(|event| matches!(event, AppEvent::StopCommitAnimation)));
+}
+
+#[tokio::test]
 async fn unterminated_plan_delta_does_not_redraw_unchanged_stream_tail() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.set_feature_enabled(Feature::CollaborationModes, /*enabled*/ true);
