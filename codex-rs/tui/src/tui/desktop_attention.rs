@@ -1,15 +1,318 @@
-//! Optional local desktop observation. Failure to observe must leave painting usable.
+//! Optional local X11/i3 attention signals. Observer failure always restores a usable UI.
 
+use std::collections::HashMap;
+use std::os::fd::AsFd;
+use std::process::Stdio;
+use std::time::Duration;
+
+use anyhow::Context;
+use anyhow::Result;
+use futures::FutureExt;
+use serde_json::Value;
+use tokio::io::AsyncBufReadExt;
+use tokio::io::AsyncReadExt;
+use tokio::io::BufReader;
+use tokio::process::Command;
 use tokio::sync::watch;
+use x11rb::connection::Connection;
+use x11rb::protocol::Event;
+use x11rb::protocol::sync::ConnectionExt as _;
+use x11rb::protocol::sync::CreateAlarmAux;
+use x11rb::protocol::sync::Int64;
+use x11rb::protocol::sync::TESTTYPE;
+use x11rb::protocol::sync::VALUETYPE;
+
+const IDLE_THRESHOLD: Duration = Duration::from_secs(30);
+const X11_INITIALIZATION_TIMEOUT: Duration = Duration::from_secs(2);
+const I3_SNAPSHOT_TIMEOUT: Duration = Duration::from_millis(500);
+const I3_SNAPSHOT_MAX_BYTES: u64 = 2 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct DesktopAttention {
     pub(crate) idle: bool,
-    /// `None` never proves that a window is hidden.
+    /// `None` is unknown and never proof that a window is hidden.
     pub(crate) visible: Option<bool>,
 }
 
 pub(crate) fn start() -> watch::Receiver<DesktopAttention> {
-    let (_, receiver) = watch::channel(DesktopAttention::default());
-    receiver
+    let (tx, rx) = watch::channel(DesktopAttention::default());
+    if std::env::var_os("DISPLAY").is_some() {
+        let idle_tx = tx.clone();
+        tokio::spawn(async move {
+            if let Err(error) = observe_idle(idle_tx.clone()).await {
+                tracing::debug!(%error, "X11 idle observer unavailable");
+                idle_tx.send_modify(|state| state.idle = false);
+            }
+        });
+    }
+    let window_id = std::env::var("ALACRITTY_WINDOW_ID")
+        .or_else(|_| std::env::var("WINDOWID"))
+        .ok()
+        .and_then(|id| {
+            id.parse::<u64>()
+                .or_else(|_| u64::from_str_radix(id.trim_start_matches("0x"), 16))
+                .ok()
+        });
+    if let Some(window_id) = window_id {
+        tokio::spawn(async move {
+            if let Err(error) = observe_visibility(tx.clone(), window_id).await {
+                tracing::debug!(%error, "i3 window observer unavailable");
+                tx.send_modify(|state| state.visible = None);
+            }
+        });
+    }
+    rx
 }
+
+async fn observe_idle(tx: watch::Sender<DesktopAttention>) -> Result<()> {
+    // x11rb's setup/reply APIs are synchronous and may wait forever for a broken X server.
+    // Give setup one dedicated OS thread rather than a Tokio blocking-pool worker: a timed-out
+    // X reply cannot then stall Tokio's runtime shutdown or block agent/terminal input.
+    let (setup_tx, setup_rx) = tokio::sync::oneshot::channel();
+    std::thread::Builder::new()
+        .name("tui-x11-idle-setup".into())
+        .spawn(move || {
+            let result = initialize_idle_alarm();
+            let _ = setup_tx.send(result);
+        })?;
+    let (conn, idle_millis) = tokio::select! {
+        result = tokio::time::timeout(X11_INITIALIZATION_TIMEOUT, setup_rx) => {
+            result.context("X11 idle initialization timed out")?
+                .context("X11 idle initialization channel closed")??
+        }
+        () = tx.closed() => return Ok(()),
+    };
+
+    let idle = idle_millis.hi > 0 || idle_millis.lo >= 30_000;
+    tx.send_if_modified(|state| {
+        if state.idle == idle {
+            return false;
+        }
+        state.idle = idle;
+        true
+    });
+    // XSync alarms wake on both the idle crossing and the clock reset caused by human input.
+    // The X11 socket itself is registered with Tokio; no periodic desktop query is needed.
+    let readable = tokio::io::unix::AsyncFd::new(conn.stream().as_fd())?;
+    loop {
+        // A synchronous reply may already have pulled an alarm into x11rb's event queue;
+        // socket readability alone would then never wake the observer again.
+        drain_idle_alarms(&conn, &tx)?;
+        let mut ready = tokio::select! {
+            ready = readable.readable() => ready?,
+            () = tx.closed() => return Ok(()),
+        };
+        drain_idle_alarms(&conn, &tx)?;
+        ready.clear_ready();
+    }
+}
+
+fn drain_idle_alarms(
+    conn: &x11rb::rust_connection::RustConnection,
+    tx: &watch::Sender<DesktopAttention>,
+) -> Result<()> {
+    while let Some(event) = conn.poll_for_event()? {
+        if let Event::SyncAlarmNotify(event) = event {
+            let elapsed = event.counter_value;
+            let idle = elapsed.hi > 0 || elapsed.lo >= 30_000;
+            tx.send_if_modified(|state| {
+                if state.idle == idle {
+                    return false;
+                }
+                state.idle = idle;
+                true
+            });
+        }
+    }
+    Ok(())
+}
+
+fn initialize_idle_alarm() -> Result<(x11rb::rust_connection::RustConnection, Int64)> {
+    let (conn, _) = x11rb::connect(None)?;
+    conn.sync_initialize(
+        /*desired_major_version*/ 3, /*desired_minor_version*/ 1,
+    )?
+    .reply()?;
+    let counter = conn
+        .sync_list_system_counters()?
+        .reply()?
+        .counters
+        .into_iter()
+        .find(|counter| counter.name.as_slice() == b"IDLETIME")
+        .context("XSync IDLETIME counter unavailable")?
+        .counter;
+    let threshold = Int64 {
+        hi: 0,
+        lo: IDLE_THRESHOLD.as_millis() as u32,
+    };
+    for test_type in [TESTTYPE::POSITIVE_TRANSITION, TESTTYPE::NEGATIVE_TRANSITION] {
+        let alarm = conn.generate_id()?;
+        conn.sync_create_alarm(
+            alarm,
+            &CreateAlarmAux::new()
+                .counter(counter)
+                .value_type(VALUETYPE::ABSOLUTE)
+                .value(threshold)
+                .test_type(test_type)
+                .delta(Int64 { hi: 0, lo: 0 })
+                .events(1),
+        )?
+        .check()?;
+    }
+    let elapsed = conn.sync_query_counter(counter)?.reply()?.counter_value;
+    Ok((conn, elapsed))
+}
+
+async fn observe_visibility(tx: watch::Sender<DesktopAttention>, window_id: u64) -> Result<()> {
+    // i3-msg streams window/workspace/output events; a snapshot is sampled only on change.
+    let mut child = Command::new("i3-msg")
+        .args([
+            "-t",
+            "subscribe",
+            "-m",
+            "[\"window\",\"workspace\",\"output\"]",
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .spawn()?;
+    let stdout = child.stdout.take().context("i3 subscribe has no stdout")?;
+    let mut events = BufReader::new(stdout).lines();
+    // i3 first sends a subscription acknowledgement, not a visibility change.
+    tokio::time::timeout(I3_SNAPSHOT_TIMEOUT, events.next_line())
+        .await
+        .context("i3 subscription handshake timed out")??
+        .context("i3 subscription closed before acknowledgement")?;
+    update_visibility(&tx, window_id).await;
+    loop {
+        tokio::select! {
+            event = events.next_line() => {
+                let Some(event) = event? else {
+                    anyhow::bail!("i3 subscription closed");
+                };
+                if !affects_visibility(&event) {
+                    continue;
+                }
+                // Burst events describe one new tree. Do not fork a snapshot subprocess per
+                // intermediate focus/move notification.
+                tokio::time::sleep(Duration::from_millis(30)).await;
+                while let Some(result) = events.next_line().now_or_never() {
+                    if result?.is_none() {
+                        anyhow::bail!("i3 subscription closed");
+                    }
+                }
+                update_visibility(&tx, window_id).await;
+            }
+            () = tx.closed() => return Ok(()),
+        }
+    }
+}
+
+fn affects_visibility(line: &str) -> bool {
+    let Ok(event) = serde_json::from_str::<Value>(line) else {
+        return true;
+    };
+    // Terminal titles refresh frequently while an agent runs. Title, mark and urgency
+    // notifications cannot move, occlude or reveal a window.
+    !matches!(event["change"].as_str(), Some("title" | "mark" | "urgent"))
+}
+
+async fn update_visibility(tx: &watch::Sender<DesktopAttention>, window_id: u64) {
+    let visible = if let (Some(tree), Some(workspaces)) = (
+        i3_snapshot("get_tree").await,
+        i3_snapshot("get_workspaces").await,
+    ) {
+        let visible_workspaces: HashMap<_, _> = workspaces
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|workspace| {
+                Some((workspace["id"].as_u64()?, workspace["visible"].as_bool()?))
+            })
+            .collect();
+        window_visibility(&tree, window_id, Some(true), &visible_workspaces)
+    } else {
+        None
+    };
+    tx.send_if_modified(|state| {
+        if state.visible == visible {
+            return false;
+        }
+        state.visible = visible;
+        true
+    });
+}
+
+async fn i3_snapshot(kind: &str) -> Option<Value> {
+    let mut child = Command::new("i3-msg")
+        .args(["-t", kind])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .ok()?;
+    let mut output = Vec::new();
+    let stdout = child.stdout.take()?;
+    let bytes = tokio::time::timeout(
+        I3_SNAPSHOT_TIMEOUT,
+        stdout
+            .take(I3_SNAPSHOT_MAX_BYTES + 1)
+            .read_to_end(&mut output),
+    )
+    .await
+    .ok()?
+    .ok()?;
+    if bytes as u64 > I3_SNAPSHOT_MAX_BYTES {
+        return None;
+    }
+    let status = tokio::time::timeout(I3_SNAPSHOT_TIMEOUT, child.wait())
+        .await
+        .ok()?
+        .ok()?;
+    (status.success())
+        .then(|| serde_json::from_slice(&output).ok())
+        .flatten()
+}
+
+fn window_visibility(
+    node: &Value,
+    window_id: u64,
+    parent_visible: Option<bool>,
+    visible_workspaces: &HashMap<u64, bool>,
+) -> Option<bool> {
+    let visible = if node["type"] == "workspace" {
+        if node["name"] == "__i3_scratch" {
+            Some(false)
+        } else {
+            node["id"]
+                .as_u64()
+                .and_then(|id| visible_workspaces.get(&id).copied())
+        }
+    } else {
+        parent_visible
+    };
+    if node["window"].as_u64() == Some(window_id) {
+        return visible;
+    }
+    for key in ["nodes", "floating_nodes"] {
+        if let Some(children) = node[key].as_array() {
+            for child in children {
+                let tab_hidden = key == "nodes"
+                    && matches!(node["layout"].as_str(), Some("tabbed" | "stacked"))
+                    && node["focus"].as_array().and_then(|focus| focus.first())
+                        != Some(&child["id"]);
+                let child_visible = if tab_hidden { Some(false) } else { visible };
+                if let Some(visible) =
+                    window_visibility(child, window_id, child_visible, visible_workspaces)
+                {
+                    return Some(visible);
+                }
+            }
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+#[path = "desktop_attention_tests.rs"]
+mod tests;
