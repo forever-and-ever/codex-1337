@@ -28,6 +28,7 @@ use codex_extension_api::ThreadResumeInput;
 use codex_extension_api::TurnStartAdmission;
 use codex_protocol::ThreadId;
 use codex_protocol::items::TurnItem;
+use codex_protocol::models::FunctionCallOutputPayload;
 use codex_protocol::models::ImageDetail;
 use codex_protocol::models::ImageReference;
 use codex_protocol::models::ResponseItem;
@@ -537,10 +538,21 @@ async fn registered_queue_lifecycle_starts_messages_in_fifo_order() -> anyhow::R
         Weak::new(),
         Arc::new(NoopExtensionEventSink),
     );
-    for prompt in ["B", "C"] {
-        staging.enqueue(thread_id, user_input(prompt)).await?;
-    }
+    // A new service reads the persisted payload. Delegation must retain tool
+    // authority rather than being rewritten as a user instruction on dispatch.
+    let delegated = TurnInput::ResponseItem(ResponseItem::FunctionCallOutput {
+        id: None,
+        call_id: None,
+        name: Some("send_message_to_thread".to_string()),
+        namespace: Some("codex_tui".to_string()),
+        output: FunctionCallOutputPayload::from_text("B".to_string()),
+        internal_chat_message_metadata_passthrough: None,
+    });
+    staging.enqueue(thread_id, delegated.clone()).await?;
+    staging.enqueue(thread_id, user_input("C")).await?;
+    drop(staging);
     let queue = install_registered_queue(&test, installed.as_ref())?;
+    assert_eq!(queue.list(thread_id).await?[0].input, delegated);
 
     tokio::time::timeout(Duration::from_secs(10), async {
         test.submit_text_turn("A").await?;
@@ -564,7 +576,15 @@ async fn registered_queue_lifecycle_starts_messages_in_fifo_order() -> anyhow::R
                 .context("model request has no user input")
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
-    assert_eq!(vec!["A", "B", "C"], prompts);
+    assert_eq!(vec!["A", "A", "C"], prompts);
+    let input = responses.requests()[1].input();
+    assert!(
+        input
+            .iter()
+            .any(|item| item["type"] == "function_call_output"
+                && item["name"] == "send_message_to_thread"
+                && item["output"] == "B")
+    );
     assert!(queue.list(thread_id).await?.is_empty());
     Ok(())
 }
@@ -965,7 +985,7 @@ async fn invalid_local_attachments_do_not_mutate_queue() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn non_user_input_cannot_enter_the_user_message_queue() -> anyhow::Result<()> {
+async fn unsupported_response_items_cannot_enter_the_queue() -> anyhow::Result<()> {
     let (queue, _home) = test_queue().await?;
     let service = QueuedItemService::new(queue, Weak::new(), Arc::new(NoopExtensionEventSink));
     let error = service

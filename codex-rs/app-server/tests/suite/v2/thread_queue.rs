@@ -51,7 +51,9 @@ use codex_app_server_protocol::TurnInterruptResponse;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::TurnStartResponse;
 use codex_app_server_protocol::TurnStatus;
+use codex_app_server_protocol::TurnToolOutput;
 use codex_app_server_protocol::UserInput;
+use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::openai_models::ReasoningEffort;
 use core_test_support::skip_if_remote;
 use pretty_assertions::assert_eq;
@@ -62,6 +64,94 @@ use tokio::time::timeout;
 use wiremock::MockServer;
 
 const READ_TIMEOUT: Duration = Duration::from_secs(/*secs*/ 10);
+
+#[tokio::test]
+async fn queued_tool_output_waits_for_completion_without_becoming_user_input() -> Result<()> {
+    skip_if_remote!(Ok(()), "uses a host-local approval fixture");
+    let (mut app, _home, server) = queue_app(vec![
+        blocked_turn_response()?,
+        create_final_assistant_message_sse_response("active done")?,
+        create_final_assistant_message_sse_response("follow-up done")?,
+    ])
+    .await?;
+    let thread_id = app
+        .start_thread(ThreadStartParams::default())
+        .await?
+        .thread
+        .id;
+    let (_, approval_id) = start_blocked_turn(&mut app, &thread_id).await?;
+    let output = TurnToolOutput {
+        name: "send_message_to_thread".to_string(),
+        namespace: Some("codex_tui".to_string()),
+        output: FunctionCallOutputBody::Text("attributed follow-up".to_string()),
+    };
+    let queued = queue_item(
+        &mut app,
+        ThreadQueueAddParams {
+            thread_id: thread_id.clone(),
+            input: None,
+            client_user_message_id: "unused-for-tool-output".to_string(),
+            tool_output: Some(Box::new(output.clone())),
+        },
+    )
+    .await?;
+    assert_eq!(queued.tool_output.as_deref(), Some(&output));
+    assert_eq!(
+        list_queue(&mut app, &thread_id).await?.data,
+        vec![queued.clone()]
+    );
+
+    // Editing through the user-message endpoint must not upgrade authority.
+    let request = app
+        .send_raw_request(
+            "thread/queue/update",
+            Some(json!({
+                "threadId": thread_id, "queuedSubmissionId": queued.id,
+                "input": [text("rewritten as user input")]
+            })),
+        )
+        .await?;
+    let error: JSONRPCError = timeout(
+        READ_TIMEOUT,
+        app.read_stream_until_error_message(RequestId::Integer(request)),
+    )
+    .await??;
+    assert_eq!(error.error.code, -32600);
+    assert_eq!(list_queue(&mut app, &thread_id).await?.data, vec![queued]);
+
+    decline_approval(&mut app, approval_id).await?;
+    for _ in 0..2 {
+        let done: TurnCompletedNotification =
+            timeout(READ_TIMEOUT, app.read_notification("turn/completed")).await??;
+        assert_eq!(done.turn.status, TurnStatus::Completed);
+    }
+    let requests = server
+        .received_requests()
+        .await
+        .context("captured model requests")?;
+    let bodies = requests
+        .iter()
+        .filter(|request| request.url.path().ends_with("/responses"))
+        .map(wiremock::Request::body_json::<Value>)
+        .collect::<Result<Vec<_>, _>>()?;
+    assert_eq!(bodies.len(), 3);
+    assert!(
+        !bodies[1]["input"]
+            .to_string()
+            .contains("attributed follow-up")
+    );
+    let item = bodies[2]["input"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["name"] == "send_message_to_thread")
+        .context("delegated tool output")?;
+    assert_eq!(item["type"], "function_call_output");
+    assert_eq!(item["namespace"], "codex_tui");
+    assert_eq!(item["output"], "attributed follow-up");
+    assert!(list_queue(&mut app, &thread_id).await?.data.is_empty());
+    Ok(())
+}
 
 #[tokio::test]
 async fn queue_requires_experimental_handshake() -> Result<()> {
@@ -272,8 +362,9 @@ async fn queue_list_returns_ordered_pages_and_lightweight_notifications() -> Res
         &mut app,
         ThreadQueueAddParams {
             thread_id: thread_id.clone(),
-            input: vec![text(&"x".repeat(64 * 1024))],
+            input: Some(vec![text(&"x".repeat(64 * 1024))]),
             client_user_message_id: "oversized-snapshot".to_string(),
+            tool_output: None,
         },
     )
     .await?;
@@ -376,8 +467,9 @@ async fn idle_queue_dispatch_preserves_client_id() -> Result<()> {
         .id;
     let queued_submission = ThreadQueueAddParams {
         thread_id: thread_id.clone(),
-        input: vec![text("durable queued message")],
+        input: Some(vec![text("durable queued message")]),
         client_user_message_id: "stable-queued-client-id".to_string(),
+        tool_output: None,
     };
     let queued = queue_item(&mut app, queued_submission.clone()).await?;
     assert_eq!(
@@ -393,7 +485,7 @@ async fn idle_queue_dispatch_preserves_client_id() -> Result<()> {
         anyhow::bail!("queued turn did not begin with its user message");
     };
     assert_eq!(client_id.as_deref(), Some("stable-queued-client-id"));
-    assert_eq!(content, queued_submission.input);
+    assert_eq!(Some(content), queued_submission.input);
     let completed: TurnCompletedNotification =
         timeout(READ_TIMEOUT, app.read_notification("turn/completed")).await??;
     assert_eq!(completed.thread_id, thread_id);
@@ -1053,8 +1145,9 @@ async fn decline_approval(app: &mut TestAppServer, request_id: RequestId) -> Res
 fn submission(thread_id: &str, value: &str) -> ThreadQueueAddParams {
     ThreadQueueAddParams {
         thread_id: thread_id.to_string(),
-        input: vec![text(value)],
+        input: Some(vec![text(value)]),
         client_user_message_id: format!("queued-{value}"),
+        tool_output: None,
     }
 }
 

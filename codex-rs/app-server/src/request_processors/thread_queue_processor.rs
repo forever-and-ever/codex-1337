@@ -22,6 +22,7 @@ use codex_app_server_protocol::ThreadQueueUpdateResponse;
 use codex_app_server_protocol::Turn;
 use codex_app_server_protocol::TurnItemsView;
 use codex_app_server_protocol::TurnStatus;
+use codex_app_server_protocol::TurnToolOutput;
 use codex_app_server_protocol::UserInput;
 use codex_core::CodexThread;
 use codex_core::NotSubmittedReason;
@@ -29,6 +30,7 @@ use codex_core::StartIfIdleSubmission;
 use codex_core::ThreadManager;
 use codex_core::TurnInput;
 use codex_protocol::ThreadId;
+use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
 use codex_queue_extension::QueueServiceError;
@@ -44,6 +46,7 @@ use super::thread_input::DIRECT_INPUT_TO_MULTI_AGENT_V2_SUBAGENT_ERROR;
 use super::thread_input::can_accept_direct_input;
 use super::thread_processor::THREAD_LIST_DEFAULT_LIMIT;
 use super::thread_processor::THREAD_LIST_MAX_LIMIT;
+use super::turn_processor::validate_response_item_image_urls;
 use super::turn_processor::validate_user_input_image_urls;
 
 const DIRECT_INPUT_TO_UNLOADED_SUBAGENT_ERROR: &str =
@@ -78,15 +81,27 @@ impl ThreadQueueRequestProcessor {
         &self,
         params: ThreadQueueAddParams,
     ) -> Result<ThreadQueueAddResponse, JSONRPCErrorError> {
-        validate_user_input_image_urls(&params.input)?;
         let (thread_id, loaded_thread, source) = self.require_thread(&params.thread_id).await?;
         ensure_direct_input_allowed(loaded_thread.as_deref(), &source)?;
+        let input = match (params.input, params.tool_output) {
+            (None, Some(output)) if !output.name.trim().is_empty() => {
+                let item = output.into_core();
+                validate_response_item_image_urls(std::slice::from_ref(&item))?;
+                TurnInput::ResponseItem(item)
+            }
+            (Some(input), None) => {
+                validate_user_input_image_urls(&input)?;
+                submission_into_turn_input(input, Some(params.client_user_message_id))
+            }
+            (Some(_), Some(_)) | (None, None) | (None, Some(_)) => {
+                return Err(invalid_request(
+                    "provide either input or named toolOutput, not both",
+                ));
+            }
+        };
         let queued_item = self
             .service()?
-            .enqueue(
-                thread_id,
-                submission_into_turn_input(params.input, Some(params.client_user_message_id)),
-            )
+            .enqueue(thread_id, input)
             .await
             .map_err(queue_error)?;
         Ok(ThreadQueueAddResponse {
@@ -219,7 +234,7 @@ impl ThreadQueueRequestProcessor {
             }
             StartIfIdleSubmission::NotSubmitted { reason } => {
                 return Err(internal_error(format!(
-                    "Core declined to start queued user message: {reason:?}"
+                    "Core declined to start queued message: {reason:?}"
                 )));
             }
         };
@@ -243,7 +258,7 @@ impl ThreadQueueRequestProcessor {
     fn service(&self) -> Result<&QueuedItemService, JSONRPCErrorError> {
         self.service
             .as_deref()
-            .ok_or_else(|| invalid_request("user message queue is unavailable"))
+            .ok_or_else(|| invalid_request("message queue is unavailable"))
     }
 
     async fn require_thread(
@@ -323,9 +338,9 @@ pub(super) fn queue_error(error: QueueServiceError) -> JSONRPCErrorError {
         QueueServiceError::InputTooLarge { actual_chars } => {
             TurnRequestProcessor::input_too_large_error(actual_chars)
         }
-        error @ (QueueServiceError::InvalidInput | QueueServiceError::InvalidAttachment(_)) => {
-            invalid_request(error.to_string())
-        }
+        error @ (QueueServiceError::InvalidInput
+        | QueueServiceError::ToolOutputReadOnly
+        | QueueServiceError::InvalidAttachment(_)) => invalid_request(error.to_string()),
         QueueServiceError::Storage(ThreadStoreError::InvalidRequest { message }) => {
             invalid_request(message)
         }
@@ -334,15 +349,36 @@ pub(super) fn queue_error(error: QueueServiceError) -> JSONRPCErrorError {
 }
 
 fn api_queued_submission(value: QueuedItem) -> Result<QueuedSubmission, JSONRPCErrorError> {
-    let TurnInput::UserInput { content, client_id } = value.input else {
-        return Err(internal_error(
-            "queued submission does not contain user input",
-        ));
+    let (input, client_user_message_id, tool_output) = match value.input {
+        TurnInput::UserInput { content, client_id } => (
+            content.into_iter().map(Into::into).collect(),
+            client_id.ok_or_else(|| {
+                internal_error("queued submission is missing its client message id")
+            })?,
+            None,
+        ),
+        TurnInput::ResponseItem(ResponseItem::FunctionCallOutput {
+            name: Some(name),
+            namespace,
+            output,
+            ..
+        }) => (
+            Vec::new(),
+            value.id.clone(),
+            Some(Box::new(TurnToolOutput {
+                name,
+                namespace,
+                output: output.body,
+            })),
+        ),
+        TurnInput::ResponseItem(_) | TurnInput::InterAgentCommunication(_) => {
+            return Err(internal_error("unsupported queued input"));
+        }
     };
     Ok(QueuedSubmission {
         id: value.id,
-        input: content.into_iter().map(Into::into).collect(),
-        client_user_message_id: client_id
-            .ok_or_else(|| internal_error("queued submission is missing its client message id"))?,
+        input,
+        client_user_message_id,
+        tool_output,
     })
 }

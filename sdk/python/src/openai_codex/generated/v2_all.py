@@ -9022,15 +9022,6 @@ class Project(BaseModel):
     updated_at: Annotated[int, Field(alias="updatedAt")]
 
 
-class QueuedSubmission(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    client_user_message_id: Annotated[str, Field(alias="clientUserMessageId")]
-    id: str
-    input: list[UserInput]
-
-
 class RateLimitResetCredit(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -12065,6 +12056,22 @@ class PluginShareListResponse(BaseModel):
         populate_by_name=True,
     )
     data: list[PluginShareListItem]
+
+
+class QueuedSubmission(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    client_user_message_id: Annotated[
+        str,
+        Field(
+            alias="clientUserMessageId",
+            description="User-message identity, or the queue item ID for tool output (which emits no user message).",
+        ),
+    ]
+    id: str
+    input: list[UserInput]
+    tool_output: Annotated[TurnToolOutput | None, Field(alias="toolOutput")] = None
 
 
 class RawResponseItemCompletedNotification(BaseModel):

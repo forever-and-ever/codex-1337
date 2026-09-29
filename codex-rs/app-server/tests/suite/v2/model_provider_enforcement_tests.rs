@@ -106,8 +106,9 @@ base_url = "{}/v1"
             request_id,
             params: ThreadQueueAddParams {
                 thread_id: started.thread.id.clone(),
-                input: input.clone(),
+                input: Some(input.clone()),
                 client_user_message_id: "queued-message".into(),
+                tool_output: None,
             },
         })
         .await?;

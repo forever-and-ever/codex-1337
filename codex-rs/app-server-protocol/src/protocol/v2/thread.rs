@@ -917,7 +917,9 @@ pub struct ThreadGoalClearResponse {
 pub struct QueuedSubmission {
     pub id: String,
     pub input: Vec<UserInput>,
+    /// User-message identity, or the queue item ID for tool output (which emits no user message).
     pub client_user_message_id: String,
+    pub tool_output: Option<Box<super::TurnToolOutput>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
@@ -925,8 +927,14 @@ pub struct QueuedSubmission {
 #[ts(export_to = "v2/")]
 pub struct ThreadQueueAddParams {
     pub thread_id: String,
-    pub input: Vec<UserInput>,
+    /// Exactly one of input or toolOutput must be present. Null input makes tool
+    /// messages fail deserialization on older servers instead of becoming empty turns.
+    #[ts(optional = nullable)]
+    pub input: Option<Vec<UserInput>>,
     pub client_user_message_id: String,
+    /// Unsolicited tool output, mutually exclusive with user input.
+    #[ts(optional = nullable)]
+    pub tool_output: Option<Box<super::TurnToolOutput>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]

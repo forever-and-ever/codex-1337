@@ -19,6 +19,7 @@ use codex_extension_api::ThreadLifecycleContributor;
 use codex_extension_api::ThreadResumeInput;
 use codex_protocol::ThreadId;
 use codex_protocol::error::CodexErr;
+use codex_protocol::models::ResponseItem;
 use codex_protocol::models::snapshot_local_user_input;
 use codex_protocol::protocol::AgentStatus;
 use codex_protocol::protocol::Event;
@@ -37,7 +38,7 @@ use tokio::sync::OwnedMutexGuard;
 use tokio::sync::broadcast::error::TryRecvError;
 use uuid::Uuid;
 
-/// One user message waiting to start on its thread.
+/// One user message or unsolicited tool output waiting to start on its thread.
 #[derive(Clone, Debug, PartialEq)]
 pub struct QueuedItem {
     pub id: String,
@@ -52,12 +53,14 @@ pub enum QueueServiceError {
     InvalidPayload(#[from] serde_json::Error),
     #[error("local queued attachment is invalid: {0}")]
     InvalidAttachment(#[from] std::io::Error),
-    #[error("Core failed to submit queued user message: {0}")]
+    #[error("Core failed to submit queued message: {0}")]
     CoreSubmissionError(#[from] CodexErr),
-    #[error("only user input can be added to the user-message queue")]
+    #[error("the queue accepts user input or named unsolicited tool output")]
     InvalidInput,
+    #[error("queued tool messages can be removed but not edited")]
+    ToolOutputReadOnly,
     #[error(
-        "queued user input exceeds the maximum length of {MAX_USER_INPUT_TEXT_CHARS} characters ({actual_chars} provided)"
+        "queued input exceeds the maximum length of {MAX_USER_INPUT_TEXT_CHARS} characters ({actual_chars} provided)"
     )]
     InputTooLarge { actual_chars: usize },
 }
@@ -267,7 +270,7 @@ impl QueuedItemService {
         thread_id: ThreadId,
         input: TurnInput,
     ) -> Result<QueuedItem, QueueServiceError> {
-        let input = prepare_queued_user_input(input).await?;
+        let input = prepare_queued_input(input).await?;
         let payload = serde_json::to_string(&input)?;
         let item = {
             let _dispatch_guard = self.dispatch_guard(thread_id).await;
@@ -306,19 +309,20 @@ impl QueuedItemService {
     ) -> Result<Option<QueuedItem>, QueueServiceError> {
         let _dispatch_guard = self.dispatch_guard(thread_id).await;
         if let TurnInput::UserInput { client_id, .. } = &mut input {
-            *client_id = self
+            let existing = self
                 .list(thread_id)
                 .await?
                 .into_iter()
-                .find_map(|item| match item {
-                    QueuedItem {
-                        id,
-                        input: TurnInput::UserInput { client_id, .. },
-                    } if id == queued_item_id => client_id,
-                    _ => None,
-                });
+                .find(|item| item.id == queued_item_id);
+            *client_id = match existing.map(|item| item.input) {
+                Some(TurnInput::UserInput { client_id, .. }) => client_id,
+                Some(_) => return Err(QueueServiceError::ToolOutputReadOnly),
+                None => None,
+            };
+        } else {
+            return Err(QueueServiceError::ToolOutputReadOnly);
         }
-        let input = prepare_queued_user_input(input).await?;
+        let input = prepare_queued_input(input).await?;
         let payload = serde_json::to_string(&input)?;
         let item = self
             .queue
@@ -385,9 +389,10 @@ impl QueuedItemService {
                 ),
             })?;
         let queued_item_id = item.id.clone();
-        let input @ TurnInput::UserInput { .. } = item.input else {
+        let input = item.input;
+        if !supported_queue_input(&input) {
             return Err(QueueServiceError::InvalidInput);
-        };
+        }
         let submission = thread
             .start_turn_if_idle(TurnInputRequest::new(input).with_trace(trace).on_start(
                 TurnStartOptions {
@@ -430,8 +435,8 @@ impl QueuedItemService {
                     continue;
                 }
             };
-            if !matches!(input, TurnInput::UserInput { .. }) {
-                tracing::warn!(%queued_item_id, "discarding non-user queued input");
+            if !supported_queue_input(&input) {
+                tracing::warn!(%queued_item_id, "discarding unsupported queued input");
                 self.delete_locked(thread_id, queued_item_id).await?;
                 continue;
             }
@@ -452,7 +457,7 @@ impl QueuedItemService {
                         %thread_id,
                         %queued_item_id,
                         ?reason,
-                        "core could not start queued user input"
+                        "core could not start queued input"
                     );
                     return Ok(());
                 }
@@ -461,7 +466,7 @@ impl QueuedItemService {
                         %thread_id,
                         %queued_item_id,
                         %error,
-                        "core could not start queued user input"
+                        "core could not start queued input"
                     );
                     return Ok(());
                 }
@@ -490,7 +495,17 @@ impl QueuedItemService {
     }
 }
 
-async fn prepare_queued_user_input(mut input: TurnInput) -> Result<TurnInput, QueueServiceError> {
+async fn prepare_queued_input(mut input: TurnInput) -> Result<TurnInput, QueueServiceError> {
+    if let TurnInput::ResponseItem(ResponseItem::FunctionCallOutput { output, .. }) = &input {
+        if !supported_queue_input(&input) {
+            return Err(QueueServiceError::InvalidInput);
+        }
+        let actual_chars = output.body.to_text().map_or(0, |text| text.chars().count());
+        if actual_chars > MAX_USER_INPUT_TEXT_CHARS {
+            return Err(QueueServiceError::InputTooLarge { actual_chars });
+        }
+        return Ok(input);
+    }
     let TurnInput::UserInput { content, client_id } = &mut input else {
         return Err(QueueServiceError::InvalidInput);
     };
@@ -531,6 +546,18 @@ async fn prepare_queued_user_input(mut input: TurnInput) -> Result<TurnInput, Qu
     .map_err(QueueServiceError::InvalidAttachment)
 }
 
+fn supported_queue_input(input: &TurnInput) -> bool {
+    match input {
+        TurnInput::UserInput { .. } => true,
+        TurnInput::ResponseItem(ResponseItem::FunctionCallOutput {
+            call_id: None,
+            name: Some(name),
+            ..
+        }) => !name.trim().is_empty(),
+        TurnInput::ResponseItem(_) | TurnInput::InterAgentCommunication(_) => false,
+    }
+}
+
 impl<C> ThreadLifecycleContributor<C> for QueuedItemService
 where
     C: Send + Sync + 'static,
@@ -560,7 +587,7 @@ where
             };
             let _guard = self.dispatch_guard(thread_id).await;
             if let Err(error) = self.dispatch_if_idle(thread_id).await {
-                tracing::warn!(%thread_id, %error, "failed to dispatch queued user input");
+                tracing::warn!(%thread_id, %error, "failed to dispatch queued input");
             }
         })
     }

@@ -10,8 +10,10 @@ use codex_protocol::config_types::MultiAgentMode;
 use codex_protocol::config_types::Personality;
 use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::models::FunctionCallOutputBody;
+use codex_protocol::models::FunctionCallOutputPayload;
 use codex_protocol::models::ImageDetail;
 use codex_protocol::models::ImageReference as CoreImageReference;
+use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::plan_tool::PlanItemArg as CorePlanItemArg;
 use codex_protocol::plan_tool::StepStatus as CorePlanStepStatus;
@@ -157,6 +159,22 @@ pub struct TurnToolOutput {
     pub name: String,
     pub namespace: Option<String>,
     pub output: FunctionCallOutputBody,
+}
+
+impl TurnToolOutput {
+    pub fn into_core(self) -> ResponseItem {
+        ResponseItem::FunctionCallOutput {
+            id: None,
+            call_id: None,
+            name: Some(self.name),
+            namespace: self.namespace,
+            output: FunctionCallOutputPayload {
+                body: self.output,
+                success: None,
+            },
+            internal_chat_message_metadata_passthrough: None,
+        }
+    }
 }
 
 #[derive(

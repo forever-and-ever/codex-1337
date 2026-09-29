@@ -18068,6 +18068,7 @@
       "QueuedSubmission": {
         "properties": {
           "clientUserMessageId": {
+            "description": "User-message identity, or the queue item ID for tool output (which emits no user message).",
             "type": "string"
           },
           "id": {
@@ -18078,6 +18079,16 @@
               "$ref": "#/definitions/v2/UserInput"
             },
             "type": "array"
+          },
+          "toolOutput": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/TurnToolOutput"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [

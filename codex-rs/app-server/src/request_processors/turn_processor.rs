@@ -11,7 +11,6 @@ use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::FunctionCallOutputContentItem;
-use codex_protocol::models::FunctionCallOutputPayload;
 use codex_protocol::models::ImageReference as CoreImageReference;
 use codex_protocol::protocol::AdditionalContextEntry as CoreAdditionalContextEntry;
 use codex_protocol::protocol::AdditionalContextKind as CoreAdditionalContextKind;
@@ -56,7 +55,9 @@ fn pending_steer_mutation_applied(outcome: PendingSteerMutationOutcome) -> bool 
     }
 }
 
-fn validate_response_item_image_urls(items: &[ResponseItem]) -> Result<(), JSONRPCErrorError> {
+pub(super) fn validate_response_item_image_urls(
+    items: &[ResponseItem],
+) -> Result<(), JSONRPCErrorError> {
     if items.iter().any(|item| match item {
         ResponseItem::Message { content, .. } => content.iter().any(|item| {
             matches!(
@@ -659,17 +660,7 @@ impl TurnRequestProcessor {
         let additional_context = map_additional_context(params.additional_context);
         let turn_has_input = !params.input.is_empty();
         let input = if let Some(tool_output) = params.tool_output {
-            let item = ResponseItem::FunctionCallOutput {
-                id: None,
-                call_id: None,
-                name: Some(tool_output.name),
-                namespace: tool_output.namespace,
-                output: FunctionCallOutputPayload {
-                    body: tool_output.output,
-                    success: None,
-                },
-                internal_chat_message_metadata_passthrough: None,
-            };
+            let item = tool_output.into_core();
             validate_response_item_image_urls(std::slice::from_ref(&item))?;
             TurnInput::ResponseItem(item)
         } else {

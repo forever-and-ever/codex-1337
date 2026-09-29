@@ -1,4 +1,4 @@
-//! Durable, storage-neutral user-message queue and idle dispatch.
+//! Durable, storage-neutral message queue and idle dispatch.
 
 use std::sync::Arc;
 
