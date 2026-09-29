@@ -180,6 +180,11 @@ async fn status_line_setup_popup_live_only_snapshot() {
 #[tokio::test]
 async fn status_surface_preview_lines_hardcoded_only_snapshot() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.remote_connection = Some(RemoteConnectionStatus {
+        address: "unix:///test/codex.sock".into(),
+        version: "v0.157.0".into(),
+        is_local_daemon: true,
+    });
 
     let snapshot = combined_preview_snapshot(
         &mut chat,
@@ -189,6 +194,7 @@ async fn status_surface_preview_lines_hardcoded_only_snapshot() {
             StatusLineItem::ThreadTitle,
             StatusLineItem::Permissions,
             StatusLineItem::ApprovalMode,
+            StatusLineItem::CodexVersion,
         ],
         &[
             TerminalTitleItem::Thread,

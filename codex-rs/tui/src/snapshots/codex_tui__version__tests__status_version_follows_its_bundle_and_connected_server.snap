@@ -1,0 +1,7 @@
+---
+source: tui/src/version_tests.rs
+expression: "[format_status_version(\"v0.157.0\", old),\nformat_status_version(\"v0.157.0\", new),\nformat_status_version(\"v0.158.0\", new),].join(\"\\n\")"
+---
+0.157.0-1337/tui-0
+0.157.0-1337/tui-1
+0.158.0-1337/tui-1

@@ -14,7 +14,7 @@ root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 # rustup selects the workspace toolchain by cwd, not Cargo's --manifest-path.
 cd "$root/codex-rs"
 
-for command in bwrap cargo cut git install ld.lld ln mktemp mv python3 readlink rg rm rustc sed sha256sum uname zsh; do
+for command in bwrap cargo cut git install ld.lld ln mktemp mv python3 readlink rg rm rustc sed uname zsh; do
     command -v "$command" >/dev/null 2>&1 || die "required command is absent: $command"
 done
 
@@ -26,8 +26,9 @@ esac
 
 install_root=${CODEX_INSTALL_ROOT:-$HOME/.local}
 data_home=${XDG_DATA_HOME:-$HOME/.local/share}
-case "$install_root:$data_home" in
-    /*:/*) ;;
+state_home=${XDG_STATE_HOME:-$HOME/.local/state}
+case "$install_root:$data_home:$state_home" in
+    /*:/*:/*) ;;
     *) die 'installation and XDG data roots must be absolute' ;;
 esac
 
@@ -100,6 +101,7 @@ PY
     printf 'codex_version=%s\nsource_commit=%s\n' \
         "$codex_version" "$revision" \
         >"$package/distribution"
+    python3 "$root/scripts/tui_revision.py" "$package" "$state_home/codex-1337"
     if [ ! -d "$payload" ]; then
         mv "$package" "$payload"
     fi

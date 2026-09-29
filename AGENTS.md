@@ -69,6 +69,17 @@ Run `just fmt` (in the `codex-rs` directory) automatically after you have finish
 
 Before finalizing a large change to `codex-rs`, run `just fix -p <project>` (in `codex-rs` directory) to fix any linter issues in the code. Prefer scoping with `-p` to avoid slow workspace‑wide Clippy builds; only run `just fix` without `-p` if you changed shared crates. Do not re-run tests after running `fix` or `fmt`.
 
+## Local TUI releases
+
+Install through `scripts/install-local`. Each new installed binary receives the next
+`tui-N`, starting at zero; builds and tests do not increment it. Reinstalling identical
+binary bytes reuses the number. The allocator is durable XDG state at
+`codex-1337/tui-builds.sqlite`, never Cargo scratch. Do not reset it during cleanup.
+The immutable bundle's `distribution` manifest carries `tui_revision`; preserve that
+manifest when copying a release. The status line pairs the connected server version
+with the running executable's revision, never the latest installation's revision.
+Uninstalled development binaries display `tui-dev`.
+
 ## The `codex-core` crate
 
 Over time, the `codex-core` crate (defined in `codex-rs/core/`) has become bloated because it is the largest crate, so it is often easier to add something new to `codex-core` rather than refactor out the library code you need so your new code neither takes a dependency on, nor contributes to the size of, `codex-core`.

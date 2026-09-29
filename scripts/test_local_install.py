@@ -1,6 +1,7 @@
 """Local distribution lifecycle and shared artifact-cache contracts."""
 
 import hashlib
+from concurrent.futures import ThreadPoolExecutor
 import os
 import subprocess
 import tempfile
@@ -9,11 +10,44 @@ from pathlib import Path
 from unittest.mock import patch
 
 import local_integration
+import tui_revision
 from codex_package import v8
 from codex_package.targets import TARGET_SPECS
 
 
 class LocalInstallTest(unittest.TestCase):
+    def test_tui_revisions_survive_reinstallation_and_serialize_publishers(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            state = root / "state"
+            packages = []
+            for index, contents in enumerate(
+                (b"first", b"second", b"second", b"third")
+            ):
+                package = root / f"package-{index}"
+                (package / "bin").mkdir(parents=True)
+                (package / "bin/codex").write_bytes(contents)
+                (package / "distribution").write_text(f"source_commit=commit-{index}\n")
+                packages.append(package)
+            self.assertEqual(tui_revision.stamp(packages[0], state), 0)
+            with ThreadPoolExecutor(max_workers=3) as publishers:
+                revisions = list(
+                    publishers.map(
+                        lambda package: tui_revision.stamp(package, state), packages[1:]
+                    )
+                )
+            self.assertEqual(revisions[0], revisions[1])
+            self.assertEqual(set(revisions), {1, 2})
+            # Pruning an installed bundle must not erase its durable identity.
+            (packages[0] / "distribution").write_text("source_commit=reinstalled\n")
+            self.assertEqual(tui_revision.stamp(packages[0], state), 0)
+            self.assertEqual(
+                (packages[0] / "distribution").read_text(),
+                "source_commit=reinstalled\ntui_revision=0\n",
+            )
+
     def test_gui_retirement_preserves_data_and_drains_daemon(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -71,7 +105,7 @@ class LocalInstallTest(unittest.TestCase):
             launcher.parent.mkdir()
             executable = distributions / "current/bin/codex"
             executable.parent.mkdir(parents=True)
-            executable.write_text('#!/bin/sh\nprintf \'%s\\n\' "$@"\n')
+            executable.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\"\n")
             executable.chmod(0o755)
             launcher.write_text("unowned\n")
             with self.assertRaises(FileExistsError):
