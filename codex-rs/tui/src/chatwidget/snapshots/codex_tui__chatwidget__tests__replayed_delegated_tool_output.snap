@@ -2,5 +2,6 @@
 source: tui/src/chatwidget/tests/history_replay.rs
 expression: "lines_to_single_string(&cells[0])"
 ---
-• Sent by Codex from task source-task
+
+  13:04:05 Sent by SYSADMIN
   Follow <up> & report

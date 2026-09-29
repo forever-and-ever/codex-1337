@@ -263,14 +263,22 @@ async fn replayed_review_prompt_does_not_seed_composer_history() {
 #[tokio::test]
 async fn replayed_delegated_tool_output_is_attributed_without_seeding_composer_history() {
     let (mut chat, mut rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
+    let sent_at = chrono::Local::now()
+        .date_naive()
+        .and_hms_opt(13, 4, 5)
+        .unwrap()
+        .and_local_timezone(chrono::Local)
+        .single()
+        .unwrap()
+        .timestamp_millis();
 
     let item = AppServerThreadItem::FunctionCallOutput {
         id: "delegation-1".to_string(),
         name: "send_message_to_thread".to_string(),
         namespace: Some("codex_tui".to_string()),
-        output: FunctionCallOutputBody::Text(
-            "<codex_delegation>\n  <source_thread_id>source-task</source_thread_id>\n  <input>Follow &lt;up&gt; &amp; report</input>\n</codex_delegation>".to_string(),
-        ),
+        output: FunctionCallOutputBody::Text(format!(
+            "<codex_delegation>\n  <source_thread_id>source-task</source_thread_id>\n  <source_thread_name>SYSADMIN</source_thread_name>\n  <sent_at>{sent_at}</sent_at>\n  <input>Follow &lt;up&gt; &amp; report</input>\n</codex_delegation>"
+        )),
     };
     chat.replay_thread_item(
         item.clone(),
@@ -297,6 +305,24 @@ async fn replayed_delegated_tool_output_is_attributed_without_seeding_composer_h
             .map(|cell| lines_to_single_string(&cell.transcript_lines(/*width*/ 80)))
             .collect::<Vec<_>>(),
         vec![lines_to_single_string(&cells[0])]
+    );
+    crate::terminal_palette::with_test_default_colors(
+        crate::terminal_probe::DefaultColors {
+            fg: (220, 220, 220),
+            bg: (20, 20, 20),
+        },
+        || {
+            let lines = projected[0].display_lines(24);
+            let area = Rect::new(0, 0, 24, lines.len() as u16);
+            let mut buffer = Buffer::empty(area);
+            let cells: Vec<std::sync::Arc<dyn history_cell::HistoryCell>> =
+                projected.into_iter().collect();
+            crate::transcript_view::TranscriptView::default().render(area, &mut buffer, &cells);
+            let background = crate::style::history_prompt_style()
+                .bg
+                .expect("message background");
+            assert!(buffer.content.iter().all(|cell| cell.bg == background));
+        },
     );
 
     chat.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));

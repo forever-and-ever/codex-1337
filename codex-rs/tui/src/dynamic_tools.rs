@@ -29,6 +29,8 @@ use codex_app_server_protocol::ThreadItemsListParams;
 use codex_app_server_protocol::ThreadItemsListResponse;
 use codex_app_server_protocol::ThreadListParams;
 use codex_app_server_protocol::ThreadListResponse;
+use codex_app_server_protocol::ThreadQueueAddParams;
+use codex_app_server_protocol::ThreadQueueAddResponse;
 use codex_app_server_protocol::ThreadReadParams;
 use codex_app_server_protocol::ThreadReadResponse;
 use codex_app_server_protocol::ThreadResumeParams;
@@ -62,8 +64,10 @@ use tokio::sync::broadcast;
 use tokio::time::Instant;
 use uuid::Uuid;
 
+mod delegation;
 #[path = "dynamic_tools_response.rs"]
 mod response;
+pub(crate) use delegation::DelegatedMessage;
 
 pub(crate) const NAMESPACE: &str = "codex_tui";
 pub(crate) const DELEGATION_TOOLS: [&str; 3] =
@@ -76,7 +80,10 @@ const DEFAULT_OUTPUT_CHARS: usize = 2_000;
 const MAX_OUTPUT_CHARS: usize = 20_000;
 const MAX_ERROR_CHARS: usize = 248;
 const MAX_INPUT_BYTES: usize = 1_000;
-const MAX_DELEGATED_INPUT_BYTES: usize = MAX_INPUT_BYTES + 256;
+// XML escaping expands a character to at most five bytes; the remaining
+// allowance covers the thread ID, timestamp, and envelope tags.
+const MAX_DELEGATED_INPUT_BYTES: usize =
+    (MAX_INPUT_BYTES + delegation::MAX_SENDER_NAME_CHARS) * 5 + 256;
 const MAX_WAIT_TARGETS: usize = 8;
 const MAX_WAIT_TIMEOUT_MS: u64 = 120_000;
 
@@ -117,6 +124,16 @@ struct SendArguments {
     thread_id: String,
     prompt: String,
     model: Option<String>,
+    #[serde(default)]
+    delivery: MessageDelivery,
+}
+
+#[derive(Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+enum MessageDelivery {
+    #[default]
+    Immediate,
+    Queued,
 }
 
 #[derive(Deserialize)]
@@ -197,8 +214,8 @@ pub(crate) fn tool_specs() -> Vec<DynamicToolSpec> {
         ),
         (
             "send_message_to_thread",
-            "Send a follow-up prompt to an existing Codex task in the background. Omit model unless the user explicitly requests an override.",
-            json!({"threadId": thread_id, "prompt": prompt, "model": {"type": "string", "minLength": 1}}),
+            "Send a message to an existing Codex task. delivery defaults to immediate: start if idle, otherwise steer the current turn. Use queued for a separate follow-up after the current turn finishes. Queued messages use the destination's model; omit model unless the user explicitly requests an immediate-delivery override.",
+            json!({"threadId": thread_id, "prompt": prompt, "model": {"type": "string", "minLength": 1}, "delivery": {"type": "string", "enum": ["immediate", "queued"]}}),
             vec!["threadId", "prompt"],
         ),
         (
@@ -461,8 +478,6 @@ async fn execute_inner(
         "create_thread" => {
             let arguments: CreateArguments = parse_arguments(params.arguments)?;
             validate_prompt(&arguments.prompt, MAX_INPUT_BYTES)?;
-            let prompt = delegated_prompt(&params.thread_id, &arguments.prompt);
-            validate_prompt(&prompt, MAX_DELEGATED_INPUT_BYTES)?;
             if arguments
                 .title
                 .as_deref()
@@ -471,6 +486,8 @@ async fn execute_inner(
                 return Err("title must not be empty".to_string());
             }
             let source_thread = read_thread(&handle, &params.thread_id).await?;
+            let prompt = DelegatedMessage::new(&source_thread, arguments.prompt).encode();
+            validate_prompt(&prompt, MAX_DELEGATED_INPUT_BYTES)?;
             if source_thread.ephemeral {
                 return Err(
                     "ephemeral tasks cannot create inspectable background tasks".to_string()
@@ -640,11 +657,15 @@ async fn execute_inner(
         }
         "send_message_to_thread" => {
             let arguments: SendArguments = parse_arguments(params.arguments)?;
+            if arguments.delivery == MessageDelivery::Queued && arguments.model.is_some() {
+                return Err("Queued messages use the destination's model; omit model.".to_string());
+            }
             if arguments.model.as_deref().is_some_and(str::is_empty) {
                 return Err("model must not be empty".to_string());
             }
             validate_prompt(&arguments.prompt, MAX_INPUT_BYTES)?;
-            let prompt = delegated_prompt(&params.thread_id, &arguments.prompt);
+            let source = read_thread(&handle, &params.thread_id).await?;
+            let prompt = DelegatedMessage::new(&source, arguments.prompt).encode();
             validate_prompt(&prompt, MAX_DELEGATED_INPUT_BYTES)?;
             let thread = read_thread(&handle, &arguments.thread_id).await?;
             let exclude_turns = thread.history_mode == ThreadHistoryMode::Paginated;
@@ -668,6 +689,26 @@ async fn execute_inner(
                 /*task_tools_available*/ false,
             )
             .await?;
+            if arguments.delivery == MessageDelivery::Queued {
+                let queued: ThreadQueueAddResponse =
+                    request(&handle, |request_id| ClientRequest::ThreadQueueAdd {
+                        request_id,
+                        params: ThreadQueueAddParams {
+                            thread_id: arguments.thread_id.clone(),
+                            input: None,
+                            client_user_message_id: Uuid::now_v7().to_string(),
+                            tool_output: Some(Box::new(TurnToolOutput {
+                                name: "send_message_to_thread".to_string(),
+                                namespace: Some(NAMESPACE.to_string()),
+                                output: FunctionCallOutputBody::Text(prompt),
+                            })),
+                        },
+                    })
+                    .await?;
+                return Ok(
+                    json!({"threadId": arguments.thread_id, "delivery": "queued", "queuedSubmissionId": queued.queued_submission.id}),
+                );
+            }
             start_turn(
                 &handle,
                 &arguments.thread_id,
@@ -1060,43 +1101,17 @@ fn validate_prompt(prompt: &str, max_bytes: usize) -> Result<(), String> {
     Ok(())
 }
 
-fn delegated_prompt(source_thread_id: &str, prompt: &str) -> String {
-    let escape = |text: &str| {
-        text.replace('&', "&amp;")
-            .replace('<', "&lt;")
-            .replace('>', "&gt;")
-    };
-    format!(
-        "<codex_delegation>\n  <source_thread_id>{}</source_thread_id>\n  <input>{}</input>\n</codex_delegation>",
-        escape(source_thread_id),
-        escape(prompt)
-    )
-}
-
-fn parse_delegated_prompt(prompt: &str) -> Option<(String, String)> {
-    let delegation = prompt.strip_prefix("<codex_delegation>\n  <source_thread_id>")?;
-    let (source, delegated) = delegation.split_once("</source_thread_id>\n  <input>")?;
-    let delegated = delegated.strip_suffix("</input>\n</codex_delegation>")?;
-    let unescape = |value: &str| {
-        value
-            .replace("&lt;", "<")
-            .replace("&gt;", ">")
-            .replace("&amp;", "&")
-    };
-    Some((unescape(source), unescape(delegated)))
-}
-
 pub(crate) fn parse_delegated_tool_output(
     name: &str,
     namespace: Option<&str>,
     output: &FunctionCallOutputBody,
-) -> Option<(String, String)> {
+) -> Option<DelegatedMessage> {
     if !matches!(namespace, Some(NAMESPACE | "codex_app"))
         || !matches!(name, "create_thread" | "send_message_to_thread")
     {
         return None;
     }
-    parse_delegated_prompt(output.to_text().as_deref()?)
+    DelegatedMessage::parse(output.to_text().as_deref()?)
 }
 
 fn same_thread_id(first: &str, second: &str) -> bool {
@@ -1233,11 +1248,13 @@ fn turn_summary(turn: &Turn, include_outputs: bool, output_chars: usize) -> Valu
                 "content": content.iter().map(|input| match input {
                     UserInput::Text { text, .. } => {
                         let mut input = json!({"type": "text", "text": truncate(text, DEFAULT_OUTPUT_CHARS)});
-                        if let Some((source_thread_id, delegated)) = parse_delegated_prompt(text)
+                        if let Some(delegated) = DelegatedMessage::parse(text)
                         {
                             input["codexDelegation"] = json!({
-                                "sourceThreadId": source_thread_id,
-                                "input": truncate(&delegated, DEFAULT_OUTPUT_CHARS)
+                                "sourceThreadId": delegated.source_thread_id,
+                                "sourceThreadName": delegated.source_thread_name,
+                                "sentAt": delegated.sent_at,
+                                "input": truncate(&delegated.input, DEFAULT_OUTPUT_CHARS)
                             });
                         }
                         input
@@ -1269,12 +1286,14 @@ fn turn_summary(turn: &Turn, include_outputs: bool, output_chars: usize) -> Valu
                 let mut item = json!({
                     "type": "functionCallOutput", "id": id, "name": name, "namespace": namespace
                 });
-                if let Some((source_thread_id, delegated)) =
+                if let Some(delegated) =
                     parse_delegated_tool_output(name, namespace.as_deref(), output)
                 {
                     item["codexDelegation"] = json!({
-                        "sourceThreadId": source_thread_id,
-                        "input": truncate(&delegated, DEFAULT_OUTPUT_CHARS)
+                        "sourceThreadId": delegated.source_thread_id,
+                        "sourceThreadName": delegated.source_thread_name,
+                        "sentAt": delegated.sent_at,
+                        "input": truncate(&delegated.input, DEFAULT_OUTPUT_CHARS)
                     });
                 }
                 if include_outputs {

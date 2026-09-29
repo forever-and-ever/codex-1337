@@ -10,7 +10,6 @@ use crate::git_action_directives::parse_assistant_markdown;
 use crate::history_cell::AgentMarkdownCell;
 use crate::history_cell::HistoryCell;
 use crate::history_cell::PlainHistoryCell;
-use crate::history_cell::PrefixedWrappedHistoryCell;
 use crate::history_cell::ReasoningSummaryCell;
 use crate::history_cell::UserHistoryCell;
 use crate::history_cell::split_reasoning_summary_parts;
@@ -306,18 +305,12 @@ fn item_to_cells(
                 &output,
             ) {
                 cells.push(Arc::new(cell));
-            } else if let Some((source_thread_id, prompt)) =
-                crate::dynamic_tools::parse_delegated_tool_output(
-                    &name,
-                    namespace.as_deref(),
-                    &output,
-                )
-            {
-                cells.push(Arc::new(PrefixedWrappedHistoryCell::new(
-                    format!("Sent by Codex from task {source_thread_id}\n{prompt}"),
-                    "• ".dim(),
-                    "  ",
-                )));
+            } else if let Some(message) = crate::dynamic_tools::parse_delegated_tool_output(
+                &name,
+                namespace.as_deref(),
+                &output,
+            ) {
+                cells.push(Arc::new(crate::history_cell::DelegatedMessageCell(message)));
             }
         }
         ThreadItem::Plan { text, .. } => {

@@ -64,7 +64,7 @@ async fn guardian_receives_sender_user_messages_by_default(
         test.submit_text_turn(prompt).await?;
         requests.extend(mock.requests());
     }
-    for (namespace, output, expected) in [
+    for (index, (namespace, output, expected)) in [
         (
             "codex_app",
             format!(
@@ -79,10 +79,25 @@ async fn guardian_receives_sender_user_messages_by_default(
         ),
         (
             "codex_tui",
+            format!(
+                "<codex_delegation>\n  <source_thread_id>{sender}</source_thread_id>\n  <source_thread_name>Experiment scout</source_thread_name>\n  <sent_at>1800000000000</sent_at>\n  <input>Inspect.</input>\n</codex_delegation>"
+            ),
+            vec![
+                "user: Inspect the experiment.",
+                "user: Add twenty workers.",
+                "user: Only use staging.",
+                "user: Never production.",
+            ],
+        ),
+        (
+            "codex_tui",
             "Inspect again without sender provenance.".to_owned(),
             vec![],
         ),
-    ] {
+    ]
+    .into_iter()
+    .enumerate()
+    {
         let command = json!({
             "cmd": "exit 0",
             "sandbox_permissions": "require_escalated",
@@ -109,7 +124,7 @@ async fn guardian_receives_sender_user_messages_by_default(
         .await;
         let delivery: ResponseItem = serde_json::from_value(json!({
             "type": "function_call_output",
-            "id": format!("delivery-{namespace}"),
+            "id": format!("delivery-{index}"),
             "name": "send_message_to_thread",
             "namespace": namespace,
             "output": output,
@@ -166,6 +181,6 @@ async fn guardian_receives_sender_user_messages_by_default(
         assert_eq!(format!("{start}{current}{end}"), snapshot.text);
         requests.extend(captured);
     }
-    assert_eq!(requests.len(), 10);
+    assert_eq!(requests.len(), 13);
     Ok(())
 }

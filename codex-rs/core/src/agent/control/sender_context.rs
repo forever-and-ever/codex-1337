@@ -37,10 +37,20 @@ impl LocalAgentRuntime {
         }
         // Recognized deliveries always get their own snapshot, even without usable provenance.
         let source_thread_id = output.body.to_text().and_then(|text| {
-            let (source, input) = text
+            let (source, mut rest) = text
                 .strip_prefix("<codex_delegation>\n  <source_thread_id>")?
-                .split_once("</source_thread_id>\n  <input>")?;
-            input.strip_suffix("</input>\n</codex_delegation>")?;
+                .split_once("</source_thread_id>")?;
+            // Display attribution must not sever the host-captured sender provenance.
+            if let Some(named) = rest.strip_prefix("\n  <source_thread_name>") {
+                rest = named.split_once("</source_thread_name>")?.1;
+            }
+            if let Some(dated) = rest.strip_prefix("\n  <sent_at>") {
+                let (timestamp, tail) = dated.split_once("</sent_at>")?;
+                timestamp.parse::<i64>().ok()?;
+                rest = tail;
+            }
+            rest.strip_prefix("\n  <input>")?
+                .strip_suffix("</input>\n</codex_delegation>")?;
             ThreadId::from_string(source)
                 .ok()
                 .filter(|source| *source != receiver_thread_id)

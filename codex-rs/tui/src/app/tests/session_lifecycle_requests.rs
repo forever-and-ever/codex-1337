@@ -1833,16 +1833,17 @@ async fn dynamic_tool_requests_ignore_other_namespaces_and_dispatch_tui_namespac
         .pop()
         .expect("background task turn request");
     assert_eq!(turn["input"], serde_json::json!([]));
-    assert_eq!(
-        turn["toolOutput"],
-        serde_json::json!({
-            "name": "create_thread",
-            "namespace": "codex_tui",
-            "output": format!(
-                "<codex_delegation>\n  <source_thread_id>{creation_source}</source_thread_id>\n  <input>Check &lt;main&gt; &amp; report</input>\n</codex_delegation>"
-            )
-        })
-    );
+    let output: codex_app_server_protocol::TurnToolOutput =
+        serde_json::from_value(turn["toolOutput"].clone())?;
+    let mut message = crate::dynamic_tools::parse_delegated_tool_output(
+        &output.name,
+        output.namespace.as_deref(),
+        &output.output,
+    )
+    .expect("attributed tool output");
+    assert!(message.sent_at.take().is_some());
+    assert_eq!(message.source_thread_id, creation_source.to_string());
+    assert_eq!(message.input, "Check <main> & report");
     assert_eq!(turn["sandboxPolicy"], source_sandbox);
     app.handle_app_server_event(
         &app_server,
@@ -1907,16 +1908,18 @@ async fn dynamic_tool_requests_ignore_other_namespaces_and_dispatch_tui_namespac
     assert!(response.success, "{response:?}");
     let turn = &recorded_params(&requests, "turn/start")[1];
     assert_eq!(turn["input"], serde_json::json!([]));
-    assert_eq!(
-        turn["toolOutput"],
-        serde_json::json!({
-            "name": "send_message_to_thread",
-            "namespace": "codex_tui",
-            "output": format!(
-                "<codex_delegation>\n  <source_thread_id>{thread_id}</source_thread_id>\n  <input>Follow &lt;up&gt; &amp; report</input>\n</codex_delegation>"
-            )
-        })
-    );
+    let output: codex_app_server_protocol::TurnToolOutput =
+        serde_json::from_value(turn["toolOutput"].clone())?;
+    let mut message = crate::dynamic_tools::parse_delegated_tool_output(
+        &output.name,
+        output.namespace.as_deref(),
+        &output.output,
+    )
+    .expect("attributed tool output");
+    assert!(message.sent_at.take().is_some());
+    assert_eq!(message.source_thread_id, thread_id.to_string());
+    assert_eq!(message.source_thread_name.as_deref(), Some("Renamed"));
+    assert_eq!(message.input, "Follow <up> & report");
 
     app.dynamic_tool_tasks.insert(
         AppServerRequestId::Integer(105),

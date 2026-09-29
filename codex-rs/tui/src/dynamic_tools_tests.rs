@@ -277,28 +277,44 @@ stream_max_retries = 0
 
 #[test]
 fn delegated_prompts_match_desktop_xml_contract() {
-    let output = FunctionCallOutputBody::Text(delegated_prompt("thread-1", "Check status"));
+    let message = DelegatedMessage {
+        source_thread_id: "thread-1".to_string(),
+        source_thread_name: Some("Coder <main> & tools".to_string()),
+        sent_at: Some(1_800_000_000_000),
+        input: "Check <main> & report > status".to_string(),
+    };
+    let output = FunctionCallOutputBody::Text(message.encode());
     for namespace in ["codex_tui", "codex_app"] {
         assert_eq!(
             parse_delegated_tool_output("send_message_to_thread", Some(namespace), &output),
-            Some(("thread-1".to_string(), "Check status".to_string()))
+            Some(message.clone())
         );
     }
     assert_eq!(
         parse_delegated_tool_output("send_message_to_thread", Some("untrusted"), &output),
         None
     );
+    // Existing desktop and persisted messages have neither a title nor a clock.
     assert_eq!(
-        delegated_prompt("thread-1", "Check <main> & report > status"),
-        "<codex_delegation>\n  <source_thread_id>thread-1</source_thread_id>\n  <input>Check &lt;main&gt; &amp; report &gt; status</input>\n</codex_delegation>"
+        DelegatedMessage::parse(
+            "<codex_delegation>\n  <source_thread_id>thread-1</source_thread_id>\n  <input>Check &lt;main&gt; &amp; report &gt; status</input>\n</codex_delegation>"
+        ),
+        Some(DelegatedMessage {
+            source_thread_name: None,
+            sent_at: None,
+            ..message
+        })
     );
-    assert!(
-        validate_prompt(
-            &delegated_prompt("thread-1", &"&".repeat(MAX_INPUT_BYTES)),
-            MAX_DELEGATED_INPUT_BYTES,
-        )
-        .is_err()
-    );
+}
+
+fn delegated_prompt(source_thread_id: &str, input: &str) -> String {
+    DelegatedMessage {
+        source_thread_id: source_thread_id.to_string(),
+        source_thread_name: None,
+        sent_at: None,
+        input: input.to_string(),
+    }
+    .encode()
 }
 
 #[test]
@@ -349,7 +365,7 @@ fn activity_metadata_is_retained_without_including_outputs() -> color_eyre::Resu
             {"type": "mcpToolCall", "id": "mcp-1", "server": "docs", "tool": "search", "arguments": {}, "status": "completed", "durationMs": null},
             {"type": "userMessage", "id": "user-1", "content": [
                 {"type": "text", "text": delegated_prompt("source-1", "Check <main> & status"),
-                    "codexDelegation": {"sourceThreadId": "source-1", "input": "Check <main> & status"}},
+                    "codexDelegation": {"sourceThreadId": "source-1", "sourceThreadName": null, "sentAt": null, "input": "Check <main> & status"}},
                 {"type": "skill", "name": "debug", "path": "/tmp/SKILL.md"},
                 {"type": "mention", "name": "docs", "path": "app://docs"}
             ]},
@@ -361,7 +377,7 @@ fn activity_metadata_is_retained_without_including_outputs() -> color_eyre::Resu
             {"type": "enteredReviewMode", "id": "review-1", "review": "review changes"},
             {"type": "functionCallOutput", "id": "delegation-1", "name": "send_message_to_thread",
                 "namespace": "codex_tui", "codexDelegation": {
-                    "sourceThreadId": "source-2", "input": "Follow <up> & report"
+                    "sourceThreadId": "source-2", "sourceThreadName": null, "sentAt": null, "input": "Follow <up> & report"
                 }}
         ])
     );
@@ -671,11 +687,11 @@ async fn task_creation_and_followup_start_background_turns() -> color_eyre::Resu
     for (tool, arguments) in [
         (
             "create_thread",
-            json!({"prompt": "&".repeat(MAX_INPUT_BYTES)}),
+            json!({"prompt": "x".repeat(MAX_INPUT_BYTES + 1)}),
         ),
         (
             "send_message_to_thread",
-            json!({"threadId": target, "prompt": "&".repeat(MAX_INPUT_BYTES)}),
+            json!({"threadId": target, "prompt": "x".repeat(MAX_INPUT_BYTES + 1)}),
         ),
     ] {
         assert!(!call_tool(&server, &source, tool, arguments).await.success);
@@ -733,6 +749,19 @@ async fn task_creation_and_followup_start_background_turns() -> color_eyre::Resu
         .await,
     );
     assert_eq!(continued["threadId"], target);
+
+    let queued = response_json(
+        call_tool(
+            &server,
+            &source,
+            "send_message_to_thread",
+            json!({"threadId": target, "prompt": "Follow up later", "delivery": "queued"}),
+        )
+        .await,
+    );
+    assert_eq!(queued["threadId"], target);
+    assert_eq!(queued["delivery"], "queued");
+    assert!(queued["queuedSubmissionId"].is_string());
 
     let oversized = call_tool(
         &server,

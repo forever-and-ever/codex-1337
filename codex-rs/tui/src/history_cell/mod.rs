@@ -11,7 +11,9 @@
 //! rendered transcript output can change.
 
 mod activity_group;
+mod delegation;
 pub(crate) use activity_group::ActivityGroup;
+pub(crate) use delegation::DelegatedMessageCell;
 
 use crate::diff_model::FileChange;
 use crate::diff_render::create_diff_summary;
