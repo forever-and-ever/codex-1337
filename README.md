@@ -15,8 +15,9 @@ both services. Staging restarts may terminate staging turns.
 
 The shared app server, account scoping, and agent controls belong to this fork.
 Use `codex agents` for the session dashboard. The graphical Wrangler is retired.
-The distribution owns its systemd user units; upgrades drain active turns rather
-than forcibly restarting the shared server. The federation bridge remains bundled.
+The distribution owns its systemd user units; upgrades wait for idle without
+closing admission or forcibly restarting the shared server. The federation bridge
+remains bundled.
 
 `/reload` replaces the Linux UI without detaching its server connection or stopping
 agents. Drafts, attachments, queued input, steering, inline answers, and the cut
@@ -30,6 +31,10 @@ Subagent navigation is keyboard-only: Down at the end of the composer enters the
 list, Enter opens an agent, and Esc returns to the main agent. The fullscreen
 transcript uses upstream selection and scrolling. On Linux, selecting text
 publishes PRIMARY without replacing CLIPBOARD; terminal paste shortcuts remain available.
+
+On X11/i3, hidden windows or 30 seconds of desktop inactivity stop repainting,
+not agent execution. Visible, unfocused windows redraw for content without
+animation; focused windows animate normally. SSH always uses reduced presentation.
 
 <p align="center"><strong>Codex CLI</strong> is a coding agent from OpenAI that runs locally on your computer.
 <p align="center">

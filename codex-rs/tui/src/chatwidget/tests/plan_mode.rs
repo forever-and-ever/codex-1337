@@ -1167,22 +1167,32 @@ async fn finalizing_plan_before_first_commit_tick_stops_stream_interval() {
     // must stop the already-enqueued interval; otherwise a controller-free tick ran forever.
     chat.on_plan_delta("- Step 1\n".to_string());
     let pending = std::iter::from_fn(|| rx.try_recv().ok()).collect::<Vec<_>>();
-    assert!(pending.iter().any(|event| matches!(event, AppEvent::StartCommitAnimation)));
     assert!(
-        !pending.iter().any(|event| matches!(event, AppEvent::StopCommitAnimation)),
+        pending
+            .iter()
+            .any(|event| matches!(event, AppEvent::StartCommitAnimation))
+    );
+    assert!(
+        !pending
+            .iter()
+            .any(|event| matches!(event, AppEvent::StopCommitAnimation)),
         "the catch-up probe must not stop a smooth stream: {pending:?}"
     );
     chat.on_plan_item_completed("- Step 1\n".to_string());
     let events = std::iter::from_fn(|| rx.try_recv().ok()).collect::<Vec<_>>();
     assert!(
-        events.iter().any(|event| matches!(event, AppEvent::StopCommitAnimation)),
+        events
+            .iter()
+            .any(|event| matches!(event, AppEvent::StopCommitAnimation)),
         "plan completion stopped the interval: {events:?}"
     );
 
     // A tick already queued before finalization must also stop, not reinstate the orphan.
     chat.run_commit_tick();
-    assert!(std::iter::from_fn(|| rx.try_recv().ok())
-        .any(|event| matches!(event, AppEvent::StopCommitAnimation)));
+    assert!(
+        std::iter::from_fn(|| rx.try_recv().ok())
+            .any(|event| matches!(event, AppEvent::StopCommitAnimation))
+    );
 }
 
 #[tokio::test]
