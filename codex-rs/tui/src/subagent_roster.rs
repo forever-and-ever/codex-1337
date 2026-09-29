@@ -1,4 +1,4 @@
-//! Retained, root-scoped subagents. Runtime residency does not determine membership.
+//! Inline view of loaded subagents. The picker retains unloaded family members.
 use crate::agent_status;
 use crate::line_truncation::truncate_line_to_width;
 use crate::render::Insets;

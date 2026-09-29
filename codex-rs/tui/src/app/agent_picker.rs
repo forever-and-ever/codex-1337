@@ -169,7 +169,9 @@ impl App {
             {
                 // Subscribed notifications win; unloaded roster entries rely on snapshots.
                 if live {
-                    row.status.get_or_insert(thread.status);
+                    if !matches!(thread.status, ThreadStatus::NotLoaded) {
+                        row.status.get_or_insert(thread.status);
+                    }
                 } else {
                     row.status = Some(thread.status);
                 }

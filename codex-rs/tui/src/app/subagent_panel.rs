@@ -11,8 +11,10 @@ impl App {
             .agent_navigation
             .ordered_threads()
             .into_iter()
-            .filter(|(id, _)| {
-                Some(*id) != self.primary_thread_id && !self.side_threads.contains_key(id)
+            .filter(|(id, entry)| {
+                !entry.is_closed
+                    && Some(*id) != self.primary_thread_id
+                    && !self.side_threads.contains_key(id)
             })
             .map(|(id, entry)| {
                 (
@@ -60,6 +62,16 @@ impl App {
         else {
             return;
         };
+        if (matches!(notification, ServerNotification::ThreadClosed(_))
+            || matches!(notification, ServerNotification::ThreadStatusChanged(event)
+                if matches!(event.status, ThreadStatus::NotLoaded)))
+            && self.agent_navigation.get(&id).is_some()
+        {
+            self.agent_navigation.mark_closed(id);
+            self.sync_subagent_roster();
+            self.chat_widget.request_redraw();
+            return;
+        }
         // Authoritative liveness can restore a previously unloaded descendant.
         if let ServerNotification::ThreadStatusChanged(event) = notification
             && !matches!(event.status, ThreadStatus::NotLoaded)
@@ -125,20 +137,10 @@ impl App {
                     ThreadStatus::Idle
                 });
             }
-            ServerNotification::ThreadClosed(_) => {
-                row.status = Some(ThreadStatus::NotLoaded);
-                row.activity = None;
-            }
             _ => return,
         }
         roster.sort_by_activity();
         drop(roster);
-        if matches!(notification, ServerNotification::ThreadClosed(_))
-            || matches!(notification, ServerNotification::ThreadStatusChanged(event)
-                if matches!(event.status, ThreadStatus::NotLoaded))
-        {
-            self.sync_subagent_roster();
-        }
         self.chat_widget.request_redraw();
     }
 

@@ -81,7 +81,7 @@ async fn agents_navigation_roster_tracks_background_metadata_without_replaying_a
     );
     drop(roster);
 
-    // Residency changes must preserve roster identity and keyboard focus.
+    // Unloading hides the inline row without losing the recoverable picker entry.
     app.agent_navigation.remove(other);
     app.sync_subagent_roster();
     app.agent_navigation.roster.lock().unwrap().down();
@@ -89,19 +89,13 @@ async fn agents_navigation_roster_tracks_background_metadata_without_replaying_a
     app.sync_subagent_roster();
     {
         let roster = app.agent_navigation.roster.lock().unwrap();
-        assert_eq!((roster.rows.len(), roster.focused), (1, Some(child)));
+        assert_eq!((roster.rows.len(), roster.focused), (0, None));
     }
+    assert!(app.agent_navigation.get(&child).unwrap().is_closed);
     insta::assert_snapshot!(
         "subagent_roster_unloaded",
         render_bottom_popup(&app.chat_widget, /*width*/ 80)
     );
-    app.agent_navigation.roster.lock().unwrap().retiring =
-        Some(crate::subagent_roster::Retirement::Pending);
-    insta::assert_snapshot!(
-        "subagent_roster_retiring",
-        render_bottom_popup(&app.chat_widget, /*width*/ 80)
-    );
-    app.agent_navigation.roster.lock().unwrap().retiring = None;
     app.track_subagent_panel(&status(codex_app_server_protocol::ThreadStatus::Idle));
     let roster = app.agent_navigation.roster.lock().unwrap();
     assert_eq!(
@@ -113,6 +107,14 @@ async fn agents_navigation_roster_tracks_background_metadata_without_replaying_a
         vec![(child, Some(codex_app_server_protocol::ThreadStatus::Idle))]
     );
     drop(roster);
+    app.agent_navigation.roster.lock().unwrap().down();
+    app.agent_navigation.roster.lock().unwrap().retiring =
+        Some(crate::subagent_roster::Retirement::Pending);
+    insta::assert_snapshot!(
+        "subagent_roster_retiring",
+        render_bottom_popup(&app.chat_widget, /*width*/ 80)
+    );
+    app.agent_navigation.roster.lock().unwrap().retiring = None;
     app.agent_navigation.retire(child);
     // A response issued before retirement cannot resurrect the retired row.
     app.upsert_agent_picker_thread(child, Some("worker".into()), None, false);
@@ -126,8 +128,15 @@ async fn agents_navigation_picker_keeps_selection_when_running_order_changes() {
     let root = ThreadId::new();
     let idle = ThreadId::new();
     let busy = ThreadId::new();
+    let unloaded = ThreadId::new();
     app.primary_thread_id = Some(root);
     app.active_thread_id = Some(idle);
+    app.upsert_agent_picker_thread(
+        unloaded,
+        Some("unloaded".into()),
+        /*agent_role*/ None,
+        /*is_closed*/ true,
+    );
     for (id, name) in [(root, "main"), (idle, "researcher"), (busy, "reviewer")] {
         app.upsert_agent_picker_thread(
             id,
@@ -138,12 +147,18 @@ async fn agents_navigation_picker_keeps_selection_when_running_order_changes() {
     }
     app.agent_navigation.set_running(busy, /*is_running*/ true);
     let first = app.agent_picker_selection_view_params(/*selected*/ None);
-    assert_eq!(app.agent_navigation.picker_order, vec![busy, root, idle]);
+    assert_eq!(
+        app.agent_navigation.picker_order,
+        vec![busy, root, idle, unloaded]
+    );
     assert_eq!(first.initial_selected_idx, Some(2));
     app.agent_navigation.set_running(busy, /*is_running*/ false);
     app.agent_navigation.set_running(idle, /*is_running*/ true);
     let next = app.agent_picker_selection_view_params(first.initial_selected_idx);
-    assert_eq!(app.agent_navigation.picker_order, vec![idle, root, busy]);
+    assert_eq!(
+        app.agent_navigation.picker_order,
+        vec![idle, root, busy, unloaded]
+    );
     assert_eq!(next.initial_selected_idx, Some(0));
     app.chat_widget.show_selection_view(next);
     insta::assert_snapshot!(
@@ -152,6 +167,7 @@ async fn agents_navigation_picker_keeps_selection_when_running_order_changes() {
             .replace(&root.to_string(), "ROOT_ID")
             .replace(&idle.to_string(), "IDLE_ID")
             .replace(&busy.to_string(), "BUSY_ID")
+            .replace(&unloaded.to_string(), "UNLOADED_ID")
     );
 }
 

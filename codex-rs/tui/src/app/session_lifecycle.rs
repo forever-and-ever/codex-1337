@@ -175,7 +175,7 @@ impl App {
             .and_then(|index| self.agent_navigation.picker_order.get(index).copied())
             .or(self.active_thread_id);
         let mut threads = self.agent_navigation.ordered_threads();
-        threads.sort_by_key(|(_, entry)| !entry.is_running || entry.is_closed);
+        threads.sort_by_key(|(_, entry)| (entry.is_closed, !entry.is_running));
         let picker_order = threads.iter().map(|(id, _)| *id).collect();
         let mut initial_selected_idx = None;
         let items: Vec<SelectionItem> = threads
