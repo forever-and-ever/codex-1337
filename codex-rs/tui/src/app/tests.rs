@@ -9819,7 +9819,10 @@ async fn observer_freeze_retires_presentation_clocks_without_suspending_input() 
     app.chat_widget.terminal_title_next_refresh = Some(Instant::now() + Duration::from_secs(1));
 
     let previous = tui.presentation_mode();
-    tui.set_desktop_attention(/*idle*/ true, /*visible*/ None);
+    tui.set_desktop_attention(tui::DesktopAttention {
+        idle: true,
+        ..Default::default()
+    });
     app.apply_presentation_transition(&mut tui, previous)?;
     assert_eq!(
         (
@@ -9834,6 +9837,26 @@ async fn observer_freeze_retires_presentation_clocks_without_suspending_input() 
     tui.note_terminal_input();
     app.apply_presentation_transition(&mut tui, previous)?;
     assert_eq!(tui.presentation_mode(), tui::PresentationMode::Normal);
+
+    app.commit_animation = Some(tokio::time::interval(Duration::from_millis(
+        /*millis*/ 8,
+    )));
+    app.chat_widget.terminal_title_next_refresh = Some(Instant::now() + Duration::from_secs(1));
+    let previous = tui.presentation_mode();
+    tui.set_desktop_attention(tui::DesktopAttention {
+        visible: Some(true),
+        focused: Some(false),
+        ..Default::default()
+    });
+    app.apply_presentation_transition(&mut tui, previous)?;
+    assert_eq!(
+        (
+            tui.presentation_mode(),
+            app.commit_animation.is_some(),
+            app.chat_widget.terminal_title_next_refresh,
+        ),
+        (tui::PresentationMode::Reduced, false, None),
+    );
     Ok(())
 }
 

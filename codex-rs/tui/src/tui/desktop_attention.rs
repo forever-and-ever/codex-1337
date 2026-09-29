@@ -26,16 +26,17 @@ use x11rb::protocol::sync::Int64;
 use x11rb::protocol::sync::TESTTYPE;
 use x11rb::protocol::sync::VALUETYPE;
 
+use super::DesktopAttention;
+
 const IDLE_THRESHOLD: Duration = Duration::from_secs(30);
 const X11_INITIALIZATION_TIMEOUT: Duration = Duration::from_secs(2);
 const I3_SNAPSHOT_TIMEOUT: Duration = Duration::from_millis(500);
 const I3_SNAPSHOT_MAX_BYTES: u64 = 2 * 1024 * 1024;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct DesktopAttention {
-    pub(crate) idle: bool,
-    /// `None` is unknown and never proof that a window is hidden.
-    pub(crate) visible: Option<bool>,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct WindowAttention {
+    visible: Option<bool>,
+    focused: Option<bool>,
 }
 
 pub(crate) fn start() -> watch::Receiver<DesktopAttention> {
@@ -59,9 +60,12 @@ pub(crate) fn start() -> watch::Receiver<DesktopAttention> {
         });
     if let Some(window_id) = window_id {
         tokio::spawn(async move {
-            if let Err(error) = observe_visibility(tx.clone(), window_id).await {
+            if let Err(error) = observe_window_attention(tx.clone(), window_id).await {
                 tracing::debug!(%error, "i3 window observer unavailable");
-                tx.send_modify(|state| state.visible = None);
+                tx.send_modify(|state| {
+                    state.visible = None;
+                    state.focused = None;
+                });
             }
         });
     }
@@ -167,7 +171,10 @@ fn initialize_idle_alarm() -> Result<(x11rb::rust_connection::RustConnection, In
     Ok((conn, elapsed))
 }
 
-async fn observe_visibility(tx: watch::Sender<DesktopAttention>, window_id: u64) -> Result<()> {
+async fn observe_window_attention(
+    tx: watch::Sender<DesktopAttention>,
+    window_id: u64,
+) -> Result<()> {
     // i3-msg -m hides the subscription acknowledgement. Use IPC directly so the
     // initial snapshot cannot race subscription setup or wait for a desktop event.
     let socket = tokio::time::timeout(I3_SNAPSHOT_TIMEOUT, async {
@@ -206,14 +213,14 @@ async fn observe_visibility(tx: watch::Sender<DesktopAttention>, window_id: u64)
         let (_, event) = read_i3_message(&mut socket).await?;
         Ok::<_, anyhow::Error>(Some((event, socket)))
     }));
-    update_visibility(&tx, window_id).await;
+    update_window_attention(&tx, window_id).await;
     loop {
         tokio::select! {
             event = events.next() => {
                 let Some(event) = event else {
                     anyhow::bail!("i3 subscription closed");
                 };
-                if !affects_visibility(&event?) {
+                if !affects_window_attention(&event?) {
                     continue;
                 }
                 // Burst events describe one new tree. Do not fork a snapshot subprocess per
@@ -222,7 +229,7 @@ async fn observe_visibility(tx: watch::Sender<DesktopAttention>, window_id: u64)
                 while let Some(result) = events.next().now_or_never() {
                     result.context("i3 subscription closed")??;
                 }
-                update_visibility(&tx, window_id).await;
+                update_window_attention(&tx, window_id).await;
             }
             () = tx.closed() => return Ok(()),
         }
@@ -244,14 +251,14 @@ async fn read_i3_message(socket: &mut UnixStream) -> Result<(u32, Value)> {
     Ok((kind, serde_json::from_slice(&payload)?))
 }
 
-fn affects_visibility(event: &Value) -> bool {
+fn affects_window_attention(event: &Value) -> bool {
     // Terminal titles refresh frequently while an agent runs. Title, mark and urgency
     // notifications cannot move, occlude or reveal a window.
     !matches!(event["change"].as_str(), Some("title" | "mark" | "urgent"))
 }
 
-async fn update_visibility(tx: &watch::Sender<DesktopAttention>, window_id: u64) {
-    let visible = if let (Some(tree), Some(workspaces)) = (
+async fn update_window_attention(tx: &watch::Sender<DesktopAttention>, window_id: u64) {
+    let attention = if let (Some(tree), Some(workspaces)) = (
         i3_snapshot("get_tree").await,
         i3_snapshot("get_workspaces").await,
     ) {
@@ -263,15 +270,18 @@ async fn update_visibility(tx: &watch::Sender<DesktopAttention>, window_id: u64)
                 Some((workspace["id"].as_u64()?, workspace["visible"].as_bool()?))
             })
             .collect();
-        window_visibility(&tree, window_id, Some(true), &visible_workspaces)
+        window_attention(&tree, window_id, Some(true), &visible_workspaces)
     } else {
         None
     };
     tx.send_if_modified(|state| {
-        if state.visible == visible {
+        let visible = attention.and_then(|attention| attention.visible);
+        let focused = attention.and_then(|attention| attention.focused);
+        if state.visible == visible && state.focused == focused {
             return false;
         }
         state.visible = visible;
+        state.focused = focused;
         true
     });
 }
@@ -309,12 +319,12 @@ async fn i3_snapshot(kind: &str) -> Option<Value> {
         .flatten()
 }
 
-fn window_visibility(
+fn window_attention(
     node: &Value,
     window_id: u64,
     parent_visible: Option<bool>,
     visible_workspaces: &HashMap<u64, bool>,
-) -> Option<bool> {
+) -> Option<WindowAttention> {
     let visible = if node["type"] == "workspace" {
         if node["name"] == "__i3_scratch" {
             Some(false)
@@ -327,7 +337,10 @@ fn window_visibility(
         parent_visible
     };
     if node["window"].as_u64() == Some(window_id) {
-        return visible;
+        return Some(WindowAttention {
+            visible,
+            focused: node["focused"].as_bool(),
+        });
     }
     // A focused floating child leads i3's focus list without replacing the visible tab.
     let selected_tiled = node["nodes"].as_array().and_then(|children| {
@@ -344,10 +357,10 @@ fn window_visibility(
                     && matches!(node["layout"].as_str(), Some("tabbed" | "stacked"))
                     && selected_tiled.is_some_and(|id| id != &child["id"]);
                 let child_visible = if tab_hidden { Some(false) } else { visible };
-                if let Some(visible) =
-                    window_visibility(child, window_id, child_visible, visible_workspaces)
+                if let Some(attention) =
+                    window_attention(child, window_id, child_visible, visible_workspaces)
                 {
-                    return Some(visible);
+                    return Some(attention);
                 }
             }
         }

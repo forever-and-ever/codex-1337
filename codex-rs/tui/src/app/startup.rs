@@ -1163,10 +1163,10 @@ See the Codex keymap documentation for supported actions and examples."
                         let previous = tui.presentation_mode();
                         if result.is_ok() && let Some(receiver) = desktop_attention.as_mut() {
                             let state = *receiver.borrow_and_update();
-                            tui.set_desktop_attention(state.idle, state.visible);
+                            tui.set_desktop_attention(state);
                         } else {
                             desktop_attention = None;
-                            tui.set_desktop_attention(/*idle*/ false, /*visible*/ None);
+                            tui.set_desktop_attention(Default::default());
                         }
                         app.apply_presentation_transition(tui, previous)?;
                         AppRunControl::Continue

@@ -82,6 +82,7 @@ mod owned_screen_tests;
 #[path = "tui_panic_tests.rs"]
 mod panic_tests;
 mod presentation;
+pub(crate) use presentation::DesktopAttention;
 mod screen_size;
 mod scrollback;
 mod selection_clipboard;
@@ -642,8 +643,9 @@ pub struct Tui {
     presentation_over_ssh: bool,
     desktop_idle: bool,
     window_visible: Option<bool>,
+    window_focused: Option<bool>,
     #[cfg(target_os = "linux")]
-    desktop_attention: Option<tokio::sync::watch::Receiver<desktop_attention::DesktopAttention>>,
+    desktop_attention: Option<tokio::sync::watch::Receiver<DesktopAttention>>,
     draw_tx: broadcast::Sender<()>,
     event_broker: Arc<EventBroker>,
     pub(crate) terminal: Terminal,
@@ -727,6 +729,7 @@ impl Tui {
             presentation_over_ssh,
             desktop_idle: false,
             window_visible: None,
+            window_focused: None,
             #[cfg(all(target_os = "linux", not(test)))]
             desktop_attention: (!presentation_over_ssh).then(desktop_attention::start),
             #[cfg(all(target_os = "linux", test))]
