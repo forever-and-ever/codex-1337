@@ -78,12 +78,13 @@ impl FrameRequester {
     pub fn new(draw_tx: broadcast::Sender<()>) -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
         let mode = Arc::new(AtomicU8::new(PresentationMode::Normal as u8));
-        let scheduler = FrameScheduler::new(rx, draw_tx, mode.clone());
+        let dirty = Arc::new(AtomicBool::new(false));
+        let scheduler = FrameScheduler::new(rx, draw_tx, mode.clone(), dirty.clone());
         tokio::spawn(scheduler.run());
         Self {
             frame_schedule_tx: tx,
             mode,
-            dirty: Arc::new(AtomicBool::new(false)),
+            dirty,
         }
     }
 
@@ -199,6 +200,7 @@ struct FrameScheduler {
     draw_tx: broadcast::Sender<()>,
     rate_limiter: FrameRateLimiter,
     mode: Arc<AtomicU8>,
+    dirty: Arc<AtomicBool>,
 }
 
 impl FrameScheduler {
@@ -207,12 +209,14 @@ impl FrameScheduler {
         receiver: mpsc::UnboundedReceiver<FrameRequest>,
         draw_tx: broadcast::Sender<()>,
         mode: Arc<AtomicU8>,
+        dirty: Arc<AtomicBool>,
     ) -> Self {
         Self {
             receiver,
             draw_tx,
             rate_limiter: FrameRateLimiter::default(),
             mode,
+            dirty,
         }
     }
 
@@ -269,6 +273,11 @@ impl FrameScheduler {
                             || (mode == PresentationMode::Normal as u8
                                 && due[FrameKind::Cosmetic as usize])
                         )) {
+                            // A preceding paint may have cleared dirty before delayed
+                            // content (for example a turn tip) became visible.
+                            if due[FrameKind::Content as usize] {
+                                self.dirty.store(true, Ordering::Relaxed);
+                            }
                             self.rate_limiter.mark_emitted(scheduling_now());
                             let _ = self.draw_tx.send(());
                     }
@@ -441,6 +450,19 @@ mod tests {
         assert!(
             draw_rx.try_recv().is_err(),
             "burst produced only one content paint"
+        );
+        requester.schedule_content_in(Duration::from_millis(/*millis*/ 200));
+        requester.take_dirty(); // A paint before the delayed content becomes visible.
+        assert!(matches!(
+            draw_rx
+                .recv()
+                .timeout(Duration::from_millis(/*millis*/ 250))
+                .await,
+            Ok(Ok(()))
+        ));
+        assert!(
+            requester.take_dirty(),
+            "due content must survive the preceding paint"
         );
     }
 

@@ -7,11 +7,15 @@ use std::time::Duration;
 
 use anyhow::Context;
 use anyhow::Result;
+use anyhow::ensure;
+use codex_utils_path::system_executable;
+use codex_utils_path::system_path;
 use futures::FutureExt;
+use futures::StreamExt;
 use serde_json::Value;
-use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncReadExt;
-use tokio::io::BufReader;
+use tokio::io::AsyncWriteExt;
+use tokio::net::UnixStream;
 use tokio::process::Command;
 use tokio::sync::watch;
 use x11rb::connection::Connection;
@@ -164,42 +168,59 @@ fn initialize_idle_alarm() -> Result<(x11rb::rust_connection::RustConnection, In
 }
 
 async fn observe_visibility(tx: watch::Sender<DesktopAttention>, window_id: u64) -> Result<()> {
-    // i3-msg streams window/workspace/output events; a snapshot is sampled only on change.
-    let mut child = Command::new("i3-msg")
-        .args([
-            "-t",
-            "subscribe",
-            "-m",
-            "[\"window\",\"workspace\",\"output\"]",
-        ])
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .kill_on_drop(true)
-        .spawn()?;
-    let stdout = child.stdout.take().context("i3 subscribe has no stdout")?;
-    let mut events = BufReader::new(stdout).lines();
-    // i3 first sends a subscription acknowledgement, not a visibility change.
-    tokio::time::timeout(I3_SNAPSHOT_TIMEOUT, events.next_line())
-        .await
-        .context("i3 subscription handshake timed out")??
-        .context("i3 subscription closed before acknowledgement")?;
+    // i3-msg -m hides the subscription acknowledgement. Use IPC directly so the
+    // initial snapshot cannot race subscription setup or wait for a desktop event.
+    let socket = tokio::time::timeout(I3_SNAPSHOT_TIMEOUT, async {
+        let path = if let Some(path) = std::env::var_os("I3SOCK") {
+            std::path::PathBuf::from(path)
+        } else {
+            let output = Command::new(system_executable("i3").context("i3 is not installed")?)
+                .env("PATH", system_path()?)
+                .arg("--get-socketpath")
+                .stdin(Stdio::null())
+                .stderr(Stdio::null())
+                .kill_on_drop(true)
+                .output()
+                .await?;
+            ensure!(output.status.success(), "i3 socket discovery failed");
+            std::path::PathBuf::from(std::str::from_utf8(&output.stdout)?.trim())
+        };
+        let mut socket = UnixStream::connect(path).await?;
+        let payload = b"[\"window\",\"workspace\",\"output\"]";
+        let mut request = b"i3-ipc".to_vec();
+        request.extend_from_slice(&(payload.len() as u32).to_ne_bytes());
+        request.extend_from_slice(&2_u32.to_ne_bytes()); // SUBSCRIBE
+        request.extend_from_slice(payload);
+        socket.write_all(&request).await?;
+        let (kind, reply) = read_i3_message(&mut socket).await?;
+        ensure!(
+            kind == 2 && reply["success"] == true,
+            "i3 subscription rejected"
+        );
+        Ok::<_, anyhow::Error>(socket)
+    })
+    .await
+    .context("i3 subscription handshake timed out")??;
+    // The stream retains partial reads across cancellation by select/now_or_never.
+    let mut events = Box::pin(futures::stream::try_unfold(socket, |mut socket| async {
+        let (_, event) = read_i3_message(&mut socket).await?;
+        Ok::<_, anyhow::Error>(Some((event, socket)))
+    }));
     update_visibility(&tx, window_id).await;
     loop {
         tokio::select! {
-            event = events.next_line() => {
-                let Some(event) = event? else {
+            event = events.next() => {
+                let Some(event) = event else {
                     anyhow::bail!("i3 subscription closed");
                 };
-                if !affects_visibility(&event) {
+                if !affects_visibility(&event?) {
                     continue;
                 }
                 // Burst events describe one new tree. Do not fork a snapshot subprocess per
                 // intermediate focus/move notification.
                 tokio::time::sleep(Duration::from_millis(30)).await;
-                while let Some(result) = events.next_line().now_or_never() {
-                    if result?.is_none() {
-                        anyhow::bail!("i3 subscription closed");
-                    }
+                while let Some(result) = events.next().now_or_never() {
+                    result.context("i3 subscription closed")??;
                 }
                 update_visibility(&tx, window_id).await;
             }
@@ -208,10 +229,22 @@ async fn observe_visibility(tx: watch::Sender<DesktopAttention>, window_id: u64)
     }
 }
 
-fn affects_visibility(line: &str) -> bool {
-    let Ok(event) = serde_json::from_str::<Value>(line) else {
-        return true;
-    };
+async fn read_i3_message(socket: &mut UnixStream) -> Result<(u32, Value)> {
+    let mut header = [0_u8; 14];
+    socket.read_exact(&mut header).await?;
+    ensure!(&header[..6] == b"i3-ipc", "invalid i3 IPC header");
+    let length = u32::from_ne_bytes(header[6..10].try_into()?);
+    ensure!(
+        u64::from(length) <= I3_SNAPSHOT_MAX_BYTES,
+        "oversized i3 event"
+    );
+    let kind = u32::from_ne_bytes(header[10..14].try_into()?);
+    let mut payload = vec![0; length as usize];
+    socket.read_exact(&mut payload).await?;
+    Ok((kind, serde_json::from_slice(&payload)?))
+}
+
+fn affects_visibility(event: &Value) -> bool {
     // Terminal titles refresh frequently while an agent runs. Title, mark and urgency
     // notifications cannot move, occlude or reveal a window.
     !matches!(event["change"].as_str(), Some("title" | "mark" | "urgent"))
@@ -244,8 +277,10 @@ async fn update_visibility(tx: &watch::Sender<DesktopAttention>, window_id: u64)
 }
 
 async fn i3_snapshot(kind: &str) -> Option<Value> {
-    let mut child = Command::new("i3-msg")
+    let mut child = Command::new(system_executable("i3-msg")?)
+        .env("PATH", system_path().ok()?)
         .args(["-t", kind])
+        .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .kill_on_drop(true)
