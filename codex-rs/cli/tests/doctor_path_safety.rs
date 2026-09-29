@@ -535,9 +535,12 @@ async fn interactive_tmux_startup_does_not_execute_workspace_helpers() -> Result
     let mut output_rx = spawned.stdout_rx;
     let writer = session.writer_sender();
     let mut output = String::new();
-    let ansi = regex_lite::Regex::new(r"\x1b\[[0-?]*[ -/]*[@-~]")?;
+    let mut terminal = vt100::Parser::new(
+        /*rows*/ 40, /*cols*/ 120, /*scrollback_len*/ 0,
+    );
     let ready = timeout(Duration::from_secs(/*secs*/ 45), async {
         while let Some(bytes) = output_rx.recv().await {
+            terminal.process(&bytes);
             let chunk = String::from_utf8_lossy(&bytes);
             output.push_str(&chunk);
             if chunk.contains("\x1b[6n") {
@@ -546,9 +549,10 @@ async fn interactive_tmux_startup_does_not_execute_workspace_helpers() -> Result
             if chunk.contains("\x1b[c") {
                 writer.send(b"\x1b[?1;2c".to_vec()).await?;
             }
-            // Ratatui can position over spaces instead of writing them.
-            let text: String = ansi
-                .replace_all(&output, "")
+            // Diff draws omit unchanged cells; raw concatenation loses those letters.
+            let text: String = terminal
+                .screen()
+                .contents()
                 .chars()
                 .filter(|character| !character.is_whitespace())
                 .collect();
