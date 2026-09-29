@@ -4,6 +4,9 @@ mod daemon_continuation;
 #[path = "daemon_snapshot.rs"]
 mod daemon_snapshot;
 
+#[path = "extension_lease.rs"]
+mod extension_lease;
+
 use super::persisted_resume_settings::PersistedResumeSettings;
 use super::persisted_resume_settings::latest_persisted_resume_settings;
 use super::thread_enrichment::enrich_loaded_threads;
@@ -459,6 +462,7 @@ pub(crate) struct ThreadRequestProcessor {
     pub(super) skills_watcher: Arc<SkillsWatcher>,
     pub(super) turn_cost_worker: Option<crate::turn_cost_worker::TurnCostWorkerHandle>,
     pub(super) initial_config_warnings: Arc<Vec<ConfigWarningNotification>>,
+    extension_leases: Arc<Mutex<HashMap<ThreadId, extension_lease::ExtensionLease>>>,
 }
 
 /// Whether resume attaches a client or restores a cold runtime during daemon startup.
@@ -518,6 +522,7 @@ impl ThreadRequestProcessor {
             skills_watcher,
             turn_cost_worker,
             initial_config_warnings: Arc::new(initial_config_warnings),
+            extension_leases: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -1003,6 +1008,9 @@ impl ThreadRequestProcessor {
     }
 
     async fn finalize_thread_teardown(&self, thread_id: ThreadId) {
+        if let Some(lease) = self.extension_leases.lock().await.remove(&thread_id) {
+            lease.cancellation.cancel();
+        }
         self.pending_thread_unloads.lock().await.remove(&thread_id);
         self.outgoing
             .cancel_requests_for_thread(thread_id, /*error*/ None)
