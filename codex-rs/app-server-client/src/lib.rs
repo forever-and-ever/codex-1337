@@ -1380,50 +1380,65 @@ mod tests {
 
     #[tokio::test]
     async fn remote_typed_request_roundtrip_works() {
-        let websocket_url = start_test_remote_server(|mut websocket| async move {
-            expect_remote_initialize(&mut websocket).await;
-            let JSONRPCMessage::Request(request) = read_websocket_message(&mut websocket).await
-            else {
-                panic!("expected account/read request");
-            };
-            assert_eq!(request.method, "account/read");
-            write_websocket_message(
-                &mut websocket,
-                JSONRPCMessage::Response(JSONRPCResponse {
-                    id: request.id,
-                    result: serde_json::to_value(GetAccountResponse {
-                        account_id: None,
-                        account: None,
-                        requires_openai_auth: false,
-                        workspace_routing: None,
-                    })
-                    .expect("response should serialize"),
-                }),
-            )
-            .await;
-            websocket.close(None).await.expect("close should succeed");
-        })
-        .await;
-        let client = RemoteAppServerClient::connect(test_remote_connect_args(websocket_url))
-            .await
-            .expect("remote client should connect");
-
-        assert_eq!(client.server_version(), Some("9.8.7-test"));
-        assert_eq!(client.codex_home(), Some("/server/.codex"));
-        let client = AppServerClient::Remote(client);
-        let response: GetAccountResponse = client
-            .request_typed(ClientRequest::GetAccount {
-                request_id: RequestId::Integer(1),
-                params: codex_app_server_protocol::GetAccountParams {
-                    thread_id: None,
-                    refresh_token: false,
-                },
+        // Reload hosts identify themselves separately from their upstream server.
+        for (user_agent, server_version) in [
+            ("codex_cli_rs/9.8.7-test (Test OS; x86_64) rust", None),
+            ("codex-ui-host", Some("9.8.7-test")),
+            ("proxy/0.0.0", Some("9.8.7-test")),
+        ] {
+            let websocket_url = start_test_remote_server(move |mut websocket| async move {
+                expect_remote_initialize_with_metadata(
+                    &mut websocket,
+                    serde_json::json!({
+                        "userAgent": user_agent,
+                        "serverVersion": server_version,
+                        "codexHome": "/server/.codex",
+                    }),
+                )
+                .await;
+                let JSONRPCMessage::Request(request) = read_websocket_message(&mut websocket).await
+                else {
+                    panic!("expected account/read request");
+                };
+                assert_eq!(request.method, "account/read");
+                write_websocket_message(
+                    &mut websocket,
+                    JSONRPCMessage::Response(JSONRPCResponse {
+                        id: request.id,
+                        result: serde_json::to_value(GetAccountResponse {
+                            account_id: None,
+                            account: None,
+                            requires_openai_auth: false,
+                            workspace_routing: None,
+                        })
+                        .expect("response should serialize"),
+                    }),
+                )
+                .await;
+                websocket.close(None).await.expect("close should succeed");
             })
-            .await
-            .expect("typed request should succeed");
-        assert_eq!(response.account, None);
+            .await;
+            let client = RemoteAppServerClient::connect(test_remote_connect_args(websocket_url))
+                .await
+                .expect("remote client should connect");
 
-        client.shutdown().await.expect("shutdown should complete");
+            assert_eq!(client.server_version(), Some("9.8.7-test"));
+            assert_eq!(client.codex_home(), Some("/server/.codex"));
+            let client = AppServerClient::Remote(client);
+            let response: GetAccountResponse = client
+                .request_typed(ClientRequest::GetAccount {
+                    request_id: RequestId::Integer(1),
+                    params: codex_app_server_protocol::GetAccountParams {
+                        thread_id: None,
+                        refresh_token: false,
+                    },
+                })
+                .await
+                .expect("typed request should succeed");
+            assert_eq!(response.account, None);
+
+            client.shutdown().await.expect("shutdown should complete");
+        }
     }
 
     #[tokio::test]

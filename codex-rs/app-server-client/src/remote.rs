@@ -854,11 +854,17 @@ where
                         JSONRPCMessage::Response(response) if response.id == initialize_request_id => {
                             metadata.server_version = response
                                 .result
-                                .get("userAgent")
+                                .get("serverVersion")
                                 .and_then(serde_json::Value::as_str)
-                                .and_then(|user_agent| {
-                                    let (_, rest) = user_agent.split_once('/')?;
-                                    rest.split_whitespace().next().map(str::to_string)
+                                .filter(|version| !version.is_empty())
+                                .map(str::to_string)
+                                .or_else(|| {
+                                    response.result.get("userAgent")
+                                        .and_then(serde_json::Value::as_str)
+                                        .and_then(|user_agent| {
+                                            let (_, rest) = user_agent.split_once('/')?;
+                                            rest.split_whitespace().next().map(str::to_string)
+                                        })
                                 });
                             metadata.codex_home = response
                                 .result
