@@ -29,15 +29,9 @@ where
 {
     let (tx, rx) = unbounded_channel();
     let mut blossom = crate::empty_state_animation::EmptyStateAnimation::default();
-    blossom
-        .greeting
-        .set(crate::empty_state_animation::Greeting {
-            phrase: "Pull up a prompt.",
-        })
-        .expect("initial greeting");
     blossom.start_fresh();
     let mut header = startup_session_header(/*config*/ None);
-    crate::history_cell::set_session_greeting(header.as_mut(), &blossom.greeting);
+    crate::history_cell::set_fresh_session(header.as_mut(), &blossom.fresh_session);
     StartupDraftPump {
         header,
         blossom: std::cell::RefCell::new(blossom),

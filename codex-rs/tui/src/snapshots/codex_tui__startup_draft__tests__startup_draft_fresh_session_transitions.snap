@@ -1,5 +1,6 @@
 ---
 source: tui/src/startup_draft_tests.rs
+assertion_line: 227
 expression: "snapshots.join(\"\\n---\\n\")"
 ---
 resume lookup fallback:
@@ -7,8 +8,6 @@ before:
 
   >_ OpenAI Codex (v<VERSION>)
      loading
-
-  Pull up a prompt.
   Resuming session…
 
 › draft while loading
@@ -18,8 +17,6 @@ after:
 
   >_ OpenAI Codex (v<VERSION>)
      loading
-
-  Pull up a prompt.
 
 
 › draft while loading
@@ -31,8 +28,6 @@ before:
 
   >_ OpenAI Codex (v<VERSION>)
      loading
-
-  Pull up a prompt.
   Forking session…
 
 › draft while loading
@@ -42,8 +37,6 @@ after:
 
   >_ OpenAI Codex (v<VERSION>)
      loading
-
-  Pull up a prompt.
 
 
 › draft while loading
@@ -58,8 +51,6 @@ after:
   >_ OpenAI Codex (v<VERSION>)
      loading
 
-  Pull up a prompt.
-
 
 › Ask Codex to do anything
 
@@ -72,8 +63,6 @@ after:
 
   >_ OpenAI Codex (v<VERSION>)
      loading
-
-  Pull up a prompt.
 
 
 › Ask Codex to do anything

@@ -347,9 +347,13 @@ impl App {
             version,
         )
         .with_yolo_mode(history_cell::is_yolo_mode(&self.config));
-        history_cell::set_session_greeting(
+        history_cell::set_fresh_session(
             &mut header,
-            &self.chat_widget.empty_state_animation.borrow().greeting,
+            &self
+                .chat_widget
+                .empty_state_animation
+                .borrow()
+                .fresh_session,
         );
         header
     }

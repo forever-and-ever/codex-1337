@@ -1,10 +1,10 @@
 //! Session headers, onboarding guidance, and transcript cards.
 
 use std::sync::Arc;
-use std::sync::OnceLock;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 
 use super::*;
-use crate::empty_state_animation::Greeting;
 use crate::line_truncation::line_width;
 use crate::line_truncation::truncate_line_with_ellipsis_if_overflow;
 use crate::style::accent_color;
@@ -125,13 +125,13 @@ impl HistoryCell for SessionNoticeCell {
 #[derive(Debug)]
 pub struct SessionInfoCell(CompositeHistoryCell);
 
-/// Bind provisional and configured banners to the thread's chosen greeting.
-pub(crate) fn set_session_greeting(cell: &mut dyn HistoryCell, greeting: &Arc<OnceLock<Greeting>>) {
+/// Bind provisional and configured banners to the thread's startup layout.
+pub(crate) fn set_fresh_session(cell: &mut dyn HistoryCell, fresh_session: &Arc<AtomicBool>) {
     if let Some(header) = cell.as_any_mut().downcast_mut::<SessionHeaderHistoryCell>() {
-        header.greeting = Arc::clone(greeting);
+        header.fresh_session = Arc::clone(fresh_session);
     } else if let Some(info) = cell.as_any_mut().downcast_mut::<SessionInfoCell>() {
         for part in &mut info.0.parts {
-            set_session_greeting(part.as_mut(), greeting);
+            set_fresh_session(part.as_mut(), fresh_session);
         }
     }
 }
@@ -313,7 +313,7 @@ pub(crate) struct SessionHeaderHistoryCell {
     show_fast_status: bool,
     directory: PathBuf,
     yolo_mode: bool,
-    greeting: Arc<OnceLock<Greeting>>,
+    fresh_session: Arc<AtomicBool>,
 }
 
 impl SessionHeaderHistoryCell {
@@ -350,7 +350,7 @@ impl SessionHeaderHistoryCell {
             show_fast_status,
             directory,
             yolo_mode: false,
-            greeting: Default::default(),
+            fresh_session: Default::default(),
         }
     }
 
@@ -395,7 +395,7 @@ impl SessionHeaderHistoryCell {
 
 impl HistoryCell for SessionHeaderHistoryCell {
     fn compact_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        if self.greeting.get().is_none() {
+        if !self.fresh_session.load(Ordering::Relaxed) {
             return self.display_hyperlink_lines(width);
         }
         let width = usize::from(width);
@@ -419,13 +419,6 @@ impl HistoryCell for SessionHeaderHistoryCell {
                 "YOLO mode".magenta().bold(),
             ]));
         }
-        if let Some(greeting) = self.greeting.get() {
-            // The tip/help that follows has its own normal composite separator.
-            lines.extend([
-                Line::default(),
-                Line::from(vec!["  ".into(), greeting.phrase.fg(accent_color())]),
-            ]);
-        }
         plain_hyperlink_lines(
             lines
                 .into_iter()
@@ -435,7 +428,7 @@ impl HistoryCell for SessionHeaderHistoryCell {
     }
 
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
-        if self.greeting.get().is_some() {
+        if self.fresh_session.load(Ordering::Relaxed) {
             return visible_lines(self.compact_hyperlink_lines(width));
         }
         let Some(inner_width) = card_inner_width(width, SESSION_HEADER_MAX_INNER_WIDTH) else {
@@ -517,7 +510,7 @@ impl HistoryCell for SessionHeaderHistoryCell {
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
-        if self.greeting.get().is_some() {
+        if self.fresh_session.load(Ordering::Relaxed) {
             return visible_lines(self.compact_hyperlink_lines(u16::MAX))
                 .into_iter()
                 .map(|line| Line::from(line.to_string()))

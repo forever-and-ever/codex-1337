@@ -21,12 +21,7 @@ async fn owned_startup_hides_tip_in_transcript() -> Result<()> {
     let mut app = crate::app::test_support::make_test_app().await;
     app.local_settings.tui.show_tooltips = true;
     app.local_settings.tui.animations = false;
-    let greeting = Arc::new(std::sync::OnceLock::new());
-    greeting
-        .set(crate::empty_state_animation::Greeting {
-            phrase: "Pull up a prompt.",
-        })
-        .unwrap();
+    let fresh_session = Arc::new(std::sync::atomic::AtomicBool::new(true));
     let session = test_thread_session(ThreadId::new(), app.config.cwd.to_path_buf());
     let mut session_info = new_session_info(
         &app.config,
@@ -39,7 +34,7 @@ async fn owned_startup_hides_tip_in_transcript() -> Result<()> {
         /*auth_plan*/ None,
         /*show_fast_status*/ false,
     );
-    history_cell::set_session_greeting(&mut session_info, &greeting);
+    history_cell::set_fresh_session(&mut session_info, &fresh_session);
     app.transcript_cells = vec![
         Arc::new(session_info),
         Arc::new(AgentMessageCell::new(
@@ -81,7 +76,6 @@ async fn owned_startup_hides_tip_in_transcript() -> Result<()> {
             .map(ToString::to_string)
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(text.contains("Pull up a prompt."));
         assert!(text.contains("Use /mcp"));
         assert!(!text.contains("model:"));
         assert!(!text.contains('╭'));

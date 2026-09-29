@@ -208,9 +208,9 @@ impl ChatWidget {
                 self.plan_type,
                 show_fast_status,
             );
-            history_cell::set_session_greeting(
+            history_cell::set_fresh_session(
                 &mut session_info_cell,
-                &self.empty_state_animation.borrow().greeting,
+                &self.empty_state_animation.borrow().fresh_session,
             );
             self.apply_session_info_cell(session_info_cell);
         } else if self
