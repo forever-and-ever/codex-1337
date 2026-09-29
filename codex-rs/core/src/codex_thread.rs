@@ -1024,6 +1024,32 @@ impl CodexThread {
         self.session.refresh_mcp_config(next_config).await;
     }
 
+    /// Attaches one connection-owned stdio MCP server to this loaded thread.
+    pub async fn attach_mcp_extension(
+        &self,
+        server_name: String,
+        server_config: codex_config::McpServerConfig,
+        developer_instructions: String,
+        cancellation: Arc<tokio_util::sync::CancellationToken>,
+    ) -> anyhow::Result<()> {
+        self.session
+            .attach_mcp_extension(
+                server_name,
+                server_config,
+                developer_instructions,
+                cancellation,
+            )
+            .await
+    }
+
+    /// Revokes a lease without stopping the conversation or its current turn.
+    pub async fn detach_mcp_extension(
+        &self,
+        cancellation: &Arc<tokio_util::sync::CancellationToken>,
+    ) {
+        self.session.detach_mcp_extension(cancellation).await;
+    }
+
     /// Refreshes this thread's Apps tools before returning their runtime state.
     pub async fn refresh_codex_apps_tools(
         &self,

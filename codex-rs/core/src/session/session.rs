@@ -81,6 +81,12 @@ pub(crate) struct Session {
     pub(super) multi_agent_version: OnceLock<MultiAgentVersion>,
     /// Owns invalidation and serializes refreshes without blocking captured calls.
     pub(super) mcp_refresh: McpRefresh,
+    /// Connection-owned MCP overlay; revocation is independent of runtime publication.
+    pub(super) mcp_extension: std::sync::RwLock<Option<super::mcp_extension::McpExtensionLease>>,
+    /// Serializes extension attachment with every turn-construction path.
+    pub(crate) mcp_extension_admission: Mutex<()>,
+    pub(super) last_mcp_extension_instruction: std::sync::Mutex<Option<String>>,
+    pub(super) mcp_extension_context_delta: std::sync::Mutex<Option<String>>,
     /// Non-owning lookup for approval data retained by running MCP invocations.
     pub(crate) mcp_tool_approval_metadata: std::sync::Mutex<McpToolApprovalMetadataMap>,
     pub(super) mcp_elicitation_reviewer_handle: OnceLock<codex_mcp::ElicitationReviewerHandle>,
@@ -1656,16 +1662,28 @@ impl Session {
                     )
                 })
             };
+            let has_extension_marker = |item: &ResponseItem| {
+                matches!(item, ResponseItem::Message { role, content, .. } if role == "developer" && content.iter().any(|content| matches!(content, ContentItem::InputText { text } if text.contains(super::mcp_extension::EXTENSION_INSTRUCTION_MARKER))))
+            };
+            let mut restored_extension_instructions = false;
             for item in initial_history.get_rollout_items() {
                 match item {
                     RolloutItem::Compacted(compacted) => {
+                        restored_extension_instructions |= compacted
+                            .replacement_history
+                            .as_deref()
+                            .unwrap_or_default()
+                            .iter()
+                            .any(|envelope| has_extension_marker(&envelope.item));
                         if let Some(checkpoint) = &compacted.mcp_resource_origins {
                             mcp_runtime.restore_resource_origin_checkpoint(checkpoint);
                         }
                     }
                     RolloutItem::EventMsg(event) => mcp_runtime.observe_event(event),
+                    RolloutItem::ResponseItem(item) => {
+                        restored_extension_instructions |= has_extension_marker(item);
+                    }
                     RolloutItem::SessionMeta(_)
-                    | RolloutItem::ResponseItem(_)
                     | RolloutItem::InterAgentCommunication(_)
                     | RolloutItem::InterAgentCommunicationMetadata { .. }
                     | RolloutItem::TurnContext(_)
@@ -1828,6 +1846,13 @@ impl Session {
                 windows_sandbox_proxy_settings_mode,
                 multi_agent_version,
                 mcp_refresh: McpRefresh::new(),
+                mcp_extension: std::sync::RwLock::new(None),
+                mcp_extension_admission: Mutex::new(()),
+                last_mcp_extension_instruction: std::sync::Mutex::new(None),
+                mcp_extension_context_delta: std::sync::Mutex::new(
+                    restored_extension_instructions
+                        .then(|| super::mcp_extension::DETACHED_INSTRUCTIONS.to_string()),
+                ),
                 mcp_tool_approval_metadata: Default::default(),
         mcp_elicitation_reviewer_handle: OnceLock::new(),
                 mcp_elicitation_lifecycle_handle: OnceLock::new(),

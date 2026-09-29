@@ -19,12 +19,14 @@ use rmcp::model::ReadResourceResult;
 use rmcp::model::Resource;
 use rmcp::model::ResourceTemplate;
 use serde_json::Value as JsonValue;
+use tokio_util::sync::CancellationToken;
 
 use crate::McpConfig;
 use crate::binding_clients::McpBindingClients;
 use crate::client_tool_catalog::ToolCatalogSnapshot;
 use crate::connection_manager::McpConnectionSet;
 use crate::rmcp_client::ManagedClient;
+use crate::runtime::McpDispatchLeaseGuard;
 use crate::server::McpServerMetadata;
 use crate::tools::ToolInfo;
 
@@ -178,6 +180,8 @@ pub struct PreparedMcpCall {
     server_metadata: McpServerMetadata,
     plugin_id: Option<String>,
     selected_plugin_server: bool,
+    lease_cancellation: Option<CancellationToken>,
+    lease_guard: Option<McpDispatchLeaseGuard>,
 }
 
 impl PreparedMcpCall {
@@ -207,11 +211,20 @@ impl PreparedMcpCall {
             server_metadata,
             plugin_id,
             selected_plugin_server,
+            lease_cancellation: None,
+            lease_guard: None,
         })
     }
 
     pub fn tool_info(&self) -> &ToolInfo {
         &self.tool_info
+    }
+
+    /// Binds a captured call to the current connection lease map.
+    pub(crate) fn with_lease_guard(mut self, guard: McpDispatchLeaseGuard) -> Self {
+        self.lease_cancellation = guard.cancellation();
+        self.lease_guard = Some(guard);
+        self
     }
 
     /// Returns the configuration and approval authority captured with this client.
@@ -310,14 +323,22 @@ impl PreparedMcpCall {
         F: FnOnce() -> Fut,
         Fut: Future<Output = Result<(Option<JsonValue>, Option<JsonValue>)>>,
     {
-        let effective_timeout = match (self.client.tool_timeout, requested_timeout) {
-            (Some(server_timeout), Some(requested_timeout)) => {
-                Some(server_timeout.min(requested_timeout))
-            }
-            (server_timeout, requested_timeout) => server_timeout.or(requested_timeout),
-        };
-        let tool_name = self.tool_info.tool.name.to_string();
-        self.client
+        if self
+            .lease_guard
+            .as_ref()
+            .is_some_and(|guard| !guard.is_valid(&self.server_name))
+        {
+            anyhow::bail!("extension MCP lease revoked");
+        }
+        let call = async {
+            let effective_timeout = match (self.client.tool_timeout, requested_timeout) {
+                (Some(server_timeout), Some(requested_timeout)) => {
+                    Some(server_timeout.min(requested_timeout))
+                }
+                (server_timeout, requested_timeout) => server_timeout.or(requested_timeout),
+            };
+            let tool_name = self.tool_info.tool.name.to_string();
+            self.client
             .tool_catalog
             .run_with_snapshot(&self.catalog_snapshot, || async {
                 let (arguments, meta) = prepare().await?;
@@ -351,6 +372,13 @@ impl PreparedMcpCall {
                     }
                     None => None,
                 };
+                if self
+                    .lease_guard
+                    .as_ref()
+                    .is_some_and(|guard| !guard.is_valid(&self.server_name))
+                {
+                    anyhow::bail!("extension MCP lease revoked");
+                }
                 self.client
                     .client
                     .call_tool(tool_name.clone(), arguments, meta, remaining_timeout)
@@ -363,6 +391,16 @@ impl PreparedMcpCall {
                 self.server_name
             ))?
             .map(call_tool_result_from_rmcp)
+        };
+        if let Some(cancellation) = &self.lease_cancellation {
+            tokio::select! {
+                biased;
+                () = cancellation.cancelled() => Err(anyhow::anyhow!("extension MCP lease revoked")),
+                result = call => result,
+            }
+        } else {
+            call.await
+        }
     }
 }
 
