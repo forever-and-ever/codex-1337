@@ -1,0 +1,7 @@
+---
+source: tui/src/daemon_startup_tests.rs
+assertion_line: 246
+expression: error
+---
+Cannot use the shared background server: This session requires api_key_model_discovery to be enabled.
+The shared app-server is required. Check the service and retry; emergency embedded mode requires CODEX_ALLOW_EMBEDDED_SERVER=1 --no-daemon.

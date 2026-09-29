@@ -51,7 +51,8 @@ impl Session {
             // inheritance. Keep that distinction in the existing optional persisted selection.
             Arc::make_mut(&mut configuration.step_settings).service_tier = selected.clone();
             self.services
-                .agent_control
+                .local_agent_runtime
+                .control(self.session_id())
                 .set_agent_tier_binding(self.thread_id, parent, selected);
             configuration.thread_settings_snapshot(&self.services.turn_environments.selections())
         };
@@ -78,10 +79,11 @@ impl Session {
         let snapshot = self.thread_config_snapshot().await;
         let requested = if snapshot.parent_thread_id.is_some() {
             self.services
-                .agent_control
+                .local_agent_runtime
+                .control(self.session_id())
                 .agent_service_tier(self.thread_id)
         } else {
-            self.services.agent_control.root_service_tier()
+            self.services.agent_control.service_tier()
         };
         let selected = if snapshot.parent_thread_id.is_some() {
             snapshot.service_tier

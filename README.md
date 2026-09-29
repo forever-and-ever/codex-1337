@@ -27,8 +27,9 @@ minutes. Older clients need one ordinary restart to acquire the reload host;
 host/protocol upgrades also require an ordinary restart.
 
 Subagent navigation is keyboard-only: Down at the end of the composer enters the
-list, Enter opens an agent, and Esc returns to the main agent. Mouse selection and
-scrolling stay with the terminal.
+list, Enter opens an agent, and Esc returns to the main agent. The fullscreen
+transcript uses upstream selection and scrolling. On Linux, selecting text
+publishes PRIMARY without replacing CLIPBOARD; terminal paste shortcuts remain available.
 
 <p align="center"><strong>Codex CLI</strong> is a coding agent from OpenAI that runs locally on your computer.
 <p align="center">

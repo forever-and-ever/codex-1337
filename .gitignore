@@ -96,3 +96,4 @@ __pycache__/
 *.pyc
 # Local external-source corpus; never ship research artifacts.
 /references/
+/.worktrees/

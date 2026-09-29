@@ -10,7 +10,8 @@
 //! current model preset's default, and it walks only efforts advertised by the
 //! active model. Unsupported efforts anchor to the model default, or the first
 //! advertised effort when the default is absent, before stepping through the
-//! advertised order, including Max. Ultra requires the explicit advanced-reasoning picker.
+//! advertised order. Raising into Ultra requires the explicit
+//! advanced-reasoning picker.
 
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::openai_models::ModelPreset;

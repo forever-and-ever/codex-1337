@@ -167,6 +167,9 @@ See `codex-rs/tui/styles.md`.
 After a test run, remove the temporary files and directories it created, including
 Codex test debris in `/tmp`. Verify ownership and that no process still uses a
 candidate before deleting it; never sweep another live run or daemon socket.
+Only clean paths created by your own run. A shared Unix owner, empty directory,
+or empty `lsof` result does not establish run ownership: a compiling process may
+retain the directory as its `TMPDIR` without holding any files open.
 
 ### Test module organization
 

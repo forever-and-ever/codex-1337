@@ -27,12 +27,18 @@ impl AppsRequestProcessor {
             .filter(|app_id| seen_app_ids.insert(app_id.clone()))
             .collect::<Vec<_>>();
         let AppsContext {
-            config,
+            mut config,
             auth_manager,
             plugins_manager,
             ..
         } = self.load_apps_context(thread_id.as_deref()).await?;
-        let auth = auth_manager.auth().await;
+        let auth = match auth_manager.auth_with_http_client_factory().await {
+            Some((auth, factory)) => {
+                config.application_network_policy = factory.network_policy().clone();
+                Some(auth)
+            }
+            None => None,
+        };
         if !config
             .features
             .apps_enabled_for_auth(auth.as_ref().is_some_and(CodexAuth::uses_codex_backend))

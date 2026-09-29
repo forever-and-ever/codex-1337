@@ -46,6 +46,11 @@ pub(super) async fn sampler_config(
             });
     let luna_compaction_hash = luna_model.and_then(|model| model.comp_hash);
     LunaSamplerConfig {
+        workspace_routing: input
+            .thread_store
+            .get_or_init(|| input.config.workspace_routing_context())
+            .as_ref()
+            .clone(),
         provider: create_model_provider(
             input.config.model_provider.clone(),
             Some(

@@ -16,7 +16,7 @@ Buffer {
         "                                                    ",
         "• Queued follow-up inputs                           ",
         "  ↳ Queued follow-up question                       ",
-        "    ⌥+↑ edit last queued message                    ",
+        "    shift+← edit last queued message                ",
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
@@ -45,7 +45,7 @@ Buffer {
         x: 4, y: 10, fg: Reset, bg: Reset, underline: Reset, modifier: DIM | ITALIC,
         x: 29, y: 10, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 4, y: 11, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
-        x: 7, y: 11, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
-        x: 32, y: 11, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 11, y: 11, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 36, y: 11, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }

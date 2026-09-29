@@ -46,6 +46,21 @@ pub struct LiveAgent {
     pub status: AgentStatus,
 }
 
+/// A retained family member; absence of status means unloaded, not retired.
+#[derive(Debug, serde::Serialize)]
+pub struct ListedAgent {
+    pub agent_name: String,
+    pub agent_status: Option<AgentStatus>,
+    #[serde(flatten)]
+    pub tier: Option<AgentTierStatus>,
+}
+
+#[derive(Clone, Debug, serde::Serialize, PartialEq, Eq)]
+pub struct AgentTierStatus {
+    pub service_tier: String,
+    pub effective_service_tier: Option<String>,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct ResolvedMultiAgentV2UsageHints {
     pub root: Option<MultiAgentRoleInstructions>,

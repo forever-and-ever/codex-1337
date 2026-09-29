@@ -19,7 +19,7 @@ use pretty_assertions::assert_eq;
 
 pub(super) async fn completed_history_app(
     names: &[&str],
-) -> Result<(App, tempfile::TempDir, ThreadId)> {
+) -> Result<(Box<App>, tempfile::TempDir, ThreadId)> {
     let mut app = make_test_app().await;
     let codex_home = tempdir()?;
     app.config.codex_home = codex_home.path().to_path_buf().abs();
@@ -229,7 +229,7 @@ async fn beginning_navigation_holds_the_view_until_the_last_page_arrives() -> Re
                 /*x*/ 0,
                 /*y*/ 2, // The screen help and its separator are not transcript rows.
                 size.width,
-                bottom.y.saturating_sub(/*rhs*/ 3),
+                bottom.y.saturating_sub(/*rhs*/ 2),
             );
             let mut buffer = Buffer::empty(area);
             let rendered =

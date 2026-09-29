@@ -1,5 +1,6 @@
 ---
 source: tui/src/keymap_setup.rs
+assertion_line: 1193
 expression: "render_picker(params, 120)"
 ---
 
@@ -26,11 +27,11 @@ expression: "render_picker(params, 120)"
   Chat           Increase Reasoning Effort  alt-., shift-up
   Chat         - Previous Permission Mode   unbound
   Chat         - Next Permission Mode       unbound
-  Chat           Edit Queued Message        alt-up, shift-left
+  Chat           Edit Queued Message        shift-left, alt-up
   Chat           Send Pending Steer         alt-i
   Chat           Edit Pending Steer         alt-e
   Chat           Remove Pending Steer       alt-x
-  Chat           Prompt Stack Back          alt-down, shift-right
+  Chat           Prompt Stack Back          shift-right, alt-down
 › Chat           Skip Question              ctrl-]
   Chat           Toggle Voice               f8
   Chat           Toggle Voice Mute          ctrl-x

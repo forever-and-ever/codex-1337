@@ -1,5 +1,6 @@
 ---
 source: tui/src/chatwidget/tests/status_and_layout.rs
+assertion_line: 4310
 expression: normalized_backend_snapshot(terminal.backend())
 ---
 "                                                                                "
@@ -10,4 +11,4 @@ expression: normalized_backend_snapshot(terminal.backend())
 "  Goal      Keep improving the benchmark                                        "
 "  Activity  —                                                                   "
 "────────────────────────────────────────────────────────────────────────────────"
-"  GPT-5.4                                           Goal achieved (2d 23h 42m)  "
+"  GPT-5.5                                           Goal achieved (2d 23h 42m)  "

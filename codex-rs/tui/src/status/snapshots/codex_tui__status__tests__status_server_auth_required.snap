@@ -1,11 +1,12 @@
 ---
 source: tui/src/status/tests.rs
+assertion_line: 847
 expression: rendered
 ---
 /status
 
 ╭─────────────────────────────────────────────────────────────────────────────╮
-│  >_ OpenAI Codex (v0.156.0-1337)                                            │
+│  >_ OpenAI Codex (v0.158.0-1337)                                            │
 │                                                                             │
 │ Visit https://chatgpt.com/codex/settings/usage for up-to-date               │
 │ information on rate limits and credits                                      │

@@ -108,3 +108,56 @@ async fn unsupported_sdk_work_is_denied_and_running_work_is_cancelled() {
         Err(NetworkPolicyDenied::Revoked)
     );
 }
+
+#[test]
+fn independent_accounts_revoke_credentials_without_detaching_machine_restrictions() {
+    // Personal account rollover must fence old credentials without revoking another
+    // conversation or copying a policy that would miss later machine restrictions.
+    let controller = NetworkPolicyController::default();
+    let local = controller.policy();
+    controller.publish(local.revision(), DestinationPolicy::Unrestricted);
+    let alice = local.clone().independent_account_scope().unwrap();
+    let bob = local.clone().independent_account_scope().unwrap();
+    let endpoint = Url::parse("https://example.com/").unwrap();
+    let old_alice = alice.clone().for_current_account();
+    let old_request = old_alice.acquire(&endpoint).unwrap();
+    let bob_request = bob
+        .clone()
+        .for_current_account()
+        .acquire(&endpoint)
+        .unwrap();
+    alice.invalidate();
+    assert_eq!(old_request.check(), Err(NetworkPolicyDenied::Revoked));
+    assert_eq!(
+        old_alice.acquire(&endpoint).unwrap_err(),
+        NetworkPolicyDenied::Revoked
+    );
+    assert_eq!(bob_request.check(), Ok(()));
+    let new_request = alice
+        .clone()
+        .for_current_account()
+        .acquire(&endpoint)
+        .unwrap();
+    assert!(local.acquire(&endpoint).is_ok());
+    controller.publish(
+        local.revision(),
+        DestinationPolicy::Restricted {
+            allowed_hosts: BTreeSet::new(),
+        },
+    );
+    assert_eq!(new_request.check(), Err(NetworkPolicyDenied::Revoked));
+    assert_eq!(bob_request.check(), Err(NetworkPolicyDenied::Revoked));
+    for policy in [alice, bob] {
+        assert_eq!(
+            policy.acquire(&endpoint).unwrap_err(),
+            NetworkPolicyDenied::Destination
+        );
+        assert!(policy.independent_account_scope().is_err());
+    }
+    assert!(
+        local
+            .for_current_account()
+            .independent_account_scope()
+            .is_err()
+    );
+}

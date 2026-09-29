@@ -7,6 +7,7 @@ use codex_http_client::HttpClientFactory;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthRouteConfig {
     http_client_factory: HttpClientFactory,
+    local_bootstrap_factory: Option<HttpClientFactory>,
 }
 
 impl AuthRouteConfig {
@@ -14,7 +15,53 @@ impl AuthRouteConfig {
     pub fn from_http_client_factory(http_client_factory: HttpClientFactory) -> Self {
         Self {
             http_client_factory,
+            local_bootstrap_factory: None,
         }
+    }
+
+    /// Installs the configuration owner's local-only policy for auth discovery.
+    /// Only auth-owned endpoint constructors can access this factory.
+    pub fn with_local_bootstrap_factory(mut self, factory: HttpClientFactory) -> Self {
+        self.local_bootstrap_factory = Some(factory);
+        self
+    }
+
+    /// Personal accounts have no cloud-managed policy. Share the live machine
+    /// restrictions, but revoke only this conversation's credentials on selection.
+    pub(crate) fn for_personal_account(&self) -> std::io::Result<Self> {
+        let factory = match &self.local_bootstrap_factory {
+            Some(factory) => factory.clone(),
+            None if !self.http_client_factory.network_policy().is_managed() => {
+                self.http_client_factory.clone()
+            }
+            None => {
+                return Err(std::io::Error::other(
+                    "Personal account routing requires a local application network policy.",
+                ));
+            }
+        };
+        let policy = factory
+            .network_policy()
+            .clone()
+            .independent_account_scope()
+            .map_err(std::io::Error::other)?;
+        Ok(Self {
+            http_client_factory: factory.clone().with_network_policy(policy),
+            local_bootstrap_factory: Some(factory),
+        })
+    }
+
+    pub(crate) fn authentication_factory(&self, endpoint: &str) -> HttpClientFactory {
+        let Some(factory) = &self.local_bootstrap_factory else {
+            return self.http_client_factory.clone();
+        };
+        let endpoints = endpoint.parse().into_iter().collect();
+        factory.clone().with_network_policy(
+            factory
+                .network_policy()
+                .clone()
+                .restrict_to_endpoints(endpoints),
+        )
     }
 
     /// Returns the HTTP client factory represented by this routing configuration.

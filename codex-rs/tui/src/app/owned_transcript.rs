@@ -3,6 +3,7 @@
 //! already-painted rows so opening or closing them leaves transcript geometry unchanged.
 //! Plain Enter returns an empty composer to latest after transcript interactions and prompt editing.
 
+use super::turn_tips::TipSurface;
 use super::*;
 use crate::history_cell::HistoryRenderMode;
 use crate::keymap::KeymapContext;
@@ -47,6 +48,9 @@ impl App {
         let transcript_width = chat_widget.history_wrap_width(width);
         let view = &mut self.transcript_view;
         view.set_output_estimates_enabled(chat_widget.config_ref().model_provider_id == "openai");
+        view.copy_on_select = self
+            .local_settings
+            .copy_on_select(&codex_terminal_detection::terminal_info());
         view.set_keymap_bindings(&self.keymap);
         view.set_presentation(view.is_detailed(), chat_widget.history_render_mode());
         let active_key = chat_widget.active_cell_transcript_key();
@@ -80,13 +84,7 @@ impl App {
         let motion = MotionMode::from_animations_enabled(
             self.local_settings.tui.animations && self.local_settings.tui.effects.shimmer,
         );
-        let focused = tui.is_terminal_focused();
-        self.empty_state_presentation(
-            MotionMode::from_animations_enabled(
-                self.local_settings.tui.animations && self.local_settings.tui.effects.welcome,
-            ),
-            focused,
-        );
+        let composer = self.first_screen_composer();
         let latest_navigation = if self.enter_returns_to_latest() {
             "enter/esc latest"
         } else {
@@ -95,6 +93,19 @@ impl App {
         self.sync_owned_transcript(screen_size.width);
         let transcript_width = self.chat_widget.history_wrap_width(screen_size.width);
         let composer_hint = self.composer_hint(transcript_width);
+        let now = Instant::now();
+        let turn_tip = self.turn_tip(transcript_width, now, &tui.frame_requester());
+        let working_tip = turn_tip
+            .as_ref()
+            .filter(|(surface, _)| *surface == TipSurface::Working)
+            .map(|(_, tip)| tip);
+        let completion_tip = turn_tip
+            .as_ref()
+            .filter(|(surface, _)| *surface == TipSurface::Completion)
+            .map(|(_, tip)| tip);
+        let mut composer_gap = (!self.chat_widget.has_active_view()
+            && !self.chat_widget.is_external_writer_view())
+        .then(crate::bottom_pane::ComposerGap::default);
         let mut prompt_footer =
             self.prompt_navigation_footer(screen_size.width.saturating_sub(/*rhs*/ 2));
         let chat_widget = &self.chat_widget;
@@ -121,6 +132,8 @@ impl App {
             prompt_footer.as_ref().or(footer.as_ref()),
             popup_placement,
             crate::bottom_pane::ComposerHintPlacement::ScreenHeader,
+            composer_gap.as_ref(),
+            working_tip,
         );
         let dashboard_visible = chat_widget
             .selected_index_for_present_view(AGENTS_OVERVIEW_VIEW_ID)
@@ -140,7 +153,7 @@ impl App {
             // Keep a transcript row and its composer gap on short terminals.
             .min(available.saturating_sub(/*rhs*/ 2));
         let header_area = Rect::new(/*x*/ 0, /*y*/ 0, screen_size.width, header_height);
-        let bottom_area = Rect::new(
+        let mut bottom_area = Rect::new(
             /*x*/ 0,
             screen_size.height.saturating_sub(bottom_height),
             screen_size.width,
@@ -149,34 +162,29 @@ impl App {
         let mut rendered_cursor = None;
         let mut footer_height_changed = false;
         let mut feedback_tick = None;
+        let mut blossom_tick = None;
+        let mut transcript_bottom = available.saturating_sub(u16::from(composer_gap.is_none()));
         tui.draw(screen_size.height, |frame| {
             ratatui::widgets::Clear.render(
                 Rect::new(/*x*/ 0, /*y*/ 0, screen_size.width, available),
                 frame.buffer,
             );
-            view.render(
+            let mut completion_tip_area = view.render_with_turn_tip_space(
                 Rect::new(
                     /*x*/ 0,
                     header_height,
                     transcript_width,
-                    available
-                        .saturating_sub(header_height)
-                        .saturating_sub(/*rhs*/ 1),
+                    transcript_bottom.saturating_sub(header_height),
                 ),
                 frame.buffer,
                 &self.transcript_cells,
+                completion_tip,
             );
-            let follow_area = (available > header_height && chat_widget.no_modal_or_popup_active())
-                .then(|| {
-                    Rect::new(
-                        /*x*/ 0,
-                        available - 1,
-                        transcript_width,
-                        /*height*/ 1,
-                    )
-                });
-            feedback_tick =
-                view.render_composer_gap(follow_area, composer_hint.as_ref(), frame.buffer);
+            if let Some(gap) = composer_gap.as_mut() {
+                gap.needs_separator = available > header_height + 1
+                    && chat_widget.no_modal_or_popup_active()
+                    && view.composer_gap_has_content(transcript_width, composer_hint.as_ref(), now);
+            }
             // Rendering resolves whether new activity is still hidden. Paint that result in
             // this frame so a revision change cannot flash a stale activity hint.
             let mut footer =
@@ -196,13 +204,71 @@ impl App {
                 prompt_footer.as_ref().or(footer.as_ref()),
                 popup_placement,
                 crate::bottom_pane::ComposerHintPlacement::ScreenHeader,
+                composer_gap.as_ref(),
+                working_tip,
             );
             footer_height_changed = !dashboard_visible
                 && bottom
                     .desired_height(screen_size.width)
                     .min(screen_size.height)
                     != bottom_height;
+            if footer_height_changed && composer_gap.as_ref().is_some_and(|gap| gap.needs_separator)
+            {
+                bottom_area.height = bottom
+                    .desired_height(screen_size.width)
+                    .min(screen_size.height);
+                bottom_area.y = screen_size.height.saturating_sub(bottom_area.height);
+                // Resolve controls with the compact viewport first, then make room for
+                // their separator. Resizing must not preserve a stale return control.
+                ratatui::widgets::Clear.render(bottom_area, frame.buffer);
+                transcript_bottom = bottom_area.y;
+                completion_tip_area = view.render_with_turn_tip_space(
+                    Rect::new(
+                        /*x*/ 0,
+                        header_height,
+                        transcript_width,
+                        transcript_bottom.saturating_sub(header_height),
+                    ),
+                    frame.buffer,
+                    &self.transcript_cells,
+                    completion_tip,
+                );
+                footer_height_changed = false;
+            }
+            blossom_tick = chat_widget
+                .empty_state_animation
+                .borrow_mut()
+                .render_first_screen(
+                    Rect {
+                        width: screen_size.width,
+                        ..view.remaining_area()
+                    },
+                    frame.buffer,
+                    composer,
+                    MotionMode::from_animations_enabled(self.local_settings.tui.animations),
+                );
             bottom.render(bottom_area, frame.buffer);
+            if let (Some(tip), Some(area)) = (completion_tip, completion_tip_area) {
+                tip.render(area, frame.buffer);
+            }
+            let follow_area = if let Some(gap) = composer_gap.as_ref() {
+                Some(Rect {
+                    width: transcript_width,
+                    ..gap.area.get()
+                })
+            } else {
+                (available > 0).then(|| {
+                    Rect::new(
+                        /*x*/ 0,
+                        available - 1,
+                        transcript_width,
+                        /*height*/ 1,
+                    )
+                })
+            }
+            .filter(|_| chat_widget.no_modal_or_popup_active());
+            feedback_tick =
+                view.render_composer_gap(follow_area, composer_hint.as_ref(), frame.buffer, now);
             chat_widget.note_rendered_width(screen_size.width);
             rendered_cursor = bottom.cursor_pos(bottom_area);
             let mut cursor_style = bottom.cursor_style(bottom_area);
@@ -224,10 +290,18 @@ impl App {
                 frame.set_cursor_position(position);
             }
         })?;
+        if let Some((surface, tip)) = &turn_tip
+            && tip.rendered.get()
+        {
+            self.turn_tips.acknowledge(*surface);
+        }
         if footer_height_changed {
             tui.frame_requester().schedule_frame();
         }
         if let Some(delay) = feedback_tick {
+            tui.frame_requester().schedule_frame_in(delay);
+        }
+        if let Some(delay) = blossom_tick {
             tui.frame_requester().schedule_frame_in(delay);
         }
         let animating =
@@ -264,6 +338,10 @@ impl App {
             return Ok(false);
         }
         if matches!(event, TuiEvent::FocusLost) {
+            self.chat_widget
+                .empty_state_animation
+                .borrow_mut()
+                .cancel_replay();
             // Show the static, faded decoration immediately when the terminal loses focus.
             tui.frame_requester().schedule_frame();
         }
@@ -287,9 +365,24 @@ impl App {
                 let size = tui.prepare_draw_size()?;
                 self.render_owned_transcript(tui, size)?;
             }
+            if self.chat_widget.no_modal_or_popup_active()
+                && self
+                    .chat_widget
+                    .empty_state_animation
+                    .borrow_mut()
+                    .handle_mouse(*mouse)
+            {
+                tui.frame_requester().schedule_frame();
+                return Ok(true);
+            }
             if composer_ready
                 && mouse.kind != MouseEventKind::Up(MouseButton::Left)
-                && self.handle_composer_copy_event(tui, event, tui::Tui::copy_transcript_selection)
+                && self.handle_composer_copy_event(tui, event, |tui, text| {
+                    tui.copy_transcript_selection(
+                        text,
+                        crate::clipboard_copy::CopyFormat::PlainText,
+                    )
+                })
             {
                 return Ok(true);
             }
@@ -320,6 +413,15 @@ impl App {
             || matches!(event, TuiEvent::Mouse(mouse) if matches!(mouse.kind, MouseEventKind::Down(_)))
         {
             self.chat_widget.end_composer_drag();
+        }
+        // Read-only Escape belongs to session navigation, even when the transcript is scrolled.
+        // Search and selection still consume Escape first to dismiss their interaction.
+        if let TuiEvent::Key(key) = event
+            && !self.transcript_view.has_active_interaction()
+            && self.chat_widget.is_external_writer_view()
+            && crate::key_hint::plain(KeyCode::Esc).is_press(*key)
+        {
+            return Ok(false);
         }
         // Visible shortcut help owns Escape before returning a paused viewport to latest.
         // A transcript search or selection still owns Escape while it replaces the help footer.
@@ -450,30 +552,32 @@ impl App {
             return self.handle_owned_backtrack_event(tui, event);
         };
         let resume_following = matches!(action, ViewAction::CopyAndFollow(_));
+        let copy_on_select = matches!(action, ViewAction::CopyOnSelect(_));
         match action {
             ViewAction::Changed => {}
-            ViewAction::PublishPrimary(text) => {
-                let result = tui.publish_primary_selection(&text);
-                if result.is_err() {
-                    self.transcript_view
-                        .show_copy_feedback(&result, text.chars().count());
-                }
-            }
-            ViewAction::Copy(text) | ViewAction::CopyAndFollow(text) => {
+            ViewAction::Copy(text)
+            | ViewAction::CopyOnSelect(text)
+            | ViewAction::CopyAndFollow(text) => {
                 let result = self.transcript_view.copy_selected_text_with(
                     &self.transcript_cells,
                     &text,
-                    |text| tui.copy_transcript_selection(text),
+                    !copy_on_select,
+                    |text, format| {
+                        if copy_on_select {
+                            tui.copy_mouse_selection(text, format)
+                        } else {
+                            tui.copy_transcript_selection(text, format)
+                        }
+                    },
                 );
-                self.transcript_view
-                    .show_copy_feedback(&result, text.chars().count());
+                if !copy_on_select || !cfg!(target_os = "linux") || result.is_err() {
+                    self.transcript_view
+                        .show_copy_feedback(&result, text.chars().count());
+                }
                 if resume_following
-                    && matches!(result, Ok(crate::clipboard_copy::CopyStatus::Confirmed))
+                    && matches!(result, Ok(crate::clipboard_copy::CopyStatus::Pending(_)))
                 {
-                    if self.backtrack.overlay_preview_active {
-                        self.close_transcript_overlay(tui);
-                    }
-                    self.transcript_view.jump_to_latest();
+                    self.transcript_view.follow_pending_copy();
                 }
             }
             ViewAction::OpenLink(url) => self.open_url_in_browser(url),
@@ -521,7 +625,7 @@ impl App {
 
 #[cfg(test)]
 #[path = "owned_transcript_tests.rs"]
-mod tests;
+pub(super) mod tests;
 
 #[cfg(test)]
 #[path = "empty_state_animation_tests.rs"]

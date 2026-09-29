@@ -305,3 +305,57 @@ async fn transcript_flag_off_preserves_viewer_and_backtracking() -> Result<()> {
     );
     Ok(())
 }
+
+async fn assert_transcript_close_repaints_inline_draft(mut app: Box<App>) -> Result<()> {
+    let mut app_server = start_config_write_test_app_server(&app).await?;
+    let mut tui = crate::tui::test_support::make_test_tui()?;
+    app.chat_widget.insert_str("EDGE-DRAFT-MUST-SURVIVE");
+    app.handle_tui_event(&mut tui, &mut app_server, TuiEvent::Draw)
+        .await?;
+    let inline_viewport = tui.terminal.viewport_area;
+    app.open_transcript_overlay(&mut tui);
+    tui.enter_alt_screen()?;
+    app.insert_history_cell(
+        &mut tui,
+        Box::new(PlainHistoryCell::new(vec!["arrived in transcript".into()])),
+    );
+    let deferred_history = app.deferred_history_lines.clone();
+    assert!(!deferred_history.is_empty());
+    app.apply_raw_output_mode(&mut tui, /*enabled*/ true, /*notify*/ false);
+    app.handle_tui_event(&mut tui, &mut app_server, TuiEvent::Draw)
+        .await?;
+    assert_eq!(app.deferred_history_lines, deferred_history);
+    assert!(app.transcript_reflow.has_pending_reflow());
+
+    app.handle_tui_event(
+        &mut tui,
+        &mut app_server,
+        TuiEvent::Key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::CONTROL)),
+    )
+    .await?;
+    assert_eq!(tui.terminal.viewport_area, inline_viewport);
+    app.handle_tui_event(&mut tui, &mut app_server, TuiEvent::Draw)
+        .await?;
+    assert!(!app.transcript_reflow.has_pending_reflow());
+    assert_eq!(
+        app.last_rendered_history_tail
+            .as_ref()
+            .expect("inline history reflowed")
+            .lines,
+        deferred_history
+    );
+
+    insta::assert_snapshot!(
+        "transcript_close_restores_inline_draft",
+        buffer_text(crate::custom_terminal::test_support::last_rendered_buffer(
+            &tui.terminal
+        ))
+        .replace(&test_path_display("/tmp/project"), "/tmp/project")
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn transcript_viewer_close_repaints_preserved_inline_draft() -> Result<()> {
+    assert_transcript_close_repaints_inline_draft(make_test_app().await).await
+}

@@ -13,6 +13,7 @@ pub const PROTOCOL: &str = "codex-ui-reload-v1";
 pub(crate) struct TerminalHints {
     pub(crate) colors: Option<crate::terminal_probe::DefaultColors>,
     pub(crate) enhanced_keys: Option<bool>,
+    pub(crate) terminal_app_over_ssh: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

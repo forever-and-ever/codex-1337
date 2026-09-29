@@ -102,7 +102,7 @@ pub(super) const KEYMAP_ACTIONS: &[KeymapActionDescriptor] = &[
     action("chat", "Chat", "increase_reasoning_effort", "Increase reasoning effort."),
     action("chat", "Chat", "previous_permission_mode", "Switch to the previous available permission mode."),
     action("chat", "Chat", "next_permission_mode", "Switch to the next available permission mode."),
-    action("chat", "Chat", "edit_queued_message", "Move up through questions, then edit the last queued message."),
+    action("chat", "Chat", "edit_queued_message", "Move forward through questions, then edit the last queued message."),
     action("chat", "Chat", "send_pending_steer", "Interrupt the turn and send the pending steering message immediately."),
     action("chat", "Chat", "edit_pending_steer", "Edit the pending steering message."),
     action("chat", "Chat", "remove_pending_steer", "Cancel the pending steering message without interrupting the turn."),

@@ -67,6 +67,7 @@ fn layouts_refresh_for_width_animation_and_mutable_frames() {
                 width,
                 CellPresentation {
                     separated: false,
+                    turn_tip_space: false,
                     expanded: false,
                     disclosure: false,
                 },
@@ -121,6 +122,7 @@ fn recent_entries_are_reused_and_old_entries_are_evicted() {
             /*width*/ 20,
             CellPresentation {
                 separated: false,
+                turn_tip_space: false,
                 expanded: false,
                 disclosure: false,
             },
@@ -139,6 +141,7 @@ fn recent_entries_are_reused_and_old_entries_are_evicted() {
             /*width*/ 20,
             CellPresentation {
                 separated: false,
+                turn_tip_space: false,
                 expanded: false,
                 disclosure: false,
             },

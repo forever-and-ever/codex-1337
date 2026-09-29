@@ -57,10 +57,10 @@ impl HistoryNotesExtension {
             && auth_manager.current_auth_uses_codex_backend()
         {
             thread_store.insert(HistoryNotesExtensionConfig {
-                backend: HistoryNotesBackend::new(create_model_provider(
-                    config.model_provider.clone(),
-                    Some(auth_manager),
-                )),
+                backend: HistoryNotesBackend::new(
+                    create_model_provider(config.model_provider.clone(), Some(auth_manager)),
+                    config.http_client_factory(),
+                ),
             });
         } else {
             thread_store.remove::<HistoryNotesExtensionConfig>();

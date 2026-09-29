@@ -11,7 +11,7 @@ expression: "screen(&view, 160, 22)"
     ■ Needs an answer                                                                         Needs input     2h ago  │ ■ Ready
     ● Working task                                                                            Working         1d ago  │
   › ■ Current task                                                                  current   Ready              now  │ Project
-    ■ A longer task title that uses the available column                                      Ready           5m ago  │ /tmp/project
+    ■ A longer task title that uses the available column                              voice   Ready           5m ago  │ /tmp/project
     △ Unloaded task                                                                           Inactive        2d ago  │ Model: Unknown
                                                                                                                       │
                                                                                                                       │ Prompt

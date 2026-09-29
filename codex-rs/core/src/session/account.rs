@@ -20,7 +20,7 @@ impl Session {
             return None;
         }
         self.services
-            .agent_control
+            .local_agent_runtime
             .account_selection
             .load_full()
             .filter(|id| {
@@ -47,7 +47,7 @@ impl Session {
             // Publish only after the root binding is durable. Restored children follow
             // this family selection rather than reviving their previous payer.
             self.services
-                .agent_control
+                .local_agent_runtime
                 .account_selection
                 .store(Some(Arc::new(id.to_owned())));
             self.deliver_event_raw(Event {

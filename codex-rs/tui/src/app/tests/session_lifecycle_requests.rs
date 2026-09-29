@@ -276,6 +276,7 @@ pub(super) async fn start_recording_app_server_with_realtime_speech(
         /*log_db*/ None,
         state_db,
         Arc::new(codex_exec_server::EnvironmentManager::default_for_tests()),
+        Default::default(),
     )
     .await?;
     let codex_home = config.codex_home.display().to_string();
@@ -669,7 +670,7 @@ async fn make_history_test_app() -> Result<(Box<App>, tempfile::TempDir)> {
     let codex_home = tempdir()?;
     app.config.codex_home = codex_home.path().to_path_buf().abs();
     app.config.sqlite = SqliteConfig::new_for_testing(codex_home.path().abs());
-    Ok((Box::new(app), codex_home))
+    Ok((app, codex_home))
 }
 
 #[tokio::test]

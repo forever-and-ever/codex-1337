@@ -7,14 +7,9 @@ use codex_protocol::config_types::ServiceTier;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
 use codex_protocol::openai_models::ModelInfo;
-use serde::Serialize;
 use std::collections::HashMap;
 
-#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
-pub(crate) struct AgentTierStatus {
-    pub(crate) service_tier: String,
-    pub(crate) effective_service_tier: Option<String>,
-}
+pub(crate) use crate::agent::types::AgentTierStatus;
 
 pub(crate) fn normalize_agent_service_tier(
     requested: &str,
@@ -71,11 +66,11 @@ impl TierTree {
 
 impl LocalAgentControl {
     pub(crate) fn root_service_tier(&self) -> Option<String> {
-        self.service_tiers.load().root.clone()
+        self.runtime.service_tiers.load().root.clone()
     }
 
     pub(crate) fn set_root_service_tier(&self, service_tier: Option<String>) {
-        self.service_tiers.rcu(|current| {
+        self.runtime.service_tiers.rcu(|current| {
             let mut next = (**current).clone();
             next.root = service_tier.clone();
             next
@@ -88,7 +83,7 @@ impl LocalAgentControl {
         parent: ThreadId,
         selected: Option<String>,
     ) {
-        self.service_tiers.rcu(|current| {
+        self.runtime.service_tiers.rcu(|current| {
             let mut next = (**current).clone();
             next.agents.insert(
                 agent,
@@ -102,7 +97,7 @@ impl LocalAgentControl {
     }
 
     pub(crate) fn agent_service_tier(&self, agent: ThreadId) -> Option<String> {
-        self.service_tiers.load().requested(agent)
+        self.runtime.service_tiers.load().requested(agent)
     }
 
     pub(crate) fn agent_request_service_tier(
@@ -111,7 +106,7 @@ impl LocalAgentControl {
         model: &ModelInfo,
         enabled: bool,
     ) -> Result<Option<String>, String> {
-        let tree = self.service_tiers.load();
+        let tree = self.runtime.service_tiers.load();
         // A later model switch must not silently discard an explicit routing choice.
         if let Some(selected) = tree
             .agents
@@ -129,9 +124,9 @@ impl LocalAgentControl {
         target: ThreadId,
         requested: &str,
     ) -> CodexResult<AgentTierStatus> {
-        self.ensure_agent_known(target)?;
+        self.runtime.ensure_agent_known(target)?;
         let descendant = {
-            let tree = self.service_tiers.load();
+            let tree = self.runtime.service_tiers.load();
             let mut cursor = target;
             let mut found = false;
             for _ in 0..tree.agents.len() {
@@ -151,7 +146,8 @@ impl LocalAgentControl {
                 "Service tiers may only be changed for your descendants.".to_owned(),
             ));
         }
-        self.upgrade()?
+        self.runtime
+            .upgrade()?
             .get_thread(target)
             .await?
             .session

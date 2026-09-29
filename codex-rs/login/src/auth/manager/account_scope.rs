@@ -94,20 +94,24 @@ impl AuthManager {
                 "Host-managed authentication cannot select a saved account.",
             ));
         }
-        let manager = Self::new_from_auth_config(
-            self.saved_account_config(),
-            /*enable_codex_api_key_env*/ false,
-        )
-        .await;
-        if let Err(error) = manager.select_account(id).await {
-            if error.kind() != std::io::ErrorKind::NotFound {
-                return Err(error);
+        let auth = match self.load_saved_account(id).await {
+            Ok(auth) => Some(auth),
+            // Retain an unavailable binding without silently spending another login's quota.
+            Err(SavedAccountLoadError::Rejected(error))
+                if error.kind() == std::io::ErrorKind::NotFound =>
+            {
+                None
             }
-            // Retain an unavailable binding so the TUI can offer /account without
-            // silently spending another login's quota while resuming this thread.
+            Err(error) => return Err(error.into()),
+        };
+        self.ensure_personal_account_selection(auth.as_ref())?;
+        let mut config = self.saved_account_config();
+        config.auth_route_config = config.auth_route_config.for_personal_account()?;
+        let manager = Self::new_from_auth_config(config, /*enable_codex_api_key_env*/ false).await;
+        {
             let mut scope = manager.write_account_scope();
             *scope = Some(id.to_owned());
-            manager.set_cached_auth(None);
+            manager.set_cached_auth(auth);
         }
         Ok(Arc::new(manager))
     }
@@ -133,22 +137,26 @@ impl AuthManager {
             .await
             .map_err(std::io::Error::other)?;
         let auth = self.load_saved_account(id).await?;
-        if self.selected_account_id().as_deref() != Some(id)
-            && (auth.is_workspace_account()
-                || self
-                    .auth_cached()
-                    .is_some_and(|current| current.is_workspace_account()))
-        {
-            return Err(std::io::Error::other(
-                "Per-conversation switching supports personal accounts only; managed workspace policies are server-scoped.",
-            ));
-        }
+        self.ensure_personal_account_selection(Some(&auth))?;
         Ok(PreparedAccount {
             manager: self,
             id: id.to_owned(),
             auth,
             _refresh: refresh,
         })
+    }
+
+    fn ensure_personal_account_selection(&self, auth: Option<&CodexAuth>) -> std::io::Result<()> {
+        if auth.is_some_and(CodexAuth::is_workspace_account)
+            || self
+                .auth_cached()
+                .is_some_and(|current| current.is_workspace_account())
+        {
+            return Err(std::io::Error::other(
+                "Per-conversation switching supports personal accounts only; managed workspace policies are server-scoped.",
+            ));
+        }
+        Ok(())
     }
 
     pub(super) async fn load_saved_account(

@@ -1,0 +1,110 @@
+---
+source: tui/src/app/turn_tips_tests.rs
+assertion_line: 342
+expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(screens.join(\"\\n\\n\"))"
+---
+working=true, response rows=1, 80x12
+Response row 0
+
+• Working (0s • ctrl+c to interrupt)
+  └ Tip: Try /help.
+
+
+› Ask Codex to do anything
+
+────────────────────────────────────────────────────────────────────────────────
+  Activity  —
+────────────────────────────────────────────────────────────────────────────────
+  gpt-test default · /tmp/project
+
+working=true, response rows=1, 80x6
+
+› Ask Codex to do anything
+
+  Activity  —
+
+  gpt-test default · /tmp/project
+
+working=false, response rows=1, 80x12
+  ? for shortcuts
+────────────────────────────────────────────────────────────────────────────────
+
+  [completion time]
+
+
+› Ask Codex to do anything
+
+────────────────────────────────────────────────────────────────────────────────
+  Activity  —
+────────────────────────────────────────────────────────────────────────────────
+  gpt-test default · /tmp/project
+
+working=false, response rows=30, 80x12
+  ? for shortcuts
+────────────────────────────────────────────────────────────────────────────────
+
+  [completion time]
+
+
+› Ask Codex to do anything
+
+────────────────────────────────────────────────────────────────────────────────
+  Activity  —
+────────────────────────────────────────────────────────────────────────────────
+  gpt-test default · /tmp/project
+
+working=false, response rows=1, 80x9
+  [completion time]
+
+
+› Ask Codex to do anything
+
+────────────────────────────────────────────────────────────────────────────────
+  Activity  —
+────────────────────────────────────────────────────────────────────────────────
+  gpt-test default · /tmp/project
+
+working=false, response rows=1, 80x10
+
+  [completion time]
+
+
+› Ask Codex to do anything
+
+────────────────────────────────────────────────────────────────────────────────
+  Activity  —
+────────────────────────────────────────────────────────────────────────────────
+  gpt-test default · /tmp/project
+
+working=false, response rows=1, 80x11
+  ? for shortcuts
+
+  [completion time]
+
+
+› Ask Codex to do anything
+
+────────────────────────────────────────────────────────────────────────────────
+  Activity  —
+────────────────────────────────────────────────────────────────────────────────
+  gpt-test default · /tmp/project
+
+working=false, response rows=1, 12x12
+  ? for shor
+
+  [completion time]
+
+
+› Ask Codex
+
+────────────
+  Activity
+           —
+────────────
+  gpt-test …
+
+working=false, response rows=1, 80x4
+
+› Ask Codex to do anything
+
+  gpt-test default · /tmp/project

@@ -7,7 +7,7 @@ impl ThreadManagerState {
         history: &InitialHistory,
         parent: Option<ThreadId>,
         auth: &Arc<AuthManager>,
-        agent_control: &LocalAgentControl,
+        agent_control: &AgentControlInit,
     ) -> CodexResult<Option<Arc<AuthManager>>> {
         let owner = match history {
             InitialHistory::Resumed(history) => Some(history.conversation_id),
@@ -47,6 +47,7 @@ impl ThreadManagerState {
             return Ok(None);
         }
         let id = agent_control
+            .runtime()
             .account_selection
             .load_full()
             .map(|id| (*id).clone())

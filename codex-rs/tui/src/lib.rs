@@ -135,6 +135,7 @@ mod config_update;
 pub(crate) mod custom_terminal;
 mod daybreak;
 mod experimental_features;
+mod markdown_copy;
 mod permission_discovery;
 mod pets;
 mod worktree_browser;
@@ -240,6 +241,7 @@ mod transcript_mode;
 mod transcript_reflow;
 mod transcript_view;
 mod tui;
+mod turn_tip;
 mod ui_consts;
 mod unarchive_prompt;
 pub(crate) mod update_action;
@@ -295,6 +297,7 @@ async fn start_embedded_app_server(
     log_db: Option<log_db::LogDbLayer>,
     state_db: Option<StateDbHandle>,
     environment_manager: Arc<EnvironmentManager>,
+    embedded_network_policy: codex_app_server_client::EmbeddedNetworkPolicy,
 ) -> color_eyre::Result<InProcessAppServerClient> {
     start_embedded_app_server_with(
         arg0_paths,
@@ -307,6 +310,7 @@ async fn start_embedded_app_server(
         log_db,
         state_db,
         environment_manager,
+        embedded_network_policy,
         InProcessAppServerClient::start,
     )
     .await
@@ -327,6 +331,37 @@ pub(crate) enum AppServerTarget {
 impl AppServerTarget {
     pub(crate) fn uses_remote_workspace(&self) -> bool {
         matches!(self, Self::Remote { .. })
+    }
+
+    fn uses_embedded_network_policy(&self) -> bool {
+        matches!(
+            self,
+            Self::Embedded
+                | Self::LocalDaemon {
+                    allow_embedded_fallback: true,
+                    ..
+                }
+        )
+    }
+
+    fn environment_http_client_factory(
+        &self,
+        config: &Config,
+        policy: &codex_app_server_client::EmbeddedNetworkPolicy,
+    ) -> codex_http_client::HttpClientFactory {
+        let factory = config.http_client_factory();
+        match self {
+            Self::Embedded
+            | Self::LocalDaemon {
+                allow_embedded_fallback: true,
+                ..
+            } => policy.bind(factory),
+            Self::LocalDaemon {
+                allow_embedded_fallback: false,
+                ..
+            }
+            | Self::Remote { .. } => factory,
+        }
     }
 
     fn auth_config_for_cloud_loader(&self, mut auth_config: AuthConfig) -> AuthConfig {
@@ -531,6 +566,7 @@ async fn start_app_server(
     log_db: Option<log_db::LogDbLayer>,
     state_db: &mut Option<StateDbHandle>,
     environment_manager: Arc<EnvironmentManager>,
+    embedded_network_policy: codex_app_server_client::EmbeddedNetworkPolicy,
 ) -> color_eyre::Result<AppServerClient> {
     match target {
         #[cfg(not(test))]
@@ -550,6 +586,7 @@ async fn start_app_server(
             log_db,
             state_db.clone(),
             environment_manager,
+            embedded_network_policy,
         )
         .await
         .map(AppServerClient::InProcess),
@@ -562,23 +599,28 @@ async fn start_app_server(
 pub(crate) async fn start_app_server_for_picker(
     config: &Config,
     target: &AppServerTarget,
+    cli_kv_overrides: Vec<(String, toml::Value)>,
+    loader_overrides: LoaderOverrides,
     state_db: Option<StateDbHandle>,
     environment_manager: Arc<EnvironmentManager>,
 ) -> color_eyre::Result<AppServerSession> {
     let mut target = target.clone();
     let mut state_db = state_db;
+    let embedded_network_policy =
+        codex_app_server_client::EmbeddedNetworkPolicy::load(&loader_overrides).await;
     let app_server = start_app_server(
         &mut target,
         Arg0DispatchPaths::default(),
         config.clone(),
-        Vec::new(),
-        LoaderOverrides::default(),
+        cli_kv_overrides,
+        loader_overrides,
         /*strict_config*/ false,
         CloudConfigBundleLoader::default(),
         codex_feedback::CodexFeedback::new(),
         /*log_db*/ None,
         &mut state_db,
         environment_manager,
+        embedded_network_policy,
     )
     .await?;
     Ok(
@@ -595,6 +637,8 @@ pub(crate) async fn start_embedded_app_server_for_picker(
     Box::pin(start_app_server_for_picker(
         config,
         &AppServerTarget::Embedded,
+        Vec::new(),
+        LoaderOverrides::default(),
         state_db,
         Arc::new(EnvironmentManager::default_for_tests()),
     ))
@@ -613,6 +657,7 @@ async fn start_embedded_app_server_with<F, Fut>(
     log_db: Option<log_db::LogDbLayer>,
     state_db: Option<StateDbHandle>,
     environment_manager: Arc<EnvironmentManager>,
+    embedded_network_policy: codex_app_server_client::EmbeddedNetworkPolicy,
     start_client: F,
 ) -> color_eyre::Result<InProcessAppServerClient>
 where
@@ -636,6 +681,7 @@ where
         loader_overrides,
         strict_config,
         cloud_config_bundle,
+        embedded_network_policy,
         feedback,
         log_db,
         state_db,
@@ -979,10 +1025,13 @@ async fn cloud_config_bundle_for_app_server_target(
     app_server_target: &AppServerTarget,
     bootstrap_config: &ConfigTomlLoadResult,
     codex_home: &Path,
+    embedded_network_policy: &codex_app_server_client::EmbeddedNetworkPolicy,
 ) -> std::io::Result<CloudConfigBundleLoader> {
     cloud_config_bundle_loader_for_storage(
-        app_server_target
-            .auth_config_for_cloud_loader(bootstrap_auth_config(codex_home, bootstrap_config)?),
+        embedded_network_policy
+            .bind_bootstrap_auth(app_server_target.auth_config_for_cloud_loader(
+                bootstrap_auth_config(codex_home, bootstrap_config)?,
+            )),
         /*enable_codex_api_key_env*/ false,
     )
     .await
@@ -1071,6 +1120,7 @@ async fn run_ratatui_app(
     log_db: Option<log_db::LogDbLayer>,
     mut state_db: Option<StateDbHandle>,
     environment_manager: Arc<EnvironmentManager>,
+    embedded_network_policy: codex_app_server_client::EmbeddedNetworkPolicy,
     managed_worktree: Option<ManagedTuiWorktree>,
     daemon_startup_warning: Option<String>,
     launch_telemetry: daemon_telemetry::Launch<impl FnOnce(&AppServerTarget, bool)>,
@@ -1136,6 +1186,7 @@ async fn run_ratatui_app(
                 log_db.clone(),
                 &mut state_db,
                 environment_manager.clone(),
+                embedded_network_policy.clone(),
             ),
         )
         .await;
@@ -1220,7 +1271,7 @@ async fn run_ratatui_app(
         should_show_trust_screen_flag,
     );
 
-    let config = if should_show_onboarding {
+    let mut config = if should_show_onboarding {
         if let Err(err) = startup_draft.flush_pending_events(&mut tui).await {
             shutdown_startup_session(app_server.take(), &mut terminal_restore_guard).await;
             return Err(err.into());
@@ -1241,6 +1292,7 @@ async fn run_ratatui_app(
                 show_trust_screen: should_show_trust_screen_flag,
                 remote_project_trust: None,
                 login_status,
+                app_server_target: app_server_target.clone(),
                 app_server_request_handle: app_server
                     .as_ref()
                     .map(AppServerSession::request_handle),
@@ -1285,7 +1337,7 @@ async fn run_ratatui_app(
                 // policy due to login status detection edge cases.
                 if show_login_screen && !uses_remote_workspace && !workload_identity_selected {
                     cloud_config_bundle = cloud_config_bundle_loader_for_storage(
-                        initial_config.auth_config(),
+                        embedded_network_policy.bind_bootstrap_auth(initial_config.auth_config()),
                         /*enable_codex_api_key_env*/ false,
                     )
                     .await?;
@@ -1322,6 +1374,9 @@ async fn run_ratatui_app(
     } else {
         initial_config
     };
+    if app_server_target.uses_embedded_network_policy() {
+        embedded_network_policy.bind_config(&mut config);
+    }
     startup_draft.apply_config(&config);
     if !(cli.resume_picker || cli.fork_picker || cli.agents_overview)
         && let Err(err) = startup_draft.show(&mut tui)
@@ -1671,6 +1726,9 @@ async fn run_ratatui_app(
             return Err(err.into());
         }
     };
+    if app_server_target.uses_embedded_network_policy() {
+        embedded_network_policy.bind_config(&mut config);
+    }
     startup_draft.apply_config(&config);
 
     if config.model_provider_id != startup_model_provider {
@@ -1698,6 +1756,7 @@ async fn run_ratatui_app(
                     log_db.clone(),
                     &mut state_db,
                     environment_manager.clone(),
+                    embedded_network_policy.clone(),
                 ),
             )
             .await
@@ -1765,6 +1824,9 @@ async fn run_ratatui_app(
                 managed_worktree.as_ref(),
             )
             .await;
+            if app_server_target.uses_embedded_network_policy() {
+                embedded_network_policy.bind_config(&mut config);
+            }
             if config.model_provider_id != previous_provider
                 && matches!(app_server_target, AppServerTarget::Embedded)
             {
@@ -1781,6 +1843,7 @@ async fn run_ratatui_app(
                     log_db.clone(),
                     &mut state_db,
                     environment_manager.clone(),
+                    embedded_network_policy.clone(),
                 )
                 .await?;
                 app_server = AppServerSession::new(client, app_server_target.thread_params_mode())
@@ -1824,6 +1887,9 @@ async fn run_ratatui_app(
     // A stale `tui.fullscreen_transcript = false` cannot opt back into the legacy renderer.
     config.tui_fullscreen_transcript = true;
 
+    if app_server_target.uses_embedded_network_policy() {
+        embedded_network_policy.bind_config(&mut config);
+    }
     startup_draft.apply_config(&config);
 
     // Count launches that reach final config resolution, regardless of screen policy.
@@ -2205,6 +2271,7 @@ fn should_show_bedrock_setup_wizard(
             .is_login_method_allowed(ForcedLoginMethod::Api)
 }
 
+mod daemon_recovery;
 mod daemon_startup;
 mod daemon_telemetry;
 
@@ -2551,6 +2618,7 @@ requires_openai_auth = {requires_openai_auth}
             /*log_db*/ None,
             state_db,
             Arc::new(EnvironmentManager::default_for_tests()),
+            Default::default(),
         )
         .await
     }
@@ -2649,6 +2717,8 @@ requires_openai_auth = {requires_openai_auth}
             let mut app_server = start_app_server_for_picker(
                 &final_config,
                 &AppServerTarget::Embedded,
+                Vec::new(),
+                LoaderOverrides::without_managed_config_for_tests(),
                 state_db,
                 Arc::new(EnvironmentManager::default_for_tests()),
             )
@@ -3690,6 +3760,7 @@ requires_openai_auth = {requires_openai_auth}
             /*log_db*/ None,
             /*state_db*/ None,
             Arc::new(EnvironmentManager::default_for_tests()),
+            Default::default(),
             |_args| async { Err(std::io::Error::other("boom")) },
         )
         .await;

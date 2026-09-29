@@ -183,8 +183,8 @@ class LocalInstallTest(unittest.TestCase):
             second = v8.resolve_codex_v8_cargo_env(spec, environ={})
             self.assertEqual(first, second)
             self.assertEqual(
-                len(downloads), 4
-            )  # Two manifests; artifact pair fetched once.
+                len(downloads), 3
+            )  # Pinned manifest and artifact pair are all reused.
             archive = Path(first["RUSTY_V8_ARCHIVE"])
             archive.write_bytes(b"corrupted")
             self.assertEqual(v8.resolve_codex_v8_cargo_env(spec, environ={}), first)

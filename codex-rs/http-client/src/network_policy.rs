@@ -57,6 +57,7 @@ pub struct NetworkPolicy {
     state: Option<Arc<Mutex<State>>>,
     endpoints: Option<Arc<BTreeSet<Url>>>,
     account: Option<u64>,
+    account_scope: Option<Arc<Mutex<AccountScope>>>,
 }
 
 impl fmt::Debug for NetworkPolicy {
@@ -71,6 +72,11 @@ impl PartialEq for NetworkPolicy {
     fn eq(&self, other: &Self) -> bool {
         self.endpoints == other.endpoints
             && self.account == other.account
+            && match (&self.account_scope, &other.account_scope) {
+                (Some(left), Some(right)) => Arc::ptr_eq(left, right),
+                (None, None) => true,
+                (Some(_), None) | (None, Some(_)) => false,
+            }
             && match (&self.state, &other.state) {
                 (Some(left), Some(right)) => Arc::ptr_eq(left, right),
                 (None, None) => true,
@@ -85,6 +91,13 @@ struct State {
     policy: Option<DestinationPolicy>,
     revision: u64,
     account: u64,
+    permits: Vec<Weak<Permit>>,
+    changes: watch::Sender<()>,
+}
+
+/// Credential lifetime independent of an identity-neutral destination policy.
+struct AccountScope {
+    generation: u64,
     permits: Vec<Weak<Permit>>,
     changes: watch::Sender<()>,
 }
@@ -132,7 +145,7 @@ impl Default for NetworkPolicyController {
     }
 }
 
-fn lock_state(state: &Mutex<State>) -> MutexGuard<'_, State> {
+fn lock_state<T>(state: &Mutex<T>) -> MutexGuard<'_, T> {
     state
         .lock()
         .unwrap_or_else(|_| panic!("application network policy lock poisoned"))
@@ -144,6 +157,7 @@ impl NetworkPolicyController {
             state: Some(self.state.clone()),
             endpoints: None,
             account: None,
+            account_scope: None,
         }
     }
 
@@ -194,19 +208,52 @@ impl NetworkPolicy {
             state: None,
             endpoints: None,
             account: None,
+            account_scope: None,
         }
+    }
+
+    /// Give one account its own credential fence while retaining live, identity-neutral
+    /// destination restrictions. A credential-bound capability cannot be rebound this way.
+    pub fn independent_account_scope(mut self) -> Result<Self, NetworkPolicyDenied> {
+        if self.account.is_some() || self.account_scope.is_some() {
+            return Err(NetworkPolicyDenied::Revoked);
+        }
+        self.account_scope = Some(Arc::new(Mutex::new(AccountScope {
+            generation: 0,
+            permits: Vec::new(),
+            changes: watch::channel(()).0,
+        })));
+        Ok(self)
+    }
+
+    /// Narrows a bootstrap client's existing local policy to exact endpoint URLs.
+    /// This cannot grant access to a destination denied by the underlying policy.
+    pub fn restrict_to_endpoints(mut self, endpoints: BTreeSet<Url>) -> Self {
+        self.endpoints = Some(Arc::new(match &self.endpoints {
+            Some(existing) => existing.intersection(&endpoints).cloned().collect(),
+            None => endpoints,
+        }));
+        self
     }
 
     /// Binds a content client to the current account so retained credentials cannot
     /// be used after another workspace's policy has been installed.
     pub fn for_current_account(mut self) -> Self {
-        self.account = self.state.as_ref().map(|state| lock_state(state).account);
+        self.account = match &self.account_scope {
+            Some(scope) => Some(lock_state(scope).generation),
+            None => self.state.as_ref().map(|state| lock_state(state).account),
+        };
         self
     }
 
     /// Whether this transport participates in the application policy lifecycle.
     pub fn is_managed(&self) -> bool {
-        self.state.is_some()
+        self.state.is_some() || self.account_scope.is_some()
+    }
+
+    /// Static endpoint restrictions need enforcement even without a policy owner.
+    pub fn requires_enforcement(&self) -> bool {
+        self.is_managed() || self.endpoints.is_some()
     }
 
     /// Watches effective changes; unmanaged callers have no application policy owner.
@@ -214,6 +261,11 @@ impl NetworkPolicy {
         self.state
             .as_ref()
             .map(|state| lock_state(state).changes.subscribe())
+            .or_else(|| {
+                self.account_scope
+                    .as_ref()
+                    .map(|scope| lock_state(scope).changes.subscribe())
+            })
     }
 
     pub fn revision(&self) -> NetworkPolicyRevision {
@@ -227,6 +279,25 @@ impl NetworkPolicy {
     /// Revokes outstanding operations before an account change or a failed requirements load.
     /// This read-side operation can only remove access; publication stays with the controller.
     pub fn invalidate(&self) {
+        if let Some(scope) = &self.account_scope {
+            // Match acquisition's lock order. Machine-policy changes and this account's
+            // credential changes both revoke the same request permits, never sibling accounts.
+            let state = self.state.as_ref().map(|state| lock_state(state));
+            let mut scope = lock_state(scope);
+            scope.generation += 1;
+            scope.changes.send_replace(());
+            if let Some(state) = state.as_ref() {
+                state.changes.send_replace(());
+            }
+            for permit in scope
+                .permits
+                .drain(..)
+                .filter_map(|permit| permit.upgrade())
+            {
+                permit.revoked.send_replace(/*value*/ true);
+            }
+            return;
+        }
         if let Some(state) = &self.state {
             let mut state = lock_state(state);
             state.revision += 1;
@@ -268,30 +339,43 @@ impl NetworkPolicy {
         &self,
         destination: PermitDestination,
     ) -> Result<NetworkPermit, NetworkPolicyDenied> {
-        let Some(state) = &self.state else {
+        let mut state = self.state.as_ref().map(|state| lock_state(state));
+        let mut scope = self.account_scope.as_ref().map(|scope| lock_state(scope));
+        if state.is_none() && scope.is_none() {
             return Ok(NetworkPermit { inner: None });
-        };
-        let mut state = lock_state(state);
-        if self.account.is_some_and(|account| account != state.account) {
+        }
+        let generation = scope
+            .as_ref()
+            .map(|scope| scope.generation)
+            .or_else(|| state.as_ref().map(|state| state.account));
+        if self.account.is_some() && self.account != generation {
             return Err(NetworkPolicyDenied::Revoked);
         }
-        let policy = state
-            .policy
-            .as_ref()
-            .ok_or(NetworkPolicyDenied::Unavailable)?;
-        if !destination.allowed_by(policy) {
-            return Err(match destination {
-                PermitDestination::Url(_) => NetworkPolicyDenied::Destination,
-                PermitDestination::UnrestrictedSdk => NetworkPolicyDenied::UnsupportedTransport,
-            });
+        if let Some(state) = state.as_ref() {
+            let policy = state
+                .policy
+                .as_ref()
+                .ok_or(NetworkPolicyDenied::Unavailable)?;
+            if !destination.allowed_by(policy) {
+                return Err(match destination {
+                    PermitDestination::Url(_) => NetworkPolicyDenied::Destination,
+                    PermitDestination::UnrestrictedSdk => NetworkPolicyDenied::UnsupportedTransport,
+                });
+            }
         }
         let (revoked, _) = watch::channel(/*init*/ false);
         let permit = Arc::new(Permit {
             destination,
             revoked,
         });
-        state.permits.retain(|permit| permit.strong_count() != 0);
-        state.permits.push(Arc::downgrade(&permit));
+        if let Some(state) = state.as_mut() {
+            state.permits.retain(|permit| permit.strong_count() != 0);
+            state.permits.push(Arc::downgrade(&permit));
+        }
+        if let Some(scope) = scope.as_mut() {
+            scope.permits.retain(|permit| permit.strong_count() != 0);
+            scope.permits.push(Arc::downgrade(&permit));
+        }
         Ok(NetworkPermit {
             inner: Some(permit),
         })

@@ -7,6 +7,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use std::sync::Arc;
 use tokio::sync::mpsc::unbounded_channel;
+use tokio_stream::StreamExt;
 
 use super::StartupDraftInitialScreen;
 use super::StartupDraftPump;
@@ -27,8 +28,20 @@ where
     I: Iterator<Item = TuiEvent> + Send + 'static,
 {
     let (tx, rx) = unbounded_channel();
+    let mut blossom = crate::empty_state_animation::EmptyStateAnimation::default();
+    blossom
+        .greeting
+        .set(crate::empty_state_animation::Greeting {
+            phrase: "Pull up a prompt.",
+        })
+        .expect("initial greeting");
+    blossom.start_fresh();
+    let mut header = startup_session_header(/*config*/ None);
+    crate::history_cell::set_session_greeting(header.as_mut(), &blossom.greeting);
     StartupDraftPump {
-        header: startup_session_header(/*config*/ None),
+        header,
+        blossom: std::cell::RefCell::new(blossom),
+        motion: crate::motion::MotionMode::Animated,
         bottom_pane: startup_draft_bottom_pane(
             AppEventSender::new(tx),
             FrameRequester::test_dummy(),
@@ -50,6 +63,12 @@ where
 pub(crate) fn quiet_startup_test_pump() -> StartupDraftPump {
     let mut pump = startup_test_pump(std::iter::empty());
     pump.events = Box::pin(futures::stream::pending());
+    pump
+}
+
+pub(crate) fn startup_test_pump_with_input(text: &str) -> StartupDraftPump {
+    let mut pump = startup_test_pump(std::iter::once(TuiEvent::Paste(text.to_string())));
+    pump.events = Box::pin(pump.events.chain(futures::stream::pending()));
     pump
 }
 
@@ -181,6 +200,7 @@ async fn startup_draft_clears_loading_status_when_starting_fresh() {
         let mut pump = startup_test_pump(std::iter::empty());
         pump.initial_screen = initial_screen;
         pump.session_action = session_action;
+        pump.blossom.borrow_mut().dismiss();
         if initial_screen == StartupDraftInitialScreen::Composer {
             pump.bottom_pane.insert_str("draft while loading");
         }
@@ -195,6 +215,7 @@ async fn startup_draft_clears_loading_status_when_starting_fresh() {
 
         pump.update_session_selection(&mut tui, &SessionSelection::StartFresh)
             .expect("clear the loading status after a fresh-session selection");
+        assert!(pump.blossom.borrow().is_eligible());
         if initial_screen == StartupDraftInitialScreen::SessionPicker {
             assert!(tui.terminal.viewport_area.is_empty());
             pump.show(&mut tui)
@@ -229,21 +250,15 @@ async fn startup_draft_hydrates_its_header_without_moving_the_composer() {
         startup_draft_renderable(&pump.header, &pump.bottom_pane, pump.session_action)
             .desired_height(width);
 
-    assert_eq!(
-        pump.header.raw_lines().last().map(ToString::to_string),
-        Some("directory: loading".to_string())
-    );
+    assert_eq!(pump.header.raw_lines()[2].to_string().trim(), "loading");
     pump.apply_config(&config);
-    let expected_directory = format!(
-        "directory: {}",
-        crate::history_cell::SessionHeaderHistoryCell::format_directory_inner(
-            config.cwd.as_path(),
-            /*max_width*/ None,
-        )
+    let expected_directory = crate::history_cell::SessionHeaderHistoryCell::format_directory_inner(
+        config.cwd.as_path(),
+        /*max_width*/ None,
     );
     assert_eq!(
-        pump.header.raw_lines().last().map(ToString::to_string),
-        Some(expected_directory)
+        pump.header.raw_lines()[2].to_string().trim(),
+        expected_directory
     );
     assert_eq!(
         startup_draft_renderable(&pump.header, &pump.bottom_pane, pump.session_action)
@@ -359,7 +374,7 @@ fn startup_draft_preserves_multiline_editing_without_submitting() {
     assert!(pump.app_event_rx.try_recv().is_err());
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn startup_draft_preserves_non_bracketed_multiline_pastes_without_submitting() {
     let events = "first line\n\nsecond line\nthird line"
         .chars()

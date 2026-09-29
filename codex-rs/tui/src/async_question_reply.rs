@@ -57,6 +57,10 @@ pub(crate) fn display_text(text: &str) -> Option<String> {
 }
 
 /// Extend the most recent answer, or collect another reply without nesting envelopes.
+#[expect(
+    clippy::expect_used,
+    reason = "parse rejects empty replies; string fields always serialize"
+)]
 pub(crate) fn append(text: &str, appended: &str) -> Option<String> {
     let mut replies = parse(text)?;
     let (prefix, _) = split_ide_context(text);

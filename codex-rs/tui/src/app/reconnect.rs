@@ -195,6 +195,10 @@ impl App {
                 row.status = None;
                 row.activity = None;
             }
+            if let Some(owner) = self.background_voice.as_mut() {
+                owner.reset_realtime_conversation();
+            }
+            self.retire_background_voice();
             self.reconnect.offline = true;
             // Cached blank sessions are usable only while this connection owns a subscription.
             self.agents_overview.blank_sessions.clear();
