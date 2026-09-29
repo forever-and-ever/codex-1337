@@ -38,6 +38,7 @@ impl App {
             && !matches!(self.app_server_target, AppServerTarget::Embedded)
             && !self.reconnect.offline
             && self.chat_widget.can_reload_ui()
+            && self.queued_messages.mutations.is_empty()
             && self.overlay.is_none()
             && self.dynamic_tool_tasks.is_empty()
             && self.temporary_structured_requests.is_empty()

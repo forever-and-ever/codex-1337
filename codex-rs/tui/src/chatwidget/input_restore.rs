@@ -9,6 +9,26 @@ use super::user_messages::remap_colliding_paste_placeholders;
 use super::*;
 use std::collections::VecDeque;
 
+impl ThreadInputState {
+    pub(crate) fn restore_queued_text(&mut self, text: String) {
+        let draft = self.composer.take().unwrap_or_default();
+        let message = merge_user_messages(vec![
+            UserMessage::from(text),
+            UserMessage {
+                text: draft.text,
+                text_elements: draft.text_elements,
+                local_images: draft.local_images,
+                remote_image_urls: draft.remote_image_urls,
+                mention_bindings: draft.mention_bindings,
+            },
+        ]);
+        self.composer = Some(ChatWidget::composer_state_from_user_message(
+            message,
+            draft.pending_pastes,
+        ));
+    }
+}
+
 impl ChatWidget {
     pub(crate) fn take_kill_buffer_snapshot(&mut self) -> KillBufferSnapshot {
         self.bottom_pane.take_kill_buffer_snapshot()

@@ -197,7 +197,13 @@ impl PendingInputPreview {
         {
             let mut hint = Line::from("    ");
             hint.spans.extend(edit_binding.spans());
-            hint.spans.push(" edit last queued message".dim());
+            hint.spans.push(" edit last".dim());
+            if self.pending_steer.is_none()
+                && let Some(binding) = self.remove_pending_steer_binding
+            {
+                hint.spans
+                    .extend([" · ".dim(), binding.into(), " cancel".dim()]);
+            }
             lines.push(hint);
         }
 

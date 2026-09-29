@@ -4467,6 +4467,8 @@ fn session_lifecycle_avoids_redundant_subagent_metadata_reads() -> Result<()> {
 
 #[path = "new_session_tests.rs"]
 mod new_session_tests;
+#[path = "queued_message_tests.rs"]
+mod queued_message_tests;
 #[path = "startup_defaults_tests.rs"]
 mod startup_defaults_tests;
 

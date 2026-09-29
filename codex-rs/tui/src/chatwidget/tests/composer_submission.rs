@@ -2047,10 +2047,10 @@ async fn queued_message_edit_hint_displays_configured_chords() {
         prefix: crate::key_hint::ctrl(KeyCode::Char('x')),
         completion: crate::key_hint::plain(KeyCode::Up),
     };
-    assert!(render_bottom_popup(&chat, /*width*/ 100).contains(&format!(
-        "{} edit last queued message",
-        hint.display_label()
-    )));
+    assert!(
+        render_bottom_popup(&chat, /*width*/ 100)
+            .contains(&format!("{} edit last", hint.display_label()))
+    );
 }
 
 /// Pressing Up to recall the most recent history entry and immediately queuing

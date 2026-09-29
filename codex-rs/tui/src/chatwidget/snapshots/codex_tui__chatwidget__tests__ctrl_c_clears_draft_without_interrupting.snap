@@ -11,7 +11,7 @@ expression: "normalize_snapshot_paths(render_bottom_popup(&chat, 80))"
 
 • Queued follow-up inputs
   ↳ queued draft
-    shift+← edit last queued message
+    shift+← edit last
 
 › Ask Codex to do anything
 

@@ -282,6 +282,8 @@ mod ide_context;
 mod image_submission;
 use self::ide_context::IdeContextState;
 mod input_queue;
+mod server_queue;
+pub(crate) use server_queue::queued_message_text;
 mod reconnect;
 use self::input_queue::InputQueueState;
 mod idle_restart;

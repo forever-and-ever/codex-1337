@@ -465,6 +465,7 @@ pub(crate) enum AppEvent {
     OpenTranscriptExportFilePrompt,
     /// Open retained warnings without changing the draft or transcript position.
     OpenWarnings,
+    Queue(crate::app::QueueEvent),
     /// Copy a diagnostic and acknowledge in the footer, without appending history.
     CopyWarning(String),
 

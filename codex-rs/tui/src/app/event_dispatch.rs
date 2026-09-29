@@ -40,6 +40,7 @@ impl App {
                 &event,
                 AppEvent::OpenDaemonMenu
                     | AppEvent::OpenWarnings
+                    | AppEvent::Queue(_)
                     | AppEvent::CopyWarning(_)
                     | AppEvent::CopySelection { .. }
                     | AppEvent::InsertHistoryCell(_)
@@ -340,6 +341,7 @@ impl App {
                 }
             }
             AppEvent::OpenWarnings => self.chat_widget.open_warnings(&self.transcript_cells),
+            AppEvent::Queue(event) => self.handle_queue_event(app_server, event).await,
             AppEvent::CopyWarning(text) => {
                 let result = tui.copy_transcript_selection(&text, crate::clipboard_copy::CopyFormat::PlainText);
                 self.chat_widget.show_selection_copy_result(result);

@@ -244,7 +244,9 @@ mod pets;
 mod platform_actions;
 mod plugin_mentions;
 mod presentation;
+mod queued_messages;
 mod rate_limit_refresh;
+pub(crate) use queued_messages::QueueEvent;
 mod realtime_delivery;
 mod realtime_settings;
 mod reasoning_replay;
@@ -688,6 +690,7 @@ pub(crate) struct App {
     rate_limit_hard_stop_generation: u64,
     account_ui: accounts::AccountUi,
     rate_limit_refresh_state: rate_limit_refresh::RateLimitRefreshState,
+    queued_messages: queued_messages::QueuedMessages,
     // Serialize plugin enablement writes per plugin so stale completions cannot
     // overwrite a newer toggle, even if the plugin is toggled from different
     // cwd contexts.

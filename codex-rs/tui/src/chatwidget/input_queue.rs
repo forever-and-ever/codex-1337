@@ -26,6 +26,9 @@ pub(super) struct InputQueueState {
     pub(super) startup_submission: Option<crate::bottom_pane::ComposerDraftSnapshot>,
     /// User inputs queued while a turn is in progress.
     pub(super) queued_user_messages: VecDeque<QueuedUserMessage>,
+    /// A read-only projection of the durable queue; never drained by local autosend.
+    pub(super) server_messages: Vec<codex_app_server_protocol::QueuedSubmission>,
+    pub(super) server_queue_busy: bool,
     /// History records for queued user messages. Slash commands such as `/goal`
     /// can render history that differs from the text submitted to core, so this
     /// stays in lockstep with `queued_user_messages`, with missing entries
@@ -65,6 +68,8 @@ impl InputQueueState {
         self.startup_submission = None;
         self.recovered_queue = false;
         self.queued_user_messages.clear();
+        self.server_messages.clear();
+        self.server_queue_busy = false;
         self.queued_user_message_history_records.clear();
         self.user_turn_pending_start = false;
         self.rejected_steers_queue.clear();

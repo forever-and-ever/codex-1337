@@ -966,8 +966,7 @@ async fn questions_and_queued_messages_share_the_resolved_shortcut() {
     let forward_hint = key_hint::shift(KeyCode::Left).display_label();
     let backward_hint = key_hint::shift(KeyCode::Right).display_label();
     assert!(
-        render_bottom_popup(&chat, /*width*/ 100)
-            .contains(&format!("{forward_hint} edit last queued message"))
+        render_bottom_popup(&chat, /*width*/ 100).contains(&format!("{forward_hint} edit last"))
     );
     chat.add_async_questions("message", &questions());
     assert!(
