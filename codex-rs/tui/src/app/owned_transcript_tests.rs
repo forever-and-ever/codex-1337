@@ -1363,13 +1363,28 @@ async fn fullscreen_composer_mouse_copy_and_input_ownership() -> Result<()> {
     let end = tui.terminal.last_known_cursor_pos;
     let x = end.x - 11;
     let y = end.y;
-    for event in [
-        mouse(Down(Left), x, y),
-        mouse(Drag(Left), x + 5, y),
-        mouse(Up(Left), x + 5, y),
-    ] {
+    for event in [mouse(Down(Left), x, y), mouse(Drag(Left), x + 5, y)] {
         assert!(app.handle_owned_transcript_event(&mut tui, &mut server, &event)?);
     }
+    let release = mouse(Up(Left), x + 5, y);
+    let TuiEvent::Mouse(release_mouse) = release else {
+        unreachable!()
+    };
+    assert!(app.chat_widget.handle_composer_mouse(release_mouse));
+    // Keep the OS clipboard outside this layout test; exercise automatic-copy ownership directly.
+    assert!(
+        app.handle_composer_copy_event(&mut tui, &release, |_, text| {
+            assert_eq!(text, "hello");
+            Ok(crate::clipboard_copy::CopyStatus::Pending(1))
+        })
+    );
+    assert_eq!(
+        app.chat_widget.finish_clipboard(
+            &(1, Ok(crate::clipboard_copy::CopyStatus::Confirmed)),
+            /*composer_visible*/ true,
+        ),
+        None,
+    );
     assert!(!app.transcript_view.has_active_interaction());
     app.start_right_click_paste(
         &mut tui,

@@ -69,10 +69,33 @@ impl CopySetup {
 
 pub(crate) type CopyResult = Result<CopyStatus, String>;
 
+#[cfg(target_os = "linux")]
+fn native_primary(text: &str, setup: &CopySetup) -> Result<super::CopyOutcome, String> {
+    use arboard::SetExtLinux;
+    let clipboard = arboard::Clipboard::new();
+    setup.begin_delivery()?;
+    let mut clipboard = clipboard.map_err(|e| format!("PRIMARY unavailable: {e}"))?;
+    clipboard
+        .set()
+        .clipboard(arboard::LinuxClipboardKind::Primary)
+        .text(text)
+        .map_err(|e| format!("failed to set PRIMARY text: {e}"))?;
+    Ok(super::CopyOutcome::Copied(Some(
+        ClipboardLease::native_linux(clipboard),
+    )))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CopyDestination {
+    Clipboard(CopyFormat),
+    #[cfg(target_os = "linux")]
+    Primary,
+}
+
 enum Request {
     Copy {
         text: Arc<str>,
-        format: CopyFormat,
+        destination: CopyDestination,
         setup: Arc<CopySetup>,
     },
     Read {
@@ -90,7 +113,7 @@ struct PendingRead {
 
 struct Response {
     result: CopyResult,
-    terminal_text: Option<String>,
+    terminal_text: Option<(super::SelectionTarget, String)>,
 }
 
 #[derive(Default)]
@@ -115,6 +138,20 @@ impl ClipboardWorker {
         format: CopyFormat,
         frames: FrameRequester,
     ) -> CopyResult {
+        self.submit(text, CopyDestination::Clipboard(format), frames)
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(crate) fn copy_primary(&mut self, text: Arc<str>, frames: FrameRequester) -> CopyResult {
+        self.submit(text, CopyDestination::Primary, frames)
+    }
+
+    fn submit(
+        &mut self,
+        text: Arc<str>,
+        destination: CopyDestination,
+        frames: FrameRequester,
+    ) -> CopyResult {
         if self.is_busy() {
             return Ok(CopyStatus::Busy);
         }
@@ -133,7 +170,7 @@ impl ClipboardWorker {
             .ok_or("clipboard worker stopped")?
             .send(Request::Copy {
                 text,
-                format,
+                destination,
                 setup: Arc::clone(&setup),
             })
             .map_err(|_| "clipboard worker stopped".to_string())?;
@@ -148,23 +185,32 @@ impl ClipboardWorker {
         if self.requests.is_none() {
             self.start(
                 frames,
-                |text, format, setup| {
+                |text, destination, setup| {
                     let terminal_text = Cell::new(/*value*/ None);
-                    let result = super::copy_to_clipboard(
-                        text,
-                        format,
-                        || setup.begin_delivery(),
-                        |text| {
-                            // Validate the limit before accepting a deferred terminal send.
-                            super::osc52_sequence(
-                                text,
-                                super::SelectionTarget::Clipboard,
-                                std::env::var_os("TMUX").is_some(),
-                            )?;
-                            terminal_text.set(Some(text.to_owned()));
-                            Ok(())
-                        },
-                    );
+                    let forward = |target| {
+                        super::osc52_sequence(text, target, std::env::var_os("TMUX").is_some())?;
+                        terminal_text.set(Some((target, text.to_owned())));
+                        Ok(())
+                    };
+                    let result = match destination {
+                        CopyDestination::Clipboard(format) => super::copy_to_clipboard(
+                            text,
+                            format,
+                            || setup.begin_delivery(),
+                            |_| forward(super::SelectionTarget::Clipboard),
+                        ),
+                        #[cfg(target_os = "linux")]
+                        CopyDestination::Primary => native_primary(text, setup).or_else(|error| {
+                            // Expired setup must never publish a late selection.
+                            setup.begin_delivery()?;
+                            tracing::debug!(
+                                %error,
+                                "native PRIMARY copy failed; forwarding to terminal"
+                            );
+                            forward(super::SelectionTarget::Primary)?;
+                            Ok(super::CopyOutcome::Requested)
+                        }),
+                    };
                     (result, terminal_text.into_inner())
                 },
                 crate::clipboard_paste::text::read,
@@ -212,10 +258,12 @@ impl ClipboardWorker {
         frames: FrameRequester,
         mut copy: impl FnMut(
             &str,
-            CopyFormat,
+            CopyDestination,
             &CopySetup,
-        ) -> (Result<super::CopyOutcome, String>, Option<String>)
-        + Send
+        ) -> (
+            Result<super::CopyOutcome, String>,
+            Option<(super::SelectionTarget, String)>,
+        ) + Send
         + 'static,
         mut read: impl FnMut(Instant) -> Result<String, String> + Send + 'static,
     ) -> Result<(), String> {
@@ -226,20 +274,31 @@ impl ClipboardWorker {
             .name("clipboard-copy".into())
             .spawn(move || {
                 let mut lease: Option<ClipboardLease> = None;
+                #[cfg(target_os = "linux")]
+                let mut primary_lease: Option<ClipboardLease> = None;
                 while let Ok(request) = incoming.recv() {
-                    let (outcome, terminal_text) = match request {
+                    let (destination, outcome, terminal_text) = match request {
                         Request::Copy {
                             text,
-                            format,
+                            destination,
                             setup,
-                        } => copy(&text, format, &setup),
+                        } => {
+                            let (outcome, terminal_text) = copy(&text, destination, &setup);
+                            (destination, outcome, terminal_text)
+                        }
                         Request::Read { deadline, response } => {
                             let _ = response.send(read(deadline));
                             frames.schedule_frame();
                             continue;
                         }
                     };
-                    let result = outcome.map(|outcome| outcome.store(&mut lease));
+                    let result = outcome.map(|outcome| {
+                        outcome.store(match destination {
+                            CopyDestination::Clipboard(_) => &mut lease,
+                            #[cfg(target_os = "linux")]
+                            CopyDestination::Primary => &mut primary_lease,
+                        })
+                    });
                     if outgoing
                         .send(Response {
                             result,
@@ -253,7 +312,7 @@ impl ClipboardWorker {
                 }
                 // Finish Linux clipboard-manager handoff before disconnecting the response channel.
                 #[cfg(target_os = "linux")]
-                drop(lease);
+                drop((lease, primary_lease));
                 drop(outgoing);
             })
             .map_err(|error| format!("could not start clipboard worker: {error}"))?;
@@ -308,8 +367,8 @@ impl ClipboardWorker {
                         return self.completed.as_ref();
                     }
                     let mut result = response.result;
-                    if let Some(text) = response.terminal_text
-                        && let Err(error) = super::osc52_copy(&text)
+                    if let Some((target, text)) = response.terminal_text
+                        && let Err(error) = super::osc52_copy_to(&text, target)
                         && result != Ok(CopyStatus::Confirmed)
                     {
                         result = Err(error);

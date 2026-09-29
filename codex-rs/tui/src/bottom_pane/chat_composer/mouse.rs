@@ -54,10 +54,11 @@ impl ChatComposer {
         let text = &self.draft.textarea.text()[range];
         let char_count = text.chars().count();
         let result = copy(text);
+        let clear_selection = !matches!(event, TuiEvent::Mouse(mouse) if mouse.kind == MouseEventKind::Up(MouseButton::Left));
         if let Ok(CopyStatus::Pending(id)) = result {
-            self.draft.textarea.defer_copy(id);
+            self.draft.textarea.defer_copy(id, clear_selection);
         }
-        if result == Ok(CopyStatus::Confirmed) {
+        if clear_selection && result == Ok(CopyStatus::Confirmed) {
             self.draft.textarea.set_cursor(self.draft.textarea.cursor());
         }
         Some((char_count, result))

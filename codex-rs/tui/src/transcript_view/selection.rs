@@ -315,7 +315,9 @@ impl TranscriptView {
         {
             self.end_selection(cells);
         }
-        self.show_copy_feedback(&completion.1, characters);
+        if pending.clear_selection || completion.1.is_err() {
+            self.show_copy_feedback(&completion.1, characters);
+        }
         Some(pending.follow && completion.1 == Ok(crate::clipboard_copy::CopyStatus::Confirmed))
     }
 

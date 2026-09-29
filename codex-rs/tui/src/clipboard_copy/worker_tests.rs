@@ -71,7 +71,10 @@ async fn blocked_copy_allows_overlay_exit_rejects_backlog_and_wakes_completion()
         start_rx
             .recv_timeout(Duration::from_secs(/*secs*/ 5))
             .unwrap(),
-        ("café\nsecond line".into(), CopyFormat::Markdown)
+        (
+            "café\nsecond line".into(),
+            CopyDestination::Clipboard(CopyFormat::Markdown)
+        )
     );
     assert_eq!(
         tui.copy_transcript_selection("newer", CopyFormat::PlainText),

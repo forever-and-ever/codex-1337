@@ -18,8 +18,8 @@
 //! fallbacks retain the original text. Terminal writes are unacknowledged requests,
 //! so callers must distinguish them from confirmed native clipboard writes.
 //! Image paste lives in `clipboard_paste`.
-//! Mouse selection publishes PRIMARY through the terminal output stream only; it never replaces
-//! CLIPBOARD or acquires a clipboard owner on a remote SSH host.
+//! Mouse selection owns PRIMARY locally; remote selections use the terminal output stream.
+//! Neither path replaces CLIPBOARD or acquires a clipboard owner on a remote SSH host.
 
 mod tmux;
 pub(crate) mod worker;
@@ -229,7 +229,7 @@ pub(crate) fn is_ssh_session() -> bool {
 }
 
 /// Detect whether the current process is running inside tmux.
-fn is_tmux_session() -> bool {
+pub(crate) fn is_tmux_session() -> bool {
     std::env::var_os("TMUX").is_some() || std::env::var_os("TMUX_PANE").is_some()
 }
 
@@ -326,12 +326,8 @@ fn wsl_clipboard_copy(_text: &str) -> Result<(), String> {
 }
 
 /// Write text to the clipboard via the OSC 52 terminal escape sequence.
-fn osc52_copy(text: &str) -> Result<(), String> {
-    let sequence = osc52_sequence(
-        text,
-        SelectionTarget::Clipboard,
-        std::env::var_os("TMUX").is_some(),
-    )?;
+fn osc52_copy_to(text: &str, target: SelectionTarget) -> Result<(), String> {
+    let sequence = osc52_sequence(text, target, std::env::var_os("TMUX").is_some())?;
     #[cfg(unix)]
     {
         match std::fs::OpenOptions::new().write(true).open("/dev/tty") {

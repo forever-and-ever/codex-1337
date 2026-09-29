@@ -18,6 +18,15 @@ impl Tui {
     }
 
     pub(crate) fn publish_primary_selection(&mut self, text: &str) -> Result<CopyStatus, String> {
+        #[cfg(target_os = "linux")]
+        if !crate::clipboard_copy::is_ssh_session()
+            && !crate::clipboard_copy::is_tmux_session()
+            && !crate::clipboard_copy::is_wsl_session()
+        {
+            return self
+                .clipboard
+                .copy_primary(text.into(), self.frame_requester());
+        }
         crate::clipboard_copy::publish_primary(text, self.terminal.backend_mut())
     }
 
