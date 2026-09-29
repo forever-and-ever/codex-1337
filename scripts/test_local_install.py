@@ -63,88 +63,30 @@ class LocalInstallTest(unittest.TestCase):
                 self.assertEqual(list(units.iterdir()), [])
                 self.assertEqual(roster.read_text(), "preserve")
 
-    def test_staging_service_is_independent_of_production_unit(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            units = root / "config/systemd/user"
-            units.mkdir(parents=True)
-            production = units / local_integration.UNITS[0]
-            production.write_text("production stays untouched")
-            staging_binary = root / "data/codex-1337/distributions/staging/bin/codex"
-            with (
-                patch.dict(os.environ, {"XDG_CONFIG_HOME": str(root / "config")}),
-                patch.object(local_integration, "systemctl") as systemctl,
-            ):
-                local_integration.integrate_staging(staging_binary)
-            self.assertEqual(production.read_text(), "production stays untouched")
-            staging = (units / local_integration.STAGING_UNIT).read_text()
-            self.assertIn(str(staging_binary), staging)
-            self.assertIn("Environment=CODEX_STAGING=1", staging)
-            self.assertIn("Environment=CODEX_HOME=%h/.codex", staging)
-            self.assertEqual(
-                [call.args for call in systemctl.call_args_list],
-                [
-                    ("daemon-reload",),
-                    ("enable", local_integration.STAGING_UNIT),
-                    ("restart", local_integration.STAGING_UNIT),
-                ],
-            )
-
-    def test_launcher_selects_staging_without_changing_default(self) -> None:
+    def test_launcher_preserves_arguments_and_refuses_unowned_files(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             distributions = root / "distributions"
             launcher = root / "bin/codex"
             launcher.parent.mkdir()
-            for channel in ("current", "staging"):
-                executable = distributions / channel / "bin/codex"
-                executable.parent.mkdir(parents=True)
-                executable.write_text(
-                    f'#!/bin/sh\nprintf \'{channel}:%s:%s\\n\' "$1" "${{CODEX_HOME:-}}"\n'
-                )
-                executable.chmod(0o755)
+            executable = distributions / "current/bin/codex"
+            executable.parent.mkdir(parents=True)
+            executable.write_text('#!/bin/sh\nprintf \'%s\\n\' "$@"\n')
+            executable.chmod(0o755)
             launcher.write_text("unowned\n")
             with self.assertRaises(FileExistsError):
                 local_integration.install_launcher(distributions, launcher)
             launcher.unlink()
             launcher.symlink_to(distributions / "current/bin/codex")
-            with (
-                patch.object(
-                    local_integration.subprocess,
-                    "run",
-                    return_value=subprocess.CompletedProcess([], 0, "", ""),
-                ) as watcher,
-                patch.object(local_integration, "systemctl") as systemctl,
-            ):
-                local_integration.install_staging_launcher(distributions, launcher)
-                local_integration.install_staging_launcher(distributions, launcher)
-            self.assertEqual(watcher.call_count, 1)
-            self.assertEqual(
-                [call.args for call in systemctl.call_args_list],
-                [
-                    ("stop", local_integration.UNITS[2]),
-                    ("start", local_integration.UNITS[2]),
-                ],
+            local_integration.install_launcher(distributions, launcher)
+            local_integration.install_launcher(distributions, launcher)
+            result = subprocess.run(
+                [launcher, "two words", "*", ""],
+                check=True,
+                capture_output=True,
+                text=True,
             )
-            for value in (None, "1"):
-                environment = os.environ.copy()
-                environment.pop("CODEX_STAGING", None)
-                environment.pop("CODEX_HOME", None)
-                if value is not None:
-                    environment["CODEX_STAGING"] = value
-                result = subprocess.run(
-                    [launcher, "probe"],
-                    env=environment,
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                )
-                expected = (
-                    "current:probe:\n"
-                    if value is None
-                    else f"staging:probe:{environment['HOME']}/.codex\n"
-                )
-                self.assertEqual(result.stdout, expected)
+            self.assertEqual(result.stdout, "two words\n*\n\n")
 
     def test_v8_reuses_verified_artifacts_at_stable_paths(self) -> None:
         downloads: list[str] = []

@@ -4080,9 +4080,6 @@ impl Config {
             .cloned()
             .or(sqlite_home_env)
             .unwrap_or_else(|| codex_home.clone());
-        let sqlite_home = AbsolutePathBuf::from_absolute_path_checked(
-            codex_state::daemon_state_home(sqlite_home.as_path()),
-        )?;
         let original_permission_profile = permission_profile.clone();
         apply_requirement_constrained_value(
             "approval_policy",

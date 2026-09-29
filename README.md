@@ -2,16 +2,6 @@
 
 Owned downstream fork of Codex. Local builds carry the `-1337` suffix.
 Install the coordinated distribution with `scripts/install-local`.
-Build and restart the disposable service with `scripts/install-staging`; launch
-its CLI with `CODEX_STAGING=1 codex`. Plain `codex` stays on production.
-Interactive staging commands attach to the staging daemon; `codex exec`
-remains in-process, using the staging binary.
-The installed `codex` launcher selects the staging binary only when
-`CODEX_STAGING=1`; staging installation pauses the production release watcher
-while replacing the launcher, so the production daemon is not restarted.
-Both use `~/.codex` for config, credentials, and session files, but use separate sockets,
-SQLite databases, and daemon recovery files. Do not resume one live thread on
-both services. Staging restarts may terminate staging turns.
 
 The shared app server, account scoping, and agent controls belong to this fork.
 Use `codex agents` for the session dashboard. The graphical Wrangler is retired.

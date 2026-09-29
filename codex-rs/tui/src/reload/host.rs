@@ -417,13 +417,5 @@ fn installed_entrypoint() -> io::Result<PathBuf> {
     }) else {
         return Ok(executable);
     };
-    let channel = if bundle
-        .file_name()
-        .is_some_and(|name| name.to_string_lossy().contains("-stage-"))
-    {
-        "staging"
-    } else {
-        "current"
-    };
-    Ok(distributions.join(channel).join("bin/codex"))
+    Ok(distributions.join("current/bin/codex"))
 }

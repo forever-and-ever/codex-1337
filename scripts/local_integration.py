@@ -12,7 +12,6 @@ UNITS = (
     "codex-app-server-refresh.service",
     "codex-app-server-refresh.path",
 )
-STAGING_UNIT = "codex-app-server-staging.service"
 
 
 def xdg(name: str, fallback: str) -> Path:
@@ -44,19 +43,8 @@ def write_unit(unit_dir: Path, name: str, contents: str) -> None:
 
 
 def launcher_contents(distributions: Path) -> str:
-    commands = {
-        channel: shlex.quote(str(distributions / channel / "bin/codex"))
-        for channel in ("current", "staging")
-    }
-    return (
-        "#!/bin/sh\n"
-        "# codex-1337 launcher\n"
-        "case ${CODEX_STAGING:-0} in\n"
-        f'    0) exec {commands["current"]} "$@" ;;\n'
-        f'    1) CODEX_HOME="$HOME/.codex" exec {commands["staging"]} "$@" ;;\n'
-        "    *) printf 'CODEX_STAGING must be 0 or 1\\n' >&2; exit 2 ;;\n"
-        "esac\n"
-    )
+    command = shlex.quote(str(distributions / "current/bin/codex"))
+    return f'#!/bin/sh\n# codex-1337 launcher\nexec {command} "$@"\n'
 
 
 def install_launcher(distributions: Path, launcher: Path) -> None:
@@ -89,34 +77,6 @@ def install_launcher(distributions: Path, launcher: Path) -> None:
             temporary.unlink(missing_ok=True)
 
 
-def install_staging_launcher(distributions: Path, launcher: Path) -> None:
-    contents = launcher_contents(distributions)
-    if (
-        launcher.is_file()
-        and not launcher.is_symlink()
-        and launcher.stat().st_size == len(contents)
-        and launcher.read_text() == contents
-    ):
-        return
-    watcher = subprocess.run(
-        ["systemctl", "--user", "is-active", "--quiet", UNITS[2]],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if watcher.returncode not in (0, 3, 4):
-        raise RuntimeError(
-            f"cannot determine production watcher state: {watcher.stderr}"
-        )
-    if watcher.returncode == 0:
-        systemctl("stop", UNITS[2])
-    try:
-        install_launcher(distributions, launcher)
-    finally:
-        if watcher.returncode == 0:
-            systemctl("start", UNITS[2])
-
-
 def integrate(action: str, install_root: Path) -> None:
     if not install_root.is_absolute() or any(c in str(install_root) for c in "\r\n"):
         raise ValueError("install_root must be absolute and contain no line breaks")
@@ -135,10 +95,8 @@ def integrate(action: str, install_root: Path) -> None:
         legacy_binary.unlink()
 
     if action == "uninstall":
-        if (unit_dir / STAGING_UNIT).exists():
-            systemctl("disable", "--now", STAGING_UNIT)
         systemctl("disable", "--now", UNITS[2], UNITS[0])
-        for name in (*UNITS, STAGING_UNIT):
+        for name in UNITS:
             (unit_dir / name).unlink(missing_ok=True)
         systemctl("daemon-reload")
         return
@@ -159,33 +117,11 @@ def integrate(action: str, install_root: Path) -> None:
     systemctl("start", UNITS[1])
 
 
-def integrate_staging(binary: Path) -> None:
-    if not binary.is_absolute() or any(c in str(binary) for c in "\r\n"):
-        raise ValueError("staging binary must be an absolute path without line breaks")
-    unit_dir = xdg("XDG_CONFIG_HOME", ".config") / "systemd/user"
-    unit_dir.mkdir(parents=True, exist_ok=True)
-    contents = (
-        (Path(__file__).parent / "systemd" / STAGING_UNIT)
-        .read_text()
-        .replace("@CODEX@", unit_path(binary))
-    )
-    write_unit(unit_dir, STAGING_UNIT, contents)
-    systemctl("daemon-reload")
-    systemctl("enable", STAGING_UNIT)
-    systemctl("restart", STAGING_UNIT)
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "action",
-        choices=(
-            "install",
-            "install-staging",
-            "install-launcher",
-            "install-staging-launcher",
-            "uninstall",
-        ),
+        choices=("install", "install-launcher", "uninstall"),
     )
     parser.add_argument("install_root", type=Path)
     parser.add_argument("launcher", nargs="?", type=Path)
@@ -196,11 +132,5 @@ if __name__ == "__main__":
         if args.launcher is None:
             parser.error("install-launcher requires a destination")
         install_launcher(args.install_root, args.launcher)
-    elif args.action == "install-staging-launcher":
-        if args.launcher is None:
-            parser.error("install-staging-launcher requires a destination")
-        install_staging_launcher(args.install_root, args.launcher)
-    elif args.action == "install-staging":
-        integrate_staging(args.install_root)
     else:
         integrate(args.action, args.install_root)
