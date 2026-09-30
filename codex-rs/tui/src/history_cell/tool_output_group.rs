@@ -171,24 +171,44 @@ impl HistoryCell for ToolOutputGroup {
     }
 
     fn compact_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        let lines = self
+        let mut lines = Vec::new();
+        for cell in self
             .members
             .iter()
             .filter(|cell| !cell.as_any().is::<ToolOutputCell>())
-            .flat_map(|cell| cell.compact_hyperlink_lines(width))
-            .collect::<Vec<_>>();
+        {
+            let next = cell.compact_hyperlink_lines(width);
+            if !next.is_empty() {
+                if !lines.is_empty() {
+                    lines.push("".into());
+                }
+                lines.extend(next);
+            }
+        }
         if lines.is_empty() {
             return self
                 .members
-                .first()
-                .map(|cell| cell.compact_hyperlink_lines(width))
+                .iter()
+                .find_map(|cell| {
+                    let preview = cell.compact_hyperlink_lines(width);
+                    (!preview.is_empty()).then_some(preview)
+                })
                 .unwrap_or_default();
         }
         lines
     }
 
     fn expanded_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        let mut lines = Vec::new();
+        let mut lines = if self
+            .members
+            .iter()
+            .filter(|cell| !cell.as_any().is::<ToolOutputCell>())
+            .all(|cell| cell.compact_hyperlink_lines(width).is_empty())
+        {
+            self.compact_hyperlink_lines(width)
+        } else {
+            Vec::new()
+        };
         for cell in &self.members {
             if cell.as_any().is::<ToolOutputCell>() {
                 if !lines.is_empty() {
@@ -203,9 +223,16 @@ impl HistoryCell for ToolOutputGroup {
                 .iter()
                 .any(|id| id.starts_with("output:"))
             {
+                if !lines.is_empty() {
+                    lines.push("".into());
+                }
                 lines.extend(cell.expanded_hyperlink_lines(width));
             } else {
-                lines.extend(cell.compact_hyperlink_lines(width));
+                let next = cell.activity_argument_lines(width);
+                if !next.is_empty() && !lines.is_empty() {
+                    lines.push("".into());
+                }
+                lines.extend(next);
             }
         }
         lines

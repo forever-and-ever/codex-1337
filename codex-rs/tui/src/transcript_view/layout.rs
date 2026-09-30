@@ -7,7 +7,6 @@ use crate::history_cell::ActivityDisclosure;
 use crate::key_hint::ShortcutHint;
 use crate::keymap::KeymapContext;
 use std::sync::Weak;
-use unicode_width::UnicodeWidthStr;
 
 use super::*;
 
@@ -27,73 +26,82 @@ pub(super) fn activity_layout(
     mut lines: ActivityTranscriptLines,
     width: u16,
     expanded: bool,
-    shortcut: Option<ShortcutHint>,
+    _shortcut: Option<ShortcutHint>,
 ) -> TextLayout {
-    let has_details = !lines.activity.is_empty() && (expanded || lines.disclosure.is_some());
-    let control_width = match lines.disclosure {
-        Some(ActivityDisclosure::Inline { source_line }) => usize::from(width).saturating_sub(
-            lines
-                .activity
-                .get(source_line)
-                .map_or(0, |line| line.line.width())
-                + 1,
-        ),
-        Some(ActivityDisclosure::Generic | ActivityDisclosure::OutputLines(_)) | None => {
-            usize::from(width.saturating_sub(4))
-        }
+    let control_line = match lines.disclosure {
+        Some(ActivityDisclosure::Inline { source_line }) => source_line,
+        _ => 0,
     };
-    let source_offset = (!lines.auxiliary.is_empty())
-        .then(|| TextLayout::new(lines.activity.clone(), width).text().len());
+    let mut heading_width = 0;
+    if let Some(header) = lines.activity.first() {
+        for span in &header.line.spans {
+            let action = span.content.split_whitespace().next().unwrap_or_default();
+            if span
+                .style
+                .add_modifier
+                .contains(ratatui::style::Modifier::BOLD)
+                && action.chars().any(char::is_alphabetic)
+            {
+                heading_width += crate::width::display_width(action);
+                break;
+            }
+            heading_width += span.width();
+        }
+    }
+    let estimate = lines
+        .tool_output_tokens
+        .map(|tokens| {
+            let tokens = codex_protocol::num_format::format_with_separators(
+                i64::try_from(tokens).unwrap_or(i64::MAX),
+            );
+            format!(" (~ {tokens} tokens)")
+        })
+        .filter(|label| label.len() + 4 + heading_width + 3 <= usize::from(width));
+    // Reserve the estimate before clipping, so invocation arguments never wrap collapsed.
+    if !expanded {
+        for (index, header) in lines.activity.iter_mut().enumerate() {
+            let estimate_width = if index == 0 {
+                estimate.as_ref().map_or(0, String::len)
+            } else {
+                0
+            };
+            let available = usize::from(width).saturating_sub(4 + estimate_width);
+            if header.width() > available {
+                lines.disclosure.get_or_insert(ActivityDisclosure::Generic);
+                let prefix_bytes = header
+                    .source
+                    .as_ref()
+                    .map_or(0, |source| source.prefix_bytes);
+                let line = crate::history_cell::activity_preview::compact_header(
+                    header.line.clone(),
+                    available,
+                );
+                let source = crate::terminal_hyperlinks::LogicalLineSource::from_line(&line);
+                let body =
+                    source.styled_range(prefix_bytes.min(source.range.end)..source.range.end);
+                let mut source = crate::terminal_hyperlinks::LogicalLineSource::from_line(&body);
+                source.prefix_bytes = prefix_bytes.min(line.to_string().len());
+                *header = line.into();
+                header.source = Some(source);
+            }
+        }
+    }
+    let has_details = !lines.activity.is_empty() && (expanded || lines.disclosure.is_some());
+    lines.activity = crate::terminal_hyperlinks::prefix_hyperlink_lines(
+        lines.activity,
+        "    ".into(),
+        "    ".into(),
+    );
     lines.activity.extend(lines.auxiliary);
-    let layout = TextLayout::new(lines.activity, width);
+    let mut layout = TextLayout::new(lines.activity, width);
+    if let Some(estimate) = estimate {
+        layout = layout.with_activity_estimate(estimate);
+    }
     if !has_details {
         return layout;
     }
-    let label = match (expanded, lines.disclosure) {
-        (true, _) => "− Show less".to_owned(),
-        (false, Some(ActivityDisclosure::OutputLines(count))) => {
-            let noun = if count == 1 { "line" } else { "lines" };
-            let mut label = format!("+ {count} {noun}");
-            if let Some(shortcut) = shortcut {
-                let hint = format!(" ({} to expand)", shortcut.display_label());
-                let indent = usize::from(width / 4).min(/*other*/ 4);
-                if Line::from(format!("{label}{hint}")).width() + indent <= usize::from(width) {
-                    label.push_str(&hint);
-                }
-            }
-            label
-        }
-        (false, Some(ActivityDisclosure::Generic | ActivityDisclosure::Inline { .. }) | None) => {
-            "+ Show details".to_owned()
-        }
-    };
-    let label = if let Some(tokens) = lines.tool_output_tokens {
-        let tokens = codex_protocol::num_format::format_with_separators(
-            i64::try_from(tokens).unwrap_or(i64::MAX),
-        );
-        let full = format!("{label} (≈{tokens} total tokens of output)");
-        let short = format!(
-            "{} (≈{tokens} tokens)",
-            if expanded { "− Less" } else { "+ Details" }
-        );
-        let available = control_width;
-        if UnicodeWidthStr::width(full.as_str()) <= available {
-            full
-        } else if UnicodeWidthStr::width(short.as_str()) <= available {
-            short
-        } else {
-            label
-        }
-    } else {
-        label
-    };
-    if let Some(ActivityDisclosure::Inline { source_line }) = lines.disclosure {
-        return layout.with_inline_disclosure_control(label, source_line);
-    }
-    match source_offset {
-        Some(offset) => layout.with_disclosure_control_at(label, offset),
-        None => layout.with_disclosure_control(label),
-    }
+    layout
+        .with_leading_disclosure_control(if expanded { "[-]" } else { "[+]" }.into(), control_line)
 }
 
 #[derive(Default)]

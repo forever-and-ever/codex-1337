@@ -263,6 +263,11 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
         self.transcript_hyperlink_lines(width)
     }
 
+    /// Complete action arguments when a returned batch owns the output instead of nested calls.
+    fn activity_argument_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        self.compact_hyperlink_lines(width)
+    }
+
     /// Details an activity offers beyond its compact presentation, if any.
     /// Prefer source metadata so collapsed rendering does not materialize hidden content.
     fn activity_disclosure(&self, _width: u16) -> Option<ActivityDisclosure> {

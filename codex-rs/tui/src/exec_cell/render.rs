@@ -241,7 +241,6 @@ impl HistoryCell for ExecCell {
         }
         if self.has_action_summary() {
             let mut lines = self.action_summary_lines(width);
-            lines.truncate(1 + crate::history_cell::activity_preview::DETAIL_PREVIEW_LINES);
             let failures = self
                 .group
                 .calls
@@ -297,17 +296,29 @@ impl HistoryCell for ExecCell {
 
     fn expanded_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         if let Some(output) = self.group.details.output_lines(width) {
-            let mut lines = if self.has_action_summary() {
-                self.action_summary_lines(width)
-            } else {
-                self.compact_hyperlink_lines(width)
-            };
+            let mut lines = self.activity_argument_lines(width);
             lines.push("".into());
             lines.extend(output);
             lines
         } else {
-            self.transcript_hyperlink_lines(width)
+            let mut lines = self.compact_hyperlink_lines(width);
+            lines.extend(self.transcript_hyperlink_lines(width));
+            lines
         }
+    }
+
+    fn activity_argument_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        let mut lines = self.compact_hyperlink_lines(width);
+        for call in self.iter_calls() {
+            let script = strip_bash_lc_and_escape(&call.command);
+            lines.extend(adaptive_wrap_hyperlink_lines(
+                &plain_hyperlink_lines(highlight_bash_to_lines(&script)),
+                RtOptions::new(usize::from(width))
+                    .initial_indent("$ ".magenta().into())
+                    .subsequent_indent("    ".into()),
+            ));
+        }
+        lines
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {

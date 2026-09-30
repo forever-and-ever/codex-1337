@@ -77,6 +77,8 @@ enum McpToolCallRenderMode {
     Display,
     /// Complete invocation and result used by the Ctrl+T transcript.
     Transcript,
+    Arguments,
+    Expanded,
 }
 
 #[derive(serde::Deserialize)]
@@ -197,8 +199,11 @@ impl McpToolCallCell {
         let mut compact_header = Line::from(compact_spans.clone());
         let reserved = compact_header.width();
 
-        let inline_invocation =
-            compact || invocation_line.width() <= (width as usize).saturating_sub(reserved);
+        let inline_invocation = !matches!(
+            mode,
+            McpToolCallRenderMode::Arguments | McpToolCallRenderMode::Expanded
+        ) && (compact
+            || invocation_line.width() <= (width as usize).saturating_sub(reserved));
 
         if inline_invocation {
             compact_header.extend(invocation_line.spans.clone());
@@ -223,7 +228,11 @@ impl McpToolCallCell {
             ));
         }
 
-        let detail_lines = self.render_detail_lines(width, mode);
+        let detail_lines = if mode == McpToolCallRenderMode::Arguments {
+            Vec::new()
+        } else {
+            self.render_detail_lines(width, mode)
+        };
         if !detail_lines.is_empty() {
             let initial_prefix = if inline_invocation {
                 "  └ ".dim()
@@ -314,7 +323,7 @@ impl McpToolCallCell {
         mode: McpToolCallRenderMode,
     ) -> Option<Cow<'a, str>> {
         let node_repl = self.result_kind() == McpResultKind::NodeRepl;
-        if mode == McpToolCallRenderMode::Transcript {
+        if mode != McpToolCallRenderMode::Display {
             return Some(Cow::Borrowed(block.render_full()));
         }
         if node_repl && self.success() == Some(true) {
@@ -364,6 +373,14 @@ impl HistoryCell for McpToolCallCell {
 
     fn compact_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         self.compact_mcp_lines(width)
+    }
+
+    fn activity_argument_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        self.render_hyperlink_lines(width, McpToolCallRenderMode::Arguments)
+    }
+
+    fn expanded_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        self.render_hyperlink_lines(width, McpToolCallRenderMode::Expanded)
     }
 
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {

@@ -1,8 +1,6 @@
 //! Dynamic tool activity with retained arguments and output across live and loaded transcripts.
 
 use super::HistoryCell;
-use super::activity_preview::DETAIL_PREVIEW_LINES;
-use super::activity_preview::clipped_line;
 use super::raw_lines_from_source;
 use crate::style::accent_color;
 use crate::terminal_hyperlinks::HyperlinkLine;
@@ -159,6 +157,12 @@ impl DynamicToolCallData {
         line
     }
 
+    fn argument_lines(&self) -> Vec<Line<'static>> {
+        let args = serde_json::to_string_pretty(&self.arguments)
+            .unwrap_or_else(|_| self.arguments.to_string());
+        raw_lines_from_source(&format!("Arguments: {args}"))
+    }
+
     fn output_lines(&self) -> Vec<Line<'static>> {
         match &self.output {
             Some(output) if output.is_empty() => vec![Line::from("(no output)".dim())],
@@ -190,41 +194,11 @@ impl HistoryCell for DynamicToolCallCell {
             .data
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let mut lines = vec![clipped_line(data.header(), width)];
-        let (skip, output) = match &data.output {
-            Some(output) if !output.is_empty() => {
-                let output = output.iter().flat_map(|text| text.split_terminator('\n'));
-                let skip = output.clone().count().saturating_sub(DETAIL_PREVIEW_LINES);
-                let tail = output
-                    .skip(skip)
-                    .map(|text| {
-                        // Bound allocation and grapheme scanning before clipping to display width.
-                        let end = text.floor_char_boundary(16 * 1024);
-                        let mut text_preview = text[..end].to_owned();
-                        if end < text.len() {
-                            text_preview.push('…');
-                        }
-                        Line::from(text_preview)
-                    })
-                    .collect();
-                (skip, tail)
-            }
-            _ => (0, data.output_lines()),
-        };
-        if skip > 0 {
-            lines.push(clipped_line(
-                format!("  … {skip} earlier lines hidden").dim().into(),
-                width,
-            ));
-        }
-        for (index, mut line) in output.into_iter().enumerate() {
-            line.spans.insert(
-                /*index*/ 0,
-                if index == 0 { "  └ " } else { "    " }.dim(),
-            );
-            lines.push(clipped_line(line.dim(), width));
-        }
-        lines
+        let mut header = data.header();
+        header.push_span("(");
+        header.push_span(super::activity_preview::compact_arguments(&data.arguments).dim());
+        header.push_span(")");
+        vec![super::activity_preview::compact_header(header, usize::from(width)).into()]
     }
 
     fn transcript_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
@@ -233,14 +207,28 @@ impl HistoryCell for DynamicToolCallCell {
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut lines = vec![data.header().into()];
-        let args = serde_json::to_string_pretty(&data.arguments)
-            .unwrap_or_else(|_| data.arguments.to_string());
-        let details = raw_lines_from_source(&format!("Arguments: {args}"))
+        let details = data
+            .argument_lines()
             .into_iter()
             .chain(data.output_lines())
             .collect();
         lines.extend(adaptive_wrap_hyperlink_lines(
             &plain_hyperlink_lines(details),
+            RtOptions::new(usize::from(width).max(/*other*/ 1))
+                .initial_indent("  └ ".dim().into())
+                .subsequent_indent("    ".into()),
+        ));
+        lines
+    }
+
+    fn activity_argument_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        let data = self
+            .data
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut lines = vec![data.header().into()];
+        lines.extend(adaptive_wrap_hyperlink_lines(
+            &plain_hyperlink_lines(data.argument_lines()),
             RtOptions::new(usize::from(width).max(/*other*/ 1))
                 .initial_indent("  └ ".dim().into())
                 .subsequent_indent("    ".into()),

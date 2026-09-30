@@ -4,17 +4,13 @@ use super::model::ExecCell;
 use crate::exec_command::strip_bash_lc_and_escape;
 use crate::history_cell::ActivityDisclosure;
 use crate::history_cell::HistoryRenderMode;
-use crate::history_cell::activity_preview::DETAIL_PREVIEW_LINES;
 use crate::history_cell::activity_preview::clipped_line;
 use crate::motion::MotionMode;
 use crate::motion::ReducedMotionIndicator;
 use crate::motion::activity_indicator;
 use crate::render::highlight::highlight_bash_to_lines;
 use crate::terminal_hyperlinks::HyperlinkLine;
-use codex_ansi_escape::ansi_escape_line;
-use ratatui::style::Modifier;
 use ratatui::style::Stylize;
-use ratatui::text::Line;
 
 impl ExecCell {
     pub(super) fn command_disclosure(&self, width: u16) -> Option<ActivityDisclosure> {
@@ -25,16 +21,8 @@ impl ExecCell {
         if !call.is_unified_exec_interaction()
             && let Some(output) = &call.output
         {
-            let retained = output.line_counts().1;
-            let clipped = output
-                .lines()
-                .rev()
-                .take(DETAIL_PREVIEW_LINES)
-                .filter(|raw| ansi_escape_line(raw.as_ref()).width() + 4 > usize::from(width))
-                .count();
-            let hidden = retained.saturating_sub(DETAIL_PREVIEW_LINES) + clipped;
-            if hidden > 0 {
-                return Some(ActivityDisclosure::OutputLines(hidden));
+            if output.line_counts().1 > 0 {
+                return Some(ActivityDisclosure::Generic);
             }
         }
         if !self
@@ -54,15 +42,7 @@ impl ExecCell {
         {
             return Some(ActivityDisclosure::Generic);
         }
-        call.output
-            .as_ref()
-            .is_some_and(|output| {
-                output.line_counts().1 > DETAIL_PREVIEW_LINES
-                    || output.transcript_lines().any(|line| {
-                        ansi_escape_line(line.as_ref()).width() + 4 > usize::from(width)
-                    })
-            })
-            .then_some(ActivityDisclosure::Generic)
+        None
     }
 
     pub(super) fn compact_command_lines(&self, width: u16) -> Vec<HyperlinkLine> {
@@ -103,30 +83,18 @@ impl ExecCell {
         // Highlight before clipping so the compact row keeps the same shell token colors.
         let mut command_lines = highlight_bash_to_lines(&script).into_iter();
         let mut header = command_lines.next().unwrap_or_default();
-        header
-            .spans
-            .splice(0..0, [marker, " ".into(), title.bold(), " ".into()]);
+        let mut heading = vec![marker, " ".into()];
+        if !self.is_active() {
+            heading.extend(
+                self.completed_at
+                    .map(crate::history_cell::HistoryTimestamp::span),
+            );
+        }
+        heading.extend([title.bold(), " ".into()]);
+        header.spans.splice(0..0, heading);
         if command_lines.next().is_some() {
             header.push_span(" …");
         }
-        let mut lines = vec![clipped_line(header, width)];
-        if let Some(output) = &call.output {
-            let tail: Vec<_> = output.lines().rev().take(DETAIL_PREVIEW_LINES).collect();
-            for (index, raw) in tail.into_iter().rev().enumerate() {
-                let mut line = ansi_escape_line(raw.as_ref());
-                line.spans.insert(
-                    /*index*/ 0,
-                    if index == 0 { "  └ " } else { "    " }.dim(),
-                );
-                line.spans.iter_mut().for_each(|span| {
-                    span.style = span.style.add_modifier(Modifier::DIM);
-                });
-                lines.push(clipped_line(line, width));
-            }
-            if lines.len() == 1 && !call.is_unified_exec_interaction() {
-                lines.push(clipped_line(Line::from("  └ (no output)".dim()), width));
-            }
-        }
-        lines
+        vec![clipped_line(header, width)]
     }
 }

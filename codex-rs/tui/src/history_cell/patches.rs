@@ -53,9 +53,7 @@ impl PatchHistoryCell {
                 crate::diff_render::display_path_for(destination, &self.cwd)
             ));
         }
-        let width = usize::from(width)
-            .saturating_sub(super::activity_preview::INLINE_DISCLOSURE_WIDTH)
-            .max(/*other*/ 1);
+        let width = usize::from(width).max(/*other*/ 1);
         let path = truncate_line_with_ellipsis_if_overflow(
             Line::from(path.replace(['\n', '\r', '\t'], " ")),
             width.saturating_sub(counts.width() + 2),
@@ -160,7 +158,7 @@ impl HistoryCell for PatchFailureCell {
 
     fn compact_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         let mut lines = self.transcript_hyperlink_lines(width);
-        lines.truncate(1 + super::activity_preview::DETAIL_PREVIEW_LINES);
+        lines.truncate(1);
         lines
             .into_iter()
             .map(|line| super::activity_preview::clipped_line(line.line, width))

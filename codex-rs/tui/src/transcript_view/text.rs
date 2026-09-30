@@ -15,6 +15,9 @@ mod logical;
 #[path = "text_tabs.rs"]
 mod tabs;
 
+#[path = "text_activity.rs"]
+mod activity;
+
 use ratatui::buffer::Buffer;
 use ratatui::layout::Alignment;
 use ratatui::layout::Rect;
@@ -49,6 +52,7 @@ pub(super) struct TextLayout {
     pub(super) separated: bool,
     pub(super) disclosure: bool,
     disclosure_control: Option<DisclosureControl>,
+    activity_estimate: Option<(usize, String)>,
 }
 
 struct DisclosureControl {
@@ -62,6 +66,7 @@ struct DisclosureControl {
 enum DisclosurePlacement {
     Row,
     Inline,
+    Leading,
 }
 
 struct TextRow {
@@ -73,6 +78,7 @@ struct TextRow {
     first_column: usize,
     prefix_columns: usize,
     tabs: tabs::TabStops,
+    estimate: Option<(usize, usize)>,
 }
 
 impl TextLayout {
@@ -84,6 +90,9 @@ impl TextLayout {
     /// Reflow the same displayed content revision, retaining styles, links and disclosure label.
     pub(super) fn rewrap(&self, width: u16) -> Self {
         let mut layout = Self::from_logical(self.logical.clone(), width);
+        if let Some((offset, label)) = &self.activity_estimate {
+            layout = layout.with_estimate_at(*offset, label.clone());
+        }
         if let Some(control) = &self.disclosure_control {
             layout =
                 match control.placement {
@@ -91,6 +100,8 @@ impl TextLayout {
                         .with_disclosure_control_at(control.label.clone(), control.source_offset),
                     DisclosurePlacement::Inline => layout
                         .with_inline_disclosure_at(control.label.clone(), control.source_offset),
+                    DisclosurePlacement::Leading => layout
+                        .with_leading_disclosure_at(control.label.clone(), control.source_offset),
                 };
         }
         if self.separated {
@@ -98,12 +109,6 @@ impl TextLayout {
         } else {
             layout
         }
-    }
-
-    /// Append a clipped interaction row outside the copied and searched source text.
-    pub(super) fn with_disclosure_control(self, label: String) -> Self {
-        let source_offset = self.text.len();
-        self.with_disclosure_control_at(label, source_offset)
     }
 
     /// Place a control after an activity, before any following auxiliary source text.
@@ -143,6 +148,7 @@ impl TextLayout {
                 first_column: indent,
                 prefix_columns: indent,
                 tabs: tabs::TabStops::default(),
+                estimate: None,
             },
         );
         self.disclosure = true;
@@ -153,18 +159,6 @@ impl TextLayout {
             placement: DisclosurePlacement::Row,
         });
         self
-    }
-
-    /// An inline control is painted separately: it never becomes selectable source text.
-    pub(super) fn with_inline_disclosure_control(self, label: String, source_line: usize) -> Self {
-        let source_offset = self
-            .logical
-            .iter()
-            .take(source_line.saturating_add(/*rhs*/ 1))
-            .map(|line| line.origin.range.len() + 1)
-            .sum::<usize>()
-            .saturating_sub(/*rhs*/ 1);
-        self.with_inline_disclosure_at(label, source_offset)
     }
 
     fn with_inline_disclosure_at(mut self, label: String, source_offset: usize) -> Self {
@@ -212,6 +206,7 @@ impl TextLayout {
                     first_column: 0,
                     prefix_columns: 0,
                     tabs: tabs::TabStops::default(),
+                    estimate: None,
                 },
             );
             if let Some(control) = &mut self.disclosure_control {
@@ -289,6 +284,7 @@ impl TextLayout {
                 let end = (start + display_width(&control.label)).min(usize::from(self.width));
                 start as u16..end as u16
             }
+            DisclosurePlacement::Leading => 0..3.min(self.width),
         }
     }
 
@@ -302,7 +298,10 @@ impl TextLayout {
             HyperlinkParagraph::new(std::slice::from_ref(&row.line), row.line.line.style)
                 .render(row_area, buf);
             if let Some(control) = &self.disclosure_control
-                && control.placement == DisclosurePlacement::Inline
+                && matches!(
+                    control.placement,
+                    DisclosurePlacement::Inline | DisclosurePlacement::Leading
+                )
                 && control.row == start_row + usize::from(screen_row)
             {
                 let columns = self.disclosure_columns();
@@ -325,6 +324,11 @@ impl TextLayout {
         for (offset, grapheme) in
             self.text[row.source.clone()].grapheme_indices(/*is_extended*/ true)
         {
+            if let Some((start, width)) = row.estimate
+                && current_column == start
+            {
+                current_column += width;
+            }
             current_column += row.tabs.grapheme_width(offset, grapheme);
             if usize::from(column) < current_column {
                 return row.source.start + offset;
@@ -365,7 +369,7 @@ impl TextLayout {
                 display_width(&self.text[row.source.start..offset]),
                 offset - row.source.start,
             );
-        column.min(usize::from(self.width)) as u16
+        row.estimate_column(column).min(usize::from(self.width)) as u16
     }
 
     /// Highlight source graphemes only, leaving alignment and viewport padding untouched.
@@ -381,6 +385,11 @@ impl TextLayout {
             for (offset, grapheme) in
                 self.text[row.source.clone()].grapheme_indices(/*is_extended*/ true)
             {
+                if let Some((start, width)) = row.estimate
+                    && column == start
+                {
+                    column += width;
+                }
                 let start = row.source.start + offset;
                 let width = row.tabs.grapheme_width(offset, grapheme);
                 if start < range.end && start + grapheme.len() > range.start {
@@ -414,11 +423,13 @@ impl TextLayout {
             let selected = range.contains(&end)
                 || (end == self.text.len()
                     && next.is_some_and(|next| self.separator_after(next).contains('\n')));
-            let column = row.first_column
-                + row.tabs.column_for_offset(
-                    display_width(&self.text[row.source.clone()]),
-                    row.source.len(),
-                );
+            let column = row.estimate_column(
+                row.first_column
+                    + row.tabs.column_for_offset(
+                        display_width(&self.text[row.source.clone()]),
+                        row.source.len(),
+                    ),
+            );
             if selected && column < usize::from(self.width) {
                 buf[(area.x + column as u16, area.y + screen_row)]
                     .set_style(Style::default().add_modifier(Modifier::REVERSED));
@@ -477,6 +488,7 @@ impl TextLayout {
             separated: false,
             disclosure: false,
             disclosure_control: None,
+            activity_estimate: None,
         }
     }
 }
@@ -557,6 +569,7 @@ fn layout_line(logical: &LogicalLine, text_start: usize, width: u16) -> Vec<Text
                 first_column: first_column + prefix_columns,
                 prefix_columns,
                 tabs,
+                estimate: None,
             }
         })
         .collect()

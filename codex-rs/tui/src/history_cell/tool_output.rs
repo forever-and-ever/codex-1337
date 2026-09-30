@@ -43,7 +43,17 @@ impl HistoryCell for ToolOutputCell {
     }
 
     fn display_lines(&self, _width: u16) -> Vec<Line<'static>> {
-        vec!["  Tool output".dim().into()]
+        // A code-only batch has no nested action header, but its retained result must be reachable.
+        vec![vec!["• ".dim(), "Returned".bold()].into()]
+    }
+
+    fn expanded_hyperlink_lines(
+        &self,
+        width: u16,
+    ) -> Vec<crate::terminal_hyperlinks::HyperlinkLine> {
+        let mut lines = self.compact_hyperlink_lines(width);
+        lines.extend(self.transcript_hyperlink_lines(width));
+        lines
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
@@ -75,6 +85,6 @@ impl HistoryCell for ToolOutputCell {
     }
 
     fn is_stream_continuation(&self) -> bool {
-        true
+        false
     }
 }
