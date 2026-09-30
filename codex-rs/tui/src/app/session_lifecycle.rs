@@ -1349,10 +1349,7 @@ impl App {
         self.local_settings = local_settings;
         self.refresh_server_version_overview_notice(CODEX_CLI_VERSION);
         self.config = resume_config;
-        tui.set_notification_settings(
-            self.local_settings.tui.notification_settings.method,
-            self.local_settings.tui.notification_settings.condition,
-        );
+        tui.set_notification_settings(&self.local_settings.tui.notification_settings);
         self.file_search
             .update_search_dir(self.config.cwd.to_path_buf());
         match self

@@ -780,6 +780,12 @@ pub struct TuiNotificationSettings {
     #[serde(default, rename = "notification_method")]
     pub method: NotificationMethod,
 
+    /// Local TUI command replacing terminal notifications. Receives the message as its last
+    /// argument, without a shell, and inherits the TUI environment rather than the app server's.
+    /// Runs asynchronously for at most six minutes; spawn failures fall back to notification_method.
+    #[serde(default, rename = "notification_command")]
+    pub command: Option<Vec<String>>,
+
     /// Controls whether TUI notifications are delivered only when the terminal is unfocused or
     /// regardless of focus. Defaults to `unfocused`.
     #[serde(default, rename = "notification_condition")]

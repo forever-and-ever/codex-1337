@@ -457,7 +457,7 @@ impl App {
         self.file_search
             .update_search_dir(self.config.cwd.to_path_buf());
         let notify = &self.local_settings.tui.notification_settings;
-        tui.set_notification_settings(notify.method, notify.condition);
+        tui.set_notification_settings(notify);
         if let Err(error) = tui.clear_ambient_pet_image() {
             tracing::warn!(%error, "failed to clear ambient pet image");
         }

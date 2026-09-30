@@ -4566,6 +4566,14 @@
           "default": {},
           "description": "Startup tooltip availability NUX state persisted by the TUI."
         },
+        "notification_command": {
+          "default": null,
+          "description": "Local TUI command replacing terminal notifications. Receives the message as its last argument, without a shell, and inherits the TUI environment rather than the app server's. Runs asynchronously for at most six minutes; spawn failures fall back to notification_method.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "notification_condition": {
           "allOf": [
             {

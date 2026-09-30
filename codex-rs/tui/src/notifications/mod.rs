@@ -1,22 +1,39 @@
 mod bel;
+mod command;
 mod osc9;
 
 use std::io;
 
 use bel::BelBackend;
 use codex_config::types::NotificationMethod;
+use codex_config::types::TuiNotificationSettings;
 use codex_terminal_detection::TerminalInfo;
 use codex_terminal_detection::TerminalName;
 use codex_terminal_detection::terminal_info;
+use command::CommandBackend;
 use osc9::Osc9Backend;
 
 #[derive(Debug)]
 pub enum DesktopNotificationBackend {
     Osc9(Osc9Backend),
     Bel(BelBackend),
+    Command {
+        backend: CommandBackend,
+        fallback: NotificationMethod,
+    },
 }
 
 impl DesktopNotificationBackend {
+    pub fn for_settings(settings: &TuiNotificationSettings) -> Self {
+        match &settings.command {
+            Some(command) => Self::Command {
+                backend: CommandBackend(command.clone()),
+                fallback: settings.method,
+            },
+            None => Self::for_method(settings.method),
+        }
+    }
+
     pub fn for_method(method: NotificationMethod) -> Self {
         match method {
             NotificationMethod::Auto => {
@@ -31,10 +48,11 @@ impl DesktopNotificationBackend {
         }
     }
 
-    pub fn method(&self) -> NotificationMethod {
+    pub fn method(&self) -> &'static str {
         match self {
-            DesktopNotificationBackend::Osc9(_) => NotificationMethod::Osc9,
-            DesktopNotificationBackend::Bel(_) => NotificationMethod::Bel,
+            DesktopNotificationBackend::Osc9(_) => "osc9",
+            DesktopNotificationBackend::Bel(_) => "bel",
+            DesktopNotificationBackend::Command { .. } => "command",
         }
     }
 
@@ -42,6 +60,16 @@ impl DesktopNotificationBackend {
         match self {
             DesktopNotificationBackend::Osc9(backend) => backend.notify(message),
             DesktopNotificationBackend::Bel(backend) => backend.notify(message),
+            DesktopNotificationBackend::Command { backend, fallback } => {
+                match backend.notify(message) {
+                    Ok(()) => Ok(()),
+                    Err(error) => {
+                        tracing::warn!(%error, "Notification command unavailable; using terminal notifications");
+                        *self = Self::for_method(*fallback);
+                        self.notify(message)
+                    }
+                }
+            }
         }
     }
 }

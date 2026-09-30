@@ -60,6 +60,7 @@ use crate::tui::screen_size::ScreenSizePolicy;
 use crate::tui::scrollback::ScrollbackStrategy;
 use codex_config::types::NotificationCondition;
 use codex_config::types::NotificationMethod;
+use codex_config::types::TuiNotificationSettings;
 
 mod alternate_screen;
 #[cfg(target_os = "linux")]
@@ -862,13 +863,9 @@ impl Tui {
         }
     }
 
-    pub fn set_notification_settings(
-        &mut self,
-        method: NotificationMethod,
-        condition: NotificationCondition,
-    ) {
-        self.notification_backend = Some(detect_backend(method));
-        self.notification_condition = condition;
+    pub fn set_notification_settings(&mut self, settings: &TuiNotificationSettings) {
+        self.notification_backend = Some(DesktopNotificationBackend::for_settings(settings));
+        self.notification_condition = settings.condition;
     }
 
     pub(crate) fn is_terminal_focused(&self) -> bool {

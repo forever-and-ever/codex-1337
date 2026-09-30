@@ -205,10 +205,7 @@ impl App {
             )));
         }
         emit_system_bwrap_warning(&app_event_tx, &config);
-        tui.set_notification_settings(
-            local_settings.tui.notification_settings.method,
-            local_settings.tui.notification_settings.condition,
-        );
+        tui.set_notification_settings(&local_settings.tui.notification_settings);
 
         let harness_overrides =
             normalize_harness_overrides_for_cwd(harness_overrides, &config.cwd)?;
