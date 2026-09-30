@@ -463,6 +463,74 @@ fn code_mode_batches_display_their_own_counts_and_replay_without_double_counting
 }
 
 #[test]
+fn mixed_shell_reads_share_one_disclosure_and_output_bill() {
+    use crate::exec_cell::CommandOutput;
+    use crate::exec_cell::new_active_exec_command;
+    use codex_app_server_protocol::CommandExecutionSource;
+    use codex_shell_command::parse_command::parse_command;
+    use std::time::Duration;
+
+    let command = vec![
+        "bash".into(),
+        "-lc".into(),
+        "git status; sed -n '20,80p' src/lib.rs; tail -n 10 log.txt".into(),
+    ];
+    let parsed = parse_command(&command);
+    let mut cell = new_active_exec_command(
+        "mixed".into(),
+        command,
+        parsed,
+        CommandExecutionSource::UnifiedExecStartup,
+        /*interaction_input*/ None,
+        /*animations_enabled*/ false,
+    );
+    // Recognized reads must not hide the opaque stage or turn the whole script into
+    // a read-only exploration group. The process has one result and one output bill.
+    assert!(!cell.is_exploring_cell());
+    cell.complete_call(
+        "mixed",
+        CommandOutput::new(/*exit_code*/ 2, "combined output\nfinal error".into()),
+        Duration::from_millis(/*millis*/ 5),
+    );
+    assert!(cell.should_flush());
+    assert_eq!(cell.activity_ids(), vec!["exec:mixed"]);
+    let cells: Vec<Arc<dyn HistoryCell>> = vec![Arc::new(cell)];
+    let mut view = TranscriptView::default();
+    view.set_output_estimates_enabled(/*enabled*/ true);
+    for _ in 0..2 {
+        view.record_tool_output_tokens("bill".into(), "mixed".into(), Some(1_280));
+    }
+    assert_eq!(
+        view.activity_output_tokens(&cells[0].activity_ids()),
+        Some(1_280)
+    );
+    let mut snapshots = Vec::new();
+    for expanded in [false, true] {
+        if expanded {
+            view.disclosure.expanded.extend(cells[0].activity_ids());
+        }
+        let area = Rect::new(
+            /*x*/ 0, /*y*/ 0, /*width*/ 100, /*height*/ 10,
+        );
+        let mut buffer = Buffer::empty(area);
+        view.render(area, &mut buffer, &cells);
+        let text = crate::transcript_view::tests::text(&buffer);
+        assert_eq!(text.matches("1,280 total tokens").count(), 1);
+        assert_eq!(
+            text.matches(if expanded {
+                "Show less"
+            } else {
+                "Show details"
+            })
+            .count(),
+            1
+        );
+        snapshots.push(format!("expanded={expanded}\n{buffer:?}"));
+    }
+    insta::assert_snapshot!("mixed_shell_reads_shared_output", snapshots.join("\n"));
+}
+
+#[test]
 fn activity_focus_keeps_controls_without_passive_hints() {
     let mut cells: Vec<Arc<dyn HistoryCell>> = Vec::new();
     let cell = Arc::new(ActivityCell::default());

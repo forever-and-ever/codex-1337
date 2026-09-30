@@ -61,9 +61,12 @@ pub fn parse_command(command: &[String]) -> Vec<ParsedCommand> {
         }
         deduped.push(cmd);
     }
-    if deduped
-        .iter()
-        .any(|cmd| matches!(cmd, ParsedCommand::Unknown { .. }))
+    // Keep recognized actions beside opaque commands. This is display metadata, not a
+    // claim that the entire script is read-only or that every branch actually executed.
+    if !deduped.is_empty()
+        && deduped
+            .iter()
+            .all(|cmd| matches!(cmd, ParsedCommand::Unknown { .. }))
     {
         vec![single_unknown_for_command(command)]
     } else {
@@ -246,33 +249,53 @@ mod tests {
         let inner = r#"rg -l QkBindingController presentation/src/main/java | xargs perl -pi -e 's/QkBindingController/QkController/g'"#;
         assert_parsed(
             &vec_str(&["bash", "-lc", inner]),
-            vec![ParsedCommand::Unknown {
-                cmd: inner.to_string(),
-            }],
+            vec![
+                ParsedCommand::Search {
+                    cmd: "rg -l QkBindingController presentation/src/main/java".to_string(),
+                    query: Some("QkBindingController".to_string()),
+                    path: Some("presentation/src/main/java".to_string()),
+                },
+                ParsedCommand::Unknown {
+                    cmd: "xargs perl -pi -e s/QkBindingController/QkController/g".to_string(),
+                },
+            ],
         );
     }
 
     #[test]
-    fn collapses_plain_pipeline_when_any_stage_is_unknown() {
+    fn preserves_plain_pipeline_actions_when_a_stage_is_unknown() {
         let command = shlex_split_safe(
             "rg -l QkBindingController presentation/src/main/java | xargs perl -pi -e 's/QkBindingController/QkController/g'",
         );
         assert_parsed(
             &command,
-            vec![ParsedCommand::Unknown {
-                cmd: shlex_join(&command),
-            }],
+            vec![
+                ParsedCommand::Search {
+                    cmd: "rg -l QkBindingController presentation/src/main/java".to_string(),
+                    query: Some("QkBindingController".to_string()),
+                    path: Some("presentation/src/main/java".to_string()),
+                },
+                ParsedCommand::Unknown {
+                    cmd: "xargs perl -pi -e s/QkBindingController/QkController/g".to_string(),
+                },
+            ],
         );
     }
 
     #[test]
-    fn collapses_pipeline_with_helper_when_later_stage_is_unknown() {
+    fn preserves_pipeline_with_helper_when_later_stage_is_unknown() {
         let command = shlex_split_safe("rg --files | nl -ba | foo");
         assert_parsed(
             &command,
-            vec![ParsedCommand::Unknown {
-                cmd: shlex_join(&command),
-            }],
+            vec![
+                ParsedCommand::ListFiles {
+                    cmd: "rg --files".to_string(),
+                    path: None,
+                },
+                ParsedCommand::Unknown {
+                    cmd: "foo".to_string(),
+                },
+            ],
         );
     }
 
@@ -866,8 +889,57 @@ mod tests {
             let inner = format!("cat README.md && {sed_command}");
             assert_parsed(
                 &vec_str(&["bash", "-lc", &inner]),
-                vec![ParsedCommand::Unknown { cmd: inner }],
+                vec![
+                    ParsedCommand::Read {
+                        cmd: "cat README.md".to_string(),
+                        name: "README.md".to_string(),
+                        path: PathBuf::from("README.md"),
+                    },
+                    ParsedCommand::Unknown {
+                        cmd: sed_command.to_string(),
+                    },
+                ],
             );
+        }
+    }
+
+    #[test]
+    fn mixed_shell_actions_respect_quoting_and_reject_dynamic_scripts() {
+        for shell in ["bash", "zsh", "sh"] {
+            for separator in [";", "&&", "||", "\n"] {
+                let script = format!(
+                    "git status {separator} sed -n '20,80p' 'src/a;b.rs' {separator} tail -n 10 log.txt"
+                );
+                assert_parsed(
+                    &vec_str(&[shell, "-lc", &script]),
+                    vec![
+                        ParsedCommand::Unknown {
+                            cmd: "git status".into(),
+                        },
+                        ParsedCommand::Read {
+                            cmd: "sed -n '20,80p' 'src/a;b.rs'".into(),
+                            name: "a;b.rs".into(),
+                            path: PathBuf::from("src/a;b.rs"),
+                        },
+                        ParsedCommand::Read {
+                            cmd: "tail -n 10 log.txt".into(),
+                            name: "log.txt".into(),
+                            path: PathBuf::from("log.txt"),
+                        },
+                    ],
+                );
+            }
+            // A literal-looking read inside a dynamic script is not evidence of access.
+            for script in [
+                "git status; sed -n '20,80p' \"$(pick_file)\"",
+                "for file in *.rs; do sed -n '20,80p' \"$file\"; done",
+                "git status; sed -n '20,80p' a.rs > captured.txt",
+            ] {
+                assert_parsed(
+                    &vec_str(&[shell, "-lc", script]),
+                    vec![ParsedCommand::Unknown { cmd: script.into() }],
+                );
+            }
         }
     }
 

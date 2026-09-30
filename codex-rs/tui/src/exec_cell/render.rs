@@ -221,7 +221,7 @@ impl HistoryCell for ExecCell {
     }
 
     fn activity_disclosure(&self, width: u16) -> Option<ActivityDisclosure> {
-        if self.is_exploring_cell() {
+        if self.has_action_summary() {
             return Some(ActivityDisclosure::Generic);
         }
         if self.group.calls.iter().any(ExecCall::is_user_shell_command) {
@@ -239,8 +239,8 @@ impl HistoryCell for ExecCell {
         if self.group.calls.iter().any(ExecCall::is_user_shell_command) {
             return self.display_hyperlink_lines(width);
         }
-        if self.is_exploring_cell() {
-            let mut lines = self.exploring_display_lines(width);
+        if self.has_action_summary() {
+            let mut lines = self.action_summary_lines(width);
             lines.truncate(1 + crate::history_cell::activity_preview::DETAIL_PREVIEW_LINES);
             let failures = self
                 .group
@@ -273,8 +273,8 @@ impl HistoryCell for ExecCell {
     }
 
     fn display_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        if self.is_exploring_cell() {
-            self.exploring_display_lines(width)
+        if self.has_action_summary() {
+            self.action_summary_lines(width)
         } else {
             self.command_display_lines(width)
         }
@@ -297,8 +297,8 @@ impl HistoryCell for ExecCell {
 
     fn expanded_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         if let Some(output) = self.group.details.output_lines(width) {
-            let mut lines = if self.is_exploring_cell() {
-                self.exploring_display_lines(width)
+            let mut lines = if self.has_action_summary() {
+                self.action_summary_lines(width)
             } else {
                 self.compact_hyperlink_lines(width)
             };
@@ -327,7 +327,24 @@ impl ExecCell {
         Line::from(vec![Self::output_ellipsis_text(omitted).dim()])
     }
 
-    fn exploring_display_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+    // Mixed scripts get the same readable action list, but remain standalone command
+    // cells: they must not become exploration merely because one stage reads a file.
+    fn has_action_summary(&self) -> bool {
+        self.group.calls.iter().all(|call| {
+            !call.is_user_shell_command()
+                && !call.is_unified_exec_interaction()
+                && call.parsed.iter().any(|action| {
+                    matches!(
+                        action,
+                        ParsedCommand::Read { .. }
+                            | ParsedCommand::ListFiles { .. }
+                            | ParsedCommand::Search { .. }
+                    )
+                })
+        })
+    }
+
+    fn action_summary_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         let mut out: Vec<HyperlinkLine> = Vec::new();
         let mut header = vec![
             if self.is_active() {
@@ -343,11 +360,13 @@ impl ExecCell {
                     .map(crate::history_cell::HistoryTimestamp::span),
             );
         }
-        header.push(if self.is_active() {
-            "Exploring".bold()
-        } else {
-            "Explored".bold()
-        });
+        let title = match (self.is_exploring_cell(), self.is_active()) {
+            (true, true) => "Exploring",
+            (true, false) => "Explored",
+            (false, true) => "Running",
+            (false, false) => "Ran",
+        };
+        header.push(title.bold());
         out.push(Line::from(header).into());
 
         let mut calls = self.group.calls.as_slice();
