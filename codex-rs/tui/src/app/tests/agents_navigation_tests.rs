@@ -271,6 +271,69 @@ async fn agents_navigation_escape_returns_to_main_but_preserves_drafts_and_popup
         app.chat_widget.composer_text_with_pending(),
         "Preserve this root draft"
     );
+    tui.set_owned_screen(/*owned*/ true)?;
+    // The owned transcript routes input before handle_key_event. An idle child
+    // previously consumed Escape as prompt backtracking instead of navigation.
+    for phase in ["running", "finished", "stopped", "finishing"] {
+        app.select_agent_thread(&mut tui, &mut app_server, child_id)
+            .await?;
+        app.chat_widget.apply_external_edit(String::new());
+        app.enqueue_thread_notification(child_id, turn_started_notification(child_id, phase))
+            .await?;
+        app.drain_active_thread_events(&mut tui).await?;
+        assert!(app.chat_widget.is_task_running_for_test());
+        if phase != "running" {
+            let status = if phase == "stopped" {
+                TurnStatus::Interrupted
+            } else {
+                TurnStatus::Completed
+            };
+            app.enqueue_thread_notification(
+                child_id,
+                turn_completed_notification(child_id, phase, status),
+            )
+            .await?;
+            if phase != "finishing" {
+                app.drain_active_thread_events(&mut tui).await?;
+                assert!(!app.chat_widget.is_task_running_for_test());
+            }
+        }
+        app.transcript_view.begin_search();
+        app.handle_tui_event(
+            &mut tui,
+            &mut app_server,
+            TuiEvent::Key(KeyCode::Esc.into()),
+        )
+        .await?;
+        assert_eq!(app.current_displayed_thread_id(), Some(child_id));
+        assert!(!app.transcript_view.is_search_active());
+        app.handle_tui_event(
+            &mut tui,
+            &mut app_server,
+            TuiEvent::Key(KeyCode::Esc.into()),
+        )
+        .await?;
+        assert_eq!(
+            (
+                app.current_displayed_thread_id(),
+                app.backtrack.primed,
+                app.backtrack.overlay_preview_active,
+                app.chat_widget.composer_text_with_pending(),
+            ),
+            (
+                Some(root_id),
+                false,
+                false,
+                "Preserve this root draft".into()
+            ),
+            "{phase}"
+        );
+    }
+    insta::assert_snapshot!(
+        "subagent_escape_restored_root",
+        render_bottom_popup(&app.chat_widget, /*width*/ 80)
+    );
+    tui.set_owned_screen(/*owned*/ false)?;
     app_server.shutdown().await?;
     Ok(())
 }
