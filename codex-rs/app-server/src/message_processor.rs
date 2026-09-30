@@ -866,6 +866,9 @@ impl MessageProcessor {
         connection_id: ConnectionId,
         session_state: &ConnectionSessionState,
     ) {
+        self.thread_processor
+            .revoke_extension_connection(connection_id)
+            .await;
         session_state.rpc_gate.close().await;
         self.account_processor
             .gateway_connection_closed(connection_id);
@@ -978,6 +981,11 @@ impl MessageProcessor {
             return Err(invalid_request(experimental_required_message(reason)));
         }
         let connection_id = connection_request_id.connection_id;
+        if let ClientRequest::ThreadUnsubscribe { params, .. } = &codex_request {
+            self.thread_processor
+                .revoke_extension_subscription(connection_id, &params.thread_id)
+                .await;
+        }
         self.initialize_processor.track_initialized_request(
             connection_id,
             connection_request_id.request_id.clone(),
@@ -990,6 +998,8 @@ impl MessageProcessor {
             | ClientRequest::ThreadResume { .. }
             | ClientRequest::ThreadRevert { .. }
             | ClientRequest::ThreadSettingsUpdate { .. }
+            | ClientRequest::ThreadExtensionAttach { .. }
+            | ClientRequest::ThreadExtensionDetach { .. }
             | ClientRequest::TurnSettingsUpdate { .. }
             | ClientRequest::ThreadDelete { .. }
             | ClientRequest::ThreadRetire { .. }
@@ -1407,6 +1417,16 @@ impl MessageProcessor {
                     .thread_attachment_remove(request_id.clone(), params)
                     .await
             }
+            ClientRequest::ThreadExtensionAttach { params, .. } => self
+                .thread_processor
+                .extension_attach(connection_id, params)
+                .await
+                .map(|response| Some(response.into())),
+            ClientRequest::ThreadExtensionDetach { params, .. } => self
+                .thread_processor
+                .extension_detach(connection_id, params)
+                .await
+                .map(|response| Some(response.into())),
             ClientRequest::ThreadSectionMove { params, .. } => {
                 self.thread_processor.thread_section_move(params).await
             }

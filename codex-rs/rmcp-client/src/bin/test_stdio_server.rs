@@ -886,6 +886,10 @@ impl TestToolServer {
     }
 
     async fn sync_result(args: SyncArgs) -> Result<CallToolResult, McpError> {
+        if let Ok(path) = std::env::var("MCP_TEST_SYNC_ENTER_FILE") {
+            std::fs::write(path, "entered")
+                .map_err(|error| McpError::internal_error(error.to_string(), None))?;
+        }
         if let Some(delay) = args.sleep_before_ms
             && delay > 0
         {

@@ -243,6 +243,7 @@ pub(crate) use reasoning_effort::RequestEffortUsage;
 pub(crate) use submission::Submission;
 mod input_queue;
 mod mcp;
+mod mcp_extension;
 mod mcp_prewarm;
 mod mcp_refresh;
 mod mcp_runtime;
@@ -4323,6 +4324,10 @@ impl Session {
             }
         }
 
+        if let Some(instructions) = self.mcp_extension_instruction(/*full_context*/ false) {
+            developer_sections.push(DeveloperInstructions::new(instructions).render_fragment());
+        }
+
         crate::context_manager::updates::build_rendered_message(developer_sections)
             .into_iter()
             .collect()
@@ -4358,6 +4363,9 @@ impl Session {
         {
             developer_sections
                 .push(DeveloperInstructions::new(developer_instructions).render_fragment());
+        }
+        if let Some(instructions) = self.mcp_extension_instruction(/*full_context*/ true) {
+            developer_sections.push(DeveloperInstructions::new(instructions).render_fragment());
         }
         let loaded_plugins = self
             .services

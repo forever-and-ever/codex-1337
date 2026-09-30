@@ -286,13 +286,14 @@ impl Session {
         ready_selected_capability_roots: &[SelectedCapabilityRoot],
         elicitation_reviewer: Option<ElicitationReviewerHandle>,
     ) {
-        let mcp_projection = self
+        let mut mcp_projection = self
             .project_selected_environment_mcp_servers(
                 &desired.config,
                 &desired.environments,
                 mcp_projection,
             )
             .await;
+        self.project_mcp_extension(&mut mcp_projection, &desired.environments, &desired.config);
         let selected_plugins = mcp_projection.selected_plugins.clone();
         let input = self.build_mcp_runtime_input(
             desired,
@@ -301,6 +302,9 @@ impl Session {
             elicitation_reviewer,
         );
         self.services.mcp_runtime.replace(input).await;
+        self.services
+            .mcp_runtime
+            .retire_revoked_server_leases(super::mcp_extension::CONNECTION_LEASE_SOURCE_ID);
         self.services.thread_extension_data.insert(selected_plugins);
     }
 

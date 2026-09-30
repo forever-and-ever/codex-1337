@@ -121,6 +121,8 @@ mod managed_threads;
 mod mcp_auth_elicitation;
 mod mcp_auth_refresh;
 mod mcp_ema_config;
+#[path = "mcp_extension_lease.rs"]
+mod mcp_extension_lease;
 mod mcp_extension_protocol;
 mod mcp_optional_startup_grace;
 #[cfg(unix)]

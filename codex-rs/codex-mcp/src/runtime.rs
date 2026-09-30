@@ -50,6 +50,7 @@ use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
 use crate::McpConfig;
+use crate::McpServerSource;
 use crate::binding::McpBinding;
 use crate::binding::PreparedMcpCall;
 use crate::client_tool_catalog::CodexAppsToolSnapshot;
@@ -107,6 +108,47 @@ pub struct McpRuntime {
     resource_cache_generation: AtomicU64,
     elicitation_router: ElicitationRequestRouter,
     resource_origins: Mutex<ResourceOrigins>,
+    /// A canceled token remains until a newer lease replaces it, fencing old publications.
+    server_leases: Arc<Mutex<HashMap<String, ServerLease>>>,
+}
+
+pub(crate) struct ServerLease {
+    cancellation: Arc<CancellationToken>,
+    ready_publication: Option<Weak<PublishedMcpRuntime>>,
+}
+
+#[derive(Clone)]
+pub(crate) struct McpDispatchLeaseGuard {
+    leases: Arc<Mutex<HashMap<String, ServerLease>>>,
+    expected: Option<Arc<CancellationToken>>,
+}
+
+impl McpDispatchLeaseGuard {
+    pub(crate) fn is_valid(&self, server: &str) -> bool {
+        let leases = self.leases.lock().unwrap();
+        match (self.expected.as_ref(), leases.get(server)) {
+            (None, None) => true,
+            (Some(expected), Some(current)) => {
+                Arc::ptr_eq(expected, &current.cancellation) && !expected.is_cancelled()
+            }
+            (None, Some(_)) | (Some(_), None) => false,
+        }
+    }
+
+    pub(crate) fn cancellation(&self) -> Option<CancellationToken> {
+        self.expected.as_ref().map(|token| token.as_ref().clone())
+    }
+}
+
+impl ServerLease {
+    fn authorizes(&self, publication: &Arc<PublishedMcpRuntime>) -> bool {
+        !self.cancellation.is_cancelled()
+            && self
+                .ready_publication
+                .as_ref()
+                .and_then(Weak::upgrade)
+                .is_some_and(|ready| Arc::ptr_eq(&ready, publication))
+    }
 }
 
 struct EventStreamCancellation {
@@ -246,7 +288,71 @@ impl McpRuntime {
             resource_cache_generation: AtomicU64::new(0),
             elicitation_router: ElicitationRequestRouter::default(),
             resource_origins: Mutex::default(),
+            server_leases: Arc::default(),
         }
+    }
+
+    /// Installs a connection lease before publishing its server.
+    pub fn set_server_lease(&self, server: String, cancellation: Arc<CancellationToken>) {
+        self.server_leases.lock().unwrap().insert(
+            server,
+            ServerLease {
+                cancellation,
+                ready_publication: None,
+            },
+        );
+    }
+
+    /// Opens dispatch only for the publication whose socket and catalog became ready.
+    pub async fn activate_server_lease(
+        &self,
+        server: &str,
+        cancellation: &Arc<CancellationToken>,
+    ) -> bool {
+        loop {
+            let current = self.current.load_full();
+            if !current.connections.wait_for_server_startup(server).await {
+                return false;
+            }
+            let binding = Self::binding_from_published_runtime(
+                Arc::clone(&current),
+                /*required_servers*/ &[],
+                /*required_plugins*/ &HashSet::new(),
+            )
+            .await;
+            if !binding.is_some_and(|binding| {
+                binding
+                    .tools()
+                    .iter()
+                    .any(|tool| tool.server_name == server)
+            }) {
+                return false;
+            }
+            let mut leases = self.server_leases.lock().unwrap();
+            let Some(lease) = leases.get_mut(server) else {
+                return false;
+            };
+            if !Arc::ptr_eq(&lease.cancellation, cancellation) || cancellation.is_cancelled() {
+                return false;
+            }
+            if Arc::ptr_eq(&current, &self.current.load_full()) {
+                lease.ready_publication = Some(Arc::downgrade(&current));
+                return true;
+            }
+        }
+    }
+
+    /// Release canceled tombstones only after the revoked overlay has left the publication.
+    pub fn retire_revoked_server_leases(&self, lease_source_id: &str) {
+        let current = self.current.load_full();
+        self.server_leases.lock().unwrap().retain(|server, lease| {
+            !lease.cancellation.is_cancelled()
+                || current.config.as_ref().is_some_and(|config| {
+                    config.mcp_server_catalog.server(server).is_some_and(|registration| {
+                        matches!(registration.source(), McpServerSource::Extension { id, .. } if id == lease_source_id)
+                    })
+                })
+        });
     }
 
     /// Updates this thread's bounded resource provenance from a live or restored event.
@@ -366,7 +472,7 @@ impl McpRuntime {
             .event_stream_cancellation
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        self.current.store(Arc::new(PublishedMcpRuntime {
+        let publication = Arc::new(PublishedMcpRuntime {
             connections,
             config: Some(config),
             auth,
@@ -377,7 +483,20 @@ impl McpRuntime {
             environment_selections,
             ready_environments,
             cached_binding: Mutex::new(None),
-        }));
+        });
+        let mut leases = self.server_leases.lock().unwrap();
+        self.current.store(Arc::clone(&publication));
+        for (server, lease) in leases.iter_mut() {
+            if !lease.cancellation.is_cancelled()
+                && lease.ready_publication.is_some()
+                && publication
+                    .config
+                    .as_ref()
+                    .is_some_and(|config| config.mcp_server_catalog.server(server).is_some())
+            {
+                lease.ready_publication = Some(Arc::downgrade(&publication));
+            }
+        }
         let _ = publish.send(true);
         cancellation.event_server_available = hosted_event_server_retained;
         if !hosted_event_server_retained {
@@ -542,10 +661,25 @@ impl McpRuntime {
     /// Its model-visible name stays fixed while execution metadata comes from the live catalog.
     pub async fn prepare_call(&self, advertised_tool: &ToolInfo) -> Option<PreparedMcpCall> {
         let current = self.current.load_full();
-        current
+        let expected = {
+            let leases = self.server_leases.lock().unwrap();
+            let lease = leases.get(&advertised_tool.server_name);
+            if lease.is_some_and(|lease| !lease.authorizes(&current)) {
+                return None;
+            }
+            lease.map(|lease| Arc::clone(&lease.cancellation))
+        };
+        let guard = McpDispatchLeaseGuard {
+            leases: Arc::clone(&self.server_leases),
+            expected,
+        };
+        let call = current
             .connections
             .prepare_call_for_tool(Arc::clone(current.config.as_ref()?), advertised_tool)
-            .await
+            .await?;
+        guard
+            .is_valid(&advertised_tool.server_name)
+            .then(|| call.with_lease_guard(guard))
     }
 
     /// Captures the current runtime after its selected server has finished startup.
@@ -653,17 +787,41 @@ impl McpRuntime {
         requested_timeout: Option<Duration>,
         wait_for_server: bool,
     ) -> anyhow::Result<CallToolResult> {
-        self.latest_connections()
-            .call_tool(
-                server,
-                tool,
-                environment_id,
-                arguments,
-                meta,
-                requested_timeout,
-                wait_for_server,
-            )
-            .await
+        let current = self.current.load_full();
+        let expected = {
+            let leases = self.server_leases.lock().unwrap();
+            let lease = leases.get(server);
+            if lease.is_some_and(|lease| !lease.authorizes(&current)) {
+                anyhow::bail!("extension MCP lease is not ready");
+            }
+            lease.map(|lease| Arc::clone(&lease.cancellation))
+        };
+        let guard = McpDispatchLeaseGuard {
+            leases: Arc::clone(&self.server_leases),
+            expected,
+        };
+        if !guard.is_valid(server) {
+            anyhow::bail!("extension MCP lease revoked");
+        }
+        let connections = Arc::clone(&current.connections);
+        let call = connections.call_tool(
+            server,
+            tool,
+            environment_id,
+            arguments,
+            meta,
+            requested_timeout,
+            wait_for_server,
+        );
+        if let Some(cancellation) = guard.cancellation() {
+            tokio::select! {
+                biased;
+                () = cancellation.cancelled() => anyhow::bail!("extension MCP lease revoked"),
+                result = call => result,
+            }
+        } else {
+            call.await
+        }
     }
 
     pub async fn latest_read_resource(

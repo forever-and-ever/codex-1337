@@ -99,6 +99,7 @@ pub async fn run_user_shell_command(
     command: String,
     timeout_ms: Option<u64>,
 ) {
+    let _extension_admission = sess.mcp_extension_admission.lock().await;
     if let Some((turn_context, cancellation_token)) =
         sess.active_turn_context_and_cancellation_token().await
     {
@@ -244,6 +245,7 @@ pub async fn reload_user_config(sess: &Arc<Session>) {
 pub async fn compact(sess: &Arc<Session>, sub_id: String) {
     // Stop the old turn before the compact task picks up the next turn's environments.
     sess.abort_all_tasks(TurnAbortReason::Replaced).await;
+    let _extension_admission = sess.mcp_extension_admission.lock().await;
     let turn_context = sess
         .new_turn_with_default_settings(sub_id, Default::default())
         .await;
@@ -386,6 +388,7 @@ pub async fn review(
     sub_id: String,
     review_request: ReviewRequest,
 ) {
+    let _extension_admission = sess.mcp_extension_admission.lock().await;
     let turn_context = sess
         .new_turn_with_default_settings(sub_id.clone(), Default::default())
         .await;

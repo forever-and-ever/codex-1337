@@ -682,6 +682,18 @@ client_request_definitions! {
         serialization: thread_id(params.thread_id),
         response: v2::ThreadAttachmentRemoveResponse,
     },
+    #[experimental("thread/extensionAttach")]
+    ThreadExtensionAttach => "thread/extensionAttach" {
+        params: v2::ThreadExtensionAttachParams,
+        serialization: thread_id(params.thread_id),
+        response: v2::ThreadExtensionAttachResponse,
+    },
+    #[experimental("thread/extensionDetach")]
+    ThreadExtensionDetach => "thread/extensionDetach" {
+        params: v2::ThreadExtensionDetachParams,
+        serialization: thread_id(params.thread_id),
+        response: v2::ThreadExtensionDetachResponse,
+    },
     ThreadSectionMove => "thread/section/move" {
         params: v2::ThreadSectionMoveParams,
         serialization: thread_id(params.thread_id),

@@ -209,7 +209,10 @@ pub(super) async fn handle(
     submission_id: String,
 ) -> CodexResult<TurnInputSubmission> {
     match mode {
-        TurnInputMode::StartOrSteer => start_or_steer(session, request, submission_id).await,
+        TurnInputMode::StartOrSteer => {
+            let _extension_admission = session.mcp_extension_admission.lock().await;
+            start_or_steer(session, request, submission_id).await
+        }
         TurnInputMode::StartIfIdle => {
             let kind = match &request.input {
                 SubmittedTurnInput::UserInput { content, .. } if !content.is_empty() => {
@@ -428,6 +431,7 @@ async fn start_if_idle(
         });
     }
 
+    let _extension_admission = session.mcp_extension_admission.lock().await;
     let turn_state = {
         let mut active_turn = session.active_turn.lock().await;
         if active_turn.is_some() {
@@ -445,6 +449,7 @@ async fn start_if_idle(
         let active_turn = active_turn.get_or_insert_with(ActiveTurn::default);
         Arc::clone(&active_turn.turn_state)
     };
+    drop(_extension_admission);
 
     if session.input_queue.has_trigger_turn_mailbox_items().await {
         session.clear_reserved_idle_turn(&turn_state).await;
