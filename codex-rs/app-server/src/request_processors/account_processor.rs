@@ -877,7 +877,6 @@ impl AccountRequestProcessor {
         if self.auth_manager.is_workload_identity_selected() {
             return Err(self.configured_auth_owned_by_host_error());
         }
-        let config = self.load_latest_config().await;
 
         self.cancel_active_login().await;
 
