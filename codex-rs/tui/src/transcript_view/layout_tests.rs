@@ -38,11 +38,12 @@ fn tool_output_disclosure_shows_full_estimate_when_it_fits() {
         ActivityTranscriptLines {
             activity: vec![HyperlinkLine::from("Called tool")],
             auxiliary: Vec::new(),
-            has_hidden_details: true,
+            disclosure: Some(ActivityDisclosure::Generic),
             tool_output_tokens: Some(1_280),
         },
         /*width*/ 80,
         /*expanded*/ false,
+        /*shortcut*/ None,
     );
     let area = Rect::new(
         /*x*/ 0, /*y*/ 0, /*width*/ 80, /*height*/ 2,

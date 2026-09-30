@@ -63,7 +63,7 @@ impl App {
         let Some(thread) = self.primary_thread_id else {
             return;
         };
-        let error = tui.with_restored(tui::RestoredInput::Preserve, || async {
+        let error = tui.with_restored(tui::TerminalHandoff::Restore, tui::RestoredInput::Preserve, || async {
             // The probe awaited a child process. Stopping the reader and checking
             // its queue closes the ordinary typeahead race before replacing it.
             match crossterm::event::poll(Duration::ZERO) {

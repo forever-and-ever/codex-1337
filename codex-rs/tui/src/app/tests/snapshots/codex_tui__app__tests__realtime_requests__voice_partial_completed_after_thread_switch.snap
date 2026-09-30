@@ -1,6 +1,5 @@
 ---
 source: tui/src/app/tests/realtime_requests.rs
-assertion_line: 479
 expression: "normalize_voice_snapshot_directory(&format!(\"Other task:\\n{other_ui}\\nRestored owner:\\n{}\\n{rendered}\",\nrender_bottom_popup(&app.chat_widget, 80)), &app.config.cwd,)"
 ---
 Other task:
@@ -20,12 +19,9 @@ Restored owner:
   Activity  —
 ────────────────────────────────────────────────────────────────────────────────
   gpt-test default · /tmp/project
-╭────────────────────────────────────────╮
-│ >_ OpenAI Codex (v0.158.0-1337)        │
-│                                        │
-│ model:     gpt-test   /model to change │
-│ directory: /tmp/project                │
-╰────────────────────────────────────────╯
+
+  >_ OpenAI Codex (v0.159.1-1337)
+     /tmp/project
 
   To get started, describe a task or try one of these commands:
 

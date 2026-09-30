@@ -94,14 +94,18 @@ pub(super) async fn check(
             issue.reason
         ))),
         (Some(1), Some(features)) if managed_daemon => {
-            tui.with_restored(crate::tui::RestoredInput::Discard, || async {
-                crossterm::terminal::disable_raw_mode()?;
-                codex_app_server_daemon::restart_with_features(features)
-                    .await
-                    .map_err(|err| {
-                        io::Error::other(format!("{err:#}\n{}", daemon_startup::FAILURE_HINT))
-                    })
-            })
+            tui.with_restored(
+                crate::tui::TerminalHandoff::Restore,
+                crate::tui::RestoredInput::Discard,
+                || async {
+                    crossterm::terminal::disable_raw_mode()?;
+                    codex_app_server_daemon::restart_with_features(features)
+                        .await
+                        .map_err(|err| {
+                            io::Error::other(format!("{err:#}\n{}", daemon_startup::FAILURE_HINT))
+                        })
+                },
+            )
             .await?;
             startup
                 .run_until(daemon_startup::compatibility_warning(target, config))

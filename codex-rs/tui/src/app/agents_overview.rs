@@ -402,6 +402,7 @@ impl App {
         if startup_draft.is_none() {
             loading::draw(tui)?;
         }
+        let mut restored_blank_session = false;
         if self.primary_thread_id != Some(root_thread_id) || self.thread_unavailable(root_thread_id)
         {
             let previous_displayed_thread_id = self.current_displayed_thread_id();
@@ -582,7 +583,10 @@ impl App {
             {
                 // An untouched task has no rollout for thread/resume yet. Its live
                 // subscription and saved settings are sufficient to restore the editor.
-                (blank.clone(), false)
+                restored_blank_session = true;
+                let mut blank = blank.clone();
+                blank.session.thread_name.clone_from(&target_thread.name);
+                (blank, false)
             } else {
                 match app_server
                     .resume_thread(
@@ -825,8 +829,12 @@ impl App {
                 .await;
         }
         if self.current_displayed_thread_id() == Some(root_thread_id)
-            && let Some(input_state) = self.agents_overview.input_states.remove(&root_thread_id)
+            && let Some(mut input_state) = self.agents_overview.input_states.remove(&root_thread_id)
         {
+            // A saved draft includes model settings, so apply newer server settings after it.
+            let pending_settings = restored_blank_session
+                .then(|| input_state.pending_thread_settings.take())
+                .flatten();
             let preserve_in_flight_turn = !read_only
                 && self
                     .active_turn_id_for_thread(root_thread_id)
@@ -838,6 +846,9 @@ impl App {
                     preserve_in_flight_turn,
                 },
             );
+            if let Some(settings) = pending_settings {
+                self.chat_widget.on_thread_settings_updated(settings);
+            }
             if !preserve_in_flight_turn {
                 self.chat_widget.maybe_send_next_queued_input();
             }

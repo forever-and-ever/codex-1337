@@ -1,6 +1,5 @@
 ---
 source: core/tests/suite/scenarios.rs
-assertion_line: 927
 expression: "read_ids.replace_all(&history, \"R<READ_ID>\")"
 ---
 Scenario: Astra checks a Settings release using direct collaboration and Code Mode tools.
@@ -17,7 +16,7 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (turn) --
-00:additional_tools/developer (3; hash=f4f0150f2eb45fdf):
+00:additional_tools/developer (3; hash=055b072a7dd71128):
         - namespace/functions; hash=a402b698e3e0e007
           - custom/exec
           - function/wait
@@ -28,7 +27,7 @@ Settings:
           - function/retire_agent
         - namespace/clock: Tools for reading and waiting on time.; hash=f402e8c5e9b5e317
           - function/sleep
-        - namespace/wrangler_agents: Tools for spawning and managing sub-agents.; hash=642c4a2e1e28620d
+        - namespace/wrangler_agents: Tools for spawning and managing sub-agents.; hash=8485fd9eebd191e4
           - function/followup_task
           - function/interrupt_agent
           - function/list_agents

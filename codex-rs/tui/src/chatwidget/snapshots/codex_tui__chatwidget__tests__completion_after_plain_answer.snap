@@ -1,7 +1,7 @@
 ---
 source: tui/src/chatwidget/tests/completion_styling_tests.rs
-expression: normalize_completion_timestamps(text)
+expression: text
 ---
 • 13:04:06 The change is ready.
 
-  Worked for [duration] · [completion time]
+  Worked for [duration] • [completion time]

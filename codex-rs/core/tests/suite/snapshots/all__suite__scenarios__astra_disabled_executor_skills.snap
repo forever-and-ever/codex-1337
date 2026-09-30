@@ -1,6 +1,5 @@
 ---
 source: core/tests/suite/scenarios.rs
-assertion_line: 744
 expression: "context_snapshot::format_context_snapshot(\"Astra sees the active executor skill while the caller-disabled skill is omitted.\",\n&[SnapshotEntry::body(&body)],\n&ContextSnapshotOptions::default().include_request_settings(),)"
 ---
 Scenario: Astra sees the active executor skill while the caller-disabled skill is omitted.
@@ -17,7 +16,7 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (request) --
-00:additional_tools/developer (3; hash=1f40b43640e8caa8):
+00:additional_tools/developer (3; hash=6d6649fc311311c3):
         - namespace/functions; hash=a6522cc172c2ef68
           - custom/exec
           - function/wait
@@ -28,7 +27,7 @@ Settings:
           - function/retire_agent
         - namespace/clock: Tools for reading and waiting on time.; hash=f402e8c5e9b5e317
           - function/sleep
-        - namespace/wrangler_agents: Tools for spawning and managing sub-agents.; hash=642c4a2e1e28620d
+        - namespace/wrangler_agents: Tools for spawning and managing sub-agents.; hash=8485fd9eebd191e4
           - function/followup_task
           - function/interrupt_agent
           - function/list_agents
