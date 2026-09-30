@@ -2,6 +2,7 @@ use anyhow::Result;
 use app_test_support::MockResponsesConfig;
 use app_test_support::TestAppServer;
 use app_test_support::create_mock_responses_server_sequence_unchecked;
+use codex_app_server_protocol::ListMcpServerStatusResponse;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ThreadExtensionAttachResponse;
 use codex_app_server_protocol::ThreadExtensionDetachResponse;
@@ -52,6 +53,33 @@ async fn loaded_thread_extension_lease_is_idempotent_and_name_exclusive() -> Res
     let repeated: ThreadExtensionAttachResponse = app.read_response(request).await?;
     assert_eq!(repeated, first);
 
+    // Inventory must read the live thread overlay, not rebuild only persisted MCP config.
+    let request = app
+        .send_raw_request(
+            "mcpServerStatus/list",
+            Some(json!({ "threadId": thread_id, "detail": "toolsAndAuthOnly" })),
+        )
+        .await?;
+    let inventory: ListMcpServerStatusResponse = app.read_response(request).await?;
+    let request = app
+        .send_raw_request(
+            "mcpServerStatus/list",
+            Some(json!({
+                "threadId": thread_id,
+                "serverName": "leased_mcp",
+                "detail": "toolsAndAuthOnly",
+            })),
+        )
+        .await?;
+    let selected: ListMcpServerStatusResponse = app.read_response(request).await?;
+    assert_eq!(inventory, selected);
+    assert!(
+        inventory
+            .data
+            .iter()
+            .any(|server| { server.name == "leased_mcp" && !server.tools.is_empty() })
+    );
+
     let mut conflicting = attach;
     conflicting["developerInstructions"] = json!("Different instructions");
     let request = app
@@ -72,6 +100,20 @@ async fn loaded_thread_extension_lease_is_idempotent_and_name_exclusive() -> Res
         .send_raw_request("thread/extensionDetach", Some(detach))
         .await?;
     let _: ThreadExtensionDetachResponse = app.read_response(request).await?;
+    let request = app
+        .send_raw_request(
+            "mcpServerStatus/list",
+            Some(json!({ "threadId": thread_id, "detail": "toolsAndAuthOnly" })),
+        )
+        .await?;
+    let detached: ListMcpServerStatusResponse = app.read_response(request).await?;
+    assert_eq!(
+        detached,
+        ListMcpServerStatusResponse {
+            data: Vec::new(),
+            next_cursor: None
+        }
+    );
     Ok(())
 }
 

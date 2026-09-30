@@ -1,4 +1,4 @@
-//! Read selected-server metadata from one published thread runtime.
+//! Read server metadata from one published thread runtime.
 
 use std::sync::Arc;
 
@@ -12,11 +12,11 @@ use crate::mcp::compute_auth_statuses;
 use crate::mcp::effective_mcp_servers;
 
 impl McpRuntime {
-    /// Reuses the selected connection and catalog without starting unrelated servers.
+    /// Reuses published connections and catalogs, optionally selecting one server.
     /// Configuration and metadata belong to the same captured runtime publication.
     pub async fn server_status_snapshot(
         &self,
-        server: &str,
+        server: Option<&str>,
         detail: McpSnapshotDetail,
         runtime_context: &McpRuntimeContext,
     ) -> anyhow::Result<(Arc<McpConfig>, McpServerStatusSnapshot)> {
@@ -32,7 +32,7 @@ impl McpRuntime {
                 .ok_or_else(|| anyhow::anyhow!("MCP runtime is not configured"))?,
         );
         let mut servers = effective_mcp_servers(&config, current.auth.as_ref());
-        servers.retain(|name, _| name == server);
+        servers.retain(|name, _| server.is_none_or(|server| name == server));
         let auth_statuses = compute_auth_statuses(
             servers.iter(),
             config.mcp_oauth_credentials_store_mode,

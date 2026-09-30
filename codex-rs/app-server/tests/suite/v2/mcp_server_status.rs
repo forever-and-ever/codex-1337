@@ -129,16 +129,19 @@ async fn mcp_server_status_list_reuses_thread_connection() -> Result<()> {
     )
     .await??;
 
-    for detail in [
-        McpServerStatusDetail::ToolsAndAuthOnly,
-        McpServerStatusDetail::Full,
+    for (server_name, detail) in [
+        (
+            Some("widget".to_string()),
+            McpServerStatusDetail::ToolsAndAuthOnly,
+        ),
+        (None, McpServerStatusDetail::Full),
     ] {
         let response: ListMcpServerStatusResponse = app
             .request(|request_id| ClientRequest::McpServerStatusList {
                 request_id,
                 params: ListMcpServerStatusParams {
                     thread_id: Some(thread.id.clone()),
-                    server_name: Some("widget".to_string()),
+                    server_name,
                     detail: Some(detail),
                     cursor: None,
                     limit: None,

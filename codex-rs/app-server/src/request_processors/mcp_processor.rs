@@ -296,41 +296,22 @@ impl McpRequestProcessor {
             McpServerStatusDetail::ToolsAndAuthOnly => McpSnapshotDetail::ToolsAndAuthOnly,
         };
 
-        let (mcp_config, snapshot) = if let (Some(thread), Some(server)) =
-            (thread.as_ref(), params.server_name.as_deref())
-        {
+        let (mcp_config, snapshot) = if let Some(thread) = thread.as_ref() {
             thread
-                .mcp_server_status_snapshot(server, detail)
+                .mcp_server_status_snapshot(params.server_name.as_deref(), detail)
                 .await
                 .map_err(|error| {
                     internal_error(format!("failed to read MCP server status: {error:#}"))
                 })?
         } else {
-            let config = match thread.as_ref() {
-                Some(thread) => {
-                    let thread_config = thread.config().await;
-                    self.config_manager
-                        .load_latest_config_with_session_layers(
-                            &thread_config.config_layer_stack,
-                            &thread_config.cwd,
-                        )
-                        .await
-                        .map_err(|err| internal_error(format!("failed to reload config: {err}")))?
-                }
-                None => self.load_latest_config(/*fallback_cwd*/ None).await?,
-            };
+            let config = self.load_latest_config(/*fallback_cwd*/ None).await?;
             let mcp_manager = self.thread_manager.mcp_manager();
             let auth = self.auth_manager.auth().await;
-            let (mcp_config, runtime_context) = match thread.as_ref() {
-                Some(thread) => thread.runtime_mcp_config_and_context(&config).await,
-                None => (
-                    mcp_manager.runtime_config(&config).await,
-                    McpRuntimeContext::new(
-                        self.thread_manager.environment_manager(),
-                        config.cwd.to_path_buf(),
-                    ),
-                ),
-            };
+            let mcp_config = mcp_manager.runtime_config(&config).await;
+            let runtime_context = McpRuntimeContext::new(
+                self.thread_manager.environment_manager(),
+                config.cwd.to_path_buf(),
+            );
             let snapshot = collect_mcp_server_status_snapshot_with_detail(
                 &mcp_config,
                 auth.as_ref(),

@@ -1115,10 +1115,10 @@ impl CodexThread {
         Ok(serde_json::to_value(result)?)
     }
 
-    /// Inspects one server through this thread's current MCP connection.
+    /// Inspects published MCP connections, optionally selecting one server.
     pub async fn mcp_server_status_snapshot(
         &self,
-        server: &str,
+        server: Option<&str>,
         detail: codex_mcp::McpSnapshotDetail,
     ) -> anyhow::Result<(
         Arc<codex_mcp::McpConfig>,
