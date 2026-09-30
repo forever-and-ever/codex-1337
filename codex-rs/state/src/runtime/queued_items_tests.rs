@@ -89,13 +89,24 @@ async fn migrating_existing_queue_preserves_unrelated_work_and_publishes_cancell
         .await
         .unwrap();
     }
-    // Apply revision backfill before cancellation so the DELETE trigger must
-    // advance the already-published revision, not merely create a missing one.
+    // A new frontend can migrate this shared store while the old daemon keeps
+    // writing. Reproduce an old writer adding the retired class after cleanup.
     let revision_migrator = Migrator {
-        migrations: Cow::Owned(QUEUE_MIGRATOR.migrations[..2].to_vec()),
+        migrations: Cow::Owned(QUEUE_MIGRATOR.migrations[..3].to_vec()),
         ..old_queue_migrator
     };
     revision_migrator.run(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO queued_items
+         (id, thread_id, payload_json, queue_order, created_at_ms, updated_at_ms)
+         VALUES (?, ?, ?, 4, 0, 0)",
+    )
+    .bind(&queued[4].id)
+    .bind(thread_id.to_string())
+    .bind(&queued[4].payload)
+    .execute(&pool)
+    .await
+    .unwrap();
     let revision: i64 =
         sqlx::query_scalar("SELECT revision FROM queued_thread_revisions WHERE thread_id = ?")
             .bind(thread_id.to_string())
@@ -108,6 +119,15 @@ async fn migrating_existing_queue_preserves_unrelated_work_and_publishes_cancell
         .await
         .unwrap();
     let queue = runtime.thread_queue();
+    // Reject both forms of stale writes without disturbing unrelated work or
+    // publishing a phantom revision for a rejected operation.
+    assert!(queue.enqueue(thread_id, &queued[4].payload).await.is_err());
+    assert!(
+        queue
+            .update(thread_id, &queued[0].id, &queued[4].payload)
+            .await
+            .is_err()
+    );
     assert_eq!(
         vec![(thread_id, revision + 1)],
         queue.changes_since(revision, &[thread_id]).await.unwrap()
