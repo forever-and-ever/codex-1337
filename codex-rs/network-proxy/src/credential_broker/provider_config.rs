@@ -22,10 +22,9 @@ pub struct CredentialProviderConfig {
 }
 
 impl CredentialProviderConfig {
-    /// Validate a complete provider definition using the broker's compilation rules.
+    /// Validate a complete provider definition without constructing a credential broker.
     pub fn validate(&self, id: &str) -> anyhow::Result<()> {
-        super::configured::ConfiguredCredentialProvider::compile(id, self)?;
-        Ok(())
+        super::configured::validate(id, self)
     }
 }
 

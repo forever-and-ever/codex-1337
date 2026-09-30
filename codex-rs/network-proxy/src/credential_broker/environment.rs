@@ -1,7 +1,6 @@
 use super::BROKERED_CREDENTIAL_ALIAS_MARKER_PREFIX;
 use super::BROKERED_CREDENTIALS_ENV_KEY;
 use super::CREDENTIAL_BROKER_ACTIVE_ENV_KEY;
-use super::CredentialBrokerState;
 use super::MIN_EMBEDDED_CREDENTIAL_LENGTH;
 use super::configured::valid_environment_key;
 use super::env_entry;
@@ -9,8 +8,6 @@ use super::env_key_matches;
 use super::env_value;
 use super::matching;
 use super::providers;
-use super::registry::BrokeredCredentialProvider;
-use super::remove_env_value;
 use super::set_env_value;
 use crate::NetworkProxy;
 use crate::NetworkProxyConfig;
@@ -18,7 +15,7 @@ use crate::PreparedManagedNetwork;
 use std::borrow::Cow;
 use std::collections::HashMap;
 
-/// Local destination hints retained by the broker, not added to child environments.
+/// Trusted local destination hints retained for environment sanitation.
 #[derive(Clone, Default, Eq, PartialEq)]
 pub struct CredentialBrokerContext(HashMap<String, String>);
 
@@ -35,32 +32,16 @@ impl std::fmt::Debug for CredentialBrokerContext {
 }
 
 impl CredentialBrokerContext {
-    /// Uses private destination hints during brokerage and returns an environment ready to spawn.
-    /// Context values override routing inputs, but never change the child's visible values.
+    /// Compatibility entry point for unavailable managed-network environment preparation.
+    /// Its proxy argument cannot be constructed in this build.
     pub fn prepare_child_environment(
         self,
         proxy: &NetworkProxy,
-        mut env: HashMap<String, String>,
+        env: HashMap<String, String>,
         environment_id: Option<&str>,
     ) -> anyhow::Result<PreparedManagedNetwork> {
-        let previous = self
-            .0
-            .into_iter()
-            .map(|(key, value)| {
-                let previous =
-                    env_entry(&env, &key).map(|(key, value)| (key.to_string(), value.to_string()));
-                set_env_value(&mut env, &key, value);
-                (key, previous)
-            })
-            .collect::<Vec<_>>();
-        let mut prepared = proxy.prepare_for_optional_environment(env, environment_id)?;
-        for (key, previous) in previous {
-            remove_env_value(&mut prepared.env, &key);
-            if let Some((key, value)) = previous {
-                prepared.env.insert(key, value);
-            }
-        }
-        Ok(prepared)
+        let _ = (self, env, environment_id);
+        match *proxy {}
     }
 
     pub(crate) fn capture(
@@ -111,130 +92,6 @@ pub struct CredentialBrokerEnvironment {
     pub provider_keys: Vec<String>,
     pub provider_context_keys: Vec<String>,
     pub configured_provider_context_keys: Vec<String>,
-}
-
-impl CredentialBrokerState {
-    pub(super) fn environment(&self, env: &HashMap<String, String>) -> CredentialBrokerEnvironment {
-        let mut metadata = CredentialBrokerEnvironment::default();
-        for key in
-            providers::credential_env_keys().chain(credential_broker_provider_context_env_keys())
-        {
-            push_unique_key(&mut metadata.provider_keys, key);
-        }
-        for key in credential_broker_provider_context_env_keys() {
-            push_unique_key(&mut metadata.provider_context_keys, key);
-        }
-        for provider in &self.configured_providers {
-            for key in &provider.config.env {
-                push_unique_key(&mut metadata.provider_keys, key);
-            }
-            if let Some(key) = provider.config.url_prefix_from_env.as_deref() {
-                push_unique_key(&mut metadata.provider_keys, key);
-                push_unique_key(&mut metadata.provider_context_keys, key);
-                push_unique_key(&mut metadata.configured_provider_context_keys, key);
-            }
-        }
-
-        if !self.enabled {
-            return metadata;
-        }
-
-        metadata.credential_keys = brokered_credential_dummy_env_keys(env);
-        let marked_credentials = env_value(env, BROKERED_CREDENTIALS_ENV_KEY)
-            .and_then(|marker| serde_json::from_str::<Vec<(String, String)>>(marker).ok())
-            .unwrap_or_default();
-        for credential in &self.credentials {
-            if matches!(
-                credential.provider,
-                BrokeredCredentialProvider::Configured(_)
-            ) && env_value(env, &credential.env_var) == Some(credential.dummy_value.as_str())
-                && marked_credentials.iter().any(|(key, value)| {
-                    env_key_matches(key, &credential.env_var) && value == &credential.dummy_value
-                })
-            {
-                push_unique_key(&mut metadata.credential_keys, &credential.env_var);
-            }
-        }
-
-        for key in providers::credential_context_env_keys(&metadata.credential_keys) {
-            if env_value(env, key).is_some() {
-                push_unique_key(&mut metadata.context_keys, key);
-            }
-        }
-        for key in providers::credential_binding_env_keys(&metadata.credential_keys) {
-            if env_value(env, key).is_some() {
-                push_unique_key(&mut metadata.binding_keys, key);
-            }
-        }
-        for provider in &self.configured_providers {
-            if provider.config.env.iter().any(|provider_key| {
-                metadata
-                    .credential_keys
-                    .iter()
-                    .any(|credential_key| env_key_matches(provider_key, credential_key))
-            }) && let Some(key) = provider.config.url_prefix_from_env.as_deref()
-                && env_value(env, key).is_some()
-            {
-                push_unique_key(&mut metadata.context_keys, key);
-                push_unique_key(&mut metadata.binding_keys, key);
-            }
-        }
-
-        metadata
-    }
-}
-
-fn push_unique_key(keys: &mut Vec<String>, key: &str) {
-    if !keys.iter().any(|candidate| env_key_matches(candidate, key)) {
-        keys.push(key.to_string());
-    }
-}
-
-pub(super) fn update_brokered_credentials_marker(
-    state: &CredentialBrokerState,
-    env: &mut HashMap<String, String>,
-) {
-    let credentials = state
-        .credentials
-        .iter()
-        .filter(|credential| {
-            env.iter().any(|(key, value)| {
-                !env_key_matches(key, CREDENTIAL_BROKER_ACTIVE_ENV_KEY)
-                    && !env_key_matches(key, BROKERED_CREDENTIALS_ENV_KEY)
-                    && (value == &credential.dummy_value
-                        || credential.contains_embedded_value(value, &credential.dummy_value))
-            })
-        })
-        .collect::<Vec<_>>();
-    let mut brokered = credentials
-        .iter()
-        .map(|credential| (credential.env_var.clone(), credential.dummy_value.clone()))
-        .collect::<Vec<_>>();
-    brokered.extend(state.credential_aliases.iter().flat_map(|alias| {
-        credentials
-            .iter()
-            .filter(|credential| {
-                alias.dummy_value == credential.dummy_value
-                    || credential
-                        .contains_embedded_value(&alias.dummy_value, &credential.dummy_value)
-            })
-            .map(|credential| {
-                (
-                    format!("{BROKERED_CREDENTIAL_ALIAS_MARKER_PREFIX}{}", alias.env_var),
-                    credential.dummy_value.clone(),
-                )
-            })
-    }));
-    brokered.sort_unstable();
-    brokered.dedup();
-    match serde_json::to_string(&brokered) {
-        Ok(marker) => {
-            set_env_value(env, BROKERED_CREDENTIALS_ENV_KEY, marker);
-        }
-        Err(_) => {
-            remove_env_value(env, BROKERED_CREDENTIALS_ENV_KEY);
-        }
-    }
 }
 
 /// Returns supported environment keys whose current values still match the child-scoped dummy

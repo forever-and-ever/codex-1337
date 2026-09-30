@@ -136,13 +136,6 @@ impl LocalBindingPolicy {
             .allow_local_binding
             .unwrap_or(config.enabled && self == Self::RequireTrue)
     }
-
-    pub(crate) fn resolved_config(self, config: &NetworkProxyConfig) -> NetworkProxyConfig {
-        NetworkProxyConfig {
-            allow_local_binding: Some(self.resolve(config)),
-            ..config.clone()
-        }
-    }
 }
 
 /// The removed proxy state has no instances.

@@ -6,7 +6,6 @@
 
 #[path = "attribution_frame.rs"]
 mod attribution;
-mod authorization_path;
 #[path = "ca_markers.rs"]
 mod certs;
 mod config;

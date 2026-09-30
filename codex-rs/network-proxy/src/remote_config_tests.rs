@@ -32,9 +32,6 @@ fn optional_socket_policy_preserves_input_and_resolves_at_remote_boundary() {
             remote.dangerously_allow_all_unix_sockets,
             allow_all.unwrap_or(false)
         );
-        config.dangerously_allow_all_unix_sockets = Some(allow_all.unwrap_or(false));
-        config.allow_local_binding = Some(false);
-        assert_eq!(remote.into_network_proxy_config(), config);
     }
 }
 
@@ -57,9 +54,12 @@ fn round_trip_preserves_supported_effective_settings() {
 
         let remote = RemoteNetworkProxyConfig::from_effective_config(&config)
             .expect("supported remote config");
-        let round_trip = remote.clone().into_network_proxy_config();
+        let round_trip = serde_json::from_value::<RemoteNetworkProxyConfig>(
+            serde_json::to_value(&remote).expect("serialize remote config"),
+        )
+        .expect("deserialize remote config");
 
-        assert_eq!(round_trip, config);
+        assert_eq!(round_trip, remote);
     }
 }
 

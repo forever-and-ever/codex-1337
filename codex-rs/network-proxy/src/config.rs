@@ -1,7 +1,6 @@
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
-use codex_utils_absolute_path::AbsolutePathBuf;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
@@ -10,6 +9,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::net::SocketAddr;
+#[cfg(test)]
 use std::path::Path;
 use tracing::warn;
 use url::Url;
@@ -480,37 +480,6 @@ pub(crate) fn clamp_bind_addrs(
 pub struct RuntimeConfig {
     pub http_addr: SocketAddr,
     pub socks_addr: SocketAddr,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct UnixStyleAbsolutePath(String);
-
-impl UnixStyleAbsolutePath {
-    fn parse(value: &str) -> Option<Self> {
-        value.starts_with('/').then(|| Self(value.to_string()))
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ValidatedUnixSocketPath {
-    Native(AbsolutePathBuf),
-    UnixStyleAbsolute(UnixStyleAbsolutePath),
-}
-
-impl ValidatedUnixSocketPath {
-    pub(crate) fn parse(socket_path: &str) -> Result<Self> {
-        let path = Path::new(socket_path);
-        if path.is_absolute() {
-            let path = AbsolutePathBuf::from_absolute_path(path)
-                .with_context(|| format!("failed to normalize unix socket path {socket_path:?}"))?;
-            return Ok(Self::Native(path));
-        }
-
-        if let Some(path) = UnixStyleAbsolutePath::parse(socket_path) {
-            return Ok(Self::UnixStyleAbsolute(path));
-        }
-        bail!("expected an absolute path, got {socket_path:?}");
-    }
 }
 
 pub(crate) fn validate_unix_socket_allowlist_paths(
