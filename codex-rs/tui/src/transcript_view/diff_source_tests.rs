@@ -3,10 +3,12 @@
 use super::*;
 use crate::diff_model::FileChange;
 use crate::history_cell::HistoryCell;
+use crate::transcript_view::TranscriptView;
 use pretty_assertions::assert_eq;
 use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 #[test]
 fn file_disclosures_are_independent_and_not_copied() {
