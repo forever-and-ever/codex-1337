@@ -564,22 +564,10 @@ pub(crate) enum AppEvent {
         result: color_eyre::Result<AppServerStartedThread>,
     },
 
-    /// Register a tool-created or resumed background thread and its overview metadata.
-    DynamicToolThreadStarted {
-        thread: Thread,
-        task_tools_available: bool,
-        registered: tokio::sync::oneshot::Sender<()>,
-    },
-
     /// Return a completed client-owned dynamic tool call to app server.
     DynamicToolCallCompleted {
         request_id: AppServerRequestId,
         response: DynamicToolCallResponse,
-    },
-
-    /// Register task tools inherited by a dynamically created thread.
-    TaskToolsAvailable {
-        thread_id: ThreadId,
     },
 
     /// Clear the terminal UI (screen + scrollback), start a fresh session, and keep the

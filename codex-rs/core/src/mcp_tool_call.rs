@@ -104,7 +104,9 @@ use tracing::field::Empty;
 use url::Url;
 
 mod account;
+mod extension_approval;
 mod telemetry;
+pub(crate) use extension_approval::approve_extension_tool;
 
 use account::McpToolAccountError;
 use telemetry::McpCallMetricOutcome;

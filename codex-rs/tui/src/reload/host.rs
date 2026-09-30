@@ -221,14 +221,6 @@ async fn supervise(
                         control::Response::Ok
                     }
                     control::Request::Suspend => control::Response::Error("UI reload in progress".into()),
-                    control::Request::Tools { params } => {
-                        let _ = broker_tx.try_send(broker::Command::Tools { params, reply });
-                        continue;
-                    }
-                    control::Request::Tasks { after } => {
-                        let _ = broker_tx.try_send(broker::Command::Tasks { after, reply });
-                        continue;
-                    }
                 };
                 let _ = reply.send(response);
             }

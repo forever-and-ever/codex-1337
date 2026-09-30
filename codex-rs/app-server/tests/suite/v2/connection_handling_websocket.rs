@@ -18,6 +18,8 @@ use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ThreadLoadedListParams;
 use codex_app_server_protocol::ThreadLoadedListResponse;
 use codex_app_server_protocol::ThreadStartParams;
+#[path = "server_coordination_tests.rs"]
+mod server_coordination;
 use codex_app_server_protocol::ThreadStartResponse;
 use codex_core::config::set_project_trust_level;
 use codex_http_client::HttpClient;

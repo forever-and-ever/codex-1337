@@ -7,6 +7,10 @@ mod daemon_snapshot;
 #[path = "extension_lease.rs"]
 mod extension_lease;
 
+#[path = "thread_coordination.rs"]
+mod coordination;
+pub(crate) use coordination::ThreadCoordinationService;
+
 use super::persisted_resume_settings::PersistedResumeSettings;
 use super::persisted_resume_settings::latest_persisted_resume_settings;
 use super::thread_enrichment::enrich_loaded_threads;
@@ -470,6 +474,8 @@ pub(crate) struct ThreadRequestProcessor {
 /// Whether resume attaches a client or restores a cold runtime during daemon startup.
 pub(crate) enum ThreadResumeTarget {
     Client(ConnectionRequestId),
+    /// Restore a runtime for server-owned work without subscribing a frontend.
+    Coordination,
     DaemonRecovery(Option<codex_app_server_transport::daemon_recovery::InterruptedTurn>),
 }
 
@@ -538,15 +544,15 @@ impl ThreadRequestProcessor {
         request_context: RequestContext,
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
         self.thread_start_inner(
-            request_id,
+            Some(request_id),
             params,
             app_server_client_name,
             app_server_client_version,
             client_mcp_extensions,
-            request_context,
+            Some(request_context),
         )
         .await
-        .map(|()| None)
+        .map(|_| None)
     }
 
     pub(crate) async fn thread_unsubscribe(
@@ -593,14 +599,14 @@ impl ThreadRequestProcessor {
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
         // Keep the large fork future out of the shared request dispatcher's stack frame.
         Box::pin(self.thread_fork_inner(
-            request_id,
+            Some(request_id),
             params,
             app_server_client_name,
             app_server_client_version,
             client_mcp_extensions,
         ))
         .await
-        .map(|()| None)
+        .map(|_| None)
     }
 
     pub(crate) async fn thread_revert(
@@ -1134,13 +1140,19 @@ impl ThreadRequestProcessor {
 
     async fn thread_start_inner(
         &self,
-        request_id: ConnectionRequestId,
+        request_id: Option<ConnectionRequestId>,
         params: ThreadStartParams,
         app_server_client_name: Option<String>,
         app_server_client_version: Option<String>,
         client_mcp_extensions: ClientMcpExtensions,
-        request_context: RequestContext,
-    ) -> Result<(), JSONRPCErrorError> {
+        request_context: Option<RequestContext>,
+    ) -> Result<
+        (
+            ThreadStartResponse,
+            Option<crate::thread_state::ThreadRuntimeLease>,
+        ),
+        JSONRPCErrorError,
+    > {
         let ThreadStartParams {
             model,
             model_provider,
@@ -1231,14 +1243,14 @@ impl ThreadRequestProcessor {
             skills_watcher: Arc::clone(&self.skills_watcher),
             turn_cost_worker: self.turn_cost_worker.clone(),
         };
-        let request_trace = request_context.request_trace();
+        let request_trace = request_context
+            .as_ref()
+            .and_then(RequestContext::request_trace);
         let config_manager = self.config_manager.clone();
         let thread_store = Arc::clone(&self.thread_store);
         let initial_config_warnings = Arc::clone(&self.initial_config_warnings);
-        let outgoing = Arc::clone(&listener_task_context.outgoing);
-        let error_request_id = request_id.clone();
         let thread_start_task = async move {
-            if let Err(error) = Self::thread_start_task(
+            Self::thread_start_task(
                 listener_task_context,
                 thread_store,
                 config_manager,
@@ -1263,15 +1275,17 @@ impl ThreadRequestProcessor {
                 initial_config_warnings,
             )
             .await
-            {
-                outgoing.send_error(error_request_id, error).await;
-            }
         };
         self.background_tasks
-            .spawn(thread_start_task.instrument(request_context.span()))
+            .spawn(
+                thread_start_task.instrument(
+                    request_context
+                        .as_ref()
+                        .map_or_else(tracing::Span::current, RequestContext::span),
+                ),
+            )
             .await
-            .map_err(|_| internal_error("thread startup task stopped before completing"))?;
-        Ok(())
+            .map_err(|_| internal_error("thread startup task stopped before completing"))?
     }
 
     pub(crate) async fn drain_background_tasks(&self) {
@@ -1324,7 +1338,7 @@ impl ThreadRequestProcessor {
         listener_task_context: ListenerTaskContext,
         thread_store: Arc<dyn ThreadStore>,
         config_manager: ConfigManager,
-        request_id: ConnectionRequestId,
+        request_id: Option<ConnectionRequestId>,
         app_server_client_name: Option<String>,
         app_server_client_version: Option<String>,
         client_mcp_extensions: ClientMcpExtensions,
@@ -1343,7 +1357,13 @@ impl ThreadRequestProcessor {
         experimental_raw_events: bool,
         request_trace: Option<W3cTraceContext>,
         initial_config_warnings: Arc<Vec<ConfigWarningNotification>>,
-    ) -> Result<(), JSONRPCErrorError> {
+    ) -> Result<
+        (
+            ThreadStartResponse,
+            Option<crate::thread_state::ThreadRuntimeLease>,
+        ),
+        JSONRPCErrorError,
+    > {
         let thread_start_started_at = std::time::Instant::now();
         let requested_cwd = typesafe_overrides.cwd.clone();
         let mut config = config_manager
@@ -1440,13 +1460,17 @@ impl ThreadRequestProcessor {
         }
         for notification in config_warnings {
             if !initial_config_warnings.contains(&notification) {
-                listener_task_context
-                    .outgoing
-                    .send_server_notification_to_connections(
-                        &[request_id.connection_id],
-                        ServerNotification::ConfigWarning(notification),
-                    )
-                    .await;
+                if let Some(request_id) = &request_id {
+                    listener_task_context
+                        .outgoing
+                        .send_server_notification_to_connections(
+                            &[request_id.connection_id],
+                            ServerNotification::ConfigWarning(notification),
+                        )
+                        .await;
+                } else {
+                    tracing::warn!(summary = %notification.summary, "headless thread startup warning");
+                }
             }
         }
 
@@ -1496,10 +1520,12 @@ impl ThreadRequestProcessor {
         start_options.reserved_thread_id = Some(thread_id);
         // Startup can prewarm the Responses socket before start_thread returns.
         // Register the creating client first so that handshake can request attestation.
-        listener_task_context
-            .thread_state_manager
-            .try_add_connection_to_thread(thread_id, request_id.connection_id)
-            .await;
+        if let Some(request_id) = &request_id {
+            listener_task_context
+                .thread_state_manager
+                .try_add_connection_to_thread(thread_id, request_id.connection_id)
+                .await;
+        }
         let create_thread_started_at = std::time::Instant::now();
         let new_thread = listener_task_context
             .thread_manager
@@ -1581,24 +1607,53 @@ impl ThreadRequestProcessor {
         thread.project_id = project_id.clone();
         thread.daybreak_enabled = daybreak_enabled;
 
-        // Auto-attach a thread listener when starting a thread.
-        log_listener_attach_result(
-            super::thread_lifecycle::ensure_conversation_listener(
-                listener_task_context.clone(),
+        // Observe every runtime; only frontend requests subscribe a connection.
+        let runtime_lease = if request_id.is_none() {
+            Some(
+                listener_task_context
+                    .thread_state_manager
+                    .lease_runtime(thread_id)
+                    .await,
+            )
+        } else {
+            None
+        };
+        if let Some(request_id) = &request_id {
+            log_listener_attach_result(
+                super::thread_lifecycle::ensure_conversation_listener(
+                    listener_task_context.clone(),
+                    thread_id,
+                    request_id.connection_id,
+                    experimental_raw_events,
+                )
+                .instrument(tracing::info_span!(
+                    "app_server.thread_start.attach_listener",
+                    otel.name = "app_server.thread_start.attach_listener",
+                    thread_start.experimental_raw_events = experimental_raw_events,
+                ))
+                .await,
                 thread_id,
                 request_id.connection_id,
-                experimental_raw_events,
+                "thread",
+            );
+        } else {
+            let runtime = listener_task_context
+                .thread_manager
+                .get_thread(thread_id)
+                .await
+                .map_err(|err| internal_error(format!("new thread disappeared: {err}")))?;
+            let state = listener_task_context
+                .thread_state_manager
+                .thread_state(thread_id)
+                .await;
+            super::thread_lifecycle::ensure_listener_task_running(
+                listener_task_context.clone(),
+                thread_id,
+                runtime,
+                state,
             )
-            .instrument(tracing::info_span!(
-                "app_server.thread_start.attach_listener",
-                otel.name = "app_server.thread_start.attach_listener",
-                thread_start.experimental_raw_events = experimental_raw_events,
-            ))
-            .await,
-            thread_id,
-            request_id.connection_id,
-            "thread",
-        );
+            .await?;
+        }
 
         listener_task_context
             .thread_watch_manager
@@ -1644,14 +1699,20 @@ impl ThreadRequestProcessor {
             multi_agent_mode: MultiAgentMode::ExplicitRequestOnly,
         };
         let notif = thread_started_notification(thread);
-        listener_task_context
-            .outgoing
-            .send_response_with_thread_originator(request_id, response, thread_originator)
-            .instrument(tracing::info_span!(
-                "app_server.thread_start.send_response",
-                otel.name = "app_server.thread_start.send_response",
-            ))
-            .await;
+        if let Some(request_id) = request_id {
+            listener_task_context
+                .outgoing
+                .send_response_with_thread_originator(
+                    request_id,
+                    response.clone(),
+                    thread_originator,
+                )
+                .instrument(tracing::info_span!(
+                    "app_server.thread_start.send_response",
+                    otel.name = "app_server.thread_start.send_response",
+                ))
+                .await;
+        }
 
         listener_task_context
             .outgoing
@@ -1666,7 +1727,7 @@ impl ThreadRequestProcessor {
             thread_start_started_at.elapsed(),
             Some("ready"),
         );
-        Ok(())
+        Ok((response, runtime_lease))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -3695,16 +3756,24 @@ impl ThreadRequestProcessor {
                 }
                 RunningThreadResumeResult::NotRunning(stored_thread) => stored_thread,
             },
-            ThreadResumeTarget::DaemonRecovery(saved) => {
+            ThreadResumeTarget::Coordination | ThreadResumeTarget::DaemonRecovery(_) => {
                 let thread_id = ThreadId::from_string(&params.thread_id)
                     .map_err(|err| invalid_request(format!("invalid thread id: {err}")))?;
                 // Recheck under the same permit as client resume, including after config loading.
-                if self.thread_manager.get_thread(thread_id).await.is_ok() {
-                    if let Some(saved) = saved {
-                        self.continue_daemon_turn(&params.thread_id, saved.clone())
+                if let Ok(thread) = self.thread_manager.get_thread(thread_id).await {
+                    if matches!(target, ThreadResumeTarget::Coordination)
+                        && matches!(thread.agent_status().await, AgentStatus::Shutdown)
+                    {
+                        self.thread_manager
+                            .remove_thread_if_matches(&thread_id, &thread)
                             .await;
+                    } else {
+                        if let ThreadResumeTarget::DaemonRecovery(Some(saved)) = target {
+                            self.continue_daemon_turn(&params.thread_id, saved.clone())
+                                .await;
+                        }
+                        return Ok(ControlFlow::Break(()));
                     }
-                    return Ok(ControlFlow::Break(()));
                 }
                 None
             }
@@ -3987,7 +4056,9 @@ impl ThreadRequestProcessor {
                     ThreadResumeTarget::Client(request_id) => {
                         self.request_trace_context(request_id).await
                     }
-                    ThreadResumeTarget::DaemonRecovery(_) => None,
+                    ThreadResumeTarget::Coordination | ThreadResumeTarget::DaemonRecovery(_) => {
+                        None
+                    }
                 },
                 client_mcp_extensions,
             )
@@ -4865,12 +4936,12 @@ impl ThreadRequestProcessor {
 
     async fn thread_fork_inner(
         &self,
-        request_id: ConnectionRequestId,
+        request_id: Option<ConnectionRequestId>,
         params: ThreadForkParams,
         app_server_client_name: Option<String>,
         app_server_client_version: Option<String>,
         client_mcp_extensions: ClientMcpExtensions,
-    ) -> Result<(), JSONRPCErrorError> {
+    ) -> Result<ThreadForkResponse, JSONRPCErrorError> {
         let ThreadForkParams {
             thread_id,
             last_turn_id,
@@ -4922,7 +4993,10 @@ impl ThreadRequestProcessor {
                 "ephemeral paginated thread/fork requires `excludeTurns: true`",
             ));
         }
-        if paginated_source && include_turns {
+        if paginated_source
+            && include_turns
+            && let Some(request_id) = &request_id
+        {
             self.send_deprecation_notice(
                 request_id.connection_id,
                 PAGINATED_FULL_HISTORY_DEPRECATION_SUMMARY,
@@ -5111,7 +5185,10 @@ impl ThreadRequestProcessor {
         let goals_enabled = config.features.enabled(Feature::Goals);
 
         let fallback_model_provider = config.model_provider_id.clone();
-        let parent_trace = self.request_trace_context(&request_id).await;
+        let parent_trace = match &request_id {
+            Some(request_id) => self.request_trace_context(request_id).await,
+            None => None,
+        };
         let thread_source = thread_source.map(Into::into);
 
         let mut history_items = if prepared_fork.is_some() {
@@ -5278,17 +5355,23 @@ impl ThreadRequestProcessor {
         let instruction_sources = forked_thread.legacy_instruction_sources().await;
 
         // Auto-attach a conversation listener when forking a thread.
-        log_listener_attach_result(
-            self.ensure_conversation_listener(
+        if let Some(request_id) = &request_id {
+            log_listener_attach_result(
+                self.ensure_conversation_listener(
+                    thread_id,
+                    request_id.connection_id,
+                    /*raw_events_enabled*/ false,
+                )
+                .await,
                 thread_id,
                 request_id.connection_id,
-                /*raw_events_enabled*/ false,
-            )
-            .await,
-            thread_id,
-            request_id.connection_id,
-            "thread",
-        );
+                "thread",
+            );
+        } else {
+            let state = self.thread_state_manager.thread_state(thread_id).await;
+            self.ensure_listener_task_running(thread_id, Arc::clone(&forked_thread), state)
+                .await?;
+        }
 
         let config_snapshot = forked_thread.config_snapshot().await;
 
@@ -5389,23 +5472,29 @@ impl ThreadRequestProcessor {
         };
 
         let notif = thread_started_notification(thread);
-        let connection_id = request_id.connection_id;
-        self.outgoing
-            .send_response_with_thread_originator(request_id, response, thread_originator)
-            .await;
-        // `excludeTurns` is the cheap fork path, so skip restored usage replay
-        // instead of rebuilding history only to attribute a historical update.
-        if let Some(token_usage_turn_id) = token_usage_turn_id {
-            // Mirror the resume contract for forks: the new thread is usable as soon
-            // as the response arrives, so restored usage must follow immediately.
-            send_thread_token_usage_update_to_connection(
-                &self.outgoing,
-                connection_id,
-                thread_id,
-                forked_thread.as_ref(),
-                token_usage_turn_id,
-            )
-            .await;
+        if let Some(request_id) = request_id {
+            let connection_id = request_id.connection_id;
+            self.outgoing
+                .send_response_with_thread_originator(
+                    request_id,
+                    response.clone(),
+                    thread_originator,
+                )
+                .await;
+            // `excludeTurns` is the cheap fork path, so skip restored usage replay
+            // instead of rebuilding history only to attribute a historical update.
+            if let Some(token_usage_turn_id) = token_usage_turn_id {
+                // Mirror the resume contract for forks: the new thread is usable as soon
+                // as the response arrives, so restored usage must follow immediately.
+                send_thread_token_usage_update_to_connection(
+                    &self.outgoing,
+                    connection_id,
+                    thread_id,
+                    forked_thread.as_ref(),
+                    token_usage_turn_id,
+                )
+                .await;
+            }
         }
 
         self.outgoing
@@ -5416,7 +5505,7 @@ impl ThreadRequestProcessor {
                 .emit_thread_goal_snapshot(thread_id)
                 .await;
         }
-        Ok(())
+        Ok(response)
     }
 
     async fn get_thread_summary_response_inner(

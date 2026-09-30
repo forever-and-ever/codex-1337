@@ -318,7 +318,6 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
             app.local_settings.clone(),
             previous_thread,
             /*remote_cwd*/ None,
-            session.thread_tool_transport(),
             ReconnectPresentation::Overview,
         )
         .await?;

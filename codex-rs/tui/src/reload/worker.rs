@@ -76,7 +76,7 @@ pub async fn initialize(cli: &mut Cli) -> io::Result<()> {
             .transpose()
             .map_err(io::Error::other)?,
         control::Response::Error(message) => return Err(io::Error::other(message)),
-        control::Response::Ok | control::Response::Tools(_) | control::Response::Tasks { .. } => {
+        control::Response::Ok => {
             return Err(io::Error::other("Missing UI checkpoint"));
         }
     };
@@ -206,9 +206,7 @@ pub(crate) async fn proxy(
             socket_path: AbsolutePathBuf::from_absolute_path(worker.directory.join("server.sock"))?,
         }),
         control::Response::Error(message) => Err(io::Error::other(message)),
-        control::Response::State(_)
-        | control::Response::Tools(_)
-        | control::Response::Tasks { .. } => Err(io::Error::other("Unexpected UI host response")),
+        control::Response::State(_) => Err(io::Error::other("Unexpected UI host response")),
     }
 }
 
@@ -229,66 +227,6 @@ pub(crate) async fn ready() -> io::Result<()> {
             Ok(())
         }
         control::Response::Error(message) => Err(io::Error::other(message)),
-        control::Response::State(_)
-        | control::Response::Tools(_)
-        | control::Response::Tasks { .. } => Err(io::Error::other("Unexpected UI host response")),
+        control::Response::State(_) => Err(io::Error::other("Unexpected UI host response")),
     }
-}
-
-pub(crate) async fn start_tools(
-    params: codex_app_server_protocol::ThreadStartParams,
-    requirement: Option<codex_config::McpServerRequirement>,
-    events: crate::app_event_sender::AppEventSender,
-) -> io::Result<serde_json::Value> {
-    let response = request(control::Request::Tools {
-        params: Box::new(params),
-    })
-    .await?;
-    let config = match response {
-        control::Response::Tools(config) => config,
-        control::Response::Error(message) => return Err(io::Error::other(message)),
-        _ => return Err(io::Error::other("Unexpected task-tools response")),
-    };
-    // The host chooses its listener; authorize that exact returned identity before
-    // exposing its credentials/configuration to any thread or model.
-    if let Some(requirement) = requirement {
-        let raw: codex_config::RawMcpServerConfig =
-            serde_json::from_value(config.clone()).map_err(io::Error::other)?;
-        let server = codex_config::McpServerConfig::try_from(raw).map_err(io::Error::other)?;
-        if !server.matches_requirement(&requirement) {
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "Managed policy does not permit the UI host task-tools server",
-            ));
-        }
-    }
-    tokio::spawn(async move {
-        let mut after = 0;
-        let Some(worker) = WORKER.get() else { return };
-        loop {
-            match control::request(
-                &worker.directory,
-                control::Envelope {
-                    generation: worker.generation,
-                    request: control::Request::Tasks { after },
-                },
-            )
-            .await
-            {
-                Ok(control::Response::Tasks { cursor, tasks }) => {
-                    after = cursor;
-                    for (thread, task_tools_available) in tasks {
-                        let (registered, _) = tokio::sync::oneshot::channel();
-                        events.send(crate::app_event::AppEvent::DynamicToolThreadStarted {
-                            thread,
-                            task_tools_available,
-                            registered,
-                        });
-                    }
-                }
-                _ => tokio::time::sleep(std::time::Duration::from_secs(/*secs*/ 1)).await,
-            }
-        }
-    });
-    Ok(config)
 }

@@ -44,7 +44,7 @@ async fn competing_runtimes_preserve_fifo_queue_order() {
 }
 
 #[tokio::test]
-async fn migrating_existing_queue_backfills_thread_revisions() {
+async fn migrating_existing_queue_preserves_unrelated_work_and_publishes_cancellation() {
     let home = unique_temp_dir();
     tokio::fs::create_dir_all(&home).await.unwrap();
     let sqlite = crate::SqliteConfig::new_for_testing(home.as_path().abs());
@@ -61,22 +61,47 @@ async fn migrating_existing_queue_backfills_thread_revisions() {
     old_queue_migrator.run(&pool).await.unwrap();
 
     let thread_id = ThreadId::new();
-    let queued = QueuedUserSubmissionRecord {
+    // The thread is cold: migration cannot depend on runtime inventory or a
+    // frontend subscription. Keep user work and lookalike tool identities intact.
+    let queued = [
+        r#"{"UserInput":{"content":[{"type":"text","text":"user work"}],"client_id":null}}"#,
+        r#"{"ResponseItem":{"type":"function_call_output","namespace":"other","name":"send_message_to_thread","output":"unrelated server"}}"#,
+        r#"{"ResponseItem":{"type":"function_call_output","namespace":"codex_tui","name":"other_tool","output":"unrelated tool"}}"#,
+        "malformed legacy payload",
+        r#"{"ResponseItem":{"type":"function_call_output","namespace":"codex_tui","name":"send_message_to_thread","output":"obsolete message"}}"#,
+    ]
+    .map(|payload| QueuedUserSubmissionRecord {
         id: Uuid::now_v7().to_string(),
         thread_id,
-        payload: r#"{"existing":true}"#.to_string(),
+        payload: payload.to_string(),
+    });
+    for (order, item) in queued.iter().enumerate() {
+        sqlx::query(
+            "INSERT INTO queued_items
+             (id, thread_id, payload_json, queue_order, created_at_ms, updated_at_ms)
+             VALUES (?, ?, ?, ?, 0, 0)",
+        )
+        .bind(&item.id)
+        .bind(thread_id.to_string())
+        .bind(&item.payload)
+        .bind(order as i64)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    // Apply revision backfill before cancellation so the DELETE trigger must
+    // advance the already-published revision, not merely create a missing one.
+    let revision_migrator = Migrator {
+        migrations: Cow::Owned(QUEUE_MIGRATOR.migrations[..2].to_vec()),
+        ..old_queue_migrator
     };
-    sqlx::query(
-        "INSERT INTO queued_items
-         (id, thread_id, payload_json, queue_order, created_at_ms, updated_at_ms)
-         VALUES (?, ?, ?, 0, 0, 0)",
-    )
-    .bind(&queued.id)
-    .bind(thread_id.to_string())
-    .bind(&queued.payload)
-    .execute(&pool)
-    .await
-    .unwrap();
+    revision_migrator.run(&pool).await.unwrap();
+    let revision: i64 =
+        sqlx::query_scalar("SELECT revision FROM queued_thread_revisions WHERE thread_id = ?")
+            .bind(thread_id.to_string())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     pool.close().await;
 
     let runtime = StateRuntime::init(sqlite, "test-provider".to_string())
@@ -84,16 +109,13 @@ async fn migrating_existing_queue_backfills_thread_revisions() {
         .unwrap();
     let queue = runtime.thread_queue();
     assert_eq!(
-        vec![(thread_id, 1)],
-        queue
-            .changes_since(/*revision*/ 0, &[thread_id])
-            .await
-            .unwrap()
+        vec![(thread_id, revision + 1)],
+        queue.changes_since(revision, &[thread_id]).await.unwrap()
     );
     assert_eq!(
-        vec![queued],
+        queued[..4].to_vec(),
         queue
-            .list_page(thread_id, /*offset*/ 0, /*limit*/ 1)
+            .list_page(thread_id, /*offset*/ 0, /*limit*/ 10)
             .await
             .unwrap()
     );

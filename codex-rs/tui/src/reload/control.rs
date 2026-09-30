@@ -60,19 +60,11 @@ pub(super) struct Envelope {
 
 #[derive(Serialize, Deserialize)]
 pub(super) enum Request {
-    Hello {
-        protocol: String,
-    },
+    Hello { protocol: String },
     Connect(Endpoint),
     Reload(Value),
     Ready,
     Suspend,
-    Tools {
-        params: Box<codex_app_server_protocol::ThreadStartParams>,
-    },
-    Tasks {
-        after: u64,
-    },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -80,11 +72,6 @@ pub(super) enum Response {
     State(Option<Value>),
     Ok,
     Error(String),
-    Tools(Value),
-    Tasks {
-        cursor: u64,
-        tasks: Vec<(codex_app_server_protocol::Thread, bool)>,
-    },
 }
 
 pub(super) struct Received {

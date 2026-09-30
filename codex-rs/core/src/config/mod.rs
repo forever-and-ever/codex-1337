@@ -1075,6 +1075,9 @@ pub struct Config {
     /// Policy for collecting and validating tool runtimes.
     pub tool_registry: ToolRegistryConfig,
 
+    /// Explicit native coordination policy, independent of any MCP transport.
+    pub thread_coordination: Option<codex_config::config_toml::ThreadCoordinationConfig>,
+
     /// Configuration for the experimental code-mode tool surface.
     pub code_mode: CodeModeConfig,
 
@@ -1840,6 +1843,7 @@ impl Config {
             use_legacy_landlock: self.features.use_legacy_landlock(),
             apps_enabled: self.features.enabled(Feature::Apps),
             prefix_mcp_tool_names: self.prefix_mcp_tool_names(),
+            reserved_native_tool_namespaces: Vec::new(),
             non_prefixed_mcp_tool_servers: if self
                 .features
                 .enabled(Feature::NonPrefixedMcpToolNames)
@@ -4447,6 +4451,7 @@ impl Config {
             experimental_request_user_input_enabled,
             update_plan_enabled,
             tool_registry,
+            thread_coordination: cfg.tools.as_ref().and_then(|tools| tools.thread_coordination.clone()),
             code_mode,
             background_terminal_max_timeout,
             thread_unload_delay,

@@ -317,6 +317,7 @@ struct ThreadEntry {
     state: Arc<Mutex<ThreadState>>,
     connection_ids: HashSet<ConnectionId>,
     has_connections_watcher: watch::Sender<bool>,
+    runtime_operations: watch::Sender<usize>,
 }
 
 impl Default for ThreadEntry {
@@ -325,7 +326,18 @@ impl Default for ThreadEntry {
             state: Arc::new(Mutex::new(ThreadState::default())),
             connection_ids: HashSet::new(),
             has_connections_watcher: watch::channel(false).0,
+            runtime_operations: watch::channel(0).0,
         }
+    }
+}
+
+/// Pins a runtime against idle eviction for one server-owned operation. This
+/// grants neither a client subscription nor authority to answer approvals.
+pub(crate) struct ThreadRuntimeLease(watch::Sender<usize>);
+
+impl Drop for ThreadRuntimeLease {
+    fn drop(&mut self) {
+        self.0.send_modify(|count| *count -= 1);
     }
 }
 
@@ -361,6 +373,26 @@ pub(crate) struct ThreadStateManager {
 }
 
 impl ThreadStateManager {
+    pub(crate) async fn lease_runtime(&self, thread_id: ThreadId) -> ThreadRuntimeLease {
+        let mut state = self.state.lock().await;
+        let operations = &state
+            .threads
+            .entry(thread_id)
+            .or_default()
+            .runtime_operations;
+        operations.send_modify(|count| *count += 1);
+        ThreadRuntimeLease(operations.clone())
+    }
+
+    pub(crate) async fn runtime_operations(&self, thread_id: ThreadId) -> watch::Receiver<usize> {
+        let mut state = self.state.lock().await;
+        state
+            .threads
+            .entry(thread_id)
+            .or_default()
+            .runtime_operations
+            .subscribe()
+    }
     pub(crate) fn new() -> Self {
         Self::default()
     }
@@ -543,7 +575,6 @@ impl ThreadStateManager {
         true
     }
 
-    #[cfg(test)]
     pub(crate) async fn has_subscribers(&self, thread_id: ThreadId) -> bool {
         self.state
             .lock()

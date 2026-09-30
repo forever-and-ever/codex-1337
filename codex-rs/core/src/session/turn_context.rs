@@ -885,17 +885,6 @@ impl Session {
             );
         }
         per_turn_config.features = config.features.clone();
-        if let Some(namespace) = self.mcp_extension_direct_only_namespace()
-            && !per_turn_config
-                .code_mode
-                .direct_only_tool_namespaces
-                .contains(&namespace)
-        {
-            per_turn_config
-                .code_mode
-                .direct_only_tool_namespaces
-                .push(namespace);
-        }
         per_turn_config
     }
 

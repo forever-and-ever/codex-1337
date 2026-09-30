@@ -18,7 +18,6 @@ use futures::SinkExt;
 use futures::StreamExt;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::collections::VecDeque;
 use std::io;
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
@@ -32,14 +31,6 @@ pub(super) enum Command {
     Attach(u64, mpsc::Sender<Message>),
     Input(u64, JSONRPCMessage),
     Detach(u64),
-    Tools {
-        params: Box<codex_app_server_protocol::ThreadStartParams>,
-        reply: oneshot::Sender<super::control::Response>,
-    },
-    Tasks {
-        after: u64,
-        reply: oneshot::Sender<super::control::Response>,
-    },
 }
 
 pub(super) async fn listen(
@@ -97,11 +88,6 @@ pub(super) async fn run(mut commands: mpsc::Receiver<Command>) {
     let mut ui_generation = 0;
     let mut pending = HashMap::<RequestId, Value>::new();
     let mut request_sequence: u64 = 0;
-    let mut tools: Option<crate::dynamic_tools_mcp::DynamicToolMcpServer> = None;
-    let (tool_events, mut tool_events_rx) = mpsc::unbounded_channel();
-    let status = tokio::sync::broadcast::channel(/*capacity*/ 64).0;
-    let mut started_tasks = RecentTasks::default();
-    let mut task_waiter: Option<(u64, oneshot::Sender<super::control::Response>)> = None;
     let (results, mut replies) = mpsc::channel::<(u64, JSONRPCMessage)>(MAILBOX);
     loop {
         tokio::select! {
@@ -125,12 +111,6 @@ pub(super) async fn run(mut commands: mpsc::Receiver<Command>) {
                         channel_capacity: MAILBOX,
                     }).await {
                         Ok(client) => {
-                            if let Some(tools) = &tools {
-                                tools.reconnect(
-                                    codex_app_server_client::AppServerRequestHandle::Remote(client.request_handle()),
-                                    crate::app_event_sender::AppEventSender::new(tool_events.clone()),
-                                );
-                            }
                             upstream = Some(client);
                             connected_endpoint = Some(endpoint);
                             let _ = response.send(Ok(()));
@@ -143,32 +123,6 @@ pub(super) async fn run(mut commands: mpsc::Receiver<Command>) {
                     if generation > ui_generation {
                         ui_generation = generation;
                         ui = Some((generation, writer));
-                    }
-                }
-                Some(Command::Tools { params, reply }) => {
-                    if let Some(tools) = &tools {
-                        let _ = reply.send(super::control::Response::Tools(tools.config()));
-                    } else if let Some(client) = &upstream {
-                        match crate::dynamic_tools_mcp::DynamicToolMcpServer::start(
-                            codex_app_server_client::AppServerRequestHandle::Remote(client.request_handle()),
-                            *params,
-                            crate::app_event_sender::AppEventSender::new(tool_events.clone()),
-                            status.clone(),
-                            /*managed_requirement*/ None,
-                        ).await {
-                            Ok(server) => {
-                                let _ = reply.send(super::control::Response::Tools(server.config()));
-                                tools = Some(server);
-                            }
-                            Err(error) => { let _ = reply.send(super::control::Response::Error(error.to_string())); }
-                        }
-                    }
-                }
-                Some(Command::Tasks { after, reply }) => {
-                    if after < started_tasks.cursor {
-                        let _ = reply.send(started_tasks.since(after));
-                    } else {
-                        task_waiter = Some((after, reply));
                     }
                 }
                 Some(Command::Detach(generation)) => {
@@ -253,9 +207,6 @@ pub(super) async fn run(mut commands: mpsc::Receiver<Command>) {
                     if let codex_app_server_protocol::ServerNotification::ServerRequestResolved(value) = notification.as_ref() {
                         pending.remove(&value.request_id);
                     }
-                    if let codex_app_server_protocol::ServerNotification::ThreadStatusChanged(value) = notification.as_ref() {
-                        let _ = status.send(value.clone());
-                    }
                     send(&mut ui, &notification);
                 }
                 Some(AppServerEvent::ServerRequest(request)) => {
@@ -266,7 +217,6 @@ pub(super) async fn run(mut commands: mpsc::Receiver<Command>) {
                         }
                 }
                 Some(AppServerEvent::Lagged { .. } | AppServerEvent::Disconnected { .. }) | None => {
-                    if let Some(tools) = &tools { tools.suspend(); }
                     ui = None;
                     upstream = None;
                     pending.clear();
@@ -277,43 +227,7 @@ pub(super) async fn run(mut commands: mpsc::Receiver<Command>) {
                     send(&mut ui, &message);
                 }
             }
-            Some(event) = tool_events_rx.recv() => {
-                if let crate::app_event::AppEvent::DynamicToolThreadStarted { thread, task_tools_available, registered } = event {
-                    // This is fallback registration metadata, not session history.
-                    // Durable tasks remain in the server's index after eviction here.
-                    if started_tasks.tasks.len() == 4096 { started_tasks.tasks.pop_front(); }
-                    started_tasks.tasks.push_back((thread, task_tools_available));
-                    started_tasks.cursor += 1;
-                    let _ = registered.send(());
-                    if let Some((after, reply)) = task_waiter.take() {
-                        let _ = reply.send(started_tasks.since(after));
-                    }
-                }
-            }
-        }
-    }
-}
 
-#[derive(Default)]
-struct RecentTasks {
-    cursor: u64,
-    tasks: VecDeque<(codex_app_server_protocol::Thread, bool)>,
-}
-
-impl RecentTasks {
-    fn since(&self, after: u64) -> super::control::Response {
-        let base = self.cursor - self.tasks.len() as u64;
-        let after = after.clamp(base, self.cursor);
-        let tasks: Vec<_> = self
-            .tasks
-            .iter()
-            .skip((after - base) as usize)
-            .take(/*n*/ 128)
-            .cloned()
-            .collect();
-        super::control::Response::Tasks {
-            cursor: after + tasks.len() as u64,
-            tasks,
         }
     }
 }

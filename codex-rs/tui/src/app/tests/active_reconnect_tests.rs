@@ -157,47 +157,6 @@ async fn reconnect_restores_history_permissions_and_keeps_old_input_paused() -> 
             Ok::<_, color_eyre::Report>(methods)
         });
         let mut session = crate::start_embedded_app_server_for_picker(&app.config).await?;
-        std::fs::write(
-            app.config
-                .codex_home
-                .join("tui-thread-reference-capabilities"),
-            "not a directory",
-        )?;
-        session.remember_task_tool_thread(id);
-        let transport = crate::dynamic_tools_mcp::ThreadToolTransport::Mcp(Arc::new(
-            crate::dynamic_tools_mcp::DynamicToolMcpServer::start(
-                session.request_handle(),
-                codex_app_server_protocol::ThreadStartParams::default(),
-                app.app_event_tx.clone(),
-                app.dynamic_tool_status_updates.clone(),
-                /*managed_requirement*/ None,
-            )
-            .await?,
-        ));
-        let mut overrides = None;
-        transport.configure_mcp(&mut overrides);
-        let mcp = overrides.unwrap().remove("mcp_servers.codex_tui").unwrap();
-        let client = codex_http_client::HttpClientBuilder::new().build_direct()?;
-        let call_mcp = || {
-            client
-                .post(mcp["url"].as_str().unwrap())
-                .header(
-                    "Authorization",
-                    mcp["http_headers"]["Authorization"].as_str().unwrap(),
-                )
-                .header("Accept", "application/json, text/event-stream")
-                .header("MCP-Protocol-Version", "2026-07-28")
-                .header("MCP-Method", "tools/call")
-                .header("MCP-Name", "list_threads")
-                .json(
-                    &json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
-                        "name": "list_threads", "arguments": {}, "_meta": {"threadId": id,
-                        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-                        "io.modelcontextprotocol/clientCapabilities": {}}
-                    }}),
-                )
-        };
-
         app.chat_widget.remote_connection =
             crate::status::remote_connection::remote_connection_status_value(
                 &app.app_server_target,
@@ -279,15 +238,9 @@ async fn reconnect_restores_history_permissions_and_keeps_old_input_paused() -> 
             app.local_settings.clone(),
             Some(id),
             /*remote_cwd*/ None,
-            transport,
             ReconnectPresentation::Conversation,
         )
         .await?;
-        let paused = call_mcp().send().await?.text().await?;
-        assert!(
-            paused.contains("TUI is reconnecting; tool was not sent"),
-            "{paused}"
-        );
         app.finish_reconnect(&mut tui, &mut session, &mut events, connected, "2.1.0")
             .await?;
         if edit_offline {
@@ -348,8 +301,6 @@ async fn reconnect_restores_history_permissions_and_keeps_old_input_paused() -> 
         for event in deferred {
             app.app_event_tx.send(event);
         }
-        let ready = call_mcp().send().await?.text().await?;
-        assert!(ready.contains("threads"), "{ready}");
         assert_eq!(
             app.chat_widget.remote_connection,
             crate::status::remote_connection::remote_connection_status_value(
@@ -542,7 +493,6 @@ async fn reconnect_reconciles_offscreen_pending_profile_before_restoring_permiss
         app.local_settings.clone(),
         Some(displayed),
         /*remote_cwd*/ None,
-        session.thread_tool_transport(),
         ReconnectPresentation::Conversation,
     )
     .await?;
@@ -615,7 +565,6 @@ async fn reconnect_exhaustion_and_unknown_initial_thread_stay_offline() -> Resul
                 app.local_settings.clone(),
                 id,
                 /*remote_cwd*/ None,
-                crate::dynamic_tools_mcp::ThreadToolTransport::Dynamic,
                 ReconnectPresentation::Conversation
             )
             .await
@@ -667,7 +616,6 @@ async fn reconnect_allows_slow_hydration_but_bounds_a_stalled_server() -> Result
             app.local_settings.clone(),
             Some(id),
             /*remote_cwd*/ None,
-            crate::dynamic_tools_mcp::ThreadToolTransport::Dynamic,
             ReconnectPresentation::Conversation,
         )
         .await;

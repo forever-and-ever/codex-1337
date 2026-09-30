@@ -215,6 +215,7 @@ impl InitializeRequestProcessor {
             codex_home,
             platform_family: std::env::consts::FAMILY.to_string(),
             platform_os: std::env::consts::OS.to_string(),
+            thread_coordination: Some(true),
         };
 
         self.outgoing

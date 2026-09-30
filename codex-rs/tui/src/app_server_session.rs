@@ -24,8 +24,6 @@ pub(crate) use history::thread_items_page_params;
 use crate::app_event::PermissionProfileSelection;
 use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::FeedbackAudience;
-use crate::dynamic_tools_mcp::DynamicToolMcpServer;
-use crate::dynamic_tools_mcp::ThreadToolTransport;
 use crate::legacy_core::config::Config;
 use crate::local_settings::LocalSettings;
 use crate::service_tier_resolution;
@@ -151,7 +149,6 @@ use color_eyre::eyre::ContextCompat;
 use color_eyre::eyre::Result;
 use color_eyre::eyre::WrapErr;
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -245,12 +242,11 @@ pub(crate) async fn request_thread_start_with_history_fallback(
             .await
         {
             Ok(response) => {
-                let task_tools_available = params.dynamic_tools.is_some()
-                    || params
-                        .config
-                        .as_ref()
-                        .is_some_and(|config| config.contains_key("mcp_servers.codex_tui"));
-                return Ok((response, history_support, task_tools_available));
+                return Ok((
+                    response,
+                    history_support,
+                    request_handle.supports_thread_coordination(),
+                ));
             }
             Err(TypedRequestError::Server { source, .. })
                 if params.history_mode.is_some() && is_history_pagination_unsupported(&source) =>
@@ -317,8 +313,6 @@ pub(crate) struct AppServerSession {
     client: AppServerClient,
     next_request_id: i64,
     history_pagination: HashMap<ThreadId, history::ThreadHistoryPagination>,
-    task_tool_threads: HashSet<ThreadId>,
-    task_tool_capabilities_dir: Option<AbsolutePathBuf>,
     task_search_generation: Arc<AtomicU64>,
     remote_cwd_override: Option<PathBuf>,
     thread_params_mode: ThreadParamsMode,
@@ -328,8 +322,6 @@ pub(crate) struct AppServerSession {
     available_models: Vec<ModelPreset>,
     managed_new_thread_defaults: Option<NewThreadModelDefaults>,
     external_agent_config_import_id: Mutex<Option<String>>,
-    dynamic_tool_mcp: Option<Arc<DynamicToolMcpServer>>,
-    hosted_task_tools: Option<serde_json::Value>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -428,8 +420,6 @@ impl AppServerSession {
             client,
             next_request_id: 1,
             history_pagination: HashMap::new(),
-            task_tool_threads: HashSet::new(),
-            task_tool_capabilities_dir: None,
             task_search_generation: Arc::new(AtomicU64::new(0)),
             remote_cwd_override: None,
             thread_params_mode,
@@ -439,98 +429,7 @@ impl AppServerSession {
             available_models: Vec::new(),
             managed_new_thread_defaults: None,
             external_agent_config_import_id: Mutex::default(),
-            dynamic_tool_mcp: None,
-            hosted_task_tools: None,
         }
-    }
-
-    pub(crate) async fn start_dynamic_tool_mcp(
-        &mut self,
-        config: Config,
-        app_event_tx: AppEventSender,
-        status_updates: tokio::sync::broadcast::Sender<ThreadStatusChangedNotification>,
-    ) -> std::io::Result<()> {
-        if self.uses_embedded_app_server() {
-            return Ok(());
-        }
-        if config
-            .mcp_servers
-            .get()
-            .contains_key(crate::dynamic_tools::NAMESPACE)
-        {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::AlreadyExists,
-                "a user-configured MCP server already owns the codex_tui namespace",
-            ));
-        }
-        let managed_requirement = config
-            .config_layer_stack
-            .requirements()
-            .mcp_servers
-            .as_ref()
-            .map(|requirements| {
-                requirements
-                    .value
-                    .get(crate::dynamic_tools::NAMESPACE)
-                    .ok_or_else(|| {
-                        std::io::Error::new(
-                            std::io::ErrorKind::PermissionDenied,
-                            "managed MCP requirements do not permit the TUI task-tools server",
-                        )
-                    })
-            })
-            .transpose()?;
-        let thread_start_params = thread_start_params_from_config(
-            &config,
-            self.thread_params_mode(),
-            self.remote_cwd_override(),
-            /*session_start_source*/ None,
-        );
-        #[cfg(target_os = "linux")]
-        if crate::reload::worker::is_hosted() {
-            self.hosted_task_tools = Some(
-                crate::reload::worker::start_tools(
-                    thread_start_params,
-                    managed_requirement.cloned(),
-                    app_event_tx,
-                )
-                .await?,
-            );
-            return Ok(());
-        }
-        self.dynamic_tool_mcp = Some(Arc::new(
-            DynamicToolMcpServer::start(
-                self.request_handle(),
-                thread_start_params,
-                app_event_tx,
-                status_updates,
-                managed_requirement,
-            )
-            .await?,
-        ));
-        Ok(())
-    }
-
-    pub(crate) fn thread_tool_transport(&self) -> ThreadToolTransport {
-        if self.uses_embedded_app_server() {
-            ThreadToolTransport::Disabled
-        } else if let Some(config) = &self.hosted_task_tools {
-            ThreadToolTransport::Hosted(config.clone())
-        } else if let Some(server) = self.dynamic_tool_mcp.as_ref() {
-            ThreadToolTransport::Mcp(Arc::clone(server))
-        } else {
-            ThreadToolTransport::Dynamic
-        }
-    }
-
-    pub(crate) fn with_thread_tool_transport(mut self, transport: ThreadToolTransport) -> Self {
-        if let ThreadToolTransport::Hosted(config) = &transport {
-            self.hosted_task_tools = Some(config.clone());
-        }
-        if let ThreadToolTransport::Mcp(server) = transport {
-            self.dynamic_tool_mcp = Some(server);
-        }
-        self
     }
 
     pub(crate) fn with_remote_cwd_override(mut self, remote_cwd_override: Option<PathBuf>) -> Self {
@@ -550,27 +449,8 @@ impl AppServerSession {
         matches!(&self.client, AppServerClient::InProcess(_))
     }
 
-    /// Carry capabilities that may exist only in memory when the optional cache is unwritable.
-    pub(crate) fn inherit_task_tool_capabilities(&mut self, previous: &Self) {
-        self.task_tool_threads.extend(&previous.task_tool_threads);
-    }
-
-    pub(crate) fn task_tools_available(&self, thread_id: ThreadId) -> bool {
-        self.task_tool_threads.contains(&thread_id)
-            || self
-                .task_tool_capabilities_dir
-                .as_ref()
-                .is_some_and(|directory| directory.join(thread_id.to_string()).is_file())
-    }
-
-    pub(crate) fn remember_task_tool_thread(&mut self, thread_id: ThreadId) {
-        if self.task_tool_threads.insert(thread_id)
-            && let Some(directory) = &self.task_tool_capabilities_dir
-            && let Err(error) = std::fs::create_dir_all(directory)
-                .and_then(|()| std::fs::write(directory.join(thread_id.to_string()), []))
-        {
-            tracing::warn!(%error, %thread_id, "failed to persist task-reference capability");
-        }
+    pub(crate) fn task_tools_available(&self, _thread_id: ThreadId) -> bool {
+        self.client.supports_thread_coordination()
     }
 
     pub(crate) fn task_search_generation(&self) -> Arc<AtomicU64> {
@@ -802,7 +682,6 @@ impl AppServerSession {
         if self.history_support == ThreadHistorySupport::LegacyOnly {
             params.history_mode = None;
         }
-        self.thread_tool_transport().configure(&mut params);
         let request_handle = self.request_handle();
         let (response, history_support, task_tools_available) =
             request_thread_start_with_history_fallback(&request_handle, request_id, params)
@@ -821,9 +700,6 @@ impl AppServerSession {
         )
         .await?;
         started.task_tools_available = task_tools_available;
-        if task_tools_available {
-            self.remember_task_tool_thread(started.session.thread_id);
-        }
         Ok(started)
     }
 
@@ -984,8 +860,6 @@ impl AppServerSession {
             params.approvals_reviewer = selected_profile.approvals_reviewer.map(Into::into);
             remove_permission_config_overrides(&mut params.config);
         }
-        self.thread_tool_transport()
-            .configure_mcp(&mut params.config);
         let response: ThreadForkResponse = match self
             .client
             .request_typed(ClientRequest::ThreadFork {
@@ -1045,7 +919,6 @@ impl AppServerSession {
         started.session.fork_parent_title = fork_parent.and_then(|thread| thread.name);
         if self.task_tools_available(thread_id) {
             started.task_tools_available = true;
-            self.remember_task_tool_thread(started.session.thread_id);
         }
         Ok(started)
     }
@@ -1740,7 +1613,6 @@ pub(crate) async fn start_thread_with_request_handle(
     config: Config,
     thread_params_mode: ThreadParamsMode,
     remote_cwd_override: Option<PathBuf>,
-    thread_tool_transport: ThreadToolTransport,
 ) -> Result<AppServerStartedThread> {
     let request_id = RequestId::String(format!("startup-thread-start-{}", Uuid::new_v4()));
     let mut params = thread_start_params_from_config(
@@ -1749,7 +1621,6 @@ pub(crate) async fn start_thread_with_request_handle(
         remote_cwd_override.as_deref(),
         /*session_start_source*/ None,
     );
-    thread_tool_transport.configure(&mut params);
     let (response, _history_support, task_tools_available) =
         request_thread_start_with_history_fallback(&request_handle, request_id, params)
             .await
