@@ -1843,7 +1843,7 @@ impl Config {
             use_legacy_landlock: self.features.use_legacy_landlock(),
             apps_enabled: self.features.enabled(Feature::Apps),
             prefix_mcp_tool_names: self.prefix_mcp_tool_names(),
-            force_prefixed_mcp_tool_servers: Vec::new(),
+            reserved_native_tool_namespaces: Vec::new(),
             non_prefixed_mcp_tool_servers: if self
                 .features
                 .enabled(Feature::NonPrefixedMcpToolNames)

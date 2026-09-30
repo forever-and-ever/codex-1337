@@ -4,6 +4,13 @@ use std::time::Duration;
 use anyhow::Context;
 use anyhow::Result;
 use codex_core::TurnInputRequest;
+use codex_core::config::Config;
+use codex_extension_api::ExtensionFuture;
+use codex_extension_api::ExtensionRegistryBuilder;
+use codex_extension_api::McpServerContribution;
+use codex_extension_api::McpServerContributionContext;
+use codex_extension_api::McpServerContributor;
+use codex_features::Feature;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::Op;
 use codex_protocol::user_input::UserInput;
@@ -16,6 +23,25 @@ use serde_json::json;
 use tempfile::TempDir;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
+
+struct NativeNamespaceIsolation;
+
+impl McpServerContributor<Config> for NativeNamespaceIsolation {
+    fn id(&self) -> &'static str {
+        "coordination_isolation_test"
+    }
+
+    fn contribute<'a>(
+        &'a self,
+        _context: McpServerContributionContext<'a, Config>,
+    ) -> ExtensionFuture<'a, Vec<McpServerContribution>> {
+        Box::pin(async {
+            vec![McpServerContribution::ReserveToolNamespace {
+                namespace: "mcp__codex_tui".into(),
+            }]
+        })
+    }
+}
 
 // The old prepared call retains its MCP client after publication changes. Revoking only the
 // catalog would let it dispatch on an orphaned browser socket or strand the in-flight request.
@@ -151,7 +177,27 @@ async fn extension_revocation_cancels_in_flight_call_without_stopping_thread() -
 async fn resumed_history_deactivates_unowned_extension_instructions() -> Result<()> {
     skip_if_remote!(Ok(()), "the stdio MCP executable is host-local");
     let server = responses::start_mock_server().await;
-    let mut builder = test_codex();
+    let mut extensions = ExtensionRegistryBuilder::new();
+    extensions.mcp_server_contributor(Arc::new(NativeNamespaceIsolation));
+    let retained: codex_config::McpServerConfig = serde_json::from_value(json!({
+        "command": stdio_server_bin()?, "required": true, "startup_timeout_sec": 10,
+    }))?;
+    let mut builder = test_codex()
+        .with_extensions(Arc::new(extensions.build()))
+        .with_model("test-gpt-5.1-codex")
+        .with_config(move |config| {
+            config
+                .features
+                .enable(Feature::CodeModeOnly)
+                .expect("Code Mode enabled");
+            config
+                .mcp_servers
+                .set(std::collections::HashMap::from([(
+                    "mcp__codex_tui".into(),
+                    retained.clone(),
+                )]))
+                .expect("retained transport configured");
+        });
     let initial = builder.build_with_auto_env(&server).await?;
     let cancellation = Arc::new(CancellationToken::new());
     let config = serde_json::from_value(json!({
@@ -162,7 +208,7 @@ async fn resumed_history_deactivates_unowned_extension_instructions() -> Result<
     initial
         .codex
         .attach_mcp_extension(
-            "leased_mcp".into(),
+            "codex_tui".into(),
             config,
             "Distinctive connection-owned instruction.".into(),
             cancellation,
@@ -177,6 +223,42 @@ async fn resumed_history_deactivates_unowned_extension_instructions() -> Result<
     let active_request = active_response.single_request();
     assert!(active_request.body_contains_text("Distinctive connection-owned instruction."));
     assert!(active_request.body_contains_text("[connection-scoped MCP extension]"));
+    // Isolation changes canonical names, not lease authority. A hardcoded
+    // mcp__{raw} direct-only selector would constrain native coordination instead
+    // and accidentally expose the leased transport through Code Mode.
+    let body = active_request.body_json();
+    let tools = body["tools"].as_array().context("model tools")?;
+    let leased = tools
+        .iter()
+        .find(|tool| {
+            tool["name"]
+                .as_str()
+                .is_some_and(|name| name.starts_with("mcp__mcp__codex_tui_"))
+        })
+        .context("isolated lease must remain directly callable")?;
+    let leased_namespace = leased["name"].as_str().context("hashed lease namespace")?;
+    let echo = leased["tools"]
+        .as_array()
+        .context("leased tools")?
+        .iter()
+        .find(|tool| tool["name"] == "echo")
+        .context("echo tool")?;
+    assert_ne!(echo["defer_loading"], json!(true));
+    let exec = tools
+        .iter()
+        .chain(
+            tools
+                .iter()
+                .flat_map(|tool| tool["tools"].as_array().into_iter().flatten()),
+        )
+        .find(|tool| tool["name"] == "exec")
+        .context("Code Mode exec")?;
+    let description = exec["description"].as_str().context("exec description")?;
+    assert!(!description.contains(&format!("{leased_namespace}__echo")));
+    assert!(
+        description.contains("mcp__mcp__codex_tui_"),
+        "ordinary retained tools must remain in Code Mode"
+    );
 
     let resumed = builder.restart(&server, &initial).await?;
     let resumed_response = responses::mount_sse_once(

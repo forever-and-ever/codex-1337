@@ -5,7 +5,7 @@ use crate::mcp::McpRuntimeProjection;
 use codex_config::McpServerConfig;
 use codex_mcp::McpServerRegistration;
 
-pub(super) const CONNECTION_LEASE_SOURCE_ID: &str = "connection_lease";
+pub(crate) const CONNECTION_LEASE_SOURCE_ID: &str = "connection_lease";
 pub(super) const EXTENSION_INSTRUCTION_MARKER: &str = "[connection-scoped MCP extension]";
 const ATTACH_READINESS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 pub(super) const DETACHED_INSTRUCTIONS: &str = "The connection-scoped MCP extension is detached. Its previous developer instructions are inactive; do not call its MCP tools until a new lease is attached.";
@@ -258,15 +258,5 @@ impl Session {
         let scope = crate::mcp::McpEnvironmentScope::Selected(&selections);
         projection.config.mcp_server_catalog =
             catalog.build_with_environment_authority(|id| scope.authority_for(id));
-    }
-
-    pub(super) fn mcp_extension_direct_only_namespace(&self) -> Option<String> {
-        let lease = self
-            .mcp_extension
-            .read()
-            .unwrap_or_else(|_| panic!("MCP extension lease authority poisoned"));
-        lease.as_ref().and_then(|lease| {
-            (!lease.cancellation.is_cancelled()).then(|| format!("mcp__{}", lease.server_name))
-        })
     }
 }

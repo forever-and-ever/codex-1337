@@ -216,7 +216,7 @@ fn apply_mcp_tool_exposure_policy(
                     .and_then(|id| apps_config.as_ref()?.apps.get(id))
                     .and_then(|app| app.omit_tools_from.as_deref())
                     .unwrap_or_default();
-                server
+                let mut omissions = server
                     .config()
                     .omit_tools_from
                     .as_deref()
@@ -224,7 +224,16 @@ fn apply_mcp_tool_exposure_policy(
                     .iter()
                     .chain(connector_omissions)
                     .copied()
-                    .collect::<ToolExposures>()
+                    .collect::<ToolExposures>();
+                // Use finalized names and immutable captured provenance, not
+                // a guessed prefix or the live lease. This happens before any
+                // model/Code Mode exposure is published, including after hashing.
+                if matches!(server.source(), codex_mcp::McpServerSource::Extension { id, .. }
+                    if id == crate::session::CONNECTION_LEASE_SOURCE_ID)
+                {
+                    omissions = omissions.union(ToolExposures::DEFERRED | ToolExposures::CODE_MODE);
+                }
+                omissions
             });
     }
 

@@ -7,7 +7,11 @@ use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::UserInput;
 use std::collections::HashMap;
 
-async fn user_owned_mcp(State(gate): State<Arc<ModelGate>>, Json(body): Json<Value>) -> Response {
+async fn user_owned_mcp(
+    State(gate): State<Arc<ModelGate>>,
+    axum::extract::OriginalUri(uri): axum::extract::OriginalUri,
+    Json(body): Json<Value>,
+) -> Response {
     gate.legacy_connections.fetch_add(1, Ordering::SeqCst);
     gate.changed.notify_one();
     let result = match body["method"].as_str() {
@@ -18,16 +22,24 @@ async fn user_owned_mcp(State(gate): State<Arc<ModelGate>>, Json(body): Json<Val
         }),
         Some("tools/list") => {
             json!({"tools": ["list_threads", "unrelated_probe"].map(|name| json!({
-                "name": name, "description": "Unrelated user server probe",
+                "name": name, "description": format!("Unrelated user server {}", uri.path()),
                 "inputSchema": {"type": "object", "properties": {}},
                 "annotations": {"readOnlyHint": true}
             }))})
         }
         Some("tools/call") => {
             let name = body["params"]["name"].as_str().expect("raw MCP tool name");
-            gate.legacy_calls.lock().await.push(name.into());
+            let server = if uri.path() == "/prefixed-mcp" {
+                "mcp__codex_tui"
+            } else {
+                "codex_tui"
+            };
+            gate.legacy_calls
+                .lock()
+                .await
+                .push(format!("{server}/{name}"));
             gate.changed.notify_one();
-            json!({"content": [{"type": "text", "text": format!("user-owned:{name}")}], "isError": false})
+            json!({"content": [{"type": "text", "text": format!("user-owned:{server}/{name}")}], "isError": false})
         }
         _ => return Response::builder().status(202).body(Body::empty()).unwrap(),
     };
@@ -64,6 +76,7 @@ async fn native_approval_requires_managed_admission_before_retiring_a_legacy_ide
                 Router::new()
                     .route("/v1/responses", post(model_response))
                     .route("/mcp", mcp_route)
+                    .route("/prefixed-mcp", post(user_owned_mcp))
                     .with_state(Arc::clone(&gate)),
             )
             .into_future(),
@@ -78,13 +91,21 @@ async fn native_approval_requires_managed_admission_before_retiring_a_legacy_ide
         if case == "user_owned_identity" {
             // Even the old listener's URL/header shape is insufficient to claim
             // ownership of a durable user-configured server.
-            config.push_str(&format!("\n[features]\nnon_prefixed_mcp_tool_names = true\n[mcp_servers.codex_tui]\nurl = {endpoint:?}\ndefault_tools_approval_mode = 'approve'\nhttp_headers = {{Authorization = 'Bearer {}'}}\n", uuid::Uuid::new_v4()));
+            config.push_str(&format!("\n[mcp_servers.codex_tui]\nurl = {endpoint:?}\nrequired = true\ndefault_tools_approval_mode = 'approve'\nhttp_headers = {{Authorization = 'Bearer {}'}}\n[mcp_servers.mcp__codex_tui]\nurl = {:?}\nrequired = true\ndefault_tools_approval_mode = 'approve'\ndisabled_tools = ['unrelated_probe']\n", uuid::Uuid::new_v4(), format!("http://{address}/prefixed-mcp")));
         }
         std::fs::write(path, config)?;
         let requirements = match case {
             "excluded" => "[mcp_servers]\n".into(),
             "admitted_identity" | "user_owned_identity" => {
-                format!("[mcp_servers.codex_tui.identity]\nurl = {endpoint:?}\n")
+                let mut requirements =
+                    format!("[mcp_servers.codex_tui.identity]\nurl = {endpoint:?}\n");
+                if case == "user_owned_identity" {
+                    requirements.push_str(&format!(
+                        "[mcp_servers.mcp__codex_tui.identity]\nurl = {:?}\n",
+                        format!("http://{address}/prefixed-mcp")
+                    ));
+                }
+                requirements
             }
             "missing_identity" | "mismatched_identity" => {
                 "[mcp_servers.codex_tui.identity]\nurl = 'https://enterprise.invalid/mcp'\n".into()
@@ -122,19 +143,77 @@ async fn native_approval_requires_managed_admission_before_retiring_a_legacy_ide
                     "list_threads",
                     "{}",
                 ));
-            gate.tools
-                .lock()
-                .await
-                .extend(["list_threads", "unrelated_probe"].map(|name| {
-                    responses::ev_function_call_with_namespace(
-                        name,
-                        "mcp__mcp__codex_tui",
-                        name,
-                        "{}",
-                    )
-                }));
         }
-        gate.release.notify_one();
+        // Discover actual finalized names, including collision hashes, rather
+        // than duplicating the normalizer in a fixture or prescribing aliases.
+        let discovery = if case == "user_owned_identity" {
+            let gate = Arc::clone(&gate);
+            Some(tokio::spawn(async move {
+                let result = async {
+                    timeout(TIMEOUT, gate.entered.notified()).await?;
+                    let calls = gate.calls.lock().await.clone();
+                    let tools = calls[0]["tools"].as_array().context("advertised tools")?;
+                    let mut namespaces = Vec::new();
+                    for (server, route, names) in [
+                        (
+                            "codex_tui",
+                            "/mcp",
+                            &["list_threads", "unrelated_probe"][..],
+                        ),
+                        ("mcp__codex_tui", "/prefixed-mcp", &["list_threads"][..]),
+                    ] {
+                        let marker = format!("Unrelated user server {route}");
+                        let spec = tools
+                            .iter()
+                            .find(|tool| {
+                                tool["tools"].as_array().is_some_and(|children| {
+                                    children.iter().any(|child| {
+                                        child["description"].as_str().is_some_and(|description| {
+                                            description.contains(&marker)
+                                        })
+                                    })
+                                })
+                            })
+                            .context("retained raw server's advertised namespace")?;
+                        let namespace = spec["name"].as_str().context("canonical namespace")?;
+                        anyhow::ensure!(
+                            namespace.starts_with("mcp__mcp__codex_tui_"),
+                            "unexpected canonical namespace: {namespace}"
+                        );
+                        namespaces.push(namespace);
+                        let advertised: Vec<_> = spec["tools"]
+                            .as_array()
+                            .context("raw server tools")?
+                            .iter()
+                            .filter_map(|tool| tool["name"].as_str())
+                            .collect();
+                        anyhow::ensure!(
+                            advertised == names,
+                            "raw policy must remain authoritative: {server}: {advertised:?}"
+                        );
+                        gate.tools.lock().await.extend(names.iter().map(|name| {
+                            responses::ev_function_call_with_namespace(
+                                &format!("{server}/{name}"),
+                                namespace,
+                                name,
+                                "{}",
+                            )
+                        }));
+                    }
+                    anyhow::ensure!(
+                        namespaces[0] != namespaces[1],
+                        "raw registrations must not shadow each other"
+                    );
+                    Ok::<_, anyhow::Error>(())
+                }
+                .await;
+                gate.release.notify_one();
+                result
+            }))
+        } else {
+            gate.release.notify_one();
+            None
+        };
         server
             .start_turn_and_wait_for_completion(TurnStartParams {
                 thread_id: source.thread.id,
@@ -145,6 +224,9 @@ async fn native_approval_requires_managed_admission_before_retiring_a_legacy_ide
                 ..Default::default()
             })
             .await?;
+        if let Some(discovery) = discovery {
+            discovery.await??;
+        }
         let calls = gate.calls.lock().await.clone();
         let output = calls
             .iter()
@@ -189,7 +271,14 @@ async fn native_approval_requires_managed_admission_before_retiring_a_legacy_ide
             .context("an unrelated user server was suppressed")?;
             let mut raw_calls = gate.legacy_calls.lock().await.clone();
             raw_calls.sort();
-            assert_eq!(raw_calls, ["list_threads", "unrelated_probe"]);
+            assert_eq!(
+                raw_calls,
+                [
+                    "codex_tui/list_threads",
+                    "codex_tui/unrelated_probe",
+                    "mcp__codex_tui/list_threads"
+                ]
+            );
             let native = calls
                 .iter()
                 .flat_map(|call| call["input"].as_array().into_iter().flatten())

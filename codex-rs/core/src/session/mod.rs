@@ -244,6 +244,7 @@ pub(crate) use submission::Submission;
 mod input_queue;
 mod mcp;
 mod mcp_extension;
+pub(crate) use mcp_extension::CONNECTION_LEASE_SOURCE_ID;
 mod mcp_prewarm;
 mod mcp_refresh;
 mod mcp_runtime;

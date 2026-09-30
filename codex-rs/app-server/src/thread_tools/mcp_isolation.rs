@@ -22,8 +22,8 @@ impl McpServerContributor<Config> for CoordinationMcpIsolation {
         _context: McpServerContributionContext<'a, Config>,
     ) -> ExtensionFuture<'a, Vec<McpServerContribution>> {
         Box::pin(async {
-            vec![McpServerContribution::ForceToolNamespacePrefix {
-                name: super::POLICY_NAMESPACE.into(),
+            vec![McpServerContribution::ReserveToolNamespace {
+                namespace: super::NAMESPACE.into(),
             }]
         })
     }

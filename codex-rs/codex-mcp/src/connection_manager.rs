@@ -216,7 +216,7 @@ pub(crate) struct McpConnectionSet {
     tool_plugin_context: Arc<ToolPluginContext>,
     prefix_mcp_tool_names: bool,
     non_prefixed_mcp_tool_servers: Vec<String>,
-    force_prefixed_mcp_tool_servers: Vec<String>,
+    reserved_native_tool_namespaces: Vec<String>,
     elicitation_requests: ElicitationRequestManager,
     pub(crate) trusted_access: Option<TrustedAccessContext>,
 }
@@ -256,7 +256,7 @@ impl McpConnectionSet {
         let codex_home = config.codex_home.clone();
         let prefix_mcp_tool_names = config.prefix_mcp_tool_names;
         let non_prefixed_mcp_tool_servers = config.non_prefixed_mcp_tool_servers.clone();
-        let force_prefixed_mcp_tool_servers = config.force_prefixed_mcp_tool_servers.clone();
+        let reserved_native_tool_namespaces = config.reserved_native_tool_namespaces.clone();
         let default_protocol_mode = config.protocol_mode;
         let host_owned_apps_protocol_mode = config.host_owned_apps_protocol_mode;
         let client_elicitation_capability = config.client_elicitation_capability.clone();
@@ -790,7 +790,7 @@ impl McpConnectionSet {
             tool_plugin_context,
             prefix_mcp_tool_names,
             non_prefixed_mcp_tool_servers,
-            force_prefixed_mcp_tool_servers,
+            reserved_native_tool_namespaces,
             elicitation_requests: elicitation_requests.clone(),
             trusted_access,
         };
@@ -849,7 +849,7 @@ impl McpConnectionSet {
             tool_plugin_context: Arc::new(ToolPluginContext::default()),
             prefix_mcp_tool_names,
             non_prefixed_mcp_tool_servers: Vec::new(),
-            force_prefixed_mcp_tool_servers: Vec::new(),
+            reserved_native_tool_namespaces: Vec::new(),
             elicitation_requests: ElicitationRequestManager::default(),
             trusted_access: None,
         }

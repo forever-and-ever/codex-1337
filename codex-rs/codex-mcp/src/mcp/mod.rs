@@ -178,10 +178,10 @@ pub struct McpConfig {
     pub prefix_mcp_tool_names: bool,
     /// MCP servers whose model-visible tool namespaces omit the `mcp__` prefix.
     pub non_prefixed_mcp_tool_servers: Vec<String>,
-    /// Native extensions can reserve their namespace without taking ownership
-    /// of a same-named MCP transport. These servers use an additional `mcp__`
-    /// prefix beyond their historical prefixed spelling.
-    pub force_prefixed_mcp_tool_servers: Vec<String>,
+    /// Canonical namespaces owned by native tools. Colliding MCP namespaces
+    /// receive an additional prefix before final normalization; transports and
+    /// raw configuration/approval identities are unchanged.
+    pub reserved_native_tool_namespaces: Vec<String>,
     /// Protocol mode for servers other than the host-owned Codex Apps registration.
     pub protocol_mode: McpProtocolMode,
     /// Independent protocol mode for the trusted, HTTP Codex Apps registration.

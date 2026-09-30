@@ -111,7 +111,7 @@ impl McpConnectionSet {
             tool_plugin_context: Arc::new(ToolPluginContext::default()),
             prefix_mcp_tool_names,
             non_prefixed_mcp_tool_servers: Vec::new(),
-            force_prefixed_mcp_tool_servers: Vec::new(),
+            reserved_native_tool_namespaces: Vec::new(),
             elicitation_requests: ElicitationRequestManager::new(
                 test_elicitation_config(
                     "server",
