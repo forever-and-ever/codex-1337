@@ -1,23 +1,47 @@
 //! Server-owned coordination tools; frontend lifetimes are not capabilities.
 
 use crate::request_processors::ThreadCoordinationService;
-use codex_app_server_protocol::delegation::{DelegatedMessage, MAX_SENDER_NAME_CHARS};
-use codex_app_server_protocol::{
-    DynamicToolFunctionSpec, DynamicToolNamespaceTool, DynamicToolSpec, SortDirection,
-    ThreadArchiveParams, ThreadForkParams, ThreadQueueAddParams, ThreadSetNameParams, ThreadStatus,
-    ThreadTurnsListParams, ThreadUnarchiveParams, TurnItemsView, TurnToolOutput,
-};
+use codex_app_server_protocol::DynamicToolFunctionSpec;
+use codex_app_server_protocol::DynamicToolNamespaceTool;
+use codex_app_server_protocol::DynamicToolSpec;
+use codex_app_server_protocol::SortDirection;
+use codex_app_server_protocol::ThreadArchiveParams;
+use codex_app_server_protocol::ThreadForkParams;
+use codex_app_server_protocol::ThreadQueueAddParams;
+use codex_app_server_protocol::ThreadSetNameParams;
+use codex_app_server_protocol::ThreadStatus;
+use codex_app_server_protocol::ThreadTurnsListParams;
+use codex_app_server_protocol::ThreadUnarchiveParams;
+use codex_app_server_protocol::TurnItemsView;
+use codex_app_server_protocol::TurnToolOutput;
+use codex_app_server_protocol::delegation::DelegatedMessage;
+use codex_app_server_protocol::delegation::MAX_SENDER_NAME_CHARS;
 use codex_core::config::Config;
-use codex_extension_api::{
-    ExtensionData, ExtensionRegistryBuilder, FunctionCallError, JsonToolOutput, ToolApproval,
-    ToolApprovalMode, ToolCall, ToolContributor, ToolExecutor, ToolExecutorFuture, ToolName,
-    ToolOutput, ToolSpec,
-};
-use codex_protocol::{ThreadId, models::FunctionCallOutputBody};
-use codex_tools::{ResponsesApiNamespace, ResponsesApiNamespaceTool, ToolExposure};
-use serde::{Deserialize, de::DeserializeOwned};
-use serde_json::{Value, json};
-use std::sync::{Arc, OnceLock, Weak};
+use codex_extension_api::ExtensionData;
+use codex_extension_api::ExtensionRegistryBuilder;
+use codex_extension_api::FunctionCallError;
+use codex_extension_api::JsonToolOutput;
+use codex_extension_api::ToolApproval;
+use codex_extension_api::ToolApprovalMode;
+use codex_extension_api::ToolCall;
+use codex_extension_api::ToolContributor;
+use codex_extension_api::ToolExecutor;
+use codex_extension_api::ToolExecutorFuture;
+use codex_extension_api::ToolName;
+use codex_extension_api::ToolOutput;
+use codex_extension_api::ToolSpec;
+use codex_protocol::ThreadId;
+use codex_protocol::models::FunctionCallOutputBody;
+use codex_tools::ResponsesApiNamespace;
+use codex_tools::ResponsesApiNamespaceTool;
+use codex_tools::ToolExposure;
+use serde::Deserialize;
+use serde::de::DeserializeOwned;
+use serde_json::Value;
+use serde_json::json;
+use std::sync::Arc;
+use std::sync::OnceLock;
+use std::sync::Weak;
 use uuid::Uuid;
 
 mod mcp_isolation;
@@ -172,6 +196,12 @@ impl CoordinationTool {
                 if args.model.as_deref().is_some_and(str::is_empty) {
                     return Err("model must not be empty".into());
                 }
+                // Execution is already approved here. Check before either
+                // delivery path can restore the destination or mutate its queue.
+                service
+                    .ensure_message_recipient(&args.thread_id)
+                    .await
+                    .map_err(error)?;
                 let output =
                     delegated_output(service, &caller, &self.function.name, args.prompt).await?;
                 if args.delivery == MessageDelivery::Queued {

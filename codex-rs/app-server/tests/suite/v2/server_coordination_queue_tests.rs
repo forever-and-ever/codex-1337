@@ -53,6 +53,22 @@ async fn queued_headless_messages_preserve_provenance_and_can_be_cancelled_befor
     .await?;
     read_response_for_id(&mut frontend, /*id*/ 4).await?;
     timeout(TIMEOUT, gate.blocked_entered.notified()).await?;
+    // Unattended active turns remain eligible even with stale persisted metadata.
+    let aged = age_destination(home.path(), &destination).await?;
+    send_request(
+        &mut frontend,
+        "thread/read",
+        /*id*/ 6,
+        Some(json!({"threadId": destination, "includeTurns": false})),
+    )
+    .await?;
+    let destination_view =
+        to_response::<ThreadReadResponse>(read_response_for_id(&mut frontend, /*id*/ 6).await?)?;
+    assert_eq!(destination_view.thread.updated_at, aged);
+    assert!(matches!(
+        destination_view.thread.status,
+        codex_app_server_protocol::ThreadStatus::Active { .. }
+    ));
     *gate.tools.lock().await = ["Deliver this", "Cancel this"]
         .into_iter()
         .enumerate()

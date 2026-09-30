@@ -3,9 +3,12 @@
 
 use std::future::IntoFuture;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 
-use anyhow::{Context, Result};
+use anyhow::Context;
+use anyhow::Result;
 use axum::Json;
 use axum::Router;
 use axum::body::Body;
@@ -22,12 +25,16 @@ use codex_app_server_protocol::ThreadResumeParams;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::ThreadStartResponse;
 use codex_app_server_protocol::delegation::DelegatedMessage;
+use codex_utils_absolute_path::test_support::PathExt;
 use core_test_support::responses;
 use pretty_assertions::assert_eq;
-use serde_json::{Value, json};
+use serde_json::Value;
+use serde_json::json;
 use tempfile::TempDir;
-use tokio::sync::{Mutex, Notify};
-use tokio::time::{Duration, timeout};
+use tokio::sync::Mutex;
+use tokio::sync::Notify;
+use tokio::time::Duration;
+use tokio::time::timeout;
 
 use super::connect_websocket;
 use super::create_config_toml;
@@ -88,6 +95,33 @@ fn frontend_transport_config(endpoint: &str) -> Value {
         "send_message_to_thread": {"approval_mode": "prompt"},
         "fork_thread": {"approval_mode": "prompt"}
     }})
+}
+
+// Age only authoritative persisted metadata: never rewrite model history or
+// introduce a production clock seam. Both columns represent the same timestamp.
+async fn age_destination(home: &std::path::Path, thread_id: &str) -> Result<i64> {
+    let sqlite = codex_state::SqliteConfig::new_for_testing(home.abs());
+    let pool = sqlite.open_read_write_pool(&sqlite.state_db_path()).await?;
+    let updated_at = chrono::Utc::now().timestamp() - 48 * 60 * 60;
+    timeout(TIMEOUT, async {
+        loop {
+            let changed =
+                sqlx::query("UPDATE threads SET updated_at = ?, updated_at_ms = ? WHERE id = ?")
+                    .bind(updated_at)
+                    .bind(updated_at * 1_000)
+                    .bind(thread_id)
+                    .execute(&pool)
+                    .await?
+                    .rows_affected();
+            if changed == 1 {
+                break Ok::<_, anyhow::Error>(());
+            }
+            tokio::time::sleep(Duration::from_millis(/*millis*/ 20)).await;
+        }
+    })
+    .await??;
+    pool.close().await;
+    Ok(updated_at)
 }
 
 async fn model_response(State(gate): State<Arc<ModelGate>>, Json(body): Json<Value>) -> Response {
@@ -215,6 +249,18 @@ approval_mode = "approve"
     read_response_for_id(&mut frontend, /*id*/ 5).await?;
     wait_for_loaded_threads(&mut frontend, /*first_id*/ 100, &[&caller]).await?;
 
+    let stale = start_thread(&mut frontend, /*id*/ 7).await?;
+    send_request(
+        &mut frontend,
+        "thread/unsubscribe",
+        /*id*/ 8,
+        Some(json!({"threadId": stale})),
+    )
+    .await?;
+    read_response_for_id(&mut frontend, /*id*/ 8).await?;
+    wait_for_loaded_threads(&mut frontend, /*first_id*/ 200, &[&caller]).await?;
+    let stale_updated_at = age_destination(home.path(), &stale).await?;
+
     *gate.tools.lock().await = vec![
         responses::ev_function_call_with_namespace(
             "message",
@@ -229,6 +275,12 @@ approval_mode = "approve"
             &json!({"prompt": "Start an independent task", "title": "Headless child"}).to_string(),
         ),
     ];
+    gate.tools.lock().await.extend(["immediate", "queued"].map(|delivery| {
+        responses::ev_function_call_with_namespace(
+            &format!("stale-{delivery}"), "mcp__codex_tui", "send_message_to_thread",
+            &json!({"threadId": stale, "prompt": "Do not revive a stale task", "delivery": delivery}).to_string(),
+        )
+    }));
     send_request(
         &mut frontend,
         "turn/start",
@@ -292,6 +344,61 @@ approval_mode = "approve"
     let mut replacement = connect_websocket(address).await?;
     send_initialize_request(&mut replacement, /*id*/ 1, "replacement-frontend").await?;
     read_response_for_id(&mut replacement, /*id*/ 1).await?;
+    send_request(
+        &mut replacement,
+        "thread/loaded/list",
+        /*id*/ 10,
+        Some(json!({})),
+    )
+    .await?;
+    let loaded = read_response_for_id(&mut replacement, /*id*/ 10)
+        .await?
+        .result;
+    assert!(
+        !loaded["data"]
+            .as_array()
+            .context("loaded thread IDs")?
+            .contains(&json!(stale)),
+        "rejected immediate and queued sends must not restore a stale destination"
+    );
+    send_request(
+        &mut replacement,
+        "thread/queue/list",
+        /*id*/ 11,
+        Some(json!({"threadId": stale})),
+    )
+    .await?;
+    assert_eq!(
+        read_response_for_id(&mut replacement, /*id*/ 11)
+            .await?
+            .result["data"],
+        json!([])
+    );
+    send_request(
+        &mut replacement,
+        "thread/read",
+        /*id*/ 12,
+        Some(json!({"threadId": stale, "includeTurns": false})),
+    )
+    .await?;
+    let stale_view = to_response::<ThreadReadResponse>(
+        read_response_for_id(&mut replacement, /*id*/ 12).await?,
+    )?;
+    assert_eq!(stale_view.thread.updated_at, stale_updated_at);
+    for delivery in ["immediate", "queued"] {
+        let call_id = format!("stale-{delivery}");
+        let output = calls
+            .iter()
+            .flat_map(|body| body["input"].as_array().into_iter().flatten())
+            .find(|item| item["type"] == "function_call_output" && item["call_id"] == call_id)
+            .context("stale message rejection")?["output"]
+            .as_str()
+            .context("rejection text")?;
+        assert!(
+            output.contains("undeliverable") && output.contains("24 hours"),
+            "{output}"
+        );
+    }
     send_request(
         &mut replacement,
         "thread/resume",
@@ -416,6 +523,27 @@ async fn headless_approval_waits_for_consent_and_replays_to_a_replacement_fronte
         1,
         "no frontend is not consent"
     );
+    // Opening the old destination grants a real destination subscription. Age
+    // it after resume so freshness cannot accidentally satisfy the predicate.
+    send_request(
+        &mut replacement,
+        "thread/resume",
+        /*id*/ 3,
+        Some(json!({"threadId": destination, "excludeTurns": true})),
+    )
+    .await?;
+    read_response_for_id(&mut replacement, /*id*/ 3).await?;
+    let aged = age_destination(home.path(), &destination).await?;
+    send_request(
+        &mut replacement,
+        "thread/read",
+        /*id*/ 4,
+        Some(json!({"threadId": destination, "includeTurns": false})),
+    )
+    .await?;
+    let destination_view =
+        to_response::<ThreadReadResponse>(read_response_for_id(&mut replacement, /*id*/ 4).await?)?;
+    assert_eq!(destination_view.thread.updated_at, aged);
     let question = approval.params.as_ref().context("approval params")?["questions"][0]["id"]
         .as_str()
         .context("approval question id")?;

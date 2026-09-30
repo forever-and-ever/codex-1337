@@ -21,6 +21,7 @@ use codex_app_server_protocol::ThreadResumeParams;
 use codex_app_server_protocol::ThreadSetNameParams;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::ThreadStartResponse;
+use codex_app_server_protocol::ThreadStatus;
 use codex_app_server_protocol::ThreadTurnsListParams;
 use codex_app_server_protocol::ThreadTurnsListResponse;
 use codex_app_server_protocol::ThreadUnarchiveParams;
@@ -83,6 +84,31 @@ impl ThreadCoordinationService {
         params: ThreadItemsListParams,
     ) -> Result<ThreadItemsListResponse, JSONRPCErrorError> {
         self.threads.thread_items_list_response_inner(params).await
+    }
+
+    /// Admit messages to existing destinations before a resume, runtime lease,
+    /// or queue insertion can manufacture activity. Initial task creation does
+    /// not use this fence; subscriber age and unattended active turns are valid.
+    pub(crate) async fn ensure_message_recipient(
+        &self,
+        thread_id: &str,
+    ) -> Result<(), JSONRPCErrorError> {
+        let id = ThreadId::from_string(thread_id)
+            .map_err(|err| invalid_request(format!("invalid thread id: {err}")))?;
+        if self.threads.thread_state_manager.has_subscribers(id).await {
+            return Ok(());
+        }
+        // Metadata-only authoritative read does not restore an unloaded runtime.
+        let destination = self.read(thread_id).await?;
+        let cutoff = chrono::Utc::now().timestamp().saturating_sub(24 * 60 * 60);
+        if matches!(destination.status, ThreadStatus::Active { .. })
+            || destination.updated_at >= cutoff
+        {
+            return Ok(());
+        }
+        Err(invalid_request(
+            "Message undeliverable: destination inactive for more than 24 hours, with no connected subscriber or active turn. Open it or send it a user message to re-enable delivery.",
+        ))
     }
 
     pub(crate) async fn load(
