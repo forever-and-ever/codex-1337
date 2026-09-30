@@ -24,13 +24,17 @@ pub(super) fn cells(item: ThreadItem, cwd: &AbsolutePathBuf) -> TranscriptCells 
             status,
         } => match status {
             PatchApplyStatus::Completed if !changes.is_empty() => {
-                cells.push(Arc::new(
-                    history_cell::new_patch_event(
+                cells.extend(
+                    history_cell::new_patch_events(
                         file_update_changes_to_display(changes),
                         cwd.as_path(),
                     )
-                    .with_activity_id(id),
-                ));
+                    .into_iter()
+                    .map(|cell| {
+                        Arc::new(cell.with_activity_id(id.clone()))
+                            as Arc<dyn history_cell::HistoryCell>
+                    }),
+                );
             }
             PatchApplyStatus::Completed => {}
             PatchApplyStatus::Failed => {

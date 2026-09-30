@@ -5,11 +5,16 @@ use crate::terminal_hyperlinks::HyperlinkLine;
 use ratatui::text::Line;
 
 pub(crate) const DETAIL_PREVIEW_LINES: usize = 3;
+pub(crate) const INLINE_DISCLOSURE_WIDTH: usize = 15;
 
 /// Details an activity can reveal without materializing its expanded transcript.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ActivityDisclosure {
     Generic,
+    /// Place the control after this logical source line, outside copied text.
+    Inline {
+        source_line: usize,
+    },
     /// Retained output lines not fully visible in the preview, excluding storage omissions.
     OutputLines(usize),
 }

@@ -9,7 +9,9 @@ use codex_utils_path_uri::LegacyAppPathString;
 
 impl ChatWidget {
     pub(super) fn on_patch_apply_begin(&mut self, changes: HashMap<PathBuf, FileChange>) {
-        self.add_to_history(history_cell::new_patch_event(changes, &self.config.cwd));
+        for cell in history_cell::new_patch_events(changes, &self.config.cwd) {
+            self.add_to_history(cell);
+        }
     }
 
     pub(super) fn on_view_image_tool_call(

@@ -16,7 +16,6 @@ pub(crate) use activity_group::ActivityGroup;
 pub(crate) use delegation::DelegatedMessageCell;
 
 use crate::diff_model::FileChange;
-use crate::diff_render::create_diff_summary;
 use crate::exec_cell::CommandOutput;
 use crate::exec_cell::OutputLinesParams;
 use crate::exec_cell::TOOL_CALL_MAX_LINES;

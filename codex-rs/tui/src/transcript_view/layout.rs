@@ -30,6 +30,18 @@ pub(super) fn activity_layout(
     shortcut: Option<ShortcutHint>,
 ) -> TextLayout {
     let has_details = !lines.activity.is_empty() && (expanded || lines.disclosure.is_some());
+    let control_width = match lines.disclosure {
+        Some(ActivityDisclosure::Inline { source_line }) => usize::from(width).saturating_sub(
+            lines
+                .activity
+                .get(source_line)
+                .map_or(0, |line| line.line.width())
+                + 1,
+        ),
+        Some(ActivityDisclosure::Generic | ActivityDisclosure::OutputLines(_)) | None => {
+            usize::from(width.saturating_sub(4))
+        }
+    };
     let source_offset = (!lines.auxiliary.is_empty())
         .then(|| TextLayout::new(lines.activity.clone(), width).text().len());
     lines.activity.extend(lines.auxiliary);
@@ -51,7 +63,9 @@ pub(super) fn activity_layout(
             }
             label
         }
-        (false, Some(ActivityDisclosure::Generic) | None) => "+ Show details".to_owned(),
+        (false, Some(ActivityDisclosure::Generic | ActivityDisclosure::Inline { .. }) | None) => {
+            "+ Show details".to_owned()
+        }
     };
     let label = if let Some(tokens) = lines.tool_output_tokens {
         let tokens = codex_protocol::num_format::format_with_separators(
@@ -62,7 +76,7 @@ pub(super) fn activity_layout(
             "{} (≈{tokens} tokens)",
             if expanded { "− Less" } else { "+ Details" }
         );
-        let available = usize::from(width.saturating_sub(4));
+        let available = control_width;
         if UnicodeWidthStr::width(full.as_str()) <= available {
             full
         } else if UnicodeWidthStr::width(short.as_str()) <= available {
@@ -73,6 +87,9 @@ pub(super) fn activity_layout(
     } else {
         label
     };
+    if let Some(ActivityDisclosure::Inline { source_line }) = lines.disclosure {
+        return layout.with_inline_disclosure_control(label, source_line);
+    }
     match source_offset {
         Some(offset) => layout.with_disclosure_control_at(label, offset),
         None => layout.with_disclosure_control(label),

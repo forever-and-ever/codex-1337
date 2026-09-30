@@ -3,7 +3,7 @@ use pretty_assertions::assert_eq;
 
 #[test]
 fn compact_patches_retain_full_changes_and_failure_details() {
-    let patch = new_patch_event(
+    let patches = new_patch_events(
         HashMap::from([
             (
                 PathBuf::from("new.txt"),
@@ -24,9 +24,21 @@ fn compact_patches_retain_full_changes_and_failure_details() {
     let failure = new_patch_apply_failure("first\nsecond\nthird\nfourth diagnostic".into());
     let missing = new_patch_apply_failure(String::new());
     let mut snapshots = Vec::new();
+    let compact: Vec<_> = patches
+        .iter()
+        .flat_map(|patch| visible_lines(patch.compact_hyperlink_lines(/*width*/ 60)))
+        .collect();
+    let full: Vec<_> = patches
+        .iter()
+        .flat_map(|patch| visible_lines(patch.transcript_hyperlink_lines(/*width*/ 60)))
+        .collect();
+    snapshots.push(format!(
+        "patch\nCompact\n{}\nFull\n{}",
+        Text::from(compact),
+        Text::from(full)
+    ));
     for (label, cell) in [
-        ("patch", &patch as &dyn HistoryCell),
-        ("failure", &failure),
+        ("failure", &failure as &dyn HistoryCell),
         ("missing diagnostics", &missing),
     ] {
         let compact = visible_lines(cell.compact_hyperlink_lines(/*width*/ 40));

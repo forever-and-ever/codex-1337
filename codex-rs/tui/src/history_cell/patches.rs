@@ -12,14 +12,59 @@ mod tests;
 #[derive(Debug)]
 pub(crate) struct PatchHistoryCell {
     activity_id: String,
-    changes: HashMap<PathBuf, FileChange>,
+    path: PathBuf,
+    change: FileChange,
     cwd: PathBuf,
+    continuation: bool,
 }
 
 impl PatchHistoryCell {
     pub(crate) fn with_activity_id(mut self, id: String) -> Self {
-        self.activity_id = format!("patch:{id}");
+        // The first file owns the call's token bill; sibling disclosures have separate IDs.
+        self.activity_id = if self.continuation {
+            format!("patch-file:{id}:{:?}", self.path)
+        } else {
+            format!("patch:{id}")
+        };
         self
+    }
+
+    fn summary(&self, width: u16) -> Vec<HyperlinkLine> {
+        let mut lines = Vec::new();
+        if !self.continuation {
+            lines.push(Line::from(vec!["• ".dim(), "Edited".bold()]).into());
+        }
+        let (added, removed) = crate::diff_render::line_counts(&self.change);
+        let counts = Line::from(vec![
+            " (".into(),
+            format!("+{added}").green(),
+            ", ".into(),
+            format!("-{removed}").red(),
+            ")".into(),
+        ]);
+        let mut path = crate::diff_render::display_path_for(&self.path, &self.cwd);
+        if let FileChange::Update {
+            move_path: Some(destination),
+            ..
+        } = &self.change
+        {
+            path.push_str(&format!(
+                " → {}",
+                crate::diff_render::display_path_for(destination, &self.cwd)
+            ));
+        }
+        let width = usize::from(width)
+            .saturating_sub(super::activity_preview::INLINE_DISCLOSURE_WIDTH)
+            .max(/*other*/ 1);
+        let path = truncate_line_with_ellipsis_if_overflow(
+            Line::from(path.replace(['\n', '\r', '\t'], " ")),
+            width.saturating_sub(counts.width() + 2),
+        );
+        let mut spans = vec!["  ".into()];
+        spans.extend(path.spans);
+        spans.extend(counts.spans);
+        lines.push(truncate_line_with_ellipsis_if_overflow(Line::from(spans), width).into());
+        lines
     }
 }
 
@@ -29,12 +74,17 @@ impl HistoryCell for PatchHistoryCell {
     }
 
     fn compact_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        crate::diff_render::create_diff_preview_with_links(
-            &self.changes,
-            &self.cwd,
-            usize::from(width),
-            super::activity_preview::DETAIL_PREVIEW_LINES,
-        )
+        self.summary(width)
+    }
+
+    fn activity_disclosure(&self, _width: u16) -> Option<ActivityDisclosure> {
+        Some(ActivityDisclosure::Inline {
+            source_line: usize::from(!self.continuation),
+        })
+    }
+
+    fn is_stream_continuation(&self) -> bool {
+        self.continuation
     }
 
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
@@ -42,11 +92,17 @@ impl HistoryCell for PatchHistoryCell {
     }
 
     fn display_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        crate::diff_render::create_diff_summary_with_links(
-            &self.changes,
-            &self.cwd,
-            usize::from(width),
-        )
+        let mut lines = self.summary(width);
+        lines.extend(crate::terminal_hyperlinks::prefix_hyperlink_lines(
+            crate::diff_render::file_change_lines(
+                &self.change,
+                &self.path,
+                usize::from(width).saturating_sub(/*rhs*/ 4),
+            ),
+            "    ".into(),
+            "    ".into(),
+        ));
+        lines
     }
 
     fn transcript_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
@@ -54,25 +110,33 @@ impl HistoryCell for PatchHistoryCell {
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
-        plain_lines(create_diff_summary(
-            &self.changes,
-            &self.cwd,
-            RAW_DIFF_SUMMARY_WIDTH,
+        plain_lines(visible_lines(
+            self.display_hyperlink_lines(RAW_DIFF_SUMMARY_WIDTH as u16),
         ))
     }
 }
-/// Create a new `PendingPatch` cell that lists the file‑level summary of
-/// a proposed patch. The summary lines should already be formatted (e.g.
-/// "A path/to/file.rs").
-pub(crate) fn new_patch_event(
+/// Each file owns its disclosure and source text; replay uses the same sorted identities.
+pub(crate) fn new_patch_events(
     changes: HashMap<PathBuf, FileChange>,
     cwd: &Path,
-) -> PatchHistoryCell {
-    PatchHistoryCell {
-        activity_id: format!("patch:{}", uuid::Uuid::new_v4()),
-        changes,
-        cwd: cwd.to_path_buf(),
-    }
+) -> Vec<PatchHistoryCell> {
+    let id = uuid::Uuid::new_v4().to_string();
+    let mut changes: Vec<_> = changes.into_iter().collect();
+    changes.sort_by(|left, right| left.0.cmp(&right.0));
+    changes
+        .into_iter()
+        .enumerate()
+        .map(|(index, (path, change))| {
+            PatchHistoryCell {
+                activity_id: String::new(),
+                path,
+                change,
+                cwd: cwd.to_path_buf(),
+                continuation: index > 0,
+            }
+            .with_activity_id(id.clone())
+        })
+        .collect()
 }
 
 pub(crate) fn new_patch_apply_failure(stderr: String) -> PatchFailureCell {

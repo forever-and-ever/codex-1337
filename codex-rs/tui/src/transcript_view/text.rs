@@ -55,6 +55,13 @@ struct DisclosureControl {
     label: String,
     source_offset: usize,
     row: usize,
+    placement: DisclosurePlacement,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DisclosurePlacement {
+    Row,
+    Inline,
 }
 
 struct TextRow {
@@ -79,7 +86,12 @@ impl TextLayout {
         let mut layout = Self::from_logical(self.logical.clone(), width);
         if let Some(control) = &self.disclosure_control {
             layout =
-                layout.with_disclosure_control_at(control.label.clone(), control.source_offset);
+                match control.placement {
+                    DisclosurePlacement::Row => layout
+                        .with_disclosure_control_at(control.label.clone(), control.source_offset),
+                    DisclosurePlacement::Inline => layout
+                        .with_inline_disclosure_at(control.label.clone(), control.source_offset),
+                };
         }
         if self.separated {
             layout.with_leading_separator()
@@ -103,7 +115,9 @@ impl TextLayout {
         if self.text.is_empty() || label.is_empty() {
             return self;
         }
-        if let Some(control) = self.disclosure_control.take() {
+        if let Some(control) = self.disclosure_control.take()
+            && control.placement == DisclosurePlacement::Row
+        {
             self.rows.remove(control.row);
         }
         let source_offset = self
@@ -136,6 +150,42 @@ impl TextLayout {
             label,
             source_offset,
             row: control_row,
+            placement: DisclosurePlacement::Row,
+        });
+        self
+    }
+
+    /// An inline control is painted separately: it never becomes selectable source text.
+    pub(super) fn with_inline_disclosure_control(self, label: String, source_line: usize) -> Self {
+        let source_offset = self
+            .logical
+            .iter()
+            .take(source_line.saturating_add(/*rhs*/ 1))
+            .map(|line| line.origin.range.len() + 1)
+            .sum::<usize>()
+            .saturating_sub(/*rhs*/ 1);
+        self.with_inline_disclosure_at(label, source_offset)
+    }
+
+    fn with_inline_disclosure_at(mut self, label: String, source_offset: usize) -> Self {
+        if self.text.is_empty() || label.is_empty() {
+            return self;
+        }
+        if let Some(control) = self.disclosure_control.take()
+            && control.placement == DisclosurePlacement::Row
+        {
+            self.rows.remove(control.row);
+        }
+        let source_offset = self
+            .text
+            .floor_char_boundary(source_offset.min(self.text.len()));
+        let row = self.row_for_offset(source_offset);
+        self.disclosure = true;
+        self.disclosure_control = Some(DisclosureControl {
+            label,
+            source_offset,
+            row,
+            placement: DisclosurePlacement::Inline,
         });
         self
     }
@@ -223,10 +273,23 @@ impl TextLayout {
     }
 
     pub(super) fn disclosure_columns(&self) -> Range<u16> {
-        let Some(row) = self.disclosure_row().and_then(|row| self.rows.get(row)) else {
+        let Some(control) = &self.disclosure_control else {
             return 0..0;
         };
-        row.first_column as u16..line_width(&row.line.line).min(usize::from(self.width)) as u16
+        let row = &self.rows[control.row];
+        match control.placement {
+            DisclosurePlacement::Row => {
+                row.first_column as u16
+                    ..line_width(&row.line.line).min(usize::from(self.width)) as u16
+            }
+            DisclosurePlacement::Inline => {
+                let start = line_width(&row.line.line)
+                    .saturating_add(/*rhs*/ 1)
+                    .min(usize::from(self.width));
+                let end = (start + display_width(&control.label)).min(usize::from(self.width));
+                start as u16..end as u16
+            }
+        }
     }
 
     /// Paint visible rows, including inherited styles on empty rows and trailing columns.
@@ -238,6 +301,18 @@ impl TextLayout {
             row_area.width = row.content_width;
             HyperlinkParagraph::new(std::slice::from_ref(&row.line), row.line.line.style)
                 .render(row_area, buf);
+            if let Some(control) = &self.disclosure_control
+                && control.placement == DisclosurePlacement::Inline
+                && control.row == start_row + usize::from(screen_row)
+            {
+                let columns = self.disclosure_columns();
+                buf.set_line(
+                    area.x + columns.start,
+                    area.y + screen_row,
+                    &Line::from(control.label.as_str()).dim(),
+                    columns.end - columns.start,
+                );
+            }
         }
     }
 
@@ -260,7 +335,10 @@ impl TextLayout {
 
     /// Find the display row containing a source position, including omitted wrapping whitespace.
     pub(super) fn row_for_offset(&self, offset: usize) -> usize {
-        let before_control = if let Some(control_row) = self.disclosure_row() {
+        let before_control = if let Some(control) = &self.disclosure_control
+            && control.placement == DisclosurePlacement::Row
+        {
+            let control_row = control.row;
             let after_control = &self.rows[control_row + 1..];
             let matching_rows = after_control.partition_point(|row| row.source.start <= offset);
             if matching_rows > 0 {

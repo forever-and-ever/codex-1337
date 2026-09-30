@@ -41,7 +41,7 @@ fn completed_patch_restores_rich_diff_and_styles() {
             diff: "@@ -1 +1 @@\n-let before = 1;\n+let after = 2;\n".to_string(),
         },
     ];
-    let expected = history_cell::new_patch_event(
+    let expected = history_cell::new_patch_events(
         HashMap::from([
             (
                 PathBuf::from("new.rs"),
@@ -75,10 +75,15 @@ fn completed_patch_restores_rich_diff_and_styles() {
         &cwd,
     );
 
-    assert_eq!(actual.len(), 1);
     assert_eq!(
-        actual[0].transcript_hyperlink_lines(/*width*/ 80),
-        expected.transcript_hyperlink_lines(/*width*/ 80),
+        actual
+            .iter()
+            .map(|cell| cell.transcript_hyperlink_lines(/*width*/ 80))
+            .collect::<Vec<_>>(),
+        expected
+            .iter()
+            .map(|cell| cell.transcript_hyperlink_lines(/*width*/ 80))
+            .collect::<Vec<_>>(),
     );
 }
 
