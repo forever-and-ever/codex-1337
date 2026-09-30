@@ -63,6 +63,7 @@ mod doctor;
 #[cfg(test)]
 #[path = "exec_server_args_tests.rs"]
 mod exec_server_args_tests;
+#[cfg(feature = "aws-sigv4")]
 mod exec_server_auth;
 mod exec_server_command;
 mod exec_server_telemetry;

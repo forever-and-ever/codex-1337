@@ -25,6 +25,7 @@ use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_cli::CliConfigOverrides;
 use codex_websocket_auth::WebsocketAuthArgs;
 
+#[cfg(feature = "aws-sigv4")]
 use crate::exec_server_auth;
 use crate::exec_server_telemetry;
 
@@ -115,7 +116,7 @@ pub(super) struct ExecServerCommand {
     )]
     pub(super) use_agent_identity_auth: bool,
 
-    /// Sign Direct registration and WebSocket handshake requests with AWS SigV4.
+    /// Sign Direct requests with AWS SigV4 (requires the aws-sigv4 build feature).
     #[arg(long = "aws-sigv4", requires = "exec_server_remote", global = true)]
     pub(super) aws_sigv4: bool,
 
@@ -193,15 +194,24 @@ impl ExecServerCommand {
             let direct_transport = self.remote_transport == ExecServerRemoteTransport::Direct;
             let (_otel, telemetry) = exec_server_telemetry::init(Some(&config));
             let auth_provider = if self.aws_sigv4 {
-                exec_server_auth::aws_sigv4_auth_provider(
-                    codex_aws_auth::AwsAuthConfig {
-                        profile: self.aws_profile,
-                        region: self.aws_region,
-                        service: self.aws_service,
-                    },
-                    config.http_client_factory(),
-                )
-                .await?
+                #[cfg(feature = "aws-sigv4")]
+                {
+                    exec_server_auth::aws_sigv4_auth_provider(
+                        codex_aws_auth::AwsAuthConfig {
+                            profile: self.aws_profile,
+                            region: self.aws_region,
+                            service: self.aws_service,
+                        },
+                        config.http_client_factory(),
+                    )
+                    .await?
+                }
+                #[cfg(not(feature = "aws-sigv4"))]
+                {
+                    anyhow::bail!(
+                        "AWS SigV4 support is not enabled; build with --features aws-sigv4"
+                    );
+                }
             } else {
                 load_exec_server_remote_auth_provider(
                     &config,
@@ -323,6 +333,10 @@ impl ExecServerCommand {
             }
             (ExecServerRemoteTransport::Noise, false)
             | (ExecServerRemoteTransport::Direct, true) => {}
+        }
+        #[cfg(not(feature = "aws-sigv4"))]
+        if self.aws_sigv4 {
+            anyhow::bail!("AWS SigV4 support is not enabled; build with --features aws-sigv4");
         }
         if self.remote_transport == ExecServerRemoteTransport::Direct
             && matches!(
