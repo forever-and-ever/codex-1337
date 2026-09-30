@@ -8,9 +8,13 @@ use crate::thread_transcript::tools::McpHistory;
 use codex_utils_path_uri::LegacyAppPathString;
 
 impl ChatWidget {
-    pub(super) fn on_patch_apply_begin(&mut self, changes: HashMap<PathBuf, FileChange>) {
+    pub(super) fn on_patch_apply_begin(
+        &mut self,
+        id: String,
+        changes: HashMap<PathBuf, FileChange>,
+    ) {
         for cell in history_cell::new_patch_events(changes, &self.config.cwd) {
-            self.add_to_history(cell);
+            self.add_to_history(cell.with_activity_id(id.clone()));
         }
     }
 

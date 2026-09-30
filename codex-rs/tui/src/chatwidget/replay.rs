@@ -248,12 +248,13 @@ impl ChatWidget {
         match item {
             // Snapshots contain the completed item without the live start that renders its diff.
             ThreadItem::FileChange {
+                id,
                 changes,
                 status: codex_app_server_protocol::PatchApplyStatus::Completed,
                 ..
             } => {
                 if !changes.is_empty() {
-                    self.on_patch_apply_begin(file_update_changes_to_display(changes));
+                    self.on_patch_apply_begin(id, file_update_changes_to_display(changes));
                 }
             }
             item => self.handle_thread_item(
