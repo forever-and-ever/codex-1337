@@ -161,8 +161,8 @@ async fn model_response(State(gate): State<Arc<ModelGate>>, Json(body): Json<Val
         .expect("valid model fixture response")
 }
 
-#[path = "server_coordination_queue_tests.rs"]
-mod queue;
+#[path = "server_coordination_steering_tests.rs"]
+mod steering;
 
 #[path = "server_coordination_policy_tests.rs"]
 mod policy;
@@ -275,12 +275,15 @@ approval_mode = "approve"
             &json!({"prompt": "Start an independent task", "title": "Headless child"}).to_string(),
         ),
     ];
-    gate.tools.lock().await.extend(["immediate", "queued"].map(|delivery| {
-        responses::ev_function_call_with_namespace(
-            &format!("stale-{delivery}"), "mcp__codex_tui", "send_message_to_thread",
-            &json!({"threadId": stale, "prompt": "Do not revive a stale task", "delivery": delivery}).to_string(),
-        )
-    }));
+    gate.tools
+        .lock()
+        .await
+        .push(responses::ev_function_call_with_namespace(
+            "stale-message",
+            "mcp__codex_tui",
+            "send_message_to_thread",
+            &json!({"threadId": stale, "prompt": "Do not revive a stale task"}).to_string(),
+        ));
     send_request(
         &mut frontend,
         "turn/start",
@@ -359,7 +362,7 @@ approval_mode = "approve"
             .as_array()
             .context("loaded thread IDs")?
             .contains(&json!(stale)),
-        "rejected immediate and queued sends must not restore a stale destination"
+        "rejected messages must not restore a stale destination"
     );
     send_request(
         &mut replacement,
@@ -385,20 +388,17 @@ approval_mode = "approve"
         read_response_for_id(&mut replacement, /*id*/ 12).await?,
     )?;
     assert_eq!(stale_view.thread.updated_at, stale_updated_at);
-    for delivery in ["immediate", "queued"] {
-        let call_id = format!("stale-{delivery}");
-        let output = calls
-            .iter()
-            .flat_map(|body| body["input"].as_array().into_iter().flatten())
-            .find(|item| item["type"] == "function_call_output" && item["call_id"] == call_id)
-            .context("stale message rejection")?["output"]
-            .as_str()
-            .context("rejection text")?;
-        assert!(
-            output.contains("undeliverable") && output.contains("24 hours"),
-            "{output}"
-        );
-    }
+    let output = calls
+        .iter()
+        .flat_map(|body| body["input"].as_array().into_iter().flatten())
+        .find(|item| item["type"] == "function_call_output" && item["call_id"] == "stale-message")
+        .context("stale message rejection")?["output"]
+        .as_str()
+        .context("rejection text")?;
+    assert!(
+        output.contains("undeliverable") && output.contains("24 hours"),
+        "{output}"
+    );
     send_request(
         &mut replacement,
         "thread/resume",

@@ -82,7 +82,7 @@ async fn queued_tool_output_waits_for_completion_without_becoming_user_input() -
     let (_, approval_id) = start_blocked_turn(&mut app, &thread_id).await?;
     let output = TurnToolOutput {
         name: "send_message_to_thread".to_string(),
-        namespace: Some("codex_tui".to_string()),
+        namespace: Some("other".to_string()),
         output: FunctionCallOutputBody::Text("attributed follow-up".to_string()),
     };
     let queued = queue_item(
@@ -96,6 +96,29 @@ async fn queued_tool_output_waits_for_completion_without_becoming_user_input() -
     )
     .await?;
     assert_eq!(queued.tool_output.as_deref(), Some(&output));
+    assert_eq!(
+        list_queue(&mut app, &thread_id).await?.data,
+        vec![queued.clone()]
+    );
+
+    // Old frontends can still use queue/add. Retiring the Codex message class
+    // must not interfere with another server's identically named queued tool.
+    let request = app.send_raw_request("thread/queue/add", Some(json!({
+        "threadId": thread_id, "clientUserMessageId": "legacy-codex-message",
+        "toolOutput": {"namespace": "codex_tui", "name": "send_message_to_thread", "output": "obsolete message"}
+    }))).await?;
+    let error: JSONRPCError = timeout(
+        READ_TIMEOUT,
+        app.read_stream_until_error_message(RequestId::Integer(request)),
+    )
+    .await??;
+    assert_eq!(error.error.code, -32600);
+    assert!(
+        error
+            .error
+            .message
+            .contains("Queued Codex messages are no longer supported")
+    );
     assert_eq!(
         list_queue(&mut app, &thread_id).await?.data,
         vec![queued.clone()]
@@ -147,7 +170,7 @@ async fn queued_tool_output_waits_for_completion_without_becoming_user_input() -
         .find(|item| item["name"] == "send_message_to_thread")
         .context("delegated tool output")?;
     assert_eq!(item["type"], "function_call_output");
-    assert_eq!(item["namespace"], "codex_tui");
+    assert_eq!(item["namespace"], "other");
     assert_eq!(item["output"], "attributed follow-up");
     assert!(list_queue(&mut app, &thread_id).await?.data.is_empty());
     Ok(())

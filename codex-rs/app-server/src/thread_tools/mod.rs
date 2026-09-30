@@ -7,7 +7,6 @@ use codex_app_server_protocol::DynamicToolSpec;
 use codex_app_server_protocol::SortDirection;
 use codex_app_server_protocol::ThreadArchiveParams;
 use codex_app_server_protocol::ThreadForkParams;
-use codex_app_server_protocol::ThreadQueueAddParams;
 use codex_app_server_protocol::ThreadSetNameParams;
 use codex_app_server_protocol::ThreadStatus;
 use codex_app_server_protocol::ThreadTurnsListParams;
@@ -42,7 +41,6 @@ use serde_json::json;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::sync::Weak;
-use uuid::Uuid;
 
 mod mcp_isolation;
 mod queries;
@@ -190,40 +188,22 @@ impl CoordinationTool {
             "wait_threads" => queries::wait(service, &caller, arguments).await,
             "send_message_to_thread" => {
                 let args: SendArguments = parse(arguments)?;
-                if args.delivery == MessageDelivery::Queued && args.model.is_some() {
-                    return Err("Queued messages use the destination's model; omit model.".into());
-                }
                 if args.model.as_deref().is_some_and(str::is_empty) {
                     return Err("model must not be empty".into());
                 }
-                // Execution is already approved here. Check before either
-                // delivery path can restore the destination or mutate its queue.
+                // Execution is already approved here. Check before the send can
+                // restore the destination or inject input into its active turn.
                 service
                     .ensure_message_recipient(&args.thread_id)
                     .await
                     .map_err(error)?;
                 let output =
                     delegated_output(service, &caller, &self.function.name, args.prompt).await?;
-                if args.delivery == MessageDelivery::Queued {
-                    let queued = service
-                        .enqueue(ThreadQueueAddParams {
-                            thread_id: args.thread_id.clone(),
-                            input: None,
-                            client_user_message_id: Uuid::now_v7().to_string(),
-                            tool_output: Some(Box::new(output)),
-                        })
-                        .await
-                        .map_err(error)?;
-                    Ok(
-                        json!({"threadId": args.thread_id, "delivery": "queued", "queuedSubmissionId": queued.queued_submission.id}),
-                    )
-                } else {
-                    service
-                        .send(&args.thread_id, output, args.model)
-                        .await
-                        .map_err(error)?;
-                    Ok(json!({"threadId": args.thread_id}))
-                }
+                service
+                    .send(&args.thread_id, output, args.model)
+                    .await
+                    .map_err(error)?;
+                Ok(json!({"threadId": args.thread_id}))
             }
             "create_thread" => {
                 let args: CreateArguments = parse(arguments)?;
@@ -418,16 +398,6 @@ struct SendArguments {
     thread_id: String,
     prompt: String,
     model: Option<String>,
-    #[serde(default)]
-    delivery: MessageDelivery,
-}
-
-#[derive(Default, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-enum MessageDelivery {
-    #[default]
-    Immediate,
-    Queued,
 }
 
 #[derive(Deserialize)]

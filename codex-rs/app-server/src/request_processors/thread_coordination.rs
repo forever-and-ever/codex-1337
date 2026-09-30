@@ -14,8 +14,6 @@ use codex_app_server_protocol::ThreadItemsListParams;
 use codex_app_server_protocol::ThreadItemsListResponse;
 use codex_app_server_protocol::ThreadListParams;
 use codex_app_server_protocol::ThreadListResponse;
-use codex_app_server_protocol::ThreadQueueAddParams;
-use codex_app_server_protocol::ThreadQueueAddResponse;
 use codex_app_server_protocol::ThreadReadParams;
 use codex_app_server_protocol::ThreadResumeParams;
 use codex_app_server_protocol::ThreadSetNameParams;
@@ -35,7 +33,6 @@ use codex_protocol::ThreadId;
 use codex_protocol::mcp::ClientMcpExtensions;
 
 use super::super::thread_input::ensure_direct_input_allowed;
-use super::super::thread_queue_processor::ThreadQueueRequestProcessor;
 use super::ThreadRequestProcessor;
 use super::ThreadResumeTarget;
 use super::internal_error;
@@ -46,12 +43,11 @@ use crate::thread_state::ThreadRuntimeLease;
 /// never by model arguments or a frontend connection.
 pub(crate) struct ThreadCoordinationService {
     threads: ThreadRequestProcessor,
-    queue: ThreadQueueRequestProcessor,
 }
 
 impl ThreadCoordinationService {
-    pub(crate) fn new(threads: ThreadRequestProcessor, queue: ThreadQueueRequestProcessor) -> Self {
-        Self { threads, queue }
+    pub(crate) fn new(threads: ThreadRequestProcessor) -> Self {
+        Self { threads }
     }
 
     pub(crate) async fn list(
@@ -87,7 +83,7 @@ impl ThreadCoordinationService {
     }
 
     /// Admit messages to existing destinations before a resume, runtime lease,
-    /// or queue insertion can manufacture activity. Initial task creation does
+    /// or turn injection can manufacture activity. Initial task creation does
     /// not use this fence; subscriber age and unattended active turns are valid.
     pub(crate) async fn ensure_message_recipient(
         &self,
@@ -185,16 +181,6 @@ impl ThreadCoordinationService {
                 "message was not delivered: {reason:?}"
             ))),
         }
-    }
-
-    pub(crate) async fn enqueue(
-        &self,
-        params: ThreadQueueAddParams,
-    ) -> Result<ThreadQueueAddResponse, JSONRPCErrorError> {
-        // Load first so idle dispatch can run without a frontend. The queue
-        // processor retains the same destination ownership and payload checks.
-        let (_thread, _lease) = self.load(&params.thread_id).await?;
-        self.queue.add(params).await
     }
 
     pub(crate) async fn create(

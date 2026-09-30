@@ -82,6 +82,14 @@ impl ThreadQueueRequestProcessor {
         &self,
         params: ThreadQueueAddParams,
     ) -> Result<ThreadQueueAddResponse, JSONRPCErrorError> {
+        if params.tool_output.as_ref().is_some_and(|output| {
+            output.namespace.as_deref() == Some("codex_tui")
+                && output.name == "send_message_to_thread"
+        }) {
+            return Err(invalid_request(
+                "Queued Codex messages are no longer supported; send_message_to_thread starts idle tasks or steers active turns.",
+            ));
+        }
         let (thread_id, loaded_thread, source) = self.require_thread(&params.thread_id).await?;
         ensure_direct_input_allowed(loaded_thread.as_deref(), &source)?;
         let input = match (params.input, params.tool_output) {

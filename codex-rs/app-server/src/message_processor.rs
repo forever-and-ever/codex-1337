@@ -528,11 +528,9 @@ impl MessageProcessor {
             turn_cost_worker.as_ref().map(TurnCostWorker::handle),
             config_warnings,
         );
-        let thread_coordination =
-            Arc::new(crate::request_processors::ThreadCoordinationService::new(
-                thread_processor.clone(),
-                thread_queue_processor.clone(),
-            ));
+        let thread_coordination = Arc::new(
+            crate::request_processors::ThreadCoordinationService::new(thread_processor.clone()),
+        );
         let _ = coordination.set(Arc::downgrade(&thread_coordination));
         let turn_processor = TurnRequestProcessor::new(
             auth_manager,

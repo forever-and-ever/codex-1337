@@ -61,8 +61,8 @@ pub(crate) fn tool_specs() -> Vec<DynamicToolSpec> {
         ),
         (
             "send_message_to_thread",
-            "Send a message to an existing Codex task with a connected subscriber, an active turn, or updatedAt within 24 hours; otherwise open it or send it a user message first. delivery defaults to immediate: start if idle, otherwise steer the current turn. Use queued for a separate follow-up after the current turn finishes. Queued messages use the destination's model; omit model unless the user explicitly requests an immediate-delivery override.",
-            json!({"threadId": thread_id, "prompt": prompt, "model": {"type": "string", "minLength": 1}, "delivery": {"type": "string", "enum": ["immediate", "queued"]}}),
+            "Send a message to an existing Codex task: start if idle, otherwise steer its active turn. The destination must have a connected subscriber, an active turn, or updatedAt within 24 hours; otherwise open it or send it a user message first. Omit model unless the user explicitly requests an override.",
+            json!({"threadId": thread_id, "prompt": prompt, "model": {"type": "string", "minLength": 1}}),
             vec!["threadId", "prompt"],
         ),
         (
