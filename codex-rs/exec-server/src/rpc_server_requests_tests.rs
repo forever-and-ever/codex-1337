@@ -3,15 +3,12 @@ use std::time::Duration;
 
 use codex_exec_server_protocol::JSONRPCRequest;
 use codex_exec_server_protocol::RequestId;
-use codex_protocol::protocol::W3cTraceContext;
 use pretty_assertions::assert_eq;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio::time::timeout;
-use tracing::Instrument;
 
 use super::MAX_IN_FLIGHT_SERVER_CALLS;
-use super::MAX_SERVER_REQUEST_TRACESTATE_LEN;
 use super::RpcServerRequestSender;
 use crate::rpc::RpcCallError;
 use crate::rpc::RpcServerOutboundMessage;

@@ -921,7 +921,6 @@ mod tests {
     use wiremock::ResponseTemplate;
     use wiremock::matchers::body_partial_json;
     use wiremock::matchers::header;
-    use wiremock::matchers::header_regex;
     use wiremock::matchers::method;
     use wiremock::matchers::path;
 

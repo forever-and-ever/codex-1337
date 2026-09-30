@@ -895,7 +895,6 @@ mod tests {
     use tokio::sync::mpsc;
     use tokio::task::JoinSet;
     use tokio::time::timeout;
-    use tracing::Instrument;
 
     use super::MAX_IN_FLIGHT_REGULAR_CALLS;
     use super::RESERVED_OUTBOUND_CONTROL_MESSAGES;

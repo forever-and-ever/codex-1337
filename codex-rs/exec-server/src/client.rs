@@ -1898,8 +1898,6 @@ mod tests {
     use tokio_tungstenite::WebSocketStream;
     use tokio_tungstenite::accept_async;
     use tokio_tungstenite::tungstenite::Message;
-    use tracing::Instrument;
-    use tracing_subscriber::filter::filter_fn;
     use tracing_subscriber::prelude::*;
 
     use super::ExecServerClient;

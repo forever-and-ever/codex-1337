@@ -1069,10 +1069,6 @@ fn compaction_trigger_label(value: CompactionTrigger) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use codex_otel::HOOK_RUN_DURATION_METRIC;
-    use codex_otel::HOOK_RUN_METRIC;
     use codex_protocol::models::ContentItem;
     use codex_protocol::protocol::HookEventName;
     use codex_protocol::protocol::HookExecutionMode;

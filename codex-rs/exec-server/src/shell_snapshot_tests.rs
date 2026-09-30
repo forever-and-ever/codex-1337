@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::collections::HashMap;
 
 use codex_protocol::config_types::ShellEnvironmentPolicyInherit;
