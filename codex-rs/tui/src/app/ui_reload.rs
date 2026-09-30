@@ -40,7 +40,6 @@ impl App {
             && self.chat_widget.can_reload_ui()
             && self.queued_messages.mutations.is_empty()
             && self.overlay.is_none()
-            && self.dynamic_tool_tasks.is_empty()
             && self.temporary_structured_requests.is_empty()
             && self.pending_server_profiles.is_empty()
             && self.account_ui.selection_request.is_none()

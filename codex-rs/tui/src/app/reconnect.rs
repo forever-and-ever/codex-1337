@@ -4,7 +4,6 @@
 
 use super::*;
 use crate::app_server_session::ResumeModelSettings;
-use crate::dynamic_tools_mcp::ThreadToolTransport;
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub(super) enum ReconnectPresentation {
@@ -33,15 +32,11 @@ pub(super) async fn reconnect(
     local_settings: crate::local_settings::LocalSettings,
     thread_id: Option<ThreadId>,
     remote_cwd: Option<PathBuf>,
-    task_tools: ThreadToolTransport,
     presentation: ReconnectPresentation,
 ) -> Result<Reconnected> {
     let mode = target.thread_params_mode();
     if matches!(target, AppServerTarget::Embedded) {
         color_eyre::eyre::bail!("in-process sessions have no connection to restore");
-    }
-    if let ThreadToolTransport::Mcp(server) = &task_tools {
-        server.suspend();
     }
     if presentation == ReconnectPresentation::Conversation && thread_id.is_none() {
         color_eyre::eyre::bail!(
@@ -55,10 +50,8 @@ pub(super) async fn reconnect(
         let attempt = async {
             tokio::time::sleep(Duration::from_secs(delay)).await;
             let client = crate::app_server_connection::connect(&target).await?;
-            let mut session = AppServerSession::new(client, mode)
-                .with_local_codex_home(&config.codex_home)
-                .with_remote_cwd_override(remote_cwd.clone())
-                .with_thread_tool_transport(task_tools.clone());
+            let mut session =
+                AppServerSession::new(client, mode).with_remote_cwd_override(remote_cwd.clone());
             let bootstrap = session.bootstrap(&config).await?;
             let thread = if let Some(thread_id) = thread_id {
                 match session
@@ -244,9 +237,6 @@ impl App {
             self.chat_widget.pause_for_disconnect();
             self.startup_pending_protected_request = false;
             self.abort_all_thread_event_listeners();
-            for (_, (_, task)) in self.dynamic_tool_tasks.drain() {
-                task.abort();
-            }
         }
         true
     }
@@ -294,7 +284,6 @@ impl App {
         self.agent_navigation.picker_refresh = None;
         self.last_subagent_backfill_attempt = None;
         self.rate_limit_refresh_state.invalidate_recovery();
-        session.inherit_task_tool_capabilities(app_server);
         *app_server = session;
         #[cfg(any(target_os = "windows", test))]
         let interrupted_windows_setup = self.windows_sandbox.pending_setup.take().is_some();
@@ -478,10 +467,6 @@ impl App {
                 "Windows sandbox setup was interrupted. Restart Codex before using Agent mode."
                     .to_string(),
             );
-        }
-        // Only accept fresh task-tool calls once this connection and its event queue are adopted.
-        if let ThreadToolTransport::Mcp(server) = app_server.thread_tool_transport() {
-            server.reconnect(app_server.request_handle(), self.app_event_tx.clone());
         }
         self.reconnect.offline = false;
         self.chat_widget.update_account_state(

@@ -21,7 +21,6 @@ use codex_app_server_protocol::ThreadTurnsListParams;
 use codex_app_server_protocol::ThreadTurnsListResponse;
 use codex_app_server_protocol::TurnItemsView;
 use codex_protocol::ThreadId;
-use codex_utils_absolute_path::AbsolutePathBuf;
 use color_eyre::eyre::Result;
 
 // Bound recovery to recent messages when item paging is unavailable.
@@ -102,16 +101,10 @@ impl AppServerSession {
                 session,
                 turns: thread.turns,
                 blocks_direct_input: false,
-                task_tools_available: false,
+                task_tools_available: self.client.supports_thread_coordination(),
             },
             history_notice,
         ))
-    }
-
-    pub(crate) fn with_local_codex_home(mut self, codex_home: &AbsolutePathBuf) -> Self {
-        self.task_tool_capabilities_dir = (!self.uses_embedded_app_server())
-            .then(|| codex_home.join("tui-thread-reference-capabilities"));
-        self
     }
 
     /// Retains trusted embedded-server history metadata for a later resume.
@@ -153,8 +146,6 @@ impl AppServerSession {
             self.remote_cwd_override.as_deref(),
             model_settings,
         );
-        self.thread_tool_transport()
-            .configure_mcp(&mut params.config);
         let mut rollout_maintenance_guard = None;
         params.exclude_turns = if self.history_support == ThreadHistorySupport::Paginated {
             let known_legacy_history = self
@@ -235,7 +226,6 @@ impl AppServerSession {
         .await?;
         started.session.fork_parent_title = fork_parent_title;
         if self.task_tools_available(thread_id) {
-            self.remember_task_tool_thread(thread_id);
             started.task_tools_available = true;
         }
         Ok(started)

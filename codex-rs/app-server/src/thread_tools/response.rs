@@ -117,5 +117,5 @@ fn truncate_content(value: &mut Value, limit: usize) {
 }
 
 #[cfg(test)]
-#[path = "dynamic_tools_response_tests.rs"]
+#[path = "response_tests.rs"]
 mod tests;

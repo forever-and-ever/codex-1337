@@ -152,6 +152,7 @@ enum RemoteClientCommand {
 
 #[derive(Default)]
 struct RemoteServerMetadata {
+    thread_coordination: bool,
     server_version: Option<String>,
     codex_home: Option<String>,
     platform_family: Option<String>,
@@ -169,6 +170,7 @@ pub struct RemoteAppServerClient {
 #[derive(Clone)]
 pub struct RemoteAppServerRequestHandle {
     command_tx: mpsc::Sender<RemoteClientCommand>,
+    thread_coordination: bool,
 }
 
 enum SocketPeerPolicy {
@@ -234,6 +236,10 @@ impl RemoteAppServerClient {
 
     pub fn platform_os(&self) -> Option<&str> {
         self.metadata.platform_os.as_deref()
+    }
+
+    pub fn supports_thread_coordination(&self) -> bool {
+        self.metadata.thread_coordination
     }
 
     async fn connect_with_stream<S>(
@@ -530,6 +536,7 @@ impl RemoteAppServerClient {
     pub fn request_handle(&self) -> RemoteAppServerRequestHandle {
         RemoteAppServerRequestHandle {
             command_tx: self.command_tx.clone(),
+            thread_coordination: self.metadata.thread_coordination,
         }
     }
 
@@ -658,6 +665,10 @@ impl RemoteAppServerClient {
 }
 
 impl RemoteAppServerRequestHandle {
+    pub fn supports_thread_coordination(&self) -> bool {
+        self.thread_coordination
+    }
+
     pub async fn request(&self, request: ClientRequest) -> IoResult<RequestResult> {
         self.request_json_rpc(jsonrpc_request_from_client_request(request))
             .await
@@ -876,6 +887,8 @@ where
                                 .and_then(serde_json::Value::as_str).map(str::to_string);
                             metadata.platform_os = response.result.get("platformOs")
                                 .and_then(serde_json::Value::as_str).map(str::to_string);
+                            metadata.thread_coordination = response.result.get("threadCoordination")
+                                .and_then(serde_json::Value::as_bool).unwrap_or(false);
                             break Ok(());
                         }
                         JSONRPCMessage::Error(error) if error.id == initialize_request_id => {

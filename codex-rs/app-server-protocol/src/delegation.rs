@@ -1,17 +1,31 @@
 //! Sender attribution is captured at send time and retained with the tool output.
 
-pub(super) const MAX_SENDER_NAME_CHARS: usize = 200;
+pub const MAX_SENDER_NAME_CHARS: usize = 200;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct DelegatedMessage {
-    pub(crate) source_thread_id: String,
-    pub(crate) source_thread_name: Option<String>,
-    pub(crate) sent_at: Option<i64>,
-    pub(crate) input: String,
+pub struct DelegatedMessage {
+    pub source_thread_id: String,
+    pub source_thread_name: Option<String>,
+    pub sent_at: Option<i64>,
+    pub input: String,
 }
 
 impl DelegatedMessage {
-    pub(super) fn new(source: &codex_app_server_protocol::Thread, input: String) -> Self {
+    /// Recognizes attribution only on named coordination outputs, including the
+    /// persisted desktop namespace. Arbitrary tools cannot claim this envelope.
+    pub fn from_tool_output(
+        name: &str,
+        namespace: Option<&str>,
+        output: &codex_protocol::models::FunctionCallOutputBody,
+    ) -> Option<Self> {
+        if !matches!(namespace, Some("codex_tui" | "codex_app"))
+            || !matches!(name, "create_thread" | "send_message_to_thread")
+        {
+            return None;
+        }
+        Self::parse(output.to_text().as_deref()?)
+    }
+    pub fn new(source: &crate::Thread, input: String) -> Self {
         Self {
             source_thread_id: source.id.clone(),
             source_thread_name: source
@@ -19,12 +33,15 @@ impl DelegatedMessage {
                 .as_deref()
                 .filter(|name| !name.trim().is_empty())
                 .map(|name| name.chars().take(MAX_SENDER_NAME_CHARS).collect()),
-            sent_at: Some(chrono::Utc::now().timestamp_millis()),
+            sent_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()
+                .and_then(|elapsed| i64::try_from(elapsed.as_millis()).ok()),
             input,
         }
     }
 
-    pub(super) fn encode(&self) -> String {
+    pub fn encode(&self) -> String {
         let mut output = format!(
             "<codex_delegation>\n  <source_thread_id>{}</source_thread_id>",
             escape(&self.source_thread_id)
@@ -45,7 +62,7 @@ impl DelegatedMessage {
         output
     }
 
-    pub(super) fn parse(text: &str) -> Option<Self> {
+    pub fn parse(text: &str) -> Option<Self> {
         let rest = text.strip_prefix("<codex_delegation>\n  <source_thread_id>")?;
         let (id, mut rest) = rest.split_once("</source_thread_id>")?;
         let source_thread_name = if let Some(named) = rest.strip_prefix("\n  <source_thread_name>")

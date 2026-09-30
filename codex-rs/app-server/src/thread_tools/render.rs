@@ -1,0 +1,284 @@
+use super::DEFAULT_OUTPUT_CHARS;
+use codex_app_server_protocol::delegation::DelegatedMessage;
+
+use codex_app_server_protocol::{
+    ImageReference, Thread, ThreadItem, ThreadStatus, Turn, UserInput,
+};
+use serde_json::{Value, json};
+
+pub(super) fn thread_summary(thread: &Thread) -> Value {
+    json!({
+        "id": thread.id,
+        "kind": "codex",
+        "projectId": thread.project_id,
+        "title": thread.name.as_deref().map(|title| truncate(title, DEFAULT_OUTPUT_CHARS)),
+        "summary": truncate(&thread.preview, /*limit*/ 300),
+        "status": match &thread.status {
+            ThreadStatus::Idle => "idle",
+            ThreadStatus::NotLoaded => "notLoaded",
+            ThreadStatus::SystemError => "systemError",
+            ThreadStatus::Active { .. } => "active",
+        },
+        "cwd": thread.cwd,
+        "updatedAt": thread.updated_at
+    })
+}
+
+pub(super) fn turn_summary(turn: &Turn, include_outputs: bool, output_chars: usize) -> Value {
+    let mut items: Vec<Value> = turn
+        .items
+        .iter()
+        .rev()
+        .filter_map(|item| Some(match item {
+            ThreadItem::ToolOutputTokens { .. } => return None,
+            ThreadItem::UserMessage { id, content, .. } => json!({
+                "type": "userMessage",
+                "id": id,
+                "content": content.iter().map(|input| match input {
+                    UserInput::Text { text, .. } => {
+                        let mut input = json!({"type": "text", "text": truncate(text, DEFAULT_OUTPUT_CHARS)});
+                        if let Some(delegated) = DelegatedMessage::parse(text)
+                        {
+                            input["codexDelegation"] = json!({
+                                "sourceThreadId": delegated.source_thread_id,
+                                "sourceThreadName": delegated.source_thread_name,
+                                "sentAt": delegated.sent_at,
+                                "input": truncate(&delegated.input, DEFAULT_OUTPUT_CHARS)
+                            });
+                        }
+                        input
+                    }
+                    UserInput::Image {
+                        image: ImageReference::Inline { url },
+                        ..
+                    } => json!({"type": "image", "url": url}),
+                    UserInput::Image {
+                        image: ImageReference::File { file_id },
+                        ..
+                    } => json!({"type": "image", "fileId": file_id}),
+                    UserInput::LocalImage { path, .. } => json!({"type": "localImage", "path": path}),
+                    UserInput::Audio { url } => json!({"type": "audio", "url": url}),
+                    UserInput::LocalAudio { path } => json!({"type": "localAudio", "path": path}),
+                    UserInput::Skill { name, path } => json!({"type": "skill", "name": name, "path": path}),
+                    UserInput::Mention { name, path } => json!({"type": "mention", "name": name, "path": path}),
+                }).collect::<Vec<_>>()
+            }),
+            ThreadItem::HookPrompt { id, fragments } => json!({
+                "type": "hookPrompt", "id": id, "fragmentCount": fragments.len()
+            }),
+            ThreadItem::FunctionCallOutput {
+                id,
+                name,
+                namespace,
+                output,
+            } => {
+                let mut item = json!({
+                    "type": "functionCallOutput", "id": id, "name": name, "namespace": namespace
+                });
+                if let Some(delegated) =
+                    DelegatedMessage::from_tool_output(name, namespace.as_deref(), output)
+                {
+                    item["codexDelegation"] = json!({
+                        "sourceThreadId": delegated.source_thread_id,
+                        "sourceThreadName": delegated.source_thread_name,
+                        "sentAt": delegated.sent_at,
+                        "input": truncate(&delegated.input, DEFAULT_OUTPUT_CHARS)
+                    });
+                }
+                if include_outputs {
+                    item["output"] = output_summary(
+                        output.to_text().as_deref().unwrap_or("[non-text output]"),
+                        output_chars,
+                    );
+                }
+                item
+            }
+            ThreadItem::AgentMessage { id, text, phase, .. } => json!({
+                "type": "agentMessage", "id": id, "text": text, "phase": phase
+            }),
+            ThreadItem::Plan { id, text } => json!({
+                "type": "plan", "id": id, "text": truncate(text, DEFAULT_OUTPUT_CHARS)
+            }),
+            ThreadItem::Reasoning {
+                id,
+                summary,
+                content,
+            } => {
+                let mut item = json!({
+                    "type": "reasoning",
+                    "id": id,
+                    "summary": summary.iter().map(|text| truncate(text, DEFAULT_OUTPUT_CHARS)).collect::<Vec<_>>()
+                });
+                if include_outputs {
+                    item["content"] = json!(
+                        content.iter().map(|text| output_summary(text, output_chars)).collect::<Vec<_>>()
+                    );
+                }
+                item
+            }
+            ThreadItem::CommandExecution {
+                id,
+                command,
+                cwd,
+                aggregated_output,
+                exit_code,
+                status,
+                duration_ms,
+                ..
+            } => {
+                let mut item = json!({
+                    "type": "commandExecution",
+                    "id": id,
+                    "command": truncate(command, DEFAULT_OUTPUT_CHARS),
+                    "cwd": cwd,
+                    "exitCode": exit_code,
+                    "status": status,
+                    "durationMs": duration_ms
+                });
+                if include_outputs && let Some(output) = aggregated_output {
+                    item["output"] = output_summary(output, output_chars);
+                }
+                item
+            }
+            ThreadItem::FileChange {
+                id,
+                changes,
+                status,
+            } => json!({
+                "type": "fileChange",
+                "id": id,
+                "status": status,
+                "changes": changes.iter().map(|change| {
+                    let mut item = json!({"path": change.path, "kind": change.kind});
+                    if include_outputs {
+                        item["diff"] = output_summary(&change.diff, output_chars);
+                    }
+                    item
+                }).collect::<Vec<_>>()
+            }),
+            ThreadItem::McpToolCall {
+                id,
+                server,
+                tool,
+                status,
+                arguments,
+                duration_ms,
+                ..
+            } => json!({
+                "type": "mcpToolCall", "id": id, "server": server, "tool": tool,
+                "arguments": arguments, "status": status, "durationMs": duration_ms
+            }),
+            ThreadItem::DynamicToolCall {
+                id,
+                namespace,
+                tool,
+                arguments,
+                status,
+                success,
+                duration_ms,
+                ..
+            } => json!({
+                "type": "dynamicToolCall", "id": id, "namespace": namespace,
+                "tool": tool, "arguments": arguments, "status": status,
+                "success": success, "durationMs": duration_ms
+            }),
+            ThreadItem::CollabAgentToolCall {
+                id,
+                tool,
+                status,
+                sender_thread_id,
+                receiver_thread_ids,
+                prompt,
+                model,
+                reasoning_effort,
+                ..
+            } => json!({
+                "type": "collabAgentToolCall", "id": id, "tool": tool,
+                "status": status, "senderThreadId": sender_thread_id,
+                "receiverThreadIds": receiver_thread_ids, "prompt": prompt,
+                "model": model, "reasoningEffort": reasoning_effort
+            }),
+            ThreadItem::SubAgentActivity {
+                id,
+                kind,
+                agent_thread_id,
+                agent_path,
+                ..
+            } => json!({
+                "type": "subAgentActivity", "id": id, "kind": kind,
+                "agentThreadId": agent_thread_id, "agentPath": agent_path
+            }),
+            ThreadItem::WebSearch(item) => json!({
+                "type": "webSearch", "id": item.id,
+                "query": truncate(&item.query, DEFAULT_OUTPUT_CHARS), "action": item.action
+            }),
+            ThreadItem::ImageView { id, path } => json!({
+                "type": "imageView", "id": id, "path": path
+            }),
+            ThreadItem::Sleep(item) => json!({
+                "type": "sleep", "id": item.id, "durationMs": item.duration_ms
+            }),
+            ThreadItem::ImageGeneration(item) => {
+                let mut image = json!({
+                    "type": "imageGeneration", "id": item.id, "status": item.status,
+                    "revisedPrompt": item.revised_prompt.as_deref().map(|prompt| truncate(prompt, DEFAULT_OUTPUT_CHARS)),
+                    "savedPath": item.saved_path
+                });
+                if include_outputs {
+                    image["result"] = output_summary(&item.result, output_chars);
+                }
+                image
+            }
+            ThreadItem::EnteredReviewMode { id, review } => json!({
+                "type": "enteredReviewMode", "id": id, "review": truncate(review, DEFAULT_OUTPUT_CHARS)
+            }),
+            ThreadItem::ExitedReviewMode { id, review } => json!({
+                "type": "exitedReviewMode", "id": id, "review": truncate(review, DEFAULT_OUTPUT_CHARS)
+            }),
+            ThreadItem::ContextCompaction { id } => json!({
+                "type": "contextCompaction", "id": id
+            }),
+        }))
+        .take(20)
+        .collect();
+    items.reverse();
+    json!({
+        "id": turn.id,
+        "status": turn.status,
+        "error": turn.error.as_ref().map(|error| json!({
+            "message": error.message,
+            "additionalDetails": error.additional_details
+        })),
+        "startedAt": turn.started_at,
+        "completedAt": turn.completed_at,
+        "durationMs": turn.duration_ms,
+        "items": items
+    })
+}
+
+pub(super) fn output_summary(text: &str, limit: usize) -> Value {
+    let original_chars = text.chars().count();
+    if original_chars <= limit {
+        json!({"text": text, "truncated": false})
+    } else {
+        json!({
+            "text": text.chars().take(limit).collect::<String>(),
+            "truncated": true,
+            "originalChars": original_chars
+        })
+    }
+}
+
+pub(super) fn truncate(text: &str, limit: usize) -> String {
+    if text.chars().count() <= limit {
+        return text.to_string();
+    }
+    if limit == 0 {
+        return String::new();
+    }
+    format!("{}…", text.chars().take(limit - 1).collect::<String>())
+}
+
+#[cfg(test)]
+#[path = "render_tests.rs"]
+mod tests;

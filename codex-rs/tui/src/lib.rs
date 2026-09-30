@@ -147,7 +147,6 @@ mod debug_config;
 mod diff_model;
 mod diff_render;
 mod dynamic_tools;
-mod dynamic_tools_mcp;
 mod empty_state_animation;
 mod exec_cell;
 mod exec_command;
@@ -623,10 +622,10 @@ pub(crate) async fn start_app_server_for_picker(
         embedded_network_policy,
     )
     .await?;
-    Ok(
-        AppServerSession::new(app_server, target.thread_params_mode())
-            .with_local_codex_home(&config.codex_home),
-    )
+    Ok(AppServerSession::new(
+        app_server,
+        target.thread_params_mode(),
+    ))
 }
 
 #[cfg(test)]
@@ -1194,7 +1193,6 @@ async fn run_ratatui_app(
     let app_server_session = match startup_app_server {
         Ok(Ok(app_server)) => {
             AppServerSession::new(app_server, app_server_target.thread_params_mode())
-                .with_local_codex_home(&initial_config.codex_home)
         }
         Ok(Err(err)) => {
             terminal_restore_guard.restore_silently();
@@ -1765,7 +1763,6 @@ async fn run_ratatui_app(
                 // A picker can replace the server; account reads belong to their original session.
                 startup_account = None;
                 AppServerSession::new(app_server, app_server_target.thread_params_mode())
-                    .with_local_codex_home(&config.codex_home)
                     .with_remote_cwd_override(remote_cwd_override.clone())
             }
             Ok(Err(err)) => {
@@ -1846,8 +1843,7 @@ async fn run_ratatui_app(
                     embedded_network_policy.clone(),
                 )
                 .await?;
-                app_server = AppServerSession::new(client, app_server_target.thread_params_mode())
-                    .with_local_codex_home(&config.codex_home);
+                app_server = AppServerSession::new(client, app_server_target.thread_params_mode());
             }
             #[cfg(target_os = "windows")]
             {

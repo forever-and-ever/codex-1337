@@ -16,7 +16,6 @@ impl App {
             && self.chat_widget.ready_for_idle_restart()
             && self.pending_primary_events.is_empty()
             && self.pending_app_server_requests.is_empty()
-            && self.dynamic_tool_tasks.is_empty()
             && self.temporary_structured_requests.is_empty()
             && self.pending_server_profiles.is_empty()
             && self.pending_plugin_enabled_writes.is_empty()

@@ -672,6 +672,13 @@ impl InProcessAppServerRequestHandle {
 }
 
 impl AppServerRequestHandle {
+    /// Whether the connected server owns native coordination; this is not authorization.
+    pub fn supports_thread_coordination(&self) -> bool {
+        match self {
+            Self::InProcess(_) => true,
+            Self::Remote(handle) => handle.supports_thread_coordination(),
+        }
+    }
     pub async fn request(&self, request: ClientRequest) -> IoResult<RequestResult> {
         match self {
             Self::InProcess(handle) => handle.request(request).await,
@@ -690,6 +697,13 @@ impl AppServerRequestHandle {
 }
 
 impl AppServerClient {
+    /// Older remote servers omit the capability and are treated as unsupported.
+    pub fn supports_thread_coordination(&self) -> bool {
+        match self {
+            Self::InProcess(_) => true,
+            Self::Remote(client) => client.supports_thread_coordination(),
+        }
+    }
     /// App-server platform family, which can differ from the executor's platform.
     /// Older remote servers may omit this metadata.
     pub fn platform_family(&self) -> Option<&str> {

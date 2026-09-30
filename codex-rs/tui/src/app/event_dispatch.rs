@@ -265,37 +265,10 @@ impl App {
                 self.handle_startup_thread_started(app_server, result)
                     .await?;
             }
-            AppEvent::DynamicToolThreadStarted {
-                thread,
-                task_tools_available,
-                registered,
-            } => {
-                let Ok(thread_id) = ThreadId::from_string(&thread.id) else {
-                    return Ok(AppRunControl::Continue);
-                };
-                self.agents_overview
-                    .dispatched_requests
-                    .entry(thread_id)
-                    .or_default();
-                if task_tools_available {
-                    app_server.remember_task_tool_thread(thread_id);
-                }
-                // Fallback metadata must not replay after fresh reads or newer notifications.
-                if !thread.ephemeral
-                    && !self.agents_overview.removed_threads.contains(&thread_id)
-                    && !self.agents_overview.threads.get(&thread_id).is_some_and(Option::is_some) {
-                    self.agents_overview.threads.insert(thread_id, Some(thread));
-                    self.agents_overview.refresh_thread_ids.insert(thread_id);
-                }
-                self.refresh_changed_agents_overview_threads(app_server);
-                self.repaint_agents_overview();
-                let _ = registered.send(());
-            }
             AppEvent::DynamicToolCallCompleted {
                 request_id,
                 response,
             } => {
-                self.dynamic_tool_tasks.remove(&request_id);
                 match serde_json::to_value(response) {
                     Ok(result) => {
                         if let Err(error) = app_server
@@ -309,9 +282,6 @@ impl App {
                         tracing::warn!(?request_id, %error, "failed to serialize dynamic tool response");
                     }
                 }
-            }
-            AppEvent::TaskToolsAvailable { thread_id } => {
-                app_server.remember_task_tool_thread(thread_id);
             }
             AppEvent::RequestOlderScrollbackHistory { thread_id } => {
                 if self.chat_widget.thread_id() == Some(thread_id)
@@ -3384,25 +3354,6 @@ impl App {
         app_server: &mut AppServerSession,
         mode: ExitMode,
     ) -> AppRunControl {
-        for (request_id, (_, task)) in self.dynamic_tool_tasks.drain() {
-            task.abort();
-            let response = crate::dynamic_tools::failure_response(
-                "TUI disconnected while handling a dynamic tool call",
-            );
-            match serde_json::to_value(response) {
-                Ok(result) => {
-                    if let Err(error) = app_server
-                        .resolve_server_request(request_id.clone(), result)
-                        .await
-                    {
-                        tracing::warn!(?request_id, %error, "failed to cancel dynamic tool call");
-                    }
-                }
-                Err(error) => {
-                    tracing::warn!(?request_id, %error, "failed to serialize dynamic tool response")
-                }
-            }
-        }
         match mode {
             ExitMode::ShutdownFirst | ExitMode::ShutdownAfterInterrupt => {
                 // Mark the thread we are explicitly shutting down for exit so

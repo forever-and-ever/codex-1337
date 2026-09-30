@@ -317,7 +317,9 @@ where
         methods.push(request.method.clone());
         let request_id = request.id.clone();
         let response = match request.method.as_str() {
-            "initialize" => Some(json!({"result": {"userAgent": "reconnect-test/2.0.0"}})),
+            "initialize" => Some(
+                json!({"result": {"userAgent": "reconnect-test/2.0.0", "threadCoordination": true}}),
+            ),
             "account/read" => {
                 Some(json!({"result": {"account": null, "requiresOpenaiAuth": false}}))
             }
@@ -367,7 +369,6 @@ async fn lost_initial_thread_reply_keeps_startup_draft_offline() -> Result<()> {
             app.config.clone(),
             ThreadParamsMode::Remote,
             /*remote_cwd_override*/ None,
-            session.thread_tool_transport(),
         )
         .await;
         let mut tui = crate::tui::test_support::make_test_tui()?;

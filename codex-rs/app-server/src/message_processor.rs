@@ -138,6 +138,8 @@ fn reject_removed_permission_profile(request: &JSONRPCRequest) -> Result<(), JSO
 }
 
 pub(crate) struct MessageProcessor {
+    // The registry retains only a weak reference; keep the service for this process.
+    _thread_coordination: Arc<crate::request_processors::ThreadCoordinationService>,
     pub(crate) turn_admission: TurnAdmission,
     user_verification: Arc<crate::user_verification::Service>,
     outgoing: Arc<OutgoingMessageSender>,
@@ -323,6 +325,7 @@ impl MessageProcessor {
         let extension_event_sink =
             app_server_extension_event_sink(outgoing.clone(), thread_state_manager.clone());
         let mut queue_service = None;
+        let coordination = Arc::new(OnceLock::new());
         let thread_manager = Arc::new_cyclic(|thread_manager| {
             queue_service = queue_store.map(|queue| {
                 Arc::new(QueuedItemService::new(
@@ -351,6 +354,7 @@ impl MessageProcessor {
                     http_client_factory: config.http_client_factory(),
                     queue_service: queue_service.clone(),
                     turn_start_admission: Some(Arc::clone(&turn_start_admission)),
+                    coordination: Some(Arc::clone(&coordination)),
                 }),
                 Arc::new(CodexHomeUserInstructionsProvider::new(
                     config.codex_home.clone(),
@@ -524,6 +528,12 @@ impl MessageProcessor {
             turn_cost_worker.as_ref().map(TurnCostWorker::handle),
             config_warnings,
         );
+        let thread_coordination =
+            Arc::new(crate::request_processors::ThreadCoordinationService::new(
+                thread_processor.clone(),
+                thread_queue_processor.clone(),
+            ));
+        let _ = coordination.set(Arc::downgrade(&thread_coordination));
         let turn_processor = TurnRequestProcessor::new(
             auth_manager,
             Arc::clone(&thread_manager),
@@ -583,6 +593,7 @@ impl MessageProcessor {
 
         Self {
             turn_admission,
+            _thread_coordination: thread_coordination,
             user_verification,
             outgoing,
             models_refresh_worker,
@@ -1969,3 +1980,7 @@ mod message_processor_tracing_tests;
 #[cfg(test)]
 #[path = "message_processor_gateway_oauth_tests.rs"]
 mod gateway_oauth_tests;
+
+#[cfg(test)]
+#[path = "thread_coordination_lifecycle_tests.rs"]
+mod coordination_lifecycle_tests;
