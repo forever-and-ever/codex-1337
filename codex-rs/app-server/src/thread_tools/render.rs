@@ -1,10 +1,14 @@
 use super::DEFAULT_OUTPUT_CHARS;
 use codex_app_server_protocol::delegation::DelegatedMessage;
 
-use codex_app_server_protocol::{
-    ImageReference, Thread, ThreadItem, ThreadStatus, Turn, UserInput,
-};
-use serde_json::{Value, json};
+use codex_app_server_protocol::ImageReference;
+use codex_app_server_protocol::Thread;
+use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadStatus;
+use codex_app_server_protocol::Turn;
+use codex_app_server_protocol::UserInput;
+use serde_json::Value;
+use serde_json::json;
 
 pub(super) fn thread_summary(thread: &Thread) -> Value {
     json!({

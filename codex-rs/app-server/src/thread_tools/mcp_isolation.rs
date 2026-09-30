@@ -5,9 +5,10 @@
 //! transport disablement, with native user policy configured independently.
 
 use codex_core::config::Config;
-use codex_extension_api::{
-    ExtensionFuture, McpServerContribution, McpServerContributionContext, McpServerContributor,
-};
+use codex_extension_api::ExtensionFuture;
+use codex_extension_api::McpServerContribution;
+use codex_extension_api::McpServerContributionContext;
+use codex_extension_api::McpServerContributor;
 
 pub(super) struct CoordinationMcpIsolation;
 

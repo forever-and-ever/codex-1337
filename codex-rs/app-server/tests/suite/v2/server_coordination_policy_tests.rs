@@ -3,7 +3,8 @@
 
 use super::*;
 use crate::common::TestAppServer;
-use codex_app_server_protocol::{TurnStartParams, UserInput};
+use codex_app_server_protocol::TurnStartParams;
+use codex_app_server_protocol::UserInput;
 use std::collections::HashMap;
 
 async fn user_owned_mcp(State(gate): State<Arc<ModelGate>>, Json(body): Json<Value>) -> Response {

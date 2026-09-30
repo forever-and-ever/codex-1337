@@ -2,18 +2,19 @@
 //! server service because the public API deliberately has no raw Core shutdown RPC.
 
 use super::ConnectionSessionState;
-use super::message_processor_tracing_tests::{
-    TEST_CONNECTION_ID, build_test_processor, read_response,
-};
+use super::message_processor_tracing_tests::TEST_CONNECTION_ID;
+use super::message_processor_tracing_tests::build_test_processor;
+use super::message_processor_tracing_tests::read_response;
 use crate::transport::AppServerTransport;
 use anyhow::Result;
-use app_test_support::{
-    create_mock_responses_server_repeating_assistant, write_mock_responses_config_toml,
-};
-use codex_app_server_protocol::{InitializeResponse, ThreadStartResponse};
+use app_test_support::create_mock_responses_server_repeating_assistant;
+use app_test_support::write_mock_responses_config_toml;
+use codex_app_server_protocol::InitializeResponse;
+use codex_app_server_protocol::ThreadStartResponse;
 use codex_core::config::ConfigBuilder;
 use codex_login::AuthManager;
-use codex_protocol::protocol::{AgentStatus, Op};
+use codex_protocol::protocol::AgentStatus;
+use codex_protocol::protocol::Op;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 use std::collections::BTreeMap;
