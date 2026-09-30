@@ -515,14 +515,9 @@ fn mixed_shell_reads_share_one_disclosure_and_output_bill() {
         let mut buffer = Buffer::empty(area);
         view.render(area, &mut buffer, &cells);
         let text = crate::transcript_view::tests::text(&buffer);
-        assert_eq!(text.matches("1,280 total tokens").count(), 1);
+        assert_eq!(text.matches("(~ 1,280 tokens)").count(), 1);
         assert_eq!(
-            text.matches(if expanded {
-                "Show less"
-            } else {
-                "Show details"
-            })
-            .count(),
+            text.matches(if expanded { "[-]" } else { "[+]" }).count(),
             1
         );
         snapshots.push(format!("expanded={expanded}\n{buffer:?}"));

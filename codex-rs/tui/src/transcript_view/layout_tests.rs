@@ -2,6 +2,7 @@
 
 use super::*;
 use pretty_assertions::assert_eq;
+use ratatui::style::Stylize;
 use ratatui::text::Line;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
@@ -51,6 +52,97 @@ fn tool_output_disclosure_shows_full_estimate_when_it_fits() {
     let mut buffer = Buffer::empty(area);
     layout.render(area, &mut buffer, /*start_row*/ 0);
     insta::assert_snapshot!(format!("{buffer:?}"));
+}
+
+#[test]
+fn tool_heading_decorations_preserve_source_and_hit_targets() {
+    use crate::history_cell::McpInvocation;
+    use crate::history_cell::new_active_mcp_tool_call;
+    use codex_protocol::mcp::CallToolResult;
+    use serde_json::json;
+    use std::time::Duration;
+    use unicode_segmentation::UnicodeSegmentation;
+
+    let mut mcp = new_active_mcp_tool_call(
+        "unicode-call".into(),
+        McpInvocation {
+            server: "server".into(),
+            tool: "search".into(),
+            arguments: Some(
+                json!({"query": "页面 👩‍💻 e\u{301} a long query", "path": "页面 👩‍💻/lib.rs"}),
+            ),
+        },
+        /*animations_enabled*/ false,
+    );
+    mcp.complete(
+        Duration::ZERO,
+        Ok(CallToolResult {
+            content: vec![json!({"type": "text", "text": "retained result\nsecond result line"})],
+            is_error: None,
+            structured_content: None,
+            meta: None,
+        }),
+    );
+    let mut snapshots = Vec::new();
+    for (width, expanded, tokens) in [
+        (90, false, Some(82)),
+        (58, false, Some(82)),
+        (90, true, Some(82)),
+        (58, false, None),
+    ] {
+        let layout = activity_layout(
+            ActivityTranscriptLines {
+                activity: if expanded {
+                    mcp.expanded_hyperlink_lines(width)
+                } else {
+                    mcp.compact_hyperlink_lines(width)
+                },
+                auxiliary: Vec::new(),
+                tool_output_tokens: tokens,
+                disclosure: mcp.activity_disclosure(width),
+            },
+            width,
+            expanded,
+            /*shortcut*/ None,
+        );
+        let area = Rect::new(/*x*/ 0, /*y*/ 0, width, /*height*/ 8);
+        let mut buffer = Buffer::empty(area);
+        layout.render(area, &mut buffer, /*start_row*/ 0);
+        assert_eq!(layout.disclosure_columns(), 0..3);
+        assert!(!layout.text().contains("tokens)"));
+        assert!(layout.text().starts_with("Called"));
+        if tokens.is_some() {
+            assert!(crate::transcript_view::tests::text(&buffer).contains("Called (~ 82 tokens)"));
+        }
+        assert_eq!(layout.position_at(/*row*/ 0, /*column*/ 0), 0);
+        if !expanded {
+            assert_eq!(layout.row_count(), 1);
+        }
+        snapshots.push(format!(
+            "width={width}, expanded={expanded}, tokens={tokens:?}\n{buffer:?}"
+        ));
+    }
+    // Every selectable character lands back on the same source offset after a mid-header estimate.
+    let layout = activity_layout(
+        ActivityTranscriptLines {
+            activity: vec![
+                Line::from(vec!["• ".into(), "Ran".bold(), " echo 界 👩‍💻".into()]).into(),
+            ],
+            auxiliary: Vec::new(),
+            tool_output_tokens: Some(1_337),
+            disclosure: None,
+        },
+        /*width*/ 80,
+        /*expanded*/ false,
+        /*shortcut*/ None,
+    );
+    for (offset, _) in layout.text().grapheme_indices(/*is_extended*/ true) {
+        let column = layout.column_for_offset(offset);
+        assert_eq!(layout.position_at(/*row*/ 0, column), offset);
+    }
+    assert!(!layout.disclosure);
+    assert_eq!(layout.rewrap(/*width*/ 60).text(), layout.text());
+    insta::assert_snapshot!(snapshots.join("\n\n"));
 }
 
 #[test]
