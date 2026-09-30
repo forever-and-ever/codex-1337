@@ -19,8 +19,6 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use tracing::warn;
 
-use super::BedrockAccessKeysAuth;
-use super::BedrockApiKeyAuth;
 use super::accounts::AuthDocument;
 use crate::token_data::TokenData;
 use codex_agent_identity::AgentIdentityJwtClaims;
@@ -39,7 +37,7 @@ use codex_secrets::SecretsManager;
 use once_cell::sync::Lazy;
 
 /// Expected structure for $CODEX_HOME/auth.json.
-#[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct AuthDotJson {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auth_mode: Option<AuthMode>,
@@ -58,12 +56,41 @@ pub struct AuthDotJson {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub personal_access_token: Option<String>,
+}
 
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bedrock_api_key: Option<BedrockApiKeyAuth>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bedrock_access_keys: Option<BedrockAccessKeysAuth>,
+impl<'de> Deserialize<'de> for AuthDotJson {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // Retired credentials must fail closed even when an old document omitted auth_mode.
+        #[derive(Deserialize)]
+        struct StoredAuth {
+            auth_mode: Option<AuthMode>,
+            #[serde(rename = "OPENAI_API_KEY")]
+            openai_api_key: Option<String>,
+            tokens: Option<TokenData>,
+            last_refresh: Option<DateTime<Utc>>,
+            agent_identity: Option<AgentIdentityStorage>,
+            personal_access_token: Option<String>,
+            bedrock_api_key: Option<serde::de::IgnoredAny>,
+            bedrock_access_keys: Option<serde::de::IgnoredAny>,
+        }
+        let stored = StoredAuth::deserialize(deserializer)?;
+        if stored.bedrock_api_key.is_some() || stored.bedrock_access_keys.is_some() {
+            return Err(serde::de::Error::custom(
+                "Amazon Bedrock credentials are no longer supported; log in with a supported provider",
+            ));
+        }
+        Ok(Self {
+            auth_mode: stored.auth_mode,
+            openai_api_key: stored.openai_api_key,
+            tokens: stored.tokens,
+            last_refresh: stored.last_refresh,
+            agent_identity: stored.agent_identity,
+            personal_access_token: stored.personal_access_token,
+        })
+    }
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq, Eq)]

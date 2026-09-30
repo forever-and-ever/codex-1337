@@ -13,10 +13,6 @@ use codex_exec_server::LOCAL_FS;
 use codex_features::feature_for_key;
 use codex_login::AuthManager;
 use codex_login::default_client::set_default_client_residency_requirement;
-use codex_model_provider_info::AMAZON_BEDROCK_PROVIDER_ID;
-use codex_model_provider_info::AMAZON_BEDROCK_RUNTIME_PROVIDER_ID;
-use codex_model_provider_info::built_in_model_providers;
-use codex_model_provider_info::merge_configured_model_providers;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_json_to_toml::json_to_toml;
 use std::collections::BTreeMap;
@@ -286,24 +282,6 @@ impl ConfigManager {
             .as_ref()
             .and_then(|providers| providers.get(&current.model_provider_id))
             .cloned();
-        let required_provider = match required_provider {
-            Some(provider)
-                if matches!(
-                    current.model_provider_id.as_str(),
-                    AMAZON_BEDROCK_PROVIDER_ID | AMAZON_BEDROCK_RUNTIME_PROVIDER_ID
-                ) =>
-            {
-                // Bedrock requirements contain overrides of the built-in provider.
-                merge_configured_model_providers(
-                    built_in_model_providers(/*openai_base_url*/ None),
-                    HashMap::from([(current.model_provider_id.clone(), provider)]),
-                )
-                .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidData, message))?
-                .remove(&current.model_provider_id)
-            }
-            Some(provider) => Some(provider),
-            None => None,
-        };
         let definition_changed = required_provider
             .as_ref()
             .is_some_and(|provider| provider != &current.model_provider);

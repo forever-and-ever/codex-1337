@@ -66,9 +66,6 @@ fn bearer_scheme() -> String {
 
 impl GatewayOAuthConfig {
     pub(crate) fn validate(&self, provider: &ModelProviderInfo) -> Result<(), String> {
-        if provider.aws.is_some() || provider.is_amazon_bedrock() {
-            return Err("provider gateway_oauth cannot be combined with AWS authentication".into());
-        }
         validate_url(&self.authorization_url, "gateway_oauth.authorization_url")?;
         validate_url(&self.token_url, "gateway_oauth.token_url")?;
         let base_url = provider

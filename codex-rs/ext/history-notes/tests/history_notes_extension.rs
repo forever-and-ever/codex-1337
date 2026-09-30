@@ -406,7 +406,10 @@ async fn history_notes_require_an_openai_provider_and_codex_backend_auth() -> Te
             CodexAuth::from_api_key("test-api-key"),
         ),
         (
-            ModelProviderInfo::create_amazon_bedrock_provider(/*aws*/ None),
+            ModelProviderInfo {
+                name: "Custom".to_string(),
+                ..ModelProviderInfo::default()
+            },
             CodexAuth::create_dummy_chatgpt_auth_for_testing(),
         ),
     ] {

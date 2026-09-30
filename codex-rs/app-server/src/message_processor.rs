@@ -1784,12 +1784,6 @@ impl MessageProcessor {
                     .login_account(request_id.clone(), params)
                     .await
             }
-            ClientRequest::BedrockDiscover { params, .. } => {
-                self.account_processor.bedrock_discover(params).await
-            }
-            ClientRequest::BedrockSetup { params, .. } => {
-                self.account_processor.bedrock_setup(params).await
-            }
             ClientRequest::GatewayOAuthRead { .. } => {
                 Box::pin(self.account_processor.gateway_oauth_read())
                     .await

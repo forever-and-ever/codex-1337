@@ -196,7 +196,7 @@ async fn experimental_notifications_are_dropped_without_capability() {
     let recovery = AuthRecoveryNotification {
         thread_id: "thread-1".to_string(),
         turn_id: "turn-1".to_string(),
-        provider: "Amazon Bedrock".to_string(),
+        provider: "Custom".to_string(),
         message: "Refreshing AWS authentication.".to_string(),
     };
 

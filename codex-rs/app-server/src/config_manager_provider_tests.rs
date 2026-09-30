@@ -14,42 +14,6 @@ use pretty_assertions::assert_eq;
 use tempfile::tempdir;
 use test_case::test_case;
 
-#[test_case(AMAZON_BEDROCK_PROVIDER_ID; "bedrock")]
-#[test_case(AMAZON_BEDROCK_RUNTIME_PROVIDER_ID; "bedrock_runtime")]
-#[tokio::test]
-async fn provider_requirements_resolve_bedrock_overrides(provider_id: &str) -> Result<()> {
-    let home = tempdir()?;
-    let requirements = format!(
-        "model_provider = '{provider_id}'\n[model_providers.{provider_id}.aws]\nregion = 'us-west-2'"
-    );
-    let manager = ConfigManager::new_for_tests(
-        home.path().to_path_buf(),
-        Vec::new(),
-        LoaderOverrides::without_managed_config_for_tests(),
-        CloudConfigBundleFixture::loader_with_enterprise_requirement(&requirements),
-    );
-    let current = manager.load_latest_config(/*fallback_cwd*/ None).await?;
-    manager.check_thread_model_provider(&current).await?;
-
-    let changed = ConfigManager::new_for_tests(
-        home.path().to_path_buf(),
-        Vec::new(),
-        LoaderOverrides::without_managed_config_for_tests(),
-        CloudConfigBundleFixture::loader_with_enterprise_requirement(
-            requirements.replace("us-west-2", "us-east-1"),
-        ),
-    );
-    assert_eq!(
-        changed
-            .check_thread_model_provider(&current)
-            .await
-            .unwrap_err()
-            .kind(),
-        std::io::ErrorKind::PermissionDenied,
-    );
-    Ok(())
-}
-
 struct UnavailableThreadConfig;
 
 impl ThreadConfigLoader for UnavailableThreadConfig {

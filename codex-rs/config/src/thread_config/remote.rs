@@ -182,7 +182,6 @@ fn model_provider_from_proto(
             .map(model_provider_auth_from_proto)
             .transpose()?,
         gateway_oauth: None,
-        aws: None,
         wire_api,
         query_params: provider.query_params.map(redacted_string_map),
         http_headers: provider.http_headers.map(redacted_string_map),
@@ -213,7 +212,6 @@ fn model_provider_to_proto(
         experimental_bearer_token,
         auth,
         gateway_oauth: _,
-        aws: _,
         wire_api,
         query_params,
         http_headers,
@@ -580,7 +578,6 @@ mod tests {
             supports_websockets: true,
             supports_standalone_web_search: true,
             gateway_oauth: None,
-            aws: None,
             include_internal_metadata: false,
         }
     }

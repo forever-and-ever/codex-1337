@@ -9,8 +9,6 @@
 
 use codex_config::types::AuthCredentialsStoreMode;
 use codex_core::config::Config;
-use codex_core::config::edit::ConfigEdit;
-use codex_core::config::edit::ConfigEditsBuilder;
 use codex_login::AuthKeyringBackendKind;
 use codex_login::AuthManager;
 use codex_login::AuthRouteConfig;
@@ -441,14 +439,6 @@ pub async fn run_login_status(cli_config_overrides: CliConfigOverrides) -> ! {
                 eprintln!("Logged in using personal access token");
                 std::process::exit(0);
             }
-            AuthMode::BedrockApiKey => {
-                eprintln!("Logged in using Amazon Bedrock API key");
-                std::process::exit(0);
-            }
-            AuthMode::BedrockAccessKeys => {
-                eprintln!("Logged in using Amazon Bedrock AWS access keys");
-                std::process::exit(0);
-            }
         },
         Ok(None) => {
             eprintln!("Not logged in");
@@ -480,25 +470,7 @@ pub async fn run_logout(cli_config_overrides: CliConfigOverrides) -> ! {
         }
     };
 
-    let cleared_bedrock_config =
-        if let Some(paths) = ConfigEditsBuilder::bedrock_provider_config_paths_to_clear(&config) {
-            let edits = paths
-                .into_iter()
-                .map(|segments| ConfigEdit::ClearPath { segments });
-            if let Err(err) = ConfigEditsBuilder::for_config(&config)
-                .with_edits(edits)
-                .apply()
-                .await
-            {
-                eprintln!("Error clearing Amazon Bedrock configuration after logout: {err}");
-                std::process::exit(1);
-            }
-            true
-        } else {
-            false
-        };
-
-    let message = if logged_out || cleared_bedrock_config {
+    let message = if logged_out {
         "Successfully logged out"
     } else {
         "Not logged in"

@@ -25,8 +25,6 @@ async fn file_storage_load_returns_auth_dot_json() -> anyhow::Result<()> {
         last_refresh: Some(Utc::now()),
         agent_identity: None,
         personal_access_token: None,
-        bedrock_api_key: None,
-        bedrock_access_keys: None,
     };
 
     storage
@@ -49,8 +47,6 @@ async fn file_storage_save_persists_auth_dot_json() -> anyhow::Result<()> {
         last_refresh: Some(Utc::now()),
         agent_identity: None,
         personal_access_token: None,
-        bedrock_api_key: None,
-        bedrock_access_keys: None,
     };
 
     let file = get_auth_file(codex_home.path());
@@ -85,8 +81,6 @@ async fn file_storage_round_trips_agent_identity_auth() -> anyhow::Result<()> {
         last_refresh: None,
         agent_identity: Some(AgentIdentityStorage::Jwt(agent_identity)),
         personal_access_token: None,
-        bedrock_api_key: None,
-        bedrock_access_keys: None,
     };
 
     storage.save(&auth_dot_json)?;
@@ -117,8 +111,6 @@ async fn file_storage_round_trips_registered_agent_identity_auth() -> anyhow::Re
         last_refresh: None,
         agent_identity: Some(AgentIdentityStorage::Record(record)),
         personal_access_token: None,
-        bedrock_api_key: None,
-        bedrock_access_keys: None,
     };
 
     storage.save(&auth_dot_json)?;
@@ -169,8 +161,6 @@ async fn file_storage_loads_empty_agent_identity_email_as_none() -> anyhow::Resu
                 task_id: None,
             })),
             personal_access_token: None,
-            bedrock_api_key: None,
-            bedrock_access_keys: None,
         })
     );
     Ok(())
@@ -196,8 +186,6 @@ async fn file_storage_writes_missing_agent_identity_email_as_empty_string() -> a
             task_id: None,
         })),
         personal_access_token: None,
-        bedrock_api_key: None,
-        bedrock_access_keys: None,
     };
 
     storage.save(&auth_dot_json)?;
@@ -220,8 +208,6 @@ async fn file_storage_round_trips_personal_access_token_auth() -> anyhow::Result
         last_refresh: None,
         agent_identity: None,
         personal_access_token: Some("at-example".to_string()),
-        bedrock_api_key: None,
-        bedrock_access_keys: None,
     };
 
     storage.save(&auth_dot_json)?;
@@ -272,8 +258,6 @@ fn file_storage_delete_removes_auth_file() -> anyhow::Result<()> {
         last_refresh: None,
         agent_identity: None,
         personal_access_token: None,
-        bedrock_api_key: None,
-        bedrock_access_keys: None,
     };
     let storage = create_auth_storage(
         dir.path().to_path_buf(),
@@ -304,8 +288,6 @@ fn ephemeral_storage_save_load_delete_is_in_memory_only() -> anyhow::Result<()> 
         last_refresh: Some(Utc::now()),
         agent_identity: None,
         personal_access_token: None,
-        bedrock_api_key: None,
-        bedrock_access_keys: None,
     };
 
     storage.save(&auth_dot_json)?;
@@ -438,8 +420,6 @@ fn auth_with_prefix(prefix: &str) -> AuthDotJson {
         last_refresh: None,
         agent_identity: None,
         personal_access_token: None,
-        bedrock_api_key: None,
-        bedrock_access_keys: None,
     }
 }
 
@@ -466,8 +446,6 @@ fn secrets_keyring_auth_storage_load_returns_deserialized_auth() -> anyhow::Resu
         last_refresh: None,
         agent_identity: None,
         personal_access_token: None,
-        bedrock_api_key: None,
-        bedrock_access_keys: None,
     };
     seed_secrets_backend_with_auth(&mock_keyring, codex_home.path(), &expected)?;
 
@@ -608,8 +586,6 @@ fn secrets_keyring_auth_storage_save_persists_and_removes_fallback_file() -> any
         last_refresh: Some(Utc::now()),
         agent_identity: None,
         personal_access_token: None,
-        bedrock_api_key: None,
-        bedrock_access_keys: None,
     };
 
     storage.save(&auth)?;

@@ -50,7 +50,6 @@ use codex_config::compose_requirements;
 use codex_config::types::McpServerTransportConfig;
 use codex_login::CodexAuth;
 use codex_login::test_support::auth_manager_with_agent_identity;
-use codex_model_provider::AMAZON_BEDROCK_PROVIDER_ID;
 use codex_plugin::AppDeclaration;
 use codex_plugin::PluginId;
 use codex_protocol::auth::AuthMode;
@@ -1674,17 +1673,14 @@ enabled = true
         vec!["linear@openai-api-curated".to_string()]
     );
 
-    for auth_mode in [AuthMode::ApiKey, AuthMode::BedrockApiKey] {
-        set_test_auth_mode(&auth_manager, Some(auth_mode)).await;
-
-        assert_eq!(
-            loaded_plugin_names(&manager, &config).await,
-            vec!["linear@openai-api-curated".to_string()]
-        );
-    }
+    set_test_auth_mode(&auth_manager, Some(AuthMode::ApiKey)).await;
+    assert_eq!(
+        loaded_plugin_names(&manager, &config).await,
+        vec!["linear@openai-api-curated".to_string()]
+    );
 
     set_test_auth_mode(&auth_manager, /*auth_mode*/ None).await;
-    for model_provider_id in ["openai", AMAZON_BEDROCK_PROVIDER_ID, "ollama"] {
+    for model_provider_id in ["openai", "ollama"] {
         config.model_provider_id = model_provider_id.to_string();
         assert_eq!(
             loaded_plugin_names(&manager, &config).await,
@@ -5104,18 +5100,6 @@ async fn list_marketplaces_selects_curated_catalog_only_from_authentication() {
     for (configured_provider, resolved_provider, auth_mode, expected_marketplace) in [
         (
             "openai",
-            AMAZON_BEDROCK_PROVIDER_ID,
-            None,
-            OPENAI_API_CURATED_MARKETPLACE_NAME,
-        ),
-        (
-            AMAZON_BEDROCK_PROVIDER_ID,
-            "openai",
-            None,
-            OPENAI_API_CURATED_MARKETPLACE_NAME,
-        ),
-        (
-            "openai",
             "ollama",
             None,
             OPENAI_API_CURATED_MARKETPLACE_NAME,
@@ -5179,45 +5163,6 @@ plugins = true
 }
 
 #[tokio::test]
-async fn list_marketplaces_uses_chatgpt_curated_manifest_for_bedrock_with_chatgpt_auth() {
-    let tmp = tempfile::tempdir().unwrap();
-    let curated_root = curated_plugins_repo_path(tmp.path());
-
-    write_file(
-        &tmp.path().join(CONFIG_TOML_FILE),
-        r#"model_provider = "amazon-bedrock"
-
-[features]
-plugins = true
-"#,
-    );
-    write_openai_curated_marketplace(&curated_root, &["chatgpt-plugin"]);
-    write_openai_api_curated_marketplace(&curated_root, &["api-plugin"]);
-
-    let config = load_config(tmp.path(), tmp.path()).await;
-    let manager = test_plugins_manager_with_options(
-        tmp.path().to_path_buf(),
-        Some(Product::Codex),
-        Some(AuthMode::Chatgpt),
-    );
-    let marketplaces = manager
-        .list_marketplaces_for_config(&config, &[], /*include_openai_curated*/ true)
-        .unwrap()
-        .marketplaces;
-
-    assert!(
-        marketplaces
-            .iter()
-            .any(|marketplace| marketplace.name == OPENAI_CURATED_MARKETPLACE_NAME)
-    );
-    assert!(
-        marketplaces
-            .iter()
-            .all(|marketplace| marketplace.name != OPENAI_API_CURATED_MARKETPLACE_NAME)
-    );
-}
-
-#[tokio::test]
 async fn list_marketplaces_skips_missing_api_curated_manifest() {
     let tmp = tempfile::tempdir().unwrap();
     let curated_root = curated_plugins_repo_path(tmp.path());
@@ -5237,7 +5182,7 @@ plugins = true
     let manager = test_plugins_manager_with_options(
         tmp.path().to_path_buf(),
         Some(Product::Codex),
-        Some(AuthMode::BedrockApiKey),
+        Some(AuthMode::ApiKey),
     );
     let outcome = manager
         .list_marketplaces_for_config(&config, &[], /*include_openai_curated*/ true)
@@ -7069,7 +7014,7 @@ async fn plugin_hooks_for_layer_stack_follow_auth_mode_and_provider() {
     let codex_home = TempDir::new().unwrap();
     write_file(
         &codex_home.path().join(CONFIG_TOML_FILE),
-        r#"model_provider = "amazon-bedrock"
+        r#"model_provider = "ollama"
 
 [features]
 plugins = true
@@ -7143,11 +7088,11 @@ enabled = true
     );
 
     set_test_auth_mode(&auth_manager, /*auth_mode*/ None).await;
-    let bedrock_hooks = manager
+    let custom_provider_hooks = manager
         .plugin_hooks_for_layer_stack(&config.config_layer_stack, &config)
         .await;
     assert_eq!(
-        bedrock_hooks
+        custom_provider_hooks
             .hook_sources
             .iter()
             .map(|source| source.plugin_id.as_key())

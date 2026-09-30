@@ -12,10 +12,6 @@ use codex_history::CodexHarnessMetadata;
 use codex_history::InitialHistory;
 use codex_history::RolloutItem;
 use codex_login::CodexAuth;
-use codex_login::auth::BedrockApiKeyAuth;
-use codex_model_provider_info::AMAZON_BEDROCK_GPT_5_5_MODEL_ID;
-use codex_model_provider_info::AMAZON_BEDROCK_PROVIDER_ID;
-use codex_model_provider_info::ModelProviderInfo;
 use codex_protocol::AgentPath;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ImageReference;
@@ -182,23 +178,6 @@ async fn wait_for_turn_complete(codex: &codex_core::CodexThread) {
         REMOTE_COMPACT_TURN_COMPLETE_TIMEOUT,
     )
     .await;
-}
-
-fn amazon_bedrock_test_codex() -> TestCodexBuilder {
-    let auth = CodexAuth::BedrockApiKey(BedrockApiKeyAuth {
-        api_key: "bedrock-test-api-key".to_string(),
-        region: "us-east-1".to_string(),
-    });
-    test_codex()
-        .with_auth(auth)
-        .with_model(AMAZON_BEDROCK_GPT_5_5_MODEL_ID)
-        .with_config(|config| {
-            config.model_provider = ModelProviderInfo {
-                base_url: config.model_provider.base_url.clone(),
-                ..ModelProviderInfo::create_amazon_bedrock_provider(/*aws*/ None)
-            };
-            config.model_provider_id = AMAZON_BEDROCK_PROVIDER_ID.to_string();
-        })
 }
 
 fn is_retained_user_message(item: &ResponseItem, retained_text: &str) -> bool {
@@ -527,84 +506,6 @@ async fn remote_compact_v2_records_usage_before_output_validation() -> Result<()
         .find(|record| record.response_id == "invalid-compact")
         .context("remote compaction usage record")?;
     assert_eq!(record.usage.total_tokens, 8_200);
-
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn amazon_bedrock_automatic_compaction_uses_v2_responses_endpoint() -> Result<()> {
-    skip_if_no_network!(Ok(()));
-
-    let harness = TestCodexHarness::with_auto_env_builder(amazon_bedrock_test_codex().with_config(
-        |config| {
-            config.model_auto_compact_token_limit = Some(200);
-        },
-    ))
-    .await?;
-    let response_mock = responses::mount_sse_sequence(
-        harness.server(),
-        vec![
-            sse(vec![
-                responses::ev_assistant_message("message-1", "before automatic compaction"),
-                responses::ev_completed_with_tokens("response-1", /*total_tokens*/ 500),
-            ]),
-            sse(vec![
-                json!({
-                    "type": "response.output_item.done",
-                    "item": {
-                        "type": "compaction",
-                        "encrypted_content": "BEDROCK_AUTOMATIC_REMOTE_COMPACTED_SUMMARY",
-                    }
-                }),
-                responses::ev_completed("response-compact"),
-            ]),
-            sse(vec![
-                responses::ev_assistant_message("message-2", "after automatic compaction"),
-                responses::ev_completed("response-2"),
-            ]),
-        ],
-    )
-    .await;
-
-    harness
-        .test()
-        .submit_turn("before automatic compact")
-        .await?;
-    harness
-        .test()
-        .submit_turn("after automatic compact")
-        .await?;
-
-    let response_requests = response_mock.requests();
-    assert_eq!(response_requests.len(), 3);
-    assert!(
-        response_requests
-            .iter()
-            .all(|request| request.path() == "/v1/responses")
-    );
-    let compact_request = &response_requests[1];
-    assert_eq!(
-        compact_request.header("authorization").as_deref(),
-        Some("Bearer bedrock-test-api-key")
-    );
-    assert_eq!(
-        compact_request
-            .header("x-amzn-mantle-client-agent")
-            .as_deref(),
-        Some("codex")
-    );
-    assert_eq!(
-        compact_request.body_json()["model"],
-        AMAZON_BEDROCK_GPT_5_5_MODEL_ID
-    );
-    assert_eq!(
-        compact_request.inputs_of_type("compaction_trigger").len(),
-        1
-    );
-    assert!(response_requests[2].input().iter().any(|item| {
-        item["type"] == "compaction"
-            && item["encrypted_content"] == "BEDROCK_AUTOMATIC_REMOTE_COMPACTED_SUMMARY"
-    }));
 
     Ok(())
 }

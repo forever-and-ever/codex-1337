@@ -55,11 +55,6 @@ async fn daemon_exclusion_survives_fork_picker() -> Result<()> {
 }
 
 #[tokio::test]
-async fn daemon_auto_start_preserves_bedrock_onboarding() -> Result<()> {
-    daemon_startup("bedrock").await
-}
-
-#[tokio::test]
 #[cfg(windows)]
 async fn restrictive_launcher_uses_embedded_if_daemon_cannot_start() -> Result<()> {
     const CHILD: &str = "CODEX_TEST_RESTRICTIVE_DAEMON_START";
@@ -90,12 +85,6 @@ async fn restrictive_launcher_uses_embedded_if_daemon_cannot_start() -> Result<(
     daemon_startup("restrictive-job").await
 }
 
-#[tokio::test]
-#[cfg(unix)]
-async fn bedrock_onboarding_leaves_a_running_daemon_untouched() -> Result<()> {
-    daemon_startup("bedrock-running").await
-}
-
 async fn daemon_startup(command: &str) -> Result<()> {
     let codex = codex_utils_cargo_bin::cargo_bin("codex")?.canonicalize()?;
     let workspace = tempfile::tempdir()?;
@@ -116,7 +105,7 @@ async fn daemon_startup(command: &str) -> Result<()> {
         home.path().join("config.toml"),
         format!(
             "model = \"gpt-5.6-terra\"\n\
-         features.bedrock_setup_wizard = true\ncli_auth_credentials_store = \"file\"\n\
+         cli_auth_credentials_store = \"file\"\n\
          suppress_unstable_features_warning = true\nanalytics.enabled = false\n\
          windows.sandbox = \"unelevated\"\n\
          tui.disable_paste_burst = true\n\
@@ -129,13 +118,10 @@ async fn daemon_startup(command: &str) -> Result<()> {
     let persisted = command == "mismatch-disable-persisted";
     let disabling = matches!(command, "mismatch-disable" | "mismatch-disable-persisted");
     let restart = command == "mismatch-restart" || disabling;
-    let bedrock_onboarding = matches!(command, "bedrock" | "bedrock-running");
-    if !bedrock_onboarding {
-        fs::write(
-            home.path().join("auth.json"),
-            r#"{"OPENAI_API_KEY":"daemon-startup-test","tokens":null,"last_refresh":null}"#,
-        )?;
-    }
+    fs::write(
+        home.path().join("auth.json"),
+        r#"{"OPENAI_API_KEY":"daemon-startup-test","tokens":null,"last_refresh":null}"#,
+    )?;
     let mut env = std::env::vars().collect::<std::collections::HashMap<_, _>>();
     for key in [
         "CODEX_EXEC_SERVER_URL",
@@ -160,11 +146,7 @@ async fn daemon_startup(command: &str) -> Result<()> {
     }
     let mut args = Vec::new();
     let mut steps: VecDeque<(&str, &[u8])> = VecDeque::new();
-    if matches!(
-        command,
-        "start" | "bedrock" | "bedrock-running" | "restrictive-job"
-    ) || mismatch
-    {
+    if matches!(command, "start" | "restrictive-job") || mismatch {
         // A selected package with a stopped daemon avoids installing a release.
         let managed = home
             .path()
@@ -190,7 +172,7 @@ async fn daemon_startup(command: &str) -> Result<()> {
     }
     let pid_file = home.path().join("app-server-daemon/daemon.pid");
     let result = async {
-        let mut existing_daemon = if command == "bedrock-running" || (mismatch && !disabling) {
+        let mut existing_daemon = if mismatch && !disabling {
             let started = Command::new(&codex)
                 .env_clear()
                 .envs(&env)
@@ -234,8 +216,6 @@ async fn daemon_startup(command: &str) -> Result<()> {
                 steps.push_back(("GPT-5.6-Terra", b"/status\r"));
                 if restart { "Server:Localbackgroundserver" } else { "Model:" }
             }
-        } else if bedrock_onboarding {
-            "UseAmazonBedrock"
         } else {
             args.extend([command.into(), "--strict-config".into()]);
             steps.push_back(("Nosessionsyet", b"\x1b"));
@@ -333,14 +313,12 @@ async fn daemon_startup(command: &str) -> Result<()> {
                         } else {
                             ensure!(text.contains("Server:Localbackgroundserver") == restart);
                         }
-                    } else if matches!(command, "start" | "bedrock") {
-                        if command == "start" {
-                            ensure!(text.contains("Server:Localbackgroundserver"));
-                        }
+                    } else if command == "start" {
+                        ensure!(text.contains("Server:Localbackgroundserver"));
                         ensure!(home.path().join("app-server-daemon/daemon.pid").exists());
                     } else if let Some(existing_daemon) = &existing_daemon {
                         ensure!(fs::read(&pid_file)? == *existing_daemon);
-                    } else if bedrock_onboarding || command == "restrictive-job" {
+                    } else if command == "restrictive-job" {
                         ensure!(!pid_file.exists());
                         if command == "restrictive-job" {
                             let contents = screen.screen().contents();

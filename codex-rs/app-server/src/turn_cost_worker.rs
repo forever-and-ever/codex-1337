@@ -107,9 +107,7 @@ impl TurnCostWorker {
             config.otel.metrics_exporter,
             OtelExporterKind::OtlpHttp { .. } | OtelExporterKind::OtlpGrpc { .. }
         );
-        if !(has_otel_log_exporter || has_otel_metrics_exporter)
-            || config.model_provider.is_amazon_bedrock()
-        {
+        if !(has_otel_log_exporter || has_otel_metrics_exporter) {
             return None;
         }
         let is_openai = config.model_provider.is_openai();

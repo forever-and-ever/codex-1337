@@ -24,7 +24,6 @@ use codex_protocol::error::CodexErr;
 use codex_protocol::openai_models::ModelsResponse;
 
 use crate::ResolvedResponsesProvider;
-use crate::amazon_bedrock::AmazonBedrockModelProvider;
 use crate::auth::ProviderAuthScope;
 use crate::auth::ResolvedProviderAuth;
 use crate::auth::auth_manager_for_provider;
@@ -96,7 +95,6 @@ pub struct ProviderAuthRecoveryMessages {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProviderAccountError {
     MissingChatgptAccountDetails,
-    UnsupportedBedrockApiKeyAuth,
 }
 
 impl fmt::Display for ProviderAccountError {
@@ -104,12 +102,6 @@ impl fmt::Display for ProviderAccountError {
         match self {
             Self::MissingChatgptAccountDetails => {
                 write!(f, "plan type is required for chatgpt authentication")
-            }
-            Self::UnsupportedBedrockApiKeyAuth => {
-                write!(
-                    f,
-                    "Bedrock API key auth is only supported by the Amazon Bedrock model provider"
-                )
             }
         }
     }
@@ -362,7 +354,6 @@ fn provider_uses_first_party_auth_path(provider: &ModelProviderInfo) -> bool {
         && provider.env_key.is_none()
         && provider.experimental_bearer_token.is_none()
         && provider.auth.is_none()
-        && provider.aws.is_none()
 }
 
 /// Creates the default runtime model provider for configured provider metadata.
@@ -370,9 +361,6 @@ pub fn create_model_provider(
     provider_info: ModelProviderInfo,
     auth_manager: Option<Arc<AuthManager>>,
 ) -> SharedModelProvider {
-    if provider_info.is_amazon_bedrock() {
-        return Arc::new(AmazonBedrockModelProvider::new(provider_info, auth_manager));
-    }
     let gateway_auth_manager = provider_info.gateway_oauth.as_ref().map(|config| {
         provider_info.validate()?;
         let manager = auth_manager
@@ -527,9 +515,6 @@ impl ModelProvider for ConfiguredModelProvider {
                 })
                 .map(|auth| match &auth {
                     CodexAuth::ApiKey(_) => Ok(ProviderAccount::ApiKey),
-                    CodexAuth::BedrockApiKey(_) | CodexAuth::BedrockAccessKeys(_) => {
-                        Err(ProviderAccountError::UnsupportedBedrockApiKeyAuth)
-                    }
                     CodexAuth::Chatgpt(_)
                     | CodexAuth::ChatgptAuthTokens(_)
                     | CodexAuth::Headers(_)
@@ -638,10 +623,6 @@ mod tests {
     use codex_http_client::HttpClientFactory;
     use codex_http_client::OutboundProxyPolicy;
     use codex_login::auth::AgentIdentityAuthPolicy;
-    use codex_login::auth::BedrockApiKeyAuth;
-    use codex_model_provider_info::AwsAuthRefreshConfig;
-    use codex_model_provider_info::AwsCredentialExportConfig;
-    use codex_model_provider_info::ModelProviderAwsAuthInfo;
     use codex_model_provider_info::WireApi;
     use codex_model_provider_info::create_oss_provider_with_base_url;
     use codex_models_manager::ModelsManagerConfig;
@@ -696,7 +677,6 @@ mod tests {
             experimental_bearer_token: None,
             auth: None,
             gateway_oauth: None,
-            aws: None,
             wire_api: WireApi::Responses,
             query_params: None,
             http_headers: None,
@@ -734,13 +714,6 @@ mod tests {
             "experimental_supported_tools": [],
         }))
         .expect("valid model")
-    }
-
-    fn bedrock_api_key_auth() -> CodexAuth {
-        CodexAuth::BedrockApiKey(BedrockApiKeyAuth {
-            api_key: "bedrock-api-key-test".to_string(),
-            region: "us-east-1".to_string(),
-        })
     }
 
     #[tokio::test]
@@ -884,267 +857,6 @@ mod tests {
     }
 
     #[test]
-    fn create_model_provider_does_not_use_openai_auth_manager_for_amazon_bedrock_provider() {
-        let provider = create_model_provider(
-            ModelProviderInfo::create_amazon_bedrock_provider(Some(ModelProviderAwsAuthInfo {
-                profile: Some("codex-bedrock".to_string()),
-                region: None,
-                credential_export: None,
-                auth_refresh: None,
-            })),
-            Some(AuthManager::from_auth_for_testing(CodexAuth::from_api_key(
-                "openai-api-key",
-            ))),
-        );
-
-        assert!(provider.auth_manager().is_none());
-    }
-
-    #[tokio::test]
-    async fn shared_bedrock_auth_refresh_is_reused_only_for_matching_configuration() {
-        const TEST_NAME: &str = "provider::tests::shared_bedrock_auth_refresh_is_reused_only_for_matching_configuration";
-        const HELPER_ARG: &str = "CODEX_BEDROCK_SHARED_AUTH_REFRESH_COMMAND";
-        const SUBPROCESS_ARG: &str = "CODEX_BEDROCK_SHARED_AUTH_REFRESH_SUBPROCESS";
-        let arguments = std::env::args().collect::<Vec<_>>();
-        if let Some(index) = arguments.iter().position(|argument| argument == HELPER_ARG) {
-            let counter = &arguments[index + 2];
-            std::thread::sleep(std::time::Duration::from_millis(50));
-            let mut counter = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(counter)
-                .expect("refresh invocation counter should open");
-            std::io::Write::write_all(&mut counter, b"1").expect("write invocation counter");
-            return;
-        }
-
-        let counter = std::env::temp_dir().join(format!("bedrock-refresh-{}", std::process::id()));
-        if !arguments.iter().any(|argument| argument == SUBPROCESS_ARG) {
-            std::fs::create_dir(&counter).expect("AWS command directory should be created");
-            let executable = std::env::current_exe().expect("test executable should be available");
-            let aws = counter.join(format!("aws{}", std::env::consts::EXE_SUFFIX));
-            std::fs::hard_link(&executable, &aws)
-                .or_else(|_| std::fs::copy(&executable, &aws).map(|_| ()))
-                .expect("test executable should be installed as aws");
-            let existing_path = std::env::var_os("PATH").unwrap_or_default();
-            let path = std::env::join_paths(
-                std::iter::once(counter.clone()).chain(std::env::split_paths(&existing_path)),
-            )
-            .expect("test executable PATH should be valid");
-            let output = tokio::process::Command::new(executable)
-                .args(["--exact", TEST_NAME, "--skip", SUBPROCESS_ARG])
-                .env("PATH", path)
-                .env_remove("AWS_ACCESS_KEY_ID")
-                .env_remove("AWS_SECRET_ACCESS_KEY")
-                .output()
-                .await
-                .expect("isolated AWS refresh test should run");
-            std::fs::remove_dir_all(&counter).expect("AWS command directory should be removed");
-            assert!(output.status.success(), "{output:?}");
-            return;
-        }
-        let _ = std::fs::remove_file(&counter);
-        let aws = ModelProviderAwsAuthInfo {
-            profile: Some("codex-bedrock".to_string()),
-            region: Some("us-west-2".to_string()),
-            credential_export: None,
-            auth_refresh: Some(AwsAuthRefreshConfig {
-                command: "aws".to_string(),
-                args: Vec::from(
-                    [
-                        "--exact",
-                        TEST_NAME,
-                        "--skip",
-                        HELPER_ARG,
-                        "--skip",
-                        counter.to_str().expect("counter path should be UTF-8"),
-                    ]
-                    .map(RedactedString::from),
-                ),
-                timeout_ms: NonZeroU64::new(10_000).expect("timeout should be non-zero"),
-            }),
-        };
-        let provider_info = ModelProviderInfo::create_amazon_bedrock_provider(Some(aws.clone()));
-
-        let first = create_model_provider(
-            provider_info.clone(),
-            Some(AuthManager::from_auth_for_testing(CodexAuth::from_api_key(
-                "openai-api-key",
-            ))),
-        );
-        let second = create_model_provider(provider_info.clone(), /*auth_manager*/ None);
-        let shared_state = process_shared_state();
-        let shared_recovery = shared_state
-            .aws_auth_recovery(&aws)
-            .expect("test provider should have refresh configured");
-        assert_eq!(Arc::strong_count(&shared_recovery), 3);
-        assert!(first.auth_manager().is_none() && second.auth_manager().is_none());
-
-        for provider in [&first, &second] {
-            for (status, body, recoverable) in [
-                (http::StatusCode::UNAUTHORIZED, "ExpiredToken", true),
-                (http::StatusCode::FORBIDDEN, "InvalidClientTokenId", true),
-                (http::StatusCode::FORBIDDEN, "AccessDeniedException", false),
-            ] {
-                let error = TransportError::Http {
-                    retry_after: None,
-                    status,
-                    url: None,
-                    headers: None,
-                    body: Some(body.to_string()),
-                };
-                assert_eq!(provider.is_recoverable_auth_error(&error), recoverable);
-            }
-        }
-
-        let mut invalid_aws = aws.clone();
-        invalid_aws.auth_refresh.as_mut().expect("refresh").command = "not-aws".into();
-        let invalid_provider = create_model_provider(
-            ModelProviderInfo::create_amazon_bedrock_provider(Some(invalid_aws)),
-            /*auth_manager*/ None,
-        );
-        let error = invalid_provider
-            .recover_from_unauthorized()
-            .await
-            .expect_err("non-aws command should be rejected");
-        assert_eq!(error.retry_delay(/*retry_count*/ 1), None);
-        assert_eq!(error.to_string(), "AWS auth refresh command must be `aws`");
-
-        let (first_result, second_result) = tokio::join!(
-            first.recover_from_unauthorized(),
-            second.recover_from_unauthorized()
-        );
-        assert_eq!(
-            [first_result, second_result].map(|result| result.expect("provider should recover")),
-            [ProviderUnauthorizedRecovery::Recovered; 2]
-        );
-        let read_counter = || std::fs::read_to_string(&counter).expect("read counter");
-        assert_eq!(read_counter(), "1");
-
-        assert_eq!(
-            first
-                .recover_from_unauthorized()
-                .await
-                .expect("later generation should recover"),
-            ProviderUnauthorizedRecovery::Recovered
-        );
-        assert_eq!(read_counter(), "11");
-
-        let fixture = tempfile::tempdir().expect("export fixture should be created");
-        let export_counter = fixture.path().join("exports");
-        let export_gate = fixture.path().join("release");
-        #[cfg(unix)]
-        let (command, mut args) = (
-            "sh".to_string(),
-            vec![
-                "-c".to_string(),
-                r#"printf '1\n' >> "$1"
-while [ ! -e "$2" ]; do :; done
-printf '%s\n' '{"AccessKeyId":"exported","SecretAccessKey":"secret"}'
-"#
-                .to_string(),
-                "export-credentials".to_string(),
-            ],
-        );
-        #[cfg(windows)]
-        let (command, mut args) = {
-            let script = fixture.path().join("export.cmd");
-            std::fs::write(
-                &script,
-                concat!(
-                    "@echo off\r\n>> \"%~1\" echo 1\r\n",
-                    ":wait\r\nif not exist \"%~2\" goto wait\r\n",
-                    "echo {\"AccessKeyId\":\"exported\",\"SecretAccessKey\":\"secret\"}\r\n",
-                ),
-            )
-            .expect("export script should be written");
-            (
-                "cmd.exe".to_string(),
-                vec![
-                    "/D".to_string(),
-                    "/Q".to_string(),
-                    "/C".to_string(),
-                    script.to_string_lossy().into_owned(),
-                ],
-            )
-        };
-        args.extend(
-            [&export_counter, &export_gate].map(|path| path.to_string_lossy().into_owned()),
-        );
-        let provider_info =
-            ModelProviderInfo::create_amazon_bedrock_provider(Some(ModelProviderAwsAuthInfo {
-                profile: None,
-                credential_export: Some(AwsCredentialExportConfig {
-                    command,
-                    args: args.into_iter().map(RedactedString::from).collect(),
-                    timeout_ms: NonZeroU64::new(5_000).expect("timeout should be non-zero"),
-                }),
-                ..aws.clone()
-            }));
-        let first_export = create_model_provider(provider_info.clone(), /*auth_manager*/ None);
-        let second_export = create_model_provider(provider_info, /*auth_manager*/ None);
-        let first_refresh = first_export.recover_from_unauthorized();
-        let second_refresh = second_export.recover_from_unauthorized();
-        tokio::pin!(first_refresh, second_refresh);
-        tokio::time::timeout(std::time::Duration::from_secs(10), async {
-            tokio::select! {
-                result = &mut first_refresh => panic!("export should wait for its gate: {result:?}"),
-                () = async {
-                    while !export_counter.exists() {
-                        tokio::task::yield_now().await;
-                    }
-                } => {}
-            }
-        }).await.expect("export should start after login");
-        assert_eq!(read_counter(), "111");
-        {
-            // Queue another recovery after login finishes, while export still holds the lock.
-            let mut context = Context::from_waker(Waker::noop());
-            assert!(second_refresh.as_mut().poll(&mut context).is_pending());
-        }
-        std::fs::write(&export_gate, []).expect("export gate should open");
-        let (first_result, second_result) = tokio::join!(first_refresh, second_refresh);
-        assert_eq!(
-            [first_result, second_result].map(|result| result.expect("provider should recover")),
-            [ProviderUnauthorizedRecovery::Recovered; 2]
-        );
-        assert_eq!(read_counter(), "111");
-        assert_eq!(
-            std::fs::read_to_string(export_counter)
-                .expect("read export counter")
-                .lines()
-                .collect::<Vec<_>>(),
-            vec!["1"]
-        );
-        std::fs::remove_file(&counter).expect("refresh invocation counter should be removed");
-
-        let different_profile = ModelProviderAwsAuthInfo {
-            profile: Some("another-bedrock-profile".to_string()),
-            ..aws.clone()
-        };
-        let other_recovery = shared_state
-            .aws_auth_recovery(&different_profile)
-            .expect("test provider should have refresh configured");
-        assert!(!Arc::ptr_eq(&shared_recovery, &other_recovery));
-
-        let released_recovery = Arc::downgrade(&shared_recovery);
-        drop((first, second, shared_recovery));
-        assert!(released_recovery.upgrade().is_none());
-        assert!(shared_state.aws_auth_recovery(&aws).is_some());
-    }
-
-    #[tokio::test]
-    async fn create_model_provider_uses_managed_auth_for_amazon_bedrock_provider() {
-        let auth = bedrock_api_key_auth();
-        let provider = create_model_provider(
-            ModelProviderInfo::create_amazon_bedrock_provider(/*aws*/ None),
-            Some(AuthManager::from_auth_for_testing(auth.clone())),
-        );
-
-        assert_eq!(provider.auth().await, Some(auth));
-    }
-
-    #[test]
     fn openai_provider_returns_unauthenticated_openai_account_state() {
         let provider = create_model_provider(
             ModelProviderInfo::create_openai_provider(/*base_url*/ None),
@@ -1200,19 +912,6 @@ printf '%s\n' '{"AccessKeyId":"exported","SecretAccessKey":"secret"}'
     }
 
     #[test]
-    fn openai_provider_rejects_bedrock_api_key_account_state() {
-        let provider = create_model_provider(
-            ModelProviderInfo::create_openai_provider(/*base_url*/ None),
-            Some(AuthManager::from_auth_for_testing(bedrock_api_key_auth())),
-        );
-
-        assert_eq!(
-            provider.account_state(),
-            Err(ProviderAccountError::UnsupportedBedrockApiKeyAuth)
-        );
-    }
-
-    #[test]
     fn custom_non_openai_provider_returns_no_account_state() {
         let provider = create_model_provider(
             ModelProviderInfo {
@@ -1232,162 +931,6 @@ printf '%s\n' '{"AccessKeyId":"exported","SecretAccessKey":"secret"}'
                 requires_openai_auth: false,
             })
         );
-    }
-
-    #[test]
-    fn amazon_bedrock_provider_returns_bedrock_account_state() {
-        let provider = create_model_provider(
-            ModelProviderInfo::create_amazon_bedrock_provider(/*aws*/ None),
-            /*auth_manager*/ None,
-        );
-
-        assert_eq!(
-            provider.account_state(),
-            Ok(ProviderAccountState {
-                account: Some(ProviderAccount::AmazonBedrock {
-                    uses_codex_managed_credentials: false,
-                }),
-                requires_openai_auth: false,
-            })
-        );
-    }
-
-    #[tokio::test]
-    async fn amazon_bedrock_provider_creates_static_models_manager() {
-        let provider = create_model_provider(
-            ModelProviderInfo::create_amazon_bedrock_provider(/*aws*/ None),
-            /*auth_manager*/ None,
-        );
-        let manager =
-            provider.models_manager(test_codex_home(), /*config_model_catalog*/ None);
-        let uncached_manager =
-            provider.models_manager_without_cache(/*config_model_catalog*/ None);
-
-        let catalog = manager
-            .raw_model_catalog(
-                RefreshStrategy::Online,
-                HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault),
-            )
-            .await;
-        let uncached_catalog = uncached_manager
-            .raw_model_catalog(
-                RefreshStrategy::Online,
-                HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault),
-            )
-            .await;
-        assert_eq!(uncached_catalog, catalog);
-        for slug in [
-            "openai.gpt-6.1-sol",
-            "openai.gpt-6-sol",
-            "openai.gpt-6-luna",
-            "openai.gpt-5.6-sol",
-            "openai.gpt-6-astra",
-        ] {
-            let model_info = manager
-                .get_model_info(
-                    slug,
-                    &ModelsManagerConfig {
-                        model_context_window: Some(1_000_000),
-                        ..Default::default()
-                    },
-                )
-                .await;
-            let mut expected_model_info = manager
-                .get_model_info(slug, &ModelsManagerConfig::default())
-                .await;
-            expected_model_info.context_window = Some(872_000);
-            assert_eq!(model_info, expected_model_info);
-        }
-
-        let models = catalog
-            .models
-            .iter()
-            .map(|model| (model.slug.as_str(), model.display_name.as_str()))
-            .collect::<Vec<_>>();
-
-        assert_eq!(
-            models,
-            vec![
-                ("openai.gpt-6.1-sol", "GPT-6.1 Sol"),
-                ("openai.gpt-6-astra", "GPT-6-Astra"),
-                ("openai.gpt-6-sol", "GPT-6 Sol"),
-                ("openai.gpt-6-luna", "GPT-6 Luna"),
-                ("openai.gpt-5.6-sol", "GPT-5.6 Sol"),
-                ("openai.gpt-5.6-terra", "GPT-5.6 Terra"),
-                ("openai.gpt-5.6-luna", "GPT-5.6 Luna"),
-                ("openai.gpt-5.5", "GPT-5.5"),
-            ]
-        );
-
-        let available_models = manager
-            .list_models(
-                RefreshStrategy::Online,
-                HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault),
-            )
-            .await;
-        assert_eq!(
-            available_models
-                .iter()
-                .map(|preset| preset.model.as_str())
-                .collect::<Vec<_>>(),
-            vec![
-                "openai.gpt-6.1-sol",
-                "openai.gpt-6-astra",
-                "openai.gpt-6-sol",
-                "openai.gpt-6-luna",
-                "openai.gpt-5.6-sol",
-                "openai.gpt-5.6-terra",
-                "openai.gpt-5.6-luna",
-                "openai.gpt-5.5",
-            ]
-        );
-
-        let default_model = available_models
-            .iter()
-            .find(|preset| preset.is_default)
-            .expect("Bedrock catalog should have a default model");
-
-        assert_eq!(default_model.model, "openai.gpt-6.1-sol");
-    }
-
-    #[tokio::test]
-    async fn configured_bedrock_catalog_only_allows_default_service_tier() {
-        let configured_model = codex_models_manager::bundled_models_response()
-            .expect("bundled models should parse")
-            .models
-            .into_iter()
-            .find(|model| model.slug == "gpt-5.5")
-            .expect("bundled models should include GPT-5.5");
-        assert!(!configured_model.additional_speed_tiers.is_empty());
-        assert!(!configured_model.service_tiers.is_empty());
-
-        let mut provider_info =
-            ModelProviderInfo::create_amazon_bedrock_provider(/*aws*/ None);
-        provider_info.base_url =
-            Some("https://bedrock-mantle.us-gov-west-1.api.aws/openai/v1".to_string());
-        let provider = create_model_provider(provider_info, /*auth_manager*/ None);
-        let manager = provider.models_manager(
-            test_codex_home(),
-            Some(ModelsResponse {
-                models: vec![configured_model],
-            }),
-        );
-
-        let catalog = manager
-            .raw_model_catalog(
-                RefreshStrategy::Online,
-                HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault),
-            )
-            .await;
-
-        assert_eq!(catalog.models.len(), 1);
-        assert_eq!(catalog.models[0].slug, "gpt-5.5");
-        assert_eq!(
-            catalog.models[0].additional_speed_tiers,
-            Vec::<String>::new()
-        );
-        assert_eq!(catalog.models[0].service_tiers, Vec::new());
-        assert_eq!(catalog.models[0].default_service_tier, None);
     }
 
     #[tokio::test]

@@ -902,7 +902,7 @@ impl StatusHistoryCell {
             RtOptions::new(available_width).subsequent_indent(indent.into()),
         );
         rendered.push(Line::default());
-        // Providers such as Bedrock manage limits and billing elsewhere.
+        // Other providers may manage limits and billing elsewhere.
         if self.show_chatgpt_usage_link {
             rendered.extend(word_wrap_lines(
                 [

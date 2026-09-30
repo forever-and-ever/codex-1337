@@ -1,5 +1,4 @@
 mod config;
-mod discovery;
 mod signing;
 mod transport;
 
@@ -12,10 +11,6 @@ use bytes::Bytes;
 use http::HeaderMap;
 use http::Method;
 use thiserror::Error;
-
-pub use discovery::AwsProfile;
-pub use discovery::discover_aws_profiles;
-pub use discovery::validate_aws_profile;
 
 /// AWS auth configuration used to resolve credentials and sign requests.
 #[derive(Debug, Clone, PartialEq, Eq)]

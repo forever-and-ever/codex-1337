@@ -1366,8 +1366,6 @@ fn stored_auth_mode(auth: &codex_login::AuthDotJson) -> &'static str {
         AuthMode::Headers => "headers",
         AuthMode::AgentIdentity => "agent_identity",
         AuthMode::PersonalAccessToken => "personal_access_token",
-        AuthMode::BedrockApiKey => "bedrock_api_key",
-        AuthMode::BedrockAccessKeys => "bedrock_access_keys",
     }
 }
 
@@ -1377,10 +1375,6 @@ fn stored_auth_mode_value(auth: &AuthDotJson) -> AuthMode {
     }
     if auth.personal_access_token.is_some() {
         AuthMode::PersonalAccessToken
-    } else if auth.bedrock_api_key.is_some() {
-        AuthMode::BedrockApiKey
-    } else if auth.bedrock_access_keys.is_some() {
-        AuthMode::BedrockAccessKeys
     } else if auth.openai_api_key.is_some() {
         AuthMode::ApiKey
     } else {
@@ -1458,22 +1452,6 @@ fn stored_auth_issues(
                 issues.push("personal access token auth is missing a personal access token");
             }
         }
-        AuthMode::BedrockApiKey => {
-            if auth.bedrock_api_key.is_none() {
-                issues.push("Bedrock API key auth is missing a Bedrock API key");
-            }
-        }
-        AuthMode::BedrockAccessKeys => match auth.bedrock_access_keys.as_ref() {
-            Some(access_keys) => {
-                if access_keys.access_key_id.trim().is_empty() {
-                    issues.push("Bedrock access key auth is missing an access key ID");
-                }
-                if access_keys.secret_access_key.trim().is_empty() {
-                    issues.push("Bedrock access key auth is missing a secret access key");
-                }
-            }
-            None => issues.push("Bedrock access key auth is missing AWS access keys"),
-        },
     }
     issues
 }
@@ -2453,8 +2431,6 @@ fn auth_mode_name(auth: &CodexAuth) -> &'static str {
         AuthMode::Headers => "headers",
         AuthMode::AgentIdentity => "agent_identity",
         AuthMode::PersonalAccessToken => "personal_access_token",
-        AuthMode::BedrockApiKey => "bedrock_api_key",
-        AuthMode::BedrockAccessKeys => "bedrock_access_keys",
     }
 }
 
@@ -2564,7 +2540,6 @@ fn provider_reachability_plan(config: &Config) -> ReachabilityPlan {
         &config.model_provider.name,
         config.model_provider.base_url.as_deref(),
         query_params.as_ref(),
-        config.model_provider.is_amazon_bedrock(),
         &config.chatgpt_base_url,
     );
     plan.http_client_factory = config.http_client_factory();
@@ -2578,7 +2553,6 @@ fn default_reachability_plan() -> ReachabilityPlan {
         "OpenAI",
         /*provider_base_url*/ None,
         /*provider_query_params*/ None,
-        /*is_amazon_bedrock*/ false,
         "https://chatgpt.com/backend-api/",
     )
 }
@@ -2604,9 +2578,7 @@ fn provider_auth_reachability_mode_from_auth(
         return ProviderAuthReachabilityMode::Chatgpt;
     }
     match stored_auth.map(stored_auth_mode_value) {
-        Some(AuthMode::ApiKey | AuthMode::BedrockApiKey | AuthMode::BedrockAccessKeys) => {
-            ProviderAuthReachabilityMode::ApiKey
-        }
+        Some(AuthMode::ApiKey) => ProviderAuthReachabilityMode::ApiKey,
         Some(
             AuthMode::Chatgpt
             | AuthMode::ChatgptAuthTokens
@@ -2624,7 +2596,6 @@ fn provider_reachability_plan_from_parts(
     provider_name: &str,
     provider_base_url: Option<&str>,
     provider_query_params: Option<&HashMap<String, String>>,
-    is_amazon_bedrock: bool,
     chatgpt_base_url: &str,
 ) -> ReachabilityPlan {
     let provider_route_probe_url = provider_base_url
@@ -2632,7 +2603,7 @@ fn provider_reachability_plan_from_parts(
             (mode == ProviderAuthReachabilityMode::ApiKey).then_some("https://api.openai.com/v1")
         })
         .and_then(|url| {
-            should_probe_models_route(provider_name, url, is_amazon_bedrock)
+            should_probe_models_route(provider_name, url)
                 .then(|| provider_url_for_path(url, "models", provider_query_params))
         });
     let endpoints = match (mode, provider_base_url) {
@@ -2661,8 +2632,8 @@ fn provider_reachability_plan_from_parts(
     }
 }
 
-fn should_probe_models_route(provider_name: &str, base_url: &str, is_amazon_bedrock: bool) -> bool {
-    !is_amazon_bedrock && !is_azure_responses_provider(provider_name, Some(base_url))
+fn should_probe_models_route(provider_name: &str, base_url: &str) -> bool {
+    !is_azure_responses_provider(provider_name, Some(base_url))
 }
 
 fn provider_url_for_path(
@@ -3502,8 +3473,6 @@ mod tests {
             last_refresh: None,
             agent_identity: None,
             personal_access_token: None,
-            bedrock_api_key: None,
-            bedrock_access_keys: None,
         };
 
         assert_eq!(
@@ -3522,8 +3491,6 @@ mod tests {
             last_refresh: None,
             agent_identity: None,
             personal_access_token: None,
-            bedrock_api_key: None,
-            bedrock_access_keys: None,
         };
 
         assert_eq!(
@@ -3544,8 +3511,6 @@ mod tests {
             last_refresh: None,
             agent_identity: None,
             personal_access_token: Some("at-test".to_string()),
-            bedrock_api_key: None,
-            bedrock_access_keys: None,
         };
 
         assert_eq!(stored_auth_mode(&auth), "personal_access_token");
@@ -3568,8 +3533,6 @@ mod tests {
             last_refresh: None,
             agent_identity: None,
             personal_access_token: None,
-            bedrock_api_key: None,
-            bedrock_access_keys: None,
         };
 
         assert_eq!(
@@ -3639,7 +3602,6 @@ mod tests {
                 "azure",
                 Some("https://example.openai.azure.com/openai/v1"),
                 /*provider_query_params*/ None,
-                /*is_amazon_bedrock*/ false,
                 "https://chatgpt.com/backend-api/",
             ),
             ReachabilityPlan {
@@ -3670,7 +3632,6 @@ mod tests {
                     "Custom",
                     Some("https://example.com/openai/v1/"),
                     Some(&query_params),
-                    /*is_amazon_bedrock*/ false,
                     "https://chatgpt.com/backend-api/",
                 ),
                 ReachabilityPlan {
@@ -3694,21 +3655,6 @@ mod tests {
     }
 
     #[test]
-    fn provider_reachability_skips_route_probe_for_bedrock() {
-        let plan = provider_reachability_plan_from_parts(
-            ProviderAuthReachabilityMode::NotRequired,
-            "amazon-bedrock",
-            "Amazon Bedrock",
-            Some("https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1"),
-            /*provider_query_params*/ None,
-            /*is_amazon_bedrock*/ true,
-            "https://chatgpt.com/backend-api/",
-        );
-
-        assert_eq!(plan.endpoints[0].route_probe_url, None);
-    }
-
-    #[test]
     fn provider_reachability_api_key_does_not_require_chatgpt() {
         let plan = provider_reachability_plan_from_parts(
             ProviderAuthReachabilityMode::ApiKey,
@@ -3716,7 +3662,6 @@ mod tests {
             "OpenAI",
             /*provider_base_url*/ None,
             /*provider_query_params*/ None,
-            /*is_amazon_bedrock*/ false,
             "https://chatgpt.com/backend-api/",
         );
 
@@ -3782,7 +3727,6 @@ mod tests {
             "OpenAI",
             Some(&format!("http://{addr}/xxxx")),
             /*provider_query_params*/ None,
-            /*is_amazon_bedrock*/ false,
             "https://chatgpt.com/backend-api/",
         );
 
@@ -3823,7 +3767,6 @@ mod tests {
             "OpenAI",
             Some(&format!("http://{addr}/v1")),
             /*provider_query_params*/ None,
-            /*is_amazon_bedrock*/ false,
             "https://chatgpt.com/backend-api/",
         );
 

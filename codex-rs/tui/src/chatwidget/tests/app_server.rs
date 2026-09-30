@@ -129,10 +129,10 @@ async fn session_and_settings_sync_server_provider_id() {
     assert!(!displayed.contains("local-provider.example"));
 
     let mut other = configured_thread_session(ThreadId::new());
-    other.model_provider_id = "server-bedrock".to_string();
+    other.model_provider_id = "server-custom".to_string();
     chat.handle_thread_session_quiet(other);
     let displayed = status(&mut chat);
-    assert!(displayed.contains("server-bedrock"));
+    assert!(displayed.contains("server-custom"));
     assert!(!displayed.contains("server-ollama"));
 
     chat.handle_thread_session_quiet(first);
