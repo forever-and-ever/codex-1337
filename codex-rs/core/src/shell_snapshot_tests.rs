@@ -80,44 +80,10 @@ fn assert_posix_snapshot_sections(snapshot: &str) {
     assert!(snapshot.contains("setopts "));
 }
 
-#[cfg(not(windows))]
-#[test]
-fn preserved_provider_context_respects_unix_environment_casing() {
-    let mut env = HashMap::from([
-        ("GH_HOST".to_string(), "startup.example.com".to_string()),
-        ("gh_host".to_string(), "custom.example.com".to_string()),
-    ]);
-
-    replace_provider_context_with_trusted(
-        &mut env,
-        &HashMap::new(),
-        ["GH_HOST".to_string(), "gh_host".to_string()],
-        &["gh_host".to_string()],
-    );
-
-    assert_eq!(
-        env,
-        HashMap::from([("gh_host".to_string(), "custom.example.com".to_string())])
-    );
-}
-
 #[cfg(windows)]
 #[test]
-fn inherited_provider_context_matches_windows_environment_casing() {
-    let mut env = HashMap::new();
-    let inherited = HashMap::from([("gh_host".to_string(), "github.example.com".to_string())]);
-
-    replace_provider_context_with_trusted(
-        &mut env,
-        &inherited,
-        std::iter::once("GH_HOST".to_string()),
-        &[],
-    );
-
-    assert_eq!(
-        env,
-        HashMap::from([("GH_HOST".to_string(), "github.example.com".to_string())])
-    );
+fn inserted_environment_values_match_windows_casing() {
+    let mut env = HashMap::from([("GH_HOST".to_string(), "github.example.com".to_string())]);
 
     insert_env_value(&mut env, "gh_host", "github.alternate.example");
     assert_eq!(
@@ -213,7 +179,6 @@ async fn inactive_profiles_keep_snapshots() -> Result<()> {
                 config,
                 dir.path().abs(),
                 shell.clone(),
-                /*allow_login_shell*/ false,
                 ShellEnvironmentPolicy {
                     r#set: HashMap::from([(
                         "BASH_ENV".to_string(),
@@ -579,7 +544,7 @@ async fn snapshot_rejects_nul_script_before_execution() -> Result<()> {
         &shell,
         "printf ran > ran\0",
         Duration::from_secs(5),
-        SnapshotShellMode::NonLogin,
+        SnapshotShellMode::Login,
         &root.path().abs(),
         /*credential_broker*/ None,
         /*sandbox*/ None,

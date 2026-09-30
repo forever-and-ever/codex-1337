@@ -54,12 +54,14 @@ fn round_trip_preserves_supported_effective_settings() {
 
         let remote = RemoteNetworkProxyConfig::from_effective_config(&config)
             .expect("supported remote config");
-        let round_trip = serde_json::from_value::<RemoteNetworkProxyConfig>(
-            serde_json::to_value(&remote).expect("serialize remote config"),
-        )
-        .expect("deserialize remote config");
+        let wire = serde_json::to_value(&remote).expect("serialize remote config");
+        let round_trip = serde_json::from_value::<RemoteNetworkProxyConfig>(wire.clone())
+            .expect("deserialize remote config");
 
-        assert_eq!(round_trip, remote);
+        assert_eq!(
+            serde_json::to_value(round_trip).expect("serialize round-tripped remote config"),
+            wire,
+        );
     }
 }
 

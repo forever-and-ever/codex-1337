@@ -10,7 +10,6 @@ use codex_network_proxy::NetworkProxy;
 use codex_network_proxy::NetworkProxyAuditMetadata;
 use codex_network_proxy::NetworkProxyConfig;
 use codex_network_proxy::NetworkProxyConstraints;
-use codex_network_proxy::NetworkProxyHandle;
 use codex_network_proxy::NetworkProxyState;
 use codex_network_proxy::build_config_state;
 use codex_network_proxy::host_and_port_from_network_addr;
@@ -32,19 +31,12 @@ pub struct NetworkProxySpec {
     hard_deny_allowlist_misses: bool,
 }
 
-pub struct StartedNetworkProxy {
-    proxy: NetworkProxy,
-    network_policy_decider: Option<Arc<dyn NetworkPolicyDecider>>,
-    _handle: NetworkProxyHandle,
-}
+/// The unavailable managed proxy runtime has no instances.
+pub enum StartedNetworkProxy {}
 
 impl StartedNetworkProxy {
     pub fn proxy(&self) -> NetworkProxy {
-        self.proxy.clone()
-    }
-
-    pub(crate) fn network_policy_decider(&self) -> Option<Arc<dyn NetworkPolicyDecider>> {
-        self.network_policy_decider.as_ref().map(Arc::clone)
+        match *self {}
     }
 }
 
@@ -231,21 +223,6 @@ impl NetworkProxySpec {
             )
         })?;
         Ok(spec)
-    }
-
-    pub(crate) async fn apply_to_started_proxy(
-        &self,
-        started_proxy: &StartedNetworkProxy,
-    ) -> std::io::Result<()> {
-        let state = self
-            .build_config_state_for_spec(Platform::from_platform_os(Some(std::env::consts::OS)))?;
-        started_proxy
-            .proxy()
-            .replace_config_state(state)
-            .await
-            .map_err(|err| {
-                std::io::Error::other(format!("failed to update network proxy state: {err}"))
-            })
     }
 
     pub(crate) fn build_state_with_audit_metadata(

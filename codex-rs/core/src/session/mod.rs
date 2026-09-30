@@ -1239,14 +1239,7 @@ impl Session {
             )
             .await
             .map_err(|err| anyhow::anyhow!("failed to start managed network proxy: {err}"))?;
-        let session_network_proxy = {
-            let proxy = network_proxy.proxy();
-            SessionNetworkProxyRuntime {
-                http_addr: proxy.http_addr().to_string(),
-                socks_addr: proxy.socks_addr().to_string(),
-            }
-        };
-        Ok((network_proxy, session_network_proxy))
+        match network_proxy {}
     }
 
     async fn refresh_managed_network_proxy_for_current_permission_profile(&self) {
@@ -1300,35 +1293,12 @@ impl Session {
                 .set_snapshot_credential_broker(SnapshotCredentialBrokerState::Inactive);
             return;
         }
-        let managed_proxy_routing =
-            managed_proxy_routing_for_windows_sandbox(session_configuration.windows_sandbox_type);
-        let started_proxy = self.services.network_proxy.load_full();
-        let network_policy_decider = started_proxy
-            .as_ref()
-            .and_then(|started_proxy| started_proxy.network_policy_decider());
-        if let Some(started_proxy) = started_proxy
-            && started_proxy.proxy().managed_proxy_routing() == managed_proxy_routing
-        {
-            if let Err(err) = spec.apply_to_started_proxy(started_proxy.as_ref()).await {
-                warn!("failed to refresh managed network proxy for sandbox change: {err}");
-            } else {
-                self.services
-                    .turn_environments
-                    .set_snapshot_credential_broker(if spec.credential_broker_enabled() {
-                        SnapshotCredentialBrokerState::Ready(started_proxy.proxy())
-                    } else {
-                        SnapshotCredentialBrokerState::Inactive
-                    });
-            }
-            return;
-        }
-
         match Self::start_managed_network_proxy(
             &spec,
             current_exec_policy.as_ref(),
             &session_configuration.permission_profile(),
             session_configuration.windows_sandbox_type,
-            network_policy_decider,
+            /*network_policy_decider*/ None,
             Some(build_blocked_request_observer(Arc::clone(
                 &self.services.network_approval,
             ))),
@@ -1337,18 +1307,7 @@ impl Session {
         )
         .await
         {
-            Ok((started_proxy, _session_network_proxy)) => {
-                if spec.credential_broker_enabled() {
-                    self.services
-                        .turn_environments
-                        .set_snapshot_credential_broker(SnapshotCredentialBrokerState::Ready(
-                            started_proxy.proxy(),
-                        ));
-                }
-                self.services
-                    .network_proxy
-                    .store(Some(Arc::new(started_proxy)));
-            }
+            Ok((started_proxy, _)) => match started_proxy {},
             Err(err) => {
                 self.services
                     .turn_environments
@@ -2733,27 +2692,6 @@ impl Session {
             .clone();
         let execpolicy_amendment =
             execpolicy_network_rule_amendment(amendment, network_approval_context, &host);
-        let mut on_policy_applied = Some(on_policy_applied);
-
-        if let Some(started_network_proxy) = self.services.network_proxy.load_full() {
-            let proxy = started_network_proxy.proxy();
-            match amendment.action {
-                NetworkPolicyRuleAction::Allow => proxy
-                    .add_allowed_domain(&host)
-                    .await
-                    .map_err(|err| anyhow::anyhow!("failed to update runtime allowlist: {err}"))?,
-                NetworkPolicyRuleAction::Deny => proxy
-                    .add_denied_domain(&host)
-                    .await
-                    .map_err(|err| anyhow::anyhow!("failed to update runtime denylist: {err}"))?,
-            }
-            // Active enforcement changed successfully. Notify the owner before
-            // the next fallible await so cancellation cannot contradict it.
-            if let Some(on_policy_applied) = on_policy_applied.take() {
-                on_policy_applied();
-            }
-        }
-
         self.services
             .exec_policy
             .append_network_rule_and_update(
@@ -2769,9 +2707,7 @@ impl Session {
             })?;
 
         // Without a running proxy, persistence is the first effective policy change.
-        if let Some(on_policy_applied) = on_policy_applied {
-            on_policy_applied();
-        }
+        on_policy_applied();
 
         Ok(())
     }

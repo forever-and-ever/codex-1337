@@ -357,7 +357,6 @@ impl ThreadEnvironments {
                 environment,
                 cwd,
                 shell,
-                /*allow_login_shell*/ true,
                 config.shell_environment_policy.clone(),
                 /*sandbox*/ None,
             )

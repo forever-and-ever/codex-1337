@@ -178,7 +178,6 @@ impl TurnEnvironment {
                         Arc::clone(&self.environment),
                         PathUri::from_abs_path(cwd),
                         Some(shell.clone()),
-                        use_login_shell,
                         self.shell_environment_policy().clone(),
                         Some(sandbox.clone()),
                     )
