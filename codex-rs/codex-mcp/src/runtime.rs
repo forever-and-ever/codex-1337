@@ -303,13 +303,42 @@ impl McpRuntime {
         );
     }
 
-    /// Opens dispatch only after the new socket's catalog has been published.
-    pub fn activate_server_lease(&self, server: &str, cancellation: &Arc<CancellationToken>) {
-        if let Some(lease) = self.server_leases.lock().unwrap().get_mut(server)
-            && Arc::ptr_eq(&lease.cancellation, cancellation)
-            && !cancellation.is_cancelled()
-        {
-            lease.ready_publication = Some(Arc::downgrade(&self.current.load_full()));
+    /// Opens dispatch only for the publication whose socket and catalog became ready.
+    pub async fn activate_server_lease(
+        &self,
+        server: &str,
+        cancellation: &Arc<CancellationToken>,
+    ) -> bool {
+        loop {
+            let current = self.current.load_full();
+            if !current.connections.wait_for_server_startup(server).await {
+                return false;
+            }
+            let binding = Self::binding_from_published_runtime(
+                Arc::clone(&current),
+                /*required_servers*/ &[],
+                /*required_plugins*/ &HashSet::new(),
+            )
+            .await;
+            if !binding.is_some_and(|binding| {
+                binding
+                    .tools()
+                    .iter()
+                    .any(|tool| tool.server_name == server)
+            }) {
+                return false;
+            }
+            let mut leases = self.server_leases.lock().unwrap();
+            let Some(lease) = leases.get_mut(server) else {
+                return false;
+            };
+            if !Arc::ptr_eq(&lease.cancellation, cancellation) || cancellation.is_cancelled() {
+                return false;
+            }
+            if Arc::ptr_eq(&current, &self.current.load_full()) {
+                lease.ready_publication = Some(Arc::downgrade(&current));
+                return true;
+            }
         }
     }
 
@@ -455,8 +484,9 @@ impl McpRuntime {
             ready_environments,
             cached_binding: Mutex::new(None),
         });
+        let mut leases = self.server_leases.lock().unwrap();
         self.current.store(Arc::clone(&publication));
-        for (server, lease) in self.server_leases.lock().unwrap().iter_mut() {
+        for (server, lease) in leases.iter_mut() {
             if !lease.cancellation.is_cancelled()
                 && lease.ready_publication.is_some()
                 && publication

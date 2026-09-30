@@ -109,17 +109,11 @@ impl Session {
                 self.refresh_mcp_if_dirty().await;
                 let ready = self.services
                     .mcp_runtime
-                    .current_binding_for_call(&server_name)
-                    .await
-                    .is_some_and(|binding| {
-                        binding.tools().iter().any(|tool| tool.server_name == server_name)
-                    });
+                    .activate_server_lease(&server_name, &cancellation)
+                    .await;
                 if !ready || cancellation.is_cancelled() {
                     anyhow::bail!("extension MCP server did not become ready");
                 }
-                self.services
-                    .mcp_runtime
-                    .activate_server_lease(&server_name, &cancellation);
                 pending.committed = true;
                 Ok(())
             }) => result.map_err(|_| anyhow::anyhow!("extension MCP server did not become ready"))?,
@@ -174,7 +168,7 @@ impl Session {
         let instructions = lease.developer_instructions.clone();
         *self.last_mcp_extension_instruction.lock().unwrap() = Some(instructions.clone());
         Some(format!(
-            "{EXTENSION_INSTRUCTION_MARKER} These instructions apply only while this thread has a live lease for MCP server `{}`. Without that lease they are inactive.\n{instructions}",
+            "{EXTENSION_INSTRUCTION_MARKER} These instructions replace all previously supplied connection-scoped MCP extension instructions. They apply only while this thread has a live lease for MCP server `{}`. Without that lease they are inactive.\n{instructions}",
             lease.server_name
         ))
     }
