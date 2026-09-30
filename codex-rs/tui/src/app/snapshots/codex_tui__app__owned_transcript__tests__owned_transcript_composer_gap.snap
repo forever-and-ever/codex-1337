@@ -1,5 +1,6 @@
 ---
 source: tui/src/app/owned_transcript_tests.rs
+assertion_line: 415
 expression: "snapshots.join(\"\\n\\n\")"
 ---
 Latest
@@ -18,9 +19,9 @@ Transcript row 40
 
 Reading
   esc latest
-────────────────────────────────────────────────────────────────────────────────
 Transcript row 38
 Transcript row 39
+────────────────────────────────────────────────────────────────────────────────
                              ↓ Back to bottom · esc
 
 › draft
@@ -32,7 +33,7 @@ Transcript row 39
 
 Resized multiline composer
 Transcript row 38
-Transcript row 39
+────────────────────────────────────────
          ↓ Back to bottom · esc
 
 › draft

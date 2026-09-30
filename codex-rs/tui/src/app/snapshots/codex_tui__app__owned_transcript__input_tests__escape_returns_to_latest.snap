@@ -1,12 +1,13 @@
 ---
 source: tui/src/app/owned_transcript_input_tests.rs
+assertion_line: 492
 expression: "format!(\"before\\n{before}\\n\\nafter\\n{}\", screen(&tui))"
 ---
 before
   New activity · esc latest
-────────────────────────────────────────────────────────────────────────────────
 row 18
 row 19
+────────────────────────────────────────────────────────────────────────────────
                      New activity · ↓ Back to bottom · esc
 
 › draft preserved
