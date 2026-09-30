@@ -2,6 +2,7 @@
 
 use super::*;
 use codex_app_server_protocol::TurnStartResponse;
+use pretty_assertions::assert_eq;
 
 #[tokio::test]
 async fn headless_message_steers_stale_active_destination_with_authentic_provenance() -> Result<()>

@@ -295,7 +295,7 @@ fn overview_thread(
 #[tokio::test]
 async fn shared_overview_keeps_rows_and_replays_changes_over_stale_reads() -> Result<()> {
     let mut app = make_test_app().await;
-    let mut app_server = crate::start_embedded_app_server_for_picker(&app.config).await?;
+    let app_server = crate::start_embedded_app_server_for_picker(&app.config).await?;
     let [retained, archived, deleted, created] = std::array::from_fn(|_| ThreadId::new());
     let [
         mut retained_thread,

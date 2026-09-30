@@ -95,7 +95,7 @@ pub(super) async fn listen(
             else {
                 return;
             };
-            let subscription = matches!(envelope.request, Request::Suspend | Request::Tasks { .. });
+            let suspended = matches!(envelope.request, Request::Suspend);
             let operation = async {
                 let (reply, response) = oneshot::channel();
                 events
@@ -105,9 +105,8 @@ pub(super) async fn listen(
                 let response = response.await.map_err(io::Error::other)?;
                 write(&mut stream, &response).await
             };
-            if subscription {
-                // Explicit suspension and a background event subscription are not
-                // reload waits. Keep idle hosts asleep instead of polling for tasks.
+            if suspended {
+                // Explicit suspension is not a reload wait. Keep idle hosts asleep.
                 let _ = operation.await;
             } else {
                 let _ =

@@ -20,9 +20,10 @@ impl ExecCell {
         // Interaction output is intentionally absent from the expanded transcript.
         if !call.is_unified_exec_interaction()
             && let Some(output) = &call.output
-            && output.line_counts().1 > 0 {
-                return Some(ActivityDisclosure::Generic);
-            }
+            && output.line_counts().1 > 0
+        {
+            return Some(ActivityDisclosure::Generic);
+        }
         if !self
             .group
             .details

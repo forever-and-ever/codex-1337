@@ -728,6 +728,16 @@ impl CodexThread {
         self.io.agent_status().await
     }
 
+    /// Proves absence of admitted turns, including pre-Running reservations.
+    /// Contention is not proof of idle: hosts may call this under eviction locks
+    /// without waiting for Core or relying on delayed task status events.
+    pub fn can_prove_turn_idle(&self) -> bool {
+        self.session
+            .active_turn
+            .try_lock()
+            .is_ok_and(|active| active.is_none())
+    }
+
     pub async fn list_background_terminals(&self) -> Vec<BackgroundTerminalInfo> {
         self.session.list_background_terminals().await
     }

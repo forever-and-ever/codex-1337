@@ -74,14 +74,7 @@ fn activity_metadata_is_retained_without_including_outputs() -> anyhow::Result<(
         ]
     }))?;
 
-    let summary = response_json(
-        success_response(turn_summary(
-            &turn,
-            /*include_outputs*/ false,
-            DEFAULT_OUTPUT_CHARS,
-        ))
-        .expect("task response"),
-    );
+    let summary = turn_summary(&turn, /*include_outputs*/ false, DEFAULT_OUTPUT_CHARS);
     assert_eq!(
         summary["items"],
         json!([

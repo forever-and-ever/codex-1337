@@ -17,4 +17,9 @@ platformFamily: string,
  * Operating system for the running app-server target, for example
  * `"macos"`, `"linux"`, or `"windows"`.
  */
-platformOs: string, };
+platformOs: string,
+/**
+ * Native thread coordination support, not permission to invoke a tool.
+ * Omitted by older servers.
+ */
+threadCoordination?: boolean, };

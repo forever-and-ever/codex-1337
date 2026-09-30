@@ -832,10 +832,12 @@ pub(super) async fn read_response_for_id(
     let target_id = RequestId::Integer(id);
     loop {
         let message = read_jsonrpc_message(stream).await?;
-        if let JSONRPCMessage::Response(response) = message
-            && response.id == target_id
-        {
-            return Ok(response);
+        match message {
+            JSONRPCMessage::Response(response) if response.id == target_id => return Ok(response),
+            JSONRPCMessage::Error(error) if error.id == target_id => {
+                anyhow::bail!("request {id} failed: {:?}", error.error);
+            }
+            _ => {}
         }
     }
 }

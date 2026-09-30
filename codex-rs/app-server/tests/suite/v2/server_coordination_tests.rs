@@ -124,6 +124,53 @@ async fn age_destination(home: &std::path::Path, thread_id: &str) -> Result<i64>
     Ok(updated_at)
 }
 
+// A never-used speculative thread has no durable rollout to restore. Seed cold
+// fixtures through the public turn API and retain interleaved completion events.
+async fn persist_destination(
+    frontend: &mut super::WsClient,
+    id: i64,
+    thread_id: &str,
+) -> Result<()> {
+    send_request(
+        frontend,
+        "turn/start",
+        id,
+        Some(json!({
+            "threadId": thread_id, "input": [{"type": "text", "text": "Persist this destination"}]
+        })),
+    )
+    .await?;
+    let mut started = false;
+    let mut completed = false;
+    timeout(TIMEOUT, async {
+        while !started || !completed {
+            match read_jsonrpc_message(frontend).await? {
+                JSONRPCMessage::Response(response)
+                    if response.id == codex_app_server_protocol::RequestId::Integer(id) =>
+                {
+                    started = true
+                }
+                JSONRPCMessage::Notification(notification)
+                    if notification.method == "turn/completed"
+                        && notification
+                            .params
+                            .as_ref()
+                            .is_some_and(|params| params["threadId"] == thread_id) =>
+                {
+                    completed = true
+                }
+                JSONRPCMessage::Error(error) => {
+                    anyhow::bail!("destination setup failed: {error:?}")
+                }
+                _ => {}
+            }
+        }
+        Ok::<_, anyhow::Error>(())
+    })
+    .await??;
+    Ok(())
+}
+
 async fn model_response(State(gate): State<Arc<ModelGate>>, Json(body): Json<Value>) -> Response {
     let blocked =
         gate.blocked_model.as_deref() == body["model"].as_str() && gate.blocked_model.is_some();
@@ -171,6 +218,7 @@ mod policy;
 async fn independent_tasks_and_cold_destinations_start_after_the_only_frontend_disconnects()
 -> Result<()> {
     let gate = Arc::new(ModelGate::default());
+    gate.first.store(true, Ordering::SeqCst);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let address = listener.local_addr()?;
     let mut legacy_transport = frontend_transport_config(&format!("http://{address}/mcp"));
@@ -239,6 +287,7 @@ approval_mode = "approve"
         to_response::<ThreadStartResponse>(read_response_for_id(&mut frontend, /*id*/ 4).await?)?
             .thread
             .id;
+    persist_destination(&mut frontend, /*id*/ 9, &destination).await?;
     send_request(
         &mut frontend,
         "thread/unsubscribe",
@@ -250,6 +299,7 @@ approval_mode = "approve"
     wait_for_loaded_threads(&mut frontend, /*first_id*/ 100, &[&caller]).await?;
 
     let stale = start_thread(&mut frontend, /*id*/ 7).await?;
+    persist_destination(&mut frontend, /*id*/ 10, &stale).await?;
     send_request(
         &mut frontend,
         "thread/unsubscribe",
@@ -260,6 +310,8 @@ approval_mode = "approve"
     read_response_for_id(&mut frontend, /*id*/ 8).await?;
     wait_for_loaded_threads(&mut frontend, /*first_id*/ 200, &[&caller]).await?;
     let stale_updated_at = age_destination(home.path(), &stale).await?;
+    gate.calls.lock().await.clear();
+    gate.first.store(false, Ordering::SeqCst);
 
     *gate.tools.lock().await = vec![
         responses::ev_function_call_with_namespace(
@@ -298,7 +350,7 @@ approval_mode = "approve"
     // The response is held until the sole frontend is gone: no port, callbacks,
     // task registration acknowledgment, or renderer can execute either tool.
     gate.release.notify_one();
-    timeout(TIMEOUT, async {
+    let delivery = timeout(TIMEOUT, async {
         loop {
             if gate.calls.lock().await.len() >= 4 {
                 break;
@@ -306,9 +358,19 @@ approval_mode = "approve"
             gate.changed.notified().await;
         }
     })
-    .await
-    .context("headless coordination did not produce model requests")?;
+    .await;
     let calls = gate.calls.lock().await.clone();
+    if delivery.is_err() {
+        let summary = calls.iter().map(|body| json!({
+            "model": body["model"],
+            "outputs": body["input"].as_array().into_iter().flatten()
+                .filter(|item| item["type"] == "function_call_output")
+                .map(|item| json!({"callId": item["call_id"], "name": item["name"],
+                    "output": item["output"].as_str().map(|text| text.chars().take(300).collect::<String>())}))
+                .collect::<Vec<_>>()
+        })).collect::<Vec<_>>();
+        anyhow::bail!("headless coordination did not produce model requests: {summary:?}");
+    }
     let delegated = |name: &str| {
         calls.iter().find_map(|body| {
             body["input"]
@@ -366,19 +428,6 @@ approval_mode = "approve"
     );
     send_request(
         &mut replacement,
-        "thread/queue/list",
-        /*id*/ 11,
-        Some(json!({"threadId": stale})),
-    )
-    .await?;
-    assert_eq!(
-        read_response_for_id(&mut replacement, /*id*/ 11)
-            .await?
-            .result["data"],
-        json!([])
-    );
-    send_request(
-        &mut replacement,
         "thread/read",
         /*id*/ 12,
         Some(json!({"threadId": stale, "includeTurns": false})),
@@ -423,7 +472,7 @@ approval_mode = "approve"
     .await?;
     let history =
         to_response::<ThreadReadResponse>(read_response_for_id(&mut replacement, /*id*/ 3).await?)?;
-    assert_eq!(history.thread.turns.len(), 1);
+    assert_eq!(history.thread.turns.len(), 2);
     assert_eq!(
         gate.calls.lock().await.len(),
         calls.len(),
@@ -464,6 +513,10 @@ async fn headless_approval_waits_for_consent_and_replays_to_a_replacement_fronte
     read_response_for_id(&mut frontend, /*id*/ 1).await?;
     let caller = start_thread(&mut frontend, /*id*/ 2).await?;
     let destination = start_thread(&mut frontend, /*id*/ 3).await?;
+    gate.first.store(true, Ordering::SeqCst);
+    persist_destination(&mut frontend, /*id*/ 5, &destination).await?;
+    gate.calls.lock().await.clear();
+    gate.first.store(false, Ordering::SeqCst);
     *gate.tools.lock().await = vec![responses::ev_function_call_with_namespace(
         "pending-message",
         "mcp__codex_tui",
@@ -485,7 +538,26 @@ async fn headless_approval_waits_for_consent_and_replays_to_a_replacement_fronte
 
     let mut replacement = connect_websocket(address).await?;
     send_initialize_request(&mut replacement, /*id*/ 1, "approval-replacement").await?;
-    read_response_for_id(&mut replacement, /*id*/ 1).await?;
+    // Requests are broadcast to initialized connections as well as replayed on
+    // resume. Do not discard one that races the initialize response.
+    let mut pending_approval = None;
+    loop {
+        match read_jsonrpc_message(&mut replacement)
+            .await
+            .context("initialize replacement while preserving pending consent")?
+        {
+            JSONRPCMessage::Response(response)
+                if response.id == codex_app_server_protocol::RequestId::Integer(1) =>
+            {
+                break;
+            }
+            JSONRPCMessage::Request(request) if request.method == "item/tool/requestUserInput" => {
+                pending_approval = Some(request)
+            }
+            JSONRPCMessage::Error(error) => anyhow::bail!("initialize failed: {error:?}"),
+            _ => {}
+        }
+    }
     send_request(
         &mut replacement,
         "thread/resume",
@@ -496,9 +568,12 @@ async fn headless_approval_waits_for_consent_and_replays_to_a_replacement_fronte
     // Resume and pending-request replay may interleave. Preserve both messages.
     let approval = timeout(TIMEOUT, async {
         let mut resumed = false;
-        let mut approval = None;
+        let mut approval = pending_approval;
         loop {
-            match read_jsonrpc_message(&mut replacement).await? {
+            match read_jsonrpc_message(&mut replacement)
+                .await
+                .context("resume caller and replay pending consent")?
+            {
                 JSONRPCMessage::Response(response)
                     if response.id == codex_app_server_protocol::RequestId::Integer(2) =>
                 {
@@ -532,7 +607,9 @@ async fn headless_approval_waits_for_consent_and_replays_to_a_replacement_fronte
         Some(json!({"threadId": destination, "excludeTurns": true})),
     )
     .await?;
-    read_response_for_id(&mut replacement, /*id*/ 3).await?;
+    read_response_for_id(&mut replacement, /*id*/ 3)
+        .await
+        .context("open persisted destination before granting consent")?;
     let aged = age_destination(home.path(), &destination).await?;
     send_request(
         &mut replacement,
@@ -570,9 +647,16 @@ async fn headless_approval_waits_for_consent_and_replays_to_a_replacement_fronte
         calls
             .iter()
             .filter(|call| call["input"].as_array().is_some_and(|input| {
-                input
-                    .iter()
-                    .any(|item| item["name"] == "send_message_to_thread")
+                input.iter().any(|item| {
+                    item["type"] == "function_call_output"
+                        && item["output"]
+                            .as_str()
+                            .and_then(DelegatedMessage::parse)
+                            .is_some_and(|message| {
+                                message.source_thread_id == caller
+                                    && message.input == "Only after consent"
+                            })
+                })
             }))
             .count(),
         1,

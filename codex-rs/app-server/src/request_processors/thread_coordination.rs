@@ -25,12 +25,13 @@ use codex_app_server_protocol::ThreadTurnsListResponse;
 use codex_app_server_protocol::ThreadUnarchiveParams;
 use codex_app_server_protocol::TurnToolOutput;
 use codex_core::CodexThread;
-use codex_core::CodexThreadSettingsOverrides;
 use codex_core::TurnInput;
 use codex_core::TurnInputRequest;
 use codex_core::TurnInputSubmission;
 use codex_protocol::ThreadId;
 use codex_protocol::mcp::ClientMcpExtensions;
+use codex_protocol::protocol::AgentStatus;
+use codex_protocol::protocol::ThreadSettingsOverrides;
 
 use super::super::thread_input::ensure_direct_input_allowed;
 use super::ThreadRequestProcessor;
@@ -114,7 +115,9 @@ impl ThreadCoordinationService {
         let id = ThreadId::from_string(thread_id)
             .map_err(|err| invalid_request(format!("invalid thread id: {err}")))?;
         // Do not allocate lifecycle state for arbitrary model-supplied UUIDs.
-        self.read(thread_id).await?;
+        if self.threads.thread_manager.get_thread(id).await.is_err() {
+            self.read(thread_id).await?;
+        }
         let lease = self.threads.thread_state_manager.lease_runtime(id).await;
         let deadline =
             tokio::time::Instant::now() + std::time::Duration::from_secs(/*secs*/ 10);
@@ -130,6 +133,15 @@ impl ThreadCoordinationService {
             }
             tokio::time::sleep(std::time::Duration::from_millis(/*millis*/ 20)).await;
         }
+        // A live newly-created thread need not have a materialized rollout.
+        // Recheck only after acquiring the lease and draining pending unloads;
+        // shutdown runtimes still require authoritative cold restoration below.
+        if let Ok(thread) = self.threads.thread_manager.get_thread(id).await
+            && thread.agent_status().await != AgentStatus::Shutdown
+        {
+            return Ok((thread, lease));
+        }
+        self.read(thread_id).await?;
         self.threads
             .thread_resume(
                 ThreadResumeTarget::Coordination,
@@ -168,7 +180,7 @@ impl ThreadCoordinationService {
         let submission = thread
             .start_or_steer_turn(
                 TurnInputRequest::new(TurnInput::ResponseItem(output.into_core()))
-                    .with_thread_settings(CodexThreadSettingsOverrides {
+                    .with_thread_settings(ThreadSettingsOverrides {
                         model,
                         ..Default::default()
                     }),
@@ -252,10 +264,9 @@ impl ThreadCoordinationService {
                 /*request_context*/ None,
             )
             .await?;
-        Ok((
-            response,
-            lease.expect("headless startup retains its runtime lease"),
-        ))
+        let lease = lease
+            .ok_or_else(|| internal_error("headless startup did not retain its runtime lease"))?;
+        Ok((response, lease))
     }
 
     pub(crate) async fn fork(

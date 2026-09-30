@@ -379,7 +379,9 @@ pub(super) async fn ensure_listener_task_running(
                     if !unloading_state.should_unload_now() {
                         continue;
                     }
-                    if matches!(conversation.agent_status().await, AgentStatus::Running) {
+                    // Core admission precedes TurnStarted and its derived status.
+                    // Releasing a headless lease must not evict that admitted turn.
+                    if !conversation.can_prove_turn_idle() {
                         unloading_state.note_thread_activity_observed();
                         continue;
                     }
@@ -388,7 +390,9 @@ pub(super) async fn ensure_listener_task_running(
                         if pending_thread_unloads.contains(&conversation_id) {
                             continue;
                         }
-                        if !unloading_state.should_unload_now() {
+                        if !unloading_state.should_unload_now()
+                            || !conversation.can_prove_turn_idle()
+                        {
                             continue;
                         }
                         pending_thread_unloads.insert(conversation_id);

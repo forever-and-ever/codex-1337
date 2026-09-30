@@ -22,7 +22,6 @@ pub(crate) use history::INITIAL_HISTORY_TURN_LIMIT;
 pub(crate) use history::thread_items_page_params;
 
 use crate::app_event::PermissionProfileSelection;
-use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::FeedbackAudience;
 use crate::legacy_core::config::Config;
 use crate::local_settings::LocalSettings;
@@ -110,7 +109,6 @@ use codex_app_server_protocol::ThreadSource;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::ThreadStartResponse;
 use codex_app_server_protocol::ThreadStartSource;
-use codex_app_server_protocol::ThreadStatusChangedNotification;
 use codex_app_server_protocol::ThreadUnarchiveParams;
 use codex_app_server_protocol::ThreadUnarchiveResponse;
 use codex_app_server_protocol::ThreadUnsubscribeParams;
@@ -1615,7 +1613,7 @@ pub(crate) async fn start_thread_with_request_handle(
     remote_cwd_override: Option<PathBuf>,
 ) -> Result<AppServerStartedThread> {
     let request_id = RequestId::String(format!("startup-thread-start-{}", Uuid::new_v4()));
-    let mut params = thread_start_params_from_config(
+    let params = thread_start_params_from_config(
         &config,
         thread_params_mode,
         remote_cwd_override.as_deref(),

@@ -24,7 +24,6 @@ use codex_app_server_protocol::ThreadListParams;
 use codex_app_server_protocol::ThreadSortKey;
 use codex_app_server_protocol::ThreadStatus;
 use codex_app_server_protocol::ThreadTurnsListParams;
-use codex_app_server_protocol::Turn;
 use codex_app_server_protocol::TurnItemsView;
 use codex_protocol::ThreadId;
 use serde_json::Value;
@@ -191,7 +190,6 @@ pub(super) async fn wait(
                                 cursor: None,
                                 limit: Some(20),
                                 sort_direction: Some(SortDirection::Desc),
-                                kinds: None,
                             }),
                         )
                         .await

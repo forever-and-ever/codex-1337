@@ -216,7 +216,19 @@ async fn resumed_history_deactivates_unowned_extension_instructions() -> Result<
         .await?;
     let active_response = responses::mount_sse_once(
         &server,
-        responses::sse(vec![responses::ev_completed("active-turn")]),
+        responses::sse(vec![
+            responses::ev_custom_tool_call(
+                "lease-inventory",
+                "exec",
+                r#"text(ALL_TOOLS.filter(({name}) => name.startsWith("mcp__mcp__codex_tui_") && typeof tools[name] === "function").map(({name}) => name));"#,
+            ),
+            responses::ev_completed("active-turn"),
+        ]),
+    )
+    .await;
+    let inventory_response = responses::mount_sse_once(
+        &server,
+        responses::sse(vec![responses::ev_completed("inventory-turn")]),
     )
     .await;
     initial.submit_text_turn("Use this thread").await?;
@@ -244,19 +256,16 @@ async fn resumed_history_deactivates_unowned_extension_instructions() -> Result<
         .find(|tool| tool["name"] == "echo")
         .context("echo tool")?;
     assert_ne!(echo["defer_loading"], json!(true));
-    let exec = tools
-        .iter()
-        .chain(
-            tools
-                .iter()
-                .flat_map(|tool| tool["tools"].as_array().into_iter().flatten()),
-        )
-        .find(|tool| tool["name"] == "exec")
-        .context("Code Mode exec")?;
-    let description = exec["description"].as_str().context("exec description")?;
-    assert!(!description.contains(&format!("{leased_namespace}__echo")));
+    // Deferred tools are deliberately omitted from exec's description. Inspect
+    // its actual callable inventory rather than treating prompt text as routing.
+    let inventory = super::code_mode::custom_tool_output_last_non_empty_text(
+        &inventory_response.single_request(),
+        "lease-inventory",
+    )
+    .context("Code Mode inventory")?;
+    assert!(!inventory.contains(&format!("{leased_namespace}__echo")));
     assert!(
-        description.contains("mcp__mcp__codex_tui_"),
+        inventory.contains("mcp__mcp__codex_tui_"),
         "ordinary retained tools must remain in Code Mode"
     );
 

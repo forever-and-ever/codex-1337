@@ -250,7 +250,7 @@ impl App {
         client_version: &str,
     ) -> Result<()> {
         let Reconnected {
-            mut session,
+            session,
             bootstrap,
             thread,
         } = connected;

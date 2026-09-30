@@ -2,14 +2,16 @@
 //! transport identity constraints. Exercise the existing public RPC fixture.
 
 use super::*;
-use crate::common::TestAppServer;
+use app_test_support::TestAppServer;
+use axum::response::IntoResponse;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::UserInput;
+use pretty_assertions::assert_eq;
 use std::collections::HashMap;
 
 async fn user_owned_mcp(
     State(gate): State<Arc<ModelGate>>,
-    axum::extract::OriginalUri(uri): axum::extract::OriginalUri,
+    uri: axum::http::Uri,
     Json(body): Json<Value>,
 ) -> Response {
     gate.legacy_connections.fetch_add(1, Ordering::SeqCst);
@@ -21,11 +23,14 @@ async fn user_owned_mcp(
             "serverInfo": {"name": "user-owned", "version": "1"}
         }),
         Some("tools/list") => {
-            json!({"tools": ["list_threads", "unrelated_probe"].map(|name| json!({
-                "name": name, "description": format!("Unrelated user server {}", uri.path()),
-                "inputSchema": {"type": "object", "properties": {}},
-                "annotations": {"readOnlyHint": true}
-            }))})
+            let tools = ["list_threads", "unrelated_probe"].map(|name| {
+                json!({
+                    "name": name, "description": format!("Unrelated user server {}", uri.path()),
+                    "inputSchema": {"type": "object", "properties": {}},
+                    "annotations": {"readOnlyHint": true}
+                })
+            });
+            json!({"tools": tools})
         }
         Some("tools/call") => {
             let name = body["params"]["name"].as_str().expect("raw MCP tool name");
@@ -41,14 +46,9 @@ async fn user_owned_mcp(
             gate.changed.notify_one();
             json!({"content": [{"type": "text", "text": format!("user-owned:{server}/{name}")}], "isError": false})
         }
-        _ => return Response::builder().status(202).body(Body::empty()).unwrap(),
+        _ => return axum::http::StatusCode::ACCEPTED.into_response(),
     };
-    Response::builder()
-        .header(CONTENT_TYPE, "application/json")
-        .body(Body::from(
-            json!({"jsonrpc": "2.0", "id": body["id"], "result": result}).to_string(),
-        ))
-        .unwrap()
+    Json(json!({"jsonrpc": "2.0", "id": body["id"], "result": result})).into_response()
 }
 
 #[tokio::test]
@@ -296,8 +296,11 @@ async fn native_approval_requires_managed_admission_before_retiring_a_legacy_ide
                         .flat_map(|call| call["input"].as_array().into_iter().flatten())
                         .any(|item| {
                             item["call_id"] == name
-                                && item["output"].as_str().is_some_and(|output| {
-                                    output.contains(&format!("user-owned:{name}"))
+                                && item["output"].as_array().is_some_and(|content| {
+                                    content.iter().any(|part| {
+                                        part["text"].as_str()
+                                            == Some(format!("user-owned:{name}").as_str())
+                                    })
                                 })
                         }),
                     "canonical MCP dispatch lost {name}"
@@ -306,7 +309,7 @@ async fn native_approval_requires_managed_admission_before_retiring_a_legacy_ide
         } else {
             assert_eq!(gate.legacy_connections.load(Ordering::SeqCst), 0, "{case}");
         }
-        server.shutdown().await?;
+        drop(server);
         model_server.abort();
     }
     Ok(())

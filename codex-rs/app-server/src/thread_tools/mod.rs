@@ -114,14 +114,16 @@ impl<'call> ToolExecutor<ToolCall<'call>> for CoordinationTool {
     fn tool_name(&self) -> ToolName {
         ToolName::namespaced(NAMESPACE, &self.function.name)
     }
+    #[expect(
+        clippy::expect_used,
+        reason = "Coordination schemas are static, owned tool definitions"
+    )]
     fn spec(&self) -> ToolSpec {
-        let function: codex_protocol::dynamic_tools::DynamicToolFunctionSpec =
-            self.function.clone().into();
         ToolSpec::Namespace(ResponsesApiNamespace {
             name: NAMESPACE.to_owned(),
             description: "Manage Codex tasks available through the connected app server.".into(),
             tools: vec![ResponsesApiNamespaceTool::Function(
-                codex_tools::dynamic_tool_to_responses_api_tool(&function)
+                codex_tools::dynamic_tool_to_responses_api_tool(&self.function)
                     .expect("coordination tool schema is valid"),
             )],
         })
@@ -221,20 +223,19 @@ impl CoordinationTool {
                     .await
                     .map_err(error)?;
                 let thread_id = started.thread.id;
-                if let Some(title) = args.title {
-                    if let Err(error) = service
+                if let Some(title) = args.title
+                    && let Err(error) = service
                         .rename(ThreadSetNameParams {
                             thread_id: thread_id.clone(),
                             name: title.trim().to_owned(),
                         })
                         .await
-                    {
-                        tracing::warn!(
-                            thread_id,
-                            error = error.message,
-                            "failed to name independent task"
-                        );
-                    }
+                {
+                    tracing::warn!(
+                        thread_id,
+                        error = error.message,
+                        "failed to name independent task"
+                    );
                 }
                 service
                     .send(&thread_id, output, /*model*/ None)

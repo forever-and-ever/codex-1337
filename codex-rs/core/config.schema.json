@@ -4159,6 +4159,49 @@
         }
       ]
     },
+    "ThreadCoordinationConfig": {
+      "additionalProperties": false,
+      "description": "Transport-free policy for the server's thread-coordination capability. An explicit section replaces legacy policy as one whole policy, rather than mixing fields with a legacy denial or allow-list.",
+      "properties": {
+        "disabled_tools": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "enabled_tools": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "tools": {
+          "additionalProperties": {
+            "$ref": "#/definitions/ThreadCoordinationToolPolicy"
+          },
+          "default": {},
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "ThreadCoordinationToolPolicy": {
+      "additionalProperties": false,
+      "description": "Explicit policy for one coordination tool; omitted fields retain that tool's native default, not a legacy transport's settings.",
+      "properties": {
+        "approval_mode": {
+          "$ref": "#/definitions/AppToolApproval"
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "ThreadStoreToml": {
       "oneOf": [
         {
@@ -4335,6 +4378,14 @@
       "properties": {
         "experimental_request_user_input": {
           "$ref": "#/definitions/ExperimentalRequestUserInput"
+        },
+        "thread_coordination": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ThreadCoordinationConfig"
+            }
+          ],
+          "description": "Server-owned cross-thread capabilities. Omission preserves explicit legacy `mcp_servers.codex_tui` policy, then uses the native defaults."
         },
         "update_plan": {
           "$ref": "#/definitions/UpdatePlanToolConfig"
