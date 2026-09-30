@@ -40,6 +40,7 @@ use codex_protocol::auth::AuthMode;
 use codex_state::RemoteControlEnrollmentRecord;
 use codex_state::StateRuntime;
 use codex_utils_absolute_path::test_support::PathExt;
+use futures::FutureExt;
 use futures::SinkExt;
 use futures::StreamExt;
 use gethostname::gethostname;
@@ -2192,7 +2193,7 @@ async fn remote_control_waits_for_account_id_before_enrolling() {
     let (transport_event_tx, _transport_event_rx) =
         mpsc::channel::<TransportEvent>(CHANNEL_CAPACITY);
     let shutdown_token = CancellationToken::new();
-    let (remote_task, _remote_handle) = start_remote_control(
+    let (remote_task, remote_handle) = start_remote_control(
         RemoteControlStartConfig {
             remote_control_url,
             installation_id: TEST_INSTALLATION_ID.to_string(),
@@ -2207,6 +2208,7 @@ async fn remote_control_waits_for_account_id_before_enrolling() {
     )
     .await
     .expect("remote control should start before account id is available");
+    let signed_out_owner = remote_handle.inner.session().auth_manager.owner.clone();
 
     timeout(Duration::from_millis(100), listener.accept())
         .await
@@ -2221,9 +2223,12 @@ async fn remote_control_waits_for_account_id_before_enrolling() {
     .expect("auth with account id should save");
     auth_manager.reload().await;
 
-    let enroll_request = timeout(Duration::from_millis(100), accept_http_request(&listener))
+    // Check the controller's wake condition directly: receiving a whole HTTP
+    // request within 100ms also depends on scheduling and unrelated I/O.
+    assert_eq!(signed_out_owner.invalidated().now_or_never(), Some(()));
+    let enroll_request = timeout(Duration::from_secs(5), accept_http_request(&listener))
         .await
-        .expect("auth change should wake remote control before the retry delay");
+        .expect("remote control should enroll after the account becomes available");
     assert_eq!(
         enroll_request.request_line,
         "POST /backend-api/wham/remote/control/server/enroll HTTP/1.1"
