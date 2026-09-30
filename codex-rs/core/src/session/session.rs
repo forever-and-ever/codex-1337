@@ -86,7 +86,7 @@ pub(crate) struct Session {
     /// Connection-owned MCP overlay; revocation is independent of runtime publication.
     pub(super) mcp_extension: std::sync::RwLock<Option<super::mcp_extension::McpExtensionLease>>,
     /// Serializes extension attachment with every turn-construction path.
-    pub(crate) mcp_extension_admission: Mutex<()>,
+    pub(crate) mcp_extension_admission: Semaphore,
     pub(super) last_mcp_extension_instruction: std::sync::Mutex<Option<String>>,
     pub(super) mcp_extension_context_delta: std::sync::Mutex<Option<String>>,
     /// Non-owning lookup for approval data retained by running MCP invocations.
@@ -1851,7 +1851,7 @@ impl Session {
                 multi_agent_version,
                 mcp_refresh: McpRefresh::new(),
                 mcp_extension: std::sync::RwLock::new(None),
-                mcp_extension_admission: Mutex::new(()),
+                mcp_extension_admission: Semaphore::new(/*permits*/ 1),
                 last_mcp_extension_instruction: std::sync::Mutex::new(None),
                 mcp_extension_context_delta: std::sync::Mutex::new(
                     restored_extension_instructions

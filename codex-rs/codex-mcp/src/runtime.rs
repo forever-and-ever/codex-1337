@@ -125,7 +125,9 @@ pub(crate) struct McpDispatchLeaseGuard {
 
 impl McpDispatchLeaseGuard {
     pub(crate) fn is_valid(&self, server: &str) -> bool {
-        let leases = self.leases.lock().unwrap();
+        let Ok(leases) = self.leases.lock() else {
+            return false;
+        };
         match (self.expected.as_ref(), leases.get(server)) {
             (None, None) => true,
             (Some(expected), Some(current)) => {
@@ -294,13 +296,16 @@ impl McpRuntime {
 
     /// Installs a connection lease before publishing its server.
     pub fn set_server_lease(&self, server: String, cancellation: Arc<CancellationToken>) {
-        self.server_leases.lock().unwrap().insert(
-            server,
-            ServerLease {
-                cancellation,
-                ready_publication: None,
-            },
-        );
+        self.server_leases
+            .lock()
+            .unwrap_or_else(|_| panic!("MCP server lease authority poisoned"))
+            .insert(
+                server,
+                ServerLease {
+                    cancellation,
+                    ready_publication: None,
+                },
+            );
     }
 
     /// Opens dispatch only for the publication whose socket and catalog became ready.
@@ -328,7 +333,9 @@ impl McpRuntime {
             }) {
                 return false;
             }
-            let mut leases = self.server_leases.lock().unwrap();
+            let Ok(mut leases) = self.server_leases.lock() else {
+                return false;
+            };
             let Some(lease) = leases.get_mut(server) else {
                 return false;
             };
@@ -345,7 +352,7 @@ impl McpRuntime {
     /// Release canceled tombstones only after the revoked overlay has left the publication.
     pub fn retire_revoked_server_leases(&self, lease_source_id: &str) {
         let current = self.current.load_full();
-        self.server_leases.lock().unwrap().retain(|server, lease| {
+        self.server_leases.lock().unwrap_or_else(|_| panic!("MCP server lease authority poisoned")).retain(|server, lease| {
             !lease.cancellation.is_cancelled()
                 || current.config.as_ref().is_some_and(|config| {
                     config.mcp_server_catalog.server(server).is_some_and(|registration| {
@@ -484,7 +491,10 @@ impl McpRuntime {
             ready_environments,
             cached_binding: Mutex::new(None),
         });
-        let mut leases = self.server_leases.lock().unwrap();
+        let mut leases = self
+            .server_leases
+            .lock()
+            .unwrap_or_else(|_| panic!("MCP server lease authority poisoned"));
         self.current.store(Arc::clone(&publication));
         for (server, lease) in leases.iter_mut() {
             if !lease.cancellation.is_cancelled()
@@ -662,7 +672,7 @@ impl McpRuntime {
     pub async fn prepare_call(&self, advertised_tool: &ToolInfo) -> Option<PreparedMcpCall> {
         let current = self.current.load_full();
         let expected = {
-            let leases = self.server_leases.lock().unwrap();
+            let leases = self.server_leases.lock().ok()?;
             let lease = leases.get(&advertised_tool.server_name);
             if lease.is_some_and(|lease| !lease.authorizes(&current)) {
                 return None;
@@ -789,7 +799,10 @@ impl McpRuntime {
     ) -> anyhow::Result<CallToolResult> {
         let current = self.current.load_full();
         let expected = {
-            let leases = self.server_leases.lock().unwrap();
+            let leases = self
+                .server_leases
+                .lock()
+                .map_err(|_| anyhow::anyhow!("MCP server lease authority poisoned"))?;
             let lease = leases.get(server);
             if lease.is_some_and(|lease| !lease.authorizes(&current)) {
                 anyhow::bail!("extension MCP lease is not ready");

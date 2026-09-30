@@ -33,7 +33,11 @@ impl Drop for PendingMcpExtensionAttach {
         }
         self.cancellation.cancel();
         let removed = {
-            let mut lease = self.session.mcp_extension.write().unwrap();
+            let Ok(mut lease) = self.session.mcp_extension.write() else {
+                self.session.mark_mcp_runtime_dirty();
+                self.session.schedule_mcp_prewarm();
+                return;
+            };
             if lease
                 .as_ref()
                 .is_some_and(|lease| Arc::ptr_eq(&lease.cancellation, &self.cancellation))
@@ -44,8 +48,9 @@ impl Drop for PendingMcpExtensionAttach {
             }
         };
         if removed {
-            *self.session.mcp_extension_context_delta.lock().unwrap() =
-                Some(DETACHED_INSTRUCTIONS.to_string());
+            if let Ok(mut delta) = self.session.mcp_extension_context_delta.lock() {
+                *delta = Some(DETACHED_INSTRUCTIONS.to_string());
+            }
             self.session.mark_mcp_runtime_dirty();
             self.session.schedule_mcp_prewarm();
         }
@@ -64,7 +69,9 @@ impl Session {
             biased;
             () = cancellation.cancelled() => anyhow::bail!("extension MCP lease revoked"),
             result = tokio::time::timeout(ATTACH_READINESS_TIMEOUT, async {
-                let _admission = self.mcp_extension_admission.lock().await;
+                let _admission = self.mcp_extension_admission.acquire().await.unwrap_or_else(|_| {
+                    unreachable!("extension admission semaphore is never closed")
+                });
                 if self.active_turn.lock().await.is_some() {
                     anyhow::bail!("thread has an active turn");
                 }
@@ -77,10 +84,12 @@ impl Session {
                 {
                     anyhow::bail!("extension lease conflict: MCP server name is already registered");
                 }
-                let instruction_pending = self.last_mcp_extension_instruction.lock().unwrap().as_ref()
+                let instruction_pending = self.last_mcp_extension_instruction.lock()
+                    .map_err(|_| anyhow::anyhow!("MCP extension instruction history poisoned"))?.as_ref()
                     != Some(&developer_instructions);
                 {
-                    let mut lease = self.mcp_extension.write().unwrap();
+                    let mut lease = self.mcp_extension.write()
+                        .map_err(|_| anyhow::anyhow!("MCP extension lease authority poisoned"))?;
                     if lease.is_some() {
                         anyhow::bail!("extension lease conflict: thread already has an extension");
                     }
@@ -93,18 +102,20 @@ impl Session {
                         deactivation_emitted: false,
                     });
                 }
-                *self.mcp_extension_context_delta.lock().unwrap() =
+                let mut pending = PendingMcpExtensionAttach {
+                    session: Arc::clone(self),
+                    cancellation: cancellation.clone(),
+                    committed: false,
+                };
+                *self.mcp_extension_context_delta.lock().unwrap_or_else(|_| {
+                    panic!("MCP extension instruction delta poisoned")
+                }) =
                     (!instruction_pending).then(|| format!(
                         "The connection-scoped MCP extension `{server_name}` is active again. Its previously supplied developer instructions apply while this lease remains active."
                     ));
                 self.services
                     .mcp_runtime
                     .set_server_lease(server_name.clone(), cancellation.clone());
-                let mut pending = PendingMcpExtensionAttach {
-                    session: Arc::clone(self),
-                    cancellation: cancellation.clone(),
-                    committed: false,
-                };
                 self.mark_mcp_runtime_dirty();
                 self.refresh_mcp_if_dirty().await;
                 let ready = self.services
@@ -126,7 +137,10 @@ impl Session {
     ) {
         cancellation.cancel();
         let removed = {
-            let mut lease = self.mcp_extension.write().unwrap();
+            let mut lease = self
+                .mcp_extension
+                .write()
+                .unwrap_or_else(|_| panic!("MCP extension lease authority poisoned"));
             if lease
                 .as_ref()
                 .is_some_and(|lease| Arc::ptr_eq(&lease.cancellation, cancellation))
@@ -138,7 +152,10 @@ impl Session {
         };
         if let Some(lease) = removed {
             if !lease.deactivation_emitted {
-                *self.mcp_extension_context_delta.lock().unwrap() =
+                *self
+                    .mcp_extension_context_delta
+                    .lock()
+                    .unwrap_or_else(|_| panic!("MCP extension instruction delta poisoned")) =
                     Some(DETACHED_INSTRUCTIONS.to_string());
             }
             self.mark_mcp_runtime_dirty();
@@ -147,26 +164,37 @@ impl Session {
     }
 
     pub(super) fn mcp_extension_instruction(&self, full_context: bool) -> Option<String> {
-        let mut lease = self.mcp_extension.write().unwrap();
+        let mut lease = self
+            .mcp_extension
+            .write()
+            .unwrap_or_else(|_| panic!("MCP extension lease authority poisoned"));
+        let mut delta = self
+            .mcp_extension_context_delta
+            .lock()
+            .unwrap_or_else(|_| panic!("MCP extension instruction delta poisoned"));
+        let mut last_instruction = self
+            .last_mcp_extension_instruction
+            .lock()
+            .unwrap_or_else(|_| panic!("MCP extension instruction history poisoned"));
         let Some(lease) = lease.as_mut() else {
-            return self.mcp_extension_context_delta.lock().unwrap().take();
+            return delta.take();
         };
         if lease.cancellation.is_cancelled() {
             if !lease.deactivation_emitted {
                 lease.deactivation_emitted = true;
                 return Some(DETACHED_INSTRUCTIONS.to_string());
             }
-            return self.mcp_extension_context_delta.lock().unwrap().take();
+            return delta.take();
         }
         if full_context {
-            self.mcp_extension_context_delta.lock().unwrap().take();
+            delta.take();
         }
         if !full_context && !lease.instruction_pending {
-            return self.mcp_extension_context_delta.lock().unwrap().take();
+            return delta.take();
         }
         lease.instruction_pending = false;
         let instructions = lease.developer_instructions.clone();
-        *self.last_mcp_extension_instruction.lock().unwrap() = Some(instructions.clone());
+        *last_instruction = Some(instructions.clone());
         Some(format!(
             "{EXTENSION_INSTRUCTION_MARKER} These instructions replace all previously supplied connection-scoped MCP extension instructions. They apply only while this thread has a live lease for MCP server `{}`. Without that lease they are inactive.\n{instructions}",
             lease.server_name
@@ -179,7 +207,10 @@ impl Session {
         environments: &TurnEnvironmentSnapshot,
         desired_config: &Config,
     ) {
-        let lease = self.mcp_extension.read().unwrap();
+        let lease = self
+            .mcp_extension
+            .read()
+            .unwrap_or_else(|_| panic!("MCP extension lease authority poisoned"));
         let Some(lease) = lease.as_ref() else {
             return;
         };
@@ -230,7 +261,10 @@ impl Session {
     }
 
     pub(super) fn mcp_extension_direct_only_namespace(&self) -> Option<String> {
-        let lease = self.mcp_extension.read().unwrap();
+        let lease = self
+            .mcp_extension
+            .read()
+            .unwrap_or_else(|_| panic!("MCP extension lease authority poisoned"));
         lease.as_ref().and_then(|lease| {
             (!lease.cancellation.is_cancelled()).then(|| format!("mcp__{}", lease.server_name))
         })

@@ -457,7 +457,11 @@ impl Session {
         self: &Arc<Self>,
         sub_id: String,
     ) {
-        let _extension_admission = self.mcp_extension_admission.lock().await;
+        let _extension_admission = self
+            .mcp_extension_admission
+            .acquire()
+            .await
+            .unwrap_or_else(|_| unreachable!("extension admission semaphore is never closed"));
         if !self.input_queue.has_pending_mailbox_items().await
             || (!self.input_queue.has_trigger_turn_mailbox_items().await
                 && !self.has_outstanding_durable_sleep())
