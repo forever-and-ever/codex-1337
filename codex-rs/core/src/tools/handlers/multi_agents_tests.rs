@@ -322,8 +322,6 @@ async fn spawn_agent_respects_thread_limit() {
             "collab spawn failed: agent thread limit reached".to_string()
         )
     );
-
-
 }
 
 #[tokio::test]

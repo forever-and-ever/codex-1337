@@ -1,4 +1,5 @@
-use crate::config::{OtelExporter, OtelSettings};
+use crate::config::OtelExporter;
+use crate::config::OtelSettings;
 use crate::metrics::MetricsClient;
 use std::error::Error;
 use std::io;
@@ -17,13 +18,15 @@ impl OtelProvider {
             return Err(io::Error::new(
                 io::ErrorKind::Unsupported,
                 "OpenTelemetry exporters are not supported by this distribution",
-            ).into());
+            )
+            .into());
         }
         if settings.runtime_metrics {
             return Err(io::Error::new(
                 io::ErrorKind::Unsupported,
                 "features.runtime_metrics is not supported by this distribution",
-            ).into());
+            )
+            .into());
         }
         Ok(None)
     }

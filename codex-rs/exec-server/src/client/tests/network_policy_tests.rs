@@ -489,6 +489,4 @@ async fn policy_requests_use_process_decider_and_cancel_on_unregister() {
         .await
         .expect("policy routing should finish")
         .expect("server task should finish");
-
-
 }

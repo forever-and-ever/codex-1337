@@ -38,7 +38,6 @@ use crate::connection::JsonRpcTransport;
 use crate::rpc_server_requests::RpcServerRequestSender;
 use crate::rpc_timing::RpcCompletion;
 
-
 pub(crate) const SESSION_ALREADY_ATTACHED_ERROR_CODE: i64 = -32010;
 const MAX_IN_FLIGHT_REGULAR_CALLS: usize = 1024;
 const RESERVED_CLEANUP_CALLS: usize = 1;
@@ -958,7 +957,6 @@ mod tests {
         }
     }
 
-
     #[tokio::test]
     async fn rpc_client_matches_out_of_order_responses_by_request_id() {
         let (client_stdin, server_reader) = tokio::io::duplex(4096);
@@ -1195,5 +1193,4 @@ mod tests {
             ));
         }
     }
-
 }

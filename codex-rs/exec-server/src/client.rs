@@ -1961,7 +1961,6 @@ mod tests {
             .expect("json-rpc line should write");
     }
 
-
     async fn accept_websocket(listener: &TcpListener) -> WebSocketStream<TcpStream> {
         let (stream, _) = listener.accept().await.expect("listener should accept");
         accept_async(stream)

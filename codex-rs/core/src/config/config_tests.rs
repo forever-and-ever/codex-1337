@@ -9636,8 +9636,6 @@ async fn legacy_profile_selection_is_rejected() -> std::io::Result<()> {
     Ok(())
 }
 
-
-
 #[tokio::test]
 async fn load_config_applies_otel_trace_metadata() -> std::io::Result<()> {
     let mut fixture = create_test_fixture()?;

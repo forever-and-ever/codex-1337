@@ -39,7 +39,6 @@ impl RpcServerRequestSender {
     }
 }
 
-
 #[tokio::test]
 async fn rpc_server_sender_matches_out_of_order_responses_by_request_id() {
     let (outgoing_tx, mut outgoing_rx) = mpsc::channel(/*buffer*/ 8);

@@ -11,21 +11,31 @@ pub fn build_provider(
     service_name_override: Option<&str>,
     default_analytics_enabled: bool,
 ) -> Result<Option<OtelProvider>, Box<dyn Error>> {
-    let _ = (service_version, service_name_override, default_analytics_enabled);
-    if [&config.otel.exporter, &config.otel.trace_exporter, &config.otel.metrics_exporter]
-        .into_iter()
-        .any(|exporter| *exporter != OtelExporterKind::None)
+    let _ = (
+        service_version,
+        service_name_override,
+        default_analytics_enabled,
+    );
+    if [
+        &config.otel.exporter,
+        &config.otel.trace_exporter,
+        &config.otel.metrics_exporter,
+    ]
+    .into_iter()
+    .any(|exporter| *exporter != OtelExporterKind::None)
     {
         return Err(std::io::Error::new(
             std::io::ErrorKind::Unsupported,
             "OpenTelemetry exporters are not supported by this distribution",
-        ).into());
+        )
+        .into());
     }
     if config.features.enabled(Feature::RuntimeMetrics) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::Unsupported,
             "features.runtime_metrics is not supported by this distribution",
-        ).into());
+        )
+        .into());
     }
     Ok(None)
 }

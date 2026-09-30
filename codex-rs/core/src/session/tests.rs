@@ -389,10 +389,6 @@ fn assistant_message(text: &str) -> ResponseItem {
     }
 }
 
-
-
-
-
 fn skill_message(text: &str) -> ResponseItem {
     ResponseItem::Message {
         id: None,
@@ -404,7 +400,6 @@ fn skill_message(text: &str) -> ResponseItem {
         internal_chat_message_metadata_passthrough: None,
     }
 }
-
 
 #[test_case(SessionSource::Exec; "root")]
 #[test_case(SessionSource::SubAgent(SubAgentSource::Review); "subagent")]
@@ -6970,9 +6965,6 @@ async fn request_permissions_is_auto_denied_when_granular_policy_blocks_tool_req
     );
 }
 
-
-
-
 #[test]
 fn submission_dispatch_span_uses_debug_for_realtime_audio() {
     let _trace_test_context = install_test_tracing("codex-core-tests");
@@ -7294,7 +7286,6 @@ async fn empty_turn_environments_clear_primary_environment() {
     assert_eq!(turn_cwd, session.get_config().await.cwd);
     assert_eq!(turn_context.config.cwd, session.get_config().await.cwd);
 }
-
 
 #[cfg(debug_assertions)]
 #[tokio::test]

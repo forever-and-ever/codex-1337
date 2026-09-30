@@ -1,17 +1,31 @@
-use std::collections::BTreeMap;
 use codex_protocol::protocol::W3cTraceContext;
 use opentelemetry::Context;
 use opentelemetry::trace::TraceState;
+use std::collections::BTreeMap;
 use tracing::Span;
 
-pub fn current_span_w3c_trace_context() -> Option<W3cTraceContext> { None }
-pub fn span_w3c_trace_context(_span: &Span) -> Option<W3cTraceContext> { None }
-pub fn inject_span_w3c_trace_headers(_span: &Span, _headers: &mut http::HeaderMap) -> bool { false }
-pub fn current_span_trace_id() -> Option<String> { None }
-pub fn context_from_w3c_trace_context(_trace: &W3cTraceContext) -> Option<Context> { None }
-pub fn set_parent_from_w3c_trace_context(_span: &Span, _trace: &W3cTraceContext) -> bool { false }
+pub fn current_span_w3c_trace_context() -> Option<W3cTraceContext> {
+    None
+}
+pub fn span_w3c_trace_context(_span: &Span) -> Option<W3cTraceContext> {
+    None
+}
+pub fn inject_span_w3c_trace_headers(_span: &Span, _headers: &mut http::HeaderMap) -> bool {
+    false
+}
+pub fn current_span_trace_id() -> Option<String> {
+    None
+}
+pub fn context_from_w3c_trace_context(_trace: &W3cTraceContext) -> Option<Context> {
+    None
+}
+pub fn set_parent_from_w3c_trace_context(_span: &Span, _trace: &W3cTraceContext) -> bool {
+    false
+}
 pub fn set_parent_from_context(_span: &Span, _context: Context) {}
-pub fn traceparent_context_from_env() -> Option<Context> { None }
+pub fn traceparent_context_from_env() -> Option<Context> {
+    None
+}
 
 pub fn validate_tracestate_entries(
     entries: &BTreeMap<String, BTreeMap<String, String>>,

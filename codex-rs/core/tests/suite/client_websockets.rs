@@ -85,7 +85,6 @@ const TEST_WINDOW_ID: &str = "test-thread:0";
 const X_CODEX_WS_STREAM_REQUEST_START_MS_CLIENT_METADATA_KEY: &str =
     "x-codex-ws-stream-request-start-ms";
 
-
 struct WebsocketTestHarness {
     codex_home: TempDir,
     auth_manager: Arc<AuthManager>,
@@ -437,8 +436,6 @@ async fn responses_websocket_streams_with_system_proxy_feature() {
     server.shutdown().await;
 }
 
-
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn responses_websocket_resume_prewarm_reuses_and_repairs_connection() -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
@@ -645,8 +642,6 @@ async fn responses_websocket_request_prewarm_reuses_connection() {
         Some("sequential_cutoff")
     );
 
-
-
     server.shutdown().await;
 }
 
@@ -692,7 +687,6 @@ async fn responses_websocket_request_prewarm_uses_caller_supplied_metadata() {
 
     server.shutdown().await;
 }
-
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn responses_websocket_reuses_connection_after_session_drop() {
@@ -854,9 +848,8 @@ async fn responses_websocket_reconnects_after_account_switch() {
             ],
             "new_turn_on_switch={new_turn_on_switch}",
         );
-
-
-    server.shutdown().await;
+        server.shutdown().await;
+    }
 }
 
 #[test_case::test_case(MODEL, Some("ultrafast"), Some("ultrafast"); "matching hint")]
@@ -1166,7 +1159,6 @@ async fn responses_websocket_emits_websocket_telemetry_events() {
 
     server.shutdown().await;
 }
-
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn responses_websocket_omits_timing_metrics_header_when_runtime_metrics_disabled() {
@@ -1587,7 +1579,6 @@ async fn responses_websocket_uses_incremental_create_on_prefix() {
         serde_json::to_value(&prompt_two.input[2..]).expect("serialize incremental items")
     );
 
-
     server.shutdown().await;
 }
 
@@ -1855,7 +1846,6 @@ async fn responses_websocket_creates_on_non_prefix() {
         serde_json::to_value(&prompt_two.input).unwrap()
     );
 
-
     server.shutdown().await;
 }
 
@@ -1891,7 +1881,6 @@ async fn responses_websocket_creates_when_non_input_request_fields_change() {
         second["input"],
         serde_json::to_value(&prompt_two.input).expect("serialize full input")
     );
-
 
     server.shutdown().await;
 }
@@ -2063,8 +2052,6 @@ async fn responses_websocket_v2_after_error_uses_full_create_without_previous_re
         third["input"],
         serde_json::to_value(&prompt_three.input).unwrap()
     );
-
-
 
     server.shutdown().await;
 }
@@ -2379,8 +2366,6 @@ async fn websocket_harness_with_provider_options_and_auth(
         session_telemetry,
     }
 }
-
-
 
 async fn stream_until_complete(
     client_session: &mut ModelClientSession,

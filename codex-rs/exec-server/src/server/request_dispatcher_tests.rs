@@ -1,5 +1,7 @@
-use super::{ConcurrentRequestLimit, RequestDispatchMode};
+use super::ConcurrentRequestLimit;
+use super::RequestDispatchMode;
 use pretty_assertions::assert_eq;
+use tokio::sync::Semaphore;
 
 #[test]
 fn concurrent_request_limit_rejects_invalid_values() {
@@ -39,5 +41,3 @@ fn request_dispatch_mode_parses_bounded_concurrency() {
     };
     assert_eq!(max_concurrent_requests.get(), Semaphore::MAX_PERMITS);
 }
-
-/// End-to-end request spans retain the wire method and inbound trace with bounded names.

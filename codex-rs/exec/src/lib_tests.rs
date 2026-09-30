@@ -8,7 +8,6 @@ use codex_utils_absolute_path::test_support::test_path_buf;
 use pretty_assertions::assert_eq;
 use tempfile::tempdir;
 
-
 #[test]
 fn builds_uncommitted_review_request() {
     let args = ReviewArgs {

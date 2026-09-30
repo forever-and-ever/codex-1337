@@ -791,8 +791,6 @@ async fn host_world_state_uses_provider_catalog_with_core_compatible_rendering()
     Ok(())
 }
 
-
-
 #[tokio::test]
 async fn selected_executor_catalog_follows_step_availability_and_reuses_its_cache() -> TestResult {
     let read_requests = Arc::new(Mutex::new(Vec::new()));

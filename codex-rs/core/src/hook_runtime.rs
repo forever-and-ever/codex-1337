@@ -1193,8 +1193,6 @@ mod tests {
                 if event.run.id == synchronous_run.id
         ));
         assert!(events.try_recv().is_err());
-
-
     }
 
     #[tokio::test]

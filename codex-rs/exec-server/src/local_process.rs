@@ -1290,8 +1290,6 @@ mod tests {
         }
     }
 
-
-
     #[tokio::test]
     async fn start_process_rejects_non_native_cwd_before_launch() {
         #[cfg(unix)]
@@ -1404,8 +1402,6 @@ mod tests {
         assert_eq!(child_env(&params), expected);
     }
 
-
-
     #[tokio::test]
     async fn termination_request_after_exit_cancels_network_policy_decisions() {
         let backend = LocalProcess::default();
@@ -1442,7 +1438,6 @@ mod tests {
         let _ = read_process_until_closed(&backend, &process.process_id).await;
         backend.shutdown().await;
     }
-
 
     #[tokio::test]
     async fn exited_process_retains_late_output_past_retention() {

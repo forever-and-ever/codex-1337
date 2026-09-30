@@ -1,8 +1,6 @@
 use crate::metrics::error::MetricsError;
 use crate::metrics::error::Result;
 
-
-
 pub(crate) fn validate_tag_key(key: &str) -> Result<()> {
     validate_tag_component(key, "tag key")?;
     Ok(())
@@ -26,7 +24,6 @@ fn validate_tag_component(value: &str, label: &str) -> Result<()> {
     }
     Ok(())
 }
-
 
 fn is_tag_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/')
