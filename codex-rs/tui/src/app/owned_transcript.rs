@@ -152,13 +152,12 @@ impl App {
                 .min(screen_size.height)
         };
         drop(bottom);
-        let available = screen_size.height.saturating_sub(bottom_height);
-        let header_height = chat_widget
+        let mut available = screen_size.height.saturating_sub(bottom_height);
+        let mut header_height = chat_widget
             .screen_hint_renderable(prompt_footer.as_ref().or(footer.as_ref()), popup_placement)
             .map_or(0, |header| header.desired_height(screen_size.width))
             // Keep a transcript row and its composer gap on short terminals.
             .min(available.saturating_sub(/*rhs*/ 2));
-        let header_area = Rect::new(/*x*/ 0, /*y*/ 0, screen_size.width, header_height);
         let mut bottom_area = Rect::new(
             /*x*/ 0,
             screen_size.height.saturating_sub(bottom_height),
@@ -230,9 +229,20 @@ impl App {
                     .desired_height(screen_size.width)
                     .min(screen_size.height);
                 bottom_area.y = screen_size.height.saturating_sub(bottom_area.height);
-                // Resolve controls with the compact viewport first, then make room for
-                // their separator. Resizing must not preserve a stale return control.
-                ratatui::widgets::Clear.render(bottom_area, frame.buffer);
+                // Releasing a reading boundary can restore header space on short terminals.
+                // Reconcile both regions before repainting, including newly available rows.
+                available = bottom_area.y;
+                header_height = chat_widget
+                    .screen_hint_renderable(
+                        prompt_footer.as_ref().or(footer.as_ref()),
+                        popup_placement,
+                    )
+                    .map_or(0, |header| header.desired_height(screen_size.width))
+                    .min(available.saturating_sub(/*rhs*/ 2));
+                ratatui::widgets::Clear.render(
+                    Rect::new(/*x*/ 0, /*y*/ 0, screen_size.width, screen_size.height),
+                    frame.buffer,
+                );
                 transcript_bottom = bottom_area.y;
                 completion_tip_area = view.render_with_turn_tip_space(
                     Rect::new(
@@ -293,6 +303,7 @@ impl App {
                     .desired_height(screen_size.width)
                     .min(available.saturating_sub(/*rhs*/ 2))
                     != header_height;
+                let header_area = Rect::new(/*x*/ 0, /*y*/ 0, screen_size.width, header_height);
                 header.render(header_area, frame.buffer);
                 if let Some(position) = header.cursor_pos(header_area) {
                     rendered_cursor = Some(position);
