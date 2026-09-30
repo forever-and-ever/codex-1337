@@ -79,13 +79,22 @@ impl TranscriptView {
         range: Range<usize>,
         replacement: &Arc<dyn HistoryCell>,
     ) {
+        self.replace_group_members(cells, range, std::slice::from_ref(replacement));
+    }
+
+    pub(crate) fn replace_group_members(
+        &mut self,
+        cells: &[Arc<dyn HistoryCell>],
+        range: Range<usize>,
+        replacements: &[Arc<dyn HistoryCell>],
+    ) {
         if range.is_empty() {
             return;
         }
         self.retain_search_origin(cells, range.clone());
         // Older history may extend the final group without introducing new activity.
         if range.end == cells.len() && self.last_tail == cells.last().map(EntryKey::cell) {
-            self.last_tail = Some(EntryKey::cell(replacement));
+            self.last_tail = replacements.last().map(EntryKey::cell);
         }
         let searching = self.search.has_active_query();
         let reading = match self.position {
@@ -118,7 +127,7 @@ impl TranscriptView {
                 return;
             };
             let mut joined = snapshot.cells.to_vec();
-            joined.splice(start..start + replaced.len(), [Arc::clone(replacement)]);
+            joined.splice(start..start + replaced.len(), replacements.iter().cloned());
             snapshot.cells = joined.into();
             return;
         }

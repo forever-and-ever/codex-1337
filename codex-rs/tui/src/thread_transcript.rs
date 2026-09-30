@@ -217,11 +217,10 @@ pub(crate) fn thread_items_to_transcript_cells(
                 if !projected.is_empty() {
                     PendingActivity::flush(&mut pending, &mut cells);
                     for cell in projected {
-                        if let Some((start, group)) =
+                        if let Some((range, replacements)) =
                             crate::history_cell::ToolOutputGroup::attach(&cells, Arc::clone(&cell))
                         {
-                            cells.truncate(start);
-                            cells.push(group);
+                            cells.splice(range, replacements);
                         } else {
                             cells.push(cell);
                         }

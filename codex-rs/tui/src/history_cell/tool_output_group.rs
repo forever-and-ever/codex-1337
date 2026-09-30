@@ -1,6 +1,7 @@
 //! Returned batches share their enclosing activity's disclosure; they are not additional calls.
 
 use super::HistoryCell;
+use super::PatchHistoryCell;
 use super::ReasoningSummaryCell;
 use super::ToolOutputCell;
 use crate::terminal_hyperlinks::HyperlinkLine;
@@ -9,6 +10,7 @@ use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::Turn;
 use ratatui::text::Line;
 use std::collections::HashSet;
+use std::ops::Range;
 use std::sync::Arc;
 
 #[derive(Debug)]
@@ -33,11 +35,43 @@ impl ToolOutputGroup {
     pub(crate) fn attach(
         cells: &[Arc<dyn HistoryCell>],
         output: Arc<dyn HistoryCell>,
-    ) -> Option<(usize, Arc<dyn HistoryCell>)> {
+    ) -> Option<(Range<usize>, Vec<Arc<dyn HistoryCell>>)> {
         output.as_any().downcast_ref::<ToolOutputCell>()?;
+        if let Some(start) = Self::patch_owner(cells) {
+            let details = cells[start + 1..].iter().filter(|cell| {
+                cell.as_any()
+                    .downcast_ref::<ReasoningSummaryCell>()
+                    .is_some_and(ReasoningSummaryCell::is_transcript_only)
+            });
+            let group = Self::from_cells(
+                std::iter::once(Arc::clone(&cells[start]))
+                    .chain(details.cloned())
+                    .chain([output]),
+            );
+            return Some((
+                start..cells.len(),
+                std::iter::once(group)
+                    .chain(
+                        cells[start + 1..]
+                            .iter()
+                            .filter(|cell| {
+                                !cell
+                                    .as_any()
+                                    .downcast_ref::<ReasoningSummaryCell>()
+                                    .is_some_and(ReasoningSummaryCell::is_transcript_only)
+                            })
+                            .cloned(),
+                    )
+                    .collect(),
+            ));
+        }
         let mut start = cells.len();
         let mut has_activity = false;
         for cell in cells.iter().rev() {
+            // File disclosures must survive arrival of their enclosing batch's output.
+            if cell.as_any().is::<PatchHistoryCell>() {
+                break;
+            }
             // Code-only batches have no activity header to share; leave them standalone.
             if cell.as_any().is::<ToolOutputCell>() {
                 break;
@@ -68,9 +102,37 @@ impl ToolOutputGroup {
             return None;
         }
         Some((
-            start,
-            Self::from_cells(cells[start..].iter().cloned().chain([output])),
+            start..cells.len(),
+            vec![Self::from_cells(
+                cells[start..].iter().cloned().chain([output]),
+            )],
         ))
+    }
+
+    pub(crate) fn patch_owner(cells: &[Arc<dyn HistoryCell>]) -> Option<usize> {
+        let mut owner = None;
+        for (index, cell) in cells.iter().enumerate().rev() {
+            let patch = cell.as_any().is::<PatchHistoryCell>()
+                || cell.as_any().downcast_ref::<Self>().is_some_and(|group| {
+                    group
+                        .members
+                        .first()
+                        .is_some_and(|cell| cell.as_any().is::<PatchHistoryCell>())
+                });
+            if patch {
+                owner = Some(index);
+            } else if !cell
+                .as_any()
+                .downcast_ref::<ReasoningSummaryCell>()
+                .is_some_and(ReasoningSummaryCell::is_transcript_only)
+            {
+                break;
+            }
+            if owner.is_some() && !cell.is_stream_continuation() {
+                break;
+            }
+        }
+        owner
     }
 
     pub(crate) fn from_cells(
@@ -108,6 +170,9 @@ impl ToolOutputGroup {
         newer: &Arc<dyn HistoryCell>,
         turns: &[Turn],
     ) -> Option<Arc<dyn HistoryCell>> {
+        if newer.as_any().is::<PatchHistoryCell>() {
+            return None;
+        }
         if !older.as_any().is::<Self>() && !newer.as_any().is::<Self>() {
             return None;
         }
@@ -228,7 +293,11 @@ impl HistoryCell for ToolOutputGroup {
                 }
                 lines.extend(cell.expanded_hyperlink_lines(width));
             } else {
-                let next = cell.activity_argument_lines(width);
+                let next = if cell.as_any().is::<PatchHistoryCell>() {
+                    cell.expanded_hyperlink_lines(width)
+                } else {
+                    cell.activity_argument_lines(width)
+                };
                 if !next.is_empty() && !lines.is_empty() {
                     lines.push("".into());
                 }
@@ -251,6 +320,13 @@ impl HistoryCell for ToolOutputGroup {
             .iter()
             .flat_map(|cell| cell.activity_ids())
             .collect()
+    }
+
+    fn activity_disclosure(&self, width: u16) -> Option<super::ActivityDisclosure> {
+        match self.members.first() {
+            Some(cell) if cell.as_any().is::<PatchHistoryCell>() => cell.activity_disclosure(width),
+            _ => Some(super::ActivityDisclosure::Generic),
+        }
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {

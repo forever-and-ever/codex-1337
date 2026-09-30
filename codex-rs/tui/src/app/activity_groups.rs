@@ -19,6 +19,66 @@ impl App {
             .iter()
             .position(|cell| !crate::thread_transcript::is_hidden_activity_detail(cell))
             .map_or(self.transcript_cells.len(), |offset| boundary + offset);
+        // Returned batches belong to Edited, not the final file in its contiguous suffix.
+        if let Some(owner) =
+            history_cell::ToolOutputGroup::patch_owner(&self.transcript_cells[..boundary])
+            && boundary < newer_index
+            && self.transcript_cells[boundary..newer_index]
+                .iter()
+                .any(|cell| {
+                    cell.as_any().is::<history_cell::ToolOutputCell>()
+                        || cell
+                            .as_any()
+                            .downcast_ref::<history_cell::ToolOutputGroup>()
+                            .is_some_and(|group| group.detail_members().is_some())
+                })
+            && let Some(group) = history_cell::ToolOutputGroup::join(
+                &history_cell::ToolOutputGroup::from_cells(
+                    std::iter::once(Arc::clone(&self.transcript_cells[owner])).chain(
+                        self.transcript_cells[owner + 1..boundary]
+                            .iter()
+                            .filter(|cell| {
+                                crate::thread_transcript::is_hidden_activity_detail(cell)
+                            })
+                            .cloned(),
+                    ),
+                ),
+                &history_cell::ToolOutputGroup::from_cells(
+                    self.transcript_cells[boundary..newer_index].iter().cloned(),
+                ),
+                turns,
+            )
+        {
+            let replacements = std::iter::once(Arc::clone(&group))
+                .chain(
+                    self.transcript_cells[owner + 1..boundary]
+                        .iter()
+                        .filter(|cell| !crate::thread_transcript::is_hidden_activity_detail(cell))
+                        .cloned(),
+                )
+                .collect::<Vec<_>>();
+            let range = owner..newer_index;
+            let previous = self.transcript_cells[range.clone()]
+                .iter()
+                .filter(|cell| {
+                    !replacements
+                        .iter()
+                        .any(|replacement| Arc::ptr_eq(cell, replacement))
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            self.native_history.consolidate(&previous, &group);
+            self.transcript_view.replace_group_members(
+                &self.transcript_cells,
+                range.clone(),
+                &replacements,
+            );
+            if let Some(Overlay::Transcript(overlay)) = self.overlay.as_mut() {
+                overlay.regroup_cell_members(range.clone(), &replacements);
+            }
+            self.transcript_cells.splice(range, replacements);
+            return;
+        }
         // A reasoning-only page belongs to the preceding group even when an answer or turn
         // separator follows it. Verify identities before touching either side of that boundary.
         if start + 1 < newer_index {

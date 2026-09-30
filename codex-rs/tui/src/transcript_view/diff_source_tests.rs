@@ -3,35 +3,54 @@
 use super::*;
 use crate::diff_model::FileChange;
 use crate::history_cell::HistoryCell;
+use crate::test_support::PathBufExt;
+use crate::test_support::test_path_buf;
 use crate::transcript_view::TranscriptView;
+use codex_app_server_protocol::FileUpdateChange;
+use codex_app_server_protocol::PatchApplyStatus;
+use codex_app_server_protocol::PatchChangeKind;
+use codex_app_server_protocol::ThreadItem;
+use codex_protocol::models::FunctionCallOutputBody;
 use pretty_assertions::assert_eq;
 use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 #[test]
 fn file_disclosures_are_independent_and_not_copied() {
-    let cells: Vec<Arc<dyn HistoryCell>> = crate::history_cell::new_patch_events(
-        HashMap::from([
-            (
-                PathBuf::from("alpha.rs"),
-                FileChange::Add {
-                    content: "alpha body\nsecond alpha line\n".into(),
-                },
-            ),
-            (
-                PathBuf::from("beta.rs"),
-                FileChange::Add {
-                    content: "beta body\nsecond beta line\n".into(),
-                },
-            ),
-        ]),
-        Path::new("/project"),
-    )
-    .into_iter()
-    .map(|cell| Arc::new(cell.with_activity_id("patch-call".into())) as Arc<dyn HistoryCell>)
-    .collect();
+    // The returned batch used to regroup all files into one disclosure, despite unique IDs.
+    let returned = ThreadItem::FunctionCallOutput {
+        id: "batch".into(),
+        name: "exec".into(),
+        namespace: None,
+        output: FunctionCallOutputBody::Text("Patch applied".into()),
+    };
+    let cells = crate::thread_transcript::thread_items_to_transcript_cells(
+        /*thread_id*/ None,
+        &test_path_buf("/project").abs(),
+        [
+            ThreadItem::FileChange {
+                id: "patch-call".into(),
+                changes: vec![
+                    FileUpdateChange {
+                        path: "alpha.rs".into(),
+                        kind: PatchChangeKind::Add,
+                        diff: "alpha body\nsecond alpha line\n".into(),
+                    },
+                    FileUpdateChange {
+                        path: "beta.rs".into(),
+                        kind: PatchChangeKind::Add,
+                        diff: "beta body\nsecond beta line\n".into(),
+                    },
+                ],
+                status: PatchApplyStatus::Completed,
+            },
+            returned.clone(),
+            returned,
+        ],
+        crate::thread_transcript::RawReasoningVisibility::Hidden,
+        /*config*/ None,
+    );
     let mut view = TranscriptView::default();
     let area = Rect::new(
         /*x*/ 0, /*y*/ 0, /*width*/ 70, /*height*/ 10,
@@ -86,6 +105,55 @@ fn file_disclosures_are_independent_and_not_copied() {
             .map(|cell| view.disclosure.is_expanded(&cell.activity_ids()))
             .collect::<Vec<_>>(),
         vec![true, true],
+    );
+    view.set_output_estimates_enabled(/*enabled*/ true);
+    view.record_tool_output_tokens(
+        "tool-output-tokens:batch".into(),
+        "outer-exec".into(),
+        Some(123),
+    );
+    assert_eq!(
+        cells
+            .iter()
+            .map(|cell| view.activity_output_tokens(&cell.activity_ids()))
+            .collect::<Vec<_>>(),
+        vec![Some(123), None],
+    );
+    assert_eq!(
+        view.current_layout(&cells, /*index*/ 0)
+            .expect("first file")
+            .text(),
+        "• Edited\n  alpha.rs (+2, -0)\n+alpha body\n+second alpha line\n\n  Patch applied",
+    );
+    for (label, collapse_first) in [
+        ("both files expanded with batch bill", false),
+        ("first file collapsed", true),
+    ] {
+        if collapse_first {
+            assert!(view.toggle_disclosure_at(&cells, /*column*/ 0, /*row*/ 1));
+        }
+        view.clear_activity_focus();
+        view.jump_to_latest();
+        let mut buffer = Buffer::empty(area);
+        view.render(area, &mut buffer, &cells);
+        let text = (0..area.height)
+            .map(|y| {
+                (0..area.width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+                    .trim_end()
+                    .to_owned()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        snapshots.push(format!("{label}\n{}", text.trim_end()));
+    }
+    assert_eq!(
+        cells
+            .iter()
+            .map(|cell| view.disclosure.is_expanded(&cell.activity_ids()))
+            .collect::<Vec<_>>(),
+        vec![false, true],
     );
     insta::assert_snapshot!(snapshots.join("\n\n"));
 }

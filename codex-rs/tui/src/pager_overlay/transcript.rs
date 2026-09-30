@@ -350,6 +350,32 @@ impl TranscriptOverlay {
         self.consolidate_cells(range, consolidated);
     }
 
+    pub(crate) fn regroup_cell_members(
+        &mut self,
+        range: std::ops::Range<usize>,
+        replacements: &[Arc<dyn HistoryCell>],
+    ) {
+        self.view
+            .replace_group_members(&self.cells, range.clone(), replacements);
+        for highlight in [&mut self.highlight_cell, &mut self.pending_highlight] {
+            *highlight = highlight.map(|index| {
+                if index < range.start {
+                    index
+                } else if index < range.end {
+                    range.start
+                        + replacements
+                            .iter()
+                            .position(|cell| Arc::ptr_eq(cell, &self.cells[index]))
+                            .unwrap_or(0)
+                } else {
+                    index - range.len() + replacements.len()
+                }
+            });
+        }
+        self.cells.splice(range, replacements.iter().cloned());
+        self.view.set_highlight(self.highlight_cell);
+    }
+
     /// The removed tail's index continues to identify the live group that absorbed its calls.
     pub(crate) fn absorb_tail_into_live(&mut self, previous_revision: u64, hydrated_revision: u64) {
         self.view

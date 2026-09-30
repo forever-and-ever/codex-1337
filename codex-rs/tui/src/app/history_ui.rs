@@ -52,18 +52,28 @@ impl App {
         }
         let is_session_header = cell.as_any().is::<history_cell::SessionInfoCell>();
         let cell: Arc<dyn HistoryCell> = cell.into();
-        if let Some((start, group)) =
+        if let Some((range, replacements)) =
             history_cell::ToolOutputGroup::attach(&self.transcript_cells, Arc::clone(&cell))
         {
-            let range = start..self.transcript_cells.len();
-            self.native_history
-                .consolidate(&self.transcript_cells[range.clone()], &group);
-            self.transcript_view
-                .replace_group(&self.transcript_cells, range.clone(), &group);
+            let previous = self.transcript_cells[range.clone()]
+                .iter()
+                .filter(|cell| {
+                    !replacements
+                        .iter()
+                        .any(|replacement| Arc::ptr_eq(cell, replacement))
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            self.native_history.consolidate(&previous, &replacements[0]);
+            self.transcript_view.replace_group_members(
+                &self.transcript_cells,
+                range.clone(),
+                &replacements,
+            );
             if let Some(Overlay::Transcript(overlay)) = self.overlay.as_mut() {
-                overlay.regroup_cells(range.clone(), Arc::clone(&group));
+                overlay.regroup_cell_members(range.clone(), &replacements);
             }
-            self.transcript_cells.splice(range, [group]);
+            self.transcript_cells.splice(range, replacements);
             tui.frame_requester().schedule_frame();
             self.chat_widget.request_pending_usage_output_insertion();
             return;

@@ -225,6 +225,103 @@ async fn returned_batches_keep_one_disclosure_and_bill_across_live_replay_and_pa
 }
 
 #[tokio::test]
+async fn patch_files_keep_disclosures_and_one_batch_bill_across_live_replay_and_pages() {
+    use crate::chatwidget::ReplayKind;
+    use codex_app_server_protocol::FileUpdateChange;
+    use codex_app_server_protocol::PatchApplyStatus;
+    use codex_app_server_protocol::PatchChangeKind;
+    use codex_protocol::models::FunctionCallOutputBody;
+
+    // Batch output must enrich Edited without absorbing its independently disclosed files.
+    let output = |id: &str| ThreadItem::FunctionCallOutput {
+        id: id.into(),
+        name: "exec".into(),
+        namespace: None,
+        output: FunctionCallOutputBody::Text(format!("Returned {id}")),
+    };
+    let current = turn(vec![
+        ThreadItem::FileChange {
+            id: "patch".into(),
+            changes: ["alpha.rs", "beta.rs"]
+                .into_iter()
+                .map(|path| FileUpdateChange {
+                    path: path.into(),
+                    kind: PatchChangeKind::Add,
+                    diff: format!("{path} body\n"),
+                })
+                .collect(),
+            status: PatchApplyStatus::Completed,
+        },
+        output("a"),
+        reasoning("between-outputs"),
+        output("b"),
+        output("a"),
+    ]);
+    let rendered = |cells: &[Arc<dyn HistoryCell>]| {
+        cells
+            .iter()
+            .map(|cell| {
+                (
+                    cell.activity_ids(),
+                    cell.compact_hyperlink_lines(/*width*/ 80),
+                    cell.expanded_hyperlink_lines(/*width*/ 80),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let (mut app, mut rx, _) = crate::app::tests::make_test_app_with_channels().await;
+    let mut tui = crate::tui::test_support::make_test_tui().unwrap();
+    tui.set_owned_screen(/*owned*/ true).unwrap();
+    let expected = project(&app, &current.items);
+    assert_eq!(expected.len(), 2);
+    for item in &current.items {
+        app.chat_widget.replay_thread_item(
+            item.clone(),
+            current.id.clone(),
+            ReplayKind::ResumeInitialMessages,
+        );
+        while let Ok(event) = rx.try_recv() {
+            if let AppEvent::InsertHistoryCell(cell) = event {
+                app.insert_history_cell(&mut tui, cell);
+            }
+        }
+    }
+    assert_eq!(rendered(&app.transcript_cells), rendered(&expected));
+    for split in 1..current.items.len() {
+        let older = project(&app, &current.items[..split]);
+        let boundary = older.len();
+        app.transcript_cells = older
+            .into_iter()
+            .chain(project(&app, &current.items[split..]))
+            .collect();
+        app.join_older_activity_group(boundary, std::slice::from_ref(&current));
+        assert_eq!(
+            rendered(&app.transcript_cells),
+            rendered(&expected),
+            "split={split}"
+        );
+    }
+    app.transcript_view
+        .set_output_estimates_enabled(/*enabled*/ true);
+    for (id, tokens) in [("a", 100), ("b", 23), ("a", 100)] {
+        app.transcript_view.record_tool_output_tokens(
+            format!("tool-output-tokens:{id}"),
+            "outer-exec".into(),
+            Some(tokens),
+        );
+    }
+    assert_eq!(
+        expected
+            .iter()
+            .map(|cell| app
+                .transcript_view
+                .activity_output_tokens(&cell.activity_ids()))
+            .collect::<Vec<_>>(),
+        vec![Some(123), None]
+    );
+}
+
+#[tokio::test]
 async fn older_page_hydration_keeps_pending_computer_and_exploration_completion() {
     for kind in [ActivityKind::Computer, ActivityKind::Exploration] {
         let mut app = make_test_app().await;
