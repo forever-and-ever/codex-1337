@@ -4268,7 +4268,13 @@ impl Config {
             profile_workspace_roots,
         )
         .map_err(std::io::Error::from)?;
-        let otel = otel::resolve_config(cfg.otel.unwrap_or_default(), &mut startup_warnings);
+        let otel = otel::resolve_config(cfg.otel.unwrap_or_default(), &mut startup_warnings)?;
+        if features.enabled(Feature::RuntimeMetrics) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "features.runtime_metrics is not supported by this distribution",
+            ));
+        }
         let config = Self {
             wrangler: cfg.wrangler,
             prefer_mxc,

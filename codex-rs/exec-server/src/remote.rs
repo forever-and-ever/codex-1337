@@ -910,8 +910,6 @@ mod tests {
     use codex_http_client::OutboundProxyPolicy;
     use http::HeaderMap;
     use http::HeaderValue;
-    use opentelemetry::trace::TracerProvider as _;
-    use opentelemetry_sdk::trace::SdkTracerProvider;
     use pretty_assertions::assert_eq;
     use tokio::io::AsyncReadExt;
     use tokio::io::AsyncWriteExt;
@@ -957,12 +955,6 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn register_environment_posts_with_auth_provider_headers() {
-        let provider = SdkTracerProvider::builder().build();
-        let tracer = provider.tracer("exec-server-test");
-        let subscriber =
-            tracing_subscriber::registry().with(tracing_opentelemetry::layer().with_tracer(tracer));
-        let _guard = subscriber.set_default();
-        tracing::callsite::rebuild_interest_cache();
         let server = MockServer::start().await;
         let executor_public_key = NoiseChannelIdentity::generate()
             .expect("identity")
@@ -971,10 +963,7 @@ mod tests {
             .and(path("/cloud/environment/environment-requested/register"))
             .and(header("authorization", "Bearer registry-token"))
             .and(header("chatgpt-account-id", "workspace-123"))
-            .and(header_regex(
-                "traceparent",
-                "^00-[0-9a-f]{32}-[0-9a-f]{16}-0[01]$",
-            ))
+
             .and(body_partial_json(serde_json::json!({
                 "security_profile": NOISE_RELAY_SECURITY_PROFILE,
                 "executor_public_key": executor_public_key.clone(),

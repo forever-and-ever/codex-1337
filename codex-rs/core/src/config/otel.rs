@@ -9,23 +9,28 @@ use codex_config::types::OtelExporterKind;
 pub(crate) fn resolve_config(
     config: OtelConfigToml,
     startup_warnings: &mut Vec<String>,
-) -> OtelConfig {
+) -> std::io::Result<OtelConfig> {
     let log_user_prompt = config.log_user_prompt.unwrap_or(false);
     let environment = config
         .environment
         .unwrap_or_else(|| DEFAULT_OTEL_ENVIRONMENT.to_string());
     let exporter = config.exporter.unwrap_or(OtelExporterKind::None);
-    // OTLP HTTP endpoints are signal-specific in our config, so enabling log
-    // export must not implicitly send spans to a /v1/logs endpoint.
     let trace_exporter = config.trace_exporter.unwrap_or(OtelExporterKind::None);
-    let metrics_exporter = config.metrics_exporter.unwrap_or(OtelExporterKind::Statsig);
-    // Provider initialization installs process-global OTEL state. Sanitize
-    // user-editable trace metadata here so malformed config is reported as a
-    // startup warning instead of making startup fail.
+    let metrics_exporter = config.metrics_exporter.unwrap_or(OtelExporterKind::None);
     let span_attributes = resolve_span_attributes(config.span_attributes, startup_warnings);
     let tracestate = resolve_tracestate(config.tracestate, startup_warnings);
 
-    OtelConfig {
+    if [&exporter, &trace_exporter, &metrics_exporter]
+        .into_iter()
+        .any(|exporter| *exporter != OtelExporterKind::None)
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "OpenTelemetry exporters are not supported by this distribution; set all otel exporters to none",
+        ));
+    }
+
+    Ok(OtelConfig {
         tool_result: config.tool_result,
         log_user_prompt,
         log_agent_responses: config.log_agent_responses.unwrap_or(false),
@@ -36,7 +41,7 @@ pub(crate) fn resolve_config(
         metrics_exporter,
         span_attributes,
         tracestate,
-    }
+    })
 }
 
 fn resolve_span_attributes(

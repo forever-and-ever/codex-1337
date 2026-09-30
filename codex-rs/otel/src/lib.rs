@@ -1,3 +1,6 @@
+//! Local tracing instrumentation with API-only OpenTelemetry context compatibility.
+//! OpenTelemetry SDKs, remote exporters, and runtime snapshots are unavailable.
+
 pub mod auth_storage;
 pub(crate) mod config;
 mod events;
@@ -7,8 +10,6 @@ pub(crate) mod trace_context;
 
 mod agent_response;
 mod guardian_assessment;
-mod network_policy;
-mod otlp;
 mod targets;
 mod tool_result;
 
@@ -73,13 +74,9 @@ impl From<AuthMode> for TelemetryAuthMode {
     }
 }
 
-/// Install externally managed, non-Statsig process-global metrics.
-///
-/// Call this once during single-threaded startup, before any instruments are
-/// registered. Keep the returned handle to flush and shut down the exporter
-/// owned by this installation.
+/// Instrumentation compatibility: metrics clients cannot be constructed.
 pub fn install_global_metrics(metrics: MetricsClient) -> MetricsClient {
-    crate::metrics::install_global(metrics)
+    match metrics {}
 }
 
 /// Start a metrics timer using the globally installed metrics client.
@@ -90,8 +87,7 @@ pub fn start_global_timer(name: &str, tags: &[(&str, &str)]) -> MetricsResult<Ti
     metrics.start_timer(name, tags)
 }
 
-/// Returns the resolved Statsig metrics settings for the globally installed
-/// OTEL metrics client, if the active metrics exporter is Statsig.
+/// Retained for elevation-payload compatibility; this distribution never installs Statsig.
 pub fn global_statsig_metrics_settings() -> Option<StatsigMetricsSettings> {
     crate::metrics::global_statsig_settings()
 }

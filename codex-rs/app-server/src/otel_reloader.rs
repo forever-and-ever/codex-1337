@@ -1,4 +1,3 @@
-use crate::OTEL_SERVICE_NAME;
 use crate::config_manager::ConfigManager;
 use codex_login::AuthManager;
 use codex_otel::OtelProvider;
@@ -28,16 +27,14 @@ where
         .map(Layer::boxed);
     let (logger_layer, logger_handle) = reload::Layer::new(logger_export_layer);
 
-    let mut layers: Vec<Box<dyn Layer<S> + Send + Sync + 'static>> = vec![
+    let layers: Vec<Box<dyn Layer<S> + Send + Sync + 'static>> = vec![
         logger_layer
             .with_filter(tracing_subscriber::filter::filter_fn(
                 OtelProvider::log_export_filter,
             ))
             .boxed(),
     ];
-    if provider.is_some_and(|provider| provider.tracer.is_some()) {
-        layers.push(OtelProvider::reloadable_tracing_layer(OTEL_SERVICE_NAME).boxed());
-    }
+
     (layers, logger_handle)
 }
 

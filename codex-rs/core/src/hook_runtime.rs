@@ -1073,8 +1073,6 @@ mod tests {
 
     use codex_otel::HOOK_RUN_DURATION_METRIC;
     use codex_otel::HOOK_RUN_METRIC;
-    use codex_otel::MetricsClient;
-    use codex_otel::MetricsConfig;
     use codex_protocol::models::ContentItem;
     use codex_protocol::protocol::HookEventName;
     use codex_protocol::protocol::HookExecutionMode;
@@ -1082,11 +1080,6 @@ mod tests {
     use codex_protocol::protocol::HookRunStatus;
     use codex_protocol::protocol::HookScope;
     use codex_protocol::protocol::HookSource;
-    use opentelemetry_sdk::metrics::InMemoryMetricExporter;
-    use opentelemetry_sdk::metrics::data::AggregatedMetrics;
-    use opentelemetry_sdk::metrics::data::HistogramDataPoint;
-    use opentelemetry_sdk::metrics::data::MetricData;
-    use opentelemetry_sdk::metrics::data::SumDataPoint;
     use pretty_assertions::assert_eq;
 
     use super::additional_context_messages;
@@ -1138,23 +1131,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn hook_lifecycle_notifications_hide_builtin_and_async_runs_but_preserve_metrics() {
-        let metrics = MetricsClient::new(
-            MetricsConfig::in_memory(
-                "test",
-                "codex-core",
-                env!("CARGO_PKG_VERSION"),
-                InMemoryMetricExporter::default(),
-            )
-            .with_runtime_reader(),
-        )
-        .expect("in-memory metrics client");
-        let (session, mut turn_context, events) = make_session_and_context_with_rx().await;
-        let turn_context_mut = Arc::get_mut(&mut turn_context).expect("single turn context ref");
-        turn_context_mut.session_telemetry = turn_context_mut
-            .session_telemetry
-            .clone()
-            .with_metrics(metrics.clone());
+    async fn hook_lifecycle_notifications_hide_builtin_and_async_runs() {
+        let (session, turn_context, events) = make_session_and_context_with_rx().await;
         let mut synchronous_run = sample_hook_run(HookRunStatus::Running, HookSource::User);
         synchronous_run.id = "synchronous-hook".to_string();
         let mut asynchronous_run = synchronous_run.clone();
@@ -1216,32 +1194,7 @@ mod tests {
         ));
         assert!(events.try_recv().is_err());
 
-        let snapshot = metrics.snapshot().expect("metrics snapshot");
-        let counter = snapshot
-            .scope_metrics()
-            .flat_map(opentelemetry_sdk::metrics::data::ScopeMetrics::metrics)
-            .find(|metric| metric.name() == HOOK_RUN_METRIC)
-            .expect("hook run counter");
-        let AggregatedMetrics::U64(MetricData::Sum(sum)) = counter.data() else {
-            panic!("expected hook run counter");
-        };
-        assert_eq!(sum.data_points().map(SumDataPoint::value).sum::<u64>(), 3);
 
-        let duration = snapshot
-            .scope_metrics()
-            .flat_map(opentelemetry_sdk::metrics::data::ScopeMetrics::metrics)
-            .find(|metric| metric.name() == HOOK_RUN_DURATION_METRIC)
-            .expect("hook run duration histogram");
-        let AggregatedMetrics::F64(MetricData::Histogram(histogram)) = duration.data() else {
-            panic!("expected hook run duration histogram");
-        };
-        assert_eq!(
-            histogram
-                .data_points()
-                .map(HistogramDataPoint::sum)
-                .sum::<f64>(),
-            81.0,
-        );
     }
 
     #[tokio::test]

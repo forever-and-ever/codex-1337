@@ -39,6 +39,9 @@ struct Cli {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    if cli.otel_trace_listen.is_some() || cli.otel_trace_exporter.is_some() {
+        anyhow::bail!("OpenTelemetry exporters are not supported by this distribution");
+    }
     let mut trace_transport = if let Some(trace_listen) = cli.otel_trace_listen.as_deref() {
         Some(TraceWebSocket::start(trace_listen).await?)
     } else {
