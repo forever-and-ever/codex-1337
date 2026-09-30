@@ -573,6 +573,7 @@ mod thread_enrichment;
 mod thread_fork_goal;
 mod thread_input;
 mod thread_processor;
+pub(crate) use thread_processor::ThreadCoordinationService;
 mod thread_queue_processor;
 mod thread_sections;
 mod token_usage_replay;

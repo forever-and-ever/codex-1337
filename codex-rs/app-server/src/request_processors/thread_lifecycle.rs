@@ -23,6 +23,7 @@ struct UnloadingState {
     has_subscribers: (bool, Instant),
     thread_status_rx: watch::Receiver<ThreadStatus>,
     is_active: (bool, Instant),
+    runtime_operations: watch::Receiver<usize>,
 }
 
 impl UnloadingState {
@@ -40,6 +41,10 @@ impl UnloadingState {
             .subscribe(thread_id)
             .await?;
         let has_subscribers = (*has_subscribers_rx.borrow(), Instant::now());
+        let runtime_operations = listener_task_context
+            .thread_state_manager
+            .runtime_operations(thread_id)
+            .await;
         let is_active = (
             matches!(*thread_status_rx.borrow(), ThreadStatus::Active { .. }),
             Instant::now(),
@@ -50,10 +55,14 @@ impl UnloadingState {
             has_subscribers,
             thread_status_rx,
             is_active,
+            runtime_operations,
         })
     }
 
     fn unloading_target(&self) -> Option<Instant> {
+        if *self.runtime_operations.borrow() != 0 {
+            return None;
+        }
         match (self.has_subscribers, self.is_active) {
             ((false, has_no_subscribers_since), (false, is_inactive_since)) => {
                 std::cmp::max(has_no_subscribers_since, is_inactive_since).checked_add(self.delay)
@@ -115,6 +124,9 @@ impl UnloadingState {
                         return false;
                     }
                     self.sync_receiver_values();
+                },
+                changed = self.runtime_operations.changed() => {
+                    if changed.is_err() { return false; }
                 },
             }
         }

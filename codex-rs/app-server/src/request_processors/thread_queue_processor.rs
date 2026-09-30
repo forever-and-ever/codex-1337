@@ -52,6 +52,7 @@ use super::turn_processor::validate_user_input_image_urls;
 const DIRECT_INPUT_TO_UNLOADED_SUBAGENT_ERROR: &str =
     "direct app-server input is not allowed for unloaded spawned sub-agents";
 
+#[derive(Clone)]
 pub(crate) struct ThreadQueueRequestProcessor {
     thread_manager: Arc<ThreadManager>,
     thread_store: Arc<dyn ThreadStore>,
