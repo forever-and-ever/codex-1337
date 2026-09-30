@@ -69,11 +69,19 @@ In the codex-rs folder where the rust code lives:
     trivial; prefer new modules/files and keep `chatwidget.rs` focused on orchestration.
 - When running Rust commands (e.g. `just fix` or `just test`) be patient with the command and never try to kill them using the PID. Rust lock can make the execution slow, this is expected.
 
-Run `just fmt` (in the `codex-rs` directory) automatically after you have finished making code changes anywhere in this repository; do not ask for approval to run it. Additionally, run the tests:
+Run `just fmt` (in the `codex-rs` directory) automatically after you have finished making code changes anywhere in this repository; do not ask for approval to run it.
+
+## Local validation budget
+
+Default to minimal, targeted validation. This repository is expensive to build
+and shares a busy machine. Test selection is an engineering decision, not a
+ritual: use the smallest existing test filter, snapshot, or smoke check that
+addresses the actual risk. Do not add tests merely because code changed.
 
 1. Do not run `cargo test` directly. Use `just test` so test execution follows the repo defaults.
-2. Run the test for the specific project that was changed. For example, if changes were made in `codex-rs/tui`, run `just test -p codex-tui`.
-3. Once those pass, if any changes were made in common, core, or protocol, run the complete test suite with `just test`. Avoid `--all-features` for routine local runs because it expands the build matrix and can significantly increase `target/` disk usage; use it only when you specifically need full feature coverage. project-specific or individual tests can be run without asking the user, but do ask the user before running the complete test suite.
+2. Prefer named tests or narrow filters within affected crates; do not automatically run an entire crate. Changes to common, core, or protocol do not trigger broader testing by themselves.
+3. Full-workspace runs are a last resort: identify the concrete uncertainty a focused check cannot answer and obtain explicit user approval first. Avoid `--all-features` unless that feature matrix is specifically needed.
+4. Report exactly what ran, what failed, and what remains untested. Do not repeatedly rerun broad suites to chase timing failures on a loaded machine.
 
 Before finalizing a large change to `codex-rs`, run `just fix -p <project>` (in `codex-rs` directory) to fix any linter issues in the code. Prefer scoping with `-p` to avoid slow workspace‑wide Clippy builds; only run `just fix` without `-p` if you changed shared crates. Do not re-run tests after running `fix` or `fmt`.
 
@@ -132,9 +140,9 @@ Search for breaking changes in external integration surfaces:
 
 For agent changes prefer integration tests over unit tests. Integration tests are under `core/suite` and use `test_codex` to set up a test instance of codex.
 
-Features that change the agent logic MUST add an integration test:
-
-- Provide a list of major logic changes and user-facing behaviors that need to be tested.
+For consequential agent-logic changes, prefer extending an existing integration
+case that exercises the relevant interaction. New permanent tests must earn
+their cost under the unit-test doctrine; there is no test-per-feature quota.
 
 If unit tests are needed, put them in a dedicated test file (\*\_tests.rs).
 Avoid test-only functions in the main implementation.
@@ -214,8 +222,8 @@ is easy to review and future diffs stay visual.
 
 When UI or text output changes intentionally, update the snapshots as follows:
 
-- Run tests to generate any updated snapshots:
-  - `just test -p codex-tui`
+- Run the relevant snapshot test or narrow filter, not the whole TUI suite:
+  - `just test -p codex-tui <relevant_test_filter>`
 - Check what’s pending:
   - `cargo insta pending-snapshots -p codex-tui`
 - Review changes by reading the generated `*.snap.new` files directly in the repo, or preview a specific file:
