@@ -71,6 +71,20 @@ In the codex-rs folder where the rust code lives:
 
 Run `just fmt` (in the `codex-rs` directory) automatically after you have finished making code changes anywhere in this repository; do not ask for approval to run it.
 
+## Stable build inputs
+
+Use the maintained PATH `cargo` wrapper. It enables workspace feature unification
+on pinned Cargo without changing rustc's channel. Do not set `RUSTFLAGS`,
+`CARGO_ENCODED_RUSTFLAGS`, per-call linker/profile overrides, or `RUSTC_BOOTSTRAP`.
+Our root Cargo config owns clang+mold and sccache; fix that configuration instead
+of creating another dependency graph. Linked worktrees share these settings.
+
+Use the default dev/test profiles for focused checks and `scripts/install-local`
+for installs (`local` profile). Do not alternate ad hoc profiles. Keep `-p`/test
+filters narrow: workspace feature unification stabilizes dependencies without
+building or running the whole workspace. Shared compiler cache and Cargo targets
+are disposable; durable release bundles and evidence belong outside them.
+
 ## Local validation budget
 
 Default to minimal, targeted validation. This repository is expensive to build

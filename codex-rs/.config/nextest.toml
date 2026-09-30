@@ -25,6 +25,7 @@ path = "junit.xml"
 
 [profile.local]
 inherits = "default"
+retries = 0
 
 [[profile.local.overrides]]
 # Each case performs five full TUI launches/forks plus daemon and checkout setup.

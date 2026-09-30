@@ -608,6 +608,11 @@ ignored = [
 # use CARGO_PROFILE_DEV_DEBUG=full (or CARGO_PROFILE_TEST_DEBUG=full) for locals.
 debug = "line-tables-only"
 
+[profile.dev.package."*"]
+# Dependency backtraces retain symbols; only workspace code needs line tables.
+debug = false
+opt-level = 1
+
 [profile.dev-small]
 inherits = "dev"
 opt-level = 0
@@ -624,6 +629,16 @@ strip = false
 
 # Balance parallel release code generation against binary size.
 codegen-units = 4
+
+[profile.local]
+# Installed workstation builds favor the next edit, not maximum optimization.
+inherits = "release"
+opt-level = 2
+incremental = true
+codegen-units = 256
+lto = false
+debug = "none"
+strip = "symbols"
 
 [profile.profiling]
 inherits = "release"

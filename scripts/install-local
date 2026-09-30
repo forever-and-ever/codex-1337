@@ -14,7 +14,7 @@ root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 # rustup selects the workspace toolchain by cwd, not Cargo's --manifest-path.
 cd "$root/codex-rs"
 
-for command in bwrap cargo cut git install ld.lld ln mktemp mv python3 readlink rg rm rustc sed uname zsh; do
+for command in bwrap cargo clang cut git install ln mktemp mold mv python3 readlink rg rm rustc sccache sed uname zsh; do
     command -v "$command" >/dev/null 2>&1 || die "required command is absent: $command"
 done
 
@@ -44,14 +44,6 @@ if [ -z "${CARGO_TARGET_DIR:-}" ]; then
     [ -n "$CARGO_TARGET_DIR" ] || die 'Cargo target directory is absent'
     export CARGO_TARGET_DIR
 fi
-export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16
-export CARGO_PROFILE_RELEASE_DEBUG=none
-export CARGO_PROFILE_RELEASE_LTO=false
-export CARGO_PROFILE_RELEASE_STRIP=symbols
-if [ -z "${RUSTFLAGS:-}" ]; then
-    RUSTFLAGS='-C target-cpu=native -C link-arg=-fuse-ld=lld'
-    export RUSTFLAGS
-fi
 
 revision=$(git -C "$root" rev-parse HEAD)
 short_revision=$(printf '%s' "$revision" | cut -c1-12)
@@ -74,7 +66,7 @@ if [ ! -d "$payload" ]; then
     install -d -m755 "$package/bin" "$package/licenses"
 
     CODEX_REPO_ROOT="$root" PYTHONPATH="$root/scripts" \
-    python3 - "$target" cargo build --locked --release \
+    python3 - "$target" cargo build --locked --profile local \
         --manifest-path "$root/codex-rs/Cargo.toml" \
         --bin codex \
         --bin codex-code-mode-host \
@@ -92,7 +84,7 @@ os.execvpe(sys.argv[2], sys.argv[2:], environment)
 PY
 
     for executable in codex codex-code-mode-host codex-wrangler-bridge; do
-        install -Dm755 "$CARGO_TARGET_DIR/release/$executable" \
+        install -Dm755 "$CARGO_TARGET_DIR/local/$executable" \
             "$package/bin/$executable"
     done
     install -Dm644 "$root/LICENSE" "$package/licenses/Codex-LICENSE"
