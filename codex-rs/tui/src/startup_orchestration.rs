@@ -609,12 +609,6 @@ pub(super) async fn run_main_inner(
         .as_ref()
         .and_then(codex_otel::OtelProvider::metrics)
         .cloned();
-    if let Some(metrics) = &metrics {
-        let _ = codex_otel::record_process_start_once(metrics, otel_originator.as_str());
-        let telemetry =
-            codex_rollout::sqlite_telemetry_recorder(metrics.clone(), otel_originator.as_str());
-        let _ = codex_state::install_process_db_telemetry(telemetry);
-    }
     let selection_reason = match (&app_server_target, daemon_exclusion) {
         (AppServerTarget::Remote { .. }, _) => "explicit_remote",
         _ if cli.agents_overview => "agents",

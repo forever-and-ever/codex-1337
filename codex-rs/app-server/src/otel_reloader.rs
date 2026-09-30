@@ -1,3 +1,4 @@
+use crate::OTEL_SERVICE_NAME;
 use crate::config_manager::ConfigManager;
 use codex_login::AuthManager;
 use codex_otel::OtelProvider;
