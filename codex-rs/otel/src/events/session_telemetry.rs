@@ -182,10 +182,7 @@ impl SessionTelemetry {
     }
 
     pub fn with_provider_metrics(self, provider: &OtelProvider) -> Self {
-        match provider.metrics() {
-            Some(metrics) => self.with_metrics(metrics.clone()),
-            None => self,
-        }
+        match *provider {}
     }
 
     pub fn counter(&self, name: &str, inc: i64, tags: &[(&str, &str)]) {

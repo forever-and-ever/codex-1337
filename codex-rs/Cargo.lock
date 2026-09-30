@@ -4055,7 +4055,6 @@ name = "codex-network-proxy"
 version = "0.159.1"
 dependencies = [
  "anyhow",
- "base64 0.22.1",
  "codex-utils-absolute-path",
  "codex-utils-home-dir",
  "codex-utils-path-uri",
