@@ -10,7 +10,7 @@ mod replacement;
 use crate::config::NetworkProxyConfig;
 use crate::policy::normalize_host;
 use environment::update_brokered_credentials_marker;
-use rama_http::HeaderMap;
+use http::HeaderMap;
 use registry::ActiveCredentialSource;
 use registry::BrokeredCredentialProvider;
 use registry::active_credential_sources;
@@ -1313,7 +1313,7 @@ impl CredentialBroker {
             )
         }) && let Some(request) = request.as_ref()
         {
-            let Ok(raw_request) = destination.parse::<rama_http::Uri>() else {
+            let Ok(raw_request) = destination.parse::<http::Uri>() else {
                 return;
             };
             let raw_path = raw_request.path();

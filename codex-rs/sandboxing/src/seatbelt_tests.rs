@@ -15,15 +15,7 @@ use super::seatbelt_regex_for_glob;
 use super::seatbelt_regex_for_unreadable_glob;
 use super::unix_socket_dir_params;
 use super::unix_socket_policy;
-use codex_network_proxy::ConfigReloader;
-use codex_network_proxy::ConfigReloaderFuture;
-use codex_network_proxy::ConfigState;
 use codex_network_proxy::ManagedNetworkSandboxContext;
-use codex_network_proxy::NetworkMode;
-use codex_network_proxy::NetworkProxy;
-use codex_network_proxy::NetworkProxyConfig;
-use codex_network_proxy::NetworkProxyConstraints;
-use codex_network_proxy::NetworkProxyState;
 use codex_network_proxy::build_config_state;
 use codex_protocol::permissions::FileSystemAccessMode;
 use codex_protocol::permissions::FileSystemPath;
@@ -43,7 +35,6 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::Arc;
 use tempfile::TempDir;
 
 fn assert_seatbelt_denied(stderr: &[u8], path: &Path) {
@@ -111,22 +102,6 @@ fn seatbelt_protected_metadata_name_requirements(root: &Path) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
-}
-
-struct TestConfigReloader;
-
-impl ConfigReloader for TestConfigReloader {
-    fn source_label(&self) -> String {
-        "seatbelt test config".to_string()
-    }
-
-    fn maybe_reload(&self) -> ConfigReloaderFuture<'_, Option<ConfigState>> {
-        Box::pin(async { Ok(None) })
-    }
-
-    fn reload_now(&self) -> ConfigReloaderFuture<'_, ConfigState> {
-        Box::pin(async { Err(anyhow::anyhow!("seatbelt test config cannot reload")) })
-    }
 }
 
 #[test]
@@ -927,111 +902,6 @@ fn prepared_managed_network_context_allows_only_its_proxy_ports() {
     assert!(!policy.contains("(allow network-outbound (remote unix-socket))"));
 }
 
-#[tokio::test]
-async fn prepared_managed_network_context_takes_precedence_over_live_proxy_socket_policy()
--> anyhow::Result<()> {
-    let cwd = TempDir::new().expect("temp cwd");
-    let file_system_policy = FileSystemSandboxPolicy::from_legacy_sandbox_policy_for_cwd(
-        &SandboxPolicy::new_read_only_policy(),
-        cwd.path(),
-    );
-    let network_config = NetworkProxyConfig {
-        enabled: true,
-        mode: NetworkMode::Full,
-        dangerously_allow_all_unix_sockets: Some(true),
-        ..Default::default()
-    };
-    let state = build_config_state(
-        network_config,
-        NetworkProxyConstraints::default(),
-        codex_utils_path_uri::Platform::native(),
-    )?;
-    let network_proxy = NetworkProxy::builder()
-        .state(Arc::new(NetworkProxyState::with_reloader(
-            state,
-            Arc::new(TestConfigReloader),
-        )))
-        .managed_by_codex(/*managed_by_codex*/ false)
-        .build()
-        .await?;
-    let prepared_socket = "/tmp/codex-prepared-use";
-    let explicit_socket = "/tmp/codex-browser-use";
-    let managed_network = ManagedNetworkSandboxContext {
-        loopback_ports: vec![43123],
-        allow_unix_sockets: vec![prepared_socket.to_string(), "relative.sock".to_string()],
-        ..Default::default()
-    };
-    let extra_allow_unix_sockets = vec![absolute_path(explicit_socket)];
-    let args = create_seatbelt_command_args(CreateSeatbeltCommandArgsParams {
-        command: vec!["/usr/bin/true".to_string()],
-        file_system_sandbox_policy: &file_system_policy,
-        network_sandbox_policy: NetworkSandboxPolicy::Restricted,
-        sandbox_policy_cwd: cwd.path(),
-        enforce_managed_network: true,
-        managed_network: Some(&managed_network),
-        environment_id: None,
-        network: Some(&network_proxy),
-        extra_allow_unix_sockets: &extra_allow_unix_sockets,
-    })
-    .expect("create seatbelt args");
-
-    let policy = seatbelt_policy_arg(&args);
-    assert!(policy.contains("(allow network-outbound (remote ip \"localhost:43123\"))"));
-    assert!(policy.contains("(allow system-socket (socket-domain AF_UNIX))"));
-    assert!(!policy.contains("(allow network-bind (local unix-socket))"));
-    assert!(!policy.contains("(allow network-outbound (remote unix-socket))"));
-    let expected_explicit_socket = normalize_path_for_sandbox(Path::new(explicit_socket))
-        .expect("explicit socket root should normalize");
-    let expected_prepared_socket = normalize_path_for_sandbox(Path::new(prepared_socket))
-        .expect("prepared socket root should normalize");
-    assert_eq!(
-        args.iter()
-            .filter(|arg| arg.starts_with("-DUNIX_SOCKET_PATH_"))
-            .cloned()
-            .collect::<Vec<_>>(),
-        vec![
-            format!(
-                "-DUNIX_SOCKET_PATH_0={}",
-                expected_explicit_socket.display()
-            ),
-            format!(
-                "-DUNIX_SOCKET_PATH_1={}",
-                expected_prepared_socket.display()
-            ),
-        ]
-    );
-
-    // An empty prepared policy must not inherit the live proxy's allow-all grant.
-    let managed_network = ManagedNetworkSandboxContext {
-        loopback_ports: vec![43123],
-        ..Default::default()
-    };
-    let args = create_seatbelt_command_args(CreateSeatbeltCommandArgsParams {
-        command: vec!["/usr/bin/true".to_string()],
-        file_system_sandbox_policy: &file_system_policy,
-        network_sandbox_policy: NetworkSandboxPolicy::Restricted,
-        sandbox_policy_cwd: cwd.path(),
-        enforce_managed_network: true,
-        managed_network: Some(&managed_network),
-        environment_id: None,
-        network: Some(&network_proxy),
-        extra_allow_unix_sockets: &[],
-    })
-    .expect("create seatbelt args for empty prepared policy");
-
-    let policy = seatbelt_policy_arg(&args);
-    assert!(policy.contains("(allow network-outbound (remote ip \"localhost:43123\"))"));
-    assert!(!policy.contains("(allow system-socket (socket-domain AF_UNIX))"));
-    assert!(!policy.contains("(allow network-bind (local unix-socket))"));
-    assert!(!policy.contains("(allow network-outbound (remote unix-socket))"));
-    assert!(
-        !args
-            .iter()
-            .any(|arg| arg.starts_with("-DUNIX_SOCKET_PATH_"))
-    );
-    Ok(())
-}
-
 #[test]
 fn explicit_unreadable_paths_are_excluded_from_readable_roots() {
     let root = absolute_path("/tmp/codex-readable");
@@ -1636,72 +1506,6 @@ fn create_seatbelt_args_allowlists_explicit_unix_socket_paths_without_proxy() {
             .any(|arg| arg == &format!("-DUNIX_SOCKET_PATH_0={expected_socket_root}")),
         "seatbelt args should pass the configured socket root as a sandbox param: {args:?}"
     );
-}
-
-#[tokio::test]
-async fn create_seatbelt_args_merges_proxy_and_explicit_unix_socket_paths() -> anyhow::Result<()> {
-    let cwd = TempDir::new().expect("temp cwd");
-    let file_system_policy = FileSystemSandboxPolicy::from_legacy_sandbox_policy_for_cwd(
-        &SandboxPolicy::new_read_only_policy(),
-        cwd.path(),
-    );
-    let network_socket = "/tmp/codex-proxy-use";
-    let explicit_socket = "/tmp/codex-browser-use";
-    let mut network_config = NetworkProxyConfig {
-        enabled: true,
-        mode: NetworkMode::Full,
-        ..Default::default()
-    };
-    network_config.set_allow_unix_sockets(vec![network_socket.to_string()]);
-    let state = build_config_state(
-        network_config,
-        NetworkProxyConstraints::default(),
-        codex_utils_path_uri::Platform::native(),
-    )?;
-    let network_proxy = NetworkProxy::builder()
-        .state(Arc::new(NetworkProxyState::with_reloader(
-            state,
-            Arc::new(TestConfigReloader),
-        )))
-        .managed_by_codex(/*managed_by_codex*/ false)
-        .build()
-        .await?;
-    let extra_allow_unix_sockets = vec![absolute_path(explicit_socket)];
-
-    let args = create_seatbelt_command_args(CreateSeatbeltCommandArgsParams {
-        command: vec!["/usr/bin/true".to_string()],
-        file_system_sandbox_policy: &file_system_policy,
-        network_sandbox_policy: NetworkSandboxPolicy::Restricted,
-        sandbox_policy_cwd: cwd.path(),
-        enforce_managed_network: false,
-        managed_network: None,
-        environment_id: None,
-        network: Some(&network_proxy),
-        extra_allow_unix_sockets: &extra_allow_unix_sockets,
-    })
-    .unwrap();
-
-    let expected_explicit_socket = normalize_path_for_sandbox(Path::new(explicit_socket))
-        .expect("explicit socket root should normalize");
-    let expected_network_socket = normalize_path_for_sandbox(Path::new(network_socket))
-        .expect("network socket root should normalize");
-    let unix_socket_definitions = args
-        .iter()
-        .filter(|arg| arg.starts_with("-DUNIX_SOCKET_PATH_"))
-        .cloned()
-        .collect::<Vec<_>>();
-    assert_eq!(
-        unix_socket_definitions,
-        vec![
-            format!(
-                "-DUNIX_SOCKET_PATH_0={}",
-                expected_explicit_socket.display()
-            ),
-            format!("-DUNIX_SOCKET_PATH_1={}", expected_network_socket.display()),
-        ],
-        "seatbelt args should include both explicit and network proxy socket roots: {args:?}"
-    );
-    Ok(())
 }
 
 #[test]

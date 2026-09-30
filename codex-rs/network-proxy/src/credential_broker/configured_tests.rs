@@ -6,10 +6,10 @@ use super::brokered_credential_marker_env_keys;
 use super::brokered_credential_value_env_keys;
 use crate::NetworkProxyConfig;
 use base64::Engine as _;
+use http::HeaderMap;
+use http::HeaderValue;
+use http::header::AUTHORIZATION;
 use pretty_assertions::assert_eq;
-use rama_http::HeaderMap;
-use rama_http::HeaderValue;
-use rama_http::header::AUTHORIZATION;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 
@@ -2229,7 +2229,7 @@ fn configured_provider_preserves_bearer_token_basic_and_custom_header_auth() {
         };
         let mut headers = HeaderMap::new();
         headers.insert(
-            rama_http::HeaderName::from_bytes(header_name.as_bytes()).expect("valid header"),
+            http::HeaderName::from_bytes(header_name.as_bytes()).expect("valid header"),
             HeaderValue::from_str(&dummy_header).expect("valid dummy authentication"),
         );
         if method == CredentialAuthMethod::Header {

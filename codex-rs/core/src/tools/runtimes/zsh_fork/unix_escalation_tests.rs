@@ -10,15 +10,12 @@ use crate::config::Constrained;
 use crate::guardian::GuardianReviewContext;
 use crate::sandboxing::SandboxPermissions;
 use crate::session::tests::make_session_and_context;
-use crate::tools::runtimes::tests::test_credential_broker_network_proxy;
 use anyhow::Context;
 use codex_execpolicy::Decision;
 use codex_execpolicy::Evaluation;
 use codex_execpolicy::PolicyParser;
 use codex_execpolicy::RuleMatch;
 use codex_hooks::HooksConfig;
-use codex_network_proxy::PROXY_ACTIVE_ENV_KEY;
-use codex_network_proxy::PROXY_ENV_KEYS;
 use codex_protocol::config_types::WindowsSandboxLevel;
 use codex_protocol::models::AdditionalPermissionProfile;
 use codex_protocol::models::FileSystemPermissions;
@@ -32,7 +29,6 @@ use codex_protocol::permissions::NetworkSandboxPolicy;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::GranularApprovalConfig;
 use codex_protocol::protocol::GuardianCommandSource;
-use codex_sandboxing::SandboxType;
 use codex_sandboxing::policy_transforms::effective_permission_profile;
 use codex_shell_escalation::EscalationExecution;
 use codex_shell_escalation::EscalationPermissions;
@@ -351,78 +347,6 @@ fn shell_request_escalation_execution_is_explicit() {
             ResolvedPermissionProfile { permission_profile },
         )),
     );
-}
-
-#[tokio::test]
-async fn unsandboxed_intercepted_exec_strips_managed_network_env() -> anyhow::Result<()> {
-    let workdir = test_sandbox_cwd();
-    let network = test_credential_broker_network_proxy().await?;
-    let executor = CoreShellCommandExecutor {
-        sandbox_manager: codex_sandboxing::SandboxManager::new(),
-        command: Vec::new(),
-        cwd: workdir.clone(),
-        permission_profile: PermissionProfile::workspace_write(),
-        sandbox: SandboxType::None,
-        env: HashMap::new(),
-        network: Some(network.clone()),
-        network_environment_id: None,
-        windows_sandbox_level: WindowsSandboxLevel::Disabled,
-        arg0: None,
-        sandbox_policy_cwd: workdir.clone(),
-        windows_sandbox_workspace_roots: vec![workdir.clone()],
-        codex_linux_sandbox_exe: None,
-        use_legacy_landlock: false,
-    };
-    let mut env = HashMap::new();
-    env.insert("GH_TOKEN".to_string(), "ghp-real".to_string());
-    env.insert(PROXY_ACTIVE_ENV_KEY.to_string(), "1".to_string());
-    for key in PROXY_ENV_KEYS {
-        env.insert((*key).to_string(), format!("proxy-{key}"));
-    }
-    network.apply_to_env(&mut env);
-    assert_ne!(env.get("GH_TOKEN").map(String::as_str), Some("ghp-real"));
-    let dummy = env.get("GH_TOKEN").expect("brokered token").clone();
-
-    let prepared = executor
-        .prepare_escalated_exec(
-            &AbsolutePathBuf::from_absolute_path("/usr/bin/curl")?,
-            &[
-                "curl".to_string(),
-                "-H".to_string(),
-                format!("Authorization: Bearer {dummy}"),
-                "example.com".to_string(),
-            ],
-            &workdir,
-            env,
-            EscalationExecution::Unsandboxed,
-        )
-        .await?;
-
-    assert!(
-        !prepared.env.contains_key(PROXY_ACTIVE_ENV_KEY),
-        "unsandboxed intercepted exec should strip the managed-network active marker"
-    );
-    for key in PROXY_ENV_KEYS {
-        assert!(
-            !prepared.env.contains_key(*key),
-            "unsandboxed intercepted exec should strip managed-network proxy env var {key}"
-        );
-    }
-    assert_eq!(
-        prepared.env.get("GH_TOKEN").map(String::as_str),
-        Some("ghp-real")
-    );
-    assert_eq!(
-        prepared.command,
-        vec![
-            "/usr/bin/curl".to_string(),
-            "-H".to_string(),
-            format!("Authorization: Bearer {dummy}"),
-            "example.com".to_string(),
-        ]
-    );
-
-    Ok(())
 }
 
 #[tokio::test]

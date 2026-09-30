@@ -4,9 +4,9 @@ use super::CredentialProvider;
 use super::CredentialSource;
 use super::shaped_dummy_value;
 use crate::config::trusted_credential_broker_host;
-use rama_http::HeaderMap;
-use rama_http::HeaderValue;
-use rama_http::header::AUTHORIZATION;
+use http::HeaderMap;
+use http::HeaderValue;
+use http::header::AUTHORIZATION;
 use std::collections::HashMap;
 
 const OPENAI_API_KEY_ENV_VARS: &[&str] = &["OPENAI_API_KEY"];

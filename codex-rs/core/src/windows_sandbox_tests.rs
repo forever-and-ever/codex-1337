@@ -98,32 +98,6 @@ fn resolve_windows_sandbox_mode_falls_back_to_legacy_keys() {
 }
 
 #[test]
-fn provisioning_settings_omit_the_disabled_socks_proxy() {
-    let config = NetworkProxyConfig {
-        enabled: true,
-        proxy_url: "http://127.0.0.1:43128".to_string(),
-        enable_socks5: false,
-        socks_url: "socks5h://127.0.0.1:48081".to_string(),
-        allow_local_binding: Some(true),
-        ..Default::default()
-    };
-    let spec = crate::config::NetworkProxySpec::from_config_and_constraints(
-        config,
-        /*requirements*/ None,
-        &PermissionProfile::workspace_write(),
-    )
-    .expect("managed proxy config should resolve");
-
-    assert_eq!(
-        provisioning_settings(Some(&spec)).expect("provisioning settings should resolve"),
-        codex_windows_sandbox::WindowsSandboxProvisioningSettings {
-            proxy_ports: vec![43128],
-            allow_local_binding: true,
-        }
-    );
-}
-
-#[test]
 fn provisioning_settings_are_empty_when_managed_network_is_disabled() {
     let spec = crate::config::NetworkProxySpec::from_config_and_constraints(
         NetworkProxyConfig::default(),

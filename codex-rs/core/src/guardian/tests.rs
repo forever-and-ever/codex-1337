@@ -3,7 +3,6 @@ use crate::config::Config;
 use crate::config::ConfigOverrides;
 use crate::config::Constrained;
 use crate::config::ManagedFeatures;
-use crate::config::NetworkProxySpec;
 use crate::config::PermissionProfileSnapshot;
 use crate::config::test_config;
 use crate::context::ContextualUserFragment;
@@ -18,8 +17,6 @@ use codex_analytics::GuardianApprovalRequestSource;
 use codex_config::ConfigLayerStack;
 use codex_config::FeatureRequirementsToml;
 use codex_config::NetworkConstraints;
-use codex_config::NetworkDomainPermissionToml;
-use codex_config::NetworkDomainPermissionsToml;
 use codex_config::RequirementSource;
 use codex_config::Sourced;
 use codex_config::config_toml::ConfigToml;
@@ -33,7 +30,6 @@ use codex_history::RolloutItem;
 use codex_model_provider::create_model_provider;
 use codex_model_provider_info::OPENAI_PROVIDER_ID;
 use codex_models_manager::manager::StaticModelsManager;
-use codex_network_proxy::NetworkProxyConfig;
 use codex_prompts::GuardianPolicyInstructions;
 use codex_prompts::ResolvedModelMessages;
 use codex_protocol::ThreadId;
@@ -3824,55 +3820,6 @@ async fn guardian_ephemeral_retry_preserves_parallel_trunk_and_fork_history() ->
         )),
     }
 }
-#[tokio::test]
-async fn guardian_review_session_config_preserves_parent_network_proxy() {
-    let mut parent_config = test_config().await;
-    let network = NetworkProxySpec::from_config_and_constraints(
-        NetworkProxyConfig::default(),
-        Some(NetworkConstraints {
-            enabled: Some(true),
-            domains: Some(NetworkDomainPermissionsToml {
-                entries: std::collections::BTreeMap::from([(
-                    "github.com".to_string(),
-                    NetworkDomainPermissionToml::Allow,
-                )]),
-            }),
-            ..Default::default()
-        }),
-        parent_config.permissions.permission_profile(),
-    )
-    .expect("network proxy spec");
-    parent_config.permissions.network = Some(network.clone());
-
-    let guardian_config = build_guardian_review_session_config_for_test(
-        crate::guardian::test_host::build_reviewer_config(&parent_config).expect("reviewer config"),
-        /*live_network_config*/ None,
-        "parent-active-model",
-        Some(codex_protocol::openai_models::ReasoningEffort::Low),
-        ReasoningSummary::default(),
-        /*personality*/ None,
-        ResolvedModelMessages::bundled(),
-    )
-    .expect("guardian config");
-
-    assert_eq!(guardian_config.permissions.network, Some(network));
-    assert_eq!(
-        guardian_config.model,
-        Some("parent-active-model".to_string())
-    );
-    assert_eq!(
-        guardian_config.model_reasoning_effort,
-        Some(codex_protocol::openai_models::ReasoningEffort::Low)
-    );
-    assert_eq!(
-        guardian_config.permissions.approval_policy,
-        Constrained::allow_only(AskForApproval::Never)
-    );
-    assert_eq!(
-        guardian_config.permissions.permission_profile(),
-        &PermissionProfile::read_only()
-    );
-}
 
 #[tokio::test]
 async fn guardian_review_session_config_clears_context_overrides_for_distinct_effective_model() {
@@ -3936,53 +3883,6 @@ async fn guardian_review_session_config_preserves_context_overrides_for_same_eff
             guardian_config.model_auto_compact_token_limit,
         ),
         (Some(128_000), Some(100_000))
-    );
-}
-
-#[tokio::test]
-async fn guardian_review_session_config_uses_live_network_proxy_state() {
-    let mut parent_config = test_config().await;
-    let mut parent_network = NetworkProxyConfig {
-        enabled: true,
-        ..Default::default()
-    };
-    parent_network.set_allowed_domains(vec!["parent.example".to_string()]);
-    parent_config.permissions.network = Some(
-        NetworkProxySpec::from_config_and_constraints(
-            parent_network,
-            /*requirements*/ None,
-            parent_config.permissions.permission_profile(),
-        )
-        .expect("parent network proxy spec"),
-    );
-
-    let mut live_network = NetworkProxyConfig {
-        enabled: true,
-        ..Default::default()
-    };
-    live_network.set_allowed_domains(vec!["github.com".to_string()]);
-
-    let guardian_config = build_guardian_review_session_config_for_test(
-        crate::guardian::test_host::build_reviewer_config(&parent_config).expect("reviewer config"),
-        Some(live_network.clone()),
-        "active-model",
-        /*reasoning_effort*/ None,
-        ReasoningSummary::default(),
-        /*personality*/ None,
-        ResolvedModelMessages::bundled(),
-    )
-    .expect("guardian config");
-
-    assert_eq!(
-        guardian_config.permissions.network,
-        Some(
-            NetworkProxySpec::from_config_and_constraints(
-                live_network,
-                /*requirements*/ None,
-                &PermissionProfile::read_only(),
-            )
-            .expect("live network proxy spec")
-        )
     );
 }
 

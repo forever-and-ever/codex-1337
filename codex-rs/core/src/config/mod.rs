@@ -587,6 +587,11 @@ fn build_network_proxy_spec(
     permission_profile: &PermissionProfile,
     environment_overrides: &HashMap<String, String>,
 ) -> std::io::Result<Option<NetworkProxySpec>> {
+    // Brokerage can implicitly activate proxy transport. Do not let environment
+    // normalization turn an unsupported brokerage request into ordinary execution.
+    if configured_network_proxy_config.credential_broker {
+        return Err(codex_network_proxy::unsupported_error());
+    }
     configured_network_proxy_config.configure_credential_broker_environment(environment_overrides);
     PreparedNetworkConfig {
         configured_proxy: configured_network_proxy_config,

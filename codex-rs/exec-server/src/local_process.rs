@@ -1233,9 +1233,7 @@ mod tests {
     use codex_exec_server_protocol::JSONRPCMessage;
     use codex_exec_server_protocol::JSONRPCResponse;
     use codex_exec_server_protocol::RequestId;
-    use codex_network_proxy::NetworkProxy;
     use codex_network_proxy::NetworkProxyConfig;
-    use codex_network_proxy::NetworkProxyState;
     use codex_network_proxy::RemoteNetworkProxyConfig;
     use codex_network_proxy::RemoteNetworkProxyLaunchConfig;
     use codex_protocol::config_types::ShellEnvironmentPolicyInherit;
@@ -1292,102 +1290,6 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn executor_proxy_sends_final_network_policy_notification() {
-        let (outgoing_tx, mut outgoing_rx) = mpsc::channel(NOTIFICATION_CHANNEL_CAPACITY);
-        let backend = LocalProcess::with_runtime_paths(
-            RpcNotificationSender::new(outgoing_tx),
-            ExecServerTelemetry::default(),
-            /*runtime_paths*/ None,
-        );
-        let proxy_config = RemoteNetworkProxyConfig::from_effective_config(&NetworkProxyConfig {
-            enabled: true,
-            ..NetworkProxyConfig::default()
-        })
-        .expect("build remote network proxy config");
-        let mut params = test_exec_params(HashMap::new());
-        params.process_id = ProcessId::from("audit-process");
-        params.argv = vec![
-            "/bin/sh".to_string(),
-            "-c".to_string(),
-            "printf '%s\\n' \"$HTTP_PROXY\"; exec sleep 60".to_string(),
-        ];
-        params.network_proxy = Some(
-            RemoteNetworkProxyLaunchConfig::new(proxy_config)
-                .for_execution("environment-1".to_string(), "execution-1".to_string()),
-        );
-        backend
-            .exec(params, ProcessTelemetry::default())
-            .await
-            .expect("start process with proxy");
-        let output = backend
-            .exec_read(ReadParams {
-                process_id: ProcessId::from("audit-process"),
-                after_seq: None,
-                max_bytes: None,
-                wait_ms: Some(1_000),
-            })
-            .await
-            .expect("read executor proxy address");
-        let proxy_addr = String::from_utf8(
-            output
-                .chunks
-                .into_iter()
-                .find(|chunk| matches!(chunk.stream, ExecOutputStream::Stdout))
-                .expect("executor proxy address output")
-                .chunk
-                .into_inner(),
-        )
-        .expect("UTF-8 proxy address");
-        let proxy_addr = proxy_addr
-            .trim()
-            .strip_prefix("http://")
-            .expect("HTTP executor proxy address");
-        let mut stream = tokio::net::TcpStream::connect(proxy_addr)
-            .await
-            .expect("connect to executor proxy");
-        stream
-            .write_all(b"CONNECT 8.8.8.8:443 HTTP/1.1\r\nHost: 8.8.8.8:443\r\n\r\n")
-            .await
-            .expect("write CONNECT request");
-        let mut response = [0_u8; 256];
-        let response_len = timeout(Duration::from_secs(2), stream.read(&mut response))
-            .await
-            .expect("proxy response timeout")
-            .expect("read proxy response");
-        assert!(String::from_utf8_lossy(&response[..response_len]).starts_with("HTTP/1.1 403"));
-
-        let notification = timeout(Duration::from_secs(2), async {
-            loop {
-                match outgoing_rx.recv().await {
-                    Some(RpcServerOutboundMessage::Notification(notification))
-                        if notification.method == NETWORK_POLICY_DECISION_METHOD =>
-                    {
-                        break serde_json::from_value::<NetworkPolicyDecisionNotification>(
-                            notification
-                                .params
-                                .expect("network policy notification params"),
-                        )
-                        .expect("deserialize network policy notification");
-                    }
-                    Some(_) => {}
-                    None => panic!("outbound notifications closed"),
-                }
-            }
-        })
-        .await
-        .expect("network policy notification timeout");
-        assert_eq!(notification.process_id, ProcessId::from("audit-process"));
-        assert_eq!(notification.decision, "deny");
-        assert_eq!(notification.host, "8.8.8.8");
-        assert_eq!(
-            notification.protocol,
-            ExecServerNetworkProtocol::HttpsConnect
-        );
-        backend.shutdown().await;
-    }
-
 
 
     #[tokio::test]
@@ -1442,24 +1344,6 @@ mod tests {
 
             assert_eq!(error, expected);
         }
-
-        let mut boundary = test_exec_params(HashMap::new());
-        boundary.process_id = ProcessId::from("p".repeat(MAX_NETWORK_POLICY_PROCESS_ID_BYTES));
-        boundary.network_proxy = Some(proxy);
-        boundary.argv.clear();
-        let error = LocalProcess::default()
-            .start_process(boundary, ProcessTelemetry::default())
-            .await
-            .err()
-            .expect("valid boundary process ID should proceed to process preparation");
-        #[cfg(not(target_os = "windows"))]
-        assert!(
-            error
-                .message
-                .contains("executor-local network proxy launch requires an enabled proxy")
-        );
-        #[cfg(target_os = "windows")]
-        assert_eq!(error, invalid_params("argv must not be empty".to_string()));
 
         for process_id in [
             String::new(),
@@ -1712,135 +1596,6 @@ mod tests {
             .expect("retained process/read response should fit the JSON value budget");
         assert_eq!(decoded, message);
 
-        backend.shutdown().await;
-    }
-
-    #[tokio::test]
-    async fn exited_process_keeps_network_proxy_until_inherited_streams_close() {
-        let backend = LocalProcess::default();
-        let mut process = spawn_test_process(&backend, "proc-background-child").await;
-        let (outgoing_tx, outgoing_rx) = mpsc::channel(NOTIFICATION_CHANNEL_CAPACITY);
-        #[cfg(not(target_os = "windows"))]
-        let mut outgoing_rx = outgoing_rx;
-        #[cfg(target_os = "windows")]
-        let _outgoing_rx = outgoing_rx;
-        let requests = RpcNotificationSender::new(outgoing_tx).request_sender();
-        *backend
-            .inner
-            .requests
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(requests.clone());
-        let network_policy_shutdown = CancellationToken::new();
-        let decider = network_policy_decider(
-            process.process_id.clone(),
-            Arc::clone(&backend.inner.requests),
-            Duration::from_secs(30),
-            network_policy_shutdown.clone(),
-        );
-        let config = NetworkProxyConfig {
-            enabled: true,
-            ..Default::default()
-        };
-        let proxy_config = RemoteNetworkProxyConfig::from_effective_config(&config)
-            .expect("build remote network proxy config");
-        let state = NetworkProxyState::from_remote_launch_config(
-            RemoteNetworkProxyLaunchConfig::new(proxy_config),
-            codex_utils_path_uri::Platform::native(),
-        )
-        .expect("build network proxy state");
-        let proxy = NetworkProxy::builder()
-            .state(Arc::new(state))
-            .policy_decider_arc(decider)
-            .build()
-            .await
-            .expect("build network proxy");
-        let handle = proxy.run().await.expect("start network proxy");
-        let prepared = proxy
-            .prepare_for_optional_environment(HashMap::new(), /*environment_id*/ None)
-            .expect("prepare network proxy environment");
-        let proxy_addr: std::net::SocketAddr = prepared
-            .env
-            .get("HTTP_PROXY")
-            .and_then(|value| value.strip_prefix("http://"))
-            .expect("HTTP proxy address")
-            .parse()
-            .expect("parse HTTP proxy address");
-
-        {
-            let mut processes = backend.inner.processes.lock().await;
-            let Some(ProcessEntry::Running(running)) = processes.get_mut(&process.process_id)
-            else {
-                panic!("test process should be running");
-            };
-            running.network_proxy_handle = Some(handle);
-            running.network_policy_shutdown = Some(network_policy_shutdown.clone());
-        }
-
-        process.exit(/*exit_code*/ 0);
-        let exit_response =
-            read_process_until_change(&backend, &process.process_id, /*after_seq*/ None).await;
-        assert!(exit_response.exited);
-        assert!(!exit_response.closed);
-        assert!(!network_policy_shutdown.is_cancelled());
-        let stream = tokio::net::TcpStream::connect(proxy_addr)
-            .await
-            .expect("proxy should remain available to a child holding inherited output streams");
-        #[cfg(target_os = "windows")]
-        {
-            assert!(proxy.network_proxy_restricting_sid(None).is_some());
-            drop(stream);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let mut stream = stream;
-            stream
-                .write_all(b"CONNECT 8.8.8.8:443 HTTP/1.1\r\nHost: 8.8.8.8:443\r\n\r\n")
-                .await
-                .expect("write CONNECT request");
-            let outbound = timeout(Duration::from_secs(1), outgoing_rx.recv())
-                .await
-                .expect("policy request should arrive")
-                .expect("policy request");
-            let RpcServerOutboundMessage::Request(request) = outbound else {
-                panic!("expected policy request");
-            };
-            assert_eq!(request.method, NETWORK_POLICY_REQUEST_METHOD);
-            let params: NetworkPolicyRequestParams =
-                serde_json::from_value(request.params.expect("request params"))
-                    .expect("deserialize policy request");
-            assert_eq!(params.process_id, process.process_id);
-            assert_eq!(params.request.host, "8.8.8.8");
-            requests.complete(
-                request.id,
-                Ok(serde_json::to_value(NetworkPolicyRequestResponse {
-                    decision: ExecServerNetworkPolicyDecision::Deny {
-                        reason: "not_allowed".to_string(),
-                    },
-                })
-                .expect("serialize policy response")),
-            );
-            let mut response = [0_u8; 256];
-            let response_len = timeout(Duration::from_secs(1), stream.read(&mut response))
-                .await
-                .expect("proxy response timeout")
-                .expect("read proxy response");
-            assert!(String::from_utf8_lossy(&response[..response_len]).starts_with("HTTP/1.1 403"));
-        }
-
-        drop(process.stdout_tx);
-        drop(process.stderr_tx);
-        let closed_response = timeout(
-            Duration::from_secs(1),
-            read_process_until_closed(&backend, &process.process_id),
-        )
-        .await
-        .expect("process should close");
-        assert!(closed_response.closed);
-        assert!(network_policy_shutdown.is_cancelled());
-        #[cfg(target_os = "windows")]
-        assert_eq!(proxy.network_proxy_restricting_sid(None), None);
-        #[cfg(not(target_os = "windows"))]
-        assert!(tokio::net::TcpStream::connect(proxy_addr).await.is_err());
         backend.shutdown().await;
     }
 

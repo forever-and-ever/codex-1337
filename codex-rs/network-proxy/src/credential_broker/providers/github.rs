@@ -5,9 +5,9 @@ use super::CredentialSource;
 use super::shaped_dummy_value;
 use crate::policy::normalize_host;
 use base64::Engine as _;
-use rama_http::HeaderMap;
-use rama_http::HeaderValue;
-use rama_http::header::AUTHORIZATION;
+use http::HeaderMap;
+use http::HeaderValue;
+use http::header::AUTHORIZATION;
 use std::collections::HashMap;
 
 const GH_HOST_ENV_VAR: &str = "GH_HOST";
@@ -156,7 +156,7 @@ fn github_host_hint(env: &HashMap<String, String>) -> Option<String> {
     } else {
         value.to_string()
     };
-    let parsed = authority.parse::<rama_http::uri::Authority>().ok()?;
+    let parsed = authority.parse::<http::uri::Authority>().ok()?;
     let suffix = authority.strip_prefix(parsed.host())?;
     if !suffix.is_empty() {
         suffix.strip_prefix(':')?.parse::<u16>().ok()?;

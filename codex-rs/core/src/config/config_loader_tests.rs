@@ -1847,9 +1847,6 @@ async fn system_requirements_define_managed_permission_profiles() -> anyhow::Res
         codex_home.join(CONFIG_TOML_FILE),
         r#"
 default_permissions = "managed-standard"
-
-[features]
-network_proxy = true
 "#,
     )
     .await?;
@@ -1867,8 +1864,6 @@ extends = ":workspace"
 
 [permissions.managed-standard.network]
 enabled = true
-proxy_url = "http://127.0.0.1:43128"
-enable_socks5 = false
 "#,
     )
     .await?;
@@ -1906,8 +1901,6 @@ extends = ":workspace"
 
 [network]
 enabled = true
-proxy_url = "http://127.0.0.1:43128"
-enable_socks5 = false
 "#
         )?
     );
@@ -1917,90 +1910,6 @@ enable_socks5 = false
         .expect("managed profile should be active");
     assert_eq!(active_permission_profile.id, "managed-standard");
 
-    let network = config
-        .network_proxy_spec_for_active_permission_profile(
-            &active_permission_profile,
-            config.permissions.permission_profile(),
-        )?
-        .expect("managed profile should retain its network proxy configuration");
-    assert_eq!(Some(&network), config.permissions.network.as_ref());
-    assert_eq!(network.proxy_host_and_port(), "127.0.0.1:43128");
-    assert!(!network.socks_enabled());
-    Ok(())
-}
-
-#[tokio::test]
-async fn credential_broker_ambiguity_guard_survives_permission_profile_selection()
--> anyhow::Result<()> {
-    for (key, other_key, other_value, ambiguous) in [
-        ("GH_HOST", "gh_host", "second.example", true),
-        ("VENDOR_HOST", "vendor_host", "second.example", true),
-        ("VENDOR_PASSWORD", "vendor_password", "second.example", true),
-        ("VENDOR_HOST", "vendor_host", "first.example", false),
-        ("FOO", "foo", "second.example", false),
-    ] {
-        let home = tempdir()?;
-        tokio::fs::write(
-            home.path().join(CONFIG_TOML_FILE),
-            format!(
-                r#"
-default_permissions = "first"
-[features.network_proxy]
-enabled = true
-credential_broker = true
-[features.network_proxy.credentials.vendor]
-env = ["VENDOR_PASSWORD"]
-patterns = ["pin_[a-z]{{8}}"]
-url_prefixes = ["https://api.vendor.example"]
-url_prefix_from_env = "VENDOR_HOST"
-auth = ["bearer"]
-[permissions.first]
-extends = ":workspace"
-[permissions.first.network]
-enabled = true
-[permissions.second]
-extends = "first"
-[shell_environment_policy.set]
-{key} = "first.example"
-{other_key} = "{other_value}"
-"#
-            ),
-        )
-        .await?;
-        let config = ConfigBuilder::default()
-            .codex_home(home.path().to_path_buf())
-            .fallback_cwd(Some(home.path().to_path_buf()))
-            .loader_overrides(LoaderOverrides::without_managed_config_for_tests())
-            .build()
-            .await?;
-        let expected_enabled = !(cfg!(windows) && ambiguous);
-        assert_eq!(
-            config.permissions.shell_environment_policy.r#set,
-            HashMap::from([
-                (key.to_string(), "first.example".to_string()),
-                (other_key.to_string(), other_value.to_string()),
-            ])
-        );
-        assert_eq!(
-            config
-                .permissions
-                .network
-                .as_ref()
-                .unwrap()
-                .credential_broker_enabled(),
-            expected_enabled,
-            "{key}"
-        );
-        let mut selected = config.permissions.active_permission_profile().unwrap();
-        selected.id = "second".to_string();
-        let rebuilt = config
-            .network_proxy_spec_for_active_permission_profile(
-                &selected,
-                config.permissions.permission_profile(),
-            )?
-            .unwrap();
-        assert_eq!(Some(&rebuilt), config.permissions.network.as_ref(), "{key}");
-    }
     Ok(())
 }
 

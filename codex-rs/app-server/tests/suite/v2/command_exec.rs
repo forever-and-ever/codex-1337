@@ -443,105 +443,6 @@ async fn command_exec_enforces_managed_deny_read_requirements() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-async fn command_exec_permission_profile_starts_selected_network_proxy() -> Result<()> {
-    let server = create_mock_responses_server_sequence_unchecked(Vec::new()).await;
-    let codex_home = TempDir::new()?;
-    create_config_toml(codex_home.path(), &server.uri(), "never")?;
-    insert_networked_permission_profile_config(
-        codex_home.path(),
-        /*default_permissions*/ None,
-    )?;
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .without_auto_env()
-        .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
-        .await?;
-
-    let command_request_id = mcp
-        .send_command_exec_request(CommandExecParams {
-            command: vec![
-                "sh".to_string(),
-                "-lc".to_string(),
-                "printf '%s' \"${CODEX_NETWORK_PROXY_ACTIVE-unset}\"".to_string(),
-            ],
-            process_id: None,
-            tty: false,
-            stream_stdin: false,
-            stream_stdout_stderr: false,
-            output_bytes_cap: None,
-            disable_output_cap: false,
-            disable_timeout: false,
-            timeout_ms: None,
-            cwd: None,
-            env: None,
-            size: None,
-            sandbox_policy: None,
-            permission_profile: Some("networked".to_string()),
-        })
-        .await?;
-
-    let response: CommandExecResponse = mcp.read_response(command_request_id).await?;
-    assert_eq!(
-        response,
-        CommandExecResponse {
-            exit_code: 0,
-            stdout: "1".to_string(),
-            stderr: String::new(),
-        }
-    );
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn command_exec_permission_profile_does_not_reuse_default_network_proxy() -> Result<()> {
-    let server = create_mock_responses_server_sequence_unchecked(Vec::new()).await;
-    let codex_home = TempDir::new()?;
-    create_config_toml(codex_home.path(), &server.uri(), "never")?;
-    insert_networked_permission_profile_config(codex_home.path(), Some("networked"))?;
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .without_auto_env()
-        .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
-        .await?;
-
-    let command_request_id = mcp
-        .send_command_exec_request(CommandExecParams {
-            command: vec![
-                "sh".to_string(),
-                "-lc".to_string(),
-                "printf '%s' \"${CODEX_NETWORK_PROXY_ACTIVE-unset}\"".to_string(),
-            ],
-            process_id: None,
-            tty: false,
-            stream_stdin: false,
-            stream_stdout_stderr: false,
-            output_bytes_cap: None,
-            disable_output_cap: false,
-            disable_timeout: false,
-            timeout_ms: None,
-            cwd: None,
-            env: None,
-            size: None,
-            sandbox_policy: None,
-            permission_profile: Some(BUILT_IN_PERMISSION_PROFILE_READ_ONLY.to_string()),
-        })
-        .await?;
-
-    let response: CommandExecResponse = mcp.read_response(command_request_id).await?;
-    assert_eq!(
-        response,
-        CommandExecResponse {
-            exit_code: 0,
-            stdout: "unset".to_string(),
-            stderr: String::new(),
-        }
-    );
-
-    Ok(())
-}
-
 #[cfg(unix)]
 #[tokio::test]
 async fn command_exec_permission_profile_project_roots_use_command_cwd() -> Result<()> {
@@ -1402,31 +1303,6 @@ fn decode_delta_notification(
         .params
         .context("command/exec/outputDelta notification should include params")?;
     serde_json::from_value(params).context("deserialize command/exec/outputDelta notification")
-}
-
-fn insert_networked_permission_profile_config(
-    codex_home: &Path,
-    default_permissions: Option<&str>,
-) -> Result<()> {
-    let default_permissions = default_permissions
-        .map(|default_permissions| format!("default_permissions = \"{default_permissions}\"\n\n"))
-        .unwrap_or_default();
-    let inserted_config = format!(
-        r#"{default_permissions}[features]
-network_proxy = true
-
-[permissions.networked.filesystem]
-":root" = "read"
-
-[permissions.networked.network]
-enabled = true
-proxy_url = "http://127.0.0.1:0"
-enable_socks5 = false
-
-"#
-    );
-    insert_command_exec_config(codex_home, &inserted_config)?;
-    Ok(())
 }
 
 fn insert_command_exec_config(codex_home: &Path, inserted_config: &str) -> Result<()> {

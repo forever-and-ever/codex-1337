@@ -4,8 +4,8 @@
 //! local configuration loading. Keep that phase separate from applying network
 //! requirements to the final permission profile so both callers share the same
 //! ordering without reading a Config or any host state here.
-//! Environment policy conversion drops listener addresses, and final validation
-//! uses the same policy resolver as command execution.
+//! Environment policy conversion preserves the wire shape and drops listener
+//! addresses. Activating managed policy fails closed because its transport is absent.
 
 use codex_config::NetworkConstraints;
 use codex_config::Sourced;
@@ -54,9 +54,7 @@ pub fn project_environment_profile_network(
     Ok(Some(network))
 }
 
-/// Validates the owner policy for its final permission profile using the native
-/// environment resolver. Execution also applies controller and saved exec rules.
-/// This checks the supplied executor's path syntax; socket support is checked at execution.
+/// Rejects attachment-owned network policy because this build cannot enforce it.
 pub fn validate_environment_network_policy(
     policy: &EnvironmentNetworkPolicy,
     permission_profile: &PermissionProfile,
@@ -126,8 +124,8 @@ impl PreparedNetworkConfig {
         })
     }
 
-    /// An attachment's portable policy can be enforced without a local proxy
-    /// controller. Its presence must not depend on the controller feature gate.
+    /// Retains portable policy conversion independently of the controller feature;
+    /// activation is rejected by the environment policy resolver.
     pub fn build_environment_policy(
         self,
         requirements: Option<Sourced<NetworkConstraints>>,

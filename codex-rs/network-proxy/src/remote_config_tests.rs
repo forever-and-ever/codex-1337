@@ -2,17 +2,10 @@ use pretty_assertions::assert_eq;
 
 use super::RemoteNetworkProxyConfig;
 use super::RemoteNetworkProxyLaunchConfig;
-use crate::LocalBindingPolicy::DefaultFalse;
-use crate::LocalBindingPolicy::RequireTrue;
 use crate::MitmHookConfig;
 use crate::NetworkMitmCaConfig;
 use crate::NetworkMode;
-use crate::NetworkProxy;
-use crate::NetworkProxyAuditMetadata;
 use crate::NetworkProxyConfig;
-use crate::NetworkProxyState;
-use crate::Platform;
-use std::sync::Arc;
 
 #[test]
 fn optional_socket_policy_preserves_input_and_resolves_at_remote_boundary() {
@@ -45,14 +38,9 @@ fn optional_socket_policy_preserves_input_and_resolves_at_remote_boundary() {
     }
 }
 
-#[tokio::test]
-async fn round_trip_preserves_supported_effective_settings() {
-    for (executor_os, socket) in [
-        (Platform::Linux, "/var/run/example.sock"),
-        (Platform::Macos, "/var/run/example.sock"),
-        (Platform::Windows, r"C:\example.sock"),
-        (Platform::Unknown, r"C:\example.sock"),
-    ] {
+#[test]
+fn round_trip_preserves_supported_effective_settings() {
+    for socket in ["/var/run/example.sock", r"C:\example.sock"] {
         let mut config = NetworkProxyConfig {
             enabled: true,
             enable_socks5: false,
@@ -72,37 +60,6 @@ async fn round_trip_preserves_supported_effective_settings() {
         let round_trip = remote.clone().into_network_proxy_config();
 
         assert_eq!(round_trip, config);
-
-        let state = Arc::new(
-            NetworkProxyState::from_remote_launch_config(
-                RemoteNetworkProxyLaunchConfig::new(remote),
-                executor_os,
-            )
-            .unwrap(),
-        );
-        // Policy edits and carrier construction must retain the executor's OS even
-        // when the controller itself cannot interpret the socket as a native path.
-        state.add_allowed_domain("added.example.com").await.unwrap();
-        let proxy = NetworkProxy::builder()
-            .state(state)
-            .managed_by_codex(/*managed_by_codex*/ false)
-            .build()
-            .await
-            .unwrap();
-        config.upsert_domain_permission(
-            "added.example.com".into(),
-            crate::NetworkDomainPermission::Allow,
-            crate::normalize_host,
-        );
-        assert_eq!(
-            proxy
-                .remote_launch_config(DefaultFalse)
-                .await
-                .unwrap()
-                .proxy
-                .into_network_proxy_config(),
-            config
-        );
     }
 }
 
@@ -188,37 +145,6 @@ fn rejects_external_ca_even_when_proxy_is_disabled() {
 }
 
 #[test]
-fn launch_config_materializes_audit_and_execution_attribution() {
-    let proxy = RemoteNetworkProxyConfig::from_effective_config(&NetworkProxyConfig {
-        enabled: true,
-        ..NetworkProxyConfig::default()
-    })
-    .expect("supported remote config");
-    let audit_metadata = NetworkProxyAuditMetadata {
-        conversation_id: Some("conversation-1".to_string()),
-        user_account_id: Some("account-1".to_string()),
-        originator: Some("codex_cli_rs".to_string()),
-        model: Some("model-1".to_string()),
-        ..NetworkProxyAuditMetadata::default()
-    };
-    let state = NetworkProxyState::from_remote_launch_config(
-        RemoteNetworkProxyLaunchConfig {
-            proxy,
-            audit_metadata: audit_metadata.clone(),
-            environment_id: Some("remote".to_string()),
-            execution_id: Some("execution-1".to_string()),
-            policy_decision_timeout_ms: None,
-        },
-        Platform::native(),
-    )
-    .expect("remote launch state");
-
-    assert_eq!(state.audit_metadata(), &audit_metadata);
-    assert_eq!(state.environment_id(), Some("remote"));
-    assert_eq!(state.execution_id().as_deref(), Some("execution-1"));
-}
-
-#[test]
 fn policy_decision_callback_timeout_round_trips() {
     let config = RemoteNetworkProxyConfig::from_effective_config(&NetworkProxyConfig::default())
         .expect("supported remote config");
@@ -233,37 +159,4 @@ fn policy_decision_callback_timeout_round_trips() {
             .expect("deserialize launch timeout"),
         launch
     );
-}
-
-#[tokio::test]
-async fn local_binding_is_resolved_for_each_executor() -> anyhow::Result<()> {
-    for (binding, policy, expected) in [
-        (None, DefaultFalse, Some(false)),
-        (None, RequireTrue, Some(true)),
-        (Some(false), DefaultFalse, Some(false)),
-        (Some(false), RequireTrue, None),
-        (Some(true), DefaultFalse, Some(true)),
-    ] {
-        let config = NetworkProxyConfig {
-            enabled: true,
-            allow_local_binding: binding,
-            ..Default::default()
-        };
-        let mut state = crate::runtime::network_proxy_state_for_policy(config);
-        state.local_binding_policy = RequireTrue;
-        let proxy = NetworkProxy::builder()
-            .state(Arc::new(state))
-            .managed_by_codex(false)
-            .build()
-            .await?;
-        assert_eq!(
-            proxy
-                .remote_launch_config(policy)
-                .await
-                .ok()
-                .map(|launch| launch.proxy.allow_local_binding),
-            expected,
-        );
-    }
-    Ok(())
 }

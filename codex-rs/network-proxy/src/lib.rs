@@ -1,38 +1,33 @@
 #![deny(clippy::print_stdout, clippy::print_stderr)]
 
+//! Policy, configuration, and wire compatibility for managed networking.
+//! The managed proxy transport is not shipped: requesting it fails closed.
+//! Ordinary sandbox network permissions and application HTTP clients are unchanged.
+
+#[path = "attribution_frame.rs"]
 mod attribution;
 mod authorization_path;
-mod brokered_tunnel;
+#[path = "ca_markers.rs"]
 mod certs;
 mod config;
-mod connect_policy;
-mod connection_lifecycle;
 mod credential_broker;
 mod environment_policy;
-mod http_proxy;
-mod mitm;
+#[path = "hook_config.rs"]
 mod mitm_hook;
-mod native_certs;
+#[path = "decisions.rs"]
 mod network_policy;
 mod policy;
 mod process_log_metadata;
+#[path = "unavailable.rs"]
 mod proxy;
+mod proxy_environment;
 mod reasons;
 mod remote_config;
 mod request_cancellation;
 mod request_disconnect;
-mod responses;
+#[path = "policy_state.rs"]
 mod runtime;
-mod socket_path;
-mod socks5;
 mod state;
-#[cfg(target_os = "macos")]
-mod system_dns;
-mod upstream;
-#[cfg(target_os = "windows")]
-mod windows_proxy_ingress;
-#[cfg(target_os = "windows")]
-mod windows_tcp_attribution;
 
 pub use attribution::PROXY_ATTRIBUTION_TOKEN_ENV_KEY;
 pub use attribution::write_attribution_frame;
@@ -83,7 +78,6 @@ pub use process_log_metadata::ExecutorLogIdentity;
 pub use process_log_metadata::NetworkProxyProcessLogMetadata;
 pub use proxy::ALL_PROXY_ENV_KEYS;
 pub use proxy::ALLOW_LOCAL_BINDING_ENV_KEY;
-pub use proxy::Args;
 #[cfg(target_os = "macos")]
 pub use proxy::CODEX_PROXY_GIT_SSH_COMMAND_MARKER;
 pub use proxy::DEFAULT_NO_PROXY_VALUE;
@@ -112,8 +106,6 @@ pub use runtime::BlockedRequest;
 pub use runtime::BlockedRequestArgs;
 pub use runtime::BlockedRequestObserver;
 pub use runtime::BlockedRequestObserverFuture;
-pub use runtime::ConfigReloader;
-pub use runtime::ConfigReloaderFuture;
 pub use runtime::ConfigState;
 pub use runtime::LocalBindingPolicy;
 pub use runtime::NetworkProxyState;
@@ -123,3 +115,30 @@ pub use state::NetworkProxyConstraints;
 pub use state::PartialNetworkProxyConfig;
 pub use state::build_config_state;
 pub use state::validate_policy_against_constraints;
+
+/// The single failure reason for every request to construct the removed capability.
+pub fn unsupported_error() -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "managed network proxy transport is not available in this build",
+    )
+}
+
+/// Rejects proxy-managed configuration rather than silently dropping its enforcement.
+pub fn reject_proxy_configuration(config: &NetworkProxyConfig) -> std::io::Result<()> {
+    if config.enabled
+        || config.credential_broker
+        || config.mitm
+        || config.mitm_ca.is_some()
+        || !config.mitm_hooks.is_empty()
+        || config.dangerously_allow_plaintext_credential_injection
+        || config.mode != NetworkMode::Full
+        || config.domains.is_some()
+        || config.unix_sockets.is_some()
+        || config.dangerously_allow_all_unix_sockets.is_some()
+        || config.allow_local_binding.is_some()
+    {
+        return Err(unsupported_error());
+    }
+    Ok(())
+}

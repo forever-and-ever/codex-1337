@@ -2,9 +2,9 @@ use super::*;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
+use http::HeaderValue;
+use http::header::AUTHORIZATION;
 use pretty_assertions::assert_eq;
-use rama_http::HeaderValue;
-use rama_http::header::AUTHORIZATION;
 
 fn env_map<const N: usize>(entries: [(&str, &str); N]) -> HashMap<String, String> {
     entries

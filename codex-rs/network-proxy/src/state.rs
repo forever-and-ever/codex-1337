@@ -2,11 +2,7 @@ use crate::config::NetworkDomainPermissions;
 use crate::config::NetworkMode;
 use crate::config::NetworkProxyConfig;
 use crate::config::NetworkUnixSocketPermissions;
-use crate::mitm::MitmState;
-use crate::mitm::MitmUpstreamConfig;
 use crate::mitm_hook::MitmHookConfig;
-use crate::mitm_hook::compile_mitm_hooks;
-use crate::mitm_hook::validate_mitm_hook_config;
 use crate::policy::DomainPattern;
 use crate::policy::compile_allowlist_globset;
 use crate::policy::compile_denylist_globset;
@@ -14,14 +10,11 @@ use crate::policy::is_global_wildcard_domain_pattern;
 use crate::runtime::ConfigState;
 use serde::Deserialize;
 use std::collections::HashSet;
-use std::sync::Arc;
 
 pub use crate::runtime::BlockedRequest;
 pub use crate::runtime::BlockedRequestArgs;
 pub use crate::runtime::NetworkProxyAuditMetadata;
 pub use crate::runtime::NetworkProxyState;
-#[cfg(test)]
-pub(crate) use crate::runtime::network_proxy_state_for_policy;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct NetworkProxyConstraints {
@@ -60,23 +53,14 @@ pub struct PartialNetworkProxyConfig {
 /// Compiles policy using the supplied executor OS, which may differ from this host.
 /// Socket paths are validated without native normalization or filesystem access.
 pub fn build_config_state(
-    mut config: NetworkProxyConfig,
+    config: NetworkProxyConfig,
     constraints: NetworkProxyConstraints,
     executor_os: crate::Platform,
 ) -> anyhow::Result<ConfigState> {
     if constraints.enabled == Some(false) {
         config.credential_broker = false;
     }
-    let brokerage_created_proxy = config.credential_broker && !config.enabled;
-    let brokerage_created_default_allowlist = brokerage_created_proxy
-        && config.allowed_domains().is_none()
-        && constraints.allowed_domains.is_none();
-    if brokerage_created_proxy {
-        config.enabled = true;
-    }
-    if brokerage_created_default_allowlist {
-        config.set_allowed_domains(vec!["*".to_string()]);
-    }
+    crate::reject_proxy_configuration(&config)?;
     crate::config::validate_unix_socket_allowlist_paths(&config, executor_os)?;
     anyhow::ensure!(
         !config.credential_broker || config.mitm,
@@ -92,23 +76,10 @@ pub fn build_config_state(
         .map_err(NetworkProxyConstraintError::into_anyhow)?;
     let deny_set = compile_denylist_globset(&denied_domains)?;
     let allow_set = compile_allowlist_globset(&allowed_domains)?;
-    let mitm_hooks = compile_mitm_hooks(&config)?;
-    let mitm = if config.mitm {
-        Some(Arc::new(MitmState::new(MitmUpstreamConfig {
-            allow_upstream_proxy: config.allow_upstream_proxy,
-            external_ca: config.mitm_ca.clone(),
-        })?))
-    } else {
-        None
-    };
     Ok(ConfigState {
-        executor_os,
         config,
-        brokerage_created_default_allowlist,
         allow_set,
         deny_set,
-        mitm,
-        mitm_hooks,
         constraints,
         blocked: std::collections::VecDeque::new(),
         blocked_total: 0,
@@ -146,7 +117,6 @@ pub fn validate_policy_against_constraints(
         .map(|entry| entry.to_ascii_lowercase())
         .collect();
     let config_allow_unix_sockets = config.allow_unix_sockets();
-    validate_mitm_hook_config(config).map_err(invalid_mitm_hook_configuration)?;
     validate_non_global_wildcard_domain_patterns("network.denied_domains", &config_denied_domains)?;
     if let Some(max_enabled) = constraints.enabled {
         validate(enabled, move |candidate| {
@@ -407,14 +377,6 @@ pub fn validate_policy_against_constraints(
     Ok(())
 }
 
-fn invalid_mitm_hook_configuration(err: anyhow::Error) -> NetworkProxyConstraintError {
-    NetworkProxyConstraintError::InvalidValue {
-        field_name: "network.mitm_hooks",
-        candidate: err.to_string(),
-        allowed: "valid MITM hook configuration".to_string(),
-    }
-}
-
 fn validate_non_global_wildcard_domain_patterns(
     field_name: &'static str,
     patterns: &[String],
@@ -455,6 +417,3 @@ fn network_mode_rank(mode: NetworkMode) -> u8 {
         NetworkMode::Full => 1,
     }
 }
-
-#[cfg(test)]
-mod tests {}

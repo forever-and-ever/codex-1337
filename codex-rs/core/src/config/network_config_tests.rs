@@ -1,56 +1,13 @@
-//! Covers policy presence and the environment-only configuration projection.
+//! Covers portable network configuration projection.
 
 use super::*;
-use codex_config::RequirementSource;
-use codex_network_proxy::NetworkProxyConstraints;
-use codex_network_proxy::build_config_state;
 use pretty_assertions::assert_eq;
 
 #[test]
-fn environment_policy_presence_keeps_selected_and_managed_denials() {
-    let mut configured_proxy = NetworkProxyConfig::default();
-    configured_proxy.set_denied_domains(vec!["blocked.example".to_string()]);
-    let expected = EnvironmentNetworkPolicy::from_config(
-        &configured_proxy,
-        /*managed_allowed_domains_only*/ false,
-    );
-    for (has_selected_policy, requirements, has_policy) in [
-        (false, None, false),
-        (true, None, true),
-        (
-            false,
-            Some(NetworkConstraints {
-                enabled: Some(false),
-                ..Default::default()
-            }),
-            true,
-        ),
-    ] {
-        let actual = PreparedNetworkConfig {
-            configured_proxy: configured_proxy.clone(),
-        }
-        .build_environment_policy(
-            requirements.map(|value| Sourced::new(value, RequirementSource::Unknown)),
-            &PermissionProfile::read_only(),
-            has_selected_policy,
-        )
-        .unwrap();
-        assert_eq!(actual, has_policy.then(|| expected.clone()));
-    }
-}
-
-#[test]
 fn attachment_projection_preserves_policy_and_drops_listener_addresses() {
-    for executor_os in [
-        Platform::Linux,
-        Platform::Macos,
-        Platform::Windows,
-        Platform::Unknown,
-    ] {
-        for (raw, windows_only) in [
-            ("", false),
-            (
-                r#"
+    for raw in [
+        "",
+        r#"
 enabled = false
 allow_upstream_proxy = false
 dangerously_allow_all_unix_sockets = false
@@ -65,58 +22,27 @@ allow_local_binding = false
 '~/blocked.sock' = 'deny'
 'C:\blocked.sock' = 'deny'
 "#,
-                false,
-            ),
-            (
-                r#"[unix_sockets]
+        r#"[unix_sockets]
 'C:\allowed.sock' = 'allow'
 '\\server\share\allowed.sock' = 'allow'
 "#,
-                true,
-            ),
-        ] {
-            let expected: NetworkToml = toml::from_str(raw).unwrap();
-            let accepted =
-                !windows_only || matches!(executor_os, Platform::Windows | Platform::Unknown);
-            assert_eq!(
-                build_config_state(
-                    expected.to_network_proxy_config(),
-                    NetworkProxyConstraints::default(),
-                    executor_os,
-                )
-                .is_ok(),
-                accepted,
-                "native validation: {executor_os:?}, {raw}"
-            );
-            assert_eq!(
-                validate_environment_network_policy(
-                    &EnvironmentNetworkPolicy::from_config(
-                        &expected.to_network_proxy_config(),
-                        /*managed_allowed_domains_only*/ false,
-                    ),
-                    &PermissionProfile::read_only(),
-                    executor_os,
-                )
-                .is_ok(),
-                accepted,
-                "environment validation: {executor_os:?}, {raw}"
-            );
-            let network = NetworkToml {
-                proxy_url: Some("not a listener URL".to_string()),
-                socks_url: Some("socks5://127.0.0.1:1080".to_string()),
-                ..expected.clone()
-            };
-            assert_eq!(
-                project_environment_profile_network(Some(network)),
-                Ok(Some(expected)),
-                "projection: {executor_os:?}, {raw}"
-            );
-        }
+    ] {
+        let expected: NetworkToml = toml::from_str(raw).unwrap();
+        let network = NetworkToml {
+            proxy_url: Some("not a listener URL".to_string()),
+            socks_url: Some("socks5://127.0.0.1:1080".to_string()),
+            ..expected.clone()
+        };
         assert_eq!(
-            project_environment_profile_network(/*network*/ None),
-            Ok(None)
+            project_environment_profile_network(Some(network)),
+            Ok(Some(expected)),
+            "{raw}"
         );
     }
+    assert_eq!(
+        project_environment_profile_network(/*network*/ None),
+        Ok(None)
+    );
 }
 
 #[test]
@@ -153,57 +79,5 @@ action = ['redact']
             .unwrap()
             .unwrap();
         assert_eq!(projected, network);
-        let configured_proxy = projected.to_network_proxy_config();
-        let policy = EnvironmentNetworkPolicy::from_config(
-            &configured_proxy,
-            /*managed_allowed_domains_only*/ false,
-        );
-        assert_eq!(
-            validate_environment_network_policy(
-                &policy,
-                &PermissionProfile::read_only(),
-                Platform::Unknown,
-            ),
-            Err(EnvironmentNetworkConfigError),
-            "{raw}"
-        );
-
-        // Managed requirements replace the invalid Allow entries before validation.
-        let policy = PreparedNetworkConfig { configured_proxy }
-            .build_environment_policy(
-                Some(Sourced::new(
-                    NetworkConstraints {
-                        enabled: Some(true),
-                        managed_allowed_domains_only: Some(true),
-                        unix_sockets: Some(Default::default()),
-                        ..Default::default()
-                    },
-                    RequirementSource::Unknown,
-                )),
-                &PermissionProfile::read_only(),
-                /*has_selected_policy*/ true,
-            )
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            policy,
-            EnvironmentNetworkPolicy::from_config(
-                &NetworkProxyConfig {
-                    enabled: true,
-                    unix_sockets: Some(Default::default()),
-                    ..Default::default()
-                },
-                /*managed_allowed_domains_only*/ true,
-            )
-        );
-        assert_eq!(
-            validate_environment_network_policy(
-                &policy,
-                &PermissionProfile::read_only(),
-                Platform::Unknown,
-            ),
-            Ok(()),
-            "{raw}"
-        );
     }
 }

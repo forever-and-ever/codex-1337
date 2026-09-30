@@ -34,12 +34,6 @@ use codex_exec_server::StartedExecProcess;
 use codex_exec_server::WindowsSandboxSelection;
 use codex_exec_server::WriteStatus;
 #[cfg(unix)]
-use codex_network_proxy::NetworkProxyConfig;
-#[cfg(unix)]
-use codex_network_proxy::RemoteNetworkProxyConfig;
-#[cfg(unix)]
-use codex_network_proxy::RemoteNetworkProxyLaunchConfig;
-#[cfg(unix)]
 use codex_protocol::config_types::ShellEnvironmentPolicyInherit;
 #[cfg(unix)]
 use codex_protocol::models::PermissionProfile;
@@ -371,89 +365,6 @@ async fn shell_snapshot_v2_filters_profile_exports_and_stays_in_memory(
     if let Some(server) = context._server {
         assert!(!server.codex_home().join("shell_snapshots").exists());
     }
-    Ok(())
-}
-
-#[cfg(unix)]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[serial_test::serial(remote_exec_server)]
-async fn shell_snapshot_v2_remote_managed_proxy_uses_prepared_execution_context() -> Result<()> {
-    let context = create_process_context(/*use_remote*/ true).await?;
-    let home = TempDir::new()?;
-    let cwd = PathUri::from_host_native_path(home.path())?;
-    std::fs::write(
-        home.path().join(".bashrc"),
-        "printf '%s\\n' \"$HTTP_PROXY\" >> \"$HOME/captures\"\ntest \"$CODEX_NETWORK_PROXY_ACTIVE\" = 1 || exit 41\nexport PROFILE_ALLOWED=profile\nprofile_helper() { printf helper; }\n",
-    )?;
-    let policy = ExecEnvPolicy {
-        inherit: ShellEnvironmentPolicyInherit::All,
-        ignore_default_excludes: false,
-        exclude: Vec::new(),
-        r#set: HashMap::from([(
-            "HOME".to_string(),
-            home.path().to_string_lossy().into_owned(),
-        )]),
-        include_only: vec![
-            "HOME".to_string(),
-            "PATH".to_string(),
-            "PROFILE_*".to_string(),
-        ],
-    };
-    let proxy_config = RemoteNetworkProxyConfig::from_effective_config(&NetworkProxyConfig {
-        enabled: true,
-        ..NetworkProxyConfig::default()
-    })?;
-    let mut proxy_addresses = Vec::new();
-
-    for attempt in 0..2 {
-        let started = context
-            .backend
-            .start(ExecParams {
-                metadata: Default::default(),
-                process_id: ProcessId::from(format!("managed-snapshot-{attempt}")),
-                argv: vec![
-                    "/bin/bash".to_string(),
-                    "-lc".to_string(),
-                    "profile_helper; printf '|%s|%s|%s' \"$PROFILE_ALLOWED\" \"$CODEX_NETWORK_PROXY_ACTIVE\" \"$HTTP_PROXY\"".to_string(),
-                ],
-                cwd: cwd.clone(),
-                env_policy: Some(policy.clone()),
-                shell_snapshot: Some(ShellSnapshotRequest {
-                    scope_id: "managed-attachment".to_string(),
-                    shell: ShellInfo {
-                        name: "bash".to_string(),
-                        path: "/bin/bash".to_string(),
-                    },
-                }),
-                env: HashMap::new(),
-                tty: false,
-                pipe_stdin: false,
-                arg0: None,
-                sandbox: None,
-                enforce_managed_network: true,
-                managed_network: None,
-                network_proxy: Some(
-                    RemoteNetworkProxyLaunchConfig::new(proxy_config.clone()).for_execution(
-                        "remote-environment".to_string(),
-                        format!("managed-snapshot-{attempt}"),
-                    ),
-                ),
-            })
-            .await?;
-        let (stdout, stderr, status, closed) =
-            collect_process_output_from_events(started.process).await?;
-        let proxy_address = stdout
-            .strip_prefix("helper|profile|1|")
-            .context("snapshot should restore profile functions and live proxy state")?;
-        assert!(proxy_address.starts_with("http://127.0.0.1:"));
-        assert_eq!((stderr, status, closed), (String::new(), Some(0), true));
-        proxy_addresses.push(proxy_address.to_string());
-    }
-
-    assert_eq!(
-        std::fs::read_to_string(home.path().join("captures"))?,
-        format!("{}\n", proxy_addresses[0])
-    );
     Ok(())
 }
 

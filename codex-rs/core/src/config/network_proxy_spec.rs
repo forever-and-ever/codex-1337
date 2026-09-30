@@ -1,13 +1,10 @@
 use codex_config::NetworkConstraints;
 use codex_execpolicy::Policy;
 use codex_network_proxy::BlockedRequestObserver;
-use codex_network_proxy::ConfigReloader;
-use codex_network_proxy::ConfigReloaderFuture;
 use codex_network_proxy::ConfigState;
 use codex_network_proxy::EnvironmentNetworkPolicy;
 use codex_network_proxy::LocalBindingPolicy;
 use codex_network_proxy::ManagedProxyRouting;
-use codex_network_proxy::NetworkDecision;
 use codex_network_proxy::NetworkPolicyDecider;
 use codex_network_proxy::NetworkProxy;
 use codex_network_proxy::NetworkProxyAuditMetadata;
@@ -42,49 +39,12 @@ pub struct StartedNetworkProxy {
 }
 
 impl StartedNetworkProxy {
-    fn new(
-        proxy: NetworkProxy,
-        handle: NetworkProxyHandle,
-        network_policy_decider: Option<Arc<dyn NetworkPolicyDecider>>,
-    ) -> Self {
-        Self {
-            proxy,
-            network_policy_decider,
-            _handle: handle,
-        }
-    }
-
     pub fn proxy(&self) -> NetworkProxy {
         self.proxy.clone()
     }
 
     pub(crate) fn network_policy_decider(&self) -> Option<Arc<dyn NetworkPolicyDecider>> {
         self.network_policy_decider.as_ref().map(Arc::clone)
-    }
-}
-
-#[derive(Clone)]
-struct StaticNetworkProxyReloader {
-    state: ConfigState,
-}
-
-impl StaticNetworkProxyReloader {
-    fn new(state: ConfigState) -> Self {
-        Self { state }
-    }
-}
-
-impl ConfigReloader for StaticNetworkProxyReloader {
-    fn maybe_reload(&self) -> ConfigReloaderFuture<'_, Option<ConfigState>> {
-        Box::pin(async { Ok(None) })
-    }
-
-    fn reload_now(&self) -> ConfigReloaderFuture<'_, ConfigState> {
-        Box::pin(async { Ok(self.state.clone()) })
-    }
-
-    fn source_label(&self) -> String {
-        "StaticNetworkProxyReloader".to_string()
     }
 }
 
@@ -160,6 +120,18 @@ impl NetworkProxySpec {
         requirements: Option<NetworkConstraints>,
         permission_profile: &PermissionProfile,
     ) -> std::io::Result<Self> {
+        // A requirement that only disables the removed proxy remains enforceable.
+        // Every other requested proxy-managed restriction must fail closed, even
+        // if the controller feature was never enabled.
+        if requirements.as_ref().is_some_and(|requirements| {
+            requirements
+                != &NetworkConstraints {
+                    enabled: requirements.enabled.filter(|enabled| !enabled),
+                    ..NetworkConstraints::default()
+                }
+        }) {
+            return Err(codex_network_proxy::unsupported_error());
+        }
         let base_config = config.clone();
         let hard_deny_allowlist_misses = requirements
             .as_ref()
@@ -174,6 +146,7 @@ impl NetworkProxySpec {
         } else {
             (config, NetworkProxyConstraints::default())
         };
+        codex_network_proxy::reject_proxy_configuration(&config)?;
         validate_policy_against_constraints(&config, &constraints).map_err(|err| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
@@ -200,38 +173,16 @@ impl NetworkProxySpec {
         enable_network_approval_flow: bool,
         audit_metadata: NetworkProxyAuditMetadata,
     ) -> std::io::Result<StartedNetworkProxy> {
-        let state = self.build_state_with_audit_metadata(
-            audit_metadata,
-            Platform::native(),
+        let _ = (
+            permission_profile,
+            managed_proxy_routing,
             local_binding_policy,
-        )?;
-        let mut builder = NetworkProxy::builder()
-            .state(Arc::new(state))
-            .managed_proxy_routing(managed_proxy_routing);
-        let retained_policy_decider = policy_decider.as_ref().map(Arc::clone);
-        if enable_network_approval_flow && !self.hard_deny_allowlist_misses {
-            if let Some(policy_decider) = policy_decider {
-                builder = builder.policy_decider_arc(policy_decider);
-            } else if Self::managed_sandbox_active(permission_profile) {
-                builder = builder
-                    .policy_decider(|_request| async { NetworkDecision::ask("not_allowed") });
-            }
-        }
-        if let Some(blocked_request_observer) = blocked_request_observer {
-            builder = builder.blocked_request_observer_arc(blocked_request_observer);
-        }
-        let proxy = builder.build().await.map_err(|err| {
-            std::io::Error::other(format!("failed to build network proxy: {err}"))
-        })?;
-        let handle = proxy
-            .run()
-            .await
-            .map_err(|err| std::io::Error::other(format!("failed to run network proxy: {err}")))?;
-        Ok(StartedNetworkProxy::new(
-            proxy,
-            handle,
-            retained_policy_decider,
-        ))
+            policy_decider,
+            blocked_request_observer,
+            enable_network_approval_flow,
+            audit_metadata,
+        );
+        Err(codex_network_proxy::unsupported_error())
     }
 
     pub(crate) fn recompute_for_permission_profile(
@@ -257,75 +208,14 @@ impl NetworkProxySpec {
         exec_policy: &Policy,
         local_binding_policy: LocalBindingPolicy,
     ) -> std::io::Result<Self> {
-        if matches!(permission_profile, PermissionProfile::Disabled) {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "environment network policy requires managed network enforcement",
-            ));
-        }
-        if controller.is_some_and(|controller| !controller.enabled()) {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "environment network policy cannot override a disabled controller proxy",
-            ));
-        }
-        let mut spec = match controller {
-            Some(controller) => controller.recompute_for_permission_profile(permission_profile)?,
-            None => Self::from_config_and_constraints(
-                NetworkProxyConfig {
-                    enabled: true,
-                    // Without a controller, the owner supplies the entire permission ceiling.
-                    dangerously_allow_all_unix_sockets: Some(true),
-                    allow_local_binding: Some(policy.allow_local_binding.unwrap_or(false)),
-                    ..NetworkProxyConfig::default()
-                },
-                /*requirements*/ None,
-                permission_profile,
-            )?,
-        };
-        policy.apply_to(&mut spec.config);
-        spec.config.allow_local_binding = Some(local_binding_policy.resolve(&spec.config));
-        let protected_denials = spec.config.denied_domains().unwrap_or_default();
-
-        // A fixed controller allowlist remains a ceiling; an expandable one is only a baseline.
-        // Profiles without managed approvals must not reuse approvals cached by another profile.
-        let fixed_allowlist = spec.hard_deny_allowlist_misses
-            || spec.constraints.allowlist_expansion_enabled == Some(false);
-        spec.hard_deny_allowlist_misses |= policy.managed_allowed_domains_only
-            || !Self::managed_sandbox_active(permission_profile);
-        let allow_owner_grants = !spec.hard_deny_allowlist_misses && !fixed_allowlist;
-        if fixed_allowlist {
-            spec.constraints.allowlist_expansion_enabled = None;
-        } else {
-            spec.constraints.allowed_domains =
-                Some(spec.config.allowed_domains().unwrap_or_default());
-            spec.constraints.allowlist_expansion_enabled = Some(allow_owner_grants);
-        }
-        spec.constraints.denylist_expansion_enabled = Some(true);
-
-        // Saved grants can extend a reviewable owner policy; owner denials are restored last.
-        let (allowed_domains, denied_domains) = exec_policy.compiled_network_domains();
-        if allow_owner_grants {
-            upsert_network_domains(&mut spec.config, allowed_domains, /*allow*/ true);
-        }
-        upsert_network_domains(&mut spec.config, denied_domains, /*allow*/ false);
-        upsert_network_domains(&mut spec.config, protected_denials, /*allow*/ false);
-        spec.constraints.denied_domains = spec.config.denied_domains();
-
-        validate_policy_against_constraints(&spec.config, &spec.constraints).map_err(|error| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                format!("environment network policy violates managed requirements: {error}"),
-            )
-        })?;
-        tracing::debug!(
-            controller_policy = ?controller.map(Self::environment_policy),
-            controller_allow_all_unix_sockets = ?controller.and_then(|spec| spec.config.dangerously_allow_all_unix_sockets),
-            attachment_policy = ?policy,
-            effective_policy = ?spec.environment_policy(),
-            "resolved environment network policy"
+        let _ = (
+            controller,
+            policy,
+            permission_profile,
+            exec_policy,
+            local_binding_policy,
         );
-        Ok(spec)
+        Err(codex_network_proxy::unsupported_error())
     }
 
     pub(crate) fn with_exec_policy_network_rules(
@@ -364,14 +254,8 @@ impl NetworkProxySpec {
         executor_os: Platform,
         local_binding_policy: LocalBindingPolicy,
     ) -> std::io::Result<NetworkProxyState> {
-        let state = self.build_config_state_for_spec(executor_os)?;
-        let reloader = Arc::new(StaticNetworkProxyReloader::new(state.clone()));
-        Ok(NetworkProxyState::with_reloader_and_audit_metadata(
-            state,
-            reloader,
-            audit_metadata,
-            local_binding_policy,
-        ))
+        let _ = (audit_metadata, executor_os, local_binding_policy);
+        Err(codex_network_proxy::unsupported_error())
     }
 
     pub(super) fn build_config_state_for_spec(
@@ -540,7 +424,3 @@ fn upsert_network_domains(config: &mut NetworkProxyConfig, hosts: Vec<String>, a
         }
     }
 }
-
-#[cfg(test)]
-#[path = "network_proxy_spec_tests.rs"]
-mod tests;

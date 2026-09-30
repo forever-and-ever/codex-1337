@@ -2,8 +2,6 @@
 
 use super::*;
 use crate::session::tests::make_session_and_context;
-use codex_network_proxy::NetworkMode;
-use codex_network_proxy::NetworkProxyConfig;
 use codex_protocol::config_types::WindowsSandboxLevel;
 use codex_protocol::models::PermissionProfileSnapshot;
 use codex_protocol::permissions::FileSystemAccessMode;
@@ -14,7 +12,6 @@ use codex_sandboxing::SandboxType;
 use codex_utils_path_uri::PathUri;
 use pretty_assertions::assert_eq;
 use serde_json::json;
-use std::sync::Arc;
 
 fn terminal_permissions(profile: &PermissionProfile) -> TerminalPermissions {
     TerminalPermissions {
@@ -93,71 +90,6 @@ fn denied_reads_reject_file_system_changes_but_only_review_network_changes() {
         permissions.review_requirement(&current.policy, &baseline),
         Ok(SandboxPermissions::RequireEscalated)
     );
-}
-
-#[tokio::test]
-async fn captured_network_changes_require_review() -> anyhow::Result<()> {
-    let (_session, mut turn) = make_session_and_context().await;
-    let mut environment = turn
-        .initial_environments
-        .primary()
-        .expect("environment")
-        .clone();
-    environment.config_mut().permission_profile =
-        PermissionProfileSnapshot::legacy(PermissionProfile::read_only());
-    let mut proxy = NetworkProxyConfig {
-        enabled: true,
-        ..Default::default()
-    };
-    Arc::make_mut(&mut turn.config).permissions.network =
-        Some(NetworkProxySpec::from_config_and_constraints(
-            proxy.clone(),
-            /*requirements*/ None,
-            &turn.permission_profile(),
-        )?);
-    let permissions = TerminalPermissions::for_launch(
-        &environment,
-        &turn,
-        TerminalSandboxSource::Native,
-        SandboxPermissions::UseDefault,
-        /*additional_permissions*/ None,
-        /*internal_permissions*/ None,
-    );
-
-    proxy.mode = NetworkMode::Limited;
-    Arc::make_mut(&mut turn.config).permissions.network =
-        Some(NetworkProxySpec::from_config_and_constraints(
-            proxy.clone(),
-            /*requirements*/ None,
-            &turn.permission_profile(),
-        )?);
-    let current = TerminalPolicy::capture(
-        &environment,
-        &turn,
-        TerminalSandboxSource::Native,
-        /*additional_permissions*/ None,
-    );
-    let expected = SandboxPermissions::RequireEscalated;
-    assert_eq!(
-        permissions.review_requirement(&current, environment.permission_profile()),
-        Ok(expected)
-    );
-    insta::assert_snapshot!("network_mode", permissions.approval_reason(expected)?);
-
-    environment.config_mut().network_policy = Some(EnvironmentNetworkPolicy::from_config(
-        &proxy, /*managed_allowed_domains_only*/ false,
-    ));
-    let current = TerminalPolicy::capture(
-        &environment,
-        &turn,
-        TerminalSandboxSource::Native,
-        /*additional_permissions*/ None,
-    );
-    assert_eq!(
-        permissions.review_requirement(&current, environment.permission_profile()),
-        Ok(SandboxPermissions::RequireEscalated)
-    );
-    Ok(())
 }
 
 #[tokio::test]
