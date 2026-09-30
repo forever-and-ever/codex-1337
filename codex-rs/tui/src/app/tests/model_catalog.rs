@@ -1,7 +1,6 @@
 use super::*;
 use assert_matches::assert_matches;
 use codex_config::types::ModelAvailabilityNuxConfig;
-use codex_model_provider::create_model_provider;
 use codex_protocol::config_types::ServiceTier;
 use codex_protocol::openai_models::ModelAvailabilityNux;
 use pretty_assertions::assert_eq;

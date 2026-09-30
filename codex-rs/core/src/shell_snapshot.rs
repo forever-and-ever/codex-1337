@@ -160,14 +160,7 @@ impl ShellSnapshot {
         // conversion to the spawned shell process.
         let cwd = cwd.to_abs_path().ok()?;
         drop(self);
-        Self::build_for_cwd(
-            config,
-            cwd,
-            shell,
-            shell_environment_policy,
-            sandbox,
-        )
-        .await
+        Self::build_for_cwd(config, cwd, shell, shell_environment_policy, sandbox).await
     }
 
     async fn build_for_cwd(

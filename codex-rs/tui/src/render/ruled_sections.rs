@@ -18,10 +18,8 @@ impl Renderable for HorizontalRule {
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
         if !area.is_empty() {
-            Paragraph::new("─".repeat(usize::from(area.width)).dim()).render(
-                Rect { height: 1, ..area },
-                buf,
-            );
+            Paragraph::new("─".repeat(usize::from(area.width)).dim())
+                .render(Rect { height: 1, ..area }, buf);
         }
     }
 }

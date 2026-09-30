@@ -33,8 +33,6 @@ pub const ALLOW_LOCAL_BINDING_ENV_KEY: &str = "CODEX_NETWORK_ALLOW_LOCAL_BINDING
 const WINDOWS_SANDBOX_PROXY_PORTS_ENV_KEY: &str = "CODEX_WINDOWS_SANDBOX_PROXY_PORTS";
 const ELECTRON_GET_USE_PROXY_ENV_KEY: &str = "ELECTRON_GET_USE_PROXY";
 const NODE_USE_ENV_PROXY_ENV_KEY: &str = "NODE_USE_ENV_PROXY";
-#[cfg(any(target_os = "macos", test))]
-const GIT_SSH_COMMAND_ENV_KEY: &str = "GIT_SSH_COMMAND";
 pub const PROXY_ENV_KEYS: &[&str] = &[
     PROXY_ACTIVE_ENV_KEY,
     CREDENTIAL_BROKER_ACTIVE_ENV_KEY,
@@ -105,7 +103,7 @@ pub fn strip_managed_proxy_env(env: &mut HashMap<String, String>) {
 }
 
 #[cfg(target_os = "macos")]
-pub const PROXY_GIT_SSH_COMMAND_ENV_KEY: &str = GIT_SSH_COMMAND_ENV_KEY;
+pub const PROXY_GIT_SSH_COMMAND_ENV_KEY: &str = "GIT_SSH_COMMAND";
 
 pub const NO_PROXY_ENV_KEYS: &[&str] = &[
     "NO_PROXY",

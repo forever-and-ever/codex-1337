@@ -383,10 +383,7 @@ async fn owned_transcript_reserves_a_row_above_the_composer() -> Result<()> {
             );
         } else {
             assert_eq!(
-                buffer_text(buffer)
-                    .lines()
-                    .nth(usize::from(gap.y))
-                    .unwrap(),
+                buffer_text(buffer).lines().nth(usize::from(gap.y)).unwrap(),
                 "─".repeat(usize::from(width))
             );
             assert!(

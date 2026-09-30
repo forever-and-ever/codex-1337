@@ -569,7 +569,6 @@ pub(super) async fn run_main_inner(
 
     remove_legacy_tui_log_file(config.codex_home.as_path());
 
-    let otel_originator = originator().value;
     let otel = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         codex_app_server_client::build_otel_provider(
             &config,
