@@ -1,14 +1,13 @@
 ---
 source: tui/src/history_cell/dynamic_tests.rs
-assertion_line: 81
+assertion_line: 73
 expression: "snapshots.join(\"\\n\\n\")"
 ---
 pending, compact
-• Calling example.inspect
+• Calling example.inspect({"path":"src/main.rs"})
 
 success, compact
-• Called example.inspect
-  └ Found the definition
+• Called example.inspect({"path":"src/main.rs"})
 
 success, full
 • Called example.inspect
@@ -23,9 +22,7 @@ Arguments: {"path":"src/main.rs"}
 Found the definition
 
 failure, compact
-• Failed example.inspect
-  └ Permission denied
+• Failed example.inspect({"path":"src/main.rs"})
 
 unavailable, compact
-• Called example.inspect
-  └ (output unavailable)
+• Called example.inspect({"path":"src/main.rs"})

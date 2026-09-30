@@ -1,33 +1,32 @@
 ---
 source: tui/src/transcript_view/footer_tests.rs
+assertion_line: 615
 expression: "hints.join(\"\\n\")"
 ---
 awaiting measurement
 Buffer {
     area: Rect { x: 0, y: 0, width: 32, height: 3 },
     content: [
-        "Activity summary                ",
-        "    + Show details              ",
+        "[+] Activity summary            ",
+        "                                ",
         "                                ",
     ],
     styles: [
-        x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 0, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
-        x: 0, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 3, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }
 collapsed
 Buffer {
     area: Rect { x: 0, y: 0, width: 32, height: 3 },
     content: [
-        "Activity summary                ",
-        "    + Details (≈1,280 tokens)   ",
+        "[+] Activity summary            ",
+        "                                ",
         "                                ",
     ],
     styles: [
-        x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 0, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
-        x: 0, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 3, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }
 20 columns: <composer hints>
@@ -37,16 +36,13 @@ focused
 Buffer {
     area: Rect { x: 0, y: 0, width: 32, height: 3 },
     content: [
-        "Activity summary                ",
-        "    + Details (≈1,280 tokens)   ",
+        "[+] Activity summary            ",
+        "                                ",
         "                                ",
     ],
     styles: [
-        x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: UNDERLINED,
-        x: 0, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
-        x: 4, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
-        x: 29, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
-        x: 0, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 3, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }
 focused, 20 columns: esc back
@@ -56,16 +52,13 @@ expanded
 Buffer {
     area: Rect { x: 0, y: 0, width: 32, height: 3 },
     content: [
-        "Activity summary                ",
-        "Hidden details                  ",
-        "    − Less (≈1,280 tokens)      ",
+        "[-] Activity summary            ",
+        "    Hidden details              ",
+        "                                ",
     ],
     styles: [
-        x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: UNDERLINED,
-        x: 0, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 0, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
-        x: 4, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
-        x: 26, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 3, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }
 "ctrl-x t": <composer hints>

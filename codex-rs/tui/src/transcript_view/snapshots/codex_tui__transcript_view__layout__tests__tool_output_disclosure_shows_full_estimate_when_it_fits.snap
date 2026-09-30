@@ -1,15 +1,18 @@
 ---
 source: tui/src/transcript_view/layout_tests.rs
+assertion_line: 54
 expression: "format!(\"{buffer:?}\")"
 ---
 Buffer {
     area: Rect { x: 0, y: 0, width: 80, height: 2 },
     content: [
-        "Called tool                                                                     ",
-        "    + Show details (≈1,280 total tokens of output)                              ",
+        "[+] Called (~ 1,280 tokens) tool                                                ",
+        "                                                                                ",
     ],
     styles: [
-        x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 0, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 3, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 10, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 27, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }
