@@ -1460,13 +1460,17 @@ impl ThreadRequestProcessor {
         }
         for notification in config_warnings {
             if !initial_config_warnings.contains(&notification) {
-                listener_task_context
-                    .outgoing
-                    .send_server_notification_to_connections(
-                        &[request_id.connection_id],
-                        ServerNotification::ConfigWarning(notification),
-                    )
-                    .await;
+                if let Some(request_id) = &request_id {
+                    listener_task_context
+                        .outgoing
+                        .send_server_notification_to_connections(
+                            &[request_id.connection_id],
+                            ServerNotification::ConfigWarning(notification),
+                        )
+                        .await;
+                } else {
+                    tracing::warn!(summary = %notification.summary, "headless thread startup warning");
+                }
             }
         }
 
@@ -1516,10 +1520,12 @@ impl ThreadRequestProcessor {
         start_options.reserved_thread_id = Some(thread_id);
         // Startup can prewarm the Responses socket before start_thread returns.
         // Register the creating client first so that handshake can request attestation.
-        listener_task_context
-            .thread_state_manager
-            .try_add_connection_to_thread(thread_id, request_id.connection_id)
-            .await;
+        if let Some(request_id) = &request_id {
+            listener_task_context
+                .thread_state_manager
+                .try_add_connection_to_thread(thread_id, request_id.connection_id)
+                .await;
+        }
         let create_thread_started_at = std::time::Instant::now();
         let new_thread = listener_task_context
             .thread_manager
