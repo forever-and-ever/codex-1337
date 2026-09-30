@@ -269,56 +269,77 @@ async fn patch_files_keep_disclosures_and_one_batch_bill_across_live_replay_and_
             })
             .collect::<Vec<_>>()
     };
-    let (mut app, mut rx, _) = crate::app::tests::make_test_app_with_channels().await;
-    let mut tui = crate::tui::test_support::make_test_tui().unwrap();
-    tui.set_owned_screen(/*owned*/ true).unwrap();
-    let expected = project(&app, &current.items);
-    assert_eq!(expected.len(), 2);
-    for item in &current.items {
-        app.chat_widget.replay_thread_item(
-            item.clone(),
-            current.id.clone(),
-            ReplayKind::ResumeInitialMessages,
-        );
-        while let Ok(event) = rx.try_recv() {
-            if let AppEvent::InsertHistoryCell(cell) = event {
-                app.insert_history_cell(&mut tui, cell);
+    for (file_count, with_command) in [(2, false), (2, true), (1, true)] {
+        let mut current = current.clone();
+        if let ThreadItem::FileChange { changes, .. } = &mut current.items[0] {
+            changes.truncate(file_count);
+        }
+        if with_command {
+            let mut command = call("command", ActivityKind::Exploration, "completed");
+            if let ThreadItem::CommandExecution {
+                command,
+                command_actions,
+                ..
+            } = &mut command
+            {
+                *command = "cargo check".into();
+                command_actions.clear();
+            }
+            current.items.insert(/*index*/ 1, command);
+        }
+        let (mut app, mut rx, _) = crate::app::tests::make_test_app_with_channels().await;
+        let mut tui = crate::tui::test_support::make_test_tui().unwrap();
+        tui.set_owned_screen(/*owned*/ true).unwrap();
+        let expected = project(&app, &current.items);
+        assert_eq!(expected.len(), file_count + usize::from(with_command));
+        for item in &current.items {
+            app.chat_widget.replay_thread_item(
+                item.clone(),
+                current.id.clone(),
+                ReplayKind::ResumeInitialMessages,
+            );
+            while let Ok(event) = rx.try_recv() {
+                if let AppEvent::InsertHistoryCell(cell) = event {
+                    app.insert_history_cell(&mut tui, cell);
+                }
             }
         }
-    }
-    assert_eq!(rendered(&app.transcript_cells), rendered(&expected));
-    for split in 1..current.items.len() {
-        let older = project(&app, &current.items[..split]);
-        let boundary = older.len();
-        app.transcript_cells = older
-            .into_iter()
-            .chain(project(&app, &current.items[split..]))
-            .collect();
-        app.join_older_activity_group(boundary, std::slice::from_ref(&current));
+        assert_eq!(rendered(&app.transcript_cells), rendered(&expected));
+        for split in 1..current.items.len() {
+            let older = project(&app, &current.items[..split]);
+            let boundary = older.len();
+            app.transcript_cells = older
+                .into_iter()
+                .chain(project(&app, &current.items[split..]))
+                .collect();
+            app.join_older_activity_group(boundary, std::slice::from_ref(&current));
+            assert_eq!(
+                rendered(&app.transcript_cells),
+                rendered(&expected),
+                "file_count={file_count} with_command={with_command} split={split}"
+            );
+        }
+        app.transcript_view
+            .set_output_estimates_enabled(/*enabled*/ true);
+        for (id, tokens) in [("a", 100), ("b", 23), ("a", 100)] {
+            app.transcript_view.record_tool_output_tokens(
+                format!("tool-output-tokens:{id}"),
+                "outer-exec".into(),
+                Some(tokens),
+            );
+        }
         assert_eq!(
-            rendered(&app.transcript_cells),
-            rendered(&expected),
-            "split={split}"
+            expected
+                .iter()
+                .map(|cell| app
+                    .transcript_view
+                    .activity_output_tokens(&cell.activity_ids()))
+                .collect::<Vec<_>>(),
+            (0..expected.len())
+                .map(|index| (index == if with_command { file_count } else { 0 }).then_some(123))
+                .collect::<Vec<_>>()
         );
     }
-    app.transcript_view
-        .set_output_estimates_enabled(/*enabled*/ true);
-    for (id, tokens) in [("a", 100), ("b", 23), ("a", 100)] {
-        app.transcript_view.record_tool_output_tokens(
-            format!("tool-output-tokens:{id}"),
-            "outer-exec".into(),
-            Some(tokens),
-        );
-    }
-    assert_eq!(
-        expected
-            .iter()
-            .map(|cell| app
-                .transcript_view
-                .activity_output_tokens(&cell.activity_ids()))
-            .collect::<Vec<_>>(),
-        vec![Some(123), None]
-    );
 }
 
 #[tokio::test]

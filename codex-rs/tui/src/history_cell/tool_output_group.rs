@@ -176,10 +176,12 @@ impl ToolOutputGroup {
         if !older.as_any().is::<Self>() && !newer.as_any().is::<Self>() {
             return None;
         }
-        if older
-            .activity_ids()
-            .iter()
-            .any(|id| id.starts_with("output:"))
+        // File disclosures cannot absorb a neighboring visible activity across a page boundary.
+        if (Self::patch_owner(std::slice::from_ref(older)).is_some()
+            || older
+                .activity_ids()
+                .iter()
+                .any(|id| id.starts_with("output:")))
             && newer
                 .as_any()
                 .downcast_ref::<Self>()
