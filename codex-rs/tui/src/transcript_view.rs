@@ -362,6 +362,10 @@ impl TranscriptView {
         self.selection.is_none() && self.position == Position::Latest
     }
 
+    pub(crate) fn is_tail_visible(&self) -> bool {
+        self.tail_visible
+    }
+
     /// Hold the current reading position until every older page has arrived.
     pub(crate) fn jump_to_beginning(&mut self, cells: &[Arc<dyn HistoryCell>]) {
         if self.history == TranscriptHistoryState::LoadingBeginning {

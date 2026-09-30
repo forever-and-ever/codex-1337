@@ -1,6 +1,6 @@
 //! Compose screen-top hints, the owned transcript, and the composer with shared cursor geometry.
-//! Reserve a cleared row between transcript content and the composer. Slash suggestions overlay
-//! already-painted rows so opening or closing them leaves transcript geometry unchanged.
+//! At latest, reserve a cleared row above the composer; while reading, attach that row to a rule
+//! before current activity. Slash suggestions overlay already-painted rows without changing geometry.
 //! Plain Enter returns an empty composer to latest after transcript interactions and prompt editing.
 
 use super::turn_tips::TipSurface;
@@ -126,6 +126,9 @@ impl App {
             /*height*/ 1,
         ));
         let footer = view.footer_with_navigation(footer_area.width, motion, latest_navigation);
+        if let Some(gap) = composer_gap.as_mut() {
+            gap.separates_transcript = !view.is_following() && !view.is_tail_visible();
+        }
         let popup_placement = if view.has_active_interaction() {
             crate::bottom_pane::CommandPopupPlacement::Hidden
         } else {
@@ -183,7 +186,11 @@ impl App {
                 &self.transcript_cells,
                 completion_tip,
             );
+            let mut reading_boundary_changed = false;
             if let Some(gap) = composer_gap.as_mut() {
+                let separates_transcript = !view.is_following() && !view.is_tail_visible();
+                reading_boundary_changed = gap.separates_transcript != separates_transcript;
+                gap.separates_transcript = separates_transcript;
                 gap.needs_separator = available > header_height + 1
                     && chat_widget.no_modal_or_popup_active()
                     && view.composer_gap_has_content(transcript_width, composer_hint.as_ref(), now);
@@ -215,7 +222,9 @@ impl App {
                     .desired_height(screen_size.width)
                     .min(screen_size.height)
                     != bottom_height;
-            if footer_height_changed && composer_gap.as_ref().is_some_and(|gap| gap.needs_separator)
+            if footer_height_changed
+                && (reading_boundary_changed
+                    || composer_gap.as_ref().is_some_and(|gap| gap.needs_separator))
             {
                 bottom_area.height = bottom
                     .desired_height(screen_size.width)

@@ -216,7 +216,8 @@ impl ChatWidget {
     /// Returns the composer, footer, and active modal without the live transcript above it.
     ///
     /// Both transcript surfaces use this composition so read-only notices and cursor placement
-    /// remain consistent. Owned transcripts reserve their shared hint row above the composer.
+    /// remain consistent. Owned transcripts place their shared hint row before reading-time activity
+    /// or above the composer at latest.
     pub(crate) fn bottom_pane_renderable<'a>(
         &'a self,
         footer: Option<&'a crate::bottom_pane::TranscriptFooter>,

@@ -99,6 +99,13 @@ async fn follow_control_click_preserves_draft_caret_and_composer_geometry() -> R
                     super::tests::buffer_text(buffer)
                 ),
             );
+        } else {
+            insta::assert_snapshot!(
+                format!("idle_follow_control_{width}"),
+                crate::chatwidget::tests::helpers::normalize_snapshot_paths(
+                    super::tests::buffer_text(buffer)
+                ),
+            );
         }
         let (column, row) = buffer
             .content()

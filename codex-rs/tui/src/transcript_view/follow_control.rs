@@ -1,4 +1,4 @@
-//! Return-to-latest affordance in the owned transcript's existing composer gap.
+//! Return-to-latest affordance attached to the owned transcript's reading boundary.
 //! The control is hidden whenever the current final transcript row is visible.
 //! Rendering owns the hit rectangle; hidden controls never intercept pointer input.
 

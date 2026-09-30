@@ -9,6 +9,23 @@ use ratatui::widgets::Widget;
 
 pub(crate) struct RuledSections<'a>(pub Vec<RenderableItem<'a>>);
 
+pub(crate) struct HorizontalRule;
+
+impl Renderable for HorizontalRule {
+    fn desired_height(&self, _width: u16) -> u16 {
+        1
+    }
+
+    fn render(&self, area: Rect, buf: &mut Buffer) {
+        if !area.is_empty() {
+            Paragraph::new("─".repeat(usize::from(area.width)).dim()).render(
+                Rect { height: 1, ..area },
+                buf,
+            );
+        }
+    }
+}
+
 impl Renderable for RuledSections<'_> {
     fn desired_height(&self, width: u16) -> u16 {
         let heights = self
@@ -47,7 +64,7 @@ impl Renderable for RuledSections<'_> {
             if area.bottom().saturating_sub(y) <= reserve + 1 {
                 continue;
             }
-            Paragraph::new("─".repeat(usize::from(area.width)).dim()).render(
+            HorizontalRule.render(
                 Rect {
                     y,
                     height: 1,
@@ -61,7 +78,7 @@ impl Renderable for RuledSections<'_> {
             y += height;
         }
         if y < area.bottom() {
-            Paragraph::new("─".repeat(usize::from(area.width)).dim()).render(
+            HorizontalRule.render(
                 Rect {
                     y,
                     height: 1,

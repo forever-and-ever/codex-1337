@@ -382,10 +382,17 @@ async fn owned_transcript_reserves_a_row_above_the_composer() -> Result<()> {
                 "{label}",
             );
         } else {
-            assert!(
+            assert_eq!(
                 buffer_text(buffer)
                     .lines()
                     .nth(usize::from(gap.y))
+                    .unwrap(),
+                "─".repeat(usize::from(width))
+            );
+            assert!(
+                buffer_text(buffer)
+                    .lines()
+                    .nth(usize::from(gap.y + 1))
                     .unwrap()
                     .contains("Back to bottom")
             );
