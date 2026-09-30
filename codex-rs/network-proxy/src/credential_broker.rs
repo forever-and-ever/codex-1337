@@ -1080,41 +1080,6 @@ impl CredentialBroker {
         })
     }
 
-    #[cfg(test)]
-    pub(crate) fn host_requires_mitm(&self, host: &str, port: u16) -> bool {
-        self.host_protocols_for_environment(host, port, /*environment_id*/ None)
-            .tls
-    }
-
-    pub(crate) fn host_protocols_for_environment(
-        &self,
-        host: &str,
-        port: u16,
-        environment_id: Option<&str>,
-    ) -> crate::brokered_tunnel::BrokeredProtocols {
-        let normalized_host = normalize_host(host);
-        let state = self.read_state();
-        let mut protocols = crate::brokered_tunnel::BrokeredProtocols::default();
-        if state.enabled {
-            for credential in state
-                .credentials
-                .iter()
-                .filter(|credential| credential.belongs_to_environment(environment_id))
-            {
-                for binding in credential.host_bindings() {
-                    protocols.tls |= binding.requires_mitm(&normalized_host, port);
-                    if let providers::CredentialHostBinding::ConfiguredHosts(destinations) = binding
-                    {
-                        protocols.http |= destinations.iter().any(|destination| {
-                            destination.requires_http_interception(&normalized_host, port)
-                        });
-                    }
-                }
-            }
-        }
-        protocols
-    }
-
     pub(crate) fn virtualize_text(&self, text: &mut String, env: &HashMap<String, String>) -> bool {
         let state = self.read_state();
         matching::virtualize_text(&state, text, env)

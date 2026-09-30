@@ -113,17 +113,6 @@ impl CredentialHostBinding {
         }
     }
 
-    pub(super) fn requires_mitm(&self, host: &str, port: u16) -> bool {
-        match self {
-            Self::ConfiguredHosts(destinations) => destinations
-                .iter()
-                .any(|destination| destination.requires_mitm(host, port)),
-            Self::ExactHost(_) | Self::ExactHosts(_) | Self::HostPattern { .. } => {
-                self.matches_host(host, port)
-            }
-        }
-    }
-
     pub(super) fn matches_request(&self, host: &str, request: Option<&Url>) -> bool {
         match self {
             Self::ConfiguredHosts(destinations) => destinations

@@ -127,14 +127,6 @@ impl CredentialDestination {
         }
     }
 
-    pub(super) fn requires_mitm(&self, host: &str, port: u16) -> bool {
-        self.scheme == CredentialDestinationScheme::Https && self.matches_host(host, port)
-    }
-
-    pub(super) fn requires_http_interception(&self, host: &str, port: u16) -> bool {
-        self.scheme == CredentialDestinationScheme::Http && self.matches_host(host, port)
-    }
-
     pub(super) fn matches_request(&self, host: &str, request: Option<&Url>) -> bool {
         let Some(request) = request else {
             return false;

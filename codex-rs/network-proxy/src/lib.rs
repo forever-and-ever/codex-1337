@@ -27,6 +27,7 @@ mod request_cancellation;
 mod request_disconnect;
 #[path = "policy_state.rs"]
 mod runtime;
+mod socket_path;
 mod state;
 
 pub use attribution::PROXY_ATTRIBUTION_TOKEN_ENV_KEY;

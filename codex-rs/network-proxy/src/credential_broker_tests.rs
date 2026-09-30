@@ -931,7 +931,6 @@ fn virtualize_child_env_keeps_unbound_enterprise_token_out_of_persisted_text() {
 
     assert_eq!(env["GH_ENTERPRISE_TOKEN"], token);
     assert_eq!(headers, headers_with_bearer(token));
-    assert!(!broker.host_requires_mitm("attacker.example", /*port*/ 443));
 
     env.insert("GH_HOST".to_string(), "github.example.com".to_string());
     broker.virtualize_child_env(&mut env);
@@ -1094,17 +1093,6 @@ fn concurrent_commands_preserve_discovered_credential_destinations() {
                 assert_eq!(
                     headers,
                     headers_with_bearer(if injected { token } else { &dummy }),
-                    "{key}, {environment_id}, {host}"
-                );
-                assert_eq!(
-                    broker
-                        .host_protocols_for_environment(
-                            host,
-                            /*port*/ 443,
-                            Some(environment_id),
-                        )
-                        .tls,
-                    injected,
                     "{key}, {environment_id}, {host}"
                 );
             }
@@ -1486,8 +1474,6 @@ fn github_cloud_credentials_do_not_bind_to_ghes_host_hint() {
         authorization(&headers),
         Some(expected_authorization.as_str())
     );
-    assert!(!broker.host_requires_mitm("github.example.com", /*port*/ 443));
-    assert!(broker.host_requires_mitm("api.github.com", /*port*/ 443));
 }
 
 #[test]
@@ -1569,8 +1555,6 @@ fn github_enterprise_credentials_bind_to_gh_host() {
     ]);
     broker.virtualize_child_env(&mut cloud_only);
     assert_eq!(cloud_only["AUTH_HEADER"], format!("Bearer {github_dummy}"));
-    assert!(broker.host_requires_mitm("github.example.com", /*port*/ 443));
-    assert!(broker.host_requires_mitm("api.github.com", /*port*/ 443));
 
     env.insert("GH_HOST".to_string(), "attacker.example".to_string());
     env.insert("GH_ENTERPRISE_TOKEN".to_string(), github_dummy.clone());
@@ -1578,7 +1562,6 @@ fn github_enterprise_credentials_bind_to_gh_host() {
     let mut attacker_headers = headers_with_bearer(&github_dummy);
     broker.inject_request_headers("attacker.example", &mut attacker_headers);
     assert_eq!(attacker_headers, headers_with_bearer(&github_dummy));
-    assert!(!broker.host_requires_mitm("attacker.example", /*port*/ 443));
 
     let mut alternate_enterprise_key = env_map([
         ("GH_HOST", "github.alternate.example"),

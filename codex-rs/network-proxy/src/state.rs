@@ -11,10 +11,7 @@ use crate::runtime::ConfigState;
 use serde::Deserialize;
 use std::collections::HashSet;
 
-pub use crate::runtime::BlockedRequest;
-pub use crate::runtime::BlockedRequestArgs;
 pub use crate::runtime::NetworkProxyAuditMetadata;
-pub use crate::runtime::NetworkProxyState;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct NetworkProxyConstraints {
@@ -57,9 +54,6 @@ pub fn build_config_state(
     constraints: NetworkProxyConstraints,
     executor_os: crate::Platform,
 ) -> anyhow::Result<ConfigState> {
-    if constraints.enabled == Some(false) {
-        config.credential_broker = false;
-    }
     crate::reject_proxy_configuration(&config)?;
     crate::config::validate_unix_socket_allowlist_paths(&config, executor_os)?;
     anyhow::ensure!(

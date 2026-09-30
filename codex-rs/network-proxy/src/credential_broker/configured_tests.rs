@@ -487,10 +487,6 @@ fn configured_provider_virtualizes_credentials_aliases_and_snapshots() {
     let mut unknown = "stripe_live_yyyyyyyyyyyyyyyyyyyyyyyy".to_string();
     assert!(!broker.virtualize_text(&mut unknown, &env));
     assert!(unknown.is_empty());
-    assert!(broker.host_requires_mitm("api.stripe.com", /*port*/ 443));
-    assert!(broker.host_requires_mitm("billing.stripe.example", /*port*/ 443));
-    assert!(!broker.host_requires_mitm("stripe.example", /*port*/ 443));
-    assert!(!broker.host_requires_mitm("attacker.example", /*port*/ 443));
     let dummy_header = format!("Bearer {dummy}");
     let mut headers = HeaderMap::new();
     headers.insert(
@@ -710,11 +706,6 @@ fn configured_provider_does_not_guess_ambiguous_alias_destinations() {
         broker.virtualize_child_env(&mut env);
 
         assert_eq!(env["AUTH_HEADER"], authorization_header);
-        assert!(!broker.host_requires_mitm("first.example", /*port*/ 443));
-        assert!(!broker.host_requires_mitm("second.example", /*port*/ 443));
-        if overlaps_builtin {
-            assert!(!broker.host_requires_mitm("api.openai.com", /*port*/ 443));
-        }
 
         env.insert("FIRST_TOKEN".to_string(), token.to_string());
         broker.virtualize_child_env(&mut env);
@@ -812,15 +803,6 @@ fn configured_owner_keeps_prefixed_builtin_shaped_aliases_scoped() {
                     retain_source.then_some(value)
                 );
                 assert_eq!(value != token, brokered);
-                assert!(
-                    !broker
-                        .host_protocols_for_environment(
-                            "api.openai.com",
-                            /*port*/ 443,
-                            environment_id,
-                        )
-                        .tls
-                );
                 let headers_for = |value: &str| {
                     HeaderMap::from_iter([(
                         AUTHORIZATION,
@@ -1070,7 +1052,6 @@ fn configured_provider_does_not_claim_embedded_builtin_credentials() {
     assert_ne!(env["AUTH_HEADER"], combined);
     assert!(!env["AUTH_HEADER"].contains(github_token));
     assert!(!env["AUTH_HEADER"].contains(openai_token));
-    assert!(!broker.host_requires_mitm("combo.example", /*port*/ 443));
     let mut headers = HeaderMap::new();
     headers.insert(
         AUTHORIZATION,
@@ -1104,7 +1085,6 @@ fn configured_discovery_does_not_claim_overlapping_credential_spans() {
             });
             let mut env = HashMap::from([("AUTH_HEADER".to_string(), format!("Bearer {token}"))]);
             broker.virtualize_child_env(&mut env);
-            assert!(!broker.host_requires_mitm("vendor.example", /*port*/ 443));
             assert!(broker.read_state().credentials.iter().all(|credential| {
                 !matches!(
                     credential.provider,
@@ -1249,7 +1229,6 @@ fn discovered_credential_aliases_rebind_when_the_destination_changes() {
             assert_ne!(unbound["AUTH_HEADER"], authorization_header);
         } else {
             assert_eq!(unbound["AUTH_HEADER"], authorization_header);
-            assert!(!broker.host_requires_mitm("api.github.com", /*port*/ 443));
         }
     }
 }
@@ -2150,8 +2129,6 @@ fn configured_provider_reload_preserves_credentials_and_rejects_overlapping_sour
 
     broker.virtualize_child_env(&mut env);
     assert_eq!(env["PROVIDER_TOKEN"], dummy);
-    assert!(!broker.host_requires_mitm("builtin-overlap.example", /*port*/ 443));
-    assert!(!broker.host_requires_mitm("configured-overlap.example", /*port*/ 443));
     let mut headers = HeaderMap::new();
     headers.insert(
         AUTHORIZATION,
@@ -2627,11 +2604,6 @@ fn configured_provider_destination_history_is_scoped_to_the_environment() {
             translated("second-environment", host, &second_dummy),
             format!("Bearer {second_dummy}")
         );
-        assert!(
-            !broker
-                .host_protocols_for_environment(host, /*port*/ 443, Some("second-environment"),)
-                .tls
-        );
     }
 }
 
@@ -2721,11 +2693,6 @@ fn configured_provider_preserves_filtered_destinations_but_honors_explicit_overr
             .get(AUTHORIZATION)
             .and_then(|value| value.to_str().ok()),
         Some(format!("Bearer {dummy}").as_str())
-    );
-    assert!(
-        !broker
-            .host_protocols_for_environment("first.example", /*port*/ 443, Some("environment"))
-            .tls
     );
 }
 
@@ -2820,7 +2787,6 @@ fn explicit_invalid_destinations_clear_previous_dynamic_bindings() {
                         },
                     );
                     broker.virtualize_child_env(&mut env);
-                    assert!(broker.host_requires_mitm("first.example", /*port*/ 443));
                     env.clear();
                     let value = if use_real { token } else { &dummy };
                     let (input_key, input_value) = if use_alias {
@@ -2849,7 +2815,6 @@ fn explicit_invalid_destinations_clear_previous_dynamic_bindings() {
                             "{key}, {invalid:?}, {host}, real={use_real}, alias={use_alias}"
                         );
                     }
-                    assert!(!broker.host_requires_mitm("first.example", /*port*/ 443));
                     if host_key == "GH_HOST" {
                         for _ in 0..2 {
                             broker.virtualize_child_env(&mut env);
@@ -2862,9 +2827,6 @@ fn explicit_invalid_destinations_clear_previous_dynamic_bindings() {
                                 },
                                 "{key}, {invalid:?}, real={use_real}, alias={use_alias}"
                             );
-                            for cloud in ["api.github.com", "github.com", "tenant.ghe.com"] {
-                                assert!(!broker.host_requires_mitm(cloud, /*port*/ 443));
-                            }
                         }
 
                         env.insert(host_key.to_string(), "restored.example".to_string());
@@ -2881,9 +2843,6 @@ fn explicit_invalid_destinations_clear_previous_dynamic_bindings() {
                         )]);
                         broker.inject_request_headers("https://restored.example/", &mut headers);
                         assert_eq!(headers[AUTHORIZATION], format!("Bearer {token}"));
-                        assert!(!broker.host_requires_mitm("first.example", /*port*/ 443));
-                        assert!(!broker.host_requires_mitm("second.example", /*port*/ 443));
-                        assert!(!broker.host_requires_mitm("api.github.com", /*port*/ 443));
                         env.clear();
                         env.insert("GH_TOKEN".to_string(), token.to_string());
                         broker.virtualize_child_env(&mut env);
@@ -2924,8 +2883,6 @@ fn configured_provider_limits_injection_to_url_prefixes() {
     let mut env = HashMap::from([("PROVIDER_TOKEN".to_string(), token.to_string())]);
     broker.virtualize_child_env(&mut env);
     let dummy = &env["PROVIDER_TOKEN"];
-    assert!(broker.host_requires_mitm("team.provider.example", /*port*/ 8443));
-    assert!(!broker.host_requires_mitm("team.provider.example", /*port*/ 443));
 
     for (destination, injected) in [
         ("root.provider.example", false),
@@ -3006,9 +2963,8 @@ fn configured_provider_accepts_hostname_or_https_url_from_one_environment_key() 
         broker.virtualize_child_env(&mut env);
 
         match expected_host {
-            Some(host) => {
+            Some(_) => {
                 assert_ne!(env["PROVIDER_TOKEN"], token);
-                assert!(broker.host_requires_mitm(host, /*port*/ 443));
                 assert_eq!(
                     broker.environment(&env).binding_keys,
                     vec!["PROVIDER_HOST".to_string()]
