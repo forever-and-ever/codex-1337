@@ -187,9 +187,21 @@ mod tests {
             "rg --version && node -v && pnpm -v && rg --files | wc -l && rg --files | head -n 40";
         assert_parsed(
             &vec_str(&["bash", "-lc", inner]),
-            vec![ParsedCommand::Unknown {
-                cmd: inner.to_string(),
-            }],
+            vec![
+                ParsedCommand::Unknown {
+                    cmd: "rg --version".into(),
+                },
+                ParsedCommand::Unknown {
+                    cmd: "node -v".into(),
+                },
+                ParsedCommand::Unknown {
+                    cmd: "pnpm -v".into(),
+                },
+                ParsedCommand::ListFiles {
+                    cmd: "rg --files".into(),
+                    path: None,
+                },
+            ],
         );
     }
 
@@ -253,7 +265,7 @@ mod tests {
                 ParsedCommand::Search {
                     cmd: "rg -l QkBindingController presentation/src/main/java".to_string(),
                     query: Some("QkBindingController".to_string()),
-                    path: Some("presentation/src/main/java".to_string()),
+                    path: Some("java".to_string()),
                 },
                 ParsedCommand::Unknown {
                     cmd: "xargs perl -pi -e s/QkBindingController/QkController/g".to_string(),
@@ -273,7 +285,7 @@ mod tests {
                 ParsedCommand::Search {
                     cmd: "rg -l QkBindingController presentation/src/main/java".to_string(),
                     query: Some("QkBindingController".to_string()),
-                    path: Some("presentation/src/main/java".to_string()),
+                    path: Some("java".to_string()),
                 },
                 ParsedCommand::Unknown {
                     cmd: "xargs perl -pi -e s/QkBindingController/QkController/g".to_string(),
@@ -2420,6 +2432,12 @@ fn summarize_main_tokens(main_cmd: &[String]) -> ParsedCommand {
         }
         Some((head, tail)) if head == "rg" || head == "rga" || head == "ripgrep-all" => {
             let args_no_connector = trim_at_connector(tail);
+            if matches!(args_no_connector.as_slice(), [flag] if matches!(flag.as_str(), "--version" | "-V" | "--help" | "-h"))
+            {
+                return ParsedCommand::Unknown {
+                    cmd: shlex_join(main_cmd),
+                };
+            }
             let has_files_flag = args_no_connector.iter().any(|a| a == "--files");
             let candidates = skip_flag_values(
                 &args_no_connector,
