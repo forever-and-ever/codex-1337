@@ -32,8 +32,7 @@ pub(crate) struct LoadedSubagentThread {
     pub(crate) agent_role: Option<String>,
     pub(crate) agent_path: Option<String>,
     pub(crate) blocks_direct_input: bool,
-    pub(crate) is_running: bool,
-    pub(crate) is_closed: bool,
+    pub(crate) status: ThreadStatus,
 }
 
 /// Walks the spawn tree rooted at `primary_thread_id` and returns every descendant subagent.
@@ -90,8 +89,7 @@ pub(crate) fn find_loaded_subagent_threads_for_primary(
                 .remove(&thread_id)
                 .map(|thread| LoadedSubagentThread {
                     blocks_direct_input: thread_blocks_direct_input(&thread),
-                    is_running: matches!(&thread.status, ThreadStatus::Active { .. }),
-                    is_closed: matches!(&thread.status, ThreadStatus::NotLoaded),
+                    status: thread.status.clone(),
                     thread_id,
                     agent_nickname: thread.agent_nickname,
                     agent_role: thread.agent_role,
@@ -245,8 +243,9 @@ mod tests {
                     agent_nickname: Some("Scout".to_string()),
                     agent_role: Some("explorer".to_string()),
                     agent_path: None,
-                    is_running: true,
-                    is_closed: false,
+                    status: ThreadStatus::Active {
+                        active_flags: Vec::new()
+                    },
                 },
                 LoadedSubagentThread {
                     blocks_direct_input: true,
@@ -254,8 +253,7 @@ mod tests {
                     agent_nickname: Some("Atlas".to_string()),
                     agent_role: Some("worker".to_string()),
                     agent_path: None,
-                    is_running: false,
-                    is_closed: true,
+                    status: ThreadStatus::NotLoaded,
                 },
             ]
         );

@@ -145,15 +145,30 @@ async fn agents_navigation_picker_keeps_selection_when_running_order_changes() {
             /*is_closed*/ false,
         );
     }
-    app.agent_navigation.set_running(busy, /*is_running*/ true);
+    for id in [root, idle] {
+        app.agent_navigation
+            .set_status(id, codex_app_server_protocol::ThreadStatus::Idle);
+    }
+    app.agent_navigation.set_status(
+        busy,
+        codex_app_server_protocol::ThreadStatus::Active {
+            active_flags: Vec::new(),
+        },
+    );
     let first = app.agent_picker_selection_view_params(/*selected*/ None);
     assert_eq!(
         app.agent_navigation.picker_order,
         vec![busy, root, idle, unloaded]
     );
     assert_eq!(first.initial_selected_idx, Some(2));
-    app.agent_navigation.set_running(busy, /*is_running*/ false);
-    app.agent_navigation.set_running(idle, /*is_running*/ true);
+    app.agent_navigation
+        .set_status(busy, codex_app_server_protocol::ThreadStatus::Idle);
+    app.agent_navigation.set_status(
+        idle,
+        codex_app_server_protocol::ThreadStatus::Active {
+            active_flags: Vec::new(),
+        },
+    );
     let next = app.agent_picker_selection_view_params(first.initial_selected_idx);
     assert_eq!(
         app.agent_navigation.picker_order,

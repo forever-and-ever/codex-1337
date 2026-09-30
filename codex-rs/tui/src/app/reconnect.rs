@@ -178,16 +178,7 @@ impl App {
             {
                 self.chat_widget.restore_user_message_to_composer(message);
             }
-            for row in &mut self
-                .agent_navigation
-                .roster
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .rows
-            {
-                row.status = None;
-                row.activity = None;
-            }
+            self.agent_navigation.clear_statuses();
             if let Some(owner) = self.background_voice.as_mut() {
                 owner.reset_realtime_conversation();
             }

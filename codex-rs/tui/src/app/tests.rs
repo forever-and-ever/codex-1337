@@ -2164,7 +2164,7 @@ async fn open_agent_picker_preserves_cached_metadata_for_replay_threads() -> Res
 }
 
 #[tokio::test]
-async fn open_agent_picker_preserves_running_hints_until_observed_completion() -> Result<()> {
+async fn open_agent_picker_preserves_authoritative_status_across_turn_replay() -> Result<()> {
     let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
     let mut app_server = Box::pin(crate::start_embedded_app_server_for_picker(
         app.chat_widget.config_ref(),
@@ -2180,6 +2180,12 @@ async fn open_agent_picker_preserves_running_hints_until_observed_completion() -
             agent_path: "/root/child".to_string(),
             is_running_hint: true,
         });
+    app.agent_navigation.set_status(
+        thread_id,
+        codex_app_server_protocol::ThreadStatus::Active {
+            active_flags: Vec::new(),
+        },
+    );
 
     Box::pin(app.open_agent_picker(&mut app_server)).await;
 
@@ -2224,6 +2230,8 @@ async fn open_agent_picker_preserves_running_hints_until_observed_completion() -
         turn_completed_notification(thread_id, "turn-1", TurnStatus::Completed),
     )
     .await?;
+    app.agent_navigation
+        .note_status(thread_id, codex_app_server_protocol::ThreadStatus::Idle);
 
     Box::pin(app.open_agent_picker(&mut app_server)).await;
 
@@ -2242,6 +2250,12 @@ async fn open_agent_picker_preserves_running_hints_until_observed_completion() -
     assert_eq!(app.agent_navigation.get(&thread_id), Some(&expected_entry));
     app.enqueue_thread_notification(thread_id, turn_started_notification(thread_id, "turn-2"))
         .await?;
+    app.agent_navigation.note_status(
+        thread_id,
+        codex_app_server_protocol::ThreadStatus::Active {
+            active_flags: Vec::new(),
+        },
+    );
 
     Box::pin(app.open_agent_picker(&mut app_server)).await;
 
@@ -2251,7 +2265,7 @@ async fn open_agent_picker_preserves_running_hints_until_observed_completion() -
 }
 
 #[tokio::test]
-async fn open_agent_picker_clears_running_hint_from_completed_snapshot() -> Result<()> {
+async fn open_agent_picker_keeps_live_status_with_completed_replay_snapshot() -> Result<()> {
     let mut app = Box::pin(make_test_app()).await;
     let mut app_server = Box::pin(crate::start_embedded_app_server_for_picker(
         app.chat_widget.config_ref(),
@@ -2273,6 +2287,13 @@ async fn open_agent_picker_clears_running_hint_from_completed_snapshot() -> Resu
             agent_path: "/root/child".to_string(),
             is_running_hint: true,
         });
+    // A completed replay turn is older than the server's live status, even with a live attachment.
+    app.agent_navigation.note_status(
+        thread_id,
+        codex_app_server_protocol::ThreadStatus::Active {
+            active_flags: Vec::new(),
+        },
+    );
     assert!(!app.agent_navigation.is_parent_owned(thread_id));
 
     Box::pin(app.open_agent_picker(&mut app_server)).await;
@@ -2283,7 +2304,7 @@ async fn open_agent_picker_clears_running_hint_from_completed_snapshot() -> Resu
             agent_nickname: None,
             agent_role: None,
             agent_path: Some("/root/child".to_string()),
-            is_running: false,
+            is_running: true,
             is_closed: false,
         })
     );

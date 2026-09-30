@@ -293,6 +293,103 @@ fn overview_thread(
 }
 
 #[tokio::test]
+async fn agents_navigation_status_notifications_survive_discovery_and_roster_refresh() {
+    let mut app = make_test_app().await;
+    let root = ThreadId::new();
+    let child = ThreadId::new();
+    let unknown = ThreadId::new();
+    app.primary_thread_id = Some(root);
+    app.active_thread_id = Some(root);
+    app.upsert_agent_picker_thread(root, None, None, false);
+    app.agent_navigation.set_status(root, ThreadStatus::Idle);
+    app.upsert_agent_picker_thread(unknown, Some("Unknown".into()), None, false);
+    let request = app.agent_navigation.begin_picker_refresh(root).unwrap();
+    let status = |status| {
+        ServerNotification::ThreadStatusChanged(
+            codex_app_server_protocol::ThreadStatusChangedNotification {
+                thread_id: child.to_string(),
+                status,
+            },
+        )
+    };
+    let active = ThreadStatus::Active {
+        active_flags: Vec::new(),
+    };
+    // Child status broadcasts precede parent spawn metadata; neither an older list
+    // reply nor a renderer's attachment can erase the received live status.
+    app.track_subagent_panel(&status(active.clone()));
+    app.upsert_agent_picker_thread(child, Some("Worker".into()), None, false);
+    app.thread_event_channels
+        .insert(child, ThreadEventChannel::new(/*capacity*/ 4));
+    app.apply_agent_picker_thread_refresh(
+        root,
+        request,
+        Ok(vec![
+            overview_thread(child, Some(root), "Worker", ThreadStatus::NotLoaded),
+            overview_thread(unknown, Some(root), "Unknown", ThreadStatus::Idle),
+        ]),
+    );
+    assert_eq!(app.agent_navigation.status(child), Some(&active));
+    app.agent_navigation.clear_statuses();
+    app.track_subagent_panel(&status(active.clone()));
+    app.sync_subagent_roster();
+    let inline = render_bottom_popup(&app.chat_widget, /*width*/ 90);
+    let params = app.agent_picker_selection_view_params(/*selected*/ None);
+    app.chat_widget.show_selection_view(params);
+    insta::assert_snapshot!(
+        "subagents_authoritative_unknown_and_active",
+        format!(
+            "Inline\n{inline}\nPicker\n{}",
+            render_bottom_popup(&app.chat_widget, /*width*/ 90)
+                .replace(&root.to_string(), "ROOT_ID")
+                .replace(&child.to_string(), "CHILD_ID")
+                .replace(&unknown.to_string(), "UNKNOWN_ID")
+        )
+    );
+    let request = app.agent_navigation.begin_picker_refresh(root).unwrap();
+    app.apply_agent_picker_thread_refresh(
+        root,
+        request,
+        Ok(vec![
+            overview_thread(child, Some(root), "Worker", ThreadStatus::Idle),
+            overview_thread(unknown, Some(root), "Unknown", ThreadStatus::Idle),
+        ]),
+    );
+    assert_eq!(
+        app.agent_navigation.status(child),
+        Some(&ThreadStatus::Idle)
+    );
+    for current in [
+        ThreadStatus::Active {
+            active_flags: vec![codex_app_server_protocol::ThreadActiveFlag::WaitingOnUserInput],
+        },
+        ThreadStatus::SystemError,
+        ThreadStatus::NotLoaded,
+        active,
+    ] {
+        app.track_subagent_panel(&status(current.clone()));
+        assert_eq!(app.agent_navigation.status(child), Some(&current));
+        assert_eq!(
+            app.agent_navigation
+                .roster
+                .lock()
+                .unwrap()
+                .rows
+                .iter()
+                .find(|row| row.id == child)
+                .map(|row| row.status.clone()),
+            (!matches!(current, ThreadStatus::NotLoaded)).then_some(Some(current.clone())),
+        );
+        let rendered = render_bottom_popup(&app.chat_widget, /*width*/ 90);
+        let worker = rendered
+            .lines()
+            .find(|line| line.contains("Worker"))
+            .unwrap();
+        assert!(worker.contains(crate::agent_status::marker(Some(&current)).content.as_ref()));
+    }
+}
+
+#[tokio::test]
 async fn shared_overview_keeps_rows_and_replays_changes_over_stale_reads() -> Result<()> {
     let mut app = make_test_app().await;
     let app_server = crate::start_embedded_app_server_for_picker(&app.config).await?;

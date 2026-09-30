@@ -547,7 +547,12 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
                 app.thread_event_channels[&id].store.lock().await.session
             );
             assert!(!app.agent_navigation.get(&id).unwrap().is_closed);
-            app.agent_navigation.mark_running(id);
+            app.agent_navigation.note_status(
+                id,
+                codex_app_server_protocol::ThreadStatus::Active {
+                    active_flags: Vec::new(),
+                },
+            );
             assert!(app.agent_navigation.get(&id).unwrap().is_running);
             assert_eq!(
                 app.chat_widget.composer_text_with_pending(),

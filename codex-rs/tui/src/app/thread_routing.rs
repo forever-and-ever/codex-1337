@@ -1256,16 +1256,10 @@ impl App {
             if started.thread.can_accept_direct_input == Some(false) {
                 self.agent_navigation.mark_parent_owned(thread_id);
             }
-            if let Some(row) = self
-                .agent_navigation
-                .roster
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .rows
-                .iter_mut()
-                .find(|row| row.id == thread_id)
-            {
-                row.status.get_or_insert(started.thread.status.clone());
+            if self.agent_navigation.status(thread_id).is_none() {
+                self.agent_navigation
+                    .set_status(thread_id, started.thread.status.clone());
+                self.sync_subagent_roster();
             }
 
             // Lifecycle responses already contain authoritative session state. Their rollout may
@@ -1416,6 +1410,7 @@ impl App {
         {
             self.agent_navigation.record_sub_agent_activity(activity);
             self.sync_active_agent_label();
+            self.refresh_visible_agent_picker();
             return;
         }
 

@@ -38,9 +38,6 @@ impl App {
         } else {
             LoadedSubagentBackfill::default()
         };
-        // V2 subagents are identified by canonical paths observed from activity events or loaded
-        // thread metadata. A buffered active turn is positive liveness evidence; a completed
-        // snapshot is terminal evidence. An empty store does not clear a successful spawn hint.
         let path_backed_thread_ids: Vec<_> = self
             .agent_navigation
             .ordered_path_backed_subagent_threads(self.primary_thread_id)
@@ -48,25 +45,12 @@ impl App {
             .map(|(thread_id, _)| thread_id)
             .collect();
         for thread_id in path_backed_thread_ids.iter().copied() {
-            if let Some(channel) = self.thread_event_channels.get(&thread_id)
-                && channel.attachment() == ThreadEventAttachment::Live
-            {
-                let Ok(store) = channel.store.try_lock() else {
-                    continue;
-                };
-                let has_active_turn = store.active_turn_id().is_some();
-                let has_terminal_snapshot = store
-                    .turns
-                    .last()
-                    .is_some_and(|turn| !matches!(turn.status, TurnStatus::InProgress));
-                drop(store);
-                if has_active_turn {
-                    self.agent_navigation.mark_running(thread_id);
-                } else if has_terminal_snapshot {
-                    self.agent_navigation.mark_stopped(thread_id);
-                }
-            } else if self.primary_thread_id.is_none()
+            if self.primary_thread_id.is_none()
                 && !backfill.refreshed_thread_ids.contains(&thread_id)
+                && !self
+                    .thread_event_channels
+                    .get(&thread_id)
+                    .is_some_and(|channel| channel.attachment() == ThreadEventAttachment::Live)
             {
                 self.refresh_agent_picker_thread_liveness(app_server, thread_id)
                     .await;
@@ -79,7 +63,10 @@ impl App {
             let running_threads: Vec<_> = path_backed_threads
                 .into_iter()
                 .filter_map(|(thread_id, entry)| {
-                    if !entry.is_running || entry.is_closed {
+                    if !matches!(
+                        self.agent_navigation.status(thread_id),
+                        Some(codex_app_server_protocol::ThreadStatus::Active { .. })
+                    ) {
                         return None;
                     }
                     Some((thread_id, entry.agent_path.as_deref()?.trim().to_string()))
@@ -175,7 +162,19 @@ impl App {
             .and_then(|index| self.agent_navigation.picker_order.get(index).copied())
             .or(self.active_thread_id);
         let mut threads = self.agent_navigation.ordered_threads();
-        threads.sort_by_key(|(_, entry)| (entry.is_closed, !entry.is_running));
+        threads.sort_by_key(|(id, _)| {
+            let status = self.agent_navigation.status(*id);
+            (
+                matches!(
+                    status,
+                    Some(codex_app_server_protocol::ThreadStatus::NotLoaded)
+                ),
+                !matches!(
+                    status,
+                    Some(codex_app_server_protocol::ThreadStatus::Active { .. })
+                ),
+            )
+        });
         let picker_order = threads.iter().map(|(id, _)| *id).collect();
         let mut initial_selected_idx = None;
         let items: Vec<SelectionItem> = threads
@@ -204,27 +203,10 @@ impl App {
                 SelectionItem {
                     name: name.clone(),
                     name_prefix_spans: {
-                        let roster = self
-                            .agent_navigation
-                            .roster
-                            .lock()
-                            .unwrap_or_else(std::sync::PoisonError::into_inner);
-                        let fallback = if entry.is_closed {
-                            codex_app_server_protocol::ThreadStatus::NotLoaded
-                        } else if entry.is_running {
-                            codex_app_server_protocol::ThreadStatus::Active {
-                                active_flags: Vec::new(),
-                            }
-                        } else {
-                            codex_app_server_protocol::ThreadStatus::Idle
-                        };
-                        let status = roster
-                            .rows
-                            .iter()
-                            .find(|row| row.id == thread_id)
-                            .and_then(|row| row.status.as_ref())
-                            .unwrap_or(&fallback);
-                        vec![crate::agent_status::marker(Some(status)), " ".into()]
+                        vec![
+                            crate::agent_status::marker(self.agent_navigation.status(thread_id)),
+                            " ".into(),
+                        ]
                     },
                     description: Some(uuid.clone()),
                     is_current: self.active_thread_id == Some(thread_id),
@@ -290,6 +272,7 @@ impl App {
         self.agent_navigation
             .upsert(thread_id, agent_nickname, agent_role, is_closed);
         self.sync_active_agent_label();
+        self.refresh_visible_agent_picker();
     }
 
     /// Persists the app-server's authoritative ownership flag and updates the active composer.
@@ -321,10 +304,6 @@ impl App {
             Ok(thread) => {
                 let is_parent_owned = thread_blocks_direct_input(&thread);
                 let agent_path = source_agent_path(&thread.source);
-                let is_running = matches!(
-                    thread.status,
-                    codex_app_server_protocol::ThreadStatus::Active { .. }
-                );
                 let is_closed = matches!(
                     thread.status,
                     codex_app_server_protocol::ThreadStatus::NotLoaded
@@ -347,23 +326,8 @@ impl App {
                     self.agent_navigation.mark_parent_owned(thread_id);
                 }
                 self.agent_navigation.set_agent_path(thread_id, agent_path);
-                if let Some(row) = self
-                    .agent_navigation
-                    .roster
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .rows
-                    .iter_mut()
-                    .find(|row| row.id == thread_id)
-                {
-                    row.status = Some(thread.status);
-                }
-                if is_running {
-                    self.agent_navigation.mark_running(thread_id);
-                } else {
-                    self.agent_navigation
-                        .set_running(thread_id, /*is_running*/ false);
-                }
+                self.agent_navigation.set_status(thread_id, thread.status);
+                self.sync_subagent_roster();
                 true
             }
             Err(err) => {
@@ -1233,11 +1197,10 @@ impl App {
         let mut refreshed_thread_ids = HashSet::new();
         for thread in find_loaded_subagent_threads_for_primary(threads, primary_thread_id) {
             let agent_path = thread.agent_path;
-            let has_live_channel = self
-                .thread_event_channels
-                .get(&thread.thread_id)
-                .is_some_and(|channel| channel.attachment() == ThreadEventAttachment::Live);
-            let is_closed = !has_live_channel && thread.is_closed;
+            let is_closed = matches!(
+                thread.status,
+                codex_app_server_protocol::ThreadStatus::NotLoaded
+            );
             if thread.blocks_direct_input {
                 self.agent_navigation.mark_parent_owned(thread.thread_id);
             }
@@ -1249,17 +1212,9 @@ impl App {
             );
             self.agent_navigation
                 .set_agent_path(thread.thread_id, agent_path);
-            // A live channel can have an empty store after a successful spawn. Only apply server
-            // status for channels that would otherwise need another liveness read.
-            if !has_live_channel {
-                if thread.is_running {
-                    self.agent_navigation.mark_running(thread.thread_id);
-                } else {
-                    self.agent_navigation
-                        .set_running(thread.thread_id, /*is_running*/ false);
-                }
-                refreshed_thread_ids.insert(thread.thread_id);
-            }
+            self.agent_navigation
+                .set_status(thread.thread_id, thread.status);
+            refreshed_thread_ids.insert(thread.thread_id);
         }
         self.sync_active_agent_label();
 
