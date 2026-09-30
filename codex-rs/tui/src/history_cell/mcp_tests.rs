@@ -155,8 +155,39 @@ fn mcp_preview_shares_one_limit_across_blocks_and_preserves_transcript() {
     );
     let display = cell.display_lines(/*width*/ 80);
     let transcript = cell.transcript_lines(/*width*/ 80);
+    let argument_previews = [
+        json!({}),
+        json!({
+            "file_path": "foo",
+            "query": "hover(\"bar\"): key=value, \\path\nnext",
+            "options": {"items": [1, true, null, {"key": "value"}]},
+        }),
+        json!({"odd key=\"name\"": "quoted"}),
+        json!("{\"query\":\"not an object\"}"),
+    ]
+    .into_iter()
+    .flat_map(|arguments| {
+        let call = new_active_mcp_tool_call(
+            "call-arguments".into(),
+            McpInvocation {
+                server: "lsp".into(),
+                tool: "hover".into(),
+                arguments: Some(arguments),
+            },
+            /*animations_enabled*/ false,
+        );
+        [200, 32].map(|width| {
+            visible_lines(call.compact_hyperlink_lines(width))
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+    })
+    .collect::<Vec<_>>()
+    .join("\n");
     insta::assert_snapshot!(format!(
-        "compact:\n{}\n\nhistory:\n{}\n\ntranscript:\n{}",
+        "compact:\n{}\n\nargument previews:\n{argument_previews}\n\nhistory:\n{}\n\ntranscript:\n{}",
         visible_lines(cell.compact_hyperlink_lines(/*width*/ 80))
             .iter()
             .map(ToString::to_string)

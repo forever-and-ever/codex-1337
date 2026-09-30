@@ -43,8 +43,13 @@ pub(crate) fn single_line(text: &str) -> String {
         .collect()
 }
 
+pub(crate) enum ArgumentSyntax {
+    Json,
+    Keywords,
+}
+
 /// Streaming serialization bounds work and allocation independently of retained arguments.
-pub(crate) fn compact_arguments(value: &serde_json::Value) -> String {
+pub(crate) fn compact_arguments(value: &serde_json::Value, syntax: ArgumentSyntax) -> String {
     struct Preview<'a>(&'a serde_json::Value, usize);
     impl Serialize for Preview<'_> {
         fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -100,7 +105,44 @@ pub(crate) fn compact_arguments(value: &serde_json::Value) -> String {
         }
     }
     let mut output = Bounded(Vec::new());
-    let clipped = serde_json::to_writer(&mut output, &Preview(value, 0)).is_err();
+    let clipped = if let (serde_json::Value::Object(fields), ArgumentSyntax::Keywords) =
+        (value, syntax)
+    {
+        let media = fields
+            .get("type")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|kind| matches!(kind, "image" | "input_image" | "audio" | "input_audio"));
+        fields
+            .iter()
+            .enumerate()
+            .try_for_each(|(index, (key, value))| {
+                if index > 0 {
+                    output.write_all(b", ")?;
+                }
+                let key = &key[..key.floor_char_boundary(16 * 1024)];
+                if !key.is_empty()
+                    && key.bytes().enumerate().all(|(index, byte)| {
+                        byte == b'_'
+                            || byte.is_ascii_alphabetic()
+                            || (index > 0 && byte.is_ascii_digit())
+                    })
+                {
+                    output.write_all(key.as_bytes())?;
+                } else {
+                    serde_json::to_writer(&mut output, key).map_err(std::io::Error::other)?;
+                }
+                output.write_all(b"=")?;
+                if media && key == "data" {
+                    serde_json::to_writer(&mut output, "<media>").map_err(std::io::Error::other)
+                } else {
+                    serde_json::to_writer(&mut output, &Preview(value, 1))
+                        .map_err(std::io::Error::other)
+                }
+            })
+    } else {
+        serde_json::to_writer(&mut output, &Preview(value, 0)).map_err(std::io::Error::other)
+    }
+    .is_err();
     let mut preview = single_line(&String::from_utf8_lossy(&output.0));
     if clipped {
         preview.push_str("...");

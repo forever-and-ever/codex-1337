@@ -196,7 +196,13 @@ impl HistoryCell for DynamicToolCallCell {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut header = data.header();
         header.push_span("(");
-        header.push_span(super::activity_preview::compact_arguments(&data.arguments).dim());
+        header.push_span(
+            super::activity_preview::compact_arguments(
+                &data.arguments,
+                super::activity_preview::ArgumentSyntax::Json,
+            )
+            .dim(),
+        );
         header.push_span(")");
         vec![super::activity_preview::compact_header(header, usize::from(width)).into()]
     }

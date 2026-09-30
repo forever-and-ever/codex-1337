@@ -1,6 +1,7 @@
 //! Single-line invocation previews; complete arguments and results remain in the transcript.
 
 use super::McpToolCallCell;
+use crate::history_cell::activity_preview::ArgumentSyntax;
 use crate::history_cell::activity_preview::compact_arguments;
 use crate::history_cell::activity_preview::single_line;
 use crate::motion::MotionMode;
@@ -41,7 +42,7 @@ impl McpToolCallCell {
             self.invocation
                 .arguments
                 .as_ref()
-                .map(compact_arguments)
+                .map(|arguments| compact_arguments(arguments, ArgumentSyntax::Keywords))
                 .unwrap_or_default()
                 .dim(),
             ")".into(),
