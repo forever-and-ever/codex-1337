@@ -210,7 +210,11 @@ pub(super) async fn handle(
 ) -> CodexResult<TurnInputSubmission> {
     match mode {
         TurnInputMode::StartOrSteer => {
-            let _extension_admission = session.mcp_extension_admission.lock().await;
+            let _extension_admission = session
+                .mcp_extension_admission
+                .acquire()
+                .await
+                .unwrap_or_else(|_| unreachable!("extension admission semaphore is never closed"));
             start_or_steer(session, request, submission_id).await
         }
         TurnInputMode::StartIfIdle => {
@@ -431,7 +435,11 @@ async fn start_if_idle(
         });
     }
 
-    let _extension_admission = session.mcp_extension_admission.lock().await;
+    let _extension_admission = session
+        .mcp_extension_admission
+        .acquire()
+        .await
+        .unwrap_or_else(|_| unreachable!("extension admission semaphore is never closed"));
     let turn_state = {
         let mut active_turn = session.active_turn.lock().await;
         if active_turn.is_some() {

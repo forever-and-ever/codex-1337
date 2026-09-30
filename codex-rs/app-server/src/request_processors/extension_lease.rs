@@ -41,14 +41,15 @@ impl Drop for PendingConnectionAttach {
         let cancellation = Arc::clone(&self.cancellation);
         if let Ok(runtime) = tokio::runtime::Handle::try_current() {
             runtime.spawn(async move {
-                let mut leases = leases.lock().await;
-                if leases
-                    .get(&thread_id)
-                    .is_some_and(|lease| lease.lease_id == lease_id)
                 {
-                    leases.remove(&thread_id);
+                    let mut leases = leases.lock().await;
+                    if leases
+                        .get(&thread_id)
+                        .is_some_and(|lease| lease.lease_id == lease_id)
+                    {
+                        leases.remove(&thread_id);
+                    }
                 }
-                drop(leases);
                 thread.detach_mcp_extension(&cancellation).await;
             });
         }
@@ -218,17 +219,11 @@ impl ThreadRequestProcessor {
     pub(crate) async fn revoke_extension_connection(&self, owner: ConnectionId) {
         let revoked = {
             let mut leases = self.extension_leases.lock().await;
-            let thread_ids = leases
-                .iter()
-                .filter_map(|(thread_id, lease)| (lease.owner == owner).then_some(*thread_id))
-                .collect::<Vec<_>>();
-            thread_ids
-                .into_iter()
-                .filter_map(|thread_id| {
-                    leases.remove(&thread_id).map(|lease| {
-                        lease.cancellation.cancel();
-                        (thread_id, lease.cancellation)
-                    })
+            leases
+                .extract_if(|_, lease| lease.owner == owner)
+                .map(|(thread_id, lease)| {
+                    lease.cancellation.cancel();
+                    (thread_id, lease.cancellation)
                 })
                 .collect::<Vec<_>>()
         };
