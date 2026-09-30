@@ -933,11 +933,7 @@ text(`MCP: ${ping.structuredContent?.echo ?? "missing"}`);"#,
         &mock.requests(),
         &ContextSnapshotOptions::default().include_request_settings(),
     );
-    let read_ids = regex_lite::Regex::new(r"\bR[0-9a-f]{12}\b")?;
-    insta::assert_snapshot!(
-        "astra_settings_release_check_tool_shapes",
-        read_ids.replace_all(&history, "R<READ_ID>")
-    );
+    insta::assert_snapshot!("astra_settings_release_check_tool_shapes", history);
     Ok(())
 }
 

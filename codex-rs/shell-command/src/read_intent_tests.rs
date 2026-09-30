@@ -13,7 +13,7 @@ fn literal_reads_exclude_composition_and_expansion() {
     ] {
         assert!(ReadIntent::parse(command).is_none(), "{command}");
     }
-    let read = ReadIntent::parse("# force_reread\nsed -n '12,24p' 'a b.rs'").unwrap();
+    let read = ReadIntent::parse("sed -n '12,24p' 'a b.rs'").unwrap();
     assert_eq!(
         read,
         ReadIntent {
@@ -21,8 +21,7 @@ fn literal_reads_exclude_composition_and_expansion() {
             range: ReadRange::Lines {
                 first: 12,
                 last: 24
-            },
-            forced: true
+            }
         }
     );
 }

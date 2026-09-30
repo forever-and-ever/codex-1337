@@ -96,11 +96,11 @@ pub(crate) fn create_exec_command_tool_with_environment_id(
         name: "exec_command".to_string(),
         description: if include_windows_shell_guidance {
             format!(
-                "Runs a command in a PTY, returning output or a session ID for ongoing interaction. Simple successful cat and sed -n reads may return an unchanged-content notice when the exact range is already retained in context. Prefix the command with `# force_reread\\n` (a comment followed by a newline) to force the full output.\n\n{}",
+                "Runs a command in a PTY, returning output or a session ID for ongoing interaction.\n\n{}",
                 windows_shell_guidance()
             )
         } else {
-            "Runs a command in a PTY, returning output or a session ID for ongoing interaction. Simple successful cat and sed -n reads may return an unchanged-content notice when the exact range is already retained in context. Prefix the command with `# force_reread\\n` (a comment followed by a newline) to force the full output."
+            "Runs a command in a PTY, returning output or a session ID for ongoing interaction."
                 .to_string()
         },
         strict: false,

@@ -405,17 +405,6 @@ impl ExecCommandHandler {
         }
 
         emit_unified_exec_tty_metric(&step_context.session_telemetry, tty);
-        let read_attempt = if tty {
-            None
-        } else {
-            crate::tools::read_interlock::ReadAttempt::prepare(
-                &command,
-                &context,
-                &cwd,
-                turn_environment,
-            )
-            .await
-        };
         let process_id = manager.allocate_process_id().await;
         let request = ExecCommandRequest {
             command,
@@ -444,18 +433,8 @@ impl ExecCommandHandler {
             }
             None => manager.exec_command(request, &context).await,
         };
-        if result.is_err()
-            && let Some(attempt) = &read_attempt
-        {
-            attempt.failed(&context).await;
-        }
         match result {
-            Ok(mut response) => {
-                if let Some(attempt) = read_attempt {
-                    attempt.finish(&context, &mut response).await;
-                }
-                Ok(boxed_tool_output(response))
-            }
+            Ok(response) => Ok(boxed_tool_output(response)),
             Err(UnifiedExecError::SandboxDenied {
                 output,
                 original_token_count,

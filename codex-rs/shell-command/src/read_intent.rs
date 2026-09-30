@@ -23,15 +23,11 @@ impl std::fmt::Display for ReadRange {
 pub struct ReadIntent {
     pub path: String,
     pub range: ReadRange,
-    pub forced: bool,
 }
 
 impl ReadIntent {
     pub fn parse(script: &str) -> Option<Self> {
         let script = script.trim();
-        let (script, forced) = script
-            .strip_prefix("# force_reread\n")
-            .map_or((script, false), |command| (command.trim(), true));
         // Reject expansion, redirection, composition and additional statements, even
         // inside quotes. False negatives are preferable to guessing shell semantics.
         if script.chars().any(|c| "$`|;&<>*?[]{}~\n\r".contains(c)) {
@@ -59,7 +55,6 @@ impl ReadIntent {
         Some(Self {
             path: path.to_owned(),
             range,
-            forced,
         })
     }
 

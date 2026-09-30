@@ -1665,11 +1665,6 @@ async fn apply_patch_cli_can_use_exec_command_output_as_patch_input() -> Result<
                         request.body_json().expect("request body should be json");
                     let read_output = function_call_output_text(&body_json, &self.read_call_id);
                     let stdout = stdout_from_shell_output(&read_output);
-                    let stdout = if stdout.starts_with("Read R") {
-                        stdout.split_once('\n').expect("read header and content").1
-                    } else {
-                        &stdout
-                    };
                     let patch_lines = stdout
                         .lines()
                         .map(|line| format!("+{line}"))
