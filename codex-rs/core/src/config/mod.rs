@@ -1075,6 +1075,9 @@ pub struct Config {
     /// Policy for collecting and validating tool runtimes.
     pub tool_registry: ToolRegistryConfig,
 
+    /// Explicit native coordination policy, independent of any MCP transport.
+    pub thread_coordination: Option<codex_config::config_toml::ThreadCoordinationConfig>,
+
     /// Configuration for the experimental code-mode tool surface.
     pub code_mode: CodeModeConfig,
 
@@ -4447,6 +4450,7 @@ impl Config {
             experimental_request_user_input_enabled,
             update_plan_enabled,
             tool_registry,
+            thread_coordination: cfg.tools.as_ref().and_then(|tools| tools.thread_coordination.clone()),
             code_mode,
             background_terminal_max_timeout,
             thread_unload_delay,

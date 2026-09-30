@@ -675,6 +675,9 @@ pub struct RealtimeAudioToml {
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ToolsToml {
+    /// Server-owned cross-thread capabilities. Omission preserves explicit
+    /// legacy `mcp_servers.codex_tui` policy, then uses the native defaults.
+    pub thread_coordination: Option<ThreadCoordinationConfig>,
     #[serde(
         default,
         deserialize_with = "deserialize_optional_web_search_tool_config"
@@ -682,6 +685,29 @@ pub struct ToolsToml {
     pub web_search: Option<WebSearchToolConfig>,
     pub experimental_request_user_input: Option<ExperimentalRequestUserInput>,
     pub update_plan: Option<UpdatePlanToolConfig>,
+}
+
+/// Transport-free policy for the server's thread-coordination capability.
+/// An explicit section replaces legacy policy as one whole policy, rather than
+/// mixing fields with a legacy denial or allow-list.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ThreadCoordinationConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    pub enabled_tools: Option<Vec<String>>,
+    pub disabled_tools: Option<Vec<String>>,
+    #[serde(default)]
+    pub tools: BTreeMap<String, ThreadCoordinationToolPolicy>,
+}
+
+/// Explicit policy for one coordination tool; omitted fields retain that
+/// tool's native default, not a legacy transport's settings.
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ThreadCoordinationToolPolicy {
+    pub enabled: Option<bool>,
+    pub approval_mode: Option<crate::types::AppToolApproval>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]

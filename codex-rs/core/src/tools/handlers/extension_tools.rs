@@ -66,7 +66,12 @@ impl ToolExecutor<ToolInvocation> for ExtensionToolAdapter {
     where
         ToolInvocation: 'a,
     {
-        Box::pin(async move { self.0.handle(to_extension_call(&invocation).await).await })
+        Box::pin(async move {
+            if let Some(approval) = self.0.approval() {
+                crate::mcp_tool_call::approve_extension_tool(&invocation, approval).await?;
+            }
+            self.0.handle(to_extension_call(&invocation).await).await
+        })
     }
 }
 

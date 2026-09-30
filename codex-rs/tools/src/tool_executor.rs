@@ -11,6 +11,24 @@ use std::pin::Pin;
 pub type ToolExecutorFuture<'a> =
     Pin<Box<dyn Future<Output = Result<Box<dyn ToolOutput>, FunctionCallError>> + Send + 'a>>;
 
+/// A native extension's approval identity. The host owns policy evaluation,
+/// authentic calling context, pending approvals, and cancellation. An extension
+/// cannot approve itself or obtain authority from the presence of a frontend.
+#[derive(Clone)]
+pub struct ToolApproval {
+    pub namespace: String,
+    pub description: String,
+    pub default_mode: ToolApprovalMode,
+    pub read_only: bool,
+}
+
+/// Default approval posture before host policy overrides are applied.
+#[derive(Clone, Copy)]
+pub enum ToolApprovalMode {
+    Prompt,
+    Approve,
+}
+
 bitflags::bitflags! {
     /// Independent model-facing surfaces supported by a tool.
     #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -108,6 +126,12 @@ pub trait ToolExecutor<Invocation>: Send + Sync {
     fn tool_name(&self) -> ToolName;
 
     fn spec(&self) -> ToolSpec;
+
+    /// Require the host's ordinary tool-approval path before invoking the runtime.
+    /// Omission means this tool does not request an additional approval gate.
+    fn approval(&self) -> Option<ToolApproval> {
+        None
+    }
 
     /// The preferred exposure before the host applies step-specific policy.
     fn exposure(&self) -> ToolExposure {
