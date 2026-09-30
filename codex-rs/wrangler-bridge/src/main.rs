@@ -132,6 +132,7 @@ impl Rpc {
                 codex_home: home,
                 platform_family: String::new(),
                 platform_os: String::new(),
+                thread_coordination: None,
             },
         };
         rpc.initialized = rpc
