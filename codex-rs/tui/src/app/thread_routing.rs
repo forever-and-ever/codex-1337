@@ -422,7 +422,7 @@ impl App {
         }
         for cell in history_cell::new_patch_events(request.changes.clone(), &request.cwd) {
             self.chat_widget
-                .add_to_history(cell.with_activity_id(request.call_id.clone()));
+                .add_to_history(cell.with_activity_id(request.id.clone()));
         }
     }
 
