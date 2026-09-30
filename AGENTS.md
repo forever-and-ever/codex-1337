@@ -1,3 +1,11 @@
+# Codex-1337 workflow
+
+**Default executor:** GPT-6.1-Sol with `high` reasoning effort.
+
+For prompts prefixed `feature:`, delegate implementation to the default executor
+in a new `.worktrees/` worktree unless explicitly directed otherwise. The primary
+agent specifies the work, reviews it, and integrates the result.
+
 # Rust/codex-rs
 
 In the codex-rs folder where the rust code lives:
