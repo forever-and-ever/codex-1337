@@ -59,7 +59,7 @@ async fn queued_headless_messages_preserve_provenance_and_can_be_cancelled_befor
         .map(|(index, prompt)| {
             responses::ev_function_call_with_namespace(
                 &format!("queue-{index}"),
-                "codex_tui",
+                "mcp__codex_tui",
                 "send_message_to_thread",
                 &json!({"threadId": destination, "prompt": prompt, "delivery": "queued"})
                     .to_string(),

@@ -20,12 +20,16 @@ use serde_json::{Value, json};
 use std::sync::{Arc, OnceLock, Weak};
 use uuid::Uuid;
 
+mod mcp_isolation;
 mod queries;
 mod render;
 mod response;
 mod spec;
 
-const NAMESPACE: &str = "codex_tui";
+// Preserve historical callable names for cached model/Code Mode contexts.
+const NAMESPACE: &str = "mcp__codex_tui";
+// Configuration, approval, and persisted delegation identity remain transport-free.
+const POLICY_NAMESPACE: &str = "codex_tui";
 const DELEGATION_TOOLS: [&str; 3] = ["create_thread", "send_message_to_thread", "fork_thread"];
 const DEFAULT_LIST_LIMIT: u32 = 10;
 const MAX_LIST_LIMIT: u32 = 50;
@@ -43,6 +47,7 @@ pub(crate) type CoordinationSlot = Arc<OnceLock<Weak<ThreadCoordinationService>>
 
 pub(crate) fn install(builder: &mut ExtensionRegistryBuilder<Config>, service: CoordinationSlot) {
     builder.tool_contributor(Arc::new(CoordinationTools { service }));
+    builder.mcp_server_contributor(Arc::new(mcp_isolation::CoordinationMcpIsolation));
 }
 
 struct CoordinationTools {
@@ -104,7 +109,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for CoordinationTool {
     }
     fn approval(&self) -> Option<ToolApproval> {
         Some(ToolApproval {
-            namespace: NAMESPACE.into(),
+            namespace: POLICY_NAMESPACE.into(),
             description: self.function.description.clone(),
             default_mode: if DELEGATION_TOOLS.contains(&self.function.name.as_str()) {
                 ToolApprovalMode::Prompt
@@ -328,7 +333,7 @@ async fn delegated_output(
     }
     Ok(TurnToolOutput {
         name: tool.to_owned(),
-        namespace: Some(NAMESPACE.into()),
+        namespace: Some(POLICY_NAMESPACE.into()),
         output: FunctionCallOutputBody::Text(prompt),
     })
 }

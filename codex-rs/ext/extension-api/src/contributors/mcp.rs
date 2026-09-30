@@ -166,6 +166,12 @@ pub struct SelectedPluginContribution {
 /// One extension-owned overlay for the runtime MCP server configuration.
 #[derive(Clone, Debug)]
 pub enum McpServerContribution {
+    /// Keep a same-named MCP server out of an extension's native namespace.
+    /// Adds one extra `mcp__` prefix beyond the historical prefixed spelling,
+    /// including when the user normally disables prefixing.
+    /// This changes its canonical callable names only, preserving the server's
+    /// transport, raw tool names, approval identity, and telemetry attribution.
+    ForceToolNamespacePrefix { name: String },
     /// Adds or replaces a named MCP server.
     Set {
         name: String,

@@ -199,6 +199,7 @@ impl McpManager {
         let mut selected_plugins = Vec::new();
         let mut disabled_plugin_roots = Vec::new();
         let mut overlays = Vec::new();
+        let mut force_prefixed_mcp_tool_servers = Vec::new();
         // A contributor can emit multiple ordered actions, so order each action globally rather
         // than enumerating contributors.
         let mut contribution_order = 0;
@@ -325,6 +326,9 @@ impl McpManager {
                             name,
                         });
                     }
+                    McpServerContribution::ForceToolNamespacePrefix { name } => {
+                        force_prefixed_mcp_tool_servers.push(name);
+                    }
                 }
                 contribution_order += 1;
             }
@@ -391,6 +395,7 @@ impl McpManager {
             );
         }
         mcp_config.mcp_server_catalog = catalog;
+        mcp_config.force_prefixed_mcp_tool_servers = force_prefixed_mcp_tool_servers;
         mcp_config.connector_snapshot = connector_snapshot;
         McpRuntimeProjection {
             config: mcp_config,

@@ -110,10 +110,13 @@ pub(crate) fn filter_tools(tools: Vec<ToolInfo>, filter: &ToolFilter) -> Vec<Too
 ///
 /// When `prefix_mcp_tool_names` is true, the historical `mcp__` namespace
 /// prefix is added except for tools from `non_prefixed_mcp_tool_servers`.
+/// Servers isolated from a native namespace receive one additional prefix,
+/// regardless of either user prefix setting; raw MCP identities are unchanged.
 pub(crate) fn normalize_tools_for_model_with_prefix<I>(
     tools: I,
     prefix_mcp_tool_names: bool,
     non_prefixed_mcp_tool_servers: &[String],
+    force_prefixed_mcp_tool_servers: &[String],
 ) -> Vec<ToolInfo>
 where
     I: IntoIterator<Item = ToolInfo>,
@@ -136,10 +139,18 @@ where
             continue;
         }
 
-        let callable_namespace = callable_namespace_with_prefix(
-            &sanitize_responses_api_tool_name(&tool.callable_namespace),
-            prefix_mcp_tool_names && !non_prefixed_mcp_tool_servers.contains(&tool.server_name),
-        );
+        let namespace = sanitize_responses_api_tool_name(&tool.callable_namespace);
+        let callable_namespace = if force_prefixed_mcp_tool_servers.contains(&tool.server_name) {
+            format!(
+                "{LEGACY_MCP_TOOL_NAME_PREFIX}{}",
+                callable_namespace_with_prefix(&namespace, /*prefix_mcp_tool_names*/ true)
+            )
+        } else {
+            callable_namespace_with_prefix(
+                &namespace,
+                prefix_mcp_tool_names && !non_prefixed_mcp_tool_servers.contains(&tool.server_name),
+            )
+        };
 
         candidates.push(CallableToolCandidate {
             callable_namespace,

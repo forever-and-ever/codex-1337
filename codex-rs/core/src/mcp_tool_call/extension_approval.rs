@@ -37,6 +37,33 @@ pub(crate) async fn approve_extension_tool(
     };
     let server_config = config.mcp_servers.get().get(&approval.namespace);
     let tool_config = server_config.and_then(|server| server.tools.get(tool));
+    // Managed admission is independent of user tool policy. A transport-free
+    // capability cannot manufacture the URL/command identity enterprise policy
+    // requires. Retain an admitted legacy identity, or fail closed.
+    if approval.namespace == "codex_tui"
+        && let Some(requirements) = &config.config_layer_stack.requirements().mcp_servers
+    {
+        let requirement = requirements.value.get(&approval.namespace).ok_or_else(|| {
+            FunctionCallError::RespondToModel(
+                "native coordination is denied: managed MCP requirements exclude codex_tui".into(),
+            )
+        })?;
+        if !server_config.is_some_and(|server| server.matches_requirement(requirement)) {
+            return Err(FunctionCallError::RespondToModel(
+                "native coordination is denied: no admitted legacy identity satisfies the managed codex_tui URL/command requirement; user native policy is not a managed grant".into(),
+            ));
+        }
+        if server_config.is_some_and(|server| {
+            matches!(
+                server.disabled_reason,
+                Some(codex_config::McpServerDisabledReason::Requirements { .. })
+            )
+        }) {
+            return Err(FunctionCallError::RespondToModel(
+                "native coordination is denied by managed MCP requirements".into(),
+            ));
+        }
+    }
     // Select one complete policy owner; never mix native fields with legacy denial.
     let native = (approval.namespace == "codex_tui")
         .then_some(config.thread_coordination.as_ref())

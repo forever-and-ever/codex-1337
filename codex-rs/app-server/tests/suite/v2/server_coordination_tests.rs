@@ -3,7 +3,7 @@
 
 use std::future::IntoFuture;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use anyhow::{Context, Result};
 use axum::Json;
@@ -12,6 +12,7 @@ use axum::body::Body;
 use axum::extract::State;
 use axum::http::header::CONTENT_TYPE;
 use axum::response::Response;
+use axum::routing::any;
 use axum::routing::post;
 use codex_app_server_protocol::JSONRPCMessage;
 use codex_app_server_protocol::JSONRPCResponse;
@@ -43,6 +44,8 @@ use super::wait_for_loaded_threads;
 const TIMEOUT: Duration = Duration::from_secs(30);
 
 struct ModelGate {
+    legacy_connections: AtomicUsize,
+    legacy_calls: Mutex<Vec<String>>,
     blocked_model: Option<String>,
     blocked_entered: Notify,
     blocked_release: Notify,
@@ -57,6 +60,8 @@ struct ModelGate {
 impl Default for ModelGate {
     fn default() -> Self {
         Self {
+            legacy_connections: AtomicUsize::new(0),
+            legacy_calls: Mutex::new(Vec::new()),
             blocked_model: None,
             blocked_entered: Notify::new(),
             blocked_release: Notify::new(),
@@ -68,6 +73,21 @@ impl Default for ModelGate {
             tools: Mutex::new(Vec::new()),
         }
     }
+}
+
+async fn retired_frontend_transport(State(gate): State<Arc<ModelGate>>) -> axum::http::StatusCode {
+    gate.legacy_connections.fetch_add(1, Ordering::SeqCst);
+    gate.changed.notify_one();
+    axum::http::StatusCode::INTERNAL_SERVER_ERROR
+}
+
+fn frontend_transport_config(endpoint: &str) -> Value {
+    json!({"url": endpoint, "http_headers": {"Authorization": format!("Bearer {}", uuid::Uuid::new_v4())},
+    "default_tools_approval_mode": "approve", "tools": {
+        "create_thread": {"approval_mode": "prompt"},
+        "send_message_to_thread": {"approval_mode": "prompt"},
+        "fork_thread": {"approval_mode": "prompt"}
+    }})
 }
 
 async fn model_response(State(gate): State<Arc<ModelGate>>, Json(body): Json<Value>) -> Response {
@@ -110,17 +130,23 @@ async fn model_response(State(gate): State<Arc<ModelGate>>, Json(body): Json<Val
 #[path = "server_coordination_queue_tests.rs"]
 mod queue;
 
+#[path = "server_coordination_policy_tests.rs"]
+mod policy;
+
 #[tokio::test]
 async fn independent_tasks_and_cold_destinations_start_after_the_only_frontend_disconnects()
 -> Result<()> {
     let gate = Arc::new(ModelGate::default());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let address = listener.local_addr()?;
+    let mut legacy_transport = frontend_transport_config(&format!("http://{address}/mcp"));
+    legacy_transport["enabled"] = json!(false);
     let model_server = tokio::spawn(
         axum::serve(
             listener,
             Router::new()
                 .route("/v1/responses", post(model_response))
+                .route("/mcp", any(retired_frontend_transport))
                 .with_state(Arc::clone(&gate)),
         )
         .into_future(),
@@ -143,7 +169,20 @@ approval_mode = "approve"
     let mut frontend = connect_websocket(address).await?;
     send_initialize_request(&mut frontend, /*id*/ 1, "sole-frontend").await?;
     read_response_for_id(&mut frontend, /*id*/ 1).await?;
-    let caller = start_thread(&mut frontend, /*id*/ 2).await?;
+    // Old listener registrations have no authentic ownership marker. Retire
+    // transport explicitly; the native section independently owns user policy.
+    // The live trap distinguishes retirement from tolerating a dead port.
+    send_request(
+        &mut frontend,
+        "thread/start",
+        /*id*/ 2,
+        Some(json!({"config": {"mcp_servers.codex_tui": legacy_transport}})),
+    )
+    .await?;
+    let caller =
+        to_response::<ThreadStartResponse>(read_response_for_id(&mut frontend, /*id*/ 2).await?)?
+            .thread
+            .id;
     send_request(
         &mut frontend,
         "thread/name/set",
@@ -179,13 +218,13 @@ approval_mode = "approve"
     *gate.tools.lock().await = vec![
         responses::ev_function_call_with_namespace(
             "message",
-            "codex_tui",
+            "mcp__codex_tui",
             "send_message_to_thread",
             &json!({"threadId": destination, "prompt": "Continue the cold task"}).to_string(),
         ),
         responses::ev_function_call_with_namespace(
             "new-task",
-            "codex_tui",
+            "mcp__codex_tui",
             "create_thread",
             &json!({"prompt": "Start an independent task", "title": "Headless child"}).to_string(),
         ),
@@ -243,6 +282,11 @@ approval_mode = "approve"
     );
     assert!(message.sent_at.is_some());
     assert!(delegated("create_thread").is_some());
+    assert_eq!(
+        gate.legacy_connections.load(Ordering::SeqCst),
+        0,
+        "native coordination must not connect the retired frontend transport"
+    );
 
     // A replacement frontend merely observes the authoritative runtime/index.
     let mut replacement = connect_websocket(address).await?;
@@ -315,7 +359,7 @@ async fn headless_approval_waits_for_consent_and_replays_to_a_replacement_fronte
     let destination = start_thread(&mut frontend, /*id*/ 3).await?;
     *gate.tools.lock().await = vec![responses::ev_function_call_with_namespace(
         "pending-message",
-        "codex_tui",
+        "mcp__codex_tui",
         "send_message_to_thread",
         &json!({"threadId": destination, "prompt": "Only after consent"}).to_string(),
     )];
