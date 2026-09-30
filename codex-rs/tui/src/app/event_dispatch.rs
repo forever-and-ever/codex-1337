@@ -42,6 +42,7 @@ impl App {
                     | AppEvent::OpenWarnings
                     | AppEvent::Queue(_)
                     | AppEvent::CopyWarning(_)
+                    | AppEvent::UpdateWarnings { .. }
                     | AppEvent::CopySelection { .. }
                     | AppEvent::InsertHistoryCell(_)
                     | AppEvent::RecordToolOutputTokens { .. }
@@ -144,7 +145,7 @@ impl App {
             AppEvent::PluginMentionsLoaded { ref cwd, .. }
                 if cwds_differ(cwd, self.config.cwd.as_path()) => {}
             AppEvent::NewSession { name } => {
-                self.start_fresh_session_with_summary_hint(
+                self.start_fresh_session(
                     tui, app_server, /*session_start_source*/ None,
                     /*initial_user_message*/ None, name,
                 )
@@ -342,6 +343,20 @@ impl App {
             }
             AppEvent::OpenWarnings => self.chat_widget.open_warnings(&self.transcript_cells),
             AppEvent::Queue(event) => self.handle_queue_event(app_server, event).await,
+            AppEvent::UpdateWarnings { transcript, dismissed, kept } => {
+                if !Arc::ptr_eq(&transcript, &self.chat_widget.warning_display_state.transcript) {
+                    return Ok(AppRunControl::Continue);
+                }
+                let state = &mut self.chat_widget.warning_display_state.dismissed;
+                state.extend(dismissed.into_iter().map(|entry| (entry.id, entry.details)));
+                for entry in kept {
+                    if state.get(&entry.id) == Some(&entry.details) {
+                        state.remove(&entry.id);
+                    }
+                }
+                self.chat_widget.warning_display_state.synced_cells = None;
+                tui.frame_requester().schedule_frame();
+            }
             AppEvent::CopyWarning(text) => {
                 let result = tui.copy_transcript_selection(&text, crate::clipboard_copy::CopyFormat::PlainText);
                 self.chat_widget.show_selection_copy_result(result);
@@ -371,7 +386,7 @@ impl App {
                 self.clear_terminal_ui(tui, /*redraw_header*/ false)?;
                 self.reset_app_ui_state_after_clear();
 
-                self.start_fresh_session_with_summary_hint(
+                self.start_fresh_session(
                     tui,
                     app_server,
                     Some(ThreadStartSource::Clear),
@@ -391,7 +406,7 @@ impl App {
                 self.clear_terminal_ui(tui, /*redraw_header*/ false)?;
                 self.reset_app_ui_state_after_clear();
 
-                self.start_fresh_session_with_summary_hint(
+                self.start_fresh_session(
                     tui,
                     app_server,
                     Some(ThreadStartSource::Clear),

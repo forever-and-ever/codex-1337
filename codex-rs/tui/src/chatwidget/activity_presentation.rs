@@ -38,8 +38,9 @@ impl ChatWidget {
                 render_compact(cell, width)
             }
         });
-        let has_hidden_details =
-            has_activity && active.is_some_and(|cell| cell.has_hidden_activity_details(width));
+        let disclosure = active
+            .filter(|_| has_activity)
+            .and_then(|cell| cell.activity_disclosure(width));
         let mut auxiliary = self
             .active_cell_hyperlink_lines_with(width, |cell, width| {
                 if active.is_some_and(|active| std::ptr::eq(active, cell)) {
@@ -58,8 +59,8 @@ impl ChatWidget {
         Some(ActivityTranscriptLines {
             activity,
             auxiliary,
-            has_hidden_details,
             tool_output_tokens: None,
+            disclosure,
         })
     }
 }

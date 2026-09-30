@@ -1,6 +1,5 @@
 ---
 source: tui/src/app/turn_tips_tests.rs
-assertion_line: 342
 expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(screens.join(\"\\n\\n\"))"
 ---
 working=true, response rows=1, 80x12
@@ -29,7 +28,7 @@ working=false, response rows=1, 80x12
   ? for shortcuts
 ────────────────────────────────────────────────────────────────────────────────
 
-  [completion time]
+  Worked for [duration] • [completion time]
 
 
 › Ask Codex to do anything
@@ -43,7 +42,7 @@ working=false, response rows=30, 80x12
   ? for shortcuts
 ────────────────────────────────────────────────────────────────────────────────
 
-  [completion time]
+  Worked for [duration] • [completion time]
 
 
 › Ask Codex to do anything
@@ -54,7 +53,7 @@ working=false, response rows=30, 80x12
   gpt-test default · /tmp/project
 
 working=false, response rows=1, 80x9
-  [completion time]
+  Worked for [duration] • [completion time]
 
 
 › Ask Codex to do anything
@@ -66,7 +65,7 @@ working=false, response rows=1, 80x9
 
 working=false, response rows=1, 80x10
 
-  [completion time]
+  Worked for [duration] • [completion time]
 
 
 › Ask Codex to do anything
@@ -79,7 +78,7 @@ working=false, response rows=1, 80x10
 working=false, response rows=1, 80x11
   ? for shortcuts
 
-  [completion time]
+  Worked for [duration] • [completion time]
 
 
 › Ask Codex to do anything
@@ -91,7 +90,7 @@ working=false, response rows=1, 80x11
 
 working=false, response rows=1, 12x12
   ? for shor
-
+  for <1s •
   [completion time]
 
 

@@ -234,6 +234,7 @@ impl McpManager {
                                     contribution.plugin_display_name.clone(),
                                 ),
                                 selection_order,
+                                &contribution.source_environment_id,
                                 server,
                             ),
                         );
