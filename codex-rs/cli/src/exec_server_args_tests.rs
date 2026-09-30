@@ -114,6 +114,7 @@ fn exec_server_parses_direct_aws_options() {
             ),
             expected,
         );
+        #[cfg(feature = "aws-sigv4")]
         command
             .validate_remote_transport()
             .expect("valid Direct mode");

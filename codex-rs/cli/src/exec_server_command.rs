@@ -334,10 +334,6 @@ impl ExecServerCommand {
             (ExecServerRemoteTransport::Noise, false)
             | (ExecServerRemoteTransport::Direct, true) => {}
         }
-        #[cfg(not(feature = "aws-sigv4"))]
-        if self.aws_sigv4 {
-            anyhow::bail!("AWS SigV4 support is not enabled; build with --features aws-sigv4");
-        }
         if self.remote_transport == ExecServerRemoteTransport::Direct
             && matches!(
                 self.command.as_ref(),
@@ -345,6 +341,10 @@ impl ExecServerCommand {
             )
         {
             anyhow::bail!("direct exec-server transport does not support forwarding");
+        }
+        #[cfg(not(feature = "aws-sigv4"))]
+        if self.aws_sigv4 {
+            anyhow::bail!("AWS SigV4 support is not enabled; build with --features aws-sigv4");
         }
         Ok(())
     }
