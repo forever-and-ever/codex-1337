@@ -39,12 +39,26 @@ impl ActivityDetails {
             .collect()
     }
 
+    /// None means there is no returned batch overriding the nested tool's result.
+    pub(crate) fn returned_output_has_details(&self) -> Option<bool> {
+        let mut result = None;
+        for (_, cell) in &self.entries {
+            if cell.as_any().is::<ToolOutputCell>() {
+                *result.get_or_insert(false) |= cell.activity_disclosure(u16::MAX).is_some();
+            }
+        }
+        result
+    }
+
     /// The batch returned to the model replaces raw nested results in the disclosure, not in raw history.
     pub(crate) fn output_lines(&self, width: u16) -> Option<Vec<HyperlinkLine>> {
         let mut output = None;
         for (_, cell) in &self.entries {
             if cell.as_any().is::<ToolOutputCell>() {
                 let lines: &mut Vec<HyperlinkLine> = output.get_or_insert_default();
+                if cell.activity_disclosure(width).is_none() {
+                    continue;
+                }
                 if !lines.is_empty() {
                     lines.push("".into());
                 }

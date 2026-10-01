@@ -263,6 +263,12 @@ impl HistoryCell for ToolOutputGroup {
     }
 
     fn expanded_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        // The batch owns the bill, not the first file's disclosure. That reveals only its diff.
+        if let Some(cell) = self.members.first()
+            && cell.as_any().is::<PatchHistoryCell>()
+        {
+            return cell.expanded_hyperlink_lines(width);
+        }
         let mut lines = if self
             .members
             .iter()
@@ -275,6 +281,9 @@ impl HistoryCell for ToolOutputGroup {
         };
         for cell in &self.members {
             if cell.as_any().is::<ToolOutputCell>() {
+                if cell.activity_disclosure(width).is_none() {
+                    continue;
+                }
                 if !lines.is_empty() {
                     lines.push("".into());
                 }
@@ -324,7 +333,21 @@ impl HistoryCell for ToolOutputGroup {
     fn activity_disclosure(&self, width: u16) -> Option<super::ActivityDisclosure> {
         match self.members.first() {
             Some(cell) if cell.as_any().is::<PatchHistoryCell>() => cell.activity_disclosure(width),
-            _ => Some(super::ActivityDisclosure::Generic),
+            _ => self
+                .members
+                .iter()
+                .any(|cell| {
+                    if cell
+                        .activity_ids()
+                        .iter()
+                        .any(|id| id.starts_with("output:"))
+                    {
+                        cell.activity_disclosure(width).is_some()
+                    } else {
+                        cell.activity_arguments_truncated(width)
+                    }
+                })
+                .then_some(super::ActivityDisclosure::Generic),
         }
     }
 

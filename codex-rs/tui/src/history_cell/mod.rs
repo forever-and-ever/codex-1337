@@ -12,6 +12,7 @@
 
 mod activity_group;
 mod delegation;
+mod returned_output;
 pub(crate) use activity_group::ActivityGroup;
 pub(crate) use delegation::DelegatedMessageCell;
 
@@ -269,6 +270,11 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
     /// Complete action arguments when a returned batch owns the output instead of nested calls.
     fn activity_argument_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         self.compact_hyperlink_lines(width)
+    }
+
+    /// Whether the compact action omits invocation text that expansion can recover.
+    fn activity_arguments_truncated(&self, _width: u16) -> bool {
+        false
     }
 
     /// Details an activity offers beyond its compact presentation, if any.

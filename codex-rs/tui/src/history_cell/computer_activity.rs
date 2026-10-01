@@ -266,13 +266,44 @@ impl HistoryCell for ComputerActivityCell {
 
     fn expanded_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         if let Some(output) = self.group.details.output_lines(width) {
-            let mut lines = self.compact_hyperlink_lines(width);
-            lines.push("".into());
-            lines.extend(output);
+            let mut lines = self
+                .group
+                .calls
+                .iter()
+                .flat_map(|call| call.activity_argument_lines(width))
+                .collect::<Vec<_>>();
+            if !output.is_empty() {
+                lines.push("".into());
+                lines.extend(output);
+            }
             lines
         } else {
-            self.transcript_hyperlink_lines(width)
+            self.group
+                .calls
+                .iter()
+                .flat_map(|call| call.expanded_hyperlink_lines(width))
+                .collect()
         }
+    }
+
+    fn activity_disclosure(&self, width: u16) -> Option<ActivityDisclosure> {
+        (self
+            .group
+            .details
+            .returned_output_has_details()
+            .unwrap_or_else(|| {
+                self.group
+                    .calls
+                    .iter()
+                    .any(|call| call.activity_disclosure(width).is_some())
+            })
+            || self.activity_arguments_truncated(width))
+        .then_some(ActivityDisclosure::Generic)
+    }
+
+    fn activity_arguments_truncated(&self, _width: u16) -> bool {
+        // The computer summary deliberately omits the executed script.
+        !self.group.calls.is_empty()
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {

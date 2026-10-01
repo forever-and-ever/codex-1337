@@ -24,7 +24,9 @@ fn file_disclosures_are_independent_and_not_copied() {
         id: "batch".into(),
         name: "exec".into(),
         namespace: None,
-        output: FunctionCallOutputBody::Text("Patch applied".into()),
+        output: FunctionCallOutputBody::Text(
+            "Script completed\nWall time 0.1 seconds\nOutput:\n{}".into(),
+        ),
     };
     let cells = crate::thread_transcript::thread_items_to_transcript_cells(
         /*thread_id*/ None,
@@ -124,7 +126,7 @@ fn file_disclosures_are_independent_and_not_copied() {
         view.current_layout(&cells, /*index*/ 0)
             .expect("first file")
             .text(),
-        "• Edited\n  alpha.rs (+2, -0)\n+alpha body\n+second alpha line\n\n  Patch applied",
+        "• Edited\n  alpha.rs (+2, -0)\n+alpha body\n+second alpha line",
     );
     for (label, collapse_first) in [
         ("both files expanded with batch bill", false),

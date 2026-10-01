@@ -5,6 +5,10 @@ Edited, etc. Consecutive tool entries are contiguous, including the live tail;
 ordinary messages retain their surrounding separation. Expanded bodies retain
 their internal formatting.
 
+`[+]` means hidden output, a diff, or a truncated invocation. Empty results with
+fully visible invocations have no control. Normal expansion omits execution
+envelopes and serialized result wrappers; each file expands only its own diff.
+
 Adjacent edits share one **Edited** heading, but each file retains its own
 disclosure. Messages and other tool entries start a new group. Per-call token
 estimates remain on their owning file row when its heading is omitted.

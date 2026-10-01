@@ -221,9 +221,6 @@ impl HistoryCell for ExecCell {
     }
 
     fn activity_disclosure(&self, width: u16) -> Option<ActivityDisclosure> {
-        if self.has_action_summary() {
-            return Some(ActivityDisclosure::Generic);
-        }
         if self.group.calls.iter().any(ExecCall::is_user_shell_command) {
             // User-shell previews already retain wrapped commands and up to fifty output rows.
             // Reuse its actual truncation decision instead of comparing differently styled text.
@@ -233,6 +230,21 @@ impl HistoryCell for ExecCell {
                 .then_some(ActivityDisclosure::Generic);
         }
         self.command_disclosure(width)
+    }
+
+    fn activity_arguments_truncated(&self, width: u16) -> bool {
+        // Read/search summaries omit shell syntax even when the summary itself fits.
+        self.has_action_summary()
+            || self.group.calls.iter().any(|call| {
+                strip_bash_lc_and_escape(&call.command)
+                    .lines()
+                    .nth(/*n*/ 1)
+                    .is_some()
+            })
+            || self
+                .compact_command_lines(u16::MAX)
+                .iter()
+                .any(|line| line.width() > usize::from(width))
     }
 
     fn compact_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
@@ -297,10 +309,19 @@ impl HistoryCell for ExecCell {
     fn expanded_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         if let Some(output) = self.group.details.output_lines(width) {
             let mut lines = self.activity_argument_lines(width);
-            lines.push("".into());
-            lines.extend(output);
+            if !output.is_empty() {
+                lines.push("".into());
+                lines.extend(output);
+            }
             lines
         } else {
+            if self.group.calls.iter().all(|call| {
+                call.output
+                    .as_ref()
+                    .is_none_or(|output| output.lines().all(|line| line.trim().is_empty()))
+            }) {
+                return self.activity_argument_lines(width);
+            }
             let mut lines = self.compact_hyperlink_lines(width);
             lines.extend(self.transcript_hyperlink_lines(width));
             lines
@@ -308,7 +329,14 @@ impl HistoryCell for ExecCell {
     }
 
     fn activity_argument_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        let mut lines = self.compact_hyperlink_lines(width);
+        let mut lines = if self.has_action_summary() {
+            self.action_summary_lines(width)
+                .into_iter()
+                .take(1)
+                .collect::<Vec<_>>()
+        } else {
+            vec![self.command_heading().into()]
+        };
         for call in self.iter_calls() {
             let script = strip_bash_lc_and_escape(&call.command);
             lines.extend(adaptive_wrap_hyperlink_lines(

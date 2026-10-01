@@ -177,6 +177,24 @@ impl DynamicToolCallData {
 }
 
 impl HistoryCell for DynamicToolCallCell {
+    fn activity_disclosure(&self, width: u16) -> Option<super::ActivityDisclosure> {
+        let has_output = self
+            .data
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .output
+            .as_ref()
+            .is_some_and(|output| output.iter().any(|text| !text.trim().is_empty()));
+        (has_output || self.activity_arguments_truncated(width))
+            .then_some(super::ActivityDisclosure::Generic)
+    }
+
+    fn activity_arguments_truncated(&self, width: u16) -> bool {
+        self.compact_hyperlink_lines(u16::MAX)
+            .iter()
+            .any(|line| line.width() > usize::from(width))
+    }
+
     fn has_stable_transcript_height(&self) -> bool {
         false
     }

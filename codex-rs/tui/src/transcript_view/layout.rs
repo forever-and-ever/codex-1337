@@ -30,6 +30,11 @@ pub(super) fn activity_layout(
     expanded: bool,
     _shortcut: Option<ShortcutHint>,
 ) -> TextLayout {
+    // A truncated header can create the control even when there is no output. Once open,
+    // its untruncated invocation must still have a control to close it.
+    if expanded && !lines.activity.is_empty() {
+        lines.disclosure.get_or_insert(ActivityDisclosure::Generic);
+    }
     let control_line = match lines.disclosure {
         Some(ActivityDisclosure::EditedFile { header }) => usize::from(header),
         _ => 0,

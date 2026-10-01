@@ -327,6 +327,16 @@ impl McpToolCallCell {
         mode: McpToolCallRenderMode,
     ) -> Option<Cow<'a, str>> {
         let node_repl = self.result_kind() == McpResultKind::NodeRepl;
+        if mode == McpToolCallRenderMode::Expanded {
+            return if node_repl {
+                block
+                    .text()
+                    .map(super::returned_output::readable_output)
+                    .or_else(|| block.render_detail())
+            } else {
+                block.render_detail()
+            };
+        }
         if mode != McpToolCallRenderMode::Display {
             return Some(Cow::Borrowed(block.render_full()));
         }
@@ -371,6 +381,26 @@ impl McpToolCallCell {
 }
 
 impl HistoryCell for McpToolCallCell {
+    fn activity_disclosure(&self, width: u16) -> Option<ActivityDisclosure> {
+        let has_output = match &self.result {
+            Some(Ok(result)) => result.content.iter().any(|block| {
+                self.result_block_text(block, McpToolCallRenderMode::Expanded)
+                    .is_some_and(|text| !text.trim().is_empty())
+                    || block.is_image
+            }),
+            Some(Err(error)) => !error.trim().is_empty(),
+            None => false,
+        };
+        (has_output || self.activity_arguments_truncated(width))
+            .then_some(ActivityDisclosure::Generic)
+    }
+
+    fn activity_arguments_truncated(&self, width: u16) -> bool {
+        self.compact_mcp_lines(u16::MAX)
+            .iter()
+            .any(|line| line.width() > usize::from(width))
+    }
+
     fn activity_ids(&self) -> Vec<String> {
         vec![format!("mcp:{}", self.call_id)]
     }

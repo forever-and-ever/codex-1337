@@ -2,8 +2,11 @@
 
 use super::HistoryCell;
 use super::raw_lines_from_source;
+use crate::terminal_hyperlinks::HyperlinkLine;
+use crate::terminal_hyperlinks::adaptive_wrap_hyperlink_lines;
+use crate::terminal_hyperlinks::plain_hyperlink_lines;
+use crate::terminal_hyperlinks::visible_lines;
 use crate::wrapping::RtOptions;
-use crate::wrapping::adaptive_wrap_lines;
 use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::FunctionCallOutputContentItem;
 use ratatui::style::Stylize;
@@ -13,6 +16,7 @@ use ratatui::text::Line;
 pub(crate) struct ToolOutputCell {
     id: String,
     output: FunctionCallOutputBody,
+    readable: String,
 }
 
 impl ToolOutputCell {
@@ -33,11 +37,33 @@ impl ToolOutputCell {
         (namespace.is_none() && matches!(name, "exec" | "wait")).then(|| Self {
             id: id.to_owned(),
             output: output.clone(),
+            readable: match output {
+                FunctionCallOutputBody::Text(text) => {
+                    super::returned_output::readable_output(text).into_owned()
+                }
+                FunctionCallOutputBody::ContentItems(items) => items
+                    .iter()
+                    .map(|item| match item {
+                        FunctionCallOutputContentItem::InputText { text } => {
+                            super::returned_output::readable_output(text).into_owned()
+                        }
+                        FunctionCallOutputContentItem::InputImage { .. } => "<image>".into(),
+                        FunctionCallOutputContentItem::InputAudio { .. } => "<audio>".into(),
+                        FunctionCallOutputContentItem::EncryptedContent { .. } => String::new(),
+                    })
+                    .filter(|text| !text.trim().is_empty())
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            },
         })
     }
 }
 
 impl HistoryCell for ToolOutputCell {
+    fn activity_disclosure(&self, _width: u16) -> Option<super::ActivityDisclosure> {
+        (!self.readable.trim().is_empty()).then_some(super::ActivityDisclosure::Generic)
+    }
+
     fn activity_ids(&self) -> Vec<String> {
         vec![format!("output:tool-output-tokens:{}", self.id)]
     }
@@ -76,8 +102,12 @@ impl HistoryCell for ToolOutputCell {
     }
 
     fn transcript_lines(&self, width: u16) -> Vec<Line<'static>> {
-        adaptive_wrap_lines(
-            self.raw_lines(),
+        visible_lines(self.transcript_hyperlink_lines(width))
+    }
+
+    fn transcript_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        adaptive_wrap_hyperlink_lines(
+            &plain_hyperlink_lines(raw_lines_from_source(&self.readable)),
             RtOptions::new(width as usize)
                 .initial_indent("  ".into())
                 .subsequent_indent("  ".into()),

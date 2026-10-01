@@ -111,6 +111,14 @@ impl McpToolResult {
 }
 
 impl McpContentBlock {
+    pub(super) fn render_detail(&self) -> Option<Cow<'_, str>> {
+        match &self.display {
+            McpContentDisplay::Text(text) => Some(Cow::Borrowed(text)),
+            McpContentDisplay::Summary(summary) => Some(Cow::Borrowed(summary)),
+            McpContentDisplay::Json(_) => None,
+        }
+    }
+
     /// Returns all retained text, with honest markers for media and embedded resource bodies.
     pub(super) fn render_full(&self) -> &str {
         if let Some(text) = &self.original_text {

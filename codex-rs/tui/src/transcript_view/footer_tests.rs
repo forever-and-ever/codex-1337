@@ -411,7 +411,8 @@ fn code_mode_batches_display_their_own_counts_and_replay_without_double_counting
         name: "exec".into(),
         namespace: None,
         output: FunctionCallOutputBody::Text(format!(
-            "{id} returned batch\nOnly emitted text, after truncation."
+            "Script completed\nWall time 0.1 seconds\nOutput:\n{}",
+            serde_json::json!({"content": [{"type": "text", "text": format!("{id} returned batch\nOnly emitted text, after truncation.")}], "isError": false})
         )),
     });
     // Use production history projection: counts belong to outer outputs, not
@@ -495,6 +496,103 @@ fn code_mode_batches_display_their_own_counts_and_replay_without_double_counting
     view.render(area, &mut buffer, &surrounded);
     snapshots.push(format!("message boundaries\n{buffer:?}"));
     insta::assert_snapshot!("code_mode_returned_batch_counts", snapshots.join("\n"));
+}
+
+#[test]
+fn empty_tool_disclosures_follow_invocation_truncation() {
+    use crate::exec_cell::CommandOutput;
+    use crate::exec_cell::new_active_exec_command;
+    use crate::history_cell::ToolOutputCell;
+    use crate::history_cell::ToolOutputGroup;
+    use codex_app_server_protocol::CommandExecutionSource;
+    use codex_protocol::models::FunctionCallOutputBody;
+    use codex_shell_command::parse_command::parse_command;
+    use std::time::Duration;
+
+    let mut snapshots = Vec::new();
+    for (script, output) in [
+        ("true", ""),
+        ("printf '%s' a_long_argument >/dev/null", ""),
+        (
+            "cat config.json",
+            r#"{"content":[],"output":"real file data"}"#,
+        ),
+    ] {
+        let command = vec!["bash".into(), "-lc".into(), script.into()];
+        let parsed = parse_command(&command);
+        let mut call = new_active_exec_command(
+            "command".into(),
+            command,
+            parsed,
+            CommandExecutionSource::UnifiedExecStartup,
+            /*interaction_input*/ None,
+            /*animations_enabled*/ false,
+        );
+        call.complete_call(
+            "command",
+            CommandOutput::new(/*exit_code*/ 0, output.into()),
+            Duration::ZERO,
+        );
+        let result = FunctionCallOutputBody::Text(format!(
+            "Script completed\nWall time 0.1 seconds\nOutput:\n{}",
+            serde_json::json!({"output": output, "exit_code": 0, "wall_time_seconds": 0.1}),
+        ));
+        let cells = vec![ToolOutputGroup::from_cells([
+            Arc::new(call) as Arc<dyn HistoryCell>,
+            Arc::new(
+                ToolOutputCell::from_output("batch", "exec", /*namespace*/ None, &result).unwrap(),
+            ),
+        ])];
+        for width in [100, 44, 24] {
+            let mut view = TranscriptView::default();
+            let area = Rect::new(/*x*/ 0, /*y*/ 0, width, /*height*/ 12);
+            let mut buffer = Buffer::empty(area);
+            view.render(area, &mut buffer, &cells);
+            let layout = view.current_layout(&cells, /*index*/ 0).unwrap();
+            let expandable = script != "true" && (width != 100 || !output.is_empty());
+            assert_eq!(layout.disclosure, expandable);
+            snapshots.push(format!(
+                "{script}, width={width}\n{}",
+                crate::transcript_view::tests::text(&buffer).trim_end()
+            ));
+            if expandable {
+                view.disclosure.expanded.extend(cells[0].activity_ids());
+                view.jump_to_latest();
+                view.render(area, &mut buffer, &cells);
+                assert!(view.current_layout(&cells, /*index*/ 0).unwrap().disclosure);
+                let layout = view.current_layout(&cells, /*index*/ 0).unwrap();
+                let source = layout.text();
+                assert!(source.contains(script));
+                if !output.is_empty() {
+                    assert!(source.contains(output));
+                }
+                snapshots.push(format!(
+                    "expanded\n{}",
+                    crate::transcript_view::tests::text(&buffer).trim_end()
+                ));
+            }
+        }
+    }
+    let mut call = crate::history_cell::new_active_mcp_tool_call(
+        "empty".into(),
+        crate::history_cell::McpInvocation {
+            server: "tools".into(),
+            tool: "noop".into(),
+            arguments: None,
+        },
+        /*animations_enabled*/ false,
+    );
+    call.complete(
+        Duration::ZERO,
+        Ok(codex_protocol::mcp::CallToolResult {
+            content: Vec::new(),
+            structured_content: None,
+            is_error: None,
+            meta: None,
+        }),
+    );
+    assert!(call.activity_disclosure(/*width*/ 80).is_none());
+    insta::assert_snapshot!(snapshots.join("\n\n"));
 }
 
 #[test]

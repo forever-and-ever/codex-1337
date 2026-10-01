@@ -152,6 +152,10 @@ pub(crate) struct PatchFailureCell {
 }
 
 impl HistoryCell for PatchFailureCell {
+    fn activity_disclosure(&self, _width: u16) -> Option<ActivityDisclosure> {
+        (!self.stderr.trim().is_empty()).then_some(ActivityDisclosure::Generic)
+    }
+
     fn activity_ids(&self) -> Vec<String> {
         vec![self.activity_id.clone()]
     }
