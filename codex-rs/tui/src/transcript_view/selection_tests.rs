@@ -405,6 +405,7 @@ fn live_selection_survives_commits_finalization_new_live_content_and_resize() {
 fn tool_selection_copies_its_displayed_revision_after_the_tool_commits() {
     let tool = ExecCell::new(
         ExecCall {
+            rows: Default::default(),
             call_id: "tool".to_owned(),
             command: vec!["printf".to_owned(), "selected tool output".to_owned()],
             parsed: Vec::new(),

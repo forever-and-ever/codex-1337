@@ -630,6 +630,7 @@ fn find_reveals_hidden_command_output_and_restores_compact_presentation() {
     );
     let command = crate::exec_cell::ExecCell::new(
         crate::exec_cell::ExecCall {
+            rows: Default::default(),
             call_id: "command".to_string(),
             command: vec!["echo".to_string()],
             parsed: Vec::new(),

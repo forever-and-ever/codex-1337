@@ -9,6 +9,7 @@ mod activity;
 mod bookmark;
 mod composer_gap;
 mod disclosure;
+mod disclosure_navigation;
 mod follow_control;
 mod footer;
 mod input;
@@ -280,7 +281,7 @@ impl TranscriptView {
         key: Option<ActiveCellTranscriptKey>,
         lines: impl FnOnce(u16) -> Option<Vec<HyperlinkLine>>,
     ) -> bool {
-        self.sync_live_layout(width, key, |width| {
+        self.sync_live_layout(width, key, |width, _| {
             lines(width).map(|lines| TextLayout::new(lines, width))
         })
     }
@@ -290,14 +291,15 @@ impl TranscriptView {
         width: u16,
         key: Option<ActiveCellTranscriptKey>,
         expanded: bool,
-        lines: impl FnOnce(u16) -> Option<ActivityTranscriptLines>,
+        lines: impl FnOnce(u16, &std::collections::HashSet<String>) -> Option<ActivityTranscriptLines>,
     ) -> bool {
         let shortcut = self
             .disclosure
             .keymap
             .primary_hint(crate::keymap::KeymapContext::Global, "open_transcript");
-        self.sync_live_layout(width, key, |width| {
-            lines(width).map(|lines| layout::activity_layout(lines, width, expanded, shortcut))
+        self.sync_live_layout(width, key, |width, expanded_parts| {
+            lines(width, expanded_parts)
+                .map(|lines| layout::activity_layout(lines, width, expanded, shortcut))
         })
     }
 
@@ -305,7 +307,7 @@ impl TranscriptView {
         &mut self,
         width: u16,
         key: Option<ActiveCellTranscriptKey>,
-        layout: impl FnOnce(u16) -> Option<TextLayout>,
+        layout: impl FnOnce(u16, &std::collections::HashSet<String>) -> Option<TextLayout>,
     ) -> bool {
         let next = key.map(|key| (width, key));
         if key.is_some_and(|key| key.cacheable) && self.live_key == next {
@@ -316,7 +318,7 @@ impl TranscriptView {
         self.live_key = next;
         self.live_separated = None;
         self.live_continuation = key.is_some_and(|key| key.is_stream_continuation);
-        let live = layout(width).map(Arc::new);
+        let live = layout(width, &self.disclosure.expanded).map(Arc::new);
         if self.live.as_ref().map(|layout| layout.text())
             != live.as_ref().map(|layout| layout.text())
         {

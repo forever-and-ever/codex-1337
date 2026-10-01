@@ -314,6 +314,7 @@ fn command_and_output_copy_preserve_hard_lines_across_resize() {
     let output = "  output alpha beta gamma delta\nnext line";
     let cell = ExecCell::new(
         ExecCall {
+            rows: Default::default(),
             call_id: "copy-test".into(),
             command: vec!["bash".into(), "-lc".into(), command.into()],
             parsed: Vec::new(),

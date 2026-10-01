@@ -6,6 +6,7 @@
 //! Disclosure controls follow their activity's source text without changing its indentation.
 //! Selected hard breaks on nonempty rows highlight one trailing cell when space permits.
 
+use crate::history_cell::activity_parts::FoldTarget;
 use std::borrow::Cow;
 use std::ops::Range;
 
@@ -51,11 +52,12 @@ pub(super) struct TextLayout {
     width: u16,
     pub(super) separated: bool,
     pub(super) disclosure: bool,
-    disclosure_control: Option<DisclosureControl>,
+    disclosure_controls: Vec<DisclosureControl>,
     activity_estimate: Option<(usize, String)>,
 }
 
 struct DisclosureControl {
+    target: FoldTarget,
     label: String,
     source_offset: usize,
     row: usize,
@@ -93,15 +95,18 @@ impl TextLayout {
         if let Some((offset, label)) = &self.activity_estimate {
             layout = layout.with_estimate_at(*offset, label.clone());
         }
-        if let Some(control) = &self.disclosure_control {
+        for control in &self.disclosure_controls {
             layout =
                 match control.placement {
                     DisclosurePlacement::Row => layout
                         .with_disclosure_control_at(control.label.clone(), control.source_offset),
                     DisclosurePlacement::Inline => layout
                         .with_inline_disclosure_at(control.label.clone(), control.source_offset),
-                    DisclosurePlacement::Leading => layout
-                        .with_leading_disclosure_at(control.label.clone(), control.source_offset),
+                    DisclosurePlacement::Leading => layout.with_leading_disclosure_at(
+                        control.label.clone(),
+                        control.source_offset,
+                        control.target.clone(),
+                    ),
                 };
         }
         if self.separated {
@@ -120,7 +125,7 @@ impl TextLayout {
         if self.text.is_empty() || label.is_empty() {
             return self;
         }
-        if let Some(control) = self.disclosure_control.take()
+        if let Some(control) = self.disclosure_controls.pop()
             && control.placement == DisclosurePlacement::Row
         {
             self.rows.remove(control.row);
@@ -152,7 +157,8 @@ impl TextLayout {
             },
         );
         self.disclosure = true;
-        self.disclosure_control = Some(DisclosureControl {
+        self.disclosure_controls.push(DisclosureControl {
+            target: FoldTarget::Activity,
             label,
             source_offset,
             row: control_row,
@@ -165,7 +171,7 @@ impl TextLayout {
         if self.text.is_empty() || label.is_empty() {
             return self;
         }
-        if let Some(control) = self.disclosure_control.take()
+        if let Some(control) = self.disclosure_controls.pop()
             && control.placement == DisclosurePlacement::Row
         {
             self.rows.remove(control.row);
@@ -175,7 +181,8 @@ impl TextLayout {
             .floor_char_boundary(source_offset.min(self.text.len()));
         let row = self.row_for_offset(source_offset);
         self.disclosure = true;
-        self.disclosure_control = Some(DisclosureControl {
+        self.disclosure_controls.push(DisclosureControl {
+            target: FoldTarget::Activity,
             label,
             source_offset,
             row,
@@ -209,7 +216,7 @@ impl TextLayout {
                     estimate: None,
                 },
             );
-            if let Some(control) = &mut self.disclosure_control {
+            for control in &mut self.disclosure_controls {
                 control.row += 1;
             }
         }
@@ -263,14 +270,20 @@ impl TextLayout {
         self.rows.len()
     }
 
+    #[cfg(test)]
     pub(super) fn disclosure_row(&self) -> Option<usize> {
-        self.disclosure_control.as_ref().map(|control| control.row)
+        self.disclosure_controls.first().map(|control| control.row)
     }
 
+    #[cfg(test)]
     pub(super) fn disclosure_columns(&self) -> Range<u16> {
-        let Some(control) = &self.disclosure_control else {
+        let Some(control) = self.disclosure_controls.first() else {
             return 0..0;
         };
+        self.control_columns(control)
+    }
+
+    fn control_columns(&self, control: &DisclosureControl) -> Range<u16> {
         let row = &self.rows[control.row];
         match control.placement {
             DisclosurePlacement::Row => {
@@ -297,14 +310,13 @@ impl TextLayout {
             row_area.width = row.content_width;
             HyperlinkParagraph::new(std::slice::from_ref(&row.line), row.line.line.style)
                 .render(row_area, buf);
-            if let Some(control) = &self.disclosure_control
-                && matches!(
+            for control in self.disclosure_controls.iter().filter(|control| {
+                matches!(
                     control.placement,
                     DisclosurePlacement::Inline | DisclosurePlacement::Leading
-                )
-                && control.row == start_row + usize::from(screen_row)
-            {
-                let columns = self.disclosure_columns();
+                ) && control.row == start_row + usize::from(screen_row)
+            }) {
+                let columns = self.control_columns(control);
                 buf.set_line(
                     area.x + columns.start,
                     area.y + screen_row,
@@ -339,7 +351,7 @@ impl TextLayout {
 
     /// Find the display row containing a source position, including omitted wrapping whitespace.
     pub(super) fn row_for_offset(&self, offset: usize) -> usize {
-        let before_control = if let Some(control) = &self.disclosure_control
+        let before_control = if let Some(control) = self.disclosure_controls.first()
             && control.placement == DisclosurePlacement::Row
         {
             let control_row = control.row;
@@ -487,7 +499,7 @@ impl TextLayout {
             width,
             separated: false,
             disclosure: false,
-            disclosure_control: None,
+            disclosure_controls: Vec::new(),
             activity_estimate: None,
         }
     }

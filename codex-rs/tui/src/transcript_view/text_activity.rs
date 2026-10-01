@@ -24,26 +24,79 @@ impl TextLayout {
             .take(source_line)
             .map(|line| line.origin.range.len() + 1)
             .sum();
-        self.with_leading_disclosure_at(label, offset)
+        self.with_leading_disclosure_at(label, offset, FoldTarget::Activity)
     }
 
     pub(super) fn with_leading_disclosure_at(
         mut self,
         label: String,
         source_offset: usize,
+        target: FoldTarget,
     ) -> Self {
         if self.text.is_empty() {
             return self;
         }
         let row = self.row_for_offset(source_offset);
         self.disclosure = true;
-        self.disclosure_control = Some(DisclosureControl {
+        self.disclosure_controls.push(DisclosureControl {
+            target,
             label,
             source_offset,
             row,
             placement: DisclosurePlacement::Leading,
         });
         self
+    }
+
+    pub(in crate::transcript_view) fn with_part_control(
+        self,
+        part: crate::history_cell::activity_parts::PartControl,
+    ) -> Self {
+        let offset = self
+            .logical
+            .iter()
+            .take(part.line)
+            .map(|line| line.origin.range.len() + 1)
+            .sum();
+        self.with_leading_disclosure_at(
+            if part.expanded { "[-]" } else { "[+]" }.into(),
+            offset,
+            FoldTarget::Part(part.id),
+        )
+    }
+
+    pub(in crate::transcript_view) fn fold_targets(&self) -> Vec<FoldTarget> {
+        self.disclosure_controls
+            .iter()
+            .map(|control| control.target.clone())
+            .collect()
+    }
+
+    pub(in crate::transcript_view) fn fold_at(
+        &self,
+        row: usize,
+        column: u16,
+    ) -> Option<FoldTarget> {
+        self.disclosure_controls
+            .iter()
+            .find(|control| control.row == row && self.control_columns(control).contains(&column))
+            .map(|control| control.target.clone())
+    }
+
+    pub(in crate::transcript_view) fn fold_position(
+        &self,
+        target: &FoldTarget,
+    ) -> Option<(usize, std::ops::Range<u16>, usize)> {
+        self.disclosure_controls
+            .iter()
+            .find(|control| &control.target == target)
+            .map(|control| {
+                (
+                    control.row,
+                    self.control_columns(control),
+                    control.source_offset,
+                )
+            })
     }
 
     pub(in crate::transcript_view) fn with_activity_estimate(self, label: String) -> Self {

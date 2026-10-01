@@ -466,8 +466,9 @@ fn code_mode_batches_display_their_own_counts_and_replay_without_double_counting
         let ids = tail.activity_ids();
         let tool_output_tokens = view.activity_output_tokens(&ids);
         view.sync_live_activity(committed, ids);
-        view.sync_live_activity_tail(/*width*/ 80, /*key*/ None, expanded, |width| {
+        view.sync_live_activity_tail(/*width*/ 80, /*key*/ None, expanded, |width, _| {
             Some(ActivityTranscriptLines {
+                controls: Vec::new(),
                 activity: if expanded {
                     tail.expanded_hyperlink_lines(width)
                 } else {
@@ -667,8 +668,9 @@ fn activity_focus_keeps_controls_without_passive_hints() {
     let render_live = |view: &mut TranscriptView| {
         let expanded = view.sync_live_activity(&cells, cell.activity_ids());
         let tool_output_tokens = view.activity_output_tokens(&cell.activity_ids());
-        view.sync_live_activity_tail(/*width*/ 32, /*key*/ None, expanded, |width| {
+        view.sync_live_activity_tail(/*width*/ 32, /*key*/ None, expanded, |width, _| {
             Some(ActivityTranscriptLines {
+                controls: Vec::new(),
                 activity: if expanded {
                     cell.expanded_hyperlink_lines(width)
                 } else {
@@ -770,7 +772,10 @@ fn activity_focus_keeps_controls_without_passive_hints() {
     view.jump_to_entry(&old, /*index*/ 0);
     render(&mut view, &old);
     view.held_reading = Some(view.capture_snapshot(&old));
-    view.disclosure.focused = Some(calls[0].activity_ids());
+    view.disclosure.focused = Some(super::disclosure::ActivityFocus {
+        ids: calls[0].activity_ids(),
+        target: Default::default(),
+    });
     let current = vec![
         grouped(vec![Arc::clone(&calls[0])]),
         grouped(vec![Arc::clone(&calls[1])]),
@@ -786,9 +791,15 @@ fn activity_focus_keeps_controls_without_passive_hints() {
     ] {
         view.handle_key(KeyEvent::new(key, KeyModifiers::NONE), &current);
         assert!(view.snapshot().is_none());
-        assert_eq!(view.disclosure.focused, Some(current[index].activity_ids()));
         assert_eq!(
-            view.canonical_activity_index(&current, view.disclosure.focused.as_ref().unwrap()),
+            view.disclosure.focused,
+            Some(super::disclosure::ActivityFocus {
+                ids: current[index].activity_ids(),
+                target: Default::default()
+            })
+        );
+        assert_eq!(
+            view.canonical_activity_index(&current, &view.disclosure.focused.as_ref().unwrap().ids),
             Some(index)
         );
         render(&mut view, &current);

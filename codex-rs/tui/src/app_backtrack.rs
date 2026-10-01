@@ -376,7 +376,12 @@ impl App {
                     chat_widget.active_cell_transcript_hyperlink_lines(width)
                 } else {
                     chat_widget
-                        .active_cell_owned_transcript_lines(width, /*expanded*/ false)
+                        .active_cell_owned_transcript_lines(
+                            width,
+                            /*expanded*/ false,
+                            &std::collections::HashSet::new(),
+                            /*tool_output_tokens*/ None,
+                        )
                         .map(|mut lines| {
                             lines.activity.extend(lines.auxiliary);
                             lines.activity

@@ -37,6 +37,7 @@ impl HistoryCell for Cell {
 fn tool_output_disclosure_shows_full_estimate_when_it_fits() {
     let layout = activity_layout(
         ActivityTranscriptLines {
+            controls: Vec::new(),
             activity: vec![HyperlinkLine::from("Called tool")],
             auxiliary: Vec::new(),
             disclosure: Some(ActivityDisclosure::Generic),
@@ -92,6 +93,7 @@ fn tool_heading_decorations_preserve_source_and_hit_targets() {
     ] {
         let layout = activity_layout(
             ActivityTranscriptLines {
+                controls: Vec::new(),
                 activity: if expanded {
                     mcp.expanded_hyperlink_lines(width)
                 } else {
@@ -125,6 +127,7 @@ fn tool_heading_decorations_preserve_source_and_hit_targets() {
     // Every selectable character lands back on the same source offset after a mid-header estimate.
     let layout = activity_layout(
         ActivityTranscriptLines {
+            controls: Vec::new(),
             activity: vec![
                 Line::from(vec!["• ".into(), "Ran".bold(), " echo 界 👩‍💻".into()]).into(),
             ],

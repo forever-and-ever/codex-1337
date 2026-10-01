@@ -64,14 +64,19 @@ impl App {
                 chat_widget.active_cell_transcript_hyperlink_lines(width)
             })
         } else {
-            view.sync_live_activity_tail(transcript_width, active_key, expanded, |width| {
-                chat_widget
-                    .active_cell_owned_transcript_lines(width, expanded)
-                    .map(|mut lines| {
-                        lines.tool_output_tokens = tool_output_tokens;
-                        lines
-                    })
-            })
+            view.sync_live_activity_tail(
+                transcript_width,
+                active_key,
+                expanded,
+                |width, expanded_parts| {
+                    chat_widget.active_cell_owned_transcript_lines(
+                        width,
+                        expanded,
+                        expanded_parts,
+                        tool_output_tokens,
+                    )
+                },
+            )
         }
     }
 

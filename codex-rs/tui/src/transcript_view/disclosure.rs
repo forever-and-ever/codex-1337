@@ -1,6 +1,7 @@
 //! Local activity disclosure keyed by retained tool identities, independent of text selection.
 //! Controls appear only while activity is focused; copied text and full-transcript search remain source based.
 
+use crate::history_cell::activity_parts::FoldTarget;
 use crate::style::accent_color;
 use std::collections::HashSet;
 
@@ -16,9 +17,15 @@ use super::*;
 
 pub(super) struct Disclosure {
     pub(super) expanded: HashSet<String>,
-    pub(super) focused: Option<Vec<String>>,
+    pub(super) focused: Option<ActivityFocus>,
     pub(super) live_ids: Vec<String>,
     pub(super) keymap: RuntimeKeymap,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct ActivityFocus {
+    pub(super) ids: Vec<String>,
+    pub(super) target: FoldTarget,
 }
 
 impl Default for Disclosure {
@@ -106,16 +113,16 @@ impl TranscriptView {
         area: Rect,
         buf: &mut Buffer,
     ) {
-        let focused = self
-            .disclosure
-            .focused
-            .as_ref()
-            .is_some_and(|focused| ids.iter().any(|id| focused.contains(id)));
-        if !focused || !layout.disclosure {
+        let Some(focused) = self.disclosure.focused.as_ref() else {
+            return;
+        };
+        if !layout.disclosure || !ids.iter().any(|id| focused.ids.contains(id)) {
             return;
         }
-        if layout.disclosure_row() == Some(row) {
-            let columns = layout.disclosure_columns();
+        let target = &focused.target;
+        if let Some((control_row, columns, _)) = layout.fold_position(target)
+            && control_row == row
+        {
             buf.set_style(
                 Rect::new(
                     area.x + columns.start,
@@ -128,7 +135,7 @@ impl TranscriptView {
                     .bold()
                     .remove_modifier(Modifier::DIM),
             );
-        } else if row == usize::from(layout.separated) {
+        } else if *target == FoldTarget::Activity && row == usize::from(layout.separated) {
             buf.set_style(area, Style::default().underlined());
         }
     }
@@ -148,17 +155,17 @@ impl TranscriptView {
         else {
             return false;
         };
-        if visible.layout.disclosure_row() != Some(visible.row)
-            || column
-                .checked_sub(self.area.x)
-                .is_none_or(|column| !visible.layout.disclosure_columns().contains(&column))
-        {
-            return false;
-        }
-        let Some(index) = self.canonical_activity_index(cells, &visible.activity_ids) else {
+        let Some(target) = column
+            .checked_sub(self.area.x)
+            .and_then(|column| visible.layout.fold_at(visible.row, column))
+        else {
             return false;
         };
-        self.toggle_activity(cells, index);
+        let ids = Arc::clone(&visible.activity_ids);
+        let Some(index) = self.canonical_fold_index(cells, &ids, &target) else {
+            return false;
+        };
+        self.toggle_activity(cells, index, target);
         true
     }
 
@@ -190,12 +197,8 @@ impl TranscriptView {
             }
             return Some(ViewAction::Changed);
         }
-        let focused = self
-            .disclosure
-            .focused
-            .as_ref()
-            .and_then(|ids| self.canonical_activity_index(cells, ids));
-        let Some(focused) = focused else {
+        let focus = self.disclosure.focused.clone()?;
+        let Some(focused) = self.canonical_fold_index(cells, &focus.ids, &focus.target) else {
             self.disclosure.focused = None;
             return None;
         };
@@ -206,11 +209,12 @@ impl TranscriptView {
         };
         match action {
             ListAction::Cancel => self.disclosure.focused = None,
-            ListAction::Accept => self.toggle_activity(cells, focused),
+            ListAction::Accept => self.toggle_activity(cells, focused, focus.target),
             ListAction::MoveLeft | ListAction::MoveRight => {
-                let ids = self.activity_ids(cells, focused);
+                let target = focus.target;
+                let ids = target.ids(&self.activity_ids(cells, focused));
                 if self.disclosure.is_expanded(&ids) != (action == ListAction::MoveRight) {
-                    self.toggle_activity(cells, focused);
+                    self.toggle_activity(cells, focused, target);
                 }
             }
             ListAction::MoveUp
@@ -219,45 +223,7 @@ impl TranscriptView {
             | ListAction::PageDown
             | ListAction::JumpTop
             | ListAction::JumpBottom => {
-                let (mut range, backwards, steps) = match action {
-                    ListAction::MoveUp => (0..focused, true, 1),
-                    ListAction::PageUp => (0..focused, true, 5),
-                    ListAction::JumpTop => (0..cells.len() + 1, false, 1),
-                    ListAction::MoveDown => (focused + 1..cells.len() + 1, false, 1),
-                    ListAction::PageDown => (focused + 1..cells.len() + 1, false, 5),
-                    ListAction::JumpBottom => (0..cells.len() + 1, true, 1),
-                    ListAction::MoveLeft
-                    | ListAction::MoveRight
-                    | ListAction::Accept
-                    | ListAction::Cancel => unreachable!(),
-                };
-                let mut next = focused;
-                for _ in 0..steps {
-                    let candidate = if backwards {
-                        range
-                            .by_ref()
-                            .rev()
-                            .find(|index| !self.activity_ids(cells, *index).is_empty())
-                    } else {
-                        range
-                            .by_ref()
-                            .find(|index| !self.activity_ids(cells, *index).is_empty())
-                    };
-                    let Some(index) = candidate else { break };
-                    next = index;
-                }
-                loop {
-                    if self.focus_activity(cells, next) {
-                        break;
-                    }
-                    let candidate = if backwards {
-                        range.next_back()
-                    } else {
-                        range.next()
-                    };
-                    let Some(index) = candidate else { break };
-                    next = index;
-                }
+                self.navigate_folds(cells, focused, action);
             }
         }
         Some(ViewAction::Changed)
@@ -290,29 +256,81 @@ impl TranscriptView {
         })
     }
 
-    fn focus_activity(&mut self, cells: &[Arc<dyn HistoryCell>], index: usize) -> bool {
-        if self
-            .current_layout(cells, index)
-            .is_none_or(|layout| !layout.disclosure)
+    fn canonical_fold_index(
+        &mut self,
+        cells: &[Arc<dyn HistoryCell>],
+        ids: &[String],
+        target: &FoldTarget,
+    ) -> Option<usize> {
+        let candidate = self.canonical_activity_index(cells, ids)?;
+        if *target == FoldTarget::Activity
+            || self
+                .current_layout(cells, candidate)
+                .is_some_and(|layout| layout.fold_position(target).is_some())
         {
-            return false;
+            return Some(candidate);
         }
+        // A historical group can split across pages. Resolve its part, not the first shared ID.
+        (0..=cells.len()).find(|index| {
+            self.activity_ids(cells, *index)
+                .iter()
+                .any(|id| ids.contains(id))
+                && self
+                    .current_layout(cells, *index)
+                    .is_some_and(|layout| layout.fold_position(target).is_some())
+        })
+    }
+
+    fn focus_activity(&mut self, cells: &[Arc<dyn HistoryCell>], index: usize) -> bool {
+        let Some(target) = self
+            .current_layout(cells, index)
+            .and_then(|layout| layout.fold_targets().into_iter().next())
+        else {
+            return false;
+        };
+        self.focus_fold(cells, index, target)
+    }
+
+    pub(super) fn focus_fold(
+        &mut self,
+        cells: &[Arc<dyn HistoryCell>],
+        index: usize,
+        target: FoldTarget,
+    ) -> bool {
+        let Some((control_row, _, offset)) = self
+            .current_layout(cells, index)
+            .and_then(|layout| layout.fold_position(&target))
+        else {
+            return false;
+        };
         // Activity traversal follows current entries, not the aliases in a frozen live/group revision.
         self.release_live_reading();
         let ids = self.activity_ids(cells, index);
         let key = cells.get(index).map_or(EntryKey::Live, EntryKey::cell);
-        let header_visible = self.visible.iter().any(|row| {
-            row.layout.disclosure && row.key == key && row.row == usize::from(row.layout.separated)
-        });
-        self.disclosure.focused = Some(ids);
+        let header_visible = self
+            .visible
+            .iter()
+            .any(|row| row.key == key && row.row == control_row);
+        self.disclosure.focused = Some(ActivityFocus { ids, target });
         if !header_visible {
-            self.jump_to_entry(cells, index);
+            self.position = Position::Reading(Anchor {
+                key,
+                index,
+                offset,
+                row_bias: 0,
+            });
         }
         true
     }
 
-    fn toggle_activity(&mut self, cells: &[Arc<dyn HistoryCell>], index: usize) {
-        let ids = self.activity_ids(cells, index);
+    fn toggle_activity(
+        &mut self,
+        cells: &[Arc<dyn HistoryCell>],
+        index: usize,
+        target: FoldTarget,
+    ) {
+        let activity_ids = self.activity_ids(cells, index);
+        let ids = target.ids(&activity_ids);
         if ids.is_empty() {
             return;
         }
@@ -352,7 +370,10 @@ impl TranscriptView {
         } else {
             self.disclosure.expanded.extend(ids.iter().cloned());
         }
-        self.disclosure.focused = Some(ids);
+        self.disclosure.focused = Some(ActivityFocus {
+            ids: activity_ids,
+            target,
+        });
         self.position = Position::Reading(anchor);
         self.cache.clear();
         self.live_key = None;

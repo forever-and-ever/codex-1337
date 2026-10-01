@@ -21,6 +21,7 @@ pub(crate) struct ActivityTranscriptLines {
     pub(crate) auxiliary: Vec<HyperlinkLine>,
     pub(crate) tool_output_tokens: Option<u64>,
     pub(crate) disclosure: Option<ActivityDisclosure>,
+    pub(crate) controls: Vec<crate::history_cell::activity_parts::PartControl>,
 }
 
 /// Keep disclosure controls outside selectable source without rendering hidden details.
@@ -57,15 +58,10 @@ pub(super) fn activity_layout(
     }
     let estimate = lines
         .tool_output_tokens
-        .map(|tokens| {
-            let tokens = codex_protocol::num_format::format_with_separators(
-                i64::try_from(tokens).unwrap_or(i64::MAX),
-            );
-            format!(" (~ {tokens} tokens)")
-        })
+        .map(crate::history_cell::activity_parts::token_label)
         .filter(|label| label.len() + 4 + heading_width + 3 <= usize::from(width));
     // Reserve the estimate before clipping, so invocation arguments never wrap collapsed.
-    if !expanded {
+    if !expanded && !lines.controls.iter().any(|control| control.expanded) {
         for (index, header) in lines.activity.iter_mut().enumerate() {
             let estimate_width = if index == 0 {
                 estimate.as_ref().map_or(0, String::len)
@@ -113,11 +109,16 @@ pub(super) fn activity_layout(
             layout.with_activity_estimate(estimate)
         };
     }
-    if !has_details {
-        return layout;
+    if has_details {
+        layout = layout.with_leading_disclosure_control(
+            if expanded { "[-]" } else { "[+]" }.into(),
+            control_line,
+        );
+    }
+    for part in lines.controls {
+        layout = layout.with_part_control(part);
     }
     layout
-        .with_leading_disclosure_control(if expanded { "[-]" } else { "[+]" }.into(), control_line)
 }
 
 #[derive(Default)]
@@ -249,8 +250,28 @@ impl TranscriptView {
             .disclosure
             .keymap
             .primary_hint(KeymapContext::Global, "open_transcript");
+        let expanded_parts = &self.disclosure.expanded;
         Some(self.cache.get(cell, width, presentation, || {
             if disclosure {
+                let reserve = tool_output_tokens
+                    .map(crate::history_cell::activity_parts::token_label)
+                    .map_or(0, |label| label.len());
+                if let Some(parts) =
+                    cell.activity_parts(width.saturating_sub(4), reserve, expanded_parts)
+                {
+                    return activity_layout(
+                        ActivityTranscriptLines {
+                            activity: parts.lines,
+                            auxiliary: Vec::new(),
+                            tool_output_tokens,
+                            disclosure: parts.output,
+                            controls: parts.controls,
+                        },
+                        width,
+                        expanded,
+                        shortcut,
+                    );
+                }
                 let mut activity = if expanded {
                     cell.expanded_hyperlink_lines(width)
                 } else {
@@ -268,6 +289,7 @@ impl TranscriptView {
                         auxiliary: Vec::new(),
                         tool_output_tokens,
                         disclosure,
+                        controls: Vec::new(),
                     },
                     width,
                     expanded,

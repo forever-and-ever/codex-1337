@@ -11,6 +11,7 @@
 //! rendered transcript output can change.
 
 mod activity_group;
+pub(crate) mod activity_parts;
 mod delegation;
 mod returned_output;
 pub(crate) use activity_group::ActivityGroup;
@@ -275,6 +276,15 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
     /// Whether the compact action omits invocation text that expansion can recover.
     fn activity_arguments_truncated(&self, _width: u16) -> bool {
         false
+    }
+
+    fn activity_parts(
+        &self,
+        _width: u16,
+        _header_reserve: usize,
+        _expanded: &std::collections::HashSet<String>,
+    ) -> Option<activity_parts::ActivityParts> {
+        None
     }
 
     /// Details an activity offers beyond its compact presentation, if any.

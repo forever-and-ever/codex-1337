@@ -17,6 +17,8 @@ impl ChatWidget {
         &self,
         width: u16,
         expanded: bool,
+        expanded_parts: &std::collections::HashSet<String>,
+        tool_output_tokens: Option<u64>,
     ) -> Option<ActivityTranscriptLines> {
         let active = self.transcript.active_cell.as_deref();
         let mode = self.history_render_mode();
@@ -31,16 +33,30 @@ impl ChatWidget {
         };
         let has_activity = mode == HistoryRenderMode::Rich
             && active.is_some_and(|cell| !cell.activity_ids().is_empty());
-        let activity = active.map_or_else(Vec::new, |cell| {
-            if expanded && has_activity {
-                cell.expanded_hyperlink_lines(width)
-            } else {
-                render_compact(cell, width)
-            }
+        let parts = active.filter(|_| has_activity).and_then(|cell| {
+            cell.activity_parts(
+                width.saturating_sub(4),
+                tool_output_tokens
+                    .map(history_cell::activity_parts::token_label)
+                    .map_or(0, |label| label.len()),
+                expanded_parts,
+            )
         });
-        let disclosure = active
-            .filter(|_| has_activity)
-            .and_then(|cell| cell.activity_disclosure(width));
+        let (activity, disclosure, controls) = if let Some(parts) = parts {
+            (parts.lines, parts.output, parts.controls)
+        } else {
+            let activity = active.map_or_else(Vec::new, |cell| {
+                if expanded && has_activity {
+                    cell.expanded_hyperlink_lines(width)
+                } else {
+                    render_compact(cell, width)
+                }
+            });
+            let disclosure = active
+                .filter(|_| has_activity)
+                .and_then(|cell| cell.activity_disclosure(width));
+            (activity, disclosure, Vec::new())
+        };
         let mut auxiliary = self
             .active_cell_hyperlink_lines_with(width, |cell, width| {
                 if active.is_some_and(|active| std::ptr::eq(active, cell)) {
@@ -59,8 +75,9 @@ impl ChatWidget {
         Some(ActivityTranscriptLines {
             activity,
             auxiliary,
-            tool_output_tokens: None,
+            tool_output_tokens,
             disclosure,
+            controls,
         })
     }
 }

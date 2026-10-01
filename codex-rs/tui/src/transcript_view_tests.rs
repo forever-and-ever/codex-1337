@@ -90,8 +90,9 @@ fn terminal_output_disclosure_follows_live_history_and_keymap() {
         /*width*/ 72,
         /*key*/ None,
         /*expanded*/ false,
-        |width| {
+        |width, _| {
             Some(ActivityTranscriptLines {
+                controls: Vec::new(),
                 activity: cell.compact_hyperlink_lines(width),
                 auxiliary: Vec::new(),
                 disclosure: cell.activity_disclosure(width),
