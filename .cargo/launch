@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+CODEX_REPO_ROOT="$root" PYTHONPATH="$root/scripts" \
+    exec python3 -m codex_package.launch "$@"

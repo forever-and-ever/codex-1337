@@ -79,6 +79,11 @@ on pinned Cargo without changing rustc's channel. Do not set `RUSTFLAGS`,
 Our root Cargo config owns clang+mold and sccache; fix that configuration instead
 of creating another dependency graph. Linked worktrees share these settings.
 
+The wrapper invokes `.cargo/launch` for builds, including language-server builds.
+It uses the packaging resolver for the V8 version in `Cargo.lock`, paired bindings
+and trusted checksums. Metadata/configuration probes do not fetch artifacts.
+Keep V8 artifact policy in `scripts/codex_package/v8.py`.
+
 Use the default dev/test profiles for focused checks and `scripts/install-local`
 for installs (`local` profile). Do not alternate ad hoc profiles. Keep `-p`/test
 filters narrow: workspace feature unification stabilizes dependencies without

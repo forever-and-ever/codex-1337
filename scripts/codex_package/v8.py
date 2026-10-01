@@ -30,23 +30,30 @@ def resolve_codex_v8_cargo_env(
     cache_root: Path | None = None,
 ) -> dict[str, str]:
     environ = os.environ if environ is None else environ
-    if environ.get("V8_FROM_SOURCE") in {"true", "1", "yes"}:
+    if not needs_codex_v8_artifacts(environ):
         return {}
-
-    archive_override = environ.get("RUSTY_V8_ARCHIVE")
-    binding_override = environ.get("RUSTY_V8_SRC_BINDING_PATH")
-    if archive_override and binding_override:
-        return {}
-    if archive_override or binding_override:
-        raise RuntimeError(
-            "Cargo package builds need RUSTY_V8_ARCHIVE and RUSTY_V8_SRC_BINDING_PATH set together."
-        )
 
     artifacts = fetch_codex_v8_artifacts(spec, cache_root=cache_root)
     return {
         "RUSTY_V8_ARCHIVE": str(artifacts.archive),
         "RUSTY_V8_SRC_BINDING_PATH": str(artifacts.binding),
     }
+
+
+def needs_codex_v8_artifacts(environ: Mapping[str, str]) -> bool:
+    if environ.get("V8_FROM_SOURCE") in {"true", "1", "yes"}:
+        return False
+
+    archive_override = environ.get("RUSTY_V8_ARCHIVE")
+    binding_override = environ.get("RUSTY_V8_SRC_BINDING_PATH")
+    if archive_override and binding_override:
+        return False
+    if archive_override or binding_override:
+        raise RuntimeError(
+            "Cargo package builds need RUSTY_V8_ARCHIVE and RUSTY_V8_SRC_BINDING_PATH set together."
+        )
+
+    return True
 
 
 def fetch_codex_v8_artifacts(
