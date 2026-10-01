@@ -6,6 +6,7 @@ use crate::outgoing_message::ConnectionId;
 use crate::outgoing_message::OutgoingMessageSender;
 use crate::plugin_config_reload::PluginStartupConfig;
 use codex_analytics::AppServerRpcTransport;
+use codex_app_server_protocol::RequestId;
 use codex_arg0::Arg0DispatchPaths;
 use codex_config::CloudConfigBundleLoader;
 use codex_config::LoaderOverrides;
