@@ -453,7 +453,9 @@ fn collab_event(title: Line<'static>, details: Vec<Line<'static>>) -> PlainHisto
     if !details.is_empty() {
         lines.extend(prefix_lines(details, "  └ ".dim(), "    ".into()));
     }
-    PlainHistoryCell::new(lines)
+    let mut cell = PlainHistoryCell::new(lines);
+    cell.tool_entry = true;
+    cell
 }
 
 fn title_text(title: impl Into<String>) -> Line<'static> {

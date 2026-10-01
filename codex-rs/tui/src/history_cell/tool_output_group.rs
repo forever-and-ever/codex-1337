@@ -326,9 +326,11 @@ impl HistoryCell for ToolOutputGroup {
             lines.extend(cell.compact_hyperlink_lines(width));
         }
         if lines.is_empty() {
+            // A code-only call can yield before finishing; its last return owns the status.
             return self
                 .members
                 .iter()
+                .rev()
                 .find_map(|cell| {
                     let preview = cell.compact_hyperlink_lines(width);
                     (!preview.is_empty()).then_some(preview)

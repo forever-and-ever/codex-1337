@@ -2,6 +2,7 @@
 
 use super::HistoryCell;
 use super::raw_lines_from_source;
+use super::returned_output::WaitOutcome;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::terminal_hyperlinks::adaptive_wrap_hyperlink_lines;
 use crate::terminal_hyperlinks::plain_hyperlink_lines;
@@ -18,6 +19,7 @@ pub(crate) struct ToolOutputCell {
     call_id: String,
     output: FunctionCallOutputBody,
     readable: String,
+    wait: Option<WaitOutcome>,
 }
 
 impl ToolOutputCell {
@@ -36,28 +38,38 @@ impl ToolOutputCell {
         namespace: Option<&str>,
         output: &FunctionCallOutputBody,
     ) -> Option<Self> {
-        (namespace.is_none() && matches!(name, "exec" | "wait")).then(|| Self {
+        if namespace.is_some() || !matches!(name, "exec" | "wait") {
+            return None;
+        }
+        let readable = match output {
+            FunctionCallOutputBody::Text(text) => {
+                super::returned_output::readable_output(text).into_owned()
+            }
+            FunctionCallOutputBody::ContentItems(items) => items
+                .iter()
+                .map(|item| match item {
+                    FunctionCallOutputContentItem::InputText { text } => {
+                        super::returned_output::readable_output(text).into_owned()
+                    }
+                    FunctionCallOutputContentItem::InputImage { .. } => "<image>".into(),
+                    FunctionCallOutputContentItem::InputAudio { .. } => "<audio>".into(),
+                    FunctionCallOutputContentItem::EncryptedContent { .. } => String::new(),
+                })
+                .filter(|text| !text.trim().is_empty())
+                .collect::<Vec<_>>()
+                .join("\n"),
+        };
+        let wait = if readable.trim().is_empty() {
+            super::returned_output::empty_wait_outcome(name, output)
+        } else {
+            (name == "wait").then_some(WaitOutcome::Unknown)
+        };
+        Some(Self {
             id: id.to_owned(),
             call_id: call_id.unwrap_or(id).to_owned(),
             output: output.clone(),
-            readable: match output {
-                FunctionCallOutputBody::Text(text) => {
-                    super::returned_output::readable_output(text).into_owned()
-                }
-                FunctionCallOutputBody::ContentItems(items) => items
-                    .iter()
-                    .map(|item| match item {
-                        FunctionCallOutputContentItem::InputText { text } => {
-                            super::returned_output::readable_output(text).into_owned()
-                        }
-                        FunctionCallOutputContentItem::InputImage { .. } => "<image>".into(),
-                        FunctionCallOutputContentItem::InputAudio { .. } => "<audio>".into(),
-                        FunctionCallOutputContentItem::EncryptedContent { .. } => String::new(),
-                    })
-                    .filter(|text| !text.trim().is_empty())
-                    .collect::<Vec<_>>()
-                    .join("\n"),
-            },
+            readable,
+            wait,
         })
     }
 }
@@ -77,7 +89,24 @@ impl HistoryCell for ToolOutputCell {
 
     fn display_lines(&self, _width: u16) -> Vec<Line<'static>> {
         // A code-only batch has no nested action header, but its retained result must be reachable.
-        vec![vec!["• ".dim(), "Returned".bold()].into()]
+        let heading = if self.wait.is_some() {
+            "Waited"
+        } else {
+            "Returned"
+        };
+        let mut spans = vec!["• ".dim(), heading.bold()];
+        let status = match &self.wait {
+            Some(WaitOutcome::Running) => Some("still running".into()),
+            Some(WaitOutcome::Completed) => Some("finished".into()),
+            Some(WaitOutcome::Exited(code)) => Some(format!("finished, exit {code}")),
+            Some(WaitOutcome::Failed) => Some("failed".into()),
+            Some(WaitOutcome::Terminated) => Some("terminated".into()),
+            Some(WaitOutcome::Unknown) | None => None,
+        };
+        if let Some(status) = status {
+            spans.push(format!(" · {status}").dim());
+        }
+        vec![spans.into()]
     }
 
     fn expanded_hyperlink_lines(

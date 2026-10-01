@@ -263,6 +263,11 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
         Vec::new()
     }
 
+    /// Tool and agent lifecycle entries share compact spacing, even without a disclosure.
+    fn is_tool_entry(&self) -> bool {
+        !self.activity_ids().is_empty()
+    }
+
     /// Enclosing model tool call, when its returned output supplies explicit ownership.
     fn outer_call_id(&self) -> Option<&str> {
         None

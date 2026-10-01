@@ -7,6 +7,7 @@ use super::*;
 pub(crate) struct PlainHistoryCell {
     pub(super) lines: Vec<Line<'static>>,
     pub(crate) timestamp: Option<HistoryTimestamp>,
+    pub(crate) tool_entry: bool,
 }
 
 impl PlainHistoryCell {
@@ -14,11 +15,16 @@ impl PlainHistoryCell {
         Self {
             lines,
             timestamp: None,
+            tool_entry: false,
         }
     }
 }
 
 impl HistoryCell for PlainHistoryCell {
+    fn is_tool_entry(&self) -> bool {
+        self.tool_entry
+    }
+
     fn display_lines(&self, _width: u16) -> Vec<Line<'static>> {
         let mut lines = self.lines.clone();
         if let Some(timestamp) = self.timestamp

@@ -643,3 +643,7 @@ mod copy_on_select_tests;
 #[cfg(test)]
 #[path = "transcript_view/command_parts_tests.rs"]
 mod command_parts_tests;
+
+#[cfg(test)]
+#[path = "transcript_view/tool_entries_tests.rs"]
+mod tool_entries_tests;

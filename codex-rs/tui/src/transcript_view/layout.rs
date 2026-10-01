@@ -206,7 +206,7 @@ impl TranscriptView {
             }
             let live = self.live.as_ref()?;
             let follows_tool_entry = !self.disclosure.live_ids.is_empty()
-                && previous.is_some_and(|cell| !cell.activity_ids().is_empty());
+                && previous.is_some_and(|cell| cell.is_tool_entry());
             if cells.is_empty() || self.live_continuation || follows_tool_entry {
                 return Some(Arc::clone(live));
             }
@@ -234,7 +234,7 @@ impl TranscriptView {
             && ToolOutputGroup::is_patch(cell.as_ref())
             && previous.is_some_and(|previous| ToolOutputGroup::is_patch(previous.as_ref()));
         let follows_tool_entry =
-            !ids.is_empty() && previous.is_some_and(|cell| !cell.activity_ids().is_empty());
+            cell.is_tool_entry() && previous.is_some_and(|cell| cell.is_tool_entry());
         if expanded {
             self.disclosure.expanded.extend(ids);
         }
@@ -296,15 +296,25 @@ impl TranscriptView {
                     shortcut,
                 )
             } else {
-                TextLayout::new(
-                    crate::history_cell::fullscreen_session_lines(
-                        cell.as_ref(),
-                        width,
-                        detailed,
-                        mode,
-                    ),
+                let lines = crate::history_cell::fullscreen_session_lines(
+                    cell.as_ref(),
                     width,
-                )
+                    detailed,
+                    mode,
+                );
+                // Opaque lifecycle entries use the same empty gutter, without inventing
+                // disclosure identities or an expansion button for a clipped heading.
+                let lines = if !detailed && mode == HistoryRenderMode::Rich && cell.is_tool_entry()
+                {
+                    crate::terminal_hyperlinks::prefix_hyperlink_lines(
+                        lines,
+                        "    ".into(),
+                        "    ".into(),
+                    )
+                } else {
+                    lines
+                };
+                TextLayout::new(lines, width)
             }
         }))
     }

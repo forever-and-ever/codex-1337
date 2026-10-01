@@ -4,6 +4,9 @@
 Edited, etc. Consecutive tool entries are contiguous, including the live tail;
 ordinary messages retain their surrounding separation. Expanded bodies retain
 their internal formatting.
+Subagent lifecycle entries share this spacing even when they have no expandable body.
+Standalone wait/poll results use **Waited** with their known running/exit status;
+**Returned** is reserved for other Code Mode results without an action header.
 
 `[+]` means hidden output, a diff, or a truncated invocation. Empty results with
 fully visible invocations have no control. Normal expansion omits execution
