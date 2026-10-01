@@ -11,7 +11,7 @@ envelopes and serialized result wrappers; each file expands only its own diff.
 
 Shell activity uses source-preserving command rows. Named Read/Search/List labels
 are row summaries, not separate grouping or lifecycle types. The header owns the
-combined output fold and token bill; each abbreviated command owns its source fold.
+combined output fold and token bill; only truncated opaque commands own source folds.
 Only outer `;`, `&&` and `||` split a script, with connectors retained on their rows.
 
 Adjacent edits share one **Edited** heading, but each file retains its own

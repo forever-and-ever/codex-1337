@@ -1,33 +1,30 @@
 ---
 source: tui/src/transcript_view/command_parts_tests.rs
-assertion_line: 58
 expression: "snapshots.join(\"\\n\\n\")"
 ---
 collapsed
 [+] • Ran (~ 2,352 tokens)
-[+]   Read main.rs:10–20;
+      Read main.rs:10–20;
+      Search TODO in src;
+      List src;
 [+]   git diff --stat --ignore-all-space -- src/very_long_... &&
       echo 'not;a&&boundary'
 
 output only
 [-] • Ran (~ 2,352 tokens)
-[+]   Read main.rs:10–20;
+      Read main.rs:10–20;
+      Search TODO in src;
+      List src;
 [+]   git diff --stat --ignore-all-space -- src/very_long_... &&
       echo 'not;a&&boundary'
 
       combined output
 
-read command expanded
+opaque command expanded
 [-] • Ran (~ 2,352 tokens)
-[-]   sed -n '10,20p' src/main.rs;
-[+]   git diff --stat --ignore-all-space -- src/very_long_... &&
-      echo 'not;a&&boundary'
-
-      combined output
-
-both command folds expanded
-[-] • Ran (~ 2,352 tokens)
-[-]   sed -n '10,20p' src/main.rs;
+      Read main.rs:10–20;
+      Search TODO in src;
+      List src;
 [-]   git diff --stat --ignore-all-space -- src/
       very_long_directory_name &&
       echo 'not;a&&boundary'
@@ -36,7 +33,9 @@ both command folds expanded
 
 narrow
 [-] • Ran (~ 2,352 tokens)
-[-]   sed -n '10,20p' src/main.rs;
+      Read main.rs:10–20;
+      Search TODO in src;
+      List src;
 [-]   git diff --stat --ignore-all-space
       -- src/very_long_directory_name &&
       echo 'not;a&&boundary'
@@ -45,15 +44,19 @@ narrow
 
 wide
 [-] • Ran (~ 2,352 tokens)
-[-]   sed -n '10,20p' src/main.rs;
+      Read main.rs:10–20;
+      Search TODO in src;
+      List src;
 [-]   git diff --stat --ignore-all-space -- src/very_long_directory_name &&
       echo 'not;a&&boundary'
 
       combined output
 
-commands open, output closed
+opaque command open, output closed
 [+] • Ran (~ 2,352 tokens)
-[-]   sed -n '10,20p' src/main.rs;
+      Read main.rs:10–20;
+      Search TODO in src;
+      List src;
 [-]   git diff --stat --ignore-all-space -- src/
       very_long_directory_name &&
       echo 'not;a&&boundary'

@@ -568,8 +568,9 @@ fn empty_tool_disclosures_follow_invocation_truncation() {
                 assert!(view.current_layout(&cells, /*index*/ 0).unwrap().disclosure);
                 let layout = view.current_layout(&cells, /*index*/ 0).unwrap();
                 let source = layout.text();
-                assert!(source.contains(script));
-                if !output.is_empty() {
+                if output.is_empty() {
+                    assert!(source.contains(script));
+                } else {
                     assert!(source.contains(output));
                 }
                 snapshots.push(format!(

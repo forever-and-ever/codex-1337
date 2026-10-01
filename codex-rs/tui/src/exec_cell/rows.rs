@@ -196,16 +196,16 @@ pub(crate) fn command_parts(
                     continue;
                 }
                 let id = row_id(call, row);
-                let open = expanded.contains(&id);
+                let open = row.summary.is_none() && expanded.contains(&id);
                 let connector = row.segment.connector.map_or("", Connector::suffix);
                 let available = usize::from(width).saturating_sub(2 + connector.len());
-                let mut source_lines = highlight_bash_to_lines(source);
-                let preview = row
+                let mut source_lines = row
                     .summary
                     .clone()
-                    .unwrap_or_else(|| source_lines.first().cloned().unwrap_or_default());
+                    .map_or_else(|| highlight_bash_to_lines(source), |summary| vec![summary]);
+                let preview = source_lines.first().cloned().unwrap_or_default();
                 let clipped = preview.width() > available || source_lines.len() > 1;
-                if open || clipped || row.summary.is_some() {
+                if row.summary.is_none() && (open || clipped) {
                     controls.push(PartControl {
                         id,
                         line: lines.len(),

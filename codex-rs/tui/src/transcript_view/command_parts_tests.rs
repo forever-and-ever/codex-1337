@@ -12,7 +12,7 @@ use std::time::Duration;
 
 #[test]
 fn shell_rows_share_output_but_have_independent_source_folds() {
-    let script = "sed -n '10,20p' src/main.rs; git diff --stat --ignore-all-space -- src/very_long_directory_name && echo 'not;a&&boundary'";
+    let script = "sed -n '10,20p' src/main.rs; rg 'TODO' src; ls src; git diff --stat --ignore-all-space -- src/very_long_directory_name && echo 'not;a&&boundary'";
     let command = vec!["bash".into(), "-lc".into(), script.into()];
     let mut cell = new_active_exec_command(
         "train".into(),
@@ -44,7 +44,7 @@ fn shell_rows_share_output_but_have_independent_source_folds() {
         .current_layout(&cells, /*index*/ 0)
         .unwrap()
         .fold_targets();
-    assert_eq!(targets.len(), 3);
+    assert_eq!(targets.len(), 2);
     assert_eq!(targets[0], FoldTarget::Activity);
     assert!(view.toggle_disclosure_at(&cells, /*column*/ 0, /*row*/ 0));
     render(&mut view, "output only", 64);
@@ -52,12 +52,11 @@ fn shell_rows_share_output_but_have_independent_source_folds() {
     for code in [KeyCode::Down, KeyCode::Enter] {
         view.handle_key(key(code), &cells);
     }
-    render(&mut view, "read command expanded", 64);
-    for code in [KeyCode::Down, KeyCode::Enter, KeyCode::Down, KeyCode::Down] {
+    for code in [KeyCode::Down, KeyCode::Down] {
         view.handle_key(key(code), &cells);
     }
-    assert_eq!(view.disclosure.focused.as_ref().unwrap().target, targets[2]);
-    render(&mut view, "both command folds expanded", 64);
+    assert_eq!(view.disclosure.focused.as_ref().unwrap().target, targets[1]);
+    render(&mut view, "opaque command expanded", 64);
     let layout = view.current_layout(&cells, /*index*/ 0).unwrap();
     assert!(
         layout
@@ -67,12 +66,12 @@ fn shell_rows_share_output_but_have_independent_source_folds() {
     assert_eq!(layout.text().matches("combined output").count(), 1);
     render(&mut view, "narrow", 40);
     render(&mut view, "wide", 110);
-    for code in [KeyCode::Up, KeyCode::Up, KeyCode::Up] {
+    for code in [KeyCode::Up, KeyCode::Up] {
         view.handle_key(key(code), &cells);
     }
     assert_eq!(view.disclosure.focused.as_ref().unwrap().target, targets[0]);
     view.handle_key(key(KeyCode::Enter), &cells);
-    render(&mut view, "commands open, output closed", 64);
+    render(&mut view, "opaque command open, output closed", 64);
     assert!(
         !view
             .current_layout(&cells, /*index*/ 0)
