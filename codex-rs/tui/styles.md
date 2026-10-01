@@ -1,3 +1,10 @@
+# Transcript entries
+
+**Tool entries** are the action/result records headed by Ran, Explored, Called,
+Edited, etc. Consecutive tool entries are contiguous, including the live tail;
+ordinary messages retain their surrounding separation. Expanded bodies retain
+their internal formatting.
+
 # Headers, primary, and secondary text
 
 - **Headers:** Use `bold`. For markdown with various header levels, leave in the `#` signs.

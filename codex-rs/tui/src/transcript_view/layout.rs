@@ -179,7 +179,11 @@ impl TranscriptView {
                 return None;
             }
             let live = self.live.as_ref()?;
-            if cells.is_empty() || self.live_continuation {
+            let follows_tool_entry = !self.disclosure.live_ids.is_empty()
+                && cells
+                    .last()
+                    .is_some_and(|cell| !cell.activity_ids().is_empty());
+            if cells.is_empty() || self.live_continuation || follows_tool_entry {
                 return Some(Arc::clone(live));
             }
             let width = self.area.width.max(/*other*/ 1);
@@ -201,10 +205,15 @@ impl TranscriptView {
         let disclosure = !detailed && mode == HistoryRenderMode::Rich && !ids.is_empty();
         let expanded = disclosure && self.disclosure.is_expanded(&ids);
         let tool_output_tokens = self.activity_output_tokens(&ids);
+        let follows_tool_entry = !ids.is_empty()
+            && index
+                .checked_sub(1)
+                .and_then(|index| cells.get(index))
+                .is_some_and(|cell| !cell.activity_ids().is_empty());
         if expanded {
             self.disclosure.expanded.extend(ids);
         }
-        let separated = index > 0 && !cell.is_stream_continuation();
+        let separated = index > 0 && !cell.is_stream_continuation() && !follows_tool_entry;
         let presentation = CellPresentation {
             separated,
             turn_tip_space: self.turn_tip_key == Some(EntryKey::cell(cell)),

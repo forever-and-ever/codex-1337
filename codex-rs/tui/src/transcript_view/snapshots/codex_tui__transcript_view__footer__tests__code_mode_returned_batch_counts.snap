@@ -1,6 +1,6 @@
 ---
 source: tui/src/transcript_view/footer_tests.rs
-assertion_line: 462
+assertion_line: 494
 expression: "snapshots.join(\"\\n\")"
 ---
 expanded=false
@@ -8,8 +8,8 @@ Buffer {
     area: Rect { x: 0, y: 0, width: 80, height: 10 },
     content: [
         "[+] • Returned (~ 1,000 tokens)                                                 ",
-        "                                                                                ",
         "[+] • Returned (~ 280 tokens)                                                   ",
+        "                                                                                ",
         "                                                                                ",
         "                                                                                ",
         "                                                                                ",
@@ -25,12 +25,12 @@ Buffer {
         x: 6, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
         x: 14, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
         x: 31, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 0, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
-        x: 3, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 4, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
-        x: 6, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
-        x: 14, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
-        x: 29, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 3, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 4, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 6, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 14, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 29, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }
 expanded=true
@@ -40,10 +40,10 @@ Buffer {
         "[-] • Returned (~ 1,000 tokens)                                                 ",
         "      first returned batch                                                      ",
         "      Only emitted text, after truncation.                                      ",
-        "                                                                                ",
         "[-] • Returned (~ 280 tokens)                                                   ",
         "      second returned batch                                                     ",
         "      Only emitted text, after truncation.                                      ",
+        "                                                                                ",
         "                                                                                ",
         "                                                                                ",
         "                                                                                ",
@@ -55,11 +55,42 @@ Buffer {
         x: 6, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
         x: 14, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
         x: 31, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 0, y: 4, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
-        x: 3, y: 4, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 4, y: 4, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
-        x: 6, y: 4, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
-        x: 14, y: 4, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
-        x: 29, y: 4, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 3, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 4, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 6, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 14, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 29, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+    ]
+}
+message boundaries
+Buffer {
+    area: Rect { x: 0, y: 0, width: 80, height: 10 },
+    content: [
+        "Before tools                                                                    ",
+        "                                                                                ",
+        "[+] • Returned (~ 1,000 tokens)                                                 ",
+        "[+] • Returned (~ 280 tokens)                                                   ",
+        "                                                                                ",
+        "After tools                                                                     ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+    ],
+    styles: [
+        x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 3, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 4, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 6, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 14, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 31, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 3, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 4, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 6, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 14, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 29, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }

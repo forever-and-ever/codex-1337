@@ -244,13 +244,7 @@ impl HistoryCell for ToolOutputGroup {
             .iter()
             .filter(|cell| !cell.as_any().is::<ToolOutputCell>())
         {
-            let next = cell.compact_hyperlink_lines(width);
-            if !next.is_empty() {
-                if !lines.is_empty() {
-                    lines.push("".into());
-                }
-                lines.extend(next);
-            }
+            lines.extend(cell.compact_hyperlink_lines(width));
         }
         if lines.is_empty() {
             return self

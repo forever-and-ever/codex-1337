@@ -458,7 +458,42 @@ fn code_mode_batches_display_their_own_counts_and_replay_without_double_counting
         let mut buffer = Buffer::empty(area);
         view.render(area, &mut buffer, &cells);
         snapshots.push(format!("expanded={expanded}\n{buffer:?}"));
+
+        // Committing a live tool entry must not change the gap above its header.
+        let committed = &cells[..1];
+        let tail = &cells[1];
+        let ids = tail.activity_ids();
+        let tool_output_tokens = view.activity_output_tokens(&ids);
+        view.sync_live_activity(committed, ids);
+        view.sync_live_activity_tail(/*width*/ 80, /*key*/ None, expanded, |width| {
+            Some(ActivityTranscriptLines {
+                activity: if expanded {
+                    tail.expanded_hyperlink_lines(width)
+                } else {
+                    tail.compact_hyperlink_lines(width)
+                },
+                auxiliary: Vec::new(),
+                tool_output_tokens,
+                disclosure: tail.activity_disclosure(width),
+            })
+        });
+        let mut live_buffer = Buffer::empty(area);
+        view.render(area, &mut live_buffer, committed);
+        assert_eq!(live_buffer, buffer);
+        view.sync_live_activity(&cells, Vec::new());
+        view.sync_live_tail(/*width*/ 80, /*key*/ None, |_| None);
     }
+    let mut surrounded: Vec<Arc<dyn HistoryCell>> =
+        vec![Arc::new(PlainHistoryCell::new(vec!["Before tools".into()]))];
+    surrounded.extend(cells);
+    surrounded.push(Arc::new(PlainHistoryCell::new(vec!["After tools".into()])));
+    view.disclosure.expanded.clear();
+    let area = Rect::new(
+        /*x*/ 0, /*y*/ 0, /*width*/ 80, /*height*/ 10,
+    );
+    let mut buffer = Buffer::empty(area);
+    view.render(area, &mut buffer, &surrounded);
+    snapshots.push(format!("message boundaries\n{buffer:?}"));
     insta::assert_snapshot!("code_mode_returned_batch_counts", snapshots.join("\n"));
 }
 
