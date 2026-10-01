@@ -93,7 +93,7 @@ ritual: use the smallest existing test filter, snapshot, or smoke check that
 addresses the actual risk. Do not add tests merely because code changed.
 
 1. Do not run `cargo test` directly. Use `just test` so test execution follows the repo defaults.
-2. Prefer named tests or narrow filters within affected crates; do not automatically run an entire crate. Changes to common, core, or protocol do not trigger broader testing by themselves.
+2. Prefer named tests or narrow filters within affected crates; also select `--lib` or `--test <target>` when known. A name filter alone still compiles unrelated test binaries. Do not automatically run an entire crate. Changes to common, core, or protocol do not trigger broader testing by themselves.
 3. Full-workspace runs are a last resort: identify the concrete uncertainty a focused check cannot answer and obtain explicit user approval first. Avoid `--all-features` unless that feature matrix is specifically needed.
 4. Report exactly what ran, what failed, and what remains untested. Do not repeatedly rerun broad suites to chase timing failures on a loaded machine.
 
