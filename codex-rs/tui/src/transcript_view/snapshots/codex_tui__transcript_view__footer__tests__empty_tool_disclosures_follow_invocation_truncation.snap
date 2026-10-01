@@ -1,6 +1,6 @@
 ---
 source: tui/src/transcript_view/footer_tests.rs
-assertion_line: 563
+assertion_line: 598
 expression: "snapshots.join(\"\\n\\n\")"
 ---
 true, width=100
@@ -16,50 +16,47 @@ printf '%s' a_long_argument >/dev/null, width=100
     • Ran printf '%s' a_long_argument >/dev/null
 
 printf '%s' a_long_argument >/dev/null, width=44
-[+] • Ran printf '%s' a_long_argument >/d...
-
-expanded
-[-] • Ran
-    $ printf '%s' a_long_argument >/dev/null
+    • Ran
+      printf '%s' a_long_argument >/dev/null
 
 printf '%s' a_long_argument >/dev/null, width=24
-[+] • Ran printf '%s'...
+    • Ran
+[+]   printf '%s' a_l...
 
 expanded
-[-] • Ran
-    $ printf '%s'
-        a_long_argument
-        >/dev/null
+    • Ran
+[-]   printf '%s'
+      a_long_argument >/
+      dev/null
 
 cat config.json, width=100
 [+] • Explored
-      └ Read config.json (whole file)
+[+]   Read config.json (whole file)
 
 expanded
 [-] • Explored
-    $ cat config.json
+[-]   cat config.json
 
       {"content":[],"output":"real file data"}
 
 cat config.json, width=44
 [+] • Explored
-      └ Read config.json (whole file)
+[+]   Read config.json (whole file)
 
 expanded
 [-] • Explored
-    $ cat config.json
+[-]   cat config.json
 
       {"content":[],"output":"real file
       data"}
 
 cat config.json, width=24
 [+] • Explored
-      └ Read config.j...
-             file)
+[+]   Read config.jso...
 
 expanded
 [-] • Explored
-    $ cat config.json
+[-]   cat config.json
 
       {"content":
       [],"output":"real

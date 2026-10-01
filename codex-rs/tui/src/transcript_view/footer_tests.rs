@@ -550,14 +550,19 @@ fn empty_tool_disclosures_follow_invocation_truncation() {
             let mut buffer = Buffer::empty(area);
             view.render(area, &mut buffer, &cells);
             let layout = view.current_layout(&cells, /*index*/ 0).unwrap();
-            let expandable = script != "true" && (width != 100 || !output.is_empty());
+            let expandable = script != "true" && (width == 24 || !output.is_empty());
             assert_eq!(layout.disclosure, expandable);
             snapshots.push(format!(
                 "{script}, width={width}\n{}",
                 crate::transcript_view::tests::text(&buffer).trim_end()
             ));
             if expandable {
-                view.disclosure.expanded.extend(cells[0].activity_ids());
+                for target in layout.fold_targets() {
+                    view.disclosure
+                        .expanded
+                        .extend(target.ids(&cells[0].activity_ids()));
+                }
+                view.cache.clear();
                 view.jump_to_latest();
                 view.render(area, &mut buffer, &cells);
                 assert!(view.current_layout(&cells, /*index*/ 0).unwrap().disclosure);
@@ -649,10 +654,6 @@ fn mixed_shell_reads_share_one_disclosure_and_output_bill() {
         view.render(area, &mut buffer, &cells);
         let text = crate::transcript_view::tests::text(&buffer);
         assert_eq!(text.matches("(~ 1,280 tokens)").count(), 1);
-        assert_eq!(
-            text.matches(if expanded { "[-]" } else { "[+]" }).count(),
-            1
-        );
         snapshots.push(format!("expanded={expanded}\n{buffer:?}"));
     }
     insta::assert_snapshot!("mixed_shell_reads_shared_output", snapshots.join("\n"));

@@ -229,7 +229,7 @@ async fn exploration_reasoning_during_followup_command_stays_ordered() {
 }
 
 #[tokio::test]
-async fn adjacent_exploration_groups_across_reasoning_live_and_replayed() {
+async fn adjacent_command_groups_across_reasoning_live_and_replayed() {
     let mut renders = Vec::new();
     for replay in [false, true] {
         let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
@@ -312,7 +312,7 @@ async fn adjacent_exploration_groups_across_reasoning_live_and_replayed() {
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert_eq!(cells.len(), 5);
+        assert_eq!(cells.len(), 3);
         let mut render = String::new();
         for mode in ["Compact", "Expanded", "Raw"] {
             render.push_str(&format!("{mode}:\n"));
