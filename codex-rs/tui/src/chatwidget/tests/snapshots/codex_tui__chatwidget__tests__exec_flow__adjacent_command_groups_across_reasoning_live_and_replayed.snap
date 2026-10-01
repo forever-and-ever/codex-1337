@@ -1,66 +1,52 @@
 ---
 source: tui/src/chatwidget/tests/exec_flow.rs
-assertion_line: 332
+assertion_line: 331
 expression: "renders[0]"
 ---
 Compact:
-• Ran · failed
+• Explored · failed
   List missing
+• Explored
   Read index.html (whole file)
-  echo boundary
+• Ran echo boundary
+• Explored
   Read later.txt (whole file)
-
 • Checking one more file.
-
 • Explored
   Read final.txt (whole file)
-
 Expanded:
 $ ls missing
 list output
 ✗ (1) • 5ms
-
 • Inspecting the page
-
 • Checking its contents
-
 $ cat index.html
 read output
 ✓ • 5ms
-
 $ echo boundary
 run output
 ✓ • 5ms
-
 $ cat later.txt
 later output
 ✓ • 5ms
-
 • Checking one more file.
-
 $ cat final.txt
 after-message output
 ✓ • 5ms
-
 Raw:
 $ ls missing
 list output
 ✗ (1) • 5ms
-
 $ cat index.html
 read output
 ✓ • 5ms
-
 $ echo boundary
 run output
 ✓ • 5ms
-
 $ cat later.txt
 later output
 ✓ • 5ms
-
 Checking one more file.
-
 $ cat final.txt
 after-message output
 ✓ • 5ms

@@ -746,6 +746,7 @@ pub(crate) async fn record_pending_input(
                 .await;
             if let ResponseItem::FunctionCallOutput {
                 id: Some(id),
+                call_id,
                 name: Some(name),
                 namespace,
                 output,
@@ -754,6 +755,7 @@ pub(crate) async fn record_pending_input(
             {
                 let item = TurnItem::FunctionCallOutput(FunctionCallOutputItem {
                     id: id.to_string(),
+                    call_id,
                     name,
                     namespace,
                     output: output.body,

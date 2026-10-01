@@ -17,6 +17,12 @@ pub(crate) struct ActivityDetails {
 }
 
 impl ActivityDetails {
+    pub(crate) fn outer_call_id(&self) -> Option<&str> {
+        self.entries
+            .iter()
+            .find_map(|(_, cell)| cell.outer_call_id())
+    }
+
     pub(crate) fn push(&mut self, after_calls: usize, cell: Arc<dyn HistoryCell>) {
         if let Some(output) = cell.as_any().downcast_ref::<ToolOutputCell>()
             && self.entries.iter().any(|(_, retained)| {

@@ -237,6 +237,10 @@ impl HistoryCell for ExecCell {
         }
     }
 
+    fn outer_call_id(&self) -> Option<&str> {
+        self.group.details.outer_call_id()
+    }
+
     fn activity_disclosure(&self, width: u16) -> Option<ActivityDisclosure> {
         if self.group.calls.iter().any(ExecCall::is_user_shell_command) {
             // User-shell previews already retain wrapped commands and up to fifty output rows.

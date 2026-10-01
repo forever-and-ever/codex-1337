@@ -72,6 +72,7 @@ async fn returned_batches_keep_one_disclosure_and_bill_across_live_replay_and_pa
 
     let output = |id: &str| ThreadItem::FunctionCallOutput {
         id: id.to_owned(),
+        call_id: Some(if id == "b" { "a" } else { id }.to_owned()),
         name: "exec".into(),
         namespace: None,
         output: FunctionCallOutputBody::Text(format!("Returned {id}\nOnly model-visible text.")),
@@ -113,6 +114,7 @@ async fn returned_batches_keep_one_disclosure_and_bill_across_live_replay_and_pa
         };
         let current = turn(vec![
             command("first"),
+            command("nested"),
             output("a"),
             reasoning("between-outputs"),
             output("b"),
@@ -120,9 +122,9 @@ async fn returned_batches_keep_one_disclosure_and_bill_across_live_replay_and_pa
             output("c"),
         ]);
         let expected = project(&app, &current.items);
-        assert_eq!(expected.len(), if ordinary { 2 } else { 1 });
+        assert_eq!(expected.len(), 2);
 
-        // Completion events use the live widget path; output must not flush an open exploration.
+        // Nested calls and notify() outputs share a call; a different call starts a new unit.
         for item in &current.items {
             app.chat_widget.replay_thread_item(
                 item.clone(),
@@ -170,7 +172,7 @@ async fn returned_batches_keep_one_disclosure_and_bill_across_live_replay_and_pa
         for (id, count) in [("a", 1000), ("b", 280), ("c", 20), ("a", 1000)] {
             app.transcript_view.record_tool_output_tokens(
                 format!("tool-output-tokens:{id}"),
-                "outer-exec".into(),
+                if id == "b" { "a" } else { id }.into(),
                 Some(count),
             );
         }
@@ -181,11 +183,7 @@ async fn returned_batches_keep_one_disclosure_and_bill_across_live_replay_and_pa
                     .transcript_view
                     .activity_output_tokens(&cell.activity_ids()))
                 .collect::<Vec<_>>(),
-            if ordinary {
-                vec![Some(1280), Some(20)]
-            } else {
-                vec![Some(1300)]
-            }
+            vec![Some(1280), Some(20)]
         );
         for expanded in [false, true] {
             if expanded {
@@ -235,6 +233,7 @@ async fn patch_files_keep_disclosures_and_one_batch_bill_across_live_replay_and_
     // Batch output must enrich Edited without absorbing its independently disclosed files.
     let output = |id: &str| ThreadItem::FunctionCallOutput {
         id: id.into(),
+        call_id: Some(id.into()),
         name: "exec".into(),
         namespace: None,
         output: FunctionCallOutputBody::Text(format!("Returned {id}")),
@@ -255,7 +254,6 @@ async fn patch_files_keep_disclosures_and_one_batch_bill_across_live_replay_and_
         output("a"),
         reasoning("between-outputs"),
         output("b"),
-        output("a"),
     ]);
     let rendered = |cells: &[Arc<dyn HistoryCell>]| {
         cells
@@ -291,7 +289,7 @@ async fn patch_files_keep_disclosures_and_one_batch_bill_across_live_replay_and_
         let mut tui = crate::tui::test_support::make_test_tui().unwrap();
         tui.set_owned_screen(/*owned*/ true).unwrap();
         let expected = project(&app, &current.items);
-        assert_eq!(expected.len(), file_count + usize::from(with_command));
+        assert_eq!(expected.len(), file_count + usize::from(with_command) + 2);
         for item in &current.items {
             app.chat_widget.replay_thread_item(
                 item.clone(),
@@ -336,7 +334,15 @@ async fn patch_files_keep_disclosures_and_one_batch_bill_across_live_replay_and_
                     .activity_output_tokens(&cell.activity_ids()))
                 .collect::<Vec<_>>(),
             (0..expected.len())
-                .map(|index| (index == if with_command { file_count } else { 0 }).then_some(123))
+                .map(|index| {
+                    if index == if with_command { file_count } else { 0 } {
+                        Some(100)
+                    } else if index == expected.len() - 1 {
+                        Some(23)
+                    } else {
+                        None
+                    }
+                })
                 .collect::<Vec<_>>()
         );
     }
@@ -384,7 +390,14 @@ async fn older_page_hydration_keeps_pending_computer_and_exploration_completion(
         app.transcript_cells
             .extend(project(&app, &current.items[1..2]));
         app.join_older_activity_group(/*boundary*/ 1, std::slice::from_ref(&current));
-        assert!(app.transcript_cells.is_empty());
+        assert_eq!(
+            app.transcript_cells.len(),
+            if matches!(kind, ActivityKind::Computer) {
+                0
+            } else {
+                2
+            }
+        );
         if matches!(kind, ActivityKind::Computer) {
             assert!(
                 crate::chatwidget::tests::helpers::render_bottom_popup(
@@ -412,13 +425,22 @@ async fn older_page_hydration_keeps_pending_computer_and_exploration_completion(
         }
         current.items[3] = call("pending", kind, "completed");
         let expected = project(&app, &current.items);
-        assert_eq!(
-            app.chat_widget
-                .active_cell_transcript_lines(/*width*/ 80)
-                .unwrap(),
-            expected[0].transcript_lines(/*width*/ 80),
-            "{kind:?}"
-        );
+        match kind {
+            ActivityKind::Computer => assert_eq!(
+                app.chat_widget
+                    .active_cell_transcript_lines(/*width*/ 80)
+                    .unwrap(),
+                expected[0].transcript_lines(/*width*/ 80),
+            ),
+            ActivityKind::Exploration => {
+                assert!(
+                    app.chat_widget
+                        .active_cell_transcript_lines(/*width*/ 80)
+                        .is_none()
+                );
+                assert_eq!(expected.len(), 4);
+            }
+        }
     }
 }
 
@@ -442,7 +464,7 @@ async fn trailing_reasoning_identity_rejects_identical_text_from_another_turn() 
             let trailing = project(&app, std::slice::from_ref(&detail)).remove(/*index*/ 0);
             app.transcript_cells = vec![Arc::clone(&older), Arc::clone(&trailing)];
             app.join_older_activity_group(/*boundary*/ 1, &turns);
-            if detail.id() == "same-turn-detail" {
+            if detail.id() == "same-turn-detail" && matches!(kind, ActivityKind::Computer) {
                 let expected = project(&app, &turns[0].items);
                 assert_eq!(app.transcript_cells.len(), 1);
                 assert_eq!(app.transcript_cells[0].raw_lines(), expected[0].raw_lines());
@@ -539,7 +561,7 @@ async fn failed_exploration_retains_following_reasoning_at_every_page_split() {
         reasoning("after-failure"),
     ]);
     let expected = project(&app, &current.items);
-    assert_eq!(expected.len(), 1);
+    assert_eq!(expected.len(), 3);
     for split in 1..current.items.len() {
         let older = project(&app, &current.items[..split]);
         let boundary = older.len();

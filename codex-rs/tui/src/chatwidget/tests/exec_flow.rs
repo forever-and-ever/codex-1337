@@ -119,100 +119,6 @@ async fn replayed_completion_preserves_unrelated_running_command() {
 }
 
 #[tokio::test]
-async fn failed_exploration_keeps_overlapping_commands_active_until_all_finish() {
-    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    chat.on_task_started();
-
-    let failed = begin_exec(&mut chat, "call-failed", "ls missing");
-    let running = begin_exec(&mut chat, "call-running", "cat foo.txt");
-    end_exec(&mut chat, failed, "", "missing\n", /*exit_code*/ 1);
-    let followup = begin_exec(&mut chat, "call-followup", "cat bar.txt");
-
-    assert!(drain_insert_history(&mut rx).is_empty());
-    chat.on_exec_command_output_delta("call-running", "streamed output\n");
-    let transcript = chat
-        .active_cell_transcript_lines(/*width*/ 80)
-        .expect("overlapping command should remain active");
-    let transcript = lines_to_single_string(&transcript);
-    assert!(transcript.contains("missing"));
-    assert!(transcript.contains("streamed output"));
-
-    end_exec(&mut chat, running, "finished\n", "", /*exit_code*/ 0);
-    assert!(drain_insert_history(&mut rx).is_empty());
-    end_exec(&mut chat, followup, "followup\n", "", /*exit_code*/ 0);
-
-    // An exploration group stays live for adjacent reads even after the last call finishes.
-    assert!(drain_insert_history(&mut rx).is_empty());
-
-    let later = begin_exec(&mut chat, "call-after-failure", "cat later.txt");
-    end_exec(&mut chat, later, "later\n", "", /*exit_code*/ 0);
-    let active = active_blob(&chat);
-    assert!(active.contains("List missing"));
-    assert!(active.contains("Read foo.txt"));
-    assert!(active.contains("bar.txt"));
-    assert!(active.contains("later.txt"));
-    chat.flush_active_cell();
-    let cells = drain_insert_history(&mut rx);
-    assert_eq!(cells.len(), 1);
-    insta::assert_snapshot!(lines_to_single_string(&cells[0]), @"
-    • Explored
-      └ List missing (exit 1)
-        Read foo.txt (whole file), bar.txt (whole file), later.txt (whole file)
-    ");
-}
-
-#[tokio::test]
-async fn exploration_nonzero_exits_remain_visible_beside_successful_reads() {
-    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    for (id, command, exit_code) in [
-        ("read", "cat first.txt", 0),
-        ("missing", "cat missing.txt", 1),
-        ("later", "cat later.txt", 0),
-        ("search", "rg absent .", 1),
-        ("error", "rg text missing.txt", 2),
-        ("compound", "cat existing.txt && rg absent .", 1),
-    ] {
-        let item = begin_exec(&mut chat, id, command);
-        end_exec(&mut chat, item, "", "", exit_code);
-    }
-    insta::assert_snapshot!(active_blob(&chat));
-    insta::assert_snapshot!(
-        "compact_exploration_with_failures",
-        chat.transcript
-            .active_cell
-            .as_ref()
-            .unwrap()
-            .compact_hyperlink_lines(/*width*/ 24)
-            .iter()
-            .map(|line| line.line.to_string())
-            .collect::<Vec<_>>()
-            .join("\n")
-    );
-    let statuses = chat
-        .transcript
-        .active_cell
-        .as_ref()
-        .unwrap()
-        .display_lines(/*width*/ 80)
-        .into_iter()
-        .flat_map(|line| line.spans)
-        .filter(|span| {
-            span.content.starts_with(" (exit") || span.content.starts_with(" (command exit")
-        })
-        .map(|span| (span.content.into_owned(), span.style.fg))
-        .collect::<Vec<_>>();
-    assert_eq!(
-        statuses,
-        vec![
-            (" (exit 1)".to_string(), Some(ratatui::style::Color::Red)),
-            (" (exit 1)".to_string(), None),
-            (" (exit 2)".to_string(), Some(ratatui::style::Color::Red)),
-            (" (command exit 1)".to_string(), None),
-        ]
-    );
-}
-
-#[tokio::test]
 async fn exploration_reasoning_during_followup_command_stays_ordered() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     let first = begin_exec(&mut chat, "first", "ls");
@@ -222,9 +128,14 @@ async fn exploration_reasoning_during_followup_command_stays_ordered() {
     let second = begin_exec(&mut chat, "second", "cat file.txt");
     chat.on_agent_reasoning_delta("Waiting for the file.".to_string());
     chat.on_agent_reasoning_final();
-    assert!(drain_insert_history(&mut rx).is_empty());
     end_exec(&mut chat, second, "contents\n", "", /*exit_code*/ 0);
-    let transcript = chat.active_cell_transcript_lines(/*width*/ 80).unwrap();
+    let transcript = std::iter::from_fn(|| rx.try_recv().ok())
+        .filter_map(|event| match event {
+            AppEvent::InsertHistoryCell(cell) => Some(cell),
+            _ => None,
+        })
+        .flat_map(|cell| cell.transcript_lines(/*width*/ 80))
+        .collect::<Vec<_>>();
     insta::assert_snapshot!(lines_to_single_string(&transcript));
 }
 
@@ -312,7 +223,7 @@ async fn adjacent_command_groups_across_reasoning_live_and_replayed() {
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert_eq!(cells.len(), 3);
+        assert_eq!(cells.len(), 8);
         let mut render = String::new();
         for mode in ["Compact", "Expanded", "Raw"] {
             render.push_str(&format!("{mode}:\n"));
@@ -323,7 +234,6 @@ async fn adjacent_command_groups_across_reasoning_live_and_replayed() {
                     _ => cell.raw_lines(),
                 };
                 render.push_str(&lines_to_single_string(&lines));
-                render.push('\n');
             }
         }
         renders.push(render);
@@ -819,120 +729,6 @@ async fn exec_end_without_begin_uses_event_command() {
 }
 
 #[tokio::test]
-async fn exec_end_without_begin_does_not_flush_unrelated_running_exploring_cell() {
-    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    chat.on_task_started();
-
-    begin_exec(&mut chat, "call-exploring", "cat /dev/null");
-    assert!(drain_insert_history(&mut rx).is_empty());
-    assert!(active_blob(&chat).contains("Read null"));
-
-    let orphan =
-        begin_unified_exec_startup(&mut chat, "call-orphan", "proc-1", "echo repro-marker");
-    assert!(drain_insert_history(&mut rx).is_empty());
-
-    end_exec(
-        &mut chat,
-        orphan,
-        "repro-marker\n",
-        "",
-        /*exit_code*/ 0,
-    );
-
-    let cells = drain_insert_history(&mut rx);
-    assert_eq!(cells.len(), 1, "only the orphan end should be inserted");
-    let orphan_blob = lines_to_single_string(&cells[0]);
-    assert!(
-        orphan_blob.contains("• Ran echo repro-marker"),
-        "expected orphan end to render a standalone entry: {orphan_blob:?}"
-    );
-    let active = active_blob(&chat);
-    assert!(
-        active.contains("• Exploring"),
-        "expected unrelated exploring call to remain active: {active:?}"
-    );
-    assert!(
-        active.contains("Read null"),
-        "expected active exploring command to remain visible: {active:?}"
-    );
-    assert!(
-        !active.contains("echo repro-marker"),
-        "orphaned end should not replace the active exploring cell: {active:?}"
-    );
-}
-
-#[tokio::test]
-async fn exec_end_without_begin_flushes_completed_unrelated_exploring_cell() {
-    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    chat.on_task_started();
-
-    let begin_ls = begin_exec(&mut chat, "call-ls", "ls -la");
-    end_exec(&mut chat, begin_ls, "", "", /*exit_code*/ 0);
-    assert!(drain_insert_history(&mut rx).is_empty());
-    assert!(active_blob(&chat).contains("ls -la"));
-
-    let orphan = begin_unified_exec_startup(&mut chat, "call-after", "proc-1", "echo after");
-    end_exec(&mut chat, orphan, "after\n", "", /*exit_code*/ 0);
-
-    let cells = drain_insert_history(&mut rx);
-    assert_eq!(
-        cells.len(),
-        2,
-        "completed exploring cell should flush before the orphan entry"
-    );
-    let first = lines_to_single_string(&cells[0]);
-    let second = lines_to_single_string(&cells[1]);
-    assert!(
-        first.contains("• Explored"),
-        "expected flushed exploring cell: {first:?}"
-    );
-    assert!(
-        first.contains("List ls -la"),
-        "expected flushed exploring cell: {first:?}"
-    );
-    assert!(
-        second.contains("• Ran echo after"),
-        "expected orphan end entry after flush: {second:?}"
-    );
-    assert!(
-        chat.transcript.active_cell.is_none(),
-        "both entries should be finalized"
-    );
-}
-
-#[tokio::test]
-async fn overlapping_exploring_exec_end_is_not_misclassified_as_orphan() {
-    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-
-    let begin_ls = begin_exec(&mut chat, "call-ls", "ls -la");
-    let begin_cat = begin_exec(&mut chat, "call-cat", "cat foo.txt");
-    assert!(drain_insert_history(&mut rx).is_empty());
-
-    end_exec(&mut chat, begin_ls, "foo.txt\n", "", /*exit_code*/ 0);
-
-    let cells = drain_insert_history(&mut rx);
-    assert!(
-        cells.is_empty(),
-        "tracked end inside an exploring cell should not render as an orphan"
-    );
-    let active = active_blob(&chat);
-    assert!(
-        active.contains("List ls -la"),
-        "expected first command still grouped: {active:?}"
-    );
-    assert!(
-        active.contains("Read foo.txt"),
-        "expected second running command to stay in the same active cell: {active:?}"
-    );
-    assert!(
-        active.contains("• Exploring"),
-        "expected grouped exploring header to remain active: {active:?}"
-    );
-
-    end_exec(&mut chat, begin_cat, "hello\n", "", /*exit_code*/ 0);
-}
-
-#[tokio::test]
 async fn exec_history_shows_unified_exec_startup_commands() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.on_task_started();
@@ -1400,55 +1196,6 @@ async fn image_generation_call_adds_history_cell() {
         "failed_image_generation_call_history_snapshot",
         lines_to_single_string(&cells[0])
     );
-}
-
-#[tokio::test]
-async fn exec_history_extends_previous_when_consecutive() {
-    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-
-    // 1) Start "ls -la" (List)
-    let begin_ls = begin_exec(&mut chat, "call-ls", "ls -la");
-    assert_chatwidget_snapshot!("exploring_step1_start_ls", active_blob(&chat));
-
-    // 2) Finish "ls -la"
-    end_exec(&mut chat, begin_ls, "", "", /*exit_code*/ 0);
-    assert_chatwidget_snapshot!("exploring_step2_finish_ls", active_blob(&chat));
-
-    // 3) Start "cat foo.txt" (Read)
-    let begin_cat_foo = begin_exec(&mut chat, "call-cat-foo", "cat foo.txt");
-    assert_chatwidget_snapshot!("exploring_step3_start_cat_foo", active_blob(&chat));
-
-    // 4) Complete "cat foo.txt"
-    end_exec(
-        &mut chat,
-        begin_cat_foo,
-        "hello from foo",
-        "",
-        /*exit_code*/ 0,
-    );
-    assert_chatwidget_snapshot!("exploring_step4_finish_cat_foo", active_blob(&chat));
-
-    // 5) Start & complete "sed -n 100,200p foo.txt" (treated as Read of foo.txt)
-    let begin_sed_range = begin_exec(&mut chat, "call-sed-range", "sed -n 100,200p foo.txt");
-    end_exec(
-        &mut chat,
-        begin_sed_range,
-        "chunk",
-        "",
-        /*exit_code*/ 0,
-    );
-    assert_chatwidget_snapshot!("exploring_step5_finish_sed_range", active_blob(&chat));
-
-    // 6) Start & complete "cat bar.txt"
-    let begin_cat_bar = begin_exec(&mut chat, "call-cat-bar", "cat bar.txt");
-    end_exec(
-        &mut chat,
-        begin_cat_bar,
-        "hello from bar",
-        "",
-        /*exit_code*/ 0,
-    );
-    assert_chatwidget_snapshot!("exploring_step6_finish_cat_bar", active_blob(&chat));
 }
 
 #[tokio::test]

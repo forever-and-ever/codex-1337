@@ -22,6 +22,7 @@ fn file_disclosures_are_independent_and_not_copied() {
     // The returned batch used to regroup all files into one disclosure, despite unique IDs.
     let returned = ThreadItem::FunctionCallOutput {
         id: "batch".into(),
+        call_id: Some("batch".into()),
         name: "exec".into(),
         namespace: None,
         output: FunctionCallOutputBody::Text(
@@ -182,6 +183,7 @@ fn file_disclosures_are_independent_and_not_copied() {
             },
             ThreadItem::FunctionCallOutput {
                 id: "next-batch".into(),
+                call_id: Some("next-batch".into()),
                 name: "exec".into(),
                 namespace: None,
                 output: FunctionCallOutputBody::Text("Next patch applied".into()),

@@ -263,6 +263,11 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
         Vec::new()
     }
 
+    /// Enclosing model tool call, when its returned output supplies explicit ownership.
+    fn outer_call_id(&self) -> Option<&str> {
+        None
+    }
+
     /// Available activity details, preserving source order and any upstream truncation notices.
     fn expanded_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         self.transcript_hyperlink_lines(width)

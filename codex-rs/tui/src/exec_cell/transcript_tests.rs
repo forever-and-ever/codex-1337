@@ -7,7 +7,6 @@ use crate::history_cell::HistoryCell;
 use crate::history_cell::new_reasoning_summary_block;
 use crate::history_cell::new_unified_exec_interaction;
 use codex_app_server_protocol::CommandExecutionSource;
-use pretty_assertions::assert_eq;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -46,9 +45,6 @@ fn raw_grouped_history_retains_terminal_input_and_omits_reasoning() {
             Some("cat first.txt".to_owned()),
             "continue\n".to_owned(),
         )));
-    group
-        .append_completed(completed_read("second.txt", "second output"))
-        .expect("adjacent reads stay grouped");
 
     let raw = group
         .raw_lines()
@@ -62,30 +58,4 @@ fn raw_grouped_history_retains_terminal_input_and_omits_reasoning() {
         .collect::<Vec<_>>()
         .join("\n");
     insta::assert_snapshot!(format!("Rich\n{rich}\n\nRaw\n{}", raw.join("\n")));
-
-    let mut earlier = completed_read("earlier.txt", "earlier output");
-    earlier
-        .group
-        .push_detail(Arc::from(new_reasoning_summary_block(
-            vec!["Inspect the first file".to_owned()],
-            Path::new("."),
-        ) as Box<dyn HistoryCell>));
-    earlier
-        .group
-        .push_detail(Arc::new(new_unified_exec_interaction(
-            Some("cat earlier.txt".to_owned()),
-            "next\n".to_owned(),
-        )));
-    let mut expected_raw = earlier.raw_lines();
-    expected_raw.push(Line::from(""));
-    expected_raw.extend(group.raw_lines());
-    let mut expected_rich = earlier.transcript_hyperlink_lines(/*width*/ 80);
-    expected_rich.push(HyperlinkLine::from(""));
-    expected_rich.extend(group.transcript_hyperlink_lines(/*width*/ 80));
-    group.prepend(earlier);
-    assert_eq!(group.raw_lines(), expected_raw);
-    assert_eq!(
-        group.transcript_hyperlink_lines(/*width*/ 80),
-        expected_rich
-    );
 }

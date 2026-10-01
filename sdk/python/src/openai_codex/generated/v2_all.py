@@ -11580,6 +11580,12 @@ class FunctionCallOutputThreadItem(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
+    call_id: Annotated[
+        str | None,
+        Field(
+            alias="callId", description="Enclosing invocation; absent in older persisted history."
+        ),
+    ] = None
     id: str
     name: str
     namespace: str | None = None

@@ -3612,11 +3612,7 @@ impl Session {
             state
                 .history
                 .record_annotated_items(&mut items, model_info.truncation_policy.into());
-            if turn_context.config.model_provider_id == "openai" {
-                tool_output_tokens::capture(&state.history, previous_len)
-            } else {
-                Vec::new()
-            }
+            tool_output_tokens::capture(&state.history, previous_len)
         };
         for image in image_preparations {
             self.services
@@ -3644,8 +3640,7 @@ impl Session {
         }
         self.send_raw_response_items(turn_context, &response_items)
             .await;
-        self.record_tool_output_tokens(turn_context, tool_outputs)
-            .await;
+        self.record_tool_outputs(turn_context, tool_outputs).await;
     }
 
     pub(crate) async fn record_step_world_state_if_changed(

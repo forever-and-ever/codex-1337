@@ -274,6 +274,7 @@ async fn replayed_delegated_tool_output_is_attributed_without_seeding_composer_h
 
     let item = AppServerThreadItem::FunctionCallOutput {
         id: "delegation-1".to_string(),
+        call_id: Some("delegation-1".to_string()),
         name: "send_message_to_thread".to_string(),
         namespace: Some("codex_tui".to_string()),
         output: FunctionCallOutputBody::Text(format!(

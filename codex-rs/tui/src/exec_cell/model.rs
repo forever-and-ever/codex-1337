@@ -1,6 +1,6 @@
 //! Data model for grouped exec-call history cells in the TUI transcript.
 //!
-//! An `ExecCell` groups adjacent agent shell calls regardless of command recognition.
+//! An `ExecCell` owns a shell invocation regardless of command recognition.
 //! The chat widget relies on stable `call_id` matching to route progress and
 //! end events into the right cell, and it treats "call id not found" as a real signal (for
 //! example, an orphan end that should render as a separate history entry).
@@ -84,68 +84,12 @@ pub(crate) struct ExecCell {
 }
 
 impl ExecCell {
-    // Bound redraw work for an active group, independently of command recognition.
-    pub(crate) const MAX_GROUP_CALLS: usize = 64;
-
     pub(crate) fn new(call: ExecCall, animations_enabled: bool) -> Self {
         Self {
             group: ActivityGroup::new(vec![call]),
             completed_at: None,
             animations_enabled,
         }
-    }
-
-    pub(crate) fn add_call(
-        &mut self,
-        call_id: String,
-        command: Vec<String>,
-        parsed: Vec<ParsedCommand>,
-        source: ExecCommandSource,
-        interaction_input: Option<String>,
-    ) -> bool {
-        let call = ExecCall {
-            rows: Default::default(),
-            call_id,
-            command,
-            parsed,
-            output: None,
-            source,
-            start_time: Some(Instant::now()),
-            duration: None,
-            interaction_input,
-        };
-        if self.group.calls.len() < Self::MAX_GROUP_CALLS
-            && self.is_agent_command_group()
-            && !call.is_user_shell_command()
-            && !call.is_unified_exec_interaction()
-        {
-            self.group.calls.push(call);
-            true
-        } else {
-            false
-        }
-    }
-
-    /// Historical grouping uses the same compatibility and size bound as live calls.
-    pub(crate) fn append_completed(&mut self, mut newer: Self) -> Result<(), Self> {
-        if !self.is_agent_command_group()
-            || !newer.is_agent_command_group()
-            || self.group.calls.len() + newer.group.calls.len() > Self::MAX_GROUP_CALLS
-        {
-            return Err(newer);
-        }
-        newer.group.details.prepend(
-            std::mem::take(&mut self.group.details),
-            self.group.calls.len(),
-        );
-        self.group.details = newer.group.details;
-        self.group.calls.append(&mut newer.group.calls);
-        Ok(())
-    }
-
-    /// Preserve live clocks and pending output when a validated older page extends the group.
-    pub(crate) fn prepend(&mut self, older: Self) {
-        self.group.prepend(older.group);
     }
 
     /// Marks the most recently matching call as finished and returns whether a call was found.
@@ -175,8 +119,7 @@ impl ExecCell {
     }
 
     pub(crate) fn should_flush(&self) -> bool {
-        (!self.is_agent_command_group() || self.group.calls.len() >= Self::MAX_GROUP_CALLS)
-            && self.group.calls.iter().all(|c| c.duration.is_some())
+        self.group.calls.iter().all(|c| c.duration.is_some())
     }
 
     pub(crate) fn mark_failed(&mut self) {

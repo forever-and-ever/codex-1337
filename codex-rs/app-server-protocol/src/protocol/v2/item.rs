@@ -265,6 +265,9 @@ pub enum ThreadItem {
     #[ts(rename_all = "camelCase")]
     FunctionCallOutput {
         id: String,
+        /// Enclosing invocation; absent in older persisted history.
+        #[serde(default)]
+        call_id: Option<String>,
         name: String,
         namespace: Option<String>,
         output: FunctionCallOutputBody,
@@ -915,6 +918,7 @@ impl From<CoreTurnItem> for ThreadItem {
             }
             CoreTurnItem::FunctionCallOutput(output) => ThreadItem::FunctionCallOutput {
                 id: output.id,
+                call_id: output.call_id,
                 name: output.name,
                 namespace: output.namespace,
                 output: output.output,

@@ -13,6 +13,8 @@ Shell activity uses source-preserving command rows. Named Read/Search/List label
 are row summaries, not separate grouping or lifecycle types. The header owns the
 combined output fold and token bill; only truncated opaque commands own source folds.
 Only outer `;`, `&&` and `||` split a script, with connectors retained on their rows.
+Each outer tool call owns its header, output fold and token bill; adjacent invocations
+never merge. Nested calls and `notify()` outputs within one Code Mode call share it.
 
 Adjacent edits share one **Edited** heading, but each file retains its own
 disclosure. Messages and other tool entries start a new group. Per-call token

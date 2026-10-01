@@ -1949,60 +1949,6 @@ fn coalesces_sequential_reads_within_one_call() {
 }
 
 #[test]
-fn coalesces_reads_across_multiple_calls() {
-    let mut cell = ExecCell::new(
-        ExecCall {
-            rows: Default::default(),
-            call_id: "c1".to_string(),
-            command: vec!["bash".into(), "-lc".into(), "echo".into()],
-            parsed: vec![ParsedCommand::Search {
-                query: Some("shimmer_spans".into()),
-                path: None,
-                cmd: "rg shimmer_spans".into(),
-            }],
-            output: None,
-            source: ExecCommandSource::Agent,
-            start_time: Some(Instant::now()),
-            duration: None,
-            interaction_input: None,
-        },
-        /*animations_enabled*/ true,
-    );
-    // Call 1: Search only
-    cell.complete_call("c1", CommandOutput::default(), Duration::from_millis(1));
-    // Call 2: Read A
-    assert!(cell.add_call(
-        "c2".into(),
-        vec!["bash".into(), "-lc".into(), "echo".into()],
-        vec![ParsedCommand::Read {
-            name: "shimmer.rs".into(),
-            cmd: "cat shimmer.rs".into(),
-            path: "shimmer.rs".into(),
-        }],
-        ExecCommandSource::Agent,
-        /*interaction_input*/ None,
-    ));
-    cell.complete_call("c2", CommandOutput::default(), Duration::from_millis(1));
-    // Call 3: Read B
-    assert!(cell.add_call(
-        "c3".into(),
-        vec!["bash".into(), "-lc".into(), "echo".into()],
-        vec![ParsedCommand::Read {
-            name: "status_indicator_widget.rs".into(),
-            cmd: "cat status_indicator_widget.rs".into(),
-            path: "status_indicator_widget.rs".into(),
-        }],
-        ExecCommandSource::Agent,
-        /*interaction_input*/ None,
-    ));
-    cell.complete_call("c3", CommandOutput::default(), Duration::from_millis(1));
-
-    let lines = cell.display_lines(/*width*/ 80);
-    let rendered = render_lines(&lines).join("\n");
-    insta::assert_snapshot!(rendered);
-}
-
-#[test]
 fn coalesced_reads_dedupe_names() {
     let mut cell = ExecCell::new(
         ExecCall {

@@ -12,6 +12,7 @@ impl ChatWidget {
             .as_any()
             .downcast_ref::<history_cell::ReasoningSummaryCell>()
             .is_some_and(history_cell::ReasoningSummaryCell::is_transcript_only);
+        let returned = cell.as_any().is::<history_cell::ToolOutputCell>();
         if !hidden_reasoning
             && !cell.as_any().is::<history_cell::ToolOutputCell>()
             && !cell
@@ -29,6 +30,9 @@ impl ChatWidget {
         {
             computer.group.push_detail(Arc::from(cell));
             self.bump_active_cell_revision();
+            if returned {
+                self.flush_active_cell();
+            }
             return Ok(());
         }
         if let Some(commands) = active.as_any_mut().downcast_mut::<ExecCell>()
@@ -36,27 +40,11 @@ impl ChatWidget {
         {
             commands.group.push_detail(Arc::from(cell));
             self.bump_active_cell_revision();
+            if returned {
+                self.flush_active_cell();
+            }
             return Ok(());
         }
         Err(cell)
-    }
-
-    /// Hydrate only the validated older portion, leaving current calls and their clocks intact.
-    pub(crate) fn prepend_active_command_history(
-        &mut self,
-        older: &dyn HistoryCell,
-        turns: &[Turn],
-    ) -> Option<(u64, u64)> {
-        let previous_revision = self.transcript.active_cell_revision;
-        let active = self
-            .transcript
-            .active_cell
-            .as_mut()?
-            .as_any_mut()
-            .downcast_mut::<ExecCell>()?;
-        let older = crate::thread_transcript::older_command_group(older, active, turns)?;
-        active.prepend(older);
-        self.bump_active_cell_revision();
-        Some((previous_revision, self.transcript.active_cell_revision))
     }
 }

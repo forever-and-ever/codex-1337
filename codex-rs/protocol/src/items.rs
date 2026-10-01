@@ -90,6 +90,10 @@ pub struct UserMessageItem {
 #[derive(Debug, Clone, Deserialize, Serialize, TS, JsonSchema)]
 pub struct FunctionCallOutputItem {
     pub id: String,
+    /// Enclosing invocation, shared by Code Mode notify() outputs from that call.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub call_id: Option<String>,
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]

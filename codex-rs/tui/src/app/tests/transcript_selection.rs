@@ -41,6 +41,7 @@ async fn displaced_tool_calls_complete_once_and_disclosure_navigation_rejoins_cu
         Box::new(
             ToolOutputCell::from_output(
                 "batch",
+                /*call_id*/ None,
                 "exec",
                 /*namespace*/ None,
                 &FunctionCallOutputBody::Text("model-visible batch".into()),

@@ -4,14 +4,14 @@
 //! displayed source revision before canonical cells are replaced or absorbed into the live tail.
 
 use super::*;
-use crate::thread_transcript::join_command_groups;
 use crate::thread_transcript::join_computer_groups;
 
 impl App {
     pub(super) fn join_older_activity_group(&mut self, boundary: usize, turns: &[Turn]) {
-        let Some(start) = self.transcript_cells[..boundary]
+        let Some(mut start) = self.transcript_cells[..boundary]
             .iter()
             .rposition(|cell| !crate::thread_transcript::is_hidden_activity_detail(cell))
+            .or_else(|| boundary.checked_sub(1))
         else {
             return;
         };
@@ -19,6 +19,24 @@ impl App {
             .iter()
             .position(|cell| !crate::thread_transcript::is_hidden_activity_detail(cell))
             .map_or(self.transcript_cells.len(), |offset| boundary + offset);
+        // Multiple notify() outputs may share an invocation, but never cross into the next one.
+        let mut outer_call = None;
+        let mut returned_end = None;
+        for (offset, cell) in self.transcript_cells[boundary..newer_index]
+            .iter()
+            .enumerate()
+        {
+            if let Some(call_id) = cell.outer_call_id() {
+                if outer_call.is_some_and(|old| old != call_id) {
+                    break;
+                }
+                outer_call = Some(call_id);
+                returned_end = Some(boundary + offset + 1);
+            }
+        }
+        if let Some(end) = returned_end {
+            newer_index = end;
+        }
         // Returned batches belong to Edited, not the final file in its contiguous suffix.
         if let Some(owner) =
             history_cell::ToolOutputGroup::patch_owner(&self.transcript_cells[..boundary])
@@ -89,6 +107,13 @@ impl App {
             ) else {
                 return;
             };
+            let (merged_start, older) = history_cell::ToolOutputGroup::join_prefix(
+                &self.transcript_cells,
+                start,
+                older,
+                turns,
+            );
+            start = merged_start;
             let range = start..newer_index;
             self.native_history
                 .consolidate(&self.transcript_cells[range.clone()], &older);
@@ -104,12 +129,6 @@ impl App {
             let Some((previous_revision, hydrated_revision)) = self
                 .chat_widget
                 .prepend_active_computer_history(self.transcript_cells[start].as_ref(), turns)
-                .or_else(|| {
-                    self.chat_widget.prepend_active_command_history(
-                        self.transcript_cells[start].as_ref(),
-                        turns,
-                    )
-                })
             else {
                 return;
             };
@@ -129,13 +148,14 @@ impl App {
             return;
         };
         let Some(group) = join_computer_groups(&self.transcript_cells[start], newer, turns)
-            .or_else(|| join_command_groups(&self.transcript_cells[start], newer, turns))
             .or_else(|| {
                 history_cell::ToolOutputGroup::join(&self.transcript_cells[start], newer, turns)
             })
         else {
             return;
         };
+        let (start, group) =
+            history_cell::ToolOutputGroup::join_prefix(&self.transcript_cells, start, group, turns);
         let range = start..newer_index + 1;
         self.native_history
             .consolidate(&self.transcript_cells[range.clone()], &group);

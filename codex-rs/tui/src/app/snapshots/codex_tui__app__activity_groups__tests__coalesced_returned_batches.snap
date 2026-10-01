@@ -1,61 +1,70 @@
 ---
 source: tui/src/app/activity_groups_tests.rs
-assertion_line: 225
+assertion_line: 223
 expression: "snapshots.join(\"\\n\\n\")"
 ---
 Exploration ordinary=false expanded=false
-[+] • Explored (~ 1,300 tokens)
-      └ Read first.rs (whole file), second.rs (whole file)
+[+] • Explored (~ 1,280 tokens)
+      Read first.rs (whole file)
+      Read nested.rs (whole file)
+[+] • Explored (~ 20 tokens)
+      Read second.rs (whole file)
 
 Exploration ordinary=false expanded=true
-[-] • Explored (~ 1,300 tokens)
-      └ Read first.rs (whole file), second.rs (whole file)
-    $ cat first.rs
-    $ cat second.rs
+[-] • Explored (~ 1,280 tokens)
+      Read first.rs (whole file)
+      Read nested.rs (whole file)
 
       Returned a
       Only model-visible text.
-
       Returned b
       Only model-visible text.
+[-] • Explored (~ 20 tokens)
+      Read second.rs (whole file)
 
       Returned c
       Only model-visible text.
 
 Computer ordinary=false expanded=false
-[+] • Used (~ 1,300 tokens) computer · 2 actions
+[+] • Used (~ 1,280 tokens) computer · 2 actions
       ├ Inspect first
+      └ Inspect nested
+[+] • Used (~ 20 tokens) computer · 1 action
       └ Inspect second
 
 Computer ordinary=false expanded=true
-[-] • Used (~ 1,300 tokens) computer · 2 actions
-      ├ Inspect first
-      └ Inspect second
+[-] • Called (~ 1,280 tokens)
+      └ cua_repl.js({"title":"Inspect first"})
+    • Called
+      └ cua_repl.js({"title":"Inspect nested"})
 
       Returned a
       Only model-visible text.
 
       Returned b
       Only model-visible text.
+[-] • Called (~ 20 tokens)
+      └ cua_repl.js({"title":"Inspect second"})
 
       Returned c
       Only model-visible text.
 
 Exploration ordinary=true expanded=false
-[+] • Ran (~ 1,280 tokens) cargo check
+[+] • Ran (~ 1,280 tokens)
+      cargo check
+      cargo check
 [+] • Ran (~ 20 tokens) cargo check
 
 Exploration ordinary=true expanded=true
-[-] • Ran (~ 1,280 tokens) cargo check
-    $ cargo check
+[-] • Ran (~ 1,280 tokens)
+      cargo check
+      cargo check
 
       Returned a
       Only model-visible text.
-
       Returned b
       Only model-visible text.
 [-] • Ran (~ 20 tokens) cargo check
-    $ cargo check
 
       Returned c
       Only model-visible text.

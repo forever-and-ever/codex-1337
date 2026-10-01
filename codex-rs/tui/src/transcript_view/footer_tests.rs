@@ -408,6 +408,7 @@ fn code_mode_batches_display_their_own_counts_and_replay_without_double_counting
     let cwd = crate::test_support::test_path_buf("/project").abs();
     let items = ["first", "second"].map(|id| ThreadItem::FunctionCallOutput {
         id: id.into(),
+        call_id: Some(id.into()),
         name: "exec".into(),
         namespace: None,
         output: FunctionCallOutputBody::Text(format!(
@@ -541,7 +542,10 @@ fn empty_tool_disclosures_follow_invocation_truncation() {
         let cells = vec![ToolOutputGroup::from_cells([
             Arc::new(call) as Arc<dyn HistoryCell>,
             Arc::new(
-                ToolOutputCell::from_output("batch", "exec", /*namespace*/ None, &result).unwrap(),
+                ToolOutputCell::from_output(
+                    "batch", /*call_id*/ None, "exec", /*namespace*/ None, &result,
+                )
+                .unwrap(),
             ),
         ])];
         for width in [100, 44, 24] {

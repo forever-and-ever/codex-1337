@@ -1,6 +1,6 @@
 //! Project persisted items into the same rich cells as completed live output.
 //! Tool grouping spans hidden reasoning but stops at visible content and turn boundaries.
-//! Only one computer or exploration group can be pending at a time.
+//! Shell invocations stay independent until an enclosing Code Mode return groups them.
 
 use std::sync::Arc;
 
@@ -24,15 +24,12 @@ use codex_utils_absolute_path::AbsolutePathBuf;
 use ratatui::style::Stylize as _;
 
 mod activity_pages;
-mod command_groups;
 mod computer_groups;
 mod other_items;
 pub(crate) mod tools;
 
 pub(crate) use activity_pages::fold_trailing_activity_details;
 pub(crate) use activity_pages::is_hidden_activity_detail;
-pub(crate) use command_groups::join_command_groups;
-pub(crate) use command_groups::older_command_group;
 #[allow(
     unused_imports,
     reason = "Used by later layers of the TUI refresh stack."
@@ -49,19 +46,12 @@ fn is_activity_metadata(item: &ThreadItem) -> bool {
     ) || crate::history_cell::ToolOutputCell::is_item(item)
 }
 
-enum PendingActivity {
-    Computer(crate::history_cell::ComputerActivityCell),
-    Exploration(crate::exec_cell::ExecCell),
-}
-
-impl PendingActivity {
-    fn flush(pending: &mut Option<Self>, cells: &mut TranscriptCells) {
-        let cell: Arc<dyn HistoryCell> = match pending.take() {
-            Some(Self::Computer(group)) => Arc::new(group),
-            Some(Self::Exploration(group)) => Arc::new(group),
-            None => return,
-        };
-        cells.push(cell);
+fn flush_computer(
+    pending: &mut Option<crate::history_cell::ComputerActivityCell>,
+    cells: &mut TranscriptCells,
+) {
+    if let Some(group) = pending.take() {
+        cells.push(Arc::new(group));
     }
 }
 
@@ -138,73 +128,49 @@ pub(crate) fn thread_items_to_transcript_cells(
         thread_id.and_then(|thread_id| InlineVisualizationContext::from_config(config, thread_id))
     });
     let mut cells: TranscriptCells = Vec::new();
-    let mut pending = None;
+    let mut pending: Option<crate::history_cell::ComputerActivityCell> = None;
     for item in items {
         if (matches!(item, ThreadItem::Reasoning { .. })
             || crate::history_cell::ToolOutputCell::is_item(&item))
             && let Some(group) = &mut pending
         {
+            let returned = crate::history_cell::ToolOutputCell::is_item(&item);
             for cell in item_to_cells(
                 item,
                 cwd,
                 raw_reasoning_visibility,
                 inline_visualization_context.clone(),
             ) {
-                match group {
-                    PendingActivity::Computer(group) => group.group.push_detail(cell),
-                    PendingActivity::Exploration(group) => group.group.push_detail(cell),
-                }
+                group.group.push_detail(cell);
+            }
+            if returned {
+                flush_computer(&mut pending, &mut cells);
             }
             continue;
         }
         if let Some(cell) = tools::historical_tool_fallback(&item) {
-            PendingActivity::flush(&mut pending, &mut cells);
+            flush_computer(&mut pending, &mut cells);
             cells.push(Arc::new(cell));
             continue;
         }
         match item {
             item @ ThreadItem::McpToolCall { .. } => {
                 let Some(call) = tools::McpHistory::from_item(item) else {
-                    PendingActivity::flush(&mut pending, &mut cells);
+                    flush_computer(&mut pending, &mut cells);
                     continue;
                 };
                 if call.invocation.is_computer_activity() {
-                    match &mut pending {
-                        Some(PendingActivity::Computer(group)) => {
-                            computer_groups::append(group, call);
-                        }
-                        Some(PendingActivity::Exploration(_)) | None => {
-                            PendingActivity::flush(&mut pending, &mut cells);
-                            let mut group = crate::history_cell::ComputerActivityCell::default();
-                            computer_groups::append(&mut group, call);
-                            pending = Some(PendingActivity::Computer(group));
-                        }
-                    }
+                    computer_groups::append(pending.get_or_insert_default(), call);
                 } else {
-                    PendingActivity::flush(&mut pending, &mut cells);
+                    flush_computer(&mut pending, &mut cells);
                     let cell = call.into_cell();
                     cells.push(Arc::new(cell));
                 }
             }
             item @ ThreadItem::CommandExecution { .. } => {
-                if matches!(pending, Some(PendingActivity::Computer(_))) {
-                    PendingActivity::flush(&mut pending, &mut cells);
-                }
+                flush_computer(&mut pending, &mut cells);
                 if let Some(command) = tools::CommandHistory::from_item(item) {
-                    let newer = command.into_cell();
-                    if let Some(PendingActivity::Exploration(group)) = &mut pending {
-                        if let Err(newer) = group.append_completed(newer) {
-                            PendingActivity::flush(&mut pending, &mut cells);
-                            pending = Some(PendingActivity::Exploration(newer));
-                        }
-                    } else {
-                        pending = Some(PendingActivity::Exploration(newer));
-                    }
-                    if let Some(PendingActivity::Exploration(group)) = &pending
-                        && group.should_flush()
-                    {
-                        PendingActivity::flush(&mut pending, &mut cells);
-                    }
+                    cells.push(Arc::new(command.into_cell()));
                 }
             }
             item => {
@@ -215,7 +181,7 @@ pub(crate) fn thread_items_to_transcript_cells(
                     inline_visualization_context.clone(),
                 );
                 if !projected.is_empty() {
-                    PendingActivity::flush(&mut pending, &mut cells);
+                    flush_computer(&mut pending, &mut cells);
                     for cell in projected {
                         if let Some((range, replacements)) =
                             crate::history_cell::ToolOutputGroup::attach(&cells, Arc::clone(&cell))
@@ -229,7 +195,7 @@ pub(crate) fn thread_items_to_transcript_cells(
             }
         }
     }
-    PendingActivity::flush(&mut pending, &mut cells);
+    flush_computer(&mut pending, &mut cells);
     cells
 }
 
@@ -293,12 +259,14 @@ fn item_to_cells(
         }
         ThreadItem::FunctionCallOutput {
             id,
+            call_id,
             name,
             namespace,
             output,
         } => {
             if let Some(cell) = crate::history_cell::ToolOutputCell::from_output(
                 &id,
+                call_id.as_deref(),
                 &name,
                 namespace.as_deref(),
                 &output,

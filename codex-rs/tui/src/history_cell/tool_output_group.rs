@@ -38,6 +38,11 @@ impl ToolOutputGroup {
     ) -> Option<(Range<usize>, Vec<Arc<dyn HistoryCell>>)> {
         output.as_any().downcast_ref::<ToolOutputCell>()?;
         if let Some(start) = Self::patch_owner(cells) {
+            if cells[start].outer_call_id().is_some()
+                && cells[start].outer_call_id() != output.outer_call_id()
+            {
+                return None;
+            }
             let details = cells[start + 1..].iter().filter(|cell| {
                 cell.as_any()
                     .downcast_ref::<ReasoningSummaryCell>()
@@ -72,8 +77,12 @@ impl ToolOutputGroup {
             if cell.as_any().is::<PatchHistoryCell>() {
                 break;
             }
-            // Code-only batches have no activity header to share; leave them standalone.
-            if cell.as_any().is::<ToolOutputCell>() {
+            // notify() can return several batches for one call, but the next call is a barrier.
+            if let Some(call_id) = cell.outer_call_id() {
+                if Some(call_id) == output.outer_call_id() {
+                    start -= 1;
+                    has_activity = true;
+                }
                 break;
             }
             let ids = cell.activity_ids();
@@ -85,13 +94,6 @@ impl ToolOutputGroup {
                 {
                     start -= 1;
                     continue;
-                }
-                break;
-            }
-            if ids.iter().any(|id| id.starts_with("output:")) {
-                if !has_activity {
-                    start -= 1;
-                    has_activity = true;
                 }
                 break;
             }
@@ -151,6 +153,21 @@ impl ToolOutputGroup {
                 group.members.push(cell);
             }
         }
+        // Page boundaries can split the computer summary inside one validated outer call.
+        let mut members: Vec<Arc<dyn HistoryCell>> = Vec::new();
+        for cell in group.members {
+            if let Some(older) = members.last_mut()
+                && let Some(previous) = older.as_any().downcast_ref::<super::ComputerActivityCell>()
+                && let Some(next) = cell.as_any().downcast_ref::<super::ComputerActivityCell>()
+            {
+                let mut merged = next.clone();
+                merged.prepend(previous.clone());
+                *older = Arc::new(merged);
+            } else {
+                members.push(cell);
+            }
+        }
+        group.members = members;
         let mut seen = HashSet::new();
         group.members.retain(|cell| {
             let mut ids = cell
@@ -167,6 +184,23 @@ impl ToolOutputGroup {
         Arc::new(group)
     }
 
+    /// Reunite every nested call from an older page, stopping at the previous outer return.
+    pub(crate) fn join_prefix(
+        cells: &[Arc<dyn HistoryCell>],
+        mut start: usize,
+        mut group: Arc<dyn HistoryCell>,
+        turns: &[Turn],
+    ) -> (usize, Arc<dyn HistoryCell>) {
+        while start > 0 {
+            let Some(joined) = Self::join(&cells[start - 1], &group, turns) else {
+                break;
+            };
+            start -= 1;
+            group = joined;
+        }
+        (start, group)
+    }
+
     /// Page joins require persisted adjacency within one turn, not matching text or proximity.
     pub(crate) fn join(
         older: &Arc<dyn HistoryCell>,
@@ -176,15 +210,19 @@ impl ToolOutputGroup {
         if newer.as_any().is::<PatchHistoryCell>() {
             return None;
         }
-        if !older.as_any().is::<Self>() && !newer.as_any().is::<Self>() {
+        let same_call =
+            older.outer_call_id().is_some() && older.outer_call_id() == newer.outer_call_id();
+        if !older.as_any().is::<Self>() && !newer.as_any().is::<Self>() && !same_call {
+            return None;
+        }
+        // Pagination may reunite outputs from one invocation, never two different invocations.
+        if older.outer_call_id().is_some() && newer.outer_call_id().is_some() && !same_call {
             return None;
         }
         // File disclosures cannot absorb a neighboring visible activity across a page boundary.
-        if (Self::patch_owner(std::slice::from_ref(older)).is_some()
-            || older
-                .activity_ids()
-                .iter()
-                .any(|id| id.starts_with("output:")))
+        if !same_call
+            && (Self::patch_owner(std::slice::from_ref(older)).is_some()
+                || older.outer_call_id().is_some())
             && newer
                 .as_any()
                 .downcast_ref::<Self>()
@@ -232,6 +270,12 @@ impl ToolOutputGroup {
 }
 
 impl HistoryCell for ToolOutputGroup {
+    fn outer_call_id(&self) -> Option<&str> {
+        self.members
+            .iter()
+            .find_map(|member| member.outer_call_id())
+    }
+
     fn activity_parts(
         &self,
         width: u16,

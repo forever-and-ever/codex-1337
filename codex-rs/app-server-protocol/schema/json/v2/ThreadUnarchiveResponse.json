@@ -1498,6 +1498,14 @@
         },
         {
           "properties": {
+            "callId": {
+              "default": null,
+              "description": "Enclosing invocation; absent in older persisted history.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "id": {
               "type": "string"
             },

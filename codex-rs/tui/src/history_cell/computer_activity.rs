@@ -264,6 +264,10 @@ impl HistoryCell for ComputerActivityCell {
             .collect()
     }
 
+    fn outer_call_id(&self) -> Option<&str> {
+        self.group.details.outer_call_id()
+    }
+
     fn expanded_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         if let Some(output) = self.group.details.output_lines(width) {
             let mut lines = self

@@ -449,12 +449,14 @@ impl ChatWidget {
             }
             ThreadItem::FunctionCallOutput {
                 id,
+                call_id,
                 name,
                 namespace,
                 output,
             } => {
                 if let Some(cell) = history_cell::ToolOutputCell::from_output(
                     &id,
+                    call_id.as_deref(),
                     &name,
                     namespace.as_deref(),
                     &output,

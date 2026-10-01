@@ -72,6 +72,7 @@ pub(super) fn turn_summary(turn: &Turn, include_outputs: bool, output_chars: usi
             }),
             ThreadItem::FunctionCallOutput {
                 id,
+                call_id: _,
                 name,
                 namespace,
                 output,

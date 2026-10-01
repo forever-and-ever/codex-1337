@@ -15,6 +15,7 @@ use ratatui::text::Line;
 #[derive(Debug)]
 pub(crate) struct ToolOutputCell {
     id: String,
+    call_id: String,
     output: FunctionCallOutputBody,
     readable: String,
 }
@@ -30,12 +31,14 @@ impl ToolOutputCell {
 
     pub(crate) fn from_output(
         id: &str,
+        call_id: Option<&str>,
         name: &str,
         namespace: Option<&str>,
         output: &FunctionCallOutputBody,
     ) -> Option<Self> {
         (namespace.is_none() && matches!(name, "exec" | "wait")).then(|| Self {
             id: id.to_owned(),
+            call_id: call_id.unwrap_or(id).to_owned(),
             output: output.clone(),
             readable: match output {
                 FunctionCallOutputBody::Text(text) => {
@@ -60,6 +63,10 @@ impl ToolOutputCell {
 }
 
 impl HistoryCell for ToolOutputCell {
+    fn outer_call_id(&self) -> Option<&str> {
+        Some(&self.call_id)
+    }
+
     fn activity_disclosure(&self, _width: u16) -> Option<super::ActivityDisclosure> {
         (!self.readable.trim().is_empty()).then_some(super::ActivityDisclosure::Generic)
     }

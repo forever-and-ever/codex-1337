@@ -70,7 +70,7 @@ pub(super) fn capture(history: &ContextManager, previous_len: usize) -> Vec<Capt
 }
 
 impl Session {
-    pub(super) async fn record_tool_output_tokens(
+    pub(super) async fn record_tool_outputs(
         &self,
         turn: &TurnContext,
         outputs: Vec<CapturedOutput>,
@@ -99,6 +99,7 @@ impl Session {
                         turn_id: turn_id.clone(),
                         item: TurnItem::FunctionCallOutput(FunctionCallOutputItem {
                             id: output.id.clone(),
+                            call_id: Some(output.call_id.clone()),
                             name: name.clone(),
                             namespace: None,
                             output: output.body.clone(),
@@ -109,6 +110,10 @@ impl Session {
                 )
                 .await;
             }
+        }
+        // Display and invocation ownership are provider-neutral, even without a tokenizer.
+        if turn.config.model_provider_id != "openai" {
+            return;
         }
         let live_thread = self.live_thread().cloned();
         let tx_event = self.get_tx_event();

@@ -1,6 +1,5 @@
 //! Attach transparent page-boundary details to a freshly rebuilt activity group.
 
-use crate::exec_cell::ExecCell;
 use crate::history_cell::ComputerActivityCell;
 use crate::history_cell::HistoryCell;
 use crate::history_cell::ReasoningSummaryCell;
@@ -40,11 +39,7 @@ pub(crate) fn fold_trailing_activity_details(
         })
         .cloned()
         .collect::<Vec<_>>();
-    if !older.as_any().is::<ComputerActivityCell>()
-        && !older
-            .as_any()
-            .downcast_ref::<ExecCell>()
-            .is_some_and(ExecCell::is_agent_command_group)
+    if (!older.as_any().is::<ComputerActivityCell>() || older.outer_call_id().is_some())
         && details
             .iter()
             .any(|cell| cell.as_any().is::<ToolOutputCell>())
@@ -55,22 +50,8 @@ pub(crate) fn fold_trailing_activity_details(
             turns,
         );
     }
-    let (mut ids, retained) =
-        if let Some(group) = older.as_any().downcast_ref::<ComputerActivityCell>() {
-            (group.call_ids().collect::<Vec<_>>(), &group.group.details)
-        } else {
-            let group = older.as_any().downcast_ref::<ExecCell>()?;
-            if !group.is_agent_command_group() || group.should_flush() {
-                return None;
-            }
-            (
-                group
-                    .iter_calls()
-                    .map(|call| call.call_id.as_str())
-                    .collect::<Vec<_>>(),
-                &group.group.details,
-            )
-        };
+    let group = older.as_any().downcast_ref::<ComputerActivityCell>()?;
+    let mut ids = group.call_ids().collect::<Vec<_>>();
     let count = ids.len();
     for detail in &details {
         if let Some(output) = detail.as_any().downcast_ref::<ToolOutputCell>() {
@@ -84,17 +65,11 @@ pub(crate) fn fold_trailing_activity_details(
         }
     }
     let items = super::computer_groups::adjacent_activity_items(&ids, turns)?;
-    let mut retained = retained.clone();
+    let mut retained = group.group.details.clone();
     for detail in &details {
         retained.push(count, Arc::clone(detail));
     }
-    if older.as_any().is::<ComputerActivityCell>() {
-        let mut group = super::computer_groups::completed_group(items)?;
-        group.group.details = retained;
-        Some(Arc::new(group))
-    } else {
-        let mut group = super::command_groups::completed_group(items)?;
-        group.group.details = retained;
-        Some(Arc::new(group))
-    }
+    let mut group = super::computer_groups::completed_group(items)?;
+    group.group.details = retained;
+    Some(Arc::new(group))
 }

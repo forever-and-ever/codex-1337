@@ -73,6 +73,9 @@ pub(super) fn adjacent_activity_items<'a>(
     let mut matched = 0;
     for (offset, item) in turn.items[start..].iter().enumerate() {
         if item.id() != ids[matched] {
+            if crate::history_cell::ToolOutputCell::is_item(item) {
+                return None;
+            }
             if super::is_activity_metadata(item) {
                 continue;
             }
