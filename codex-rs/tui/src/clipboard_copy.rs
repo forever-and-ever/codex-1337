@@ -355,8 +355,8 @@ fn write_osc52_to_writer(mut writer: impl Write, sequence: &str) -> Result<(), S
         .map_err(|e| format!("failed to flush OSC 52: {e}"))
 }
 
-#[derive(Clone, Copy)]
-enum SelectionTarget {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum SelectionTarget {
     Clipboard,
     Primary,
 }

@@ -1390,7 +1390,7 @@ async fn fullscreen_composer_mouse_copy_and_input_ownership() -> Result<()> {
         None,
     );
     assert!(!app.transcript_view.has_active_interaction());
-    app.start_right_click_paste(
+    app.start_mouse_paste(
         &mut tui,
         crossterm::event::MouseEvent {
             kind: Down(Right),

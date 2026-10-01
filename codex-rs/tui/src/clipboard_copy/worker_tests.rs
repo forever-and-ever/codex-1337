@@ -28,7 +28,7 @@ async fn blocked_copy_allows_overlay_exit_rejects_backlog_and_wakes_completion()
                 released.recv().unwrap();
                 (Ok(CopyOutcome::Copied(Some(ClipboardLease::test()))), None)
             },
-            |_| unreachable!("copy-only backend"),
+            |_, _| unreachable!("copy-only backend"),
         )
         .unwrap();
     let mut app = Box::new(crate::app::test_support::make_test_app().await);
@@ -139,7 +139,7 @@ fn dropping_worker_does_not_wait_for_blocked_backend() {
                 finished.send(()).unwrap();
                 (Err("unavailable".into()), None)
             },
-            |_| unreachable!("copy-only backend"),
+            |_, _| unreachable!("copy-only backend"),
         )
         .unwrap();
     worker
@@ -180,7 +180,7 @@ async fn expired_setup_discards_delivery_and_keeps_worker_busy_until_it_returns(
                     });
                     (outcome, None)
                 },
-                |_| unreachable!("copy-only backend"),
+                |_, _| unreachable!("copy-only backend"),
             )
             .unwrap();
         worker
@@ -282,7 +282,7 @@ fn delivery_claim_cannot_be_abandoned() {
 }
 
 #[tokio::test]
-async fn right_click_paste_uses_normal_input_and_discards_stale_reads() {
+async fn mouse_paste_uses_requested_selection_and_discards_stale_reads() {
     use codex_config::types::RightClickPaste;
     use crossterm::event::MouseButton;
     use crossterm::event::MouseEvent;
@@ -294,8 +294,8 @@ async fn right_click_paste_uses_normal_input_and_discards_stale_reads() {
         .start(
             tui.frame_requester(),
             |_, _, _| unreachable!("no selection"),
-            move |_| {
-                started.send(()).unwrap();
+            move |source, _| {
+                started.send(source).unwrap();
                 released.recv().unwrap();
                 Ok("café\r\nsecond line\n".into())
             },
@@ -317,18 +317,73 @@ async fn right_click_paste_uses_normal_input_and_discards_stale_reads() {
         .unwrap();
     assert!(!tui.clipboard.is_busy());
     tui.set_owned_screen(/*owned*/ true).unwrap();
-    for (change, expected) in [
-        ("none", "draft café\nsecond line\n"),
-        ("native", "draft native"),
-        ("edit", "replacement"),
-        ("disable", "draft "),
-    ] {
-        app.local_settings.tui.right_click_paste = RightClickPaste::On;
+    let mut cases = vec![
+        (MouseButton::Right, "none", "draft café\nsecond line\n"),
+        (MouseButton::Right, "native", "draft native"),
+        (MouseButton::Right, "edit", "replacement"),
+        (MouseButton::Right, "disable", "draft "),
+    ];
+    if cfg!(target_os = "linux") {
+        cases.extend([
+            (MouseButton::Middle, "none", "draft café\nsecond line\n"),
+            (MouseButton::Middle, "native", "draft native"),
+            (MouseButton::Middle, "edit", "replacement"),
+        ]);
+    }
+    for (button, change, expected) in cases {
+        // PRIMARY paste is independent of the optional right-click fallback.
+        app.local_settings.tui.right_click_paste = if button == MouseButton::Middle {
+            RightClickPaste::Off
+        } else {
+            RightClickPaste::On
+        };
+        let click = MouseEvent {
+            kind: MouseEventKind::Down(button),
+            ..click
+        };
         app.chat_widget.apply_external_edit("draft ".into());
+        if button == MouseButton::Middle {
+            app.local_settings.tui.copy_on_select = codex_config::types::CopyOnSelect::Never;
+            app.transcript_view.copy_on_select = false;
+            app.transcript_cells = vec![Arc::new(PlainHistoryCell::new(vec![
+                "selected source".into(),
+            ]))];
+            let area = ratatui::layout::Rect::new(
+                /*x*/ 0, /*y*/ 0, /*width*/ 40, /*height*/ 1,
+            );
+            app.transcript_view.render(
+                area,
+                &mut ratatui::buffer::Buffer::empty(area),
+                &app.transcript_cells,
+            );
+            for (kind, column) in [
+                (MouseEventKind::Down(MouseButton::Left), 0),
+                (MouseEventKind::Drag(MouseButton::Left), 8),
+                (MouseEventKind::Up(MouseButton::Left), 8),
+            ] {
+                app.transcript_view.handle_mouse(
+                    MouseEvent {
+                        kind,
+                        column,
+                        row: 0,
+                        ..click
+                    },
+                    &app.transcript_cells,
+                );
+            }
+            assert!(app.transcript_view.has_selection_range());
+        }
         app.handle_tui_event(&mut tui, &mut server, TuiEvent::Mouse(click))
             .await
             .unwrap();
-        start_rx.recv_timeout(SETUP_TIMEOUT).unwrap();
+        assert_eq!(
+            start_rx.recv_timeout(SETUP_TIMEOUT).unwrap(),
+            if button == MouseButton::Middle {
+                SelectionTarget::Primary
+            } else {
+                SelectionTarget::Clipboard
+            }
+        );
         if change == "none" {
             app.handle_tui_event(&mut tui, &mut server, TuiEvent::Mouse(click))
                 .await
@@ -343,7 +398,7 @@ async fn right_click_paste_uses_normal_input_and_discards_stale_reads() {
                 &mut tui,
                 &mut server,
                 TuiEvent::Mouse(MouseEvent {
-                    kind: MouseEventKind::Up(MouseButton::Right),
+                    kind: MouseEventKind::Up(button),
                     ..click
                 }),
             )
@@ -381,20 +436,28 @@ fn expired_text_read_rejects_backlog_and_discards_late_completion() {
         .start(
             FrameRequester::test_dummy(),
             |_, _, _| unreachable!(),
-            move |_| {
+            move |_, _| {
                 released.recv().unwrap();
                 Ok("late".into())
             },
         )
         .unwrap();
-    assert!(worker.read_text(FrameRequester::test_dummy()).unwrap());
+    assert!(
+        worker
+            .read_text(SelectionTarget::Clipboard, FrameRequester::test_dummy())
+            .unwrap()
+    );
     worker.pending_read.as_mut().unwrap().deadline = Instant::now();
     worker.poll();
     assert_eq!(
         worker.take_text_result(),
         Some(Err("clipboard read timed out".into()))
     );
-    assert!(!worker.read_text(FrameRequester::test_dummy()).unwrap());
+    assert!(
+        !worker
+            .read_text(SelectionTarget::Clipboard, FrameRequester::test_dummy())
+            .unwrap()
+    );
     release.send(()).unwrap();
     let deadline = Instant::now() + SETUP_TIMEOUT;
     while worker.is_busy() && Instant::now() < deadline {

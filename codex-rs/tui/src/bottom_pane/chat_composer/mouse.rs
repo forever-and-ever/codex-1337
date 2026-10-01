@@ -3,6 +3,7 @@
 //! Double/triple clicks select words/logical lines using the transcript's shared gesture rules.
 //! Explicit copies preserve the draft and cursor; confirmed copies clear selection.
 //! Left release publishes PRIMARY without clearing selection or touching CLIPBOARD.
+//! Middle-click may paste PRIMARY over a selection; right-click leaves selections to copy.
 
 use super::*;
 use crate::clipboard_copy::CopyStatus;
@@ -12,12 +13,16 @@ use crossterm::event::MouseEvent;
 use crossterm::event::MouseEventKind;
 
 impl ChatComposer {
-    pub(crate) fn can_paste_on_right_click(&self) -> bool {
+    pub(crate) fn can_paste_with_mouse(
+        &self,
+        source: crate::clipboard_copy::SelectionTarget,
+    ) -> bool {
         self.draft.input_enabled
             && !self.blocks_direct_input
             && self.history_search.is_none()
             && self.draft.textarea.vim_query().is_none()
-            && self.draft.textarea.mouse_selection_range().is_none()
+            && (source == crate::clipboard_copy::SelectionTarget::Primary
+                || self.draft.textarea.mouse_selection_range().is_none())
     }
 
     pub(in crate::bottom_pane) fn finish_copy(

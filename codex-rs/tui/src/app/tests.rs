@@ -6006,8 +6006,8 @@ async fn make_test_app() -> Box<App> {
         environment_manager: Arc::new(EnvironmentManager::default_for_tests()),
         app_server_target: crate::AppServerTarget::Embedded,
         reconnect: Default::default(),
-        pending_right_click_paste: None,
-        right_click_paste_environment: super::right_click_paste::PasteEnvironment {
+        pending_mouse_paste: None,
+        mouse_paste_environment: super::mouse_paste::PasteEnvironment {
             platform_default: true,
             ssh: false,
             wsl: false,
@@ -6120,8 +6120,8 @@ pub(super) async fn make_test_app_with_channels() -> (
             environment_manager: Arc::new(EnvironmentManager::default_for_tests()),
             app_server_target: crate::AppServerTarget::Embedded,
             reconnect: Default::default(),
-            pending_right_click_paste: None,
-            right_click_paste_environment: super::right_click_paste::PasteEnvironment {
+            pending_mouse_paste: None,
+            mouse_paste_environment: super::mouse_paste::PasteEnvironment {
                 platform_default: true,
                 ssh: false,
                 wsl: false,

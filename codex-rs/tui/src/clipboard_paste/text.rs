@@ -1,15 +1,19 @@
 //! Local clipboard text reads, executed only by the shared clipboard worker.
 //! WSL reads the Windows clipboard; it never falls back to a separate Linux clipboard.
 
+use crate::clipboard_copy::SelectionTarget;
 use codex_protocol::user_input::MAX_USER_INPUT_TEXT_CHARS;
 use std::time::Instant;
 
-pub(crate) fn read(deadline: Instant) -> Result<String, String> {
+pub(crate) fn read(target: SelectionTarget, deadline: Instant) -> Result<String, String> {
     if crate::clipboard_copy::is_ssh_session() {
         return Err("clipboard text is unavailable over SSH".into());
     }
     #[cfg(target_os = "linux")]
     if super::is_probably_wsl() {
+        if target == SelectionTarget::Primary {
+            return Err("PRIMARY selection is unavailable in WSL".into());
+        }
         let executable = codex_utils_path::system_executable("powershell.exe")
             .ok_or("Windows clipboard reader is unavailable")?;
         let mut command = tokio::process::Command::new(executable);
@@ -22,7 +26,19 @@ pub(crate) fn read(deadline: Instant) -> Result<String, String> {
             .block_on(read_command(command, deadline));
     }
     #[cfg(not(target_os = "android"))]
-    let text = match arboard::Clipboard::new().and_then(|mut clipboard| clipboard.get_text()) {
+    let text = match arboard::Clipboard::new().and_then(|mut clipboard| match target {
+        SelectionTarget::Clipboard => clipboard.get_text(),
+        #[cfg(target_os = "linux")]
+        SelectionTarget::Primary => {
+            use arboard::GetExtLinux;
+            clipboard
+                .get()
+                .clipboard(arboard::LinuxClipboardKind::Primary)
+                .text()
+        }
+        #[cfg(not(target_os = "linux"))]
+        SelectionTarget::Primary => Err(arboard::Error::ContentNotAvailable),
+    }) {
         Ok(text) => text,
         Err(arboard::Error::ContentNotAvailable) => String::new(),
         Err(_) => return Err("clipboard text is unavailable".into()),

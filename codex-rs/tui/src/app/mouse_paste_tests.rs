@@ -26,8 +26,12 @@ fn policy_preserves_explicit_modes_and_terminal_ownership() {
                 RightClickPaste::On,
                 RightClickPaste::Auto
             ]
-            .map(|mode| env.allows(mode)),
+            .map(|mode| env.allows(SelectionTarget::Clipboard, mode)),
             expected
+        );
+        assert_eq!(
+            env.allows(SelectionTarget::Primary, RightClickPaste::Off),
+            cfg!(target_os = "linux") && !ssh && !wsl && vscode != VsCode,
         );
     }
 }

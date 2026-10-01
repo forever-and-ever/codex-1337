@@ -1811,8 +1811,11 @@ impl BottomPane {
         self.composer.copy_selection(event, copy)
     }
 
-    pub(crate) fn can_paste_on_right_click(&self) -> bool {
-        self.no_modal_or_popup_active() && self.composer.can_paste_on_right_click()
+    pub(crate) fn can_paste_with_mouse(
+        &self,
+        source: crate::clipboard_copy::SelectionTarget,
+    ) -> bool {
+        self.no_modal_or_popup_active() && self.composer.can_paste_with_mouse(source)
     }
 
     pub(crate) fn prepare_composer_mouse(&mut self, event: crossterm::event::MouseEvent) -> bool {

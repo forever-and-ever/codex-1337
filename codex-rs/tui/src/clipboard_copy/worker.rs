@@ -7,6 +7,7 @@
 use super::ClipboardLease;
 use super::CopyFormat;
 use super::CopyStatus;
+use super::SelectionTarget;
 use crate::tui::FrameRequester;
 use std::cell::Cell;
 use std::sync::Arc;
@@ -99,6 +100,7 @@ enum Request {
         setup: Arc<CopySetup>,
     },
     Read {
+        target: SelectionTarget,
         deadline: Instant,
         response: mpsc::Sender<Result<String, String>>,
     },
@@ -220,7 +222,11 @@ impl ClipboardWorker {
     }
 
     /// Start one text read. A timed-out native call keeps the shared worker occupied.
-    pub(crate) fn read_text(&mut self, frames: FrameRequester) -> Result<bool, String> {
+    pub(crate) fn read_text(
+        &mut self,
+        target: SelectionTarget,
+        frames: FrameRequester,
+    ) -> Result<bool, String> {
         if self.is_busy() {
             return Ok(false);
         }
@@ -230,7 +236,11 @@ impl ClipboardWorker {
         self.requests
             .as_ref()
             .ok_or("clipboard worker stopped")?
-            .send(Request::Read { deadline, response })
+            .send(Request::Read {
+                target,
+                deadline,
+                response,
+            })
             .map_err(|_| "clipboard worker stopped".to_string())?;
         self.pending_read = Some(PendingRead {
             frames: frames.clone(),
@@ -265,7 +275,7 @@ impl ClipboardWorker {
             Option<(super::SelectionTarget, String)>,
         ) + Send
         + 'static,
-        mut read: impl FnMut(Instant) -> Result<String, String> + Send + 'static,
+        mut read: impl FnMut(SelectionTarget, Instant) -> Result<String, String> + Send + 'static,
     ) -> Result<(), String> {
         let (requests, incoming) = mpsc::channel::<Request>();
         let (outgoing, responses) = mpsc::channel();
@@ -286,8 +296,12 @@ impl ClipboardWorker {
                             let (outcome, terminal_text) = copy(&text, destination, &setup);
                             (destination, outcome, terminal_text)
                         }
-                        Request::Read { deadline, response } => {
-                            let _ = response.send(read(deadline));
+                        Request::Read {
+                            target,
+                            deadline,
+                            response,
+                        } => {
+                            let _ = response.send(read(target, deadline));
                             frames.schedule_frame();
                             continue;
                         }

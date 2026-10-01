@@ -248,6 +248,7 @@ mod presentation;
 mod queued_messages;
 mod rate_limit_refresh;
 pub(crate) use queued_messages::QueueEvent;
+mod mouse_paste;
 mod realtime_delivery;
 mod realtime_settings;
 mod reasoning_replay;
@@ -256,7 +257,6 @@ mod reconnect;
 mod replay_filter;
 mod resize_reflow;
 mod resume_config;
-mod right_click_paste;
 mod safety_buffering;
 mod server_version_notice;
 mod session_lifecycle;
@@ -595,8 +595,8 @@ pub(crate) struct App {
     environment_manager: Arc<EnvironmentManager>,
     app_server_target: AppServerTarget,
     reconnect: reconnect::ReconnectState,
-    pending_right_click_paste: Option<right_click_paste::PendingPaste>,
-    right_click_paste_environment: right_click_paste::PasteEnvironment,
+    pending_mouse_paste: Option<mouse_paste::PendingPaste>,
+    mouse_paste_environment: mouse_paste::PasteEnvironment,
     /// Tracks the thread we intentionally shut down while exiting the app.
     ///
     /// When this matches the active thread, its `ShutdownComplete` should lead to
@@ -855,9 +855,9 @@ impl App {
         let scheduled_draw = matches!(event, TuiEvent::Draw);
         tui.link_hover.observe(&event);
         self.refresh_link_hover(tui)?;
-        self.invalidate_right_click_paste(&event);
+        self.invalidate_mouse_paste(&event);
         self.finish_clipboard(tui);
-        let event = self.finish_right_click_paste(tui, event);
+        let event = self.finish_mouse_paste(tui, event);
         if matches!(&event, TuiEvent::Key(_))
             && self.handle_composer_copy_event(tui, &event, |tui, text| {
                 tui.copy_transcript_selection(text, crate::clipboard_copy::CopyFormat::PlainText)
@@ -1167,7 +1167,7 @@ impl App {
                         self.app_event_tx.send(AppEvent::LaunchExternalEditor);
                     }
                 }
-                TuiEvent::Mouse(mouse) => self.start_right_click_paste(tui, mouse),
+                TuiEvent::Mouse(mouse) => self.start_mouse_paste(tui, mouse),
                 TuiEvent::FocusLost => {}
             }
         }

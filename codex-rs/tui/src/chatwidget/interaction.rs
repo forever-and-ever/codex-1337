@@ -39,8 +39,11 @@ impl ChatWidget {
     }
 
     /// Snapshot only the editable paste target, without changing pending submissions.
-    pub(crate) fn right_click_paste_target(&self) -> Option<(String, usize)> {
-        self.bottom_pane.can_paste_on_right_click().then(|| {
+    pub(crate) fn mouse_paste_target(
+        &self,
+        source: crate::clipboard_copy::SelectionTarget,
+    ) -> Option<(String, usize)> {
+        self.bottom_pane.can_paste_with_mouse(source).then(|| {
             (
                 self.bottom_pane.composer_text(),
                 self.bottom_pane.composer_cursor(),

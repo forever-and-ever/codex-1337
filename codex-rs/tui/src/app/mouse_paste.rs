@@ -1,8 +1,10 @@
-//! Right-click fallback for an unchanged, editable fullscreen composer.
+//! Pointer paste into an unchanged, editable fullscreen composer: CLIPBOARD on configured
+//! right-click, PRIMARY on Linux middle-click, without changing the terminal's shortcuts.
 //! Existing selection handlers run first. Only a draw may deliver a read, so real input
 //! invalidates pending paste before completion and is never replaced by clipboard text.
 
 use super::*;
+use crate::clipboard_copy::SelectionTarget;
 use crate::tui::VscodeDetection;
 use codex_config::types::RightClickPaste;
 use crossterm::event::MouseButton;
@@ -10,6 +12,7 @@ use crossterm::event::MouseEvent;
 use crossterm::event::MouseEventKind;
 
 pub(super) struct PendingPaste {
+    source: SelectionTarget,
     thread: Option<ThreadId>,
     draft: (String, usize),
 }
@@ -31,9 +34,12 @@ impl PasteEnvironment {
         }
     }
 
-    fn allows(&self, mode: RightClickPaste) -> bool {
+    fn allows(&self, source: SelectionTarget, mode: RightClickPaste) -> bool {
         if self.ssh || self.vscode == VscodeDetection::VsCode {
             return false;
+        }
+        if source == SelectionTarget::Primary {
+            return cfg!(target_os = "linux") && !self.wsl;
         }
         match mode {
             RightClickPaste::Off => false,
@@ -46,74 +52,78 @@ impl PasteEnvironment {
 }
 
 impl App {
-    fn right_click_paste_target(&self, tui: &tui::Tui) -> Option<PendingPaste> {
+    fn mouse_paste_target(&self, tui: &tui::Tui, source: SelectionTarget) -> Option<PendingPaste> {
         if !tui.is_owned_screen()
             || self.overlay.is_some()
-            || self.transcript_view.has_selection_range()
+            || (source == SelectionTarget::Clipboard && self.transcript_view.has_selection_range())
             || self.transcript_view.is_search_active()
             || !self
-                .right_click_paste_environment
-                .allows(self.local_settings.tui.right_click_paste)
+                .mouse_paste_environment
+                .allows(source, self.local_settings.tui.right_click_paste)
         {
             return None;
         }
         Some(PendingPaste {
+            source,
             thread: self.current_displayed_thread_id(),
-            draft: self.chat_widget.right_click_paste_target()?,
+            draft: self.chat_widget.mouse_paste_target(source)?,
         })
     }
 
-    pub(super) fn start_right_click_paste(&mut self, tui: &mut tui::Tui, mouse: MouseEvent) {
-        if mouse.kind != MouseEventKind::Down(MouseButton::Right)
-            || !mouse.modifiers.is_empty()
-            || self.pending_right_click_paste.is_some()
+    pub(super) fn start_mouse_paste(&mut self, tui: &mut tui::Tui, mouse: MouseEvent) {
+        let source = match mouse.kind {
+            MouseEventKind::Down(MouseButton::Right) => SelectionTarget::Clipboard,
+            MouseEventKind::Down(MouseButton::Middle) => SelectionTarget::Primary,
+            _ => return,
+        };
+        if !mouse.modifiers.is_empty()
+            || self.pending_mouse_paste.is_some()
             || tui.clipboard.is_busy()
         {
             return;
         }
-        let Some(target) = self.right_click_paste_target(tui) else {
+        let Some(target) = self.mouse_paste_target(tui, source) else {
             return;
         };
-        match tui.clipboard.read_text(tui.frame_requester()) {
-            Ok(true) => self.pending_right_click_paste = Some(target),
+        match tui.clipboard.read_text(source, tui.frame_requester()) {
+            Ok(true) => self.pending_mouse_paste = Some(target),
             Ok(false) => {}
             Err(error) => self.chat_widget.add_error_message(error),
         }
     }
 
     /// Invalidate before polling, even when the worker has already completed.
-    pub(super) fn invalidate_right_click_paste(&mut self, event: &TuiEvent) {
+    pub(super) fn invalidate_mouse_paste(&mut self, event: &TuiEvent) {
         let keep = match event {
             TuiEvent::Draw | TuiEvent::Resize(_) | TuiEvent::FocusGained => true,
             TuiEvent::Mouse(mouse) => {
                 matches!(
                     mouse.kind,
-                    MouseEventKind::Moved | MouseEventKind::Up(MouseButton::Right)
-                ) || (mouse.kind == MouseEventKind::Down(MouseButton::Right)
-                    && mouse.modifiers.is_empty())
+                    MouseEventKind::Moved
+                        | MouseEventKind::Up(MouseButton::Right | MouseButton::Middle)
+                ) || (matches!(
+                    mouse.kind,
+                    MouseEventKind::Down(MouseButton::Right | MouseButton::Middle)
+                ) && mouse.modifiers.is_empty())
             }
             TuiEvent::Key(_) | TuiEvent::Paste(_) | TuiEvent::FocusLost | TuiEvent::Resume => false,
         };
         if !keep {
-            self.pending_right_click_paste = None;
+            self.pending_mouse_paste = None;
         }
     }
 
-    pub(super) fn finish_right_click_paste(
-        &mut self,
-        tui: &mut tui::Tui,
-        event: TuiEvent,
-    ) -> TuiEvent {
+    pub(super) fn finish_mouse_paste(&mut self, tui: &mut tui::Tui, event: TuiEvent) -> TuiEvent {
         if !matches!(event, TuiEvent::Draw) {
             return event;
         }
         let Some(result) = tui.clipboard.take_text_result() else {
             return event;
         };
-        let Some(pending) = self.pending_right_click_paste.take() else {
+        let Some(pending) = self.pending_mouse_paste.take() else {
             return event;
         };
-        let Some(current) = self.right_click_paste_target(tui) else {
+        let Some(current) = self.mouse_paste_target(tui, pending.source) else {
             return event;
         };
         if pending.thread != current.thread || pending.draft != current.draft {
@@ -134,5 +144,5 @@ impl App {
 }
 
 #[cfg(test)]
-#[path = "right_click_paste_tests.rs"]
+#[path = "mouse_paste_tests.rs"]
 mod tests;
