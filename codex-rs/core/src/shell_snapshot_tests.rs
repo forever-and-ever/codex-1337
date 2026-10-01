@@ -5,8 +5,6 @@ use pretty_assertions::assert_eq;
 #[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
-#[cfg(unix)]
-use std::process::Command;
 #[cfg(target_os = "linux")]
 use std::process::Command as StdCommand;
 

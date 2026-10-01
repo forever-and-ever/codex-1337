@@ -1,5 +1,4 @@
 use super::CoreShellActionProvider;
-use super::CoreShellCommandExecutor;
 use super::InterceptedExecPolicyContext;
 use super::ParsedShellCommand;
 use super::commands_for_intercepted_exec_policy;
@@ -37,7 +36,6 @@ use codex_tools::ToolName;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;

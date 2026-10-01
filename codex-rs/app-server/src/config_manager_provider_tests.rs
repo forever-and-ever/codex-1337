@@ -12,7 +12,6 @@ use codex_config::ThreadConfigSource;
 use codex_config::test_support::CloudConfigBundleFixture;
 use pretty_assertions::assert_eq;
 use tempfile::tempdir;
-use test_case::test_case;
 
 struct UnavailableThreadConfig;
 

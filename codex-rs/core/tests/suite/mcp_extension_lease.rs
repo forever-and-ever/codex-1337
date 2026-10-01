@@ -194,7 +194,7 @@ async fn resumed_history_deactivates_unowned_extension_instructions() -> Result<
                 .mcp_servers
                 .set(std::collections::HashMap::from([(
                     "mcp__codex_tui".into(),
-                    retained.clone(),
+                    retained,
                 )]))
                 .expect("retained transport configured");
         });

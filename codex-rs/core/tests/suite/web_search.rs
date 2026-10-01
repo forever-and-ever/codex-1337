@@ -1,10 +1,8 @@
 #![allow(clippy::unwrap_used)]
 
-use codex_config::test_support::CloudConfigBundleFixture;
 use codex_features::Feature;
 use codex_protocol::config_types::WebSearchMode;
 use codex_protocol::models::PermissionProfile;
-use codex_protocol::openai_models::WebSearchToolType;
 use core_test_support::responses;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
