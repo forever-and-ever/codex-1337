@@ -15,6 +15,7 @@ use pretty_assertions::assert_eq;
 use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 #[test]
 fn file_disclosures_are_independent_and_not_copied() {
@@ -155,6 +156,85 @@ fn file_disclosures_are_independent_and_not_copied() {
             .collect::<Vec<_>>(),
         vec![false, true],
     );
+    // A later call shares the heading, not the prior call's disclosure or token bill.
+    let mut cells = cells;
+    cells.push(Arc::new(crate::history_cell::ReasoningSummaryCell::new(
+        String::new(),
+        "Hidden reasoning between edits".into(),
+        Path::new("/project"),
+        /*transcript_only*/ true,
+    )));
+    let next_index = cells.len();
+    cells.extend(crate::thread_transcript::thread_items_to_transcript_cells(
+        /*thread_id*/ None,
+        &test_path_buf("/project").abs(),
+        [
+            ThreadItem::FileChange {
+                id: "next-patch".into(),
+                changes: vec![FileUpdateChange {
+                    path: "gamma.rs".into(),
+                    kind: PatchChangeKind::Add,
+                    diff: "gamma body\n".into(),
+                }],
+                status: PatchApplyStatus::Completed,
+            },
+            ThreadItem::FunctionCallOutput {
+                id: "next-batch".into(),
+                name: "exec".into(),
+                namespace: None,
+                output: FunctionCallOutputBody::Text("Next patch applied".into()),
+            },
+        ],
+        crate::thread_transcript::RawReasoningVisibility::Hidden,
+        /*config*/ None,
+    ));
+    view.record_tool_output_tokens(
+        "tool-output-tokens:next-batch".into(),
+        "next-exec".into(),
+        Some(55),
+    );
+    view.disclosure.expanded.clear();
+    let area = Rect::new(
+        /*x*/ 0, /*y*/ 0, /*width*/ 70, /*height*/ 14,
+    );
+    for stage in ["adjacent calls", "next file expanded", "message boundary"] {
+        if stage == "message boundary" {
+            cells.insert(
+                next_index,
+                Arc::new(crate::history_cell::PlainHistoryCell::new(vec![
+                    "A separate message".into(),
+                ])),
+            );
+        }
+        view.clear_activity_focus();
+        view.jump_to_latest();
+        let mut buffer = Buffer::empty(area);
+        view.render(area, &mut buffer, &cells);
+        snapshots.push(format!(
+            "{stage}\n{}",
+            crate::transcript_view::tests::text(&buffer).trim_end()
+        ));
+        if stage == "adjacent calls" {
+            let (row, column) = view
+                .visible
+                .iter()
+                .enumerate()
+                .find_map(|(row, visible)| {
+                    (visible.index == next_index
+                        && visible.layout.disclosure_row() == Some(visible.row))
+                    .then(|| (row as u16, visible.layout.disclosure_columns().start))
+                })
+                .expect("next call's file control");
+            assert!(view.toggle_disclosure_at(&cells, column, row));
+            assert_eq!(
+                cells
+                    .iter()
+                    .map(|cell| view.disclosure.is_expanded(&cell.activity_ids()))
+                    .collect::<Vec<_>>(),
+                vec![false, false, false, true],
+            );
+        }
+    }
     insta::assert_snapshot!(snapshots.join("\n\n"));
 }
 

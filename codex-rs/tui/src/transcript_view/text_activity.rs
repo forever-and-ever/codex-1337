@@ -71,7 +71,11 @@ impl TextLayout {
         self
     }
 
-    pub(super) fn with_estimate_at(mut self, offset: usize, label: String) -> Self {
+    pub(in crate::transcript_view) fn with_estimate_at(
+        mut self,
+        offset: usize,
+        label: String,
+    ) -> Self {
         let row_index = self.row_for_offset(offset.saturating_sub(1));
         let Some(row) = self.rows.get_mut(row_index) else {
             return self;

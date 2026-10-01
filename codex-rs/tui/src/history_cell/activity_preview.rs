@@ -14,9 +14,9 @@ pub(crate) const DETAIL_PREVIEW_LINES: usize = 3;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ActivityDisclosure {
     Generic,
-    /// Place the control before this logical source line, outside copied text.
-    Inline {
-        source_line: usize,
+    /// A file summary with an optional Edited heading; the control belongs to the file row.
+    EditedFile {
+        header: bool,
     },
 }
 

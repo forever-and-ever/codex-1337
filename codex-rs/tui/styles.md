@@ -5,6 +5,10 @@ Edited, etc. Consecutive tool entries are contiguous, including the live tail;
 ordinary messages retain their surrounding separation. Expanded bodies retain
 their internal formatting.
 
+Adjacent edits share one **Edited** heading, but each file retains its own
+disclosure. Messages and other tool entries start a new group. Per-call token
+estimates remain on their owning file row when its heading is omitted.
+
 # Headers, primary, and secondary text
 
 - **Headers:** Use `bold`. For markdown with various header levels, leave in the `#` signs.

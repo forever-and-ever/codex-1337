@@ -4,6 +4,8 @@
 //! Stable cells also invalidate when animation ticks, syntax themes, or terminal colors change.
 
 use crate::history_cell::ActivityDisclosure;
+use crate::history_cell::ReasoningSummaryCell;
+use crate::history_cell::ToolOutputGroup;
 use crate::key_hint::ShortcutHint;
 use crate::keymap::KeymapContext;
 use std::sync::Weak;
@@ -29,7 +31,7 @@ pub(super) fn activity_layout(
     _shortcut: Option<ShortcutHint>,
 ) -> TextLayout {
     let control_line = match lines.disclosure {
-        Some(ActivityDisclosure::Inline { source_line }) => source_line,
+        Some(ActivityDisclosure::EditedFile { header }) => usize::from(header),
         _ => 0,
     };
     let mut heading_width = 0;
@@ -95,7 +97,16 @@ pub(super) fn activity_layout(
     lines.activity.extend(lines.auxiliary);
     let mut layout = TextLayout::new(lines.activity, width);
     if let Some(estimate) = estimate {
-        layout = layout.with_activity_estimate(estimate);
+        layout = if matches!(
+            lines.disclosure,
+            Some(ActivityDisclosure::EditedFile { header: false })
+        ) {
+            // Keep each call's bill on its file row when the shared Edited heading is omitted.
+            let offset = layout.text().find('\n').unwrap_or(layout.text().len());
+            layout.with_estimate_at(offset, estimate)
+        } else {
+            layout.with_activity_estimate(estimate)
+        };
     }
     if !has_details {
         return layout;
@@ -134,6 +145,7 @@ pub(super) struct CellPresentation {
     turn_tip_space: bool,
     expanded: bool,
     disclosure: bool,
+    continued_edit: bool,
 }
 
 impl TranscriptView {
@@ -174,15 +186,21 @@ impl TranscriptView {
         cells: &[Arc<dyn HistoryCell>],
         index: usize,
     ) -> Option<Arc<TextLayout>> {
+        let previous = cells.get(..index)?.iter().rev().find(|cell| {
+            self.detailed
+                || self.mode != HistoryRenderMode::Rich
+                || !cell
+                    .as_any()
+                    .downcast_ref::<ReasoningSummaryCell>()
+                    .is_some_and(ReasoningSummaryCell::is_transcript_only)
+        });
         let Some(cell) = cells.get(index) else {
             if index != cells.len() {
                 return None;
             }
             let live = self.live.as_ref()?;
             let follows_tool_entry = !self.disclosure.live_ids.is_empty()
-                && cells
-                    .last()
-                    .is_some_and(|cell| !cell.activity_ids().is_empty());
+                && previous.is_some_and(|cell| !cell.activity_ids().is_empty());
             if cells.is_empty() || self.live_continuation || follows_tool_entry {
                 return Some(Arc::clone(live));
             }
@@ -205,11 +223,12 @@ impl TranscriptView {
         let disclosure = !detailed && mode == HistoryRenderMode::Rich && !ids.is_empty();
         let expanded = disclosure && self.disclosure.is_expanded(&ids);
         let tool_output_tokens = self.activity_output_tokens(&ids);
-        let follows_tool_entry = !ids.is_empty()
-            && index
-                .checked_sub(1)
-                .and_then(|index| cells.get(index))
-                .is_some_and(|cell| !cell.activity_ids().is_empty());
+        let continued_edit = disclosure
+            && !cell.is_stream_continuation()
+            && ToolOutputGroup::is_patch(cell.as_ref())
+            && previous.is_some_and(|previous| ToolOutputGroup::is_patch(previous.as_ref()));
+        let follows_tool_entry =
+            !ids.is_empty() && previous.is_some_and(|cell| !cell.activity_ids().is_empty());
         if expanded {
             self.disclosure.expanded.extend(ids);
         }
@@ -219,6 +238,7 @@ impl TranscriptView {
             turn_tip_space: self.turn_tip_key == Some(EntryKey::cell(cell)),
             expanded,
             disclosure,
+            continued_edit,
         };
         let shortcut = self
             .disclosure
@@ -226,16 +246,23 @@ impl TranscriptView {
             .primary_hint(KeymapContext::Global, "open_transcript");
         Some(self.cache.get(cell, width, presentation, || {
             if disclosure {
+                let mut activity = if expanded {
+                    cell.expanded_hyperlink_lines(width)
+                } else {
+                    cell.compact_hyperlink_lines(width)
+                };
+                let disclosure = if continued_edit {
+                    activity.remove(0);
+                    Some(ActivityDisclosure::EditedFile { header: false })
+                } else {
+                    cell.activity_disclosure(width)
+                };
                 activity_layout(
                     ActivityTranscriptLines {
-                        activity: if expanded {
-                            cell.expanded_hyperlink_lines(width)
-                        } else {
-                            cell.compact_hyperlink_lines(width)
-                        },
+                        activity,
                         auxiliary: Vec::new(),
                         tool_output_tokens,
-                        disclosure: cell.activity_disclosure(width),
+                        disclosure,
                     },
                     width,
                     expanded,

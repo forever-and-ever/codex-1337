@@ -109,17 +109,20 @@ impl ToolOutputGroup {
         ))
     }
 
+    pub(crate) fn is_patch(cell: &dyn HistoryCell) -> bool {
+        cell.as_any().is::<PatchHistoryCell>()
+            || cell.as_any().downcast_ref::<Self>().is_some_and(|group| {
+                group
+                    .members
+                    .first()
+                    .is_some_and(|cell| cell.as_any().is::<PatchHistoryCell>())
+            })
+    }
+
     pub(crate) fn patch_owner(cells: &[Arc<dyn HistoryCell>]) -> Option<usize> {
         let mut owner = None;
         for (index, cell) in cells.iter().enumerate().rev() {
-            let patch = cell.as_any().is::<PatchHistoryCell>()
-                || cell.as_any().downcast_ref::<Self>().is_some_and(|group| {
-                    group
-                        .members
-                        .first()
-                        .is_some_and(|cell| cell.as_any().is::<PatchHistoryCell>())
-                });
-            if patch {
+            if Self::is_patch(cell.as_ref()) {
                 owner = Some(index);
             } else if !cell
                 .as_any()

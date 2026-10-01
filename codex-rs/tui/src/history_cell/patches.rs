@@ -76,8 +76,8 @@ impl HistoryCell for PatchHistoryCell {
     }
 
     fn activity_disclosure(&self, _width: u16) -> Option<ActivityDisclosure> {
-        Some(ActivityDisclosure::Inline {
-            source_line: usize::from(!self.continuation),
+        Some(ActivityDisclosure::EditedFile {
+            header: !self.continuation,
         })
     }
 
