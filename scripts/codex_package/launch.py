@@ -24,7 +24,15 @@ def main() -> None:
     )
 
     query = [cargo, *toolchain]
+    config_files: set[str] = set()
     for config in parsed.config:
+        # Cargo subcommands can repeat the wrapper's config file. Flattening
+        # both argv scopes into one probe otherwise creates an include cycle.
+        # Inline assignments still retain their order and last-write semantics.
+        if "=" not in config:
+            if config in config_files:
+                continue
+            config_files.add(config)
         query.extend(["--config", config])
     if parsed.C is not None:
         query.extend(["-C", parsed.C])
