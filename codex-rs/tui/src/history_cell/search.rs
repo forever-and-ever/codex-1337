@@ -36,7 +36,7 @@ fn web_search_detail(action: Option<&WebSearchAction>, query: &str) -> String {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct WebSearchCell {
     pub(crate) completed_at: Option<HistoryTimestamp>,
     call_id: String,
@@ -67,6 +67,10 @@ impl WebSearchCell {
 
     pub(crate) fn call_id(&self) -> &str {
         &self.call_id
+    }
+
+    pub(crate) fn is_active(&self) -> bool {
+        !self.completed
     }
 
     pub(crate) fn update(&mut self, action: WebSearchAction, query: String) {

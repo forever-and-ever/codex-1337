@@ -297,11 +297,12 @@ impl TranscriptView {
         {
             return false;
         }
+        // Activity traversal follows current entries, not the aliases in a frozen live/group revision.
+        self.release_live_reading();
         let ids = self.activity_ids(cells, index);
+        let key = cells.get(index).map_or(EntryKey::Live, EntryKey::cell);
         let header_visible = self.visible.iter().any(|row| {
-            row.layout.disclosure
-                && row.activity_ids.iter().any(|id| ids.contains(id))
-                && row.row == usize::from(row.layout.separated)
+            row.layout.disclosure && row.key == key && row.row == usize::from(row.layout.separated)
         });
         self.disclosure.focused = Some(ids);
         if !header_visible {

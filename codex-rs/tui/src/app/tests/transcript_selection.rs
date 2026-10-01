@@ -2,7 +2,202 @@
 
 use super::*;
 use crate::chatwidget::UserMessage;
+use crossterm::event::MouseButton;
+use crossterm::event::MouseEvent;
+use crossterm::event::MouseEventKind;
 use pretty_assertions::assert_eq;
+use serde_json::json;
+
+#[tokio::test]
+async fn displaced_tool_calls_complete_once_and_disclosure_navigation_rejoins_current_history()
+-> Result<()> {
+    use crate::history_cell::ComputerActivityCell;
+    use crate::history_cell::McpInvocation;
+    use crate::history_cell::ToolOutputCell;
+    use codex_protocol::models::FunctionCallOutputBody;
+    use std::time::Duration;
+
+    let mut app = make_test_app().await;
+    let mut tui = crate::tui::test_support::make_test_tui()?;
+    app.transcript_cells.clear();
+    let call = |id: &str, server: &str| {
+        history_cell::new_active_mcp_tool_call(
+            id.into(),
+            McpInvocation {
+                server: server.into(),
+                tool: "inspect".into(),
+                arguments: Some(json!({"path": "same"})),
+            },
+            /*animations_enabled*/ false,
+        )
+    };
+    // Concurrent starts displace running calls into immutable history. Returned batches can
+    // already own those calls when their completions arrive out of order.
+    for id in ["first", "second"] {
+        app.insert_history_cell(&mut tui, Box::new(call(id, "tools")));
+    }
+    app.insert_history_cell(
+        &mut tui,
+        Box::new(
+            ToolOutputCell::from_output(
+                "batch",
+                "exec",
+                /*namespace*/ None,
+                &FunctionCallOutputBody::Text("model-visible batch".into()),
+            )
+            .unwrap(),
+        ),
+    );
+    app.flush_native_history(&mut tui);
+    assert!(tui.pending_history_lines_for_test().is_empty());
+    for _ in 0..2 {
+        app.transcript_view.record_tool_output_tokens(
+            "tool-output-tokens:batch".into(),
+            "outer-exec".into(),
+            Some(128),
+        );
+    }
+    let render = |app: &mut App| {
+        let area = Rect::new(
+            /*x*/ 0, /*y*/ 0, /*width*/ 80, /*height*/ 12,
+        );
+        let mut buffer = ratatui::buffer::Buffer::empty(area);
+        app.transcript_view
+            .render(area, &mut buffer, &app.transcript_cells);
+        buffer
+    };
+    render(&mut app);
+    for (kind, column) in [
+        (MouseEventKind::Down(MouseButton::Left), 4),
+        (MouseEventKind::Drag(MouseButton::Left), 12),
+        (MouseEventKind::Up(MouseButton::Left), 12),
+    ] {
+        app.transcript_view.handle_mouse(
+            MouseEvent {
+                kind,
+                column,
+                row: 0,
+                modifiers: KeyModifiers::NONE,
+            },
+            &app.transcript_cells,
+        );
+    }
+    let selected = render(&mut app);
+    for id in ["second", "first"] {
+        let mut completed = call(id, "tools");
+        completed.complete(
+            Duration::from_millis(/*millis*/ 1),
+            Ok(codex_protocol::mcp::CallToolResult {
+                content: vec![json!({"type": "text", "text": "raw nested result"})],
+                structured_content: None,
+                is_error: Some(false),
+                meta: None,
+            }),
+        );
+        app.insert_history_cell(&mut tui, Box::new(completed));
+    }
+    assert_eq!(app.transcript_cells.len(), 1);
+    assert_eq!(
+        app.transcript_cells[0].activity_ids(),
+        vec!["mcp:first", "mcp:second", "output:tool-output-tokens:batch"]
+    );
+    app.flush_native_history(&mut tui);
+    let native = tui
+        .pending_history_lines_for_test()
+        .iter()
+        .map(|line| line.line.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(!native.contains("Calling"));
+    assert_eq!(native.matches("Called").count(), 2);
+    // A selection keeps its source revision, but never also displays the completion alias.
+    assert_eq!(render(&mut app), selected);
+    app.transcript_view.handle_key(
+        KeyEvent::new(KeyCode::F(4), KeyModifiers::NONE),
+        &app.transcript_cells,
+    );
+    let completed = render(&mut app);
+    let text = completed
+        .content
+        .iter()
+        .map(ratatui::buffer::Cell::symbol)
+        .collect::<String>();
+    assert!(!text.contains("Calling"));
+    assert_eq!(text.matches("Called").count(), 2);
+    assert_eq!(text.matches("128 tokens").count(), 1);
+
+    // A flushed computer group must preserve its other running calls and its own details.
+    let mut computer = ComputerActivityCell::default();
+    computer.start(call("computer-first", "cua_repl"));
+    computer.start(call("computer-second", "cua_repl"));
+    app.insert_history_cell(&mut tui, Box::new(computer));
+    let mut computer = ComputerActivityCell::default();
+    computer.start(call("computer-new", "cua_repl"));
+    let mut previous = call("computer-second", "cua_repl");
+    previous.mark_failed();
+    computer.start(previous);
+    app.insert_history_cell(&mut tui, Box::new(computer));
+    assert_eq!(app.transcript_cells.len(), 3);
+    assert_eq!(
+        app.transcript_cells[1].activity_ids(),
+        vec!["mcp:computer-first", "mcp:computer-second"]
+    );
+    assert_eq!(
+        app.transcript_cells[2].activity_ids(),
+        vec!["mcp:computer-new"]
+    );
+    for query in ["running", "finished"] {
+        app.insert_history_cell(
+            &mut tui,
+            Box::new(if query == "running" {
+                history_cell::new_active_web_search_call(
+                    "web".into(),
+                    query.into(),
+                    /*animations_enabled*/ false,
+                )
+            } else {
+                history_cell::new_web_search_call(
+                    "web".into(),
+                    query.into(),
+                    codex_app_server_protocol::WebSearchAction::Other,
+                )
+            }),
+        );
+    }
+    assert_eq!(app.transcript_cells.len(), 4);
+    insta::assert_snapshot!(format!("completed batch\n{completed:?}"));
+    let exec = |id: &str| {
+        let command = vec!["cat".into(), "same-file".into()];
+        let parsed = codex_shell_command::parse_command::parse_command(&command);
+        crate::exec_cell::new_active_exec_command(
+            id.into(),
+            command,
+            parsed,
+            codex_app_server_protocol::CommandExecutionSource::Agent,
+            /*interaction_input*/ None,
+            /*animations_enabled*/ false,
+        )
+    };
+    let mut pending = exec("exec-first");
+    pending
+        .group
+        .calls
+        .push(exec("exec-second").group.calls.remove(/*index*/ 0));
+    app.insert_history_cell(&mut tui, Box::new(pending));
+    let mut completed = exec("exec-second");
+    completed.complete_call(
+        "exec-second",
+        crate::exec_cell::CommandOutput::new(/*exit_code*/ 0, "command output".into()),
+        Duration::from_millis(/*millis*/ 1),
+    );
+    app.insert_history_cell(&mut tui, Box::new(completed));
+    assert_eq!(app.transcript_cells.len(), 5);
+    assert_eq!(
+        app.transcript_cells[4].activity_ids(),
+        vec!["exec:exec-first", "exec:exec-second"]
+    );
+    Ok(())
+}
 
 #[tokio::test]
 async fn text_selection_temporarily_replaces_the_rendered_backtrack_highlight() -> Result<()> {

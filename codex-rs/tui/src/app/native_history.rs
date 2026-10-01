@@ -1,4 +1,4 @@
-//! Queue native terminal output behind unfinished dynamic tools.
+//! Queue native terminal output behind unfinished tools.
 //! Fullscreen rendering reads retained cells directly and never queues terminal output.
 //!
 //! Entries own their render source independently of the retained view. Consolidation remaps their
@@ -20,9 +20,7 @@ pub(super) struct NativeHistory {
 }
 
 pub(super) fn is_pending(cell: &dyn HistoryCell) -> bool {
-    cell.as_any()
-        .downcast_ref::<history_cell::DynamicToolCallCell>()
-        .is_some_and(history_cell::DynamicToolCallCell::is_active)
+    history_cell::has_running_tool_calls(cell)
 }
 
 impl NativeHistory {

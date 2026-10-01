@@ -23,6 +23,10 @@ pub(super) struct ThreadUsageStatusHistory {
 
 impl App {
     pub(super) fn insert_history_cell(&mut self, tui: &mut tui::Tui, cell: Box<dyn HistoryCell>) {
+        self.insert_retained_history_cell(tui, cell.into());
+    }
+
+    fn insert_retained_history_cell(&mut self, tui: &mut tui::Tui, cell: Arc<dyn HistoryCell>) {
         // Global deprecations can be delivered again by hidden threads. Scope deduplication to
         // retained history so clearing or rebuilding a transcript can show the notice again.
         if let Some(notice) = cell
@@ -51,7 +55,32 @@ impl App {
             return;
         }
         let is_session_header = cell.as_any().is::<history_cell::SessionInfoCell>();
-        let cell: Arc<dyn HistoryCell> = cell.into();
+        let reconciliation = history_cell::reconcile_tool_calls(&self.transcript_cells, &cell);
+        if !reconciliation.replacements.is_empty() {
+            for (index, replacement) in reconciliation.replacements {
+                if Arc::ptr_eq(&self.transcript_cells[index], &replacement) {
+                    continue;
+                }
+                self.native_history
+                    .consolidate(&self.transcript_cells[index..=index], &replacement);
+                self.transcript_view.replace_range(
+                    &self.transcript_cells,
+                    index..index + 1,
+                    &replacement,
+                );
+                if let Some(Overlay::Transcript(overlay)) = self.overlay.as_mut() {
+                    overlay
+                        .regroup_cell_members(index..index + 1, std::slice::from_ref(&replacement));
+                }
+                self.transcript_cells[index] = replacement;
+            }
+            for cell in reconciliation.remainder {
+                self.insert_retained_history_cell(tui, cell);
+            }
+            tui.frame_requester().schedule_frame();
+            self.chat_widget.request_pending_usage_output_insertion();
+            return;
+        }
         if let Some((range, replacements)) =
             history_cell::ToolOutputGroup::attach(&self.transcript_cells, Arc::clone(&cell))
         {

@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 #[derive(Debug)]
 pub(crate) struct ToolOutputGroup {
-    members: Vec<Arc<dyn HistoryCell>>,
+    pub(super) members: Vec<Arc<dyn HistoryCell>>,
 }
 
 impl ToolOutputGroup {

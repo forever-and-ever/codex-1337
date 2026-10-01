@@ -21,14 +21,14 @@ pub(super) enum McpResultKind {
     NodeRepl,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct McpToolResult {
     pub(super) content: Vec<McpContentBlock>,
     pub(super) is_error: bool,
     pub(super) has_image: bool,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct McpContentBlock {
     display: McpContentDisplay,
     pub(super) is_image: bool,
@@ -36,7 +36,7 @@ pub(super) struct McpContentBlock {
     original_text: Option<String>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 enum McpContentDisplay {
     Text(String),
     Summary(Cow<'static, str>),

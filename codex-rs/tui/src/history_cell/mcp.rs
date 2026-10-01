@@ -47,7 +47,7 @@ fn mcp_auth_status_label(status: McpAuthStatus) -> &'static str {
         McpAuthStatus::OAuth => "OAuth",
     }
 }
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct McpToolCallCell {
     pub(crate) completed_at: Option<HistoryTimestamp>,
     call_id: String,
@@ -106,6 +106,10 @@ impl McpToolCallCell {
 
     pub(crate) fn call_id(&self) -> &str {
         &self.call_id
+    }
+
+    pub(crate) fn is_active(&self) -> bool {
+        self.result.is_none()
     }
 
     pub(crate) fn complete(

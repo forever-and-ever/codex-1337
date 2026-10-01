@@ -103,6 +103,7 @@ use url::Url;
 const RAW_DIFF_SUMMARY_WIDTH: usize = 10_000;
 
 mod activity_details;
+mod activity_lifecycle;
 pub(crate) mod activity_preview;
 mod approvals;
 mod base;
@@ -127,6 +128,8 @@ mod tool_output_group;
 mod warnings;
 
 pub(crate) use activity_details::ActivityDetails;
+pub(crate) use activity_lifecycle::has_running_tool_calls;
+pub(crate) use activity_lifecycle::reconcile_tool_calls;
 pub(crate) use activity_preview::ActivityDisclosure;
 pub(crate) use approvals::*;
 pub(crate) use base::*;

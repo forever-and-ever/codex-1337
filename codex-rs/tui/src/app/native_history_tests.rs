@@ -107,9 +107,9 @@ async fn settled_tool_precedes_queued_output_and_is_not_emitted_twice() -> Resul
         .map(|line| line.line.to_string())
         .collect::<Vec<_>>()
         .join("\n");
-    assert_eq!(text.matches("unique result").count(), 1);
+    assert_eq!(text.matches("Called lookup").count(), 1);
     assert_eq!(text.matches("later output").count(), 4097);
-    assert!(text.find("unique result").unwrap() < text.find("later output").unwrap());
+    assert!(text.find("Called lookup").unwrap() < text.find("later output").unwrap());
     app.flush_native_history(&mut tui);
     assert_eq!(tui.pending_history_lines_for_test(), lines);
     // Rollback replay consumes even a queue larger than one frame's drain budget.

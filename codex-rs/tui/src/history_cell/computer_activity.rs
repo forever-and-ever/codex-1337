@@ -6,7 +6,7 @@
 
 use super::*;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct ComputerActivityCell {
     pub(crate) group: ActivityGroup<McpToolCallCell>,
 }

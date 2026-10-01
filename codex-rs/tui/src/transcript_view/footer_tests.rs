@@ -648,6 +648,53 @@ fn activity_focus_keeps_controls_without_passive_hints() {
         hints.push(format!("{configured}: {hint}"));
     }
     insta::assert_snapshot!(hints.join("\n"));
+
+    // A frozen grouped header can alias multiple current entries. Navigation must leave that
+    // revision instead of treating its shared IDs as proof the next header is already visible.
+    let call = |id: &str| -> Arc<dyn HistoryCell> {
+        let mut cell = crate::history_cell::new_active_mcp_tool_call(
+            id.into(),
+            crate::history_cell::McpInvocation {
+                server: "tools".into(),
+                tool: "inspect".into(),
+                arguments: None,
+            },
+            /*animations_enabled*/ false,
+        );
+        cell.mark_failed();
+        Arc::new(cell)
+    };
+    let calls = [call("first"), call("second"), call("last")];
+    let grouped =
+        |cells: Vec<Arc<dyn HistoryCell>>| crate::history_cell::ToolOutputGroup::from_cells(cells);
+    let old = vec![grouped(calls[..2].to_vec()), Arc::clone(&calls[2])];
+    let mut view = TranscriptView::default();
+    view.jump_to_entry(&old, /*index*/ 0);
+    render(&mut view, &old);
+    view.held_reading = Some(view.capture_snapshot(&old));
+    view.disclosure.focused = Some(calls[0].activity_ids());
+    let current = vec![
+        grouped(vec![Arc::clone(&calls[0])]),
+        grouped(vec![Arc::clone(&calls[1])]),
+        Arc::clone(&calls[2]),
+    ];
+    for (key, index) in [
+        (KeyCode::Down, 1),
+        (KeyCode::Down, 2),
+        (KeyCode::Down, 2),
+        (KeyCode::Up, 1),
+        (KeyCode::Up, 0),
+        (KeyCode::Up, 0),
+    ] {
+        view.handle_key(KeyEvent::new(key, KeyModifiers::NONE), &current);
+        assert!(view.snapshot().is_none());
+        assert_eq!(view.disclosure.focused, Some(current[index].activity_ids()));
+        assert_eq!(
+            view.canonical_activity_index(&current, view.disclosure.focused.as_ref().unwrap()),
+            Some(index)
+        );
+        render(&mut view, &current);
+    }
 }
 
 #[test]

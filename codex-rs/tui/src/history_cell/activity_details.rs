@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 #[derive(Debug, Default, Clone)]
 pub(crate) struct ActivityDetails {
-    entries: Vec<(usize, Arc<dyn HistoryCell>)>,
+    pub(super) entries: Vec<(usize, Arc<dyn HistoryCell>)>,
 }
 
 impl ActivityDetails {
