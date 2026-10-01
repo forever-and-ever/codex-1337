@@ -17,6 +17,7 @@ use codex_app_server_protocol::ThreadResumeParams;
 use codex_app_server_protocol::ThreadResumeResponse;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::ThreadStartResponse;
+use codex_app_server_protocol::ThreadStartedNotification;
 use codex_app_server_protocol::ThreadStatus;
 use codex_app_server_protocol::ThreadTokenUsageUpdatedNotification;
 use codex_app_server_protocol::ThreadUnsubscribeParams;
@@ -223,6 +224,34 @@ async fn spawned_subagents_apply_configured_developer_instruction_precedence(
             },
         })
         .await?;
+    if case == "no history" {
+        // A newly spawned agent must advertise resolved settings without a thread/read or
+        // waiting for its first turn to finish. The TUI has no other initial model source.
+        let notification = timeout(
+            READ_TIMEOUT,
+            app_server.read_stream_until_matching_notification(
+                "spawned agent metadata",
+                |notification| {
+                    notification.method == "thread/started"
+                        && notification
+                            .params
+                            .as_ref()
+                            .and_then(|params| params["thread"]["id"].as_str())
+                            .is_some_and(|id| id != thread.id)
+                },
+            ),
+        )
+        .await??;
+        let started: ThreadStartedNotification =
+            serde_json::from_value(notification.params.expect("thread/started parameters"))?;
+        assert_eq!(
+            (
+                started.thread.model.as_deref(),
+                started.thread.reasoning_effort
+            ),
+            (Some(configured_model), None)
+        );
+    }
     let child_request = timeout(READ_TIMEOUT, async {
         loop {
             if let Some(request) = child_request

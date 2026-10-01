@@ -3673,7 +3673,7 @@ impl ThreadRequestProcessor {
         self.thread_watch_manager.subscribe_running_turn_count()
     }
 
-    /// Best-effort: ensure initialized connections are subscribed to this thread.
+    /// Announce core-created runtimes, then best-effort subscribe initialized connections.
     pub(crate) async fn try_attach_thread_listener(
         &self,
         thread_id: ThreadId,
@@ -3684,6 +3684,19 @@ impl ThreadRequestProcessor {
             let config_snapshot = thread.config_snapshot().await;
             self.thread_watch_manager
                 .upsert_thread(&thread_id.to_string())
+                .await;
+            // Core-spawned/resumed agents bypass the frontend start/fork request handlers.
+            // Publish their resolved settings before any child output or turn completion is needed.
+            let mut summary =
+                build_thread_from_loaded_snapshot(thread_id, &config_snapshot, &thread);
+            summary.status = self
+                .thread_watch_manager
+                .loaded_status_for_thread(&summary.id)
+                .await;
+            self.outgoing
+                .send_server_notification(ServerNotification::ThreadStarted(
+                    thread_started_notification(summary),
+                ))
                 .await;
             if let Some(parent_thread_id) = config_snapshot.parent_thread_id {
                 raw_events_enabled = self
