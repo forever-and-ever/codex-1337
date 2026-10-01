@@ -24,21 +24,21 @@ use codex_utils_absolute_path::AbsolutePathBuf;
 use ratatui::style::Stylize as _;
 
 mod activity_pages;
+mod command_groups;
 mod computer_groups;
-mod exploration_groups;
 mod other_items;
 pub(crate) mod tools;
 
 pub(crate) use activity_pages::fold_trailing_activity_details;
 pub(crate) use activity_pages::is_hidden_activity_detail;
+pub(crate) use command_groups::join_command_groups;
+pub(crate) use command_groups::older_command_group;
 #[allow(
     unused_imports,
     reason = "Used by later layers of the TUI refresh stack."
 )]
 pub(crate) use computer_groups::join_computer_groups;
 pub(crate) use computer_groups::older_computer_group;
-pub(crate) use exploration_groups::join_exploration_groups;
-pub(crate) use exploration_groups::older_exploration_group;
 
 pub(crate) type TranscriptCells = Vec<Arc<dyn HistoryCell>>;
 

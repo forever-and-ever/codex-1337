@@ -469,8 +469,10 @@ impl ChatWidget {
                     .as_mut()
                     .and_then(|cell| cell.as_any_mut().downcast_mut::<ExecCell>())
                     && !active.is_active()
-                    && active.is_exploring_cell()
-                    && cell.is_exploring_cell()
+                    && active.is_agent_command_group()
+                    && cell.is_agent_command_group()
+                    && active.group.calls.len() + cell.group.calls.len()
+                        <= ExecCell::MAX_GROUP_CALLS
                 {
                     // Replayed commands have completion events without matching starts.
                     active.group.calls.extend(cell.group.calls);

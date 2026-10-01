@@ -1912,6 +1912,7 @@ fn coalesces_sequential_reads_within_one_call() {
     let call_id = "c1".to_string();
     let mut cell = ExecCell::new(
         ExecCall {
+            rows: Default::default(),
             call_id: call_id.clone(),
             command: vec!["bash".into(), "-lc".into(), "echo".into()],
             parsed: vec![
@@ -1951,6 +1952,7 @@ fn coalesces_sequential_reads_within_one_call() {
 fn coalesces_reads_across_multiple_calls() {
     let mut cell = ExecCell::new(
         ExecCall {
+            rows: Default::default(),
             call_id: "c1".to_string(),
             command: vec!["bash".into(), "-lc".into(), "echo".into()],
             parsed: vec![ParsedCommand::Search {
@@ -2004,6 +2006,7 @@ fn coalesces_reads_across_multiple_calls() {
 fn coalesced_reads_dedupe_names() {
     let mut cell = ExecCell::new(
         ExecCall {
+            rows: Default::default(),
             call_id: "c1".to_string(),
             command: vec!["bash".into(), "-lc".into(), "echo".into()],
             parsed: vec![
@@ -2044,6 +2047,7 @@ fn multiline_command_wraps_with_extra_indent_on_subsequent_lines() {
     let call_id = "c1".to_string();
     let mut cell = ExecCell::new(
         ExecCall {
+            rows: Default::default(),
             call_id: call_id.clone(),
             command: vec!["bash".into(), "-lc".into(), cmd],
             parsed: Vec::new(),
@@ -2070,6 +2074,7 @@ fn single_line_command_compact_when_fits() {
     let call_id = "c1".to_string();
     let mut cell = ExecCell::new(
         ExecCall {
+            rows: Default::default(),
             call_id: call_id.clone(),
             command: vec!["echo".into(), "ok".into()],
             parsed: Vec::new(),
@@ -2094,6 +2099,7 @@ fn single_line_command_wraps_with_four_space_continuation() {
     let long = "a_very_long_token_without_spaces_to_force_wrapping".to_string();
     let mut cell = ExecCell::new(
         ExecCall {
+            rows: Default::default(),
             call_id: call_id.clone(),
             command: vec!["bash".into(), "-lc".into(), long],
             parsed: Vec::new(),
@@ -2117,6 +2123,7 @@ fn single_line_command_over_highlight_limit_uses_plain_text_fallback() {
     let base64_like = "A".repeat(MAX_HIGHLIGHT_LINE_BYTES + 1);
     let mut cell = ExecCell::new(
         ExecCall {
+            rows: Default::default(),
             call_id: call_id.clone(),
             command: vec!["bash".into(), "-lc".into(), base64_like],
             parsed: Vec::new(),
@@ -2141,6 +2148,7 @@ fn multiline_command_without_wrap_uses_branch_then_eight_spaces() {
     let cmd = "echo one\necho two".to_string();
     let mut cell = ExecCell::new(
         ExecCall {
+            rows: Default::default(),
             call_id: call_id.clone(),
             command: vec!["bash".into(), "-lc".into(), cmd],
             parsed: Vec::new(),
@@ -2165,6 +2173,7 @@ fn multiline_command_both_lines_wrap_with_correct_prefixes() {
         "first_token_is_long_enough_to_wrap\nsecond_token_is_also_long_enough_to_wrap".to_string();
     let mut cell = ExecCell::new(
         ExecCall {
+            rows: Default::default(),
             call_id: call_id.clone(),
             command: vec!["bash".into(), "-lc".into(), cmd],
             parsed: Vec::new(),
@@ -2189,6 +2198,7 @@ fn stderr_tail_more_than_five_lines_snapshot() {
     let call_id = "c_err".to_string();
     let mut cell = ExecCell::new(
         ExecCall {
+            rows: Default::default(),
             call_id: call_id.clone(),
             command: vec!["bash".into(), "-lc".into(), "seq 1 10 1>&2 && false".into()],
             parsed: Vec::new(),
@@ -2235,6 +2245,7 @@ fn ran_cell_multiline_with_stderr_snapshot() {
         "echo this_is_a_very_long_single_token_that_will_wrap_across_the_available_width";
     let mut cell = ExecCell::new(
         ExecCall {
+            rows: Default::default(),
             call_id: call_id.clone(),
             command: vec!["bash".into(), "-lc".into(), long_cmd.to_string()],
             parsed: Vec::new(),

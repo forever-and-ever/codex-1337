@@ -4,8 +4,8 @@
 //! displayed source revision before canonical cells are replaced or absorbed into the live tail.
 
 use super::*;
+use crate::thread_transcript::join_command_groups;
 use crate::thread_transcript::join_computer_groups;
-use crate::thread_transcript::join_exploration_groups;
 
 impl App {
     pub(super) fn join_older_activity_group(&mut self, boundary: usize, turns: &[Turn]) {
@@ -105,7 +105,7 @@ impl App {
                 .chat_widget
                 .prepend_active_computer_history(self.transcript_cells[start].as_ref(), turns)
                 .or_else(|| {
-                    self.chat_widget.prepend_active_exploration_history(
+                    self.chat_widget.prepend_active_command_history(
                         self.transcript_cells[start].as_ref(),
                         turns,
                     )
@@ -129,7 +129,7 @@ impl App {
             return;
         };
         let Some(group) = join_computer_groups(&self.transcript_cells[start], newer, turns)
-            .or_else(|| join_exploration_groups(&self.transcript_cells[start], newer, turns))
+            .or_else(|| join_command_groups(&self.transcript_cells[start], newer, turns))
             .or_else(|| {
                 history_cell::ToolOutputGroup::join(&self.transcript_cells[start], newer, turns)
             })

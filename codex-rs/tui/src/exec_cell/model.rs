@@ -1,10 +1,10 @@
 //! Data model for grouped exec-call history cells in the TUI transcript.
 //!
-//! An `ExecCell` can represent either a single command or an "exploring" group of related read/
-//! list/search commands. The chat widget relies on stable `call_id` matching to route progress and
+//! An `ExecCell` groups adjacent agent shell calls regardless of command recognition.
+//! The chat widget relies on stable `call_id` matching to route progress and
 //! end events into the right cell, and it treats "call id not found" as a real signal (for
 //! example, an orphan end that should render as a separate history entry).
-//! Transcript-only reasoning stays inside exploration groups so it does not split their
+//! Transcript-only reasoning stays inside command groups so it does not split their
 //! compact display, while the expanded transcript retains its position between commands.
 
 use std::borrow::Cow;
@@ -65,6 +65,7 @@ impl CommandOutput {
 
 #[derive(Clone, Debug)]
 pub(crate) struct ExecCall {
+    pub(crate) rows: std::sync::OnceLock<std::sync::Arc<super::rows::CommandRows>>,
     pub(crate) call_id: String,
     pub(crate) command: Vec<String>,
     pub(crate) parsed: Vec<ParsedCommand>,
@@ -83,6 +84,9 @@ pub(crate) struct ExecCell {
 }
 
 impl ExecCell {
+    // Bound redraw work for an active group, independently of command recognition.
+    pub(crate) const MAX_GROUP_CALLS: usize = 64;
+
     pub(crate) fn new(call: ExecCall, animations_enabled: bool) -> Self {
         Self {
             group: ActivityGroup::new(vec![call]),
@@ -100,6 +104,7 @@ impl ExecCell {
         interaction_input: Option<String>,
     ) -> bool {
         let call = ExecCall {
+            rows: Default::default(),
             call_id,
             command,
             parsed,
@@ -109,7 +114,11 @@ impl ExecCell {
             duration: None,
             interaction_input,
         };
-        if self.is_exploring_cell() && Self::is_exploring_call(&call) {
+        if self.group.calls.len() < Self::MAX_GROUP_CALLS
+            && self.is_agent_command_group()
+            && !call.is_user_shell_command()
+            && !call.is_unified_exec_interaction()
+        {
             self.group.calls.push(call);
             true
         } else {
@@ -117,9 +126,12 @@ impl ExecCell {
         }
     }
 
-    /// Historical grouping uses the same compatibility and failure boundary as live calls.
+    /// Historical grouping uses the same compatibility and size bound as live calls.
     pub(crate) fn append_completed(&mut self, mut newer: Self) -> Result<(), Self> {
-        if !self.is_exploring_cell() || self.should_flush() || !newer.is_exploring_cell() {
+        if !self.is_agent_command_group()
+            || !newer.is_agent_command_group()
+            || self.group.calls.len() + newer.group.calls.len() > Self::MAX_GROUP_CALLS
+        {
             return Err(newer);
         }
         newer.group.details.prepend(
@@ -131,7 +143,7 @@ impl ExecCell {
         Ok(())
     }
 
-    /// Preserve live clocks and pending output when a validated older page extends exploration.
+    /// Preserve live clocks and pending output when a validated older page extends the group.
     pub(crate) fn prepend(&mut self, older: Self) {
         self.group.prepend(older.group);
     }
@@ -140,7 +152,7 @@ impl ExecCell {
     ///
     /// Callers should treat `false` as a routing mismatch rather than silently ignoring it. The
     /// chat widget uses that signal to avoid attaching an orphan `exec_end` event to an unrelated
-    /// active exploring cell, which would incorrectly collapse two transcript entries together.
+    /// active command group, which would incorrectly collapse two transcript entries together.
     pub(crate) fn complete_call(
         &mut self,
         call_id: &str,
@@ -163,8 +175,8 @@ impl ExecCell {
     }
 
     pub(crate) fn should_flush(&self) -> bool {
-        // Exploration stays open for adjacent calls, including after a failed read/list/search.
-        !self.is_exploring_cell() && self.group.calls.iter().all(|c| c.duration.is_some())
+        (!self.is_agent_command_group() || self.group.calls.len() >= Self::MAX_GROUP_CALLS)
+            && self.group.calls.iter().all(|c| c.duration.is_some())
     }
 
     pub(crate) fn mark_failed(&mut self) {
@@ -183,8 +195,11 @@ impl ExecCell {
         }
     }
 
-    pub(crate) fn is_exploring_cell(&self) -> bool {
-        self.group.calls.iter().all(Self::is_exploring_call)
+    pub(crate) fn is_agent_command_group(&self) -> bool {
+        self.group
+            .calls
+            .iter()
+            .all(|call| !call.is_user_shell_command() && !call.is_unified_exec_interaction())
     }
 
     pub(crate) fn is_active(&self) -> bool {
@@ -230,19 +245,6 @@ impl ExecCell {
             .get_or_insert_with(LiveCommandOutput::default)
             .push_str(chunk);
         true
-    }
-
-    pub(super) fn is_exploring_call(call: &ExecCall) -> bool {
-        !matches!(call.source, ExecCommandSource::UserShell)
-            && !call.parsed.is_empty()
-            && call.parsed.iter().all(|p| {
-                matches!(
-                    p,
-                    ParsedCommand::Read { .. }
-                        | ParsedCommand::ListFiles { .. }
-                        | ParsedCommand::Search { .. }
-                )
-            })
     }
 }
 

@@ -1,4 +1,4 @@
-//! Apply live exploration compatibility to replay and repair groups split by history pages.
+//! Apply shell-call compatibility to replay and repair groups split by history pages.
 
 use super::tools::CommandHistory;
 use crate::exec_cell::ExecCell;
@@ -7,7 +7,7 @@ use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::Turn;
 use std::sync::Arc;
 
-pub(crate) fn join_exploration_groups(
+pub(crate) fn join_command_groups(
     older: &Arc<dyn HistoryCell>,
     newer: &Arc<dyn HistoryCell>,
     turns: &[Turn],
@@ -24,7 +24,7 @@ pub(crate) fn join_exploration_groups(
     Some(Arc::new(group))
 }
 
-pub(crate) fn older_exploration_group(
+pub(crate) fn older_command_group(
     older: &dyn HistoryCell,
     newer: &ExecCell,
     turns: &[Turn],
@@ -47,7 +47,7 @@ fn adjacent_items<'a>(
     newer: &ExecCell,
     turns: &'a [Turn],
 ) -> Option<&'a [ThreadItem]> {
-    if !older.is_exploring_cell() || older.should_flush() || !newer.is_exploring_cell() {
+    if !older.is_agent_command_group() || older.should_flush() || !newer.is_agent_command_group() {
         return None;
     }
     let ids = older
@@ -65,7 +65,7 @@ pub(super) fn completed_group(items: &[ThreadItem]) -> Option<ExecCell> {
             continue;
         }
         let call = CommandHistory::from_item(item.clone())?.into_cell();
-        if !call.is_exploring_cell() {
+        if !call.is_agent_command_group() {
             return None;
         }
         if let Some(group) = &mut group {

@@ -232,6 +232,38 @@ impl ToolOutputGroup {
 }
 
 impl HistoryCell for ToolOutputGroup {
+    fn activity_parts(
+        &self,
+        width: u16,
+        header_reserve: usize,
+        expanded: &HashSet<String>,
+    ) -> Option<super::activity_parts::ActivityParts> {
+        let mut commands = Vec::new();
+        let mut batches = Vec::new();
+        for member in &self.members {
+            if let Some(command) = member.as_any().downcast_ref::<crate::exec_cell::ExecCell>() {
+                if !command.is_agent_command_group() {
+                    return None;
+                }
+                commands.push(command);
+            } else if let Some(batch) = member.as_any().downcast_ref::<ToolOutputCell>() {
+                batches.push(batch);
+            } else if !member.as_any().is::<ReasoningSummaryCell>() {
+                return None;
+            }
+        }
+        (!commands.is_empty()).then(|| {
+            crate::exec_cell::rows::command_parts(
+                &commands,
+                &batches,
+                width,
+                header_reserve,
+                expanded,
+                &self.activity_ids(),
+            )
+        })
+    }
+
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         visible_lines(self.compact_hyperlink_lines(width))
     }

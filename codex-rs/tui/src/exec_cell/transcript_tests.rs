@@ -17,6 +17,7 @@ fn completed_read(name: &str, output: &str) -> ExecCell {
     let parsed = codex_shell_command::parse_command::parse_command(&command);
     ExecCell::new(
         ExecCall {
+            rows: Default::default(),
             call_id: name.to_owned(),
             command,
             parsed,

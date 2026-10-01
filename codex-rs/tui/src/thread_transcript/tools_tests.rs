@@ -234,7 +234,7 @@ fn historical_command_fallbacks_preserve_status_output_and_group_boundaries() {
                 cell.as_any()
                     .downcast_ref::<ExecCell>()
                     .unwrap()
-                    .is_exploring_cell()
+                    .has_only_read_actions()
             );
         }
         let [compact, detailed, raw] = [

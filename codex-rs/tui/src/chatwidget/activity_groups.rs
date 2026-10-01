@@ -31,10 +31,10 @@ impl ChatWidget {
             self.bump_active_cell_revision();
             return Ok(());
         }
-        if let Some(exploration) = active.as_any_mut().downcast_mut::<ExecCell>()
-            && exploration.is_exploring_cell()
+        if let Some(commands) = active.as_any_mut().downcast_mut::<ExecCell>()
+            && commands.is_agent_command_group()
         {
-            exploration.group.push_detail(Arc::from(cell));
+            commands.group.push_detail(Arc::from(cell));
             self.bump_active_cell_revision();
             return Ok(());
         }
@@ -42,7 +42,7 @@ impl ChatWidget {
     }
 
     /// Hydrate only the validated older portion, leaving current calls and their clocks intact.
-    pub(crate) fn prepend_active_exploration_history(
+    pub(crate) fn prepend_active_command_history(
         &mut self,
         older: &dyn HistoryCell,
         turns: &[Turn],
@@ -54,7 +54,7 @@ impl ChatWidget {
             .as_mut()?
             .as_any_mut()
             .downcast_mut::<ExecCell>()?;
-        let older = crate::thread_transcript::older_exploration_group(older, active, turns)?;
+        let older = crate::thread_transcript::older_command_group(older, active, turns)?;
         active.prepend(older);
         self.bump_active_cell_revision();
         Some((previous_revision, self.transcript.active_cell_revision))

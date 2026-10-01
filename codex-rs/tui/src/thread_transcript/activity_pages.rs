@@ -44,7 +44,7 @@ pub(crate) fn fold_trailing_activity_details(
         && !older
             .as_any()
             .downcast_ref::<ExecCell>()
-            .is_some_and(ExecCell::is_exploring_cell)
+            .is_some_and(ExecCell::is_agent_command_group)
         && details
             .iter()
             .any(|cell| cell.as_any().is::<ToolOutputCell>())
@@ -60,7 +60,7 @@ pub(crate) fn fold_trailing_activity_details(
             (group.call_ids().collect::<Vec<_>>(), &group.group.details)
         } else {
             let group = older.as_any().downcast_ref::<ExecCell>()?;
-            if !group.is_exploring_cell() || group.should_flush() {
+            if !group.is_agent_command_group() || group.should_flush() {
                 return None;
             }
             (
@@ -93,7 +93,7 @@ pub(crate) fn fold_trailing_activity_details(
         group.group.details = retained;
         Some(Arc::new(group))
     } else {
-        let mut group = super::exploration_groups::completed_group(items)?;
+        let mut group = super::command_groups::completed_group(items)?;
         group.group.details = retained;
         Some(Arc::new(group))
     }

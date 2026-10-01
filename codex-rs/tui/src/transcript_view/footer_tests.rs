@@ -620,13 +620,12 @@ fn mixed_shell_reads_share_one_disclosure_and_output_bill() {
     );
     // Recognized reads must not hide the opaque stage or turn the whole script into
     // a read-only exploration group. The process has one result and one output bill.
-    assert!(!cell.is_exploring_cell());
+    assert!(!cell.has_only_read_actions());
     cell.complete_call(
         "mixed",
         CommandOutput::new(/*exit_code*/ 2, "combined output\nfinal error".into()),
         Duration::from_millis(/*millis*/ 5),
     );
-    assert!(cell.should_flush());
     assert_eq!(cell.activity_ids(), vec!["exec:mixed"]);
     let cells: Vec<Arc<dyn HistoryCell>> = vec![Arc::new(cell)];
     let mut view = TranscriptView::default();
