@@ -47,6 +47,7 @@ impl App {
         let chat_widget = &self.chat_widget;
         let transcript_width = chat_widget.history_wrap_width(width);
         let view = &mut self.transcript_view;
+        view.primary_selection = cfg!(target_os = "linux");
         view.copy_on_select = self
             .local_settings
             .copy_on_select(&codex_terminal_detection::terminal_info());
@@ -604,20 +605,18 @@ impl App {
         let copy_on_select = matches!(action, ViewAction::CopyOnSelect(_));
         match action {
             ViewAction::Changed => {}
+            ViewAction::PrimarySelection(text) => self.transcript_view.publish_primary(tui, &text),
+            ViewAction::CopyOnSelect(text) if cfg!(target_os = "linux") => {
+                self.transcript_view.publish_primary(tui, &text);
+            }
             ViewAction::Copy(text)
             | ViewAction::CopyOnSelect(text)
             | ViewAction::CopyAndFollow(text) => {
-                let result = self.transcript_view.copy_selected_text_with(
+                let result = self.transcript_view.copy_selected_text(
+                    tui,
                     &self.transcript_cells,
                     &text,
                     !copy_on_select,
-                    |text, format| {
-                        if copy_on_select {
-                            tui.copy_mouse_selection(text, format)
-                        } else {
-                            tui.copy_transcript_selection(text, format)
-                        }
-                    },
                 );
                 if !copy_on_select || !cfg!(target_os = "linux") || result.is_err() {
                     self.transcript_view

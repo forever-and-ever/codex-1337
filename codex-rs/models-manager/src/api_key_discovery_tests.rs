@@ -4,36 +4,44 @@ use super::*;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
-async fn api_key_discovery_disabled_preserves_command_auth_discovery_and_merging() {
+async fn api_key_discovery_disabled_preserves_provider_owned_discovery_and_merging() {
     let models = vec![remote_model(
         "command-auth",
         "Command Auth",
         /*priority*/ 0,
     )];
-    let endpoint = Arc::new(TestModelsEndpoint {
-        has_command_auth: true,
-        uses_codex_backend: false,
-        responses: Mutex::new(vec![models.clone()].into()),
-        etag: None,
-        fetch_count: AtomicUsize::new(0),
-        observed_proxy_policy: Mutex::new(None),
-    });
-    let manager = OpenAiModelsManager::new_without_cache(
-        endpoint.clone(),
-        Some(AuthManager::from_auth_for_testing(CodexAuth::from_api_key(
-            "test-key",
-        ))),
-    );
     let mut merged = load_remote_models_from_file().unwrap();
     merged.extend(models.clone());
-    assert_eq!(
-        manager
-            .raw_model_catalog(RefreshStrategy::Online, DEFAULT_HTTP_CLIENT_FACTORY)
-            .await
-            .models,
-        merged
-    );
-    assert_eq!(endpoint.fetch_count(), 1);
+    // Native catalog authentication is independent of an ambient OpenAI API key.
+    for endpoint in [
+        TestModelsEndpoint {
+            has_command_auth: true,
+            ..TestModelsEndpoint::default()
+        },
+        TestModelsEndpoint {
+            supports_unauthenticated_catalog: true,
+            ..TestModelsEndpoint::default()
+        },
+    ] {
+        let endpoint = Arc::new(TestModelsEndpoint {
+            responses: Mutex::new(vec![Ok(models.clone())].into()),
+            ..endpoint
+        });
+        let manager = OpenAiModelsManager::new_without_cache(
+            endpoint.clone(),
+            Some(AuthManager::from_auth_for_testing(CodexAuth::from_api_key(
+                "test-key",
+            ))),
+        );
+        assert_eq!(
+            manager
+                .raw_model_catalog(RefreshStrategy::Online, DEFAULT_HTTP_CLIENT_FACTORY)
+                .await
+                .models,
+            merged
+        );
+        assert_eq!(endpoint.fetch_count(), 1);
+    }
 }
 
 #[tokio::test]

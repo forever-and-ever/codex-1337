@@ -133,6 +133,8 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
             .last_messages
             .insert(selected, "Pre-disconnect answer".into());
         app.agents_overview.initialized = overview_initialized;
+        // This task was unarchived elsewhere while disconnected.
+        app.agents_overview.removed_threads.insert(added);
         let view = app.agents_overview_view(
             stale.clone(),
             Some(if previous_thread.is_some() {
@@ -283,6 +285,7 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
                 last_messages: HashMap::new(),
                 threads: HashMap::new(),
                 recent_seed_complete: false,
+                discovery: None,
             }),
         );
         assert_eq!(app.agents_overview.visible_thread_ids.len(), 2);
@@ -433,6 +436,7 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
                 last_messages: HashMap::new(),
                 threads: stale_threads,
                 recent_seed_complete: true,
+                discovery: None,
             }),
         );
         assert!(!app.agents_overview.visible_thread_ids.contains(&vanished));

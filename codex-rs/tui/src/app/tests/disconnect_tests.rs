@@ -326,6 +326,15 @@ where
             "model/list" => Some(json!({"result": {"data": [], "nextCursor": null}})),
             "collaborationMode/list" => Some(json!({"result": {"data": []}})),
             "configRequirements/read" => Some(json!({"result": {"requirements": null}})),
+            // Layered folder-consent reads belong to the fixture; never mask its trust response.
+            "config/read"
+                if request
+                    .params
+                    .as_ref()
+                    .is_none_or(|params| params["includeLayers"] != true) =>
+            {
+                Some(json!({"error": {"code": -32601, "message": "unsupported"}}))
+            }
             _ => respond(request).await,
         };
         let Some(mut response) = response else {
@@ -369,6 +378,7 @@ async fn lost_initial_thread_reply_keeps_startup_draft_offline() -> Result<()> {
             app.config.clone(),
             ThreadParamsMode::Remote,
             /*remote_cwd_override*/ None,
+            /*model_provider_override*/ None,
         )
         .await;
         let mut tui = crate::tui::test_support::make_test_tui()?;

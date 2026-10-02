@@ -9,11 +9,15 @@ pub(crate) fn read(target: SelectionTarget, deadline: Instant) -> Result<String,
     if crate::clipboard_copy::is_ssh_session() {
         return Err("clipboard text is unavailable over SSH".into());
     }
+    if target == SelectionTarget::Primary {
+        return if crate::clipboard_copy::primary::available() {
+            crate::clipboard_copy::primary::read(deadline)
+        } else {
+            Err("PRIMARY selection is unavailable in this terminal".into())
+        };
+    }
     #[cfg(target_os = "linux")]
     if super::is_probably_wsl() {
-        if target == SelectionTarget::Primary {
-            return Err("PRIMARY selection is unavailable in WSL".into());
-        }
         let executable = codex_utils_path::system_executable("powershell.exe")
             .ok_or("Windows clipboard reader is unavailable")?;
         let mut command = tokio::process::Command::new(executable);
@@ -26,25 +30,28 @@ pub(crate) fn read(target: SelectionTarget, deadline: Instant) -> Result<String,
             .block_on(read_command(command, deadline));
     }
     #[cfg(not(target_os = "android"))]
-    let text = match arboard::Clipboard::new().and_then(|mut clipboard| match target {
-        SelectionTarget::Clipboard => clipboard.get_text(),
-        #[cfg(target_os = "linux")]
-        SelectionTarget::Primary => {
-            use arboard::GetExtLinux;
-            clipboard
-                .get()
-                .clipboard(arboard::LinuxClipboardKind::Primary)
-                .text()
-        }
-        #[cfg(not(target_os = "linux"))]
-        SelectionTarget::Primary => Err(arboard::Error::ContentNotAvailable),
-    }) {
+    {
+        native_result(
+            arboard::Clipboard::new().and_then(|mut clipboard| clipboard.get_text()),
+            deadline,
+        )
+    }
+    #[cfg(target_os = "android")]
+    {
+        validate(String::new(), deadline)
+    }
+}
+
+#[cfg(not(target_os = "android"))]
+pub(crate) fn native_result(
+    result: Result<String, arboard::Error>,
+    deadline: Instant,
+) -> Result<String, String> {
+    let text = match result {
         Ok(text) => text,
         Err(arboard::Error::ContentNotAvailable) => String::new(),
         Err(_) => return Err("clipboard text is unavailable".into()),
     };
-    #[cfg(target_os = "android")]
-    let text = String::new();
     validate(text, deadline)
 }
 

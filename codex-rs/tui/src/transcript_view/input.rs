@@ -20,6 +20,7 @@ pub(crate) enum ViewAction {
     Changed,
     Copy(String),
     CopyOnSelect(String),
+    PrimarySelection(String),
     CopyAndFollow(String),
     OpenLink(String),
 }
@@ -270,10 +271,13 @@ impl TranscriptView {
                     self.end_selection(cells);
                     return Some(ViewAction::OpenLink(link));
                 }
-                if self.copy_on_select
-                    && let Some(text) = selected.filter(|text| !text.is_empty())
-                {
-                    return Some(ViewAction::CopyOnSelect(text));
+                if let Some(text) = selected.filter(|text| !text.is_empty()) {
+                    if self.copy_on_select {
+                        return Some(ViewAction::CopyOnSelect(text));
+                    }
+                    if self.primary_selection {
+                        return Some(ViewAction::PrimarySelection(text));
+                    }
                 }
             }
             _ => return None,

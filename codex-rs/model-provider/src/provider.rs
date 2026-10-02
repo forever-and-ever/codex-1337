@@ -453,6 +453,12 @@ struct ConfiguredModelProvider {
     anthropic_auth_context: Option<Result<Arc<AnthropicAuthContext>, String>>,
 }
 
+enum ModelsCacheConfig {
+    Disk { codex_home: PathBuf },
+    Disabled,
+    Custom(Arc<dyn ModelsCache>),
+}
+
 impl ConfiguredModelProvider {
     fn new(
         info: ModelProviderInfo,
@@ -468,21 +474,49 @@ impl ConfiguredModelProvider {
         }
     }
 
-    fn static_models_manager(&self, mut catalog: ModelsResponse) -> SharedModelsManager {
-        let normalize: fn(ModelInfo) -> ModelInfo = match self.info.adapter {
-            codex_model_provider_info::ModelProviderAdapter::OpenaiCompatible => {
-                std::convert::identity
+    fn create_models_manager(
+        &self,
+        config_model_catalog: Option<ModelsResponse>,
+        cache: ModelsCacheConfig,
+    ) -> SharedModelsManager {
+        if let Some(mut catalog) = config_model_catalog {
+            let normalize: fn(ModelInfo) -> ModelInfo = match self.info.adapter {
+                codex_model_provider_info::ModelProviderAdapter::OpenaiCompatible => {
+                    std::convert::identity
+                }
+                codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription => {
+                    catalog.models = crate::claude_catalog::normalize(catalog.models);
+                    crate::claude_catalog::normalize_model_info
+                }
+            };
+            return Arc::new(StaticModelsManager::new_with_model_info_normalizer(
+                self.auth_manager.clone(),
+                catalog,
+                normalize,
+            ));
+        }
+        let endpoint = Arc::new(OpenAiModelsEndpoint::new(
+            self.info.clone(),
+            self.auth_manager.clone(),
+            self.gateway_auth_manager.clone(),
+            self.anthropic_auth_context.clone(),
+        ));
+        let auth_manager = self.auth_manager.clone();
+        let manager = match cache {
+            ModelsCacheConfig::Disk { codex_home } => {
+                OpenAiModelsManager::new(codex_home, endpoint, auth_manager)
             }
-            codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription => {
-                catalog.models = crate::claude_catalog::normalize(catalog.models);
-                crate::claude_catalog::normalize_model_info
+            ModelsCacheConfig::Disabled => {
+                OpenAiModelsManager::new_without_cache(endpoint, auth_manager)
+            }
+            ModelsCacheConfig::Custom(cache) => {
+                OpenAiModelsManager::new_with_cache(cache, endpoint, auth_manager)
             }
         };
-        Arc::new(StaticModelsManager::new_with_model_info_normalizer(
-            self.auth_manager.clone(),
-            catalog,
-            normalize,
-        ))
+        match &self.info.model_catalog_url {
+            Some(_) => Arc::new(manager.with_provider_catalog()),
+            None => Arc::new(manager),
+        }
     }
 }
 
@@ -685,43 +719,14 @@ impl ModelProvider for ConfiguredModelProvider {
         codex_home: PathBuf,
         config_model_catalog: Option<ModelsResponse>,
     ) -> SharedModelsManager {
-        match config_model_catalog {
-            Some(model_catalog) => self.static_models_manager(model_catalog),
-            None => {
-                let endpoint = Arc::new(OpenAiModelsEndpoint::new(
-                    self.info.clone(),
-                    self.auth_manager.clone(),
-                    self.gateway_auth_manager.clone(),
-                    self.anthropic_auth_context.clone(),
-                ));
-                Arc::new(OpenAiModelsManager::new(
-                    codex_home,
-                    endpoint,
-                    self.auth_manager.clone(),
-                ))
-            }
-        }
+        self.create_models_manager(config_model_catalog, ModelsCacheConfig::Disk { codex_home })
     }
 
     fn models_manager_without_cache(
         &self,
         config_model_catalog: Option<ModelsResponse>,
     ) -> SharedModelsManager {
-        match config_model_catalog {
-            Some(model_catalog) => self.static_models_manager(model_catalog),
-            None => {
-                let endpoint = Arc::new(OpenAiModelsEndpoint::new(
-                    self.info.clone(),
-                    self.auth_manager.clone(),
-                    self.gateway_auth_manager.clone(),
-                    self.anthropic_auth_context.clone(),
-                ));
-                Arc::new(OpenAiModelsManager::new_without_cache(
-                    endpoint,
-                    self.auth_manager.clone(),
-                ))
-            }
-        }
+        self.create_models_manager(config_model_catalog, ModelsCacheConfig::Disabled)
     }
 
     fn models_manager_with_cache(
@@ -729,22 +734,7 @@ impl ModelProvider for ConfiguredModelProvider {
         config_model_catalog: Option<ModelsResponse>,
         cache: Arc<dyn ModelsCache>,
     ) -> SharedModelsManager {
-        match config_model_catalog {
-            Some(model_catalog) => self.static_models_manager(model_catalog),
-            None => {
-                let endpoint = Arc::new(OpenAiModelsEndpoint::new(
-                    self.info.clone(),
-                    self.auth_manager.clone(),
-                    self.gateway_auth_manager.clone(),
-                    self.anthropic_auth_context.clone(),
-                ));
-                Arc::new(OpenAiModelsManager::new_with_cache(
-                    cache,
-                    endpoint,
-                    self.auth_manager.clone(),
-                ))
-            }
-        }
+        self.create_models_manager(config_model_catalog, ModelsCacheConfig::Custom(cache))
     }
 }
 

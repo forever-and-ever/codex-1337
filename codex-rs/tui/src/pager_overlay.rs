@@ -55,6 +55,7 @@ impl Overlay {
     ) -> Self {
         let mut overlay = TranscriptOverlay::new(cells, keymap);
         overlay.view.copy_on_select = copy_on_select;
+        overlay.view.primary_selection = cfg!(target_os = "linux");
         Self::Transcript(overlay)
     }
 

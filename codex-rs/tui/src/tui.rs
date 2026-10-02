@@ -702,6 +702,7 @@ pub struct Tui {
     pub(crate) overlay_input: OverlayInput,
     // Copies and native ownership survive closing an overlay or startup picker.
     pub(crate) clipboard: crate::clipboard_copy::worker::ClipboardWorker,
+    selection_clipboard_owner: Option<Arc<()>>,
     // Keeps unmanaged process stderr writes out of the inline viewport.
     _stderr_guard: terminal_stderr::TerminalStderrGuard,
 }
@@ -785,6 +786,7 @@ impl Tui {
             owned_screen: false,
             overlay_input: OverlayInput::Default,
             clipboard: Default::default(),
+            selection_clipboard_owner: None,
             _stderr_guard: stderr_guard,
         }
     }

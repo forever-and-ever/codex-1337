@@ -22,7 +22,7 @@ async fn blocked_copy_allows_overlay_exit_rejects_backlog_and_wakes_completion()
     tui.clipboard
         .start(
             frames.clone(),
-            move |text, format, setup| {
+            move |text, format, _, setup| {
                 setup.begin_delivery().unwrap();
                 started.send((text.to_owned(), format)).unwrap();
                 released.recv().unwrap();
@@ -71,10 +71,7 @@ async fn blocked_copy_allows_overlay_exit_rejects_backlog_and_wakes_completion()
         start_rx
             .recv_timeout(Duration::from_secs(/*secs*/ 5))
             .unwrap(),
-        (
-            "café\nsecond line".into(),
-            CopyDestination::Clipboard(CopyFormat::Markdown)
-        )
+        ("café\nsecond line".into(), CopyFormat::Markdown)
     );
     assert_eq!(
         tui.copy_transcript_selection("newer", CopyFormat::PlainText),
@@ -133,7 +130,7 @@ fn dropping_worker_does_not_wait_for_blocked_backend() {
     worker
         .start(
             FrameRequester::test_dummy(),
-            move |_, _, _| {
+            move |_, _, _, _| {
                 started.send(()).unwrap();
                 released.recv().unwrap();
                 finished.send(()).unwrap();
@@ -171,7 +168,7 @@ async fn expired_setup_discards_delivery_and_keeps_worker_busy_until_it_returns(
         worker
             .start(
                 frames.clone(),
-                move |text, _, setup| {
+                move |text, _, _, setup| {
                     started.send(()).unwrap();
                     released.recv().unwrap();
                     let outcome = setup.begin_delivery().map(|()| {
@@ -268,6 +265,7 @@ fn delivery_claim_cannot_be_abandoned() {
     let setup = CopySetup {
         phase: Mutex::new(Setup::Pending(Instant::now() + SETUP_TIMEOUT)),
         frames: FrameRequester::test_dummy(),
+        owner: None,
     };
     assert_eq!(setup.begin_delivery(), Ok(()));
     assert!(
@@ -293,7 +291,7 @@ async fn mouse_paste_uses_requested_selection_and_discards_stale_reads() {
     tui.clipboard
         .start(
             tui.frame_requester(),
-            |_, _, _| unreachable!("no selection"),
+            |_, _, _, _| unreachable!("no selection"),
             move |source, _| {
                 started.send(source).unwrap();
                 released.recv().unwrap();
@@ -435,18 +433,17 @@ fn expired_text_read_rejects_backlog_and_discards_late_completion() {
     worker
         .start(
             FrameRequester::test_dummy(),
-            |_, _, _| unreachable!(),
+            |_, _, _, _| unreachable!(),
             move |_, _| {
                 released.recv().unwrap();
                 Ok("late".into())
             },
         )
         .unwrap();
-    assert!(
-        worker
-            .read_text(SelectionTarget::Clipboard, FrameRequester::test_dummy())
-            .unwrap()
-    );
+    let request = worker
+        .read_text(SelectionTarget::Clipboard, FrameRequester::test_dummy())
+        .unwrap()
+        .unwrap();
     worker.pending_read.as_mut().unwrap().deadline = Instant::now();
     worker.poll();
     assert_eq!(
@@ -454,9 +451,10 @@ fn expired_text_read_rejects_backlog_and_discards_late_completion() {
         Some(Err("clipboard read timed out".into()))
     );
     assert!(
-        !worker
+        worker
             .read_text(SelectionTarget::Clipboard, FrameRequester::test_dummy())
             .unwrap()
+            .is_none()
     );
     release.send(()).unwrap();
     let deadline = Instant::now() + SETUP_TIMEOUT;
@@ -467,9 +465,167 @@ fn expired_text_read_rejects_backlog_and_discards_late_completion() {
     assert!(!worker.is_busy());
     assert_eq!(worker.take_text_result(), None);
     // A completion harvested by a non-draw event must retain its acceptance deadline.
-    worker.read_result = Some((Instant::now(), Ok("completed but no longer current".into())));
+    worker.read_result = Some((
+        Instant::now(),
+        Arc::downgrade(&request),
+        Ok("completed but no longer current".into()),
+    ));
     assert_eq!(
         worker.take_text_result(),
         Some(Err("clipboard read timed out".into()))
     );
+}
+
+#[test]
+fn latest_primary_is_published_before_read_but_does_not_preempt_explicit_copy() {
+    let frames = FrameRequester::test_dummy();
+    let (requests, incoming) = mpsc::channel();
+    let (outgoing, responses) = mpsc::channel();
+    let mut worker = ClipboardWorker::default();
+    worker.requests = Some(requests);
+    worker.responses = Some(responses);
+    let complete = || {
+        outgoing
+            .send(Response {
+                result: Ok(CopyStatus::Confirmed),
+                terminal_text: None,
+            })
+            .unwrap();
+    };
+    worker
+        .copy("original".into(), CopyFormat::PlainText, frames.clone())
+        .unwrap();
+    assert!(matches!(incoming.try_recv(), Ok(Request::Copy { .. })));
+    let (result, _old) = worker.select(
+        "old".into(),
+        CopyFormat::PlainText,
+        SelectionTarget::Primary,
+        frames.clone(),
+    );
+    assert_eq!(result, Ok(CopyStatus::Busy));
+    let (result, _latest) = worker.select(
+        "visit the café".into(),
+        CopyFormat::PlainText,
+        SelectionTarget::Primary,
+        frames.clone(),
+    );
+    assert_eq!(result, Ok(CopyStatus::Busy));
+    let _read = worker
+        .read_text(SelectionTarget::Primary, frames.clone())
+        .unwrap()
+        .unwrap();
+    assert!(
+        worker
+            .read_text(SelectionTarget::Clipboard, frames.clone())
+            .unwrap()
+            .is_none()
+    );
+    assert!(incoming.try_recv().is_err());
+    complete();
+    assert_eq!(worker.poll(), Some(&(1, Ok(CopyStatus::Confirmed))));
+    // This models a completion arriving with a real copy key, before an idle draw.
+    assert_eq!(
+        worker.copy("explicit".into(), CopyFormat::PlainText, frames.clone()),
+        Ok(CopyStatus::Pending(2))
+    );
+    assert!(
+        matches!(incoming.try_recv(), Ok(Request::Copy { text, destination: SelectionTarget::Clipboard, .. })
+        if text.as_ref() == "explicit")
+    );
+    worker.advance(frames.clone());
+    assert!(incoming.try_recv().is_err());
+    complete();
+    worker.poll();
+    worker.advance(frames.clone());
+    assert!(
+        matches!(incoming.try_recv(), Ok(Request::Copy { text, format: CopyFormat::PlainText, destination: SelectionTarget::Primary, .. })
+        if text.as_ref() == "visit the café")
+    );
+    assert!(incoming.try_recv().is_err());
+    complete();
+    worker.poll();
+    worker.advance(frames);
+    let Ok(Request::Read {
+        source: SelectionTarget::Primary,
+        response,
+        ..
+    }) = incoming.try_recv()
+    else {
+        panic!("one PRIMARY read must follow the latest publication");
+    };
+    response.send(Ok("visit the café".into())).unwrap();
+    worker.poll();
+    assert_eq!(worker.take_text_result(), Some(Ok("visit the café".into())));
+    assert!(incoming.try_recv().is_err());
+    drop(outgoing);
+}
+
+#[test]
+fn cancelling_owners_after_poll_drops_deferred_work_without_releasing_worker_early() {
+    let frames = FrameRequester::test_dummy();
+    let (requests, incoming) = mpsc::channel();
+    let (outgoing, responses) = mpsc::channel();
+    let mut worker = ClipboardWorker::default();
+    worker.requests = Some(requests);
+    worker.responses = Some(responses);
+    worker
+        .copy("active".into(), CopyFormat::PlainText, frames.clone())
+        .unwrap();
+    assert!(matches!(incoming.try_recv(), Ok(Request::Copy { .. })));
+    let (_, selection) = worker.select(
+        "cancelled".into(),
+        CopyFormat::PlainText,
+        SelectionTarget::Primary,
+        frames.clone(),
+    );
+    let read = worker
+        .read_text(SelectionTarget::Primary, frames.clone())
+        .unwrap()
+        .unwrap();
+    worker.poll();
+    drop(selection);
+    drop(read);
+    worker.advance(frames.clone());
+    assert!(worker.is_busy());
+    assert!(incoming.try_recv().is_err());
+    outgoing
+        .send(Response {
+            result: Ok(CopyStatus::Confirmed),
+            terminal_text: None,
+        })
+        .unwrap();
+    worker.poll();
+    worker.advance(frames.clone());
+    assert!(!worker.is_busy());
+    assert!(worker.take_text_result().is_none());
+    assert!(incoming.try_recv().is_err());
+
+    let read = worker
+        .read_text(SelectionTarget::Primary, frames.clone())
+        .unwrap()
+        .unwrap();
+    let Ok(Request::Read { response, .. }) = incoming.try_recv() else {
+        panic!("an available read must start immediately");
+    };
+    response
+        .send(Ok("completed before validation".into()))
+        .unwrap();
+    worker.poll();
+    drop(read);
+    assert!(worker.take_text_result().is_none());
+    let (_, selection) = worker.select(
+        "cancelled during setup".into(),
+        CopyFormat::PlainText,
+        SelectionTarget::Primary,
+        frames,
+    );
+    let Ok(Request::Copy { setup, .. }) = incoming.try_recv() else {
+        panic!("selection must reach the worker");
+    };
+    drop(selection);
+    assert_eq!(
+        setup.begin_delivery(),
+        Err("selection ended before clipboard delivery".into())
+    );
+    drop(outgoing);
 }

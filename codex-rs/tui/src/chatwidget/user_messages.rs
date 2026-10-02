@@ -67,10 +67,20 @@ pub(super) enum UserMessageSource {
     QuestionAnswer,
 }
 
+/// Whether a recovered message can be submitted without risking a duplicate.
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+pub(super) enum MessageDelivery {
+    #[default]
+    Unsent,
+    Unconfirmed(Option<String>),
+}
+
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(super) struct QueuedUserMessage {
     pub(super) user_message: UserMessage,
     pub(super) action: QueuedInputAction,
+    #[serde(default)]
+    pub(super) delivery: MessageDelivery,
     pub(super) pending_pastes: Vec<(String, String)>,
     pub(super) source: UserMessageSource,
 }
@@ -80,6 +90,7 @@ impl QueuedUserMessage {
         Self {
             user_message,
             action,
+            delivery: MessageDelivery::Unsent,
             pending_pastes: Vec::new(),
             source: UserMessageSource::Prompt,
         }
@@ -148,8 +159,13 @@ pub(crate) struct ThreadInputState {
     pub(super) queued_user_messages: VecDeque<QueuedUserMessage>,
     pub(super) queued_user_message_history_records: VecDeque<UserMessageHistoryRecord>,
     pub(crate) recovered_queue: bool,
+    /// Reconcile delivery after transport recovery, not after a fork or ordinary thread switch.
+    #[serde(default)]
+    pub(crate) reconnect_pending: bool,
     pub(super) user_turn_pending_start: bool,
     pub(super) submit_pending_steer_after_interrupt: bool,
+    #[serde(default)]
+    pub(super) pending_user_message_client_id: Option<String>,
     pub(super) current_collaboration_mode: CollaborationMode,
     pub(super) active_collaboration_mask: Option<CollaborationModeMask>,
     pub(super) plan_mode_reasoning_effort: Option<ReasoningEffortConfig>,
@@ -891,5 +907,13 @@ impl ChatWidget {
             local_images,
             remote_image_urls,
         )
+    }
+}
+
+impl ThreadInputState {
+    pub(crate) fn has_unconfirmed_messages(&self) -> bool {
+        self.queued_user_messages
+            .iter()
+            .any(|message| matches!(message.delivery, MessageDelivery::Unconfirmed(_)))
     }
 }

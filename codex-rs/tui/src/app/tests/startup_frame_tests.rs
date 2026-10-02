@@ -32,7 +32,6 @@ async fn owned_startup_hides_tip_in_transcript() -> Result<()> {
         /*is_first_event*/ false,
         Some("Use /mcp to list configured MCP tools.".into()),
         /*auth_plan*/ None,
-        /*show_fast_status*/ false,
     );
     history_cell::set_fresh_session(&mut session_info, &fresh_session);
     app.transcript_cells = vec![

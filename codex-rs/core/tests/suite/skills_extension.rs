@@ -121,8 +121,8 @@ struct StaticSkillProvider {
     main_prompt_contents: Option<String>,
 }
 
-struct CatalogSkillProvider {
-    catalog: SkillCatalog,
+pub(super) struct CatalogSkillProvider {
+    pub(super) catalog: SkillCatalog,
 }
 
 struct PausedCatalogSkillProvider {

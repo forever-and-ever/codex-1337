@@ -17,6 +17,8 @@ pub enum ApiError {
     /// A native inference may have executed; replay would duplicate usage or tools.
     #[error("native stream error (not replayed): {0}")]
     NativeStream(String),
+    #[error("stream error: Incomplete response returned, reason: content_filter")]
+    ContentFilter,
     #[error("context window exceeded")]
     ContextWindowExceeded,
     #[error("quota exceeded")]

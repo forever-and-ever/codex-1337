@@ -61,6 +61,7 @@ use uuid::Uuid;
 
 #[path = "directory_trust.rs"]
 mod directory_trust;
+pub(crate) use directory_trust::DirectoryTrustOptions;
 pub(crate) use directory_trust::check_directory_trust;
 
 #[allow(clippy::large_enum_variant)]
@@ -658,6 +659,9 @@ async fn run_onboarding_screen_inner(
                                     *widget.error.write().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(message);
                                 }
                                 pending_copy = None;
+                            }
+                            if matches!(&event, TuiEvent::Draw) {
+                                tui.clipboard.advance(tui.frame_requester());
                             }
                             for step in &onboarding_screen.steps {
                                 if let Step::Welcome(widget) = step {

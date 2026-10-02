@@ -21,6 +21,7 @@
 //! Mouse selection owns PRIMARY locally; remote selections use the terminal output stream.
 //! Neither path replaces CLIPBOARD or acquires a clipboard owner on a remote SSH host.
 
+pub(crate) mod primary;
 mod tmux;
 pub(crate) mod worker;
 
@@ -359,17 +360,6 @@ fn write_osc52_to_writer(mut writer: impl Write, sequence: &str) -> Result<(), S
 pub(crate) enum SelectionTarget {
     Clipboard,
     Primary,
-}
-
-/// Publish the selection to the user's terminal, including over SSH, without replacing CLIPBOARD.
-pub(crate) fn publish_primary(text: &str, writer: impl Write) -> Result<CopyStatus, String> {
-    let sequence = osc52_sequence(
-        text,
-        SelectionTarget::Primary,
-        std::env::var_os("TMUX").is_some(),
-    )?;
-    write_osc52_to_writer(writer, &sequence)?;
-    Ok(CopyStatus::Unconfirmed)
 }
 
 fn osc52_sequence(text: &str, target: SelectionTarget, tmux: bool) -> Result<String, String> {
