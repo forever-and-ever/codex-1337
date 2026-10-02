@@ -48,6 +48,7 @@ use codex_otel::TURN_TOOL_CALL_METRIC;
 use codex_otel::TURN_UNIFIED_EXEC_RUNNING_PROCESSES_METRIC;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::ErrorEvent;
+use codex_protocol::protocol::Event;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::MultiAgentVersion;
 use codex_protocol::protocol::TokenUsage;
@@ -478,9 +479,28 @@ impl Session {
             Arc::clone(&active_turn.turn_state)
         };
 
-        self.services
-            .models_manager
-            .refresh_after_auth_change(self.get_config().await.http_client_factory())
+        let config = self.get_config().await;
+        let models_manager = match self.request_models_manager(&config).await {
+            Ok(manager) => manager,
+            Err(error) => {
+                let mut active = self.active_turn.lock().await;
+                if active
+                    .as_ref()
+                    .is_some_and(|turn| Arc::ptr_eq(&turn.turn_state, &turn_state))
+                {
+                    *active = None;
+                }
+                drop(active);
+                self.send_event_raw(Event {
+                    id: sub_id,
+                    msg: EventMsg::Error(error.to_error_event(/*message_prefix*/ None)),
+                })
+                .await;
+                return;
+            }
+        };
+        models_manager
+            .refresh_after_auth_change(config.http_client_factory())
             .await;
         // A completion-triggered wakeup can be interrupted while discovery waits.
         if self

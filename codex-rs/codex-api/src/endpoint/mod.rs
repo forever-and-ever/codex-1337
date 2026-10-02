@@ -8,6 +8,8 @@ pub(crate) mod responses_websocket;
 pub(crate) mod search;
 mod session;
 
+pub(crate) use session::EndpointSession;
+
 pub use images::ImageRequestError;
 pub use images::ImagesClient;
 pub use memories::MemoriesClient;

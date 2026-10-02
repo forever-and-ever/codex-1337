@@ -88,6 +88,8 @@ static LIVE_THREADS: Gauge = Gauge::new("core.threads.live");
 pub struct ThreadConfigSnapshot {
     pub model: String,
     pub model_provider_id: String,
+    pub model_provider_adapter: codex_model_provider_info::ModelProviderAdapter,
+    pub requires_openai_auth: bool,
     pub service_tier: Option<String>,
     pub approval_policy: AskForApproval,
     pub approvals_reviewer: ApprovalsReviewer,
@@ -937,8 +939,17 @@ impl CodexThread {
         self.session.select_account(id).await
     }
 
+    /// Selects a saved subscription identity for future family requests.
+    pub async fn select_claude_account(&self, id: &str) -> std::io::Result<()> {
+        self.session.select_claude_account(id).await
+    }
+
     pub fn pending_account_id(&self) -> Option<String> {
         self.session.pending_account_id()
+    }
+
+    pub fn committed_provider_account_id(&self) -> Option<String> {
+        self.session.committed_provider_account_id()
     }
 
     pub fn auth_manager(&self) -> std::sync::Arc<codex_login::AuthManager> {

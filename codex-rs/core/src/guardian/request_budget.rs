@@ -33,8 +33,7 @@ pub(crate) enum ExhaustedReviewBudget {
     Compacting,
 }
 
-pub(crate) fn observe(telemetry: &SessionTelemetry, request: &ResponsesApiRequest) -> usize {
-    let total = estimate_request_tokens(request);
+pub(crate) fn observe(telemetry: &SessionTelemetry, total: usize) {
     // The assembled input already includes inherited history and the current
     // review. Do not report a guessed old/new split after context injection.
     telemetry.histogram_with_boundaries(
@@ -43,10 +42,9 @@ pub(crate) fn observe(telemetry: &SessionTelemetry, request: &ResponsesApiReques
         REQUEST_TOKENS_BOUNDARIES,
         &[("target", "sync"), ("component", "total")],
     );
-    total
 }
 
-pub(super) fn estimate_request_tokens(request: &ResponsesApiRequest) -> usize {
+pub(crate) fn estimate_request_tokens(request: &ResponsesApiRequest) -> usize {
     let input = request
         .input
         .iter()
@@ -81,22 +79,17 @@ pub(crate) async fn prepare_prompt(
         .as_ref()
         .filter(|retained| retained.history_version != history_version)
     {
-        let baseline = session.services.model_client.build_responses_request(
-            prompt,
-            model,
-            /*effort*/ None,
-            codex_protocol::config_types::ReasoningSummary::None,
-            /*service_tier*/ None,
-            metadata,
-            /*include_internal*/ true,
-        )?;
+        let baseline = session
+            .services
+            .model_client
+            .estimate_model_request_tokens(prompt, model, metadata)?;
         let mut context = retained.context.clone();
         context.retain_new_instructions(&history.for_prompt_annotated(&model.input_modalities));
         let context = context
             .enforce_budget(
                 RequestBudget {
                     max_input_tokens: maximum,
-                    existing_context_tokens: estimate_request_tokens(&baseline),
+                    existing_context_tokens: baseline,
                 },
                 GuardianBudgetOmission.render(),
                 HistoryTruncation::Preserve,
@@ -147,16 +140,12 @@ pub(crate) async fn prepare_prompt(
             .input
             .extend(restored.iter().map(|envelope| envelope.item.clone()));
     }
-    let request = session.services.model_client.build_responses_request(
-        prompt,
-        model,
-        /*effort*/ None,
-        codex_protocol::config_types::ReasoningSummary::None,
-        /*service_tier*/ None,
-        metadata,
-        /*include_internal*/ true,
-    )?;
-    if estimate_request_tokens(&request) > maximum {
+    if session
+        .services
+        .model_client
+        .estimate_model_request_tokens(prompt, model, metadata)?
+        > maximum
+    {
         session
             .services
             .thread_extension_data

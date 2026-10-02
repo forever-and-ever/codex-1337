@@ -42,6 +42,7 @@ impl StatusLineAccent {
             | StatusLineItem::PullRequestNumber
             | StatusLineItem::BranchChanges => Self::Branch,
             StatusLineItem::Status => Self::State,
+            StatusLineItem::ActiveAccount => Self::Metadata,
             StatusLineItem::ContextRemaining
             | StatusLineItem::ContextUsed
             | StatusLineItem::ContextWindowSize

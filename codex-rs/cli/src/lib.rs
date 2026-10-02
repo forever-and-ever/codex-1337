@@ -1,3 +1,4 @@
+mod claude_login;
 pub(crate) mod debug_sandbox;
 mod exit_status;
 pub(crate) mod login;
@@ -10,6 +11,9 @@ use codex_utils_cli::CliConfigOverrides;
 use codex_utils_cli::ProfileV2Name;
 use std::path::PathBuf;
 
+pub use claude_login::LoginAction;
+pub use claude_login::run_claude_account_command;
+pub use claude_login::run_login_with_claude_subscription;
 pub use debug_sandbox::run_command_under_landlock;
 pub use debug_sandbox::run_command_under_seatbelt;
 pub use debug_sandbox::run_command_under_windows_sandbox;

@@ -10,6 +10,252 @@ use codex_app_server_protocol::TurnStartResponse;
 use codex_app_server_protocol::UserInput;
 use pretty_assertions::assert_eq;
 
+// A stale OpenAI default must never become a prerequisite for a provider that
+// does not use OpenAI authentication, including an installation with no login.
+#[tokio::test]
+async fn provider_thread_starts_without_openai_account() -> Result<()> {
+    let home = TempDir::new()?;
+    create_config_toml(
+        home.path(),
+        CreateConfigTomlParams {
+            requires_openai_auth: Some(false),
+            ..Default::default()
+        },
+    )?;
+    let config_path = home.path().join("config.toml");
+    let mut config = std::fs::read_to_string(&config_path)?;
+    config.push_str("\n[wrangler]\ndefault_account = \"stale-openai-account\"\n");
+    std::fs::write(config_path, config)?;
+
+    let mut app = TestAppServer::builder()
+        .with_codex_home(home.path())
+        .with_env_overrides(&[("OPENAI_API_KEY", None)])
+        .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
+        .await?;
+    let request = app
+        .send_thread_start_request_with_auto_env(ThreadStartParams::default())
+        .await?;
+    let started: ThreadStartResponse =
+        timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
+    let request = app
+        .send_request("account/read", Some(json!({"threadId": started.thread.id})))
+        .await?;
+    let account: codex_app_server_protocol::GetAccountResponse =
+        timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
+    assert_eq!(account.account_id, None);
+    assert_eq!(account.account, None);
+    assert!(!account.requires_openai_auth);
+    let request = app
+        .send_request(
+            "thread/account/list",
+            Some(json!({"threadId": started.thread.id})),
+        )
+        .await?;
+    let accounts: ThreadAccountListResponse =
+        timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
+    assert_eq!(accounts.conversation_provider, None);
+    Ok(())
+}
+
+// Saved native identities, default preferences and captured conversation accounts
+// remain distinct even without an OpenAI login.
+#[tokio::test]
+async fn claude_subscription_accounts_are_native_and_conversation_scoped() -> Result<()> {
+    use codex_app_server_protocol::Account;
+    use codex_app_server_protocol::AccountNicknameSetResponse;
+    use codex_app_server_protocol::ClaudeSubscriptionAccount;
+    use codex_app_server_protocol::GetAccountResponse;
+    use codex_app_server_protocol::SubscriptionAccountProvider;
+    use codex_login::anthropic::AccountIdentity;
+    use codex_login::anthropic::AccountInfo;
+    use codex_login::anthropic::AccountStore;
+    use codex_login::anthropic::SubscriptionGrant;
+    use codex_protocol::openai_models::AnthropicModelCapabilities;
+    use codex_protocol::openai_models::AnthropicThinkingMode;
+
+    let home = TempDir::new()?;
+    let store = AccountStore::new(home.path().to_path_buf());
+    let mut ids = Vec::new();
+    let mut expected = Vec::new();
+    for name in ["synthetic-a", "synthetic-b"] {
+        let email = format!("{name}@example.test");
+        let id = store
+            .upsert(
+                AccountInfo {
+                    identity: AccountIdentity::new(name)?,
+                    email: Some(email.clone()),
+                    organization_uuid: None,
+                    organization_name: None,
+                },
+                SubscriptionGrant::bearer_only(format!("not-a-real-token-{name}"))?,
+            )
+            .await?
+            .to_string();
+        expected.push(ClaudeSubscriptionAccount {
+            id: id.clone(),
+            email: Some(email),
+            nickname: None,
+            available: true,
+            status: None,
+        });
+        ids.push(id);
+    }
+    expected.sort_by(|a, b| a.id.cmp(&b.id));
+    let mut catalog = codex_models_manager::bundled_models_response()?;
+    catalog.models.truncate(1);
+    catalog.models[0].slug = "claude-haiku-4-5-20251001".into();
+    catalog.models[0].anthropic = Some(AnthropicModelCapabilities {
+        thinking: AnthropicThinkingMode::Disabled,
+        max_output_tokens: std::num::NonZeroU32::new(8192).unwrap(),
+        supported_efforts: Vec::new(),
+        supports_mid_conversation_system: false,
+        supports_structured_outputs: false,
+    });
+    let catalog_path = home.path().join("models.json");
+    std::fs::write(&catalog_path, serde_json::to_vec(&catalog)?)?;
+    let config_path = home.path().join("config.toml");
+    std::fs::write(
+        &config_path,
+        format!(
+            r#"model = "claude-haiku-4-5-20251001"
+model_provider = "claude_subscription"
+model_catalog_json = {}
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+[model_providers.claude_subscription]
+name = "Claude subscription"
+adapter = "claude_subscription"
+base_url = "https://api.anthropic.com/v1"
+requires_openai_auth = false
+supports_websockets = false
+[wrangler]
+default_account = "stale-openai-account"
+default_claude_account = {}
+"#,
+            serde_json::to_string(&catalog_path)?,
+            serde_json::to_string(&ids[0])?,
+        ),
+    )?;
+    let mut app = TestAppServer::builder()
+        .with_codex_home(home.path())
+        .with_env_overrides(&[("OPENAI_API_KEY", None)])
+        .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
+        .await?;
+    let mut threads = Vec::new();
+    for _ in 0..2 {
+        let request = app
+            .send_thread_start_request_with_auto_env(ThreadStartParams::default())
+            .await?;
+        let started: ThreadStartResponse =
+            timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
+        threads.push(started.thread.id);
+    }
+    let request = app
+        .send_request("thread/account/list", Some(json!({"threadId": threads[0]})))
+        .await?;
+    let accounts: ThreadAccountListResponse =
+        timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
+    assert_eq!(accounts.claude_accounts, expected);
+    assert_eq!(accounts.selected_claude_account_id, Some(ids[0].clone()));
+    let request = app
+        .send_request(
+            "account/nickname/set",
+            Some(json!({"provider":"claudeSubscription","accountId":ids[1],"nickname":"work"})),
+        )
+        .await?;
+    let renamed: AccountNicknameSetResponse =
+        timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
+    assert_eq!(
+        renamed,
+        AccountNicknameSetResponse {
+            provider: SubscriptionAccountProvider::ClaudeSubscription,
+            account_id: ids[1].clone(),
+            nickname: Some("work".into())
+        }
+    );
+    let request = app
+        .send_request(
+            "thread/account/select",
+            Some(json!({"threadId":threads[0],"provider":"claudeSubscription","accountId":ids[1]})),
+        )
+        .await?;
+    let selected: ThreadAccountSelectResponse =
+        timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
+    assert_eq!(
+        selected,
+        ThreadAccountSelectResponse {
+            account_id: ids[1].clone(),
+            provider: SubscriptionAccountProvider::ClaudeSubscription,
+            conversation_changed: true,
+            pending: false,
+            default_saved: true
+        }
+    );
+    let request = app
+        .send_thread_fork_request(ThreadForkParams {
+            thread_id: threads[0].clone(),
+            ..Default::default()
+        })
+        .await?;
+    let forked: ThreadForkResponse =
+        timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
+    let request = app
+        .send_thread_start_request_with_auto_env(ThreadStartParams::default())
+        .await?;
+    let fresh: ThreadStartResponse =
+        timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
+    for (thread, id, email, name) in [
+        (
+            &threads[0],
+            &ids[1],
+            "synthetic-b@example.test",
+            Some("work"),
+        ),
+        (&threads[1], &ids[0], "synthetic-a@example.test", None),
+        (
+            &forked.thread.id,
+            &ids[1],
+            "synthetic-b@example.test",
+            Some("work"),
+        ),
+        (
+            &fresh.thread.id,
+            &ids[1],
+            "synthetic-b@example.test",
+            Some("work"),
+        ),
+    ] {
+        let request = app
+            .send_request("account/read", Some(json!({"threadId":thread})))
+            .await?;
+        let account: GetAccountResponse =
+            timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
+        assert_eq!(
+            account,
+            GetAccountResponse {
+                account_id: Some(id.clone()),
+                account: Some(Account::ClaudeSubscription {
+                    email: Some(email.to_owned())
+                }),
+                display_name: name.map(ToOwned::to_owned),
+                requires_openai_auth: false,
+                workspace_routing: None
+            }
+        );
+    }
+    let config: toml_edit::DocumentMut = std::fs::read_to_string(config_path)?.parse()?;
+    assert_eq!(
+        config["wrangler"]["default_account"].as_str(),
+        Some("stale-openai-account")
+    );
+    assert_eq!(
+        config["wrangler"]["default_claude_account"].as_str(),
+        Some(ids[1].as_str())
+    );
+    assert_eq!(store.list()?.len(), 2);
+    Ok(())
+}
+
 // Exercise the public boundary, not just credential storage: the payer follows
 // the conversation through selection and forks, never the last global login.
 #[tokio::test]
@@ -66,6 +312,8 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
         selected,
         ThreadAccountSelectResponse {
             account_id: "bob:bob".into(),
+            provider: codex_app_server_protocol::SubscriptionAccountProvider::Openai,
+            conversation_changed: true,
             pending: false,
             default_saved: true
         }
@@ -123,6 +371,7 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
         assert_eq!(
             response,
             GetAccountResponse {
+                display_name: None,
                 account_id: Some(expected.to_string()),
                 account: Some(Account::Chatgpt {
                     email: Some(format!("{id}@example.com")),
@@ -133,6 +382,21 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
             }
         );
     }
+    let request = app
+        .send_request(
+            "account/nickname/set",
+            Some(json!({"provider": "openai", "accountId": "bob:bob", "nickname": "work"})),
+        )
+        .await?;
+    let renamed: codex_app_server_protocol::AccountNicknameSetResponse =
+        timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
+    assert_eq!(renamed.nickname.as_deref(), Some("work"));
+    let request = app
+        .send_request("account/read", Some(json!({"threadId": threads[0]})))
+        .await?;
+    let renamed_account: GetAccountResponse =
+        timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
+    assert_eq!(renamed_account.display_name.as_deref(), Some("work"));
 
     let mock = responses::mount_sse_once(
         &server,
@@ -327,6 +591,8 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
         selected,
         ThreadAccountSelectResponse {
             account_id: "bob:bob".into(),
+            provider: codex_app_server_protocol::SubscriptionAccountProvider::Openai,
+            conversation_changed: true,
             pending: true,
             default_saved: true
         },
@@ -590,6 +856,130 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
             .map(|request| request.header("chatgpt-account-id"))
             .collect::<Vec<_>>(),
         vec![Some("alice".into()), Some("bob".into())]
+    );
+
+    // Legacy children accept account configuration directly. A child-origin
+    // switch must checkpoint the idle root, not merely the child's rollout.
+    let request = app
+        .send_thread_start_request_with_auto_env(ThreadStartParams {
+            config: Some([("features.multi_agent_v2.enabled".into(), json!(false))].into()),
+            approval_policy: Some(codex_app_server_protocol::AskForApproval::OnRequest),
+            approvals_reviewer: Some(codex_app_server_protocol::ApprovalsReviewer::User),
+            sandbox: Some(codex_app_server_protocol::SandboxMode::WorkspaceWrite),
+            ..Default::default()
+        })
+        .await?;
+    let legacy: ThreadStartResponse =
+        timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
+    responses::mount_sse_once(
+        &server,
+        responses::sse(vec![
+            responses::ev_function_call_with_namespace(
+                "spawn-account-child",
+                "multi_agent_v1",
+                "spawn_agent",
+                &json!({"message": "legacy-account-child-only", "fork_context": false}).to_string(),
+            ),
+            responses::ev_completed("legacy-spawn"),
+        ]),
+    )
+    .await;
+    responses::mount_sse_once_match(&server, |request: &wiremock::Request| {
+        let body = String::from_utf8_lossy(&request.body);
+        body.contains("legacy-account-child-only") && !body.contains("spawn-account-child")
+    }, responses::sse(vec![
+        responses::ev_function_call("hold-account-child", "exec_command",
+            r#"{"cmd":"printf legacy-child","sandbox_permissions":"require_escalated","justification":"account durability approval boundary"}"#),
+        responses::ev_completed("legacy-child-approval"),
+    ])).await;
+    responses::mount_sse_once_match(
+        &server,
+        |request: &wiremock::Request| {
+            String::from_utf8_lossy(&request.body).contains("spawn-account-child")
+        },
+        responses::sse(vec![responses::ev_completed("idle-account-root")]),
+    )
+    .await;
+    let request = app
+        .send_turn_start_request(TurnStartParams {
+            thread_id: legacy.thread.id.clone(),
+            input: vec![UserInput::Text {
+                text: "Start legacy account family".into(),
+                text_elements: Vec::new(),
+            }],
+            ..Default::default()
+        })
+        .await?;
+    let _: TurnStartResponse = timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
+    let mut root_idle = false;
+    let mut legacy_child = None;
+    while !root_idle || legacy_child.is_none() {
+        match timeout(DEFAULT_READ_TIMEOUT, app.read_next_message()).await?? {
+            codex_app_server_protocol::JSONRPCMessage::Notification(notification)
+                if notification.method == "turn/completed"
+                    && notification
+                        .params
+                        .as_ref()
+                        .is_some_and(|params| params["threadId"] == legacy.thread.id) =>
+            {
+                root_idle = true
+            }
+            codex_app_server_protocol::JSONRPCMessage::Request(request)
+                if request.method == "item/commandExecution/requestApproval" =>
+            {
+                legacy_child = request
+                    .params
+                    .and_then(|params| params["threadId"].as_str().map(str::to_owned));
+            }
+            _ => {}
+        }
+    }
+    let request = app
+        .send_request(
+            "thread/account/select",
+            Some(json!({
+                "threadId": legacy_child.expect("legacy child approval"), "accountId": "alice:alice"
+            })),
+        )
+        .await?;
+    let selected: ThreadAccountSelectResponse =
+        timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
+    assert!(selected.conversation_changed);
+    assert!(selected.default_saved);
+    assert!(selected.pending);
+    app.shutdown_gracefully().await?;
+    // Another family's preference cannot supersede the saved root selection.
+    let config_path = home.path().join("config.toml");
+    let mut config: toml_edit::DocumentMut = std::fs::read_to_string(&config_path)?.parse()?;
+    config["wrangler"]["default_account"] = toml_edit::value("bob:bob");
+    std::fs::write(&config_path, config.to_string())?;
+    app = TestAppServer::builder()
+        .with_codex_home(home.path())
+        .with_env_overrides(&[("OPENAI_API_KEY", None)])
+        .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
+        .await?;
+    let request = app
+        .send_thread_resume_request(codex_app_server_protocol::ThreadResumeParams {
+            thread_id: legacy.thread.id.clone(),
+            ..Default::default()
+        })
+        .await?;
+    let _: codex_app_server_protocol::ThreadResumeResponse =
+        timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
+    let request = app
+        .send_request(
+            "thread/account/list",
+            Some(json!({"threadId": legacy.thread.id})),
+        )
+        .await?;
+    let accounts: ThreadAccountListResponse =
+        timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
+    assert_eq!(
+        (
+            accounts.selected_account_id.as_deref(),
+            accounts.pending_account_id.as_deref()
+        ),
+        (Some("alice:alice"), None)
     );
     Ok(())
 }

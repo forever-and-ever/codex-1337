@@ -363,6 +363,36 @@ pub(crate) enum AppEvent {
     SelectAccount {
         thread_id: ThreadId,
         account_id: String,
+        provider: codex_app_server_protocol::SubscriptionAccountProvider,
+    },
+    RenameAccountPrompt {
+        thread_id: ThreadId,
+        provider: codex_app_server_protocol::SubscriptionAccountProvider,
+        account_id: String,
+        nickname: Option<String>,
+    },
+    SetAccountNickname {
+        thread_id: ThreadId,
+        provider: codex_app_server_protocol::SubscriptionAccountProvider,
+        account_id: String,
+        nickname: String,
+    },
+    AccountNicknameSetFinished {
+        thread_id: ThreadId,
+        result: Result<codex_app_server_protocol::AccountNicknameSetResponse, String>,
+    },
+    AddClaudeAccount {
+        thread_id: ThreadId,
+    },
+    ClaudeLoginStarted {
+        thread_id: ThreadId,
+        result: Result<codex_app_server_protocol::LoginAccountResponse, String>,
+    },
+    CancelClaudeLogin {
+        login_id: String,
+    },
+    ClaudeLoginCancelFailed {
+        error: String,
     },
     AccountPickerLoaded {
         thread_id: ThreadId,
@@ -1249,7 +1279,13 @@ pub(crate) enum AppEvent {
     },
     ModelsLoaded {
         request_id: uuid::Uuid,
-        result: Result<Vec<ModelPreset>, String>,
+        result: Result<crate::model_catalog::ModelListing, String>,
+    },
+
+    ProviderModel(crate::app::ProviderModelEvent),
+    OpenProviderReasoning {
+        provider: codex_app_server_protocol::ModelProviderOption,
+        model: ModelPreset,
     },
 
     FetchPermissionProfiles {

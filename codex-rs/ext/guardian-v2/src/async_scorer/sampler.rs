@@ -1,8 +1,9 @@
-//! Builds tool-less risk requests and publishes the first classifier output.
-//! Both transports share request identity, retry, cancellation, and output handling.
+//! Builds bounded tool-less risk requests with provider-owned authentication.
+//! Responses retains its first-token path; native Messages waits for terminal JSON.
 
 mod connection_pool;
 mod execution;
+mod native;
 
 use connection_pool::ConnectionPool;
 use std::collections::VecDeque;
@@ -68,6 +69,8 @@ pub struct LunaSamplerConfig {
 
 /// One tool-less Luna classification request.
 pub struct LunaSamplingRequest {
+    /// Owning conversation's account captured before asynchronous preparation.
+    pub provider_account_id: Option<String>,
     /// ID of the response handling the classified tool.
     pub parent_response_id: Option<String>,
     /// Trusted classifier instructions with their role and content attribution.
@@ -92,8 +95,8 @@ pub enum LunaSamplerError {
     /// The thread's provider or scoped credentials could not be resolved.
     #[error("could not resolve the Luna model provider: {0}")]
     Provider(#[source] CodexErr),
-    /// The Responses request could not be opened or streamed.
-    #[error("Luna Responses request failed: {0}")]
+    /// The classifier request could not be opened or streamed.
+    #[error("Guardian classifier request failed: {0}")]
     Api(#[source] ApiError),
     /// The provider's WebSocket connect deadline elapsed.
     #[error("Luna Responses WebSocket connection timed out")]
@@ -125,11 +128,23 @@ pub struct LunaSampler {
     config: Arc<LunaSamplerConfig>,
     connections: Arc<ConnectionPool>,
     active_requests: Mutex<VecDeque<ActiveRequest>>,
+    native_catalog: tokio::sync::Mutex<Option<Arc<native::Catalog>>>,
 }
 
 impl LunaSampler {
+    pub(super) fn output_instructions(&self) -> &'static str {
+        if matches!(self.config.provider.anthropic_auth_context(), Ok(None)) {
+            super::config::CLASSIFICATION_OUTPUT_INSTRUCTIONS
+        } else {
+            super::config::NATIVE_CLASSIFICATION_OUTPUT_INSTRUCTIONS
+        }
+    }
+
     /// A checkpoint is reusable only when both models declare the same nonempty hash.
     pub(super) fn supports_parent_compaction(&self, parent_hash: Option<&str>) -> bool {
+        if !matches!(self.config.provider.anthropic_auth_context(), Ok(None)) {
+            return false;
+        }
         parent_hash
             .zip(self.config.luna_compaction_hash.as_deref())
             .is_some_and(|(parent_hash, luna_hash)| {
@@ -143,10 +158,14 @@ impl LunaSampler {
             connections: ConnectionPool::new(Arc::clone(&config)),
             config,
             active_requests: Mutex::new(VecDeque::with_capacity(MAX_CONCURRENT_REQUESTS)),
+            native_catalog: tokio::sync::Mutex::new(None),
         }
     }
 
     pub(super) async fn prewarm(&self) {
+        if !matches!(self.config.provider.anthropic_auth_context(), Ok(None)) {
+            return;
+        }
         if let Some(refill) = self.connections.replenish() {
             let _ = refill.await;
         }
@@ -154,6 +173,22 @@ impl LunaSampler {
 
     /// Sends one tool-less classification request using an available transport.
     pub async fn sample(&self, request: LunaSamplingRequest) -> Result<String, LunaSamplerError> {
+        let native = match self
+            .config
+            .provider
+            .anthropic_auth_context()
+            .map_err(|error| LunaSamplerError::Provider(error.into()))?
+        {
+            Some(auth) => {
+                let account_id = request.provider_account_id.as_deref().ok_or_else(|| {
+                    LunaSamplerError::Provider(CodexErr::InvalidRequest(
+                        "Native Guardian requires the thread's selected Anthropic account".into(),
+                    ))
+                })?;
+                Some((auth, native::model(self, account_id).await?, account_id))
+            }
+            None => None,
+        };
         let auth_owner_generation = self
             .config
             .provider
@@ -175,14 +210,15 @@ impl LunaSampler {
         let parent_response_id = request.parent_response_id;
         let parent_turn_id = request.parent_turn_id;
         let root_turn_id = request.root_turn_id;
-        let mut input = vec![
-            ResponseItem::AdditionalTools {
+        let mut input = Vec::new();
+        if native.is_none() {
+            input.push(ResponseItem::AdditionalTools {
                 id: None,
                 role: "developer".to_owned(),
                 tools: Vec::new(),
-            },
-            ResponseItem::from(request.instructions),
-        ];
+            });
+        }
+        input.push(ResponseItem::from(request.instructions));
         if let Some(parent_compaction) = request.parent_compaction {
             input.push(parent_compaction);
         }
@@ -224,8 +260,45 @@ impl LunaSampler {
             }
         }
         // Oversized classifications defer to sync with the existing failure score.
-        if total_tokens > self.config.max_input_tokens.saturating_sub(/*rhs*/ 256) {
+        let max_input_tokens =
+            native
+                .as_ref()
+                .map_or(self.config.max_input_tokens, |(_, model, _)| {
+                    codex_guardian_context::effective_input_token_limit(
+                        model, /*configured_window*/ None,
+                    )
+                });
+        if total_tokens > max_input_tokens.saturating_sub(/*rhs*/ 256) {
             return Err(LunaSamplerError::InputTooLarge);
+        }
+        let (supersede, superseded) = oneshot::channel();
+        let scored = Arc::new(AtomicBool::new(false));
+        {
+            let mut active_requests = self
+                .active_requests
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            active_requests.retain(|request| !request.supersede.is_closed());
+            if active_requests.len() == MAX_CONCURRENT_REQUESTS {
+                let oldest_scored = active_requests
+                    .iter()
+                    .position(|request| request.scored.load(Ordering::Relaxed))
+                    .unwrap_or(0);
+                if let Some(oldest) = active_requests.remove(oldest_scored) {
+                    let _ = oldest.supersede.send(());
+                }
+            }
+            active_requests.push_back(ActiveRequest {
+                supersede,
+                scored: Arc::clone(&scored),
+            });
+        }
+        if let Some((auth, model, account_id)) = native {
+            return tokio::select! {
+                biased;
+                _ = superseded => Err(LunaSamplerError::Superseded),
+                result = native::sample(self, auth, &model, &input, account_id, scored) => result,
+            };
         }
         let request = ResponsesApiRequest {
             model: MODEL.to_owned(),
@@ -249,28 +322,6 @@ impl LunaSampler {
             client_metadata: None,
             access_programs: None,
         };
-        let (supersede, superseded) = oneshot::channel();
-        let scored = Arc::new(AtomicBool::new(false));
-        {
-            let mut active_requests = self
-                .active_requests
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            active_requests.retain(|request| !request.supersede.is_closed());
-            if active_requests.len() == MAX_CONCURRENT_REQUESTS {
-                let oldest_scored = active_requests
-                    .iter()
-                    .position(|request| request.scored.load(Ordering::Relaxed))
-                    .unwrap_or(0);
-                if let Some(oldest) = active_requests.remove(oldest_scored) {
-                    let _ = oldest.supersede.send(());
-                }
-            }
-            active_requests.push_back(ActiveRequest {
-                supersede,
-                scored: Arc::clone(&scored),
-            });
-        }
         execution::SamplingExecution {
             auth_owner_generation,
             config: Arc::clone(&self.config),

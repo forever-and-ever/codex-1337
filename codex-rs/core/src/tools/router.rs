@@ -42,17 +42,35 @@ pub struct ToolCall {
 }
 
 impl ToolCall {
-    pub(crate) fn direct_source(&self) -> ToolCallSource {
-        if matches!(
-            self.tool_name.namespace.as_deref(),
-            Some("collaboration" | "wrangler_agents")
-        ) && matches!(
+    fn validate_message_encryption(&self) -> Result<(), FunctionCallError> {
+        if self.is_agent_message_tool()
+            && self
+                .encrypted_function_args
+                .as_ref()
+                .is_some_and(|fields| fields.iter().any(|field| field == "plaintext_message"))
+        {
+            return Err(FunctionCallError::RespondToModel(
+                "Upstream encrypted plaintext_message despite its unencrypted schema; no message was delivered".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn is_agent_message_tool(&self) -> bool {
+        // The v2 namespace is configurable, and namespace-disabled tools are plain.
+        matches!(
             self.tool_name.name.as_str(),
             "spawn_agent" | "send_message" | "followup_task"
-        ) && self
-            .encrypted_function_args
-            .as_ref()
-            .is_some_and(Vec::is_empty)
+        )
+    }
+
+    pub(crate) fn direct_source(&self) -> ToolCallSource {
+        if self.is_agent_message_tool()
+            && (self
+                .encrypted_function_args
+                .as_ref()
+                .is_some_and(Vec::is_empty)
+                || has_plaintext_message_argument(&self.payload))
         {
             ToolCallSource::DirectPlaintextMessage
         } else {
@@ -61,11 +79,20 @@ impl ToolCall {
     }
 }
 
+fn has_plaintext_message_argument(payload: &ToolPayload) -> bool {
+    matches!(payload, ToolPayload::Function { arguments }
+    if serde_json::from_str::<serde_json::Value>(arguments).is_ok_and(|arguments| {
+        arguments.get("plaintext_message").is_some_and(serde_json::Value::is_string)
+    }))
+}
+
 pub(crate) fn tool_log_payload<'a>(
     payload: &'a ToolPayload,
     source: &ToolCallSource,
 ) -> Cow<'a, str> {
-    if matches!(source, ToolCallSource::DirectPlaintextMessage) {
+    if matches!(source, ToolCallSource::DirectPlaintextMessage)
+        || has_plaintext_message_argument(payload)
+    {
         return Cow::Borrowed("[plaintext arguments]");
     }
     payload.log_payload()
@@ -257,12 +284,14 @@ impl ToolRouter {
                 ..
             } => {
                 let tool_name = ToolName::new(namespace, name).with_default_namespace();
-                Ok(Some(ToolCall {
+                let call = ToolCall {
                     tool_name,
                     call_id,
                     payload: ToolPayload::Function { arguments },
                     encrypted_function_args,
-                }))
+                };
+                call.validate_message_encryption()?;
+                Ok(Some(call))
             }
             ResponseItem::ToolSearchCall {
                 call_id: Some(call_id),
@@ -358,6 +387,7 @@ impl ToolRouter {
         source: ToolCallSource,
         call_state: Option<Arc<ToolCallState>>,
     ) -> Result<AnyToolResult, FunctionCallError> {
+        call.validate_message_encryption()?;
         let ToolCall {
             tool_name,
             call_id,

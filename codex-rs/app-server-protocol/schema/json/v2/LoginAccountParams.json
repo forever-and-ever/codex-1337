@@ -12,6 +12,22 @@
   "oneOf": [
     {
       "properties": {
+        "type": {
+          "enum": [
+            "claudeSubscription"
+          ],
+          "title": "ClaudeSubscriptionv2::LoginAccountParamsType",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "ClaudeSubscriptionv2::LoginAccountParams",
+      "type": "object"
+    },
+    {
+      "properties": {
         "apiKey": {
           "type": "string"
         },

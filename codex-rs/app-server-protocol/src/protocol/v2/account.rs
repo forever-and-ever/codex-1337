@@ -35,12 +35,9 @@ pub enum Account {
         plan_type: PlanType,
     },
 
-    #[serde(rename = "amazonBedrock", rename_all = "camelCase")]
-    #[ts(rename = "amazonBedrock", rename_all = "camelCase")]
-    AmazonBedrock {
-        #[serde(default)]
-        uses_codex_managed_credentials: bool,
-    },
+    #[serde(rename = "claudeSubscription", rename_all = "camelCase")]
+    #[ts(rename = "claudeSubscription", rename_all = "camelCase")]
+    ClaudeSubscription { email: Option<String> },
 }
 
 impl From<ProviderAccount> for Account {
@@ -48,11 +45,6 @@ impl From<ProviderAccount> for Account {
         match account {
             ProviderAccount::ApiKey => Self::ApiKey {},
             ProviderAccount::Chatgpt { email, plan_type } => Self::Chatgpt { email, plan_type },
-            ProviderAccount::AmazonBedrock {
-                uses_codex_managed_credentials,
-            } => Self::AmazonBedrock {
-                uses_codex_managed_credentials,
-            },
         }
     }
 }
@@ -62,6 +54,9 @@ impl From<ProviderAccount> for Account {
 #[ts(tag = "type")]
 #[ts(export_to = "v2/")]
 pub enum LoginAccountParams {
+    #[serde(rename = "claudeSubscription")]
+    #[ts(rename = "claudeSubscription")]
+    ClaudeSubscription,
     #[serde(rename = "apiKey", rename_all = "camelCase")]
     #[ts(rename = "apiKey", rename_all = "camelCase")]
     ApiKey {
@@ -101,22 +96,6 @@ pub enum LoginAccountParams {
         #[ts(optional = nullable)]
         chatgpt_plan_type: Option<String>,
     },
-    /// [UNSTABLE] Managed Amazon Bedrock login is experimental.
-    #[experimental("account/login/start.amazonBedrock")]
-    #[serde(rename = "amazonBedrock", rename_all = "camelCase")]
-    #[ts(rename = "amazonBedrock", rename_all = "camelCase")]
-    AmazonBedrock { api_key: String, region: String },
-    /// [UNSTABLE] Managed Amazon Bedrock AWS access key login is experimental.
-    #[experimental("account/login/start.amazonBedrockAccessKeys")]
-    #[serde(rename = "amazonBedrockAccessKeys", rename_all = "camelCase")]
-    #[ts(rename = "amazonBedrockAccessKeys", rename_all = "camelCase")]
-    AmazonBedrockAccessKeys {
-        access_key_id: String,
-        secret_access_key: String,
-        #[ts(optional = nullable)]
-        session_token: Option<String>,
-        region: String,
-    },
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
@@ -134,6 +113,9 @@ pub enum LoginAppBrand {
 #[ts(tag = "type")]
 #[ts(export_to = "v2/")]
 pub enum LoginAccountResponse {
+    #[serde(rename = "claudeSubscription", rename_all = "camelCase")]
+    #[ts(rename = "claudeSubscription", rename_all = "camelCase")]
+    ClaudeSubscription { login_id: String, auth_url: String },
     #[serde(rename = "apiKey", rename_all = "camelCase")]
     #[ts(rename = "apiKey", rename_all = "camelCase")]
     ApiKey {},
@@ -160,9 +142,6 @@ pub enum LoginAccountResponse {
     #[serde(rename = "chatgptAuthTokens", rename_all = "camelCase")]
     #[ts(rename = "chatgptAuthTokens", rename_all = "camelCase")]
     ChatgptAuthTokens {},
-    #[serde(rename = "amazonBedrock", rename_all = "camelCase")]
-    #[ts(rename = "amazonBedrock", rename_all = "camelCase")]
-    AmazonBedrock {},
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
@@ -571,6 +550,8 @@ pub struct GetAccountResponse {
     /// Saved conversation binding; null for an unscoped global-account read.
     pub account_id: Option<String>,
     pub account: Option<Account>,
+    /// Stored nickname or legacy ChatGPT alias; display-only, never a routing selector.
+    pub display_name: Option<String>,
     pub requires_openai_auth: bool,
     #[experimental("account/read.workspaceRouting")]
     pub workspace_routing: Option<WorkspaceRouting>,
@@ -627,18 +608,75 @@ pub type NullableAccountScopeParams = Option<AccountScopeParams>;
 pub struct SavedAccount {
     pub id: String,
     pub alias: Option<String>,
+    pub nickname: Option<String>,
     pub email: Option<String>,
     pub plan: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub enum SubscriptionAccountProvider {
+    #[default]
+    Openai,
+    ClaudeSubscription,
+}
+
+impl SubscriptionAccountProvider {
+    pub fn config_id(self) -> &'static str {
+        match self {
+            Self::Openai => "openai",
+            Self::ClaudeSubscription => "claude_subscription",
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ClaudeSubscriptionAccount {
+    /// Stable upstream subscription identity; never a bearer token.
+    pub id: String,
+    pub email: Option<String>,
+    pub nickname: Option<String>,
+    /// Whether this saved identity can be selected; not an upstream availability check.
+    pub available: bool,
+    pub status: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct AccountNicknameSetParams {
+    pub provider: SubscriptionAccountProvider,
+    pub account_id: String,
+    /// Empty or whitespace-only text clears the nickname.
+    pub nickname: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct AccountNicknameSetResponse {
+    pub provider: SubscriptionAccountProvider,
+    pub account_id: String,
+    pub nickname: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct ThreadAccountListResponse {
+    pub conversation_provider: Option<SubscriptionAccountProvider>,
     pub accounts: Vec<SavedAccount>,
     pub selected_account_id: Option<String>,
     /// Selected target whose handoff is not yet complete.
     pub pending_account_id: Option<String>,
+    pub claude_accounts: Vec<ClaudeSubscriptionAccount>,
+    pub selected_claude_account_id: Option<String>,
+    pub pending_claude_account_id: Option<String>,
+    pub claude_management_error: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
@@ -648,6 +686,9 @@ pub struct ThreadAccountSelectParams {
     pub thread_id: String,
     /// Saved identity or an alias from `[wrangler.account_aliases]`.
     pub account_id: String,
+    /// Defaults to ChatGPT for pre-Claude clients; Claude selection must be explicit.
+    #[ts(optional = nullable)]
+    pub provider: Option<SubscriptionAccountProvider>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
@@ -655,6 +696,9 @@ pub struct ThreadAccountSelectParams {
 #[ts(export_to = "v2/")]
 pub struct ThreadAccountSelectResponse {
     pub account_id: String,
+    pub provider: SubscriptionAccountProvider,
+    /// False when choosing the other provider's new-conversation default.
+    pub conversation_changed: bool,
     /// Whether this thread's account handoff is still pending.
     #[serde(default)]
     pub pending: bool,

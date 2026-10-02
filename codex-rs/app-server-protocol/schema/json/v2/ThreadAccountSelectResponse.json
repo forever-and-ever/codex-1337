@@ -1,8 +1,21 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "SubscriptionAccountProvider": {
+      "enum": [
+        "openai",
+        "claudeSubscription"
+      ],
+      "type": "string"
+    }
+  },
   "properties": {
     "accountId": {
       "type": "string"
+    },
+    "conversationChanged": {
+      "description": "False when choosing the other provider's new-conversation default.",
+      "type": "boolean"
     },
     "defaultSaved": {
       "description": "False means saving the new-thread default failed; the selection was still accepted.",
@@ -12,11 +25,16 @@
       "default": false,
       "description": "Whether this thread's account handoff is still pending.",
       "type": "boolean"
+    },
+    "provider": {
+      "$ref": "#/definitions/SubscriptionAccountProvider"
     }
   },
   "required": [
     "accountId",
-    "defaultSaved"
+    "conversationChanged",
+    "defaultSaved",
+    "provider"
   ],
   "title": "ThreadAccountSelectResponse",
   "type": "object"

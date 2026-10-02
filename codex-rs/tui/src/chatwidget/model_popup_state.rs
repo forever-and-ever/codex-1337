@@ -23,21 +23,25 @@ impl ChatWidget {
     pub(crate) fn on_models_loaded(
         &mut self,
         request_id: uuid::Uuid,
-        result: Result<Vec<ModelPreset>, String>,
+        result: Result<crate::model_catalog::ModelListing, String>,
     ) -> bool {
         if !self.model_popup_request_is_current(request_id) {
             return false;
         }
         self.model_popup_request_id = None;
-        let Ok(presets) = result else {
+        let Ok(listing) = result else {
             return false;
         };
-        if presets.is_empty()
-            || self.model_catalog.try_list_models().ok().as_ref() == Some(&presets)
+        if (listing.models.is_empty() || self.model_catalog.models == listing.models)
+            && self.model_catalog.providers == listing.providers
         {
             return false;
         }
-        Arc::make_mut(&mut self.model_catalog).models = presets;
+        let catalog = Arc::make_mut(&mut self.model_catalog);
+        if !listing.models.is_empty() {
+            catalog.models = listing.models;
+        }
+        catalog.providers = listing.providers;
         self.refresh_effective_service_tier();
         self.refresh_model_dependent_surfaces();
         true

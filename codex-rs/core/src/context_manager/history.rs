@@ -41,6 +41,7 @@ use codex_history::RetainedContext;
 use codex_history::RetainedContextEntry;
 use codex_history::RetainedContextEvent;
 use codex_history::RetainedInputSource;
+use codex_model_provider_info::ModelProviderAdapter;
 use codex_prompts::render_model_instructions;
 use codex_protocol::DEFAULT_FUNCTION_NAMESPACE;
 use codex_protocol::items::TurnItem;
@@ -265,8 +266,15 @@ impl ContextManager {
         &self.retained_context
     }
 
-    pub(crate) fn for_session(source: &SessionSource, features: &ManagedFeatures) -> Self {
-        let independent = !features.enabled(Feature::GuardianReuseParentCompaction);
+    pub(crate) fn for_session(
+        source: &SessionSource,
+        features: &ManagedFeatures,
+        provider_adapter: ModelProviderAdapter,
+    ) -> Self {
+        // Native Guardian's Haiku classifier/reviewer cannot consume signed parent checkpoints.
+        // Retain its independent plaintext transcript before compaction can replace the window.
+        let independent = provider_adapter == ModelProviderAdapter::ClaudeSubscription
+            || !features.enabled(Feature::GuardianReuseParentCompaction);
         Self {
             retain_inherited_user_messages: !source.is_non_root_agent(),
             guardian_review_mode: if independent {
@@ -1014,6 +1022,7 @@ fn is_api_message(message: &ResponseItem, metadata: Option<&CodexHarnessMetadata
         | ResponseItem::WebSearchCall { .. }
         | ResponseItem::ImageGenerationCall { .. }
         | ResponseItem::Compaction { .. }
+        | ResponseItem::NativeCompaction { .. }
         | ResponseItem::ContextCompaction { .. } => true,
         ResponseItem::CompactionTrigger { .. } => false,
         ResponseItem::Other => false,
@@ -1108,6 +1117,10 @@ fn estimate_response_item_model_visible_bytes(item: &ResponseItem) -> i64 {
             encrypted_content: Some(content),
             ..
         } => i64::try_from(estimate_reasoning_length(content.len())).unwrap_or(i64::MAX),
+        ResponseItem::NativeCompaction {
+            compaction: codex_protocol::models::NativeCompaction::Anthropic(summary),
+            ..
+        } => text_bytes(summary.content()),
         ResponseItem::FunctionCall {
             name,
             namespace,
@@ -1320,6 +1333,7 @@ fn is_model_generated_item(item: &ResponseItem) -> bool {
         | ResponseItem::CustomToolCall { .. }
         | ResponseItem::LocalShellCall { .. }
         | ResponseItem::Compaction { .. }
+        | ResponseItem::NativeCompaction { .. }
         | ResponseItem::ContextCompaction { .. } => true,
         ResponseItem::ConfigurationUpdate { .. } | ResponseItem::CompactionTrigger { .. } => false,
         ResponseItem::AdditionalTools { .. }

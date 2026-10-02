@@ -246,6 +246,11 @@ fn realtime_input_fingerprint(input: &str) -> (usize, u64) {
 }
 
 impl ChatWidget {
+    pub(super) fn realtime_supported_by_provider(&self) -> bool {
+        self.config.model_provider.adapter
+            != codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription
+    }
+
     pub(crate) fn realtime_conversation_is_running(&self) -> bool {
         self.realtime_conversation.phase != RealtimeConversationPhase::Inactive
     }
@@ -267,6 +272,13 @@ impl ChatWidget {
 
         if self.realtime_conversation.phase != RealtimeConversationPhase::Inactive {
             self.stop_realtime_conversation();
+            return;
+        }
+
+        if !self.realtime_supported_by_provider() {
+            self.add_error_message(
+                "Voice conversations are unavailable with Claude subscriptions.".into(),
+            );
             return;
         }
 

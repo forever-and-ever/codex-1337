@@ -7,6 +7,7 @@ use codex_app_server_protocol::DesktopOnboardingEntrypoint;
 use codex_app_server_protocol::GetAccountRateLimitsParams;
 use codex_login::LoginOnboardingEntrypoint;
 
+mod claude_login;
 mod gateway_oauth;
 mod rate_limit_resets;
 mod workspace_routing;
@@ -24,6 +25,10 @@ const LOGIN_ISSUER_OVERRIDE_ENV_VAR: &str = "CODEX_APP_SERVER_LOGIN_ISSUER";
 const LOGIN_OPEN_APP_URL_OVERRIDE_ENV_VAR: &str = "CODEX_APP_SERVER_DEV_OPEN_APP_URL";
 
 enum ActiveLogin {
+    ClaudeSubscription {
+        cancel: codex_login::anthropic::LoginCancelHandle,
+        login_id: Uuid,
+    },
     Browser {
         shutdown_handle: ShutdownHandle,
         login_id: Uuid,
@@ -37,9 +42,9 @@ enum ActiveLogin {
 impl ActiveLogin {
     fn login_id(&self) -> Uuid {
         match self {
-            ActiveLogin::Browser { login_id, .. } | ActiveLogin::DeviceCode { login_id, .. } => {
-                *login_id
-            }
+            ActiveLogin::Browser { login_id, .. }
+            | ActiveLogin::DeviceCode { login_id, .. }
+            | ActiveLogin::ClaudeSubscription { login_id, .. } => *login_id,
         }
     }
 
@@ -49,6 +54,7 @@ impl ActiveLogin {
                 shutdown_handle, ..
             } => shutdown_handle.shutdown(),
             ActiveLogin::DeviceCode { cancel, .. } => cancel.cancel(),
+            ActiveLogin::ClaudeSubscription { cancel, .. } => cancel.cancel(),
         }
     }
 }
@@ -76,6 +82,8 @@ pub(crate) struct AccountRequestProcessor {
     thread_manager: Arc<ThreadManager>,
     outgoing: Arc<OutgoingMessageSender>,
     config: Arc<Config>,
+    scoped_config: Option<Arc<Config>>,
+    scoped_provider_account_id: Option<String>,
     config_manager: ConfigManager,
     active_login: Arc<Mutex<Option<ActiveLogin>>>,
     workspace_routing: Arc<Mutex<Option<workspace_routing::CachedWorkspaceRouting>>>,
@@ -95,12 +103,14 @@ impl AccountRequestProcessor {
         if let Some(id) = thread_id {
             let id = ThreadId::from_string(id)
                 .map_err(|error| invalid_request(format!("Invalid thread ID: {error}")))?;
-            scoped.auth_manager = self
+            let thread = self
                 .thread_manager
                 .get_thread(id)
                 .await
-                .map_err(|error| invalid_request(error.to_string()))?
-                .auth_manager();
+                .map_err(|error| invalid_request(error.to_string()))?;
+            scoped.auth_manager = thread.auth_manager();
+            scoped.scoped_config = Some(thread.config().await);
+            scoped.scoped_provider_account_id = thread.committed_provider_account_id();
             if scoped.auth_manager.is_account_scoped() {
                 scoped.auth_manager.reload().await;
             }
@@ -125,6 +135,8 @@ impl AccountRequestProcessor {
             thread_manager,
             outgoing,
             config,
+            scoped_config: None,
+            scoped_provider_account_id: None,
             config_manager,
             active_login: Arc::new(Mutex::new(None)),
             gateway_login: Arc::new(std::sync::Mutex::new(/*t*/ None)),
@@ -351,10 +363,15 @@ impl AccountRequestProcessor {
         request_id: ConnectionRequestId,
         params: LoginAccountParams,
     ) -> Result<(), JSONRPCErrorError> {
-        if self.auth_manager.is_workload_identity_selected() {
+        if self.auth_manager.is_workload_identity_selected()
+            && !matches!(params, LoginAccountParams::ClaudeSubscription)
+        {
             return Err(self.configured_auth_owned_by_host_error());
         }
         match params {
+            LoginAccountParams::ClaudeSubscription => {
+                self.login_claude_subscription(request_id).await
+            }
             LoginAccountParams::ApiKey { api_key } => {
                 self.login_api_key_v2(request_id, LoginApiKeyParams { api_key })
                     .await;

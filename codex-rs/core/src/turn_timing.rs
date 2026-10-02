@@ -428,6 +428,7 @@ fn response_item_records_turn_ttft(item: &ResponseItem) -> bool {
         | ResponseItem::WebSearchCall { .. }
         | ResponseItem::ImageGenerationCall { .. }
         | ResponseItem::Compaction { .. }
+        | ResponseItem::NativeCompaction { .. }
         | ResponseItem::ContextCompaction { .. } => true,
         ResponseItem::ConfigurationUpdate { .. } | ResponseItem::CompactionTrigger { .. } => false,
         ResponseItem::AdditionalTools { .. }

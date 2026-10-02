@@ -27,7 +27,13 @@ async fn collaboration_catalog_selection_clears_restored_prompt_and_survives_mod
     models[0].description = "Refreshed model description".into();
     let request_id = uuid::Uuid::new_v4();
     chat.model_popup_request_id = Some(request_id);
-    assert!(chat.on_models_loaded(request_id, Ok(models)));
+    assert!(chat.on_models_loaded(
+        request_id,
+        Ok(crate::model_catalog::ModelListing {
+            models,
+            providers: Vec::new()
+        })
+    ));
     assert_eq!(chat.model_catalog.collaboration_modes, vec![plan]);
     assert_eq!(chat.effective_collaboration_mode(), restored);
     assert!(collaboration_modes::default_mode_mask(&chat.model_catalog).is_none());

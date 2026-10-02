@@ -212,6 +212,67 @@ async fn derive_legacy_sandbox_policy_for_test(
 }
 
 #[tokio::test]
+async fn provider_context_defaults_follow_selection_without_baking_into_config()
+-> std::io::Result<()> {
+    let codex_home = tempdir()?;
+    let config_toml = toml::from_str(
+        r#"
+[model_provider_context_defaults.openai]
+model_context_window = 400000
+model_auto_compact_token_limit = 300000
+
+[model_provider_context_defaults.other]
+model_context_window = 1000000
+model_auto_compact_token_limit = 750000
+"#,
+    )
+    .unwrap();
+    let mut config = Config::load_from_base_config_with_overrides(
+        config_toml,
+        ConfigOverrides::default(),
+        codex_home.abs(),
+    )
+    .await?;
+
+    // Config is inherited by fresh children; resolving defaults into its explicit
+    // override fields would silently carry the parent's policy across providers.
+    assert_eq!(
+        (
+            config.model_context_window,
+            config.model_auto_compact_token_limit
+        ),
+        (None, None)
+    );
+    for (provider, expected) in [
+        ("openai", (Some(400_000), Some(300_000))),
+        ("other", (Some(1_000_000), Some(750_000))),
+        ("unconfigured", (None, None)),
+    ] {
+        config.model_provider_id = provider.into();
+        let policy = config.to_models_manager_config();
+        assert_eq!(
+            (
+                policy.model_context_window,
+                policy.model_auto_compact_token_limit
+            ),
+            expected
+        );
+    }
+    config.model_provider_id = "other".into();
+    config.model_context_window = Some(200_000);
+    config.model_auto_compact_token_limit = Some(150_000);
+    let policy = config.to_models_manager_config();
+    assert_eq!(
+        (
+            policy.model_context_window,
+            policy.model_auto_compact_token_limit
+        ),
+        (Some(200_000), Some(150_000))
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn load_config_normalizes_relative_cwd_override() -> std::io::Result<()> {
     let expected_cwd = AbsolutePathBuf::relative_to_current_dir("nested")?;
     let codex_home = tempdir()?;

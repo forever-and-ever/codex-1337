@@ -14,6 +14,9 @@ pub enum ApiError {
     Api { status: StatusCode, message: String },
     #[error("stream error: {0}")]
     Stream(String),
+    /// A native inference may have executed; replay would duplicate usage or tools.
+    #[error("native stream error (not replayed): {0}")]
+    NativeStream(String),
     #[error("context window exceeded")]
     ContextWindowExceeded,
     #[error("quota exceeded")]

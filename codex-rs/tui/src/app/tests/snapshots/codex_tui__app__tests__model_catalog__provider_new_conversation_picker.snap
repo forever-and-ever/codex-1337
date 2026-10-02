@@ -1,0 +1,10 @@
+---
+source: tui/src/app/tests/model_catalog.rs
+expression: "render_bottom_popup(&app.chat_widget, 80)"
+---
+  New Claude conversation
+
+
+› 1. Sonnet 5.5  Claude subscription
+
+  enter select · esc back

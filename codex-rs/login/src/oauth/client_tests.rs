@@ -79,6 +79,7 @@ async fn authorization_code_preserves_pkce_and_http_policy() {
             redirect_uri,
             pkce: &pkce,
             resource: Some(resource),
+            state: None,
         })
         .await
         .unwrap();
@@ -184,6 +185,7 @@ async fn rejection_preserves_status_and_omits_oversized_diagnostics() {
             .refresh::<Value>(RefreshTokenGrant {
                 refresh_token,
                 resource: Some("urn:gateway"),
+                scope: None,
             })
             .await;
         let Err(OAuthError::Rejected(error)) = result else {
@@ -227,6 +229,7 @@ async fn rejection_keeps_status_when_reading_the_body_fails() {
         .refresh::<Value>(RefreshTokenGrant {
             refresh_token: "refresh",
             resource: None,
+            scope: None,
         })
         .await;
     let Err(OAuthError::Rejected(error)) = result else {
@@ -287,7 +290,8 @@ async fn success_body_revocation_preserves_the_policy_error() {
         tokio::join!(
             form.refresh::<Value>(RefreshTokenGrant {
                 refresh_token: "refresh",
-                resource: None
+                resource: None,
+                scope: None
             }),
             server
         )

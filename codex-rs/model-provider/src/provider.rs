@@ -21,8 +21,10 @@ use codex_models_manager::manager::SharedModelsManager;
 use codex_models_manager::manager::StaticModelsManager;
 use codex_protocol::account::ProviderAccount;
 use codex_protocol::error::CodexErr;
+use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelsResponse;
 
+use crate::AnthropicAuthContext;
 use crate::ResolvedResponsesProvider;
 use crate::auth::ProviderAuthScope;
 use crate::auth::ResolvedProviderAuth;
@@ -40,6 +42,8 @@ pub enum RemoteCompactionSupport {
     Unsupported,
     /// The provider supports `compaction_trigger` items over the Responses endpoint.
     V2,
+    /// Native Anthropic Messages returns an exact signed checkpoint.
+    AnthropicSigned,
 }
 
 /// Optional provider-backed features that Codex may expose at runtime.
@@ -150,6 +154,16 @@ pub trait ModelProvider: fmt::Debug + Send + Sync {
         ProviderCapabilities::default()
     }
 
+    /// Selects the model's available compaction protocol without guessing support.
+    fn remote_compaction_for_model(&self, model: &ModelInfo) -> RemoteCompactionSupport {
+        match self.capabilities().remote_compaction {
+            RemoteCompactionSupport::AnthropicSigned if !model.supports_native_compaction => {
+                RemoteCompactionSupport::Unsupported
+            }
+            support => support,
+        }
+    }
+
     /// Returns the preferred model used for automatic approval review.
     ///
     /// Providers that require backend-specific model IDs should override this.
@@ -183,6 +197,22 @@ pub trait ModelProvider: fmt::Debug + Send + Sync {
     /// to think through whether Codex should have a unified provider-specific auth
     /// manager throughout the codebase; that is a larger refactor than this change.
     fn auth_manager(&self) -> Option<Arc<AuthManager>>;
+
+    /// Native subscription authentication, never resolved through OpenAI credentials.
+    fn anthropic_auth_context(&self) -> std::io::Result<Option<Arc<AnthropicAuthContext>>> {
+        Ok(None)
+    }
+
+    /// Returns an immutable native discovery scope sharing this provider's credential manager.
+    /// Other provider authentication and request routing remain unchanged.
+    fn for_anthropic_account(
+        &self,
+        _account_id: &str,
+    ) -> codex_protocol::error::Result<SharedModelProvider> {
+        Err(CodexErr::InvalidRequest(
+            "Provider does not support Anthropic account-scoped discovery".into(),
+        ))
+    }
 
     /// Returns the gateway credential manager shared with inference and model discovery.
     /// Hosts use this handle for explicit login; configured setup failures remain errors.
@@ -361,20 +391,55 @@ pub fn create_model_provider(
     provider_info: ModelProviderInfo,
     auth_manager: Option<Arc<AuthManager>>,
 ) -> SharedModelProvider {
-    let gateway_auth_manager = provider_info.gateway_oauth.as_ref().map(|config| {
-        provider_info.validate()?;
-        let manager = auth_manager
-            .as_ref()
-            .ok_or_else(|| "gateway_oauth requires auth runtime configuration".to_string())?;
-        crate::shared_state::process_shared_state()
-            .gateway_auth(config, &manager.runtime_config())
-            .map_err(|_| "failed to create provider OAuth HTTP client".to_string())
-    });
+    create_model_provider_with_anthropic_account(
+        provider_info,
+        auth_manager,
+        /*default_account*/ None,
+    )
+}
+
+/// Captures the configured native discovery account without changing conversation selection.
+pub fn create_model_provider_with_anthropic_account(
+    provider_info: ModelProviderInfo,
+    auth_manager: Option<Arc<AuthManager>>,
+    default_account: Option<String>,
+) -> SharedModelProvider {
+    let anthropic_auth_context = (provider_info.adapter
+        == codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription)
+        .then(|| {
+            provider_info.validate()?;
+            let runtime = auth_manager
+                .as_ref()
+                .ok_or_else(|| {
+                    "Anthropic requires authentication runtime configuration".to_string()
+                })?
+                .runtime_config();
+            AnthropicAuthContext::new(&runtime, default_account)
+                .map(Arc::new)
+                .map_err(|error| error.to_string())
+        });
+    let gateway_auth_manager = provider_info
+        .gateway_oauth
+        .as_ref()
+        .filter(|_| {
+            provider_info.adapter
+                != codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription
+        })
+        .map(|config| {
+            provider_info.validate()?;
+            let manager = auth_manager
+                .as_ref()
+                .ok_or_else(|| "gateway_oauth requires auth runtime configuration".to_string())?;
+            crate::shared_state::process_shared_state()
+                .gateway_auth(config, &manager.runtime_config())
+                .map_err(|_| "failed to create provider OAuth HTTP client".to_string())
+        });
     let auth_manager = auth_manager_for_provider(auth_manager, &provider_info);
     Arc::new(ConfiguredModelProvider::new(
         provider_info,
         auth_manager,
         gateway_auth_manager,
+        anthropic_auth_context,
     ))
 }
 
@@ -385,6 +450,7 @@ struct ConfiguredModelProvider {
     auth_manager: Option<Arc<AuthManager>>,
     // Construct eagerly; report setup failures when auth is requested because the factory is infallible.
     gateway_auth_manager: Option<Result<Arc<GatewayAuthManager>, String>>,
+    anthropic_auth_context: Option<Result<Arc<AnthropicAuthContext>, String>>,
 }
 
 impl ConfiguredModelProvider {
@@ -392,12 +458,31 @@ impl ConfiguredModelProvider {
         info: ModelProviderInfo,
         auth_manager: Option<Arc<AuthManager>>,
         gateway_auth_manager: Option<Result<Arc<GatewayAuthManager>, String>>,
+        anthropic_auth_context: Option<Result<Arc<AnthropicAuthContext>, String>>,
     ) -> Self {
         Self {
             info,
             auth_manager,
             gateway_auth_manager,
+            anthropic_auth_context,
         }
+    }
+
+    fn static_models_manager(&self, mut catalog: ModelsResponse) -> SharedModelsManager {
+        let normalize: fn(ModelInfo) -> ModelInfo = match self.info.adapter {
+            codex_model_provider_info::ModelProviderAdapter::OpenaiCompatible => {
+                std::convert::identity
+            }
+            codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription => {
+                catalog.models = crate::claude_catalog::normalize(catalog.models);
+                crate::claude_catalog::normalize_model_info
+            }
+        };
+        Arc::new(StaticModelsManager::new_with_model_info_normalizer(
+            self.auth_manager.clone(),
+            catalog,
+            normalize,
+        ))
     }
 }
 
@@ -407,6 +492,15 @@ impl ModelProvider for ConfiguredModelProvider {
     }
 
     fn capabilities(&self) -> ProviderCapabilities {
+        if self.info.adapter == codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription
+        {
+            return ProviderCapabilities {
+                remote_compaction: RemoteCompactionSupport::AnthropicSigned,
+                image_generation: false,
+                web_search: false,
+                ..ProviderCapabilities::default()
+            };
+        }
         let remote_compaction = if self.info.is_openai()
             || is_azure_responses_provider(&self.info.name, self.info.base_url.as_deref())
         {
@@ -422,6 +516,10 @@ impl ModelProvider for ConfiguredModelProvider {
     }
 
     fn approval_review_preferred_model(&self) -> &'static str {
+        if self.info.adapter == codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription
+        {
+            return "claude-haiku-4-5-20251001";
+        }
         if self
             .auth_manager
             .as_ref()
@@ -434,8 +532,37 @@ impl ModelProvider for ConfiguredModelProvider {
         }
     }
 
+    fn memory_extraction_preferred_model(&self) -> &'static str {
+        match self.info.adapter {
+            codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription => {
+                "claude-haiku-4-5-20251001"
+            }
+            codex_model_provider_info::ModelProviderAdapter::OpenaiCompatible => {
+                DEFAULT_MEMORY_EXTRACTION_PREFERRED_MODEL
+            }
+        }
+    }
+
+    fn memory_consolidation_preferred_model(&self) -> &'static str {
+        match self.info.adapter {
+            codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription => {
+                "claude-sonnet-5-5"
+            }
+            codex_model_provider_info::ModelProviderAdapter::OpenaiCompatible => {
+                DEFAULT_MEMORY_CONSOLIDATION_PREFERRED_MODEL
+            }
+        }
+    }
+
     fn auth_manager(&self) -> Option<Arc<AuthManager>> {
         self.auth_manager.clone()
+    }
+
+    fn anthropic_auth_context(&self) -> std::io::Result<Option<Arc<AnthropicAuthContext>>> {
+        self.anthropic_auth_context
+            .clone()
+            .transpose()
+            .map_err(std::io::Error::other)
     }
 
     fn gateway_auth_manager(&self) -> std::io::Result<Option<Arc<GatewayAuthManager>>> {
@@ -443,6 +570,20 @@ impl ModelProvider for ConfiguredModelProvider {
             .clone()
             .transpose()
             .map_err(std::io::Error::other)
+    }
+
+    fn for_anthropic_account(
+        &self,
+        account_id: &str,
+    ) -> codex_protocol::error::Result<SharedModelProvider> {
+        let context = self.anthropic_auth_context()?.ok_or_else(|| {
+            CodexErr::InvalidRequest(
+                "Provider does not support Anthropic account-scoped discovery".into(),
+            )
+        })?;
+        let mut provider = self.clone();
+        provider.anthropic_auth_context = Some(Ok(Arc::new(context.for_account(account_id)?)));
+        Ok(Arc::new(provider))
     }
 
     fn supports_attestation(&self) -> bool {
@@ -545,15 +686,13 @@ impl ModelProvider for ConfiguredModelProvider {
         config_model_catalog: Option<ModelsResponse>,
     ) -> SharedModelsManager {
         match config_model_catalog {
-            Some(model_catalog) => Arc::new(StaticModelsManager::new(
-                self.auth_manager.clone(),
-                model_catalog,
-            )),
+            Some(model_catalog) => self.static_models_manager(model_catalog),
             None => {
                 let endpoint = Arc::new(OpenAiModelsEndpoint::new(
                     self.info.clone(),
                     self.auth_manager.clone(),
                     self.gateway_auth_manager.clone(),
+                    self.anthropic_auth_context.clone(),
                 ));
                 Arc::new(OpenAiModelsManager::new(
                     codex_home,
@@ -569,15 +708,13 @@ impl ModelProvider for ConfiguredModelProvider {
         config_model_catalog: Option<ModelsResponse>,
     ) -> SharedModelsManager {
         match config_model_catalog {
-            Some(model_catalog) => Arc::new(StaticModelsManager::new(
-                self.auth_manager.clone(),
-                model_catalog,
-            )),
+            Some(model_catalog) => self.static_models_manager(model_catalog),
             None => {
                 let endpoint = Arc::new(OpenAiModelsEndpoint::new(
                     self.info.clone(),
                     self.auth_manager.clone(),
                     self.gateway_auth_manager.clone(),
+                    self.anthropic_auth_context.clone(),
                 ));
                 Arc::new(OpenAiModelsManager::new_without_cache(
                     endpoint,
@@ -593,15 +730,13 @@ impl ModelProvider for ConfiguredModelProvider {
         cache: Arc<dyn ModelsCache>,
     ) -> SharedModelsManager {
         match config_model_catalog {
-            Some(model_catalog) => Arc::new(StaticModelsManager::new(
-                self.auth_manager.clone(),
-                model_catalog,
-            )),
+            Some(model_catalog) => self.static_models_manager(model_catalog),
             None => {
                 let endpoint = Arc::new(OpenAiModelsEndpoint::new(
                     self.info.clone(),
                     self.auth_manager.clone(),
                     self.gateway_auth_manager.clone(),
+                    self.anthropic_auth_context.clone(),
                 ));
                 Arc::new(OpenAiModelsManager::new_with_cache(
                     cache,
@@ -615,24 +750,19 @@ impl ModelProvider for ConfiguredModelProvider {
 
 #[cfg(test)]
 mod tests {
-    use std::future::Future;
     use std::num::NonZeroU64;
-    use std::task::Context;
-    use std::task::Waker;
 
     use codex_http_client::HttpClientFactory;
     use codex_http_client::OutboundProxyPolicy;
     use codex_login::auth::AgentIdentityAuthPolicy;
     use codex_model_provider_info::WireApi;
     use codex_model_provider_info::create_oss_provider_with_base_url;
-    use codex_models_manager::ModelsManagerConfig;
     use codex_models_manager::manager::RefreshStrategy;
     use codex_protocol::account::PlanType;
     use codex_protocol::config_types::ModelProviderAuthInfo;
     use codex_protocol::openai_models::ModelInfo;
     use codex_protocol::openai_models::ModelsResponse;
     use codex_protocol::protocol::SessionSource;
-    use codex_utils_redacted_string::RedactedString;
     use pretty_assertions::assert_eq;
     use serde_json::json;
     use wiremock::Mock;
@@ -644,7 +774,6 @@ mod tests {
 
     use super::*;
     use crate::auth::AgentIdentitySessionFallback;
-    use crate::shared_state::process_shared_state;
 
     fn provider_info_with_command_auth() -> ModelProviderInfo {
         ModelProviderInfo {
@@ -669,6 +798,7 @@ mod tests {
 
     fn provider_for(base_url: String) -> ModelProviderInfo {
         ModelProviderInfo {
+            adapter: codex_model_provider_info::ModelProviderAdapter::OpenaiCompatible,
             name: "mock".into(),
             base_url: Some(base_url),
             model_catalog_url: None,

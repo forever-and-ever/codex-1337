@@ -183,6 +183,7 @@ impl ChatWidget {
             });
         }
 
+        self.append_provider_choices(&mut items, &mut model_ids);
         let header = self.model_menu_header(
             "Select Model",
             "Pick a quick auto mode or browse all models.",
@@ -234,7 +235,13 @@ impl ChatWidget {
         presets: Vec<ModelPreset>,
         view_id: &'static str,
     ) {
-        if presets.is_empty() {
+        if presets.is_empty()
+            && self
+                .model_catalog
+                .providers
+                .iter()
+                .all(|provider| provider.id == self.config.model_provider_id)
+        {
             self.bottom_pane.dismiss_view_by_id(view_id);
             self.add_info_message(
                 "No additional models are available right now.".to_string(),
@@ -244,7 +251,7 @@ impl ChatWidget {
         }
 
         let mut items: Vec<SelectionItem> = Vec::new();
-        let model_ids = presets.iter().map(|preset| preset.model.clone()).collect();
+        let mut model_ids = presets.iter().map(|preset| preset.model.clone()).collect();
         for preset in presets.into_iter() {
             let description =
                 (!preset.description.is_empty()).then_some(preset.description.to_string());
@@ -278,6 +285,7 @@ impl ChatWidget {
             });
         }
 
+        self.append_provider_choices(&mut items, &mut model_ids);
         let header = self.model_menu_header("Select Model and Effort", "");
         self.show_model_selection_view(
             model_ids,

@@ -376,7 +376,7 @@ impl StatusHistoryCell {
         let default_usage = TokenUsage::default();
         let (context_usage, context_window) = match token_info {
             Some(info) => (&info.last_token_usage, info.model_context_window),
-            None => (&default_usage, config.model_context_window),
+            None => (&default_usage, None),
         };
         let context_window = context_window.map(|window| StatusContextWindowData {
             percent_remaining: context_usage.percent_of_context_window_remaining(window),
@@ -768,6 +768,10 @@ impl StatusHistoryCell {
             StatusAccountDisplay::ApiKey => {
                 "API key configured (run codex login to use ChatGPT)".to_string()
             }
+            StatusAccountDisplay::ClaudeSubscription { email } => email.as_ref().map_or_else(
+                || "Claude subscription".to_owned(),
+                |email| format!("Claude subscription · {email}"),
+            ),
         });
 
         let mut labels: Vec<String> = vec!["Model", "Directory", "Permissions", "Agents.md"]

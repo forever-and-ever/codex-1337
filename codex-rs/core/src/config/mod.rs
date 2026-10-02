@@ -28,6 +28,7 @@ use codex_config::ThreadConfigLoader;
 use codex_config::config_toml::CircuitBreakAction;
 use codex_config::config_toml::ConfigToml;
 use codex_config::config_toml::DEFAULT_PROJECT_DOC_MAX_BYTES;
+use codex_config::config_toml::ModelProviderContextDefaults;
 use codex_config::config_toml::ProjectConfig;
 use codex_config::config_toml::RealtimeAudioConfig;
 use codex_config::config_toml::RealtimeConfig;
@@ -639,6 +640,9 @@ pub struct Config {
 
     /// Token usage threshold triggering auto-compaction of conversation history.
     pub model_auto_compact_token_limit: Option<i64>,
+
+    /// Unresolved context defaults, selected when projecting this provider's model policy.
+    pub model_provider_context_defaults: HashMap<String, ModelProviderContextDefaults>,
 
     /// Controls whether `model_auto_compact_token_limit` applies to the full
     /// active context or only tokens after the carried compaction-window prefix.
@@ -1667,9 +1671,16 @@ impl Config {
     }
 
     pub fn to_models_manager_config(&self) -> ModelsManagerConfig {
+        let defaults = self
+            .model_provider_context_defaults
+            .get(&self.model_provider_id);
         ModelsManagerConfig {
-            model_context_window: self.model_context_window,
-            model_auto_compact_token_limit: self.model_auto_compact_token_limit,
+            model_context_window: self
+                .model_context_window
+                .or_else(|| defaults.and_then(|defaults| defaults.model_context_window)),
+            model_auto_compact_token_limit: self
+                .model_auto_compact_token_limit
+                .or_else(|| defaults.and_then(|defaults| defaults.model_auto_compact_token_limit)),
             tool_output_token_limit: self.tool_output_token_limit,
             base_instructions: self.base_instructions.clone().filter(|_| {
                 !matches!(
@@ -4288,6 +4299,7 @@ impl Config {
             review_model,
             model_context_window: cfg.model_context_window,
             model_auto_compact_token_limit: cfg.model_auto_compact_token_limit,
+            model_provider_context_defaults: cfg.model_provider_context_defaults,
             model_auto_compact_token_limit_scope: cfg
                 .model_auto_compact_token_limit_scope
                 .unwrap_or_default(),

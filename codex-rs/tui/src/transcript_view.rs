@@ -114,7 +114,6 @@ pub(crate) struct TranscriptView {
     last_tail: Option<EntryKey>,
     last_click: Option<(std::time::Instant, u16, u16, u8)>,
     disclosure: disclosure::Disclosure,
-    output_estimates_enabled: bool,
     tool_output_tokens: tool_output_tokens::ToolOutputTokens,
 }
 
@@ -148,7 +147,6 @@ impl Default for TranscriptView {
             last_tail: None,
             last_click: None,
             disclosure: disclosure::Disclosure::default(),
-            output_estimates_enabled: false,
             tool_output_tokens: Default::default(),
         }
     }

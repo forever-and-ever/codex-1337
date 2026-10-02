@@ -15,6 +15,8 @@ use crate::agent::agent_status_from_event;
 use crate::agent::api::AgentConfigUpdate;
 use crate::agent::api::AgentTurnOutcome;
 use crate::agent::control::AgentControlInit;
+use crate::agent::control::ProviderAccountSelection;
+use crate::agent::control::ProviderAccountSelections;
 use crate::agent::status::is_final;
 use crate::agents_md_manager::SessionInstructions;
 use crate::attestation::AttestationProvider;
@@ -219,7 +221,6 @@ use crate::thread_rollout_truncation::initial_history_has_prior_user_turns;
 use codex_config::CONFIG_TOML_FILE;
 use codex_config::ConfigLayerSource;
 use codex_config::types::McpServerConfig;
-use codex_model_provider::create_model_provider;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::CodexErrorDetails;
@@ -248,6 +249,7 @@ pub(crate) use mcp_extension::CONNECTION_LEASE_SOURCE_ID;
 mod mcp_prewarm;
 mod mcp_refresh;
 mod mcp_runtime;
+mod model_catalog;
 pub(crate) mod multi_agents;
 mod plugin_selection;
 mod realtime_history;
@@ -646,7 +648,23 @@ impl Session {
         } else {
             codex_models_manager::manager::RefreshStrategy::OnlineIfUncached
         };
-        if config.model.is_none()
+        let native = config.model_provider.adapter
+            == codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription;
+        if native {
+            // Explicit models bypass get_default_model discovery. Native metadata
+            // must be hydrated even for resumed/fresh children before get_model_info.
+            let catalog = models_manager
+                .raw_model_catalog(
+                    RefreshStrategy::OnlineIfUncached,
+                    config.http_client_factory(),
+                )
+                .await;
+            if !catalog.models.iter().any(|model| model.anthropic.is_some()) {
+                return Err(CodexErr::InvalidRequest(
+                    "Cannot load authoritative Anthropic model metadata for this account".into(),
+                ));
+            }
+        } else if config.model.is_none()
             || !matches!(
                 refresh_strategy,
                 codex_models_manager::manager::RefreshStrategy::Offline
@@ -822,17 +840,21 @@ impl Session {
         );
         let service_tier =
             get_service_tier(config.service_tier.clone(), fast_mode_enabled, &model_info);
-        if parent_thread_id.is_none() && auth_manager.is_account_scoped() {
-            agent_control
-                .runtime()
-                .account_selection
-                .store(auth_manager.selected_account_id().map(Arc::new));
+        if parent_thread_id.is_none()
+            && auth_manager.is_account_scoped()
+            && let Some(id) = auth_manager.selected_account_id()
+        {
+            agent_control.runtime().account_selection.select(
+                &config.model_provider_id,
+                ProviderAccountSelection::Chatgpt { id },
+            );
         }
         let session_configuration = SessionConfiguration {
             account_selection: Arc::clone(&agent_control.runtime().account_selection),
-            provider: create_model_provider(
+            provider: codex_model_provider::create_model_provider_with_anthropic_account(
                 config.model_provider.clone(),
                 Some(Arc::clone(&auth_manager)),
+                config.wrangler.default_claude_account.clone(),
             ),
             step_settings: Arc::new(StepSettings {
                 collaboration_mode,
@@ -1381,7 +1403,10 @@ impl Session {
         context: PersistContext,
     ) -> std::io::Result<()> {
         if let Some(live_thread) = self.live_thread() {
-            if self.services.auth_manager.is_account_scoped() {
+            if self.services.auth_manager.is_account_scoped()
+                || (self.services.model_client.uses_claude_subscription()
+                    && self.services.model_client.provider_account_id().is_some())
+            {
                 // Ownership must be durable when the rollout first materializes, not when a
                 // blank composer opens. Serialize the snapshot with explicit account changes.
                 self.initial_account_binding
@@ -4073,7 +4098,7 @@ impl Session {
         reference_context_item: Option<TurnContextItem>,
         world_state_baseline: Option<Arc<WorldState>>,
         metadata: CompactedHistoryMetadata,
-    ) {
+    ) -> CodexResult<()> {
         for envelope in &mut items {
             Self::assign_missing_response_item_id(&mut envelope.item);
         }
@@ -4090,7 +4115,9 @@ impl Session {
         if let Some(checkpoint) = items.iter_mut().rev().find(|envelope| {
             matches!(
                 envelope.item,
-                ResponseItem::Compaction { .. } | ResponseItem::ContextCompaction { .. }
+                ResponseItem::Compaction { .. }
+                    | ResponseItem::NativeCompaction { .. }
+                    | ResponseItem::ContextCompaction { .. }
             )
         }) {
             checkpoint
@@ -4098,7 +4125,6 @@ impl Session {
                 .get_or_insert_default()
                 .compaction_model_hash = metadata.compaction_model_hash;
         }
-        let replacement_history = items.clone();
         // Wait for accepted updates to finish persisting, then keep later updates from
         // overtaking the current settings snapshot while its checkpoint is written.
         let _settings_guard = thread_settings::acquire_persistence_lock(self).await;
@@ -4107,6 +4133,19 @@ impl Session {
         let mut world_state_item = None;
         let compacted_item = {
             let mut state = self.state.lock().await;
+            if let Some(prefix) = metadata.source_history {
+                let current = state.history.annotated_items();
+                if !current.starts_with(prefix.as_slice()) {
+                    return Err(CodexErr::InvalidRequest("History changed inside the native compaction prefix; checkpoint not installed".into()));
+                }
+                // Preserve every append made while the native summary was in flight.
+                items.extend_from_slice(&current[prefix.len()..]);
+            }
+            let (window_number, window_ids) = match metadata.window {
+                crate::compact::CompactionWindow::Existing { number, ids } => (number, ids),
+                crate::compact::CompactionWindow::Advance => state.advance_auto_compact_window(),
+            };
+            let replacement_history = items.clone();
             let snapshot = world_state_baseline
                 .map(|world_state| world_state.snapshot())
                 .or_else(|| {
@@ -4137,13 +4176,10 @@ impl Session {
                 guardian_history: state.history.guardian_history_checkpoint(),
                 retained_context: Some(state.history.retained_context().clone()),
                 mcp_resource_origins: self.services.mcp_runtime.resource_origin_checkpoint(),
-                window_number: Some(metadata.window_number),
-                first_window_id: Some(metadata.window_ids.first_window_id.to_string()),
-                previous_window_id: metadata
-                    .window_ids
-                    .previous_window_id
-                    .map(|id| id.to_string()),
-                window_id: Some(metadata.window_ids.window_id.to_string()),
+                window_number: Some(window_number),
+                first_window_id: Some(window_ids.first_window_id.to_string()),
+                previous_window_id: window_ids.previous_window_id.map(|id| id.to_string()),
+                window_id: Some(window_ids.window_id.to_string()),
                 compaction_response_id: metadata.compaction_response_id,
                 latest_token_usage_record: state.latest_token_usage_record.clone(),
                 resume_metadata: Some(CompactionResumeMetadata {
@@ -4177,6 +4213,7 @@ impl Session {
             let mut state = self.state.lock().await;
             state.queue_pending_session_start_source(codex_hooks::SessionStartSource::Compact);
         }
+        Ok(())
     }
 
     pub fn enabled(&self, feature: Feature) -> bool {
@@ -4578,7 +4615,7 @@ impl Session {
         &self,
         step_context: &StepContext,
         world_state: Arc<WorldState>,
-    ) -> u64 {
+    ) -> CodexResult<()> {
         let turn_context = step_context.turn.as_ref();
         let retained_client_developer_messages =
             if self.enabled(Feature::RetainClientDeveloperMessages) {
@@ -4615,17 +4652,20 @@ impl Session {
             Some(turn_context_item),
             Some(world_state),
             CompactedHistoryMetadata {
+                source_history: None,
                 message: String::new(),
-                window_number,
-                window_ids,
+                window: crate::compact::CompactionWindow::Existing {
+                    number: window_number,
+                    ids: window_ids,
+                },
                 compaction_response_id: None,
                 compaction_model_hash: None,
                 reviewer_compaction_hash: None,
             },
         )
-        .await;
+        .await?;
         self.recompute_token_usage(turn_context).await;
-        window_number
+        Ok(())
     }
 
     pub(crate) async fn reference_context_item(&self) -> Option<TurnContextItem> {

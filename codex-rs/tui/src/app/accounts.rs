@@ -1,5 +1,9 @@
 use super::*;
+use codex_app_server_protocol::AccountNicknameSetParams;
+use codex_app_server_protocol::AccountNicknameSetResponse;
 use codex_app_server_protocol::ClientRequest;
+use codex_app_server_protocol::LoginAccountResponse;
+use codex_app_server_protocol::SubscriptionAccountProvider;
 use codex_app_server_protocol::ThreadAccountListParams;
 use codex_app_server_protocol::ThreadAccountListResponse;
 use codex_app_server_protocol::ThreadAccountSelectParams;
@@ -10,16 +14,156 @@ pub(super) struct AccountUi {
     serial: u64,
     picker_request: Option<uuid::Uuid>,
     pub(super) selection_request: Option<ThreadId>,
+    login_request: Option<ThreadId>,
+    claude_login: Option<String>,
+    early_login_completions:
+        std::collections::VecDeque<codex_app_server_protocol::AccountLoginCompletedNotification>,
+    nickname_request: Option<ThreadId>,
     pending: std::collections::HashMap<ThreadId, String>,
     pub(super) displayed: Option<(ThreadId, codex_app_server_protocol::GetAccountResponse)>,
 }
 
 impl App {
+    pub(super) fn cancel_claude_login(&mut self, server: &mut AppServerSession, login_id: String) {
+        if self.account_ui.claude_login.as_ref() != Some(&login_id) {
+            return;
+        }
+        let handle = server.request_handle();
+        let request_id = server.next_request_id();
+        let tx = self.app_event_tx.clone();
+        tokio::spawn(async move {
+            let result = handle
+                .request_typed::<codex_app_server_protocol::CancelLoginAccountResponse>(
+                    ClientRequest::CancelLoginAccount {
+                        request_id,
+                        params: codex_app_server_protocol::CancelLoginAccountParams { login_id },
+                    },
+                )
+                .await;
+            if let Err(error) = result {
+                tx.send(AppEvent::ClaudeLoginCancelFailed {
+                    error: format!("Cannot cancel Claude sign-in: {error}"),
+                });
+            }
+        });
+    }
+
+    pub(super) fn finish_claude_login(
+        &mut self,
+        notification: &codex_app_server_protocol::AccountLoginCompletedNotification,
+    ) {
+        // The response reader can receive completion before the start waiter runs.
+        if self.account_ui.login_request.is_some() && self.account_ui.claude_login.is_none() {
+            if self.account_ui.early_login_completions.len() == 2 {
+                self.account_ui.early_login_completions.pop_front();
+            }
+            self.account_ui
+                .early_login_completions
+                .push_back(notification.clone());
+            return;
+        }
+        if self.account_ui.claude_login.as_ref() != notification.login_id.as_ref()
+            || notification.login_id.is_none()
+        {
+            return;
+        }
+        self.account_ui.claude_login = None;
+        self.chat_widget.finish_claude_login_pending();
+        if notification.success {
+            self.chat_widget.add_info_message(
+                "Claude account added. Reopen /account to select or rename it.".to_owned(),
+                None,
+            );
+        }
+        if let Some(error) = &notification.error {
+            self.chat_widget.add_error_message(error.clone());
+        }
+    }
+
+    pub(super) fn set_account_nickname(
+        &mut self,
+        server: &mut AppServerSession,
+        thread_id: ThreadId,
+        provider: SubscriptionAccountProvider,
+        account_id: String,
+        nickname: String,
+    ) {
+        if self.current_displayed_thread_id() != Some(thread_id)
+            || self.account_ui.nickname_request.is_some()
+        {
+            return;
+        }
+        self.account_ui.nickname_request = Some(thread_id);
+        let request_id = server.next_request_id();
+        let handle = server.request_handle();
+        let tx = self.app_event_tx.clone();
+        tokio::spawn(async move {
+            let result = tokio::time::timeout(
+                Duration::from_secs(/*secs*/ 30),
+                handle.request_typed::<AccountNicknameSetResponse>(
+                    ClientRequest::AccountNicknameSet {
+                        request_id,
+                        params: AccountNicknameSetParams {
+                            provider,
+                            account_id,
+                            nickname,
+                        },
+                    },
+                ),
+            )
+            .await
+            .map_err(|_| "Rename not confirmed; reopen /account to check".to_owned())
+            .and_then(|result| result.map_err(|error| error.to_string()));
+            tx.send(AppEvent::AccountNicknameSetFinished { thread_id, result });
+        });
+    }
+
+    pub(super) fn finish_account_nickname_set(
+        &mut self,
+        server: &AppServerSession,
+        thread_id: ThreadId,
+        result: Result<AccountNicknameSetResponse, String>,
+    ) {
+        if self.account_ui.nickname_request != Some(thread_id) {
+            return;
+        }
+        self.account_ui.nickname_request = None;
+        if self.current_displayed_thread_id() != Some(thread_id) {
+            return;
+        }
+        match result {
+            Ok(response) => {
+                self.chat_widget.add_info_message(
+                    if response.nickname.is_some() {
+                        "Account nickname saved."
+                    } else {
+                        "Account nickname cleared."
+                    }
+                    .to_owned(),
+                    None,
+                );
+                self.refresh_conversation_account(server, thread_id);
+            }
+            Err(error) => self
+                .chat_widget
+                .add_error_message(format!("Cannot rename account: {error}")),
+        }
+    }
+
     pub(super) fn refresh_conversation_account(
         &mut self,
         server: &AppServerSession,
         thread_id: ThreadId,
     ) {
+        if self
+            .account_ui
+            .displayed
+            .as_ref()
+            .is_some_and(|(shown, _)| *shown != thread_id)
+        {
+            self.chat_widget.active_account_label = None;
+            self.chat_widget.refresh_status_line();
+        }
         self.account_ui.serial = self.account_ui.serial.wrapping_add(1);
         let serial = self.account_ui.serial;
         let handle = server.request_handle();
@@ -66,6 +210,8 @@ impl App {
                 self.account_ui.displayed = None;
                 self.chat_widget
                     .update_account_state(None, None, false, false);
+                self.chat_widget.active_account_label = None;
+                self.chat_widget.refresh_status_line();
                 return;
             }
         };
@@ -93,10 +239,43 @@ impl App {
                 true,
             ),
             Some(Account::ApiKey {}) => (Some(StatusAccountDisplay::ApiKey), None, false),
-            Some(Account::AmazonBedrock { .. }) | None => (None, None, false),
+            Some(Account::ClaudeSubscription { email }) => (
+                Some(StatusAccountDisplay::ClaudeSubscription { email }),
+                None,
+                false,
+            ),
+            None => (None, None, false),
+        };
+        let account_label = response
+            .display_name
+            .clone()
+            .or_else(|| match &response.account {
+                Some(Account::Chatgpt { email, .. })
+                | Some(Account::ClaudeSubscription { email }) => email.clone(),
+                Some(Account::ApiKey {}) | None => None,
+            })
+            .or_else(|| response.account_id.clone());
+        let account_label = account_label.and_then(|label| {
+            let safe = label
+                .chars()
+                .filter(|character| {
+                    !character.is_control()
+                        && !matches!(*character as u32, 0x202A..=0x202E | 0x2066..=0x2069)
+                })
+                .take(96)
+                .collect::<String>();
+            (!safe.is_empty()).then_some(safe)
+        });
+        let active_account_label = match (&response.account, account_label) {
+            (Some(Account::Chatgpt { .. }), Some(label)) => Some(format!("ChatGPT · {label}")),
+            (Some(Account::ClaudeSubscription { .. }), Some(label)) => {
+                Some(format!("Claude · {label}"))
+            }
+            _ => None,
         };
         if self.account_ui.displayed.as_ref() == Some(&(thread_id, response.clone()))
             && self.chat_widget.status_account_display() == display.as_ref()
+            && self.chat_widget.active_account_label == active_account_label
         {
             return;
         }
@@ -110,12 +289,14 @@ impl App {
             );
         }
         self.account_ui.displayed = Some((thread_id, response));
+        self.chat_widget.active_account_label = active_account_label;
         self.rate_limit_hard_stop_generation = self.rate_limit_hard_stop_generation.wrapping_add(1);
         self.rate_limit_refresh_state.invalidate_recovery();
         self.last_thread_usage_status_cell = None;
         self.pending_thread_usage_history_refresh = false;
         self.chat_widget
             .update_account_state(display, plan, chatgpt, chatgpt || backend_only);
+        self.chat_widget.refresh_status_line();
         if chatgpt {
             let reset_hint_request_id = self.chat_widget.start_rate_limit_reset_startup_check();
             self.refresh_rate_limits(
@@ -132,24 +313,39 @@ impl App {
         server: &mut AppServerSession,
         thread_id: ThreadId,
     ) {
-        if self.account_ui.picker_request.is_some() || self.account_ui.selection_request.is_some() {
+        if let Some(login_id) = self.account_ui.claude_login.clone() {
+            self.chat_widget.show_claude_login_pending(login_id);
+            return;
+        }
+        if (self.account_ui.picker_request.is_some()
+            && self.chat_widget.account_picker_loading_visible())
+            || self.account_ui.selection_request.is_some()
+            || self.account_ui.login_request.is_some()
+            || self.account_ui.nickname_request.is_some()
+        {
             return;
         }
         let serial = uuid::Uuid::new_v4();
         self.account_ui.picker_request = Some(serial);
+        self.chat_widget.show_account_picker_loading();
         let request_id = server.next_request_id();
         let handle = server.request_handle();
         let tx = self.app_event_tx.clone();
         tokio::spawn(async move {
-            let result = handle
-                .request_typed::<ThreadAccountListResponse>(ClientRequest::ThreadAccountList {
-                    request_id,
-                    params: ThreadAccountListParams {
-                        thread_id: thread_id.to_string(),
+            let result = tokio::time::timeout(
+                Duration::from_secs(/*secs*/ 30),
+                handle.request_typed::<ThreadAccountListResponse>(
+                    ClientRequest::ThreadAccountList {
+                        request_id,
+                        params: ThreadAccountListParams {
+                            thread_id: thread_id.to_string(),
+                        },
                     },
-                })
-                .await
-                .map_err(|error| error.to_string());
+                ),
+            )
+            .await
+            .map_err(|_| "Account discovery timed out; try /account again".to_owned())
+            .and_then(|result| result.map_err(|error| error.to_string()));
             tx.send(AppEvent::AccountPickerLoaded {
                 thread_id,
                 serial,
@@ -168,7 +364,9 @@ impl App {
             return;
         }
         self.account_ui.picker_request = None;
-        if self.current_displayed_thread_id() != Some(thread_id) {
+        if self.current_displayed_thread_id() != Some(thread_id)
+            || !self.chat_widget.finish_account_picker_loading()
+        {
             return;
         }
         match result {
@@ -184,8 +382,12 @@ impl App {
         server: &mut AppServerSession,
         thread_id: ThreadId,
         account_id: String,
+        provider: SubscriptionAccountProvider,
     ) {
-        if self.account_ui.selection_request.is_some() {
+        if self.account_ui.selection_request.is_some()
+            || self.account_ui.claude_login.is_some()
+            || self.account_ui.login_request.is_some()
+        {
             return;
         }
         self.account_ui.selection_request = Some(thread_id);
@@ -194,16 +396,22 @@ impl App {
         let handle = server.request_handle();
         let tx = self.app_event_tx.clone();
         tokio::spawn(async move {
-            let result = handle
-                .request_typed::<ThreadAccountSelectResponse>(ClientRequest::ThreadAccountSelect {
-                    request_id,
-                    params: ThreadAccountSelectParams {
-                        thread_id: thread_id.to_string(),
-                        account_id,
+            let result = tokio::time::timeout(
+                Duration::from_secs(/*secs*/ 30),
+                handle.request_typed::<ThreadAccountSelectResponse>(
+                    ClientRequest::ThreadAccountSelect {
+                        request_id,
+                        params: ThreadAccountSelectParams {
+                            thread_id: thread_id.to_string(),
+                            account_id,
+                            provider: Some(provider),
+                        },
                     },
-                })
-                .await
-                .map_err(|error| error.to_string());
+                ),
+            )
+            .await
+            .map_err(|_| "Selection not confirmed; reopen /account to check".to_owned())
+            .and_then(|result| result.map_err(|error| error.to_string()));
             tx.send(AppEvent::AccountSelectionFinished { thread_id, result });
         });
     }
@@ -217,27 +425,42 @@ impl App {
         self.account_ui.selection_request = None;
         match result {
             Ok(response) => {
-                if response.pending {
-                    self.account_ui
-                        .pending
-                        .insert(thread_id, response.account_id.clone());
-                } else {
-                    self.account_ui.pending.remove(&thread_id);
+                if response.conversation_changed {
+                    if response.pending {
+                        self.account_ui
+                            .pending
+                            .insert(thread_id, response.account_id.clone());
+                    } else {
+                        self.account_ui.pending.remove(&thread_id);
+                    }
                 }
                 if response.default_saved {
-                    self.config.wrangler.default_account = Some(response.account_id);
+                    match response.provider {
+                        SubscriptionAccountProvider::Openai => {
+                            self.config.wrangler.default_account =
+                                Some(response.account_id.clone());
+                        }
+                        SubscriptionAccountProvider::ClaudeSubscription => {
+                            self.config.wrangler.default_claude_account =
+                                Some(response.account_id.clone());
+                        }
+                    }
                 }
                 if self.current_displayed_thread_id() != Some(thread_id) {
                     return;
                 }
-                self.rate_limit_hard_stop_generation =
-                    self.rate_limit_hard_stop_generation.wrapping_add(1);
-                self.rate_limit_refresh_state.invalidate_recovery();
-                self.last_thread_usage_status_cell = None;
-                self.pending_thread_usage_history_refresh = false;
-                self.refresh_conversation_account(server, thread_id);
+                if response.conversation_changed {
+                    self.rate_limit_hard_stop_generation =
+                        self.rate_limit_hard_stop_generation.wrapping_add(1);
+                    self.rate_limit_refresh_state.invalidate_recovery();
+                    self.last_thread_usage_status_cell = None;
+                    self.pending_thread_usage_history_refresh = false;
+                    self.refresh_conversation_account(server, thread_id);
+                }
                 self.chat_widget.add_info_message(
-                    if response.pending {
+                    if !response.conversation_changed {
+                        "Default account changed for new conversations. This conversation keeps its current provider."
+                    } else if response.pending {
                         "Account switch pending. This conversation and its agents will switch between model/tool steps."
                     } else {
                         "Conversation account changed. Running agents will follow between model/tool steps."
@@ -251,6 +474,84 @@ impl App {
                 .add_error_message(format!("Cannot change account: {error}")),
             Err(error) => {
                 tracing::warn!(%thread_id, %error, "cannot change background conversation account")
+            }
+        }
+    }
+
+    pub(super) fn add_claude_account(
+        &mut self,
+        server: &mut AppServerSession,
+        thread_id: ThreadId,
+    ) {
+        if self.account_ui.login_request.is_some() || self.account_ui.claude_login.is_some() {
+            return;
+        }
+        self.account_ui.login_request = Some(thread_id);
+        self.chat_widget
+            .add_info_message("Starting Claude sign-in…".to_owned(), None);
+        let request_id = server.next_request_id();
+        let handle = server.request_handle();
+        let tx = self.app_event_tx.clone();
+        tokio::spawn(async move {
+            let result = tokio::time::timeout(
+                Duration::from_secs(/*secs*/ 30),
+                handle.request_typed::<LoginAccountResponse>(ClientRequest::LoginAccount {
+                    request_id,
+                    params: codex_app_server_protocol::LoginAccountParams::ClaudeSubscription,
+                }),
+            )
+            .await
+            .map_err(|_| "Sign-in start not confirmed; reopen /account before retrying".to_owned())
+            .and_then(|result| result.map_err(|error| error.to_string()));
+            tx.send(AppEvent::ClaudeLoginStarted { thread_id, result });
+        });
+    }
+
+    pub(super) fn finish_claude_login_start(
+        &mut self,
+        thread_id: ThreadId,
+        result: Result<LoginAccountResponse, String>,
+    ) {
+        if self.account_ui.login_request != Some(thread_id) {
+            return;
+        }
+        self.account_ui.login_request = None;
+        match result {
+            Ok(LoginAccountResponse::ClaudeSubscription { login_id, auth_url }) => {
+                self.account_ui.claude_login = Some(login_id.clone());
+                if let Some(index) = self
+                    .account_ui
+                    .early_login_completions
+                    .iter()
+                    .position(|completion| completion.login_id.as_ref() == Some(&login_id))
+                {
+                    let completion = self
+                        .account_ui
+                        .early_login_completions
+                        .remove(index)
+                        .expect("matched completion exists");
+                    self.account_ui.early_login_completions.clear();
+                    self.finish_claude_login(&completion);
+                    return;
+                }
+                self.account_ui.early_login_completions.clear();
+                if let Err(error) = webbrowser::open(&auth_url) {
+                    self.chat_widget.add_error_message(format!(
+                        "Cannot open browser: {error}. Open this URL to sign in: {auth_url}"
+                    ));
+                }
+                self.chat_widget.show_claude_login_pending(login_id);
+            }
+            Ok(_) => {
+                self.account_ui.early_login_completions.clear();
+                self.chat_widget.add_error_message(
+                    "Server returned another provider's sign-in flow".to_owned(),
+                );
+            }
+            Err(error) => {
+                self.account_ui.early_login_completions.clear();
+                self.chat_widget
+                    .add_error_message(format!("Cannot start Claude sign-in: {error}"));
             }
         }
     }

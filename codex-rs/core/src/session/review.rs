@@ -15,17 +15,24 @@ pub(super) async fn spawn_review_thread(
         .review_model
         .clone()
         .unwrap_or_else(|| parent_turn_context.model_info().slug.clone());
-    let available_models = sess
-        .services
-        .models_manager
+    let models_manager = match sess.request_models_manager(&config).await {
+        Ok(manager) => manager,
+        Err(error) => {
+            sess.send_event(
+                &parent_turn_context,
+                EventMsg::Error(error.to_error_event(/*message_prefix*/ None)),
+            )
+            .await;
+            return;
+        }
+    };
+    let available_models = models_manager
         .list_models(
             RefreshStrategy::OnlineIfUncached,
             config.http_client_factory(),
         )
         .await;
-    let review_model_info = sess
-        .services
-        .models_manager
+    let review_model_info = models_manager
         .get_model_info(&model, &config.to_models_manager_config())
         .await;
     // For reviews, disable web_search and view_image regardless of global settings.

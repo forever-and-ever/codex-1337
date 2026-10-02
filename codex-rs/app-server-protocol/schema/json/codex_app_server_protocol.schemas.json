@@ -667,6 +667,30 @@
             },
             "method": {
               "enum": [
+                "account/nickname/set"
+              ],
+              "title": "Account/nickname/setRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/AccountNicknameSetParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Account/nickname/setRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/v2/RequestId"
+            },
+            "method": {
+              "enum": [
                 "thread/unarchive"
               ],
               "title": "Thread/unarchiveRequestMethod",
@@ -6914,22 +6938,24 @@
           },
           {
             "properties": {
+              "email": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "type": {
                 "enum": [
-                  "amazonBedrock"
+                  "claudeSubscription"
                 ],
-                "title": "AmazonBedrockAccountType",
+                "title": "ClaudeSubscriptionAccountType",
                 "type": "string"
-              },
-              "usesCodexManagedCredentials": {
-                "default": false,
-                "type": "boolean"
               }
             },
             "required": [
               "type"
             ],
-            "title": "AmazonBedrockAccount",
+            "title": "ClaudeSubscriptionAccount",
             "type": "object"
           }
         ]
@@ -6967,6 +6993,51 @@
           "success"
         ],
         "title": "AccountLoginCompletedNotification",
+        "type": "object"
+      },
+      "AccountNicknameSetParams": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "accountId": {
+            "type": "string"
+          },
+          "nickname": {
+            "description": "Empty or whitespace-only text clears the nickname.",
+            "type": "string"
+          },
+          "provider": {
+            "$ref": "#/definitions/v2/SubscriptionAccountProvider"
+          }
+        },
+        "required": [
+          "accountId",
+          "nickname",
+          "provider"
+        ],
+        "title": "AccountNicknameSetParams",
+        "type": "object"
+      },
+      "AccountNicknameSetResponse": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "accountId": {
+            "type": "string"
+          },
+          "nickname": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider": {
+            "$ref": "#/definitions/v2/SubscriptionAccountProvider"
+          }
+        },
+        "required": [
+          "accountId",
+          "provider"
+        ],
+        "title": "AccountNicknameSetResponse",
         "type": "object"
       },
       "AccountRateLimitsUpdatedNotification": {
@@ -8222,20 +8293,6 @@
               "personalAccessToken"
             ],
             "type": "string"
-          },
-          {
-            "description": "Amazon Bedrock bearer token managed by Codex.",
-            "enum": [
-              "bedrockApiKey"
-            ],
-            "type": "string"
-          },
-          {
-            "description": "Amazon Bedrock AWS access keys managed by Codex.",
-            "enum": [
-              "bedrockAccessKeys"
-            ],
-            "type": "string"
           }
         ]
       },
@@ -8596,6 +8653,41 @@
             "type": "object"
           }
         ]
+      },
+      "ClaudeSubscriptionAccount": {
+        "properties": {
+          "available": {
+            "description": "Whether this saved identity can be selected; not an upstream availability check.",
+            "type": "boolean"
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "description": "Stable upstream subscription identity; never a bearer token.",
+            "type": "string"
+          },
+          "nickname": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "available",
+          "id"
+        ],
+        "type": "object"
       },
       "CliAuthCredentialsStoreMode": {
         "enum": [
@@ -12958,6 +13050,13 @@
               "null"
             ]
           },
+          "displayName": {
+            "description": "Stored nickname or legacy ChatGPT alias; display-only, never a routing selector.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "requiresOpenaiAuth": {
             "type": "boolean"
           }
@@ -14284,6 +14383,22 @@
         "oneOf": [
           {
             "properties": {
+              "type": {
+                "enum": [
+                  "claudeSubscription"
+                ],
+                "title": "ClaudeSubscriptionv2::LoginAccountParamsType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "title": "ClaudeSubscriptionv2::LoginAccountParams",
+            "type": "object"
+          },
+          {
+            "properties": {
               "apiKey": {
                 "type": "string"
               },
@@ -14384,66 +14499,6 @@
             ],
             "title": "ChatgptAuthTokensv2::LoginAccountParams",
             "type": "object"
-          },
-          {
-            "description": "[UNSTABLE] Managed Amazon Bedrock login is experimental.",
-            "properties": {
-              "apiKey": {
-                "type": "string"
-              },
-              "region": {
-                "type": "string"
-              },
-              "type": {
-                "enum": [
-                  "amazonBedrock"
-                ],
-                "title": "AmazonBedrockv2::LoginAccountParamsType",
-                "type": "string"
-              }
-            },
-            "required": [
-              "apiKey",
-              "region",
-              "type"
-            ],
-            "title": "AmazonBedrockv2::LoginAccountParams",
-            "type": "object"
-          },
-          {
-            "description": "[UNSTABLE] Managed Amazon Bedrock AWS access key login is experimental.",
-            "properties": {
-              "accessKeyId": {
-                "type": "string"
-              },
-              "region": {
-                "type": "string"
-              },
-              "secretAccessKey": {
-                "type": "string"
-              },
-              "sessionToken": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "type": {
-                "enum": [
-                  "amazonBedrockAccessKeys"
-                ],
-                "title": "AmazonBedrockAccessKeysv2::LoginAccountParamsType",
-                "type": "string"
-              }
-            },
-            "required": [
-              "accessKeyId",
-              "region",
-              "secretAccessKey",
-              "type"
-            ],
-            "title": "AmazonBedrockAccessKeysv2::LoginAccountParams",
-            "type": "object"
           }
         ],
         "title": "LoginAccountParams"
@@ -14451,6 +14506,30 @@
       "LoginAccountResponse": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "oneOf": [
+          {
+            "properties": {
+              "authUrl": {
+                "type": "string"
+              },
+              "loginId": {
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "claudeSubscription"
+                ],
+                "title": "ClaudeSubscriptionv2::LoginAccountResponseType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "authUrl",
+              "loginId",
+              "type"
+            ],
+            "title": "ClaudeSubscriptionv2::LoginAccountResponse",
+            "type": "object"
+          },
           {
             "properties": {
               "type": {
@@ -14536,22 +14615,6 @@
               "type"
             ],
             "title": "ChatgptAuthTokensv2::LoginAccountResponse",
-            "type": "object"
-          },
-          {
-            "properties": {
-              "type": {
-                "enum": [
-                  "amazonBedrock"
-                ],
-                "title": "AmazonBedrockv2::LoginAccountResponseType",
-                "type": "string"
-              }
-            },
-            "required": [
-              "type"
-            ],
-            "title": "AmazonBedrockv2::LoginAccountResponse",
             "type": "object"
           }
         ],
@@ -15808,6 +15871,13 @@
               "integer",
               "null"
             ]
+          },
+          "modelProvider": {
+            "description": "Configured provider whose catalog should be read on the server.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "title": "ModelListParams",
@@ -15822,12 +15892,28 @@
             },
             "type": "array"
           },
+          "modelProvider": {
+            "default": null,
+            "description": "Provider that supplied this catalog; absent only on older servers.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "nextCursor": {
             "description": "Opaque cursor to pass to the next call to continue after the last item. If None, there are no more items to return.",
             "type": [
               "string",
               "null"
             ]
+          },
+          "providers": {
+            "default": [],
+            "description": "Providers available for starting a new conversation, without auth material.",
+            "items": {
+              "$ref": "#/definitions/v2/ModelProviderOption"
+            },
+            "type": "array"
           }
         },
         "required": [
@@ -15860,6 +15946,21 @@
           "webSearch"
         ],
         "title": "ModelProviderCapabilitiesReadResponse",
+        "type": "object"
+      },
+      "ModelProviderOption": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
         "type": "object"
       },
       "ModelRerouteReason": {
@@ -19548,6 +19649,54 @@
             "type": "object"
           },
           {
+            "description": "Provider-native signed state, persisted and replayed without conversion.",
+            "oneOf": [
+              {
+                "description": "An exact Anthropic summary/signature pair. Reject oversized blocks rather than truncate either signed field. Only the content is visible to the model. The owned summarization request caps output at 4096 provider tokens; this decoded-byte bound is an additional resource limit, not a tokenizer claim.",
+                "properties": {
+                  "content": {
+                    "type": "string"
+                  },
+                  "provider": {
+                    "enum": [
+                      "anthropic"
+                    ],
+                    "type": "string"
+                  },
+                  "signature": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "content",
+                  "provider",
+                  "signature"
+                ],
+                "type": "object"
+              }
+            ],
+            "properties": {
+              "id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "type": {
+                "enum": [
+                  "native_compaction"
+                ],
+                "title": "NativeCompactionResponseItemType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "title": "NativeCompactionResponseItem",
+            "type": "object"
+          },
+          {
             "description": "A durable input control interpreted by the backend at its position in history.",
             "properties": {
               "reasoning": {
@@ -20046,6 +20195,12 @@
           },
           "id": {
             "type": "string"
+          },
+          "nickname": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "plan": {
             "type": [
@@ -20940,6 +21095,13 @@
         ],
         "type": "object"
       },
+      "SubscriptionAccountProvider": {
+        "enum": [
+          "openai",
+          "claudeSubscription"
+        ],
+        "type": "string"
+      },
       "TerminalInteractionNotification": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "properties": {
@@ -21269,8 +21431,36 @@
             },
             "type": "array"
           },
+          "claudeAccounts": {
+            "items": {
+              "$ref": "#/definitions/v2/ClaudeSubscriptionAccount"
+            },
+            "type": "array"
+          },
+          "claudeManagementError": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "conversationProvider": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/SubscriptionAccountProvider"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "pendingAccountId": {
             "description": "Selected target whose handoff is not yet complete.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pendingClaudeAccountId": {
             "type": [
               "string",
               "null"
@@ -21281,10 +21471,17 @@
               "string",
               "null"
             ]
+          },
+          "selectedClaudeAccountId": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
-          "accounts"
+          "accounts",
+          "claudeAccounts"
         ],
         "title": "ThreadAccountListResponse",
         "type": "object"
@@ -21295,6 +21492,17 @@
           "accountId": {
             "description": "Saved identity or an alias from `[wrangler.account_aliases]`.",
             "type": "string"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/SubscriptionAccountProvider"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Defaults to ChatGPT for pre-Claude clients; Claude selection must be explicit."
           },
           "threadId": {
             "type": "string"
@@ -21313,6 +21521,10 @@
           "accountId": {
             "type": "string"
           },
+          "conversationChanged": {
+            "description": "False when choosing the other provider's new-conversation default.",
+            "type": "boolean"
+          },
           "defaultSaved": {
             "description": "False means saving the new-thread default failed; the selection was still accepted.",
             "type": "boolean"
@@ -21321,11 +21533,16 @@
             "default": false,
             "description": "Whether this thread's account handoff is still pending.",
             "type": "boolean"
+          },
+          "provider": {
+            "$ref": "#/definitions/v2/SubscriptionAccountProvider"
           }
         },
         "required": [
           "accountId",
-          "defaultSaved"
+          "conversationChanged",
+          "defaultSaved",
+          "provider"
         ],
         "title": "ThreadAccountSelectResponse",
         "type": "object"

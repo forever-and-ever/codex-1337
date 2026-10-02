@@ -135,6 +135,7 @@ impl ChatWidget {
             session_header: SessionHeader::new(header_model),
             initial_user_message,
             status_account_display,
+            active_account_label: None,
             remote_connection: None,
             snapshot_local_images: false,
             pending_image_submission: None,

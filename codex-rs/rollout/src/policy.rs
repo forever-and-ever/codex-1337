@@ -57,6 +57,7 @@ pub fn should_persist_response_item(item: &ResponseItem) -> bool {
         | ResponseItem::ImageGenerationCall { .. }
         | ResponseItem::ConfigurationUpdate { .. }
         | ResponseItem::Compaction { .. }
+        | ResponseItem::NativeCompaction { .. }
         | ResponseItem::ContextCompaction { .. } => true,
         ResponseItem::AdditionalTools { .. }
         | ResponseItem::CompactionTrigger { .. }
@@ -83,6 +84,7 @@ pub fn should_persist_response_item_for_memories(item: &ResponseItem) -> bool {
         | ResponseItem::ConfigurationUpdate { .. }
         | ResponseItem::ImageGenerationCall { .. }
         | ResponseItem::Compaction { .. }
+        | ResponseItem::NativeCompaction { .. }
         | ResponseItem::CompactionTrigger { .. }
         | ResponseItem::ContextCompaction { .. }
         | ResponseItem::Other => false,

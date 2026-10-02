@@ -5,6 +5,26 @@
       "description": "A path that is guaranteed to be absolute and normalized (though it is not guaranteed to be canonicalized or exist on the filesystem).\n\nIMPORTANT: When deserializing an `AbsolutePathBuf`, a base path must be set using [AbsolutePathBufGuard::new]. If no base path is set, the deserialization will fail unless the path being deserialized is already absolute.",
       "type": "string"
     },
+    "AccountNicknameSetParams": {
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "nickname": {
+          "description": "Empty or whitespace-only text clears the nickname.",
+          "type": "string"
+        },
+        "provider": {
+          "$ref": "#/definitions/SubscriptionAccountProvider"
+        }
+      },
+      "required": [
+        "accountId",
+        "nickname",
+        "provider"
+      ],
+      "type": "object"
+    },
     "AccountScopeParams": {
       "properties": {
         "threadId": {
@@ -1855,6 +1875,22 @@
       "oneOf": [
         {
           "properties": {
+            "type": {
+              "enum": [
+                "claudeSubscription"
+              ],
+              "title": "ClaudeSubscriptionLoginAccountParamsType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "ClaudeSubscriptionLoginAccountParams",
+          "type": "object"
+        },
+        {
+          "properties": {
             "apiKey": {
               "type": "string"
             },
@@ -2284,6 +2320,13 @@
           "minimum": 0.0,
           "type": [
             "integer",
+            "null"
+          ]
+        },
+        "modelProvider": {
+          "description": "Configured provider whose catalog should be read on the server.",
+          "type": [
+            "string",
             "null"
           ]
         }
@@ -3539,6 +3582,54 @@
           "type": "object"
         },
         {
+          "description": "Provider-native signed state, persisted and replayed without conversion.",
+          "oneOf": [
+            {
+              "description": "An exact Anthropic summary/signature pair. Reject oversized blocks rather than truncate either signed field. Only the content is visible to the model. The owned summarization request caps output at 4096 provider tokens; this decoded-byte bound is an additional resource limit, not a tokenizer claim.",
+              "properties": {
+                "content": {
+                  "type": "string"
+                },
+                "provider": {
+                  "enum": [
+                    "anthropic"
+                  ],
+                  "type": "string"
+                },
+                "signature": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "content",
+                "provider",
+                "signature"
+              ],
+              "type": "object"
+            }
+          ],
+          "properties": {
+            "id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "enum": [
+                "native_compaction"
+              ],
+              "title": "NativeCompactionResponseItemType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "NativeCompactionResponseItem",
+          "type": "object"
+        },
+        {
           "description": "A durable input control interpreted by the backend at its position in history.",
           "properties": {
             "reasoning": {
@@ -4140,6 +4231,13 @@
       ],
       "type": "object"
     },
+    "SubscriptionAccountProvider": {
+      "enum": [
+        "openai",
+        "claudeSubscription"
+      ],
+      "type": "string"
+    },
     "TextElement": {
       "properties": {
         "byteRange": {
@@ -4179,6 +4277,17 @@
         "accountId": {
           "description": "Saved identity or an alias from `[wrangler.account_aliases]`.",
           "type": "string"
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SubscriptionAccountProvider"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Defaults to ChatGPT for pre-Claude clients; Claude selection must be explicit."
         },
         "threadId": {
           "type": "string"
@@ -6494,6 +6603,30 @@
         "params"
       ],
       "title": "Thread/account/selectRequest",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "enum": [
+            "account/nickname/set"
+          ],
+          "title": "Account/nickname/setRequestMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/AccountNicknameSetParams"
+        }
+      },
+      "required": [
+        "id",
+        "method",
+        "params"
+      ],
+      "title": "Account/nickname/setRequest",
       "type": "object"
     },
     {

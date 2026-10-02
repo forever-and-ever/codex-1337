@@ -302,6 +302,7 @@ pub fn collect_transcript(
             | ResponseItem::ToolSearchCall { .. }
             | ResponseItem::ToolSearchOutput { .. }
             | ResponseItem::Compaction { .. }
+            | ResponseItem::NativeCompaction { .. }
             | ResponseItem::ConfigurationUpdate { .. }
             | ResponseItem::CompactionTrigger { .. }
             | ResponseItem::ContextCompaction { .. }

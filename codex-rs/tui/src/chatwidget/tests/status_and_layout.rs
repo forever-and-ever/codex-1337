@@ -164,7 +164,7 @@ async fn app_server_model_verification_renders_warning() {
 async fn context_indicator_shows_used_tokens_when_window_unknown() {
     let (mut chat, _rx, _ops) = make_chatwidget_manual(Some("unknown-model")).await;
 
-    chat.config.model_context_window = None;
+    chat.config.model_context_window = Some(1_000_000);
     let auto_compact_limit = 200_000;
     chat.config.model_auto_compact_token_limit = Some(auto_compact_limit);
 
@@ -194,6 +194,19 @@ async fn token_usage_update_uses_runtime_context_window() {
     let (mut chat, mut rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
 
     chat.config.model_context_window = Some(1_000_000);
+
+    // A config default is not the server's model-capped usable window.
+    assert_eq!(chat.status_line_context_window_size(), None);
+    assert_eq!(chat.status_line_context_remaining_percent(), None);
+    chat.add_status_output(
+        /*refreshing_rate_limits*/ false, /*request_id*/ None,
+    );
+    let startup_cells = drain_insert_history(&mut rx);
+    assert!(
+        !startup_cells
+            .iter()
+            .any(|lines| lines_to_single_string(lines).contains("Context window"))
+    );
 
     handle_token_count(
         &mut chat,
@@ -2960,6 +2973,13 @@ async fn status_line_context_used_renders_labeled_percent() {
     chat.thread_id = Some(ThreadId::new());
     chat.local_settings.tui.status_line = Some(vec!["context-used".to_string()]);
 
+    handle_token_count(
+        &mut chat,
+        Some(make_token_info(
+            /*total_tokens*/ 0, /*context_window*/ 400_000,
+        )),
+    );
+
     chat.refresh_status_line();
 
     assert_eq!(status_line_text(&chat), Some("Context 0% used".to_string()));
@@ -2974,6 +2994,13 @@ async fn status_line_context_remaining_renders_labeled_percent() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.thread_id = Some(ThreadId::new());
     chat.local_settings.tui.status_line = Some(vec!["context-remaining".to_string()]);
+
+    handle_token_count(
+        &mut chat,
+        Some(make_token_info(
+            /*total_tokens*/ 0, /*context_window*/ 400_000,
+        )),
+    );
 
     chat.refresh_status_line();
 
@@ -2992,6 +3019,13 @@ async fn status_line_legacy_context_usage_renders_context_used_percent() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.thread_id = Some(ThreadId::new());
     chat.local_settings.tui.status_line = Some(vec!["context-usage".to_string()]);
+
+    handle_token_count(
+        &mut chat,
+        Some(make_token_info(
+            /*total_tokens*/ 0, /*context_window*/ 400_000,
+        )),
+    );
 
     chat.refresh_status_line();
 
@@ -4003,8 +4037,44 @@ async fn status_line_fast_mode_footer_snapshot() {
 }
 
 #[tokio::test]
+async fn status_line_active_account_footer_snapshot() {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.2")).await;
+    chat.show_welcome_banner = false;
+    chat.local_settings.tui.status_line = Some(vec!["active-account".to_string()]);
+    chat.active_account_label = Some("Claude · work Claude".to_string());
+    chat.refresh_status_line();
+
+    let width = 80;
+    let height = chat.desired_height(width);
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("create terminal");
+    terminal
+        .draw(|f| chat.render(f.area(), f.buffer_mut()))
+        .expect("draw active-account footer");
+    assert_chatwidget_snapshot!(
+        "status_line_active_account_footer",
+        normalized_backend_snapshot(terminal.backend())
+    );
+
+    chat.active_account_label = Some("ChatGPT · personal".to_string());
+    chat.refresh_status_line();
+    assert_eq!(
+        status_line_text(&chat),
+        Some("ChatGPT · personal".to_string())
+    );
+}
+
+#[tokio::test]
 async fn status_line_model_with_reasoning_includes_fast_for_fast_capable_models() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.4")).await;
+    handle_token_count(
+        &mut chat,
+        Some(make_token_info(
+            /*total_tokens*/ 0, /*context_window*/ 400_000,
+        )),
+    );
     set_fast_mode_test_catalog(&mut chat);
     assert!(get_available_model(&chat, "gpt-5.4").supports_fast_mode());
     chat.config.cwd = test_project_path().abs();

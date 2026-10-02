@@ -60,7 +60,6 @@ use codex_login::enforce_login_restrictions;
 use codex_login::is_workload_identity_selected;
 use codex_protocol::ThreadId;
 use codex_protocol::auth::AuthMode;
-use codex_protocol::config_types::ForcedLoginMethod;
 use codex_protocol::config_types::SandboxMode;
 use codex_rollout::StateDbHandle;
 use codex_rollout::state_db;
@@ -783,15 +782,12 @@ async fn lookup_session_target_with_app_server(
         };
     }
 
-    let model_provider =
-        (!app_server.uses_remote_workspace()).then_some(config.model_provider_id.as_str());
     Ok(named_session_lookup::lookup(
         app_server,
         config.codex_home.as_path(),
         id_or_name,
         &[named_session_lookup::SessionCollection::Active],
         &[resume_source_kinds(/*include_non_interactive*/ false)],
-        model_provider,
     )
     .await?
     .and_then(session_target_from_app_server_thread))
@@ -812,7 +808,6 @@ async fn lookup_latest_session_target_with_app_server(
         let response = app_server
             .thread_list(latest_session_lookup_params(
                 uses_remote_filesystem,
-                uses_remote_workspace,
                 config,
                 cwd_filter,
                 include_non_interactive,
@@ -840,7 +835,6 @@ enum LatestSessionLookupMode {
 
 fn latest_session_lookup_params(
     uses_remote_filesystem: bool,
-    uses_remote_workspace: bool,
     config: &Config,
     cwd_filter: Option<&Path>,
     include_non_interactive: bool,
@@ -852,11 +846,8 @@ fn latest_session_lookup_params(
         limit: Some(1),
         sort_key: Some(AppServerThreadSortKey::UpdatedAt),
         sort_direction: None,
-        model_providers: if uses_remote_workspace {
-            None
-        } else {
-            Some(vec![config.model_provider_id.clone()])
-        },
+        // An omitted filter selects the server's default provider, not all providers.
+        model_providers: Some(Vec::new()),
         source_kinds: Some(resume_source_kinds(include_non_interactive)),
         archived: Some(false),
         section_id: None,
@@ -1276,16 +1267,9 @@ async fn run_ratatui_app(
         // Authentication can change while any interactive onboarding screen is open.
         startup_account = None;
         let show_login_screen = should_show_login_screen(login_status, requires_openai_auth);
-        let bedrock_setup_enabled = should_show_bedrock_setup_wizard(
-            login_status,
-            requires_openai_auth,
-            &initial_config,
-            &app_server_target,
-        );
         let onboarding_result = run_onboarding_app(
             OnboardingScreenArgs {
                 show_login_screen,
-                bedrock_setup_enabled,
                 show_trust_screen: should_show_trust_screen_flag,
                 remote_project_trust: None,
                 login_status,
@@ -2086,7 +2070,7 @@ async fn get_login_status(
     let login_status = match &account.account {
         Some(AppServerAccount::ApiKey {}) => LoginStatus::AuthMode(AuthMode::ApiKey),
         Some(AppServerAccount::Chatgpt { .. }) => LoginStatus::AuthMode(AuthMode::Chatgpt),
-        Some(AppServerAccount::AmazonBedrock { .. }) | None => LoginStatus::NotAuthenticated,
+        Some(AppServerAccount::ClaudeSubscription { .. }) | None => LoginStatus::NotAuthenticated,
     };
     Ok((login_status, account))
 }
@@ -2246,26 +2230,6 @@ fn should_show_login_screen(login_status: LoginStatus, requires_openai_auth: boo
     login_status == LoginStatus::NotAuthenticated
 }
 
-fn should_show_bedrock_setup_wizard(
-    login_status: LoginStatus,
-    requires_openai_auth: bool,
-    config: &Config,
-    app_server_target: &AppServerTarget,
-) -> bool {
-    !app_server_target.uses_remote_workspace()
-        && should_show_login_screen(login_status, requires_openai_auth)
-        && config.features.enabled(Feature::BedrockSetupWizard)
-        && config.model_provider_id == "openai"
-        && config
-            .config_layer_stack
-            .effective_config()
-            .get("model_provider")
-            .is_none()
-        && config
-            .auth_config()
-            .is_login_method_allowed(ForcedLoginMethod::Api)
-}
-
 mod daemon_recovery;
 mod daemon_startup;
 mod daemon_telemetry;
@@ -2346,89 +2310,6 @@ requires_openai_auth = {requires_openai_auth}
             ));
             server.shutdown().await?;
         }
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn bedrock_setup_wizard_requires_eligible_onboarding() -> color_eyre::Result<()> {
-        let shared_endpoint = RemoteAppServerEndpoint::WebSocket {
-            websocket_url: "ws://127.0.0.1:4500/".to_string(),
-            auth_token: None,
-        };
-        let enabled = "[features]\nbedrock_setup_wizard = true\n";
-
-        for (label, config_toml, login_status, target, expected) in [
-            (
-                "disabled by default",
-                "",
-                LoginStatus::NotAuthenticated,
-                AppServerTarget::Embedded,
-                false,
-            ),
-            (
-                "enabled for the default provider",
-                enabled,
-                LoginStatus::NotAuthenticated,
-                AppServerTarget::Embedded,
-                true,
-            ),
-            (
-                "explicit provider",
-                "model_provider = \"openai\"\n[features]\nbedrock_setup_wizard = true\n",
-                LoginStatus::NotAuthenticated,
-                AppServerTarget::Embedded,
-                false,
-            ),
-            (
-                "forced ChatGPT login",
-                "forced_login_method = \"chatgpt\"\n[features]\nbedrock_setup_wizard = true\n",
-                LoginStatus::NotAuthenticated,
-                AppServerTarget::Embedded,
-                false,
-            ),
-            (
-                "existing authentication",
-                enabled,
-                LoginStatus::AuthMode(AuthMode::Chatgpt),
-                AppServerTarget::Embedded,
-                false,
-            ),
-            (
-                "shared local daemon",
-                enabled,
-                LoginStatus::NotAuthenticated,
-                AppServerTarget::LocalDaemon {
-                    allow_embedded_fallback: true,
-                    endpoint: shared_endpoint.clone(),
-                },
-                true,
-            ),
-            (
-                "remote app server",
-                enabled,
-                LoginStatus::NotAuthenticated,
-                AppServerTarget::Remote {
-                    endpoint: shared_endpoint,
-                },
-                false,
-            ),
-        ] {
-            let codex_home = TempDir::new()?;
-            std::fs::write(codex_home.path().join("config.toml"), config_toml)?;
-            let config = build_config(&codex_home).await?;
-
-            assert_eq!(
-                should_show_bedrock_setup_wizard(
-                    login_status,
-                    /*requires_openai_auth*/ true,
-                    &config,
-                    &target
-                ),
-                expected,
-                "{label}"
-            );
-        }
-
         Ok(())
     }
 
@@ -3123,17 +3004,13 @@ requires_openai_auth = {requires_openai_auth}
 
         let params = latest_session_lookup_params(
             /*uses_remote_filesystem*/ false,
-            /*uses_remote_workspace*/ false,
             &config,
             Some(cwd.as_path()),
             /*include_non_interactive*/ false,
             LatestSessionLookupMode::StateDbOnly,
         );
 
-        assert_eq!(
-            params.model_providers,
-            Some(vec![config.model_provider_id.clone()])
-        );
+        assert_eq!(params.model_providers, Some(Vec::new()));
         assert_eq!(
             params.cwd,
             Some(ThreadListCwdFilter::One(cwd.to_string_lossy().to_string()))
@@ -3142,7 +3019,6 @@ requires_openai_auth = {requires_openai_auth}
 
         let scan_params = latest_session_lookup_params(
             /*uses_remote_filesystem*/ false,
-            /*uses_remote_workspace*/ false,
             &config,
             Some(cwd.as_path()),
             /*include_non_interactive*/ false,
@@ -3158,23 +3034,15 @@ requires_openai_auth = {requires_openai_auth}
         let temp_dir = TempDir::new()?;
         let config = build_config(&temp_dir).await?;
         let cwd = temp_dir.path().join("project");
-        let target = AppServerTarget::LocalDaemon {
-            allow_embedded_fallback: true,
-            endpoint: RemoteAppServerEndpoint::UnixSocket {
-                socket_path: AbsolutePathBuf::relative_to_current_dir("codex.sock")?,
-            },
-        };
-
         let params = latest_session_lookup_params(
             /*uses_remote_filesystem*/ false,
-            target.uses_remote_workspace(),
             &config,
             Some(cwd.as_path()),
             /*include_non_interactive*/ false,
             LatestSessionLookupMode::StateDbOnly,
         );
 
-        assert_eq!(params.model_providers, Some(vec![config.model_provider_id]));
+        assert_eq!(params.model_providers, Some(Vec::new()));
         assert_eq!(
             params.cwd,
             Some(ThreadListCwdFilter::One(cwd.to_string_lossy().to_string()))
@@ -3190,14 +3058,13 @@ requires_openai_auth = {requires_openai_auth}
 
         let params = latest_session_lookup_params(
             /*uses_remote_filesystem*/ true,
-            /*uses_remote_workspace*/ true,
             &config,
             /*cwd_filter*/ None,
             /*include_non_interactive*/ false,
             LatestSessionLookupMode::StateDbOnly,
         );
 
-        assert_eq!(params.model_providers, None);
+        assert_eq!(params.model_providers, Some(Vec::new()));
         assert_eq!(params.cwd, None);
         Ok(())
     }
@@ -3210,7 +3077,6 @@ requires_openai_auth = {requires_openai_auth}
 
         let params = latest_session_lookup_params(
             /*uses_remote_filesystem*/ true,
-            /*uses_remote_workspace*/ true,
             &config,
             /*cwd_filter*/ None,
             /*include_non_interactive*/ true,
@@ -3238,14 +3104,13 @@ requires_openai_auth = {requires_openai_auth}
 
         let params = latest_session_lookup_params(
             /*uses_remote_filesystem*/ true,
-            /*uses_remote_workspace*/ true,
             &config,
             Some(cwd),
             /*include_non_interactive*/ false,
             LatestSessionLookupMode::StateDbOnly,
         );
 
-        assert_eq!(params.model_providers, None);
+        assert_eq!(params.model_providers, Some(Vec::new()));
         assert_eq!(
             params.cwd,
             Some(ThreadListCwdFilter::One(String::from("repo/on/server")))

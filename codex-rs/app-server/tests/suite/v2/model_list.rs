@@ -39,6 +39,78 @@ use wiremock::matchers::path;
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 const INVALID_REQUEST_ERROR_CODE: i64 = -32600;
 
+#[tokio::test]
+async fn provider_catalogs_remain_isolated_without_openai_credentials() -> Result<()> {
+    let server = MockServer::start().await;
+    let mut claude = codex_models_manager::bundled_models_response()?
+        .models
+        .remove(0);
+    claude.slug = "account-a/claude-sonnet-5-5".into();
+    claude.visibility = codex_protocol::openai_models::ModelVisibility::List;
+    Mock::given(method("GET"))
+        .and(path("/v1/models"))
+        .and(header("authorization", "Bearer proxy-test-key"))
+        .respond_with(
+            ResponseTemplate::new(/*s*/ 200).set_body_json(ModelsResponse {
+                models: vec![claude],
+            }),
+        )
+        .mount(&server)
+        .await;
+    let home = TempDir::new()?;
+    write_models_cache(home.path()).await?;
+    let url = server.uri();
+    std::fs::write(
+        home.path().join("config.toml"),
+        format!(
+            r#"
+[model_providers.claude_subscription]
+name = "Claude"
+adapter = "claude_subscription"
+base_url = "{url}/v1"
+model_catalog_url = "{url}/v1/models"
+experimental_bearer_token = "proxy-test-key"
+"#
+        ),
+    )?;
+    let mut app = TestAppServer::builder()
+        .with_codex_home(home.path())
+        .without_auto_env()
+        .with_env_overrides(&[("OPENAI_API_KEY", None), ("CODEX_API_KEY", None)])
+        .build_initialized()
+        .await?;
+    let mut catalogs = Vec::new();
+    for provider in ["openai", "claude_subscription", "openai"] {
+        let response: ModelListResponse = app
+            .request(|request_id| ClientRequest::ModelList {
+                request_id,
+                params: ModelListParams {
+                    model_provider: Some(provider.into()),
+                    limit: Some(100),
+                    ..Default::default()
+                },
+            })
+            .await?;
+        assert_eq!(response.model_provider.as_deref(), Some(provider));
+        catalogs.push(
+            response
+                .data
+                .into_iter()
+                .map(|model| model.model)
+                .collect::<Vec<_>>(),
+        );
+    }
+    assert_eq!(catalogs[1], vec!["claude-sonnet-5-5"]);
+    assert!(!catalogs[0].is_empty());
+    assert!(
+        catalogs[0]
+            .iter()
+            .all(|model| !model.starts_with("claude-"))
+    );
+    assert_eq!(catalogs[0], catalogs[2]);
+    Ok(())
+}
+
 #[test_case(None, false, true; "default off")]
 #[test_case(None, true, true; "app rollout")]
 #[test_case(Some(false), true, true; "user opt out")]
@@ -124,6 +196,7 @@ requires_openai_auth = true
         .request(|request_id| ClientRequest::ModelList {
             request_id,
             params: ModelListParams {
+                model_provider: None,
                 limit: Some(100),
                 include_hidden: Some(true),
                 cursor: None,
@@ -135,6 +208,17 @@ requires_openai_auth = true
     assert_eq!(
         response,
         ModelListResponse {
+            model_provider: Some("catalog-test".into()),
+            providers: vec![
+                codex_app_server_protocol::ModelProviderOption {
+                    id: "catalog-test".into(),
+                    name: "OpenAI".into()
+                },
+                codex_app_server_protocol::ModelProviderOption {
+                    id: "openai".into(),
+                    name: "OpenAI".into()
+                },
+            ],
             data: expected
                 .iter()
                 .map(|preset| Model {
@@ -240,10 +324,12 @@ async fn list_models_returns_all_models_with_large_limit() -> Result<()> {
     let ModelListResponse {
         data: items,
         next_cursor,
+        ..
     } = mcp
         .request(|request_id| ClientRequest::ModelList {
             request_id,
             params: ModelListParams {
+                model_provider: None,
                 limit: Some(100),
                 cursor: None,
                 include_hidden: None,
@@ -270,10 +356,12 @@ async fn list_models_includes_hidden_models() -> Result<()> {
     let ModelListResponse {
         data: items,
         next_cursor,
+        ..
     } = mcp
         .request(|request_id| ClientRequest::ModelList {
             request_id,
             params: ModelListParams {
+                model_provider: None,
                 limit: Some(100),
                 cursor: None,
                 include_hidden: Some(true),
@@ -396,6 +484,7 @@ model_catalog_url = "{server_uri}/v1/models"
         .await?;
     let request_id = mcp
         .send_list_models_request(ModelListParams {
+            model_provider: None,
             limit: Some(100),
             cursor: None,
             include_hidden: None,
@@ -429,6 +518,7 @@ model_catalog_url = "{server_uri}/v1/models"
     let ModelListResponse {
         data: items,
         next_cursor,
+        ..
     } = serde_json::from_value(response.result)?;
     let mut expected_presets: Vec<ModelPreset> =
         remote_models.into_iter().map(Into::into).collect();
@@ -475,10 +565,12 @@ async fn list_models_pagination_works() -> Result<()> {
         let ModelListResponse {
             data: page_items,
             next_cursor,
+            ..
         } = mcp
             .request(|request_id| ClientRequest::ModelList {
                 request_id,
                 params: ModelListParams {
+                    model_provider: None,
                     limit: Some(1),
                     cursor: cursor.clone(),
                     include_hidden: None,
@@ -515,6 +607,7 @@ async fn list_models_rejects_invalid_cursor() -> Result<()> {
 
     let request_id = mcp
         .send_list_models_request(ModelListParams {
+            model_provider: None,
             limit: None,
             cursor: Some("invalid".to_string()),
             include_hidden: None,

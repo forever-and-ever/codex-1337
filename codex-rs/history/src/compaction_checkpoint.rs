@@ -1,4 +1,4 @@
-//! Borrows the latest opaque checkpoint and its recorded producer as one history item.
+//! Borrows the latest compaction checkpoint and its recorded producer as one history item.
 //! Malformed checkpoints remain visible so consumers cannot fall back to an older grant.
 
 use codex_protocol::models::ResponseItem;
@@ -28,13 +28,16 @@ impl<'a> CompactionCheckpoint<'a> {
     pub fn from_item(item: &'a ResponseItem, model_hash: Option<&'a str>) -> Option<Self> {
         matches!(
             item,
-            ResponseItem::Compaction { .. } | ResponseItem::ContextCompaction { .. }
+            ResponseItem::Compaction { .. }
+                | ResponseItem::NativeCompaction { .. }
+                | ResponseItem::ContextCompaction { .. }
         )
         .then_some(Self { item, model_hash })
     }
 
     pub fn is_usable(self) -> bool {
         match self.item {
+            ResponseItem::NativeCompaction { id: Some(_), .. } => true,
             ResponseItem::Compaction {
                 id: Some(_),
                 encrypted_content,
@@ -50,6 +53,11 @@ impl<'a> CompactionCheckpoint<'a> {
     }
 
     pub fn is_compatible_with(self, reviewer_model_hash: Option<&str>) -> bool {
+        // A signed Anthropic summary is not an opaque reviewer grant. Matching
+        // template hashes cannot establish cross-provider review compatibility.
+        if matches!(self.item, ResponseItem::NativeCompaction { .. }) {
+            return false;
+        }
         self.model_hash
             .zip(reviewer_model_hash)
             .is_some_and(|(producer, reviewer)| !producer.is_empty() && producer == reviewer)

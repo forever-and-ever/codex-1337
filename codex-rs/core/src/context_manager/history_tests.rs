@@ -116,6 +116,7 @@ fn root_history() -> ContextManager {
     ContextManager::for_session(
         &SessionSource::Cli,
         &ManagedFeatures::from(codex_features::Features::with_defaults()),
+        ModelProviderAdapter::OpenaiCompatible,
     )
 }
 
@@ -345,38 +346,78 @@ fn checkpoint_retained_evidence_survives_legacy_review(saved_context: serde_json
     }
 }
 
-#[test]
-fn checkpoint_replayed_messages_keep_legacy_review_when_the_source_survives() {
-    let mut history = root_history();
-    history.replace_annotated(vec![ResponseItemEnvelope::new(
-        serde_json::from_value(serde_json::json!({
-            "type": "compaction", "id": "unknown", "encrypted_content": "opaque checkpoint"
-        }))
-        .expect("checkpoint fixture"),
-    )]);
-    history.restore_review_context(
-        /*retained_context*/ None, /*checkpoint*/ None,
-        /*reviewer_compaction_hash*/ None,
-    );
-    history.record_items(
-        &[
-            user_input_text_msg("Only publish privately."),
-            assistant_msg("May I publish to the private repository?"),
-        ],
-        TruncationPolicy::Bytes(10_000),
-    );
+#[test_case(ModelProviderAdapter::OpenaiCompatible, GuardianContextMode::Legacy; "OpenAI legacy")]
+#[test_case(ModelProviderAdapter::ClaudeSubscription, GuardianContextMode::Independent; "native independent")]
+fn checkpoint_replayed_messages_keep_legacy_review_when_the_source_survives(
+    provider_adapter: ModelProviderAdapter,
+    expected_mode: GuardianContextMode,
+) {
+    let features = ManagedFeatures::from(codex_features::Features::with_defaults());
+    let mut history = ContextManager::for_session(&SessionSource::Cli, &features, provider_adapter);
+    let mut expected_messages = Vec::new();
+    if provider_adapter == ModelProviderAdapter::ClaudeSubscription {
+        // Default reuse is enabled, but Haiku cannot replay the signed parent checkpoint.
+        // The restriction must enter independent history before model-window compaction.
+        let restriction = user_input_text_msg("Do not publish the private report.");
+        history.record_items([&restriction], TruncationPolicy::Bytes(10_000));
+        expected_messages.push(restriction);
+        history.replace_compacted(
+            vec![
+                serde_json::from_value::<ResponseItem>(serde_json::json!({
+                    "type": "native_compaction", "id": "native-checkpoint", "provider":"anthropic",
+                    "content":"signed summary", "signature":"opaque signature"
+                }))
+                .expect("native checkpoint fixture")
+                .into(),
+            ],
+            /*reviewer_compaction_hash*/ None,
+        );
+    } else {
+        history.replace_annotated(vec![ResponseItemEnvelope::new(
+            serde_json::from_value(serde_json::json!({
+                "type": "compaction", "id": "unknown", "encrypted_content": "opaque checkpoint"
+            }))
+            .expect("checkpoint fixture"),
+        )]);
+    }
+    let checkpoint = history.guardian_history_checkpoint();
     let retained = history.retained_context().clone();
     history.restore_review_context(
         Some(&retained),
-        /*checkpoint*/ None,
+        checkpoint.as_ref(),
+        /*reviewer_compaction_hash*/ None,
+    );
+    let messages = vec![
+        user_input_text_msg("Only publish privately."),
+        assistant_msg("May I publish to the private repository?"),
+    ];
+    history.record_items(&messages, TruncationPolicy::Bytes(10_000));
+    expected_messages.extend(messages);
+    let checkpoint = history.guardian_history_checkpoint();
+    let retained = history.retained_context().clone();
+    history.restore_review_context(
+        Some(&retained),
+        checkpoint.as_ref(),
         /*reviewer_compaction_hash*/ None,
     );
 
-    assert_eq!(
-        GuardianContextMode::from_history(history.conversation_history_snapshot().as_ref()),
-        GuardianContextMode::Legacy,
+    // Resume through a fresh constructor, so retained live state cannot mask the default policy.
+    let mut resumed = ContextManager::for_session(&SessionSource::Cli, &features, provider_adapter);
+    resumed.replace_annotated(history.annotated_items().to_vec());
+    resumed.restore_review_context(
+        Some(&retained),
+        checkpoint.as_ref(),
+        /*reviewer_compaction_hash*/ None,
     );
-    assert_eq!(history.retained_context(), &retained);
+    let snapshot = resumed.conversation_history_snapshot();
+    assert_eq!(
+        (
+            GuardianContextMode::from_history(snapshot.as_ref()),
+            snapshot.review_items().cloned().collect::<Vec<_>>(),
+            snapshot.retained_context(),
+        ),
+        (expected_mode, expected_messages, Some(&retained)),
+    );
 }
 
 #[test_case(None; "no retained checkpoint")]

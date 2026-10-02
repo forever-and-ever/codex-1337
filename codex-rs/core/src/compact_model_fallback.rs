@@ -9,7 +9,8 @@ use tracing::warn;
 pub(crate) fn should_retry_with_current_model(error: &CodexErr) -> bool {
     !matches!(
         error.details(),
-        CodexErrorDetails::TurnAborted
+        CodexErrorDetails::Fatal(_)
+            | CodexErrorDetails::TurnAborted
             | CodexErrorDetails::Interrupted
             | CodexErrorDetails::SessionBudgetExceeded
     )
@@ -32,6 +33,7 @@ pub(crate) fn record_model_fallback(
     let implementation_tag = match implementation {
         CompactionImplementation::Responses => "responses",
         CompactionImplementation::ResponsesCompactionV2 => "responses_compaction_v2",
+        CompactionImplementation::AnthropicNative => "anthropic_native",
     };
     let outcome = if fallback_error.is_none() {
         "succeeded"

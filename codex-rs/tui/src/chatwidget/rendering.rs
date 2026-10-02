@@ -271,9 +271,10 @@ impl ChatWidget {
                             status: self.current_work_status.as_ref(),
                             reasoning: self.reasoning_header.as_deref(),
                         })),
-                        RenderableItem::Owned(Box::new(crate::subagent_roster::RosterView(
-                            self.subagent_roster.clone(),
-                        ))),
+                        RenderableItem::Owned(Box::new(crate::subagent_roster::RosterView {
+                            roster: self.subagent_roster.clone(),
+                            use_theme_colors: self.local_settings.tui.status_line_use_colors,
+                        })),
                     ]),
                 ))),
             )

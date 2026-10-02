@@ -160,8 +160,22 @@ pub struct FeatureToggleToml {
 pub struct WranglerConfig {
     /// Account identity selected explicitly with `/account`; used for new conversations.
     pub default_account: Option<String>,
+    /// Selected native Claude subscription identity for new conversations.
+    pub default_claude_account: Option<String>,
     /// Short names accepted by `/account`, mapped to saved account identities.
     pub account_aliases: std::collections::BTreeMap<String, String>,
+    /// Display-only names keyed first by billing provider, then stable account ID.
+    pub account_nicknames:
+        std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
+}
+
+/// Context policy defaults for one provider; explicit top-level values take precedence.
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct ModelProviderContextDefaults {
+    pub model_context_window: Option<i64>,
+    pub model_auto_compact_token_limit: Option<i64>,
 }
 
 /// Base config deserialized from ~/.codex/config.toml.
@@ -184,6 +198,14 @@ pub struct ConfigToml {
 
     /// Token usage threshold triggering auto-compaction of conversation history.
     pub model_auto_compact_token_limit: Option<i64>,
+
+    /// Context policy defaults keyed by provider ID. Explicit top-level values
+    /// (including profile and CLI layers) override these defaults, which override
+    /// catalog defaults. The selected model's advertised context maximum and
+    /// automatic-compaction safety cap still apply. Defaults are resolved for
+    /// the selected provider, including fresh cross-provider subagents.
+    #[serde(default)]
+    pub model_provider_context_defaults: HashMap<String, ModelProviderContextDefaults>,
 
     /// Controls whether the auto-compaction limit applies to the full context or
     /// only to tokens after the carried prefix in the current compaction window.

@@ -1,8 +1,11 @@
+mod anthropic_auth;
 mod auth;
 mod bearer_auth_provider;
+mod claude_catalog;
 mod combined_auth;
 mod models_endpoint;
 mod models_identity;
+mod native_claude_catalog;
 mod provider;
 mod shared_state;
 pub mod test_support;
@@ -12,6 +15,8 @@ pub use workspace_routing::ResolvedResponsesProvider;
 pub use workspace_routing::ResponsesConnectionKey;
 pub use workspace_routing::WorkspaceRoutingContext;
 
+pub use anthropic_auth::AnthropicAuthContext;
+pub use anthropic_auth::AnthropicRequestAuth;
 pub use auth::AgentIdentitySessionFallback;
 pub use auth::ProviderAuthScope;
 pub use auth::ResolvedProviderAuth;
@@ -33,6 +38,7 @@ pub use provider::ProviderUnauthorizedRecovery;
 pub use provider::RemoteCompactionSupport;
 pub use provider::SharedModelProvider;
 pub use provider::create_model_provider;
+pub use provider::create_model_provider_with_anthropic_account;
 
 #[cfg(test)]
 #[path = "workspace_routing_tests.rs"]

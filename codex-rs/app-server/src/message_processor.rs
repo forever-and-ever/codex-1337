@@ -1464,6 +1464,9 @@ impl MessageProcessor {
                     .thread_account_select(&request_id, params)
                     .await
             }
+            ClientRequest::AccountNicknameSet { params, .. } => {
+                self.turn_processor.account_nickname_set(params).await
+            }
             ClientRequest::ThreadMemoryModeSet { params, .. } => {
                 self.thread_processor.thread_memory_mode_set(params).await
             }

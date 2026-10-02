@@ -1556,6 +1556,7 @@ async fn provider_auth_command_recovers_after_initial_resolution_failure() {
 async fn send_provider_auth_request(server: &MockServer, auth: ModelProviderAuthInfo) {
     let provider = ModelProviderInfo {
         name: "corp".into(),
+        adapter: Default::default(),
         base_url: Some(format!("{}/v1", server.uri())),
         model_catalog_url: None,
         env_key: None,
@@ -3074,6 +3075,7 @@ async fn azure_responses_request_does_not_store_and_preserves_prefixed_item_ids(
 
     let provider = ModelProviderInfo {
         name: "azure".into(),
+        adapter: Default::default(),
         base_url: Some(format!("{}/openai", server.uri())),
         model_catalog_url: None,
         env_key: None,
@@ -3704,6 +3706,7 @@ async fn azure_overrides_assign_properties_used_for_responses_url() {
 
     let provider = ModelProviderInfo {
         name: "custom".to_string(),
+        adapter: Default::default(),
         base_url: Some(format!("{}/openai", server.uri())),
         model_catalog_url: None,
         // Reuse the existing environment variable to avoid using unsafe code
@@ -3790,6 +3793,7 @@ async fn env_var_overrides_loaded_auth() {
 
     let provider = ModelProviderInfo {
         name: ModelProviderInfo::create_openai_provider(/*base_url*/ None).name,
+        adapter: Default::default(),
         base_url: Some(format!("{}/openai", server.uri())),
         model_catalog_url: None,
         // Reuse the existing environment variable to avoid using unsafe code

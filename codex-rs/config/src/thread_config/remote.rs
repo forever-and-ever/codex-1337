@@ -171,6 +171,20 @@ fn model_provider_from_proto(
         }
     };
     let info = ModelProviderInfo {
+        adapter: match proto::ModelProviderAdapter::try_from(provider.adapter) {
+            Ok(proto::ModelProviderAdapter::OpenaiCompatible) => {
+                codex_model_provider_info::ModelProviderAdapter::OpenaiCompatible
+            }
+            Ok(proto::ModelProviderAdapter::ClaudeSubscription) => {
+                codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription
+            }
+            Err(_) => {
+                return Err(parse_error(format!(
+                    "unknown model provider adapter: {}",
+                    provider.adapter
+                )));
+            }
+        },
         name: provider.name,
         base_url: provider.base_url,
         model_catalog_url: provider.model_catalog_url.map(Into::into),
@@ -204,6 +218,7 @@ fn model_provider_to_proto(
     provider: ModelProviderInfo,
 ) -> proto::ModelProvider {
     let ModelProviderInfo {
+        adapter,
         name,
         base_url,
         model_catalog_url,
@@ -228,6 +243,15 @@ fn model_provider_to_proto(
 
     proto::ModelProvider {
         id: id.into(),
+        adapter: match adapter {
+            codex_model_provider_info::ModelProviderAdapter::OpenaiCompatible => {
+                proto::ModelProviderAdapter::OpenaiCompatible
+            }
+            codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription => {
+                proto::ModelProviderAdapter::ClaudeSubscription
+            }
+        }
+        .into(),
         name,
         base_url,
         model_catalog_url: model_catalog_url.map(RedactedString::into_inner),
@@ -440,15 +464,21 @@ mod tests {
 
     #[test]
     fn model_provider_proto_roundtrips_through_domain_type() {
-        let mut expected = expected_provider();
-        expected.auth = None;
-        expected.experimental_bearer_token = Some("synthetic-provider-token".into());
-        let proto = model_provider_to_proto("local", expected.clone());
-        assert!(proto.supports_standalone_web_search);
-        let (id, actual) = model_provider_from_proto(proto).expect("model provider from proto");
+        for adapter in [
+            codex_model_provider_info::ModelProviderAdapter::OpenaiCompatible,
+            codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription,
+        ] {
+            let mut expected = expected_provider();
+            expected.adapter = adapter;
+            expected.auth = None;
+            expected.experimental_bearer_token = Some("synthetic-provider-token".into());
+            let proto = model_provider_to_proto("local", expected.clone());
+            assert!(proto.supports_standalone_web_search);
+            let (id, actual) = model_provider_from_proto(proto).expect("model provider from proto");
 
-        assert_eq!(id, "local");
-        assert_eq!(actual, expected);
+            assert_eq!(id, "local");
+            assert_eq!(actual, expected);
+        }
     }
 
     #[test]
@@ -473,6 +503,7 @@ mod tests {
                     proto::SessionThreadConfig {
                         model_provider: Some("local".to_string()),
                         model_providers: vec![proto::ModelProvider {
+                            adapter: proto::ModelProviderAdapter::OpenaiCompatible.into(),
                             id: "local".to_string(),
                             name: "Local".to_string(),
                             base_url: Some("http://127.0.0.1:8061/api/codex".to_string()),
@@ -547,6 +578,7 @@ mod tests {
 
     fn expected_provider() -> ModelProviderInfo {
         ModelProviderInfo {
+            adapter: codex_model_provider_info::ModelProviderAdapter::default(),
             name: "Local".to_string(),
             base_url: Some("http://127.0.0.1:8061/api/codex".to_string()),
             model_catalog_url: Some("http://127.0.0.1:8061/api/codex/models".into()),

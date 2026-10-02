@@ -20,7 +20,22 @@ pub(super) async fn sampler_config(
     auth_manager: Arc<AuthManager>,
     manager: Option<Arc<ThreadManager>>,
 ) -> LunaSamplerConfig {
-    let luna_model = if let Some(thread_manager) = manager {
+    let provider = create_model_provider(
+        input.config.model_provider.clone(),
+        Some(
+            input
+                .thread_store
+                .get::<Arc<AuthManager>>()
+                .as_deref()
+                .cloned()
+                .unwrap_or(auth_manager),
+        ),
+    );
+    let native = !matches!(provider.anthropic_auth_context(), Ok(None));
+    // Native discovery waits for the classification's committed conversation identity.
+    let luna_model = if native {
+        None
+    } else if let Some(thread_manager) = manager {
         let mut model_config = input.config.to_models_manager_config();
         model_config.model_context_window = None;
         Some(
@@ -36,14 +51,18 @@ pub(super) async fn sampler_config(
     } else {
         None
     };
-    let max_input_tokens =
-        luna_model
-            .as_ref()
-            .map_or(codex_guardian_context::DEFAULT_MAX_INPUT_TOKENS, |model| {
-                codex_guardian_context::effective_input_token_limit(
-                    model, /*configured_window*/ None,
-                )
-            });
+    let max_input_tokens = luna_model.as_ref().map_or(
+        if native {
+            0
+        } else {
+            codex_guardian_context::DEFAULT_MAX_INPUT_TOKENS
+        },
+        |model| {
+            codex_guardian_context::effective_input_token_limit(
+                model, /*configured_window*/ None,
+            )
+        },
+    );
     let luna_compaction_hash = luna_model.and_then(|model| model.comp_hash);
     LunaSamplerConfig {
         workspace_routing: input
@@ -51,17 +70,7 @@ pub(super) async fn sampler_config(
             .get_or_init(|| input.config.workspace_routing_context())
             .as_ref()
             .clone(),
-        provider: create_model_provider(
-            input.config.model_provider.clone(),
-            Some(
-                input
-                    .thread_store
-                    .get::<Arc<AuthManager>>()
-                    .as_deref()
-                    .cloned()
-                    .unwrap_or(auth_manager),
-            ),
-        ),
+        provider,
         http_client_factory: input.config.http_client_factory(),
         agent_identity_policy: if input.config.features.enabled(Feature::UseAgentIdentity) {
             AgentIdentityAuthPolicy::ChatGptAuth

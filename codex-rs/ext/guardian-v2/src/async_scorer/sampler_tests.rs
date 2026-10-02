@@ -260,6 +260,7 @@ fn assert_classifier_instructions(request: &serde_json::Value) {
 
 pub(super) fn sample_request(parent_turn_id: &str) -> LunaSamplingRequest {
     LunaSamplingRequest {
+        provider_account_id: None,
         parent_response_id: None,
         instructions: classifier_instructions(),
         input: vec![responses::user_message_item(
@@ -559,6 +560,7 @@ async fn preconnected_sampler_reuses_authenticated_websocket_for_classifications
 
     let first = sampler
         .sample(LunaSamplingRequest {
+            provider_account_id: None,
             parent_response_id: None,
             instructions: classifier_instructions(),
             input: vec![ResponseItem::Message {
@@ -600,6 +602,7 @@ async fn preconnected_sampler_reuses_authenticated_websocket_for_classifications
     sampler.prewarm().await;
     let second = sampler
         .sample(LunaSamplingRequest {
+            provider_account_id: None,
             parent_response_id: None,
             instructions: classifier_instructions(),
             input: vec![responses::user_message_item(
@@ -782,6 +785,7 @@ async fn sampler_returns_classification_token_before_terminal_response_events() 
     let output = tokio::time::timeout(
         Duration::from_secs(2),
         sampler.sample(LunaSamplingRequest {
+            provider_account_id: None,
             parent_response_id: None,
             instructions: classifier_instructions(),
             input: vec![responses::user_message_item(

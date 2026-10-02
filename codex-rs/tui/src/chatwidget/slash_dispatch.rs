@@ -778,6 +778,11 @@ impl ChatWidget {
                     self.app_event_tx.send(AppEvent::SelectAccount {
                         thread_id,
                         account_id: trimmed.to_owned(),
+                        provider: if trimmed.starts_with("codex-account-") {
+                            codex_app_server_protocol::SubscriptionAccountProvider::ClaudeSubscription
+                        } else {
+                            codex_app_server_protocol::SubscriptionAccountProvider::Openai
+                        },
                     });
                 } else {
                     self.add_error_message(

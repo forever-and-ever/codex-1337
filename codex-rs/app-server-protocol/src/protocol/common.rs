@@ -702,6 +702,11 @@ client_request_definitions! {
         serialization: global("account-auth"),
         response: v2::ThreadAccountSelectResponse,
     },
+    AccountNicknameSet => "account/nickname/set" {
+        params: v2::AccountNicknameSetParams,
+        serialization: global("account-auth"),
+        response: v2::AccountNicknameSetResponse,
+    },
     #[experimental("thread/memoryMode/set")]
     ThreadMemoryModeSet => "thread/memoryMode/set" {
         params: v2::ThreadMemoryModeSetParams,
@@ -3600,6 +3605,7 @@ mod tests {
                 "method": "model/list",
                 "id": 6,
                 "params": {
+                    "modelProvider": null,
                     "limit": null,
                     "cursor": null,
                     "includeHidden": null

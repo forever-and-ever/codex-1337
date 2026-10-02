@@ -69,9 +69,7 @@ async fn context_window_token_status_with_config(
                 let window = sess.auto_compact_window_snapshot().await;
                 let baseline = window.prefill_input_tokens.unwrap_or(active_context_tokens);
 
-                let scope_limit = config
-                    .model_auto_compact_token_limit
-                    .or_else(|| model_info.auto_compact_token_limit());
+                let scope_limit = model_info.auto_compact_token_limit();
                 (
                     active_context_tokens.saturating_sub(baseline),
                     scope_limit,
@@ -81,9 +79,7 @@ async fn context_window_token_status_with_config(
         };
 
     // The model's full context window is a hard cap, independent of the auto-compaction scope.
-    let full_context_window_limit = model_info.resolved_context_window().map(|context_window| {
-        context_window.saturating_mul(model_info.effective_context_window_percent) / 100
-    });
+    let full_context_window_limit = model_info.usable_context_window();
 
     // Report remaining tokens against the base (unbuffered) window, capped by the full context.
     let base_window_tokens_remaining = [

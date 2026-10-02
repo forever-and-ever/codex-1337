@@ -12,6 +12,9 @@ use crate::oauth::PkceCodes;
 use crate::oauth::TokenRejection;
 use crate::oauth::diagnostics::redact_error_url;
 
+// OAuth grants contain small credential documents, never provider output streams.
+const TOKEN_RESPONSE_LIMIT: usize = 1024 * 1024;
+
 /// ChatGPT refresh uses JSON; authorization-code and gateway grants use form encoding.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum TokenEncoding {
@@ -34,11 +37,13 @@ pub(crate) struct AuthorizationCodeGrant<'a> {
     pub redirect_uri: &'a str,
     pub pkce: &'a PkceCodes,
     pub resource: Option<&'a str>,
+    pub state: Option<&'a str>,
 }
 
 pub(crate) struct RefreshTokenGrant<'a> {
     pub refresh_token: &'a str,
     pub resource: Option<&'a str>,
+    pub scope: Option<&'a str>,
 }
 
 /// Shared OAuth protocol implementation; callers retain tokens, storage, and recovery decisions.
@@ -69,8 +74,12 @@ impl<'a> OAuthClient<'a> {
         if let Some(resource) = grant.resource {
             parameters.push(("resource", resource));
         }
-        self.exchange(&parameters, &[grant.code, &grant.pkce.code_verifier])
-            .await
+        let mut secrets = vec![grant.code, grant.pkce.code_verifier.as_str()];
+        if let Some(state) = grant.state {
+            parameters.push(("state", state));
+            secrets.push(state);
+        }
+        self.exchange(&parameters, &secrets).await
     }
 
     pub(crate) async fn refresh<T: DeserializeOwned>(
@@ -84,6 +93,9 @@ impl<'a> OAuthClient<'a> {
         ];
         if let Some(resource) = grant.resource {
             parameters.push(("resource", resource));
+        }
+        if let Some(scope) = grant.scope {
+            parameters.push(("scope", scope));
         }
         self.exchange(&parameters, &[grant.refresh_token]).await
     }
@@ -109,7 +121,7 @@ impl<'a> OAuthClient<'a> {
                 .header("Content-Type", "application/json")
                 .json(&parameters.iter().copied().collect::<BTreeMap<_, _>>()),
         };
-        let response = request
+        let mut response = request
             .send()
             .await
             .map_err(|error| OAuthError::Transport(redact_error_url(error)))?;
@@ -119,10 +131,17 @@ impl<'a> OAuthClient<'a> {
                     .await,
             )));
         }
-        response.json().await.map_err(|error| match error {
+        let mut body = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(|error| match error {
             error @ codex_http_client::HttpError::Policy(_) => OAuthError::Transport(error),
             _ => OAuthError::InvalidResponse,
-        })
+        })? {
+            if chunk.len() > TOKEN_RESPONSE_LIMIT.saturating_sub(body.len()) {
+                return Err(OAuthError::InvalidResponse);
+            }
+            body.extend_from_slice(&chunk);
+        }
+        serde_json::from_slice(&body).map_err(|_| OAuthError::InvalidResponse)
     }
 }
 

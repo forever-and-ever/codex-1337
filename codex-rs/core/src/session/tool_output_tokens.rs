@@ -3,6 +3,7 @@
 use super::Session;
 use super::TurnContext;
 use crate::context_manager::ContextManager;
+use codex_protocol::ToolName;
 use codex_protocol::items::FunctionCallOutputItem;
 use codex_protocol::items::ToolOutputTokensItem;
 use codex_protocol::items::TurnItem;
@@ -53,9 +54,14 @@ pub(super) fn capture(history: &ContextManager, previous_len: usize) -> Vec<Capt
                     ResponseItem::FunctionCall {
                         call_id: id,
                         name,
-                        namespace: None,
+                        namespace,
                         ..
-                    } if id == call_id && name == "wait" => Some(name.clone()),
+                    } if id == call_id
+                        && name == "wait"
+                        && ToolName::new(namespace.clone(), name).is_default_namespace() =>
+                    {
+                        Some(name.clone())
+                    }
                     _ => None,
                 })
             });
@@ -112,7 +118,9 @@ impl Session {
             }
         }
         // Display and invocation ownership are provider-neutral, even without a tokenizer.
-        if turn.config.model_provider_id != "openai" {
+        if turn.config.model_provider_id != "openai"
+            && !self.services.model_client.uses_claude_subscription()
+        {
             return;
         }
         let live_thread = self.live_thread().cloned();

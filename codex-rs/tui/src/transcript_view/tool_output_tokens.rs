@@ -31,7 +31,7 @@ impl TranscriptView {
     }
 
     pub(crate) fn activity_output_tokens(&self, ids: &[String]) -> Option<u64> {
-        if !self.output_estimates_enabled || ids.is_empty() {
+        if ids.is_empty() {
             return None;
         }
         let counts = &self.tool_output_tokens;

@@ -58,7 +58,7 @@ pub(super) enum RequestMode {
 pub(super) struct ConnectionPool {
     config: Arc<LunaSamplerConfig>,
     pub(super) idle_connections: Mutex<Vec<PooledConnection>>,
-    classifications: Arc<Semaphore>,
+    pub(super) classifications: Arc<Semaphore>,
     // A socket holds its permit while opening, idle, leased, and draining.
     sockets: Arc<Semaphore>,
     replenishing: Arc<tokio::sync::Mutex<()>>,

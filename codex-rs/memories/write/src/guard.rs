@@ -1,12 +1,17 @@
 use codex_backend_client::Client as BackendClient;
 use codex_core::config::Config;
 use codex_login::AuthManager;
+use codex_model_provider_info::ModelProviderAdapter;
 use codex_protocol::protocol::RateLimitSnapshot;
 use codex_protocol::protocol::RateLimitWindow;
 use tracing::info;
 use tracing::warn;
 
 pub(crate) async fn rate_limits_ok(auth_manager: &AuthManager, config: &Config) -> bool {
+    if config.model_provider.adapter == ModelProviderAdapter::ClaudeSubscription {
+        // No native quota endpoint is implemented; unrelated ChatGPT quota is not evidence.
+        return true;
+    }
     rate_limits_check(auth_manager, config)
         .await
         .unwrap_or(true)

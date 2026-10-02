@@ -38,6 +38,7 @@ async fn guardian_checkpoint_preserves_live_context_without_storage(
         state.history = ContextManager::for_session(
             &SessionSource::default(),
             &crate::config::ManagedFeatures::from(codex_features::Features::with_defaults()),
+            codex_model_provider_info::ModelProviderAdapter::OpenaiCompatible,
         );
         state
             .history
@@ -107,6 +108,7 @@ async fn guardian_checkpoint_preserves_live_context_without_storage(
     fork.state.lock().await.history = ContextManager::for_session(
         &SessionSource::default(),
         &crate::config::ManagedFeatures::from(codex_features::Features::with_defaults()),
+        codex_model_provider_info::ModelProviderAdapter::OpenaiCompatible,
     );
     fork.record_initial_history(InitialHistory::Forked(items))
         .await;

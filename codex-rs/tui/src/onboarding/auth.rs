@@ -223,12 +223,9 @@ impl KeyboardHandler for AuthModeWidget {
 
     fn handle_paste(&mut self, pasted: String) {
         let sign_in_state = self.sign_in_state.read().unwrap();
-        match &*sign_in_state {
-            SignInState::ApiKeyEntry(_) => {
-                drop(sign_in_state);
-                let _ = self.handle_api_key_entry_paste(pasted);
-            }
-            _ => {}
+        if let SignInState::ApiKeyEntry(_) = &*sign_in_state {
+            drop(sign_in_state);
+            let _ = self.handle_api_key_entry_paste(pasted);
         }
     }
 }
@@ -296,10 +293,9 @@ impl AuthModeWidget {
 
     /// Returns whether the auth flow is currently accepting text input.
     pub(crate) fn is_text_entry_active(&self) -> bool {
-        self.sign_in_state.read().is_ok_and(|guard| match &*guard {
-            SignInState::ApiKeyEntry(_) => true,
-            _ => false,
-        })
+        self.sign_in_state
+            .read()
+            .is_ok_and(|guard| matches!(&*guard, SignInState::ApiKeyEntry(_)))
     }
 
     /// Returns whether printable quit shortcuts must be treated as text input.

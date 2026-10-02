@@ -17,19 +17,20 @@ use codex_core::resolve_installation_id;
 use codex_features::Feature;
 use codex_login::AuthManager;
 use codex_login::CodexAuth;
+use codex_login::anthropic::AccountId;
 use codex_login::auth::AgentIdentityAuthPolicy;
 use codex_login::auth_env_telemetry::collect_auth_env_telemetry;
 use codex_login::default_client::originator;
 use codex_model_provider::ModelProvider;
 use codex_model_provider::SharedModelProvider;
 use codex_model_provider::create_model_provider;
+use codex_model_provider_info::ModelProviderAdapter;
+use codex_models_manager::manager::RefreshStrategy;
 use codex_otel::SessionTelemetry;
 use codex_otel::TelemetryAuthMode;
 use codex_protocol::MemoryVersion;
 use codex_protocol::SessionId;
 use codex_protocol::ThreadId;
-use codex_protocol::config_types::ReasoningSummary;
-use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::InternalSessionSource;
 use codex_protocol::protocol::SessionSource;
@@ -44,37 +45,12 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+mod stage_one_request;
+pub(crate) use stage_one_request::StageOneRequestContext;
+
 pub(crate) struct SpawnedConsolidationAgent {
     pub(crate) thread_id: ThreadId,
     pub(crate) thread: Arc<CodexThread>,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct StageOneRequestContext {
-    version: MemoryVersion,
-    pub(crate) model_info: ModelInfo,
-    pub(crate) session_telemetry: SessionTelemetry,
-    pub(crate) reasoning_effort: Option<ReasoningEffort>,
-    pub(crate) reasoning_summary: ReasoningSummary,
-    pub(crate) service_tier: Option<String>,
-}
-
-impl StageOneRequestContext {
-    pub(crate) fn start_timer(&self, name: &str) -> Option<codex_otel::Timer> {
-        self.session_telemetry
-            .start_timer(name, &memory_metric_tags(self.version, &[]))
-            .ok()
-    }
-
-    pub(crate) fn counter(&self, name: &str, inc: i64, tags: &[(&str, &str)]) {
-        self.session_telemetry
-            .counter(name, inc, &memory_metric_tags(self.version, tags));
-    }
-
-    pub(crate) fn histogram(&self, name: &str, value: i64, tags: &[(&str, &str)]) {
-        self.session_telemetry
-            .histogram(name, value, &memory_metric_tags(self.version, tags));
-    }
 }
 
 pub(crate) struct MemoryStartupContext {
@@ -110,14 +86,18 @@ fn build_session_telemetry(
     model: &str,
     originator: String,
 ) -> SessionTelemetry {
-    let auth = auth_manager.auth_cached();
+    let is_native_anthropic =
+        config.model_provider.adapter == ModelProviderAdapter::ClaudeSubscription;
+    let auth = (!is_native_anthropic)
+        .then(|| auth_manager.auth_cached())
+        .flatten();
     let auth = auth.as_ref();
     let auth_mode = auth.map(CodexAuth::auth_mode).map(TelemetryAuthMode::from);
     let account_id = auth.and_then(CodexAuth::get_account_id);
     let account_email = auth.and_then(CodexAuth::get_account_email);
     let auth_env_telemetry = collect_auth_env_telemetry(
         &config.model_provider,
-        auth_manager.codex_api_key_env_enabled(),
+        !is_native_anthropic && auth_manager.codex_api_key_env_enabled(),
     );
     SessionTelemetry::new(
         thread_id,
@@ -283,19 +263,56 @@ impl MemoryStartupContext {
         config: &Config,
         model_name: &str,
         reasoning_effort: ReasoningEffort,
-    ) -> StageOneRequestContext {
+    ) -> anyhow::Result<StageOneRequestContext> {
+        let anthropic_account =
+            if config.model_provider.adapter == ModelProviderAdapter::ClaudeSubscription {
+                Some(
+                    self.thread
+                        .committed_provider_account_id()
+                        .ok_or_else(|| {
+                            anyhow::anyhow!("Select an Anthropic account before memory extraction")
+                        })?
+                        .parse::<AccountId>()?,
+                )
+            } else {
+                None
+            };
+        let models_manager = if let Some(account) = &anthropic_account {
+            let provider = self.provider.for_anthropic_account(&account.to_string())?;
+            let manager = provider.models_manager(
+                config.codex_home.to_path_buf(),
+                config.model_catalog.clone(),
+            );
+            let catalog = manager
+                .raw_model_catalog(
+                    RefreshStrategy::OnlineIfUncached,
+                    config.http_client_factory(),
+                )
+                .await;
+            if !catalog
+                .models
+                .iter()
+                .any(|model| model.slug == model_name && model.anthropic.is_some())
+            {
+                anyhow::bail!(
+                    "Cannot load authoritative Anthropic memory-extraction metadata for this account"
+                );
+            }
+            manager
+        } else {
+            self.thread_manager.get_models_manager()
+        };
         let config_snapshot = self.thread.config_snapshot().await;
-        let model_info = self
-            .thread_manager
-            .get_models_manager()
+        let model_info = models_manager
             .get_model_info(model_name, &config.to_models_manager_config())
             .await;
         let reasoning_summary = config
             .model_reasoning_summary
             .unwrap_or(model_info.default_reasoning_summary);
 
-        StageOneRequestContext {
+        Ok(StageOneRequestContext {
             version: self.version,
+            anthropic_account,
             model_info,
             session_telemetry: build_session_telemetry(
                 &self.auth_manager,
@@ -308,7 +325,7 @@ impl MemoryStartupContext {
             reasoning_effort: Some(reasoning_effort),
             reasoning_summary,
             service_tier: config_snapshot.service_tier,
-        }
+        })
     }
 
     pub(crate) async fn stream_stage_one_prompt(
@@ -341,6 +358,10 @@ impl MemoryStartupContext {
             config.workspace_routing_context(),
             Vec::new(),
         );
+        let model_client = match &context.anthropic_account {
+            Some(account) => model_client.with_anthropic_account(account.clone())?,
+            None => model_client,
+        };
 
         let mut client_session = model_client.new_session();
         let window_id = format!("{}:0", self.thread_id);
@@ -397,9 +418,21 @@ impl MemoryStartupContext {
 
     pub(crate) async fn spawn_consolidation_agent(
         &self,
-        config: Config,
+        mut config: Config,
         prompt: Vec<UserInput>,
     ) -> anyhow::Result<SpawnedConsolidationAgent> {
+        if config.model_provider.adapter == ModelProviderAdapter::ClaudeSubscription {
+            let account = self
+                .thread
+                .committed_provider_account_id()
+                .ok_or_else(|| {
+                    anyhow::anyhow!("Select an Anthropic account before memory consolidation")
+                })?
+                .parse::<AccountId>()?;
+            // Consolidation is an independent family, not a visible child. StartThreadOptions
+            // has no explicit native binding; change only its owned configuration snapshot.
+            config.wrangler.default_claude_account = Some(account.to_string());
+        }
         let NewThread {
             thread_id, thread, ..
         } = self

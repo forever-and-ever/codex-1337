@@ -33,16 +33,24 @@ impl SessionTask for CompactTask {
         _cancellation_token: CancellationToken,
     ) -> SessionTaskResult {
         let _profile_guard = ctx.turn_timing_state.begin_compaction();
-        if ctx.config.features.enabled(Feature::TokenBudget) {
+        let support = ctx.provider.remote_compaction_for_model(ctx.model_info());
+        if ctx.config.features.enabled(Feature::TokenBudget)
+            && ctx.provider.capabilities().remote_compaction
+                != RemoteCompactionSupport::AnthropicSigned
+        {
             crate::compact_token_budget::run_manual_compact_task(session, ctx).await?;
             return Ok(None);
         }
 
-        let result = match ctx.provider.capabilities().remote_compaction {
-            RemoteCompactionSupport::V2 => {
+        let result = match support {
+            RemoteCompactionSupport::V2 | RemoteCompactionSupport::AnthropicSigned => {
                 emit_compact_metric(
                     &session.services.session_telemetry,
-                    "remote_v2",
+                    if support == RemoteCompactionSupport::AnthropicSigned {
+                        "anthropic_native"
+                    } else {
+                        "remote_v2"
+                    },
                     /*manual*/ true,
                 );
                 crate::compact_remote_v2::run_remote_compact_task(session.clone(), ctx).await

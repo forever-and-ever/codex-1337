@@ -1,0 +1,11 @@
+---
+source: tui/src/chatwidget/tests/popups_and_settings.rs
+expression: "render_bottom_popup(&chat, 100)"
+---
+  Sign in to Claude
+  Complete sign-in in your browser. Existing conversations keep their accounts.
+
+
+› 1. Cancel sign-in
+
+  enter select · esc back

@@ -81,11 +81,6 @@ impl ChatWidget {
             .send(AppEvent::RefreshConversationAccount {
                 thread_id: session.thread_id,
             });
-        self.realtime_conversation_available_for_thread =
-            self.config.features.enabled(Feature::RealtimeConversation)
-                && codex_realtime_webrtc::RealtimeWebrtcSession::is_supported();
-        self.bottom_pane
-            .set_voice_command_enabled(self.realtime_conversation_available_for_thread);
         self.bottom_pane
             .set_queue_submissions(/*queue_submissions*/ false);
         if previous_thread_id != self.thread_id {
@@ -105,7 +100,21 @@ impl ChatWidget {
         self.current_rollout_path = session.rollout_path.clone();
         self.current_cwd = Some(session.cwd.to_path_buf());
         self.config.cwd = session.cwd.clone();
-        self.config.model_provider_id = session.model_provider_id.clone();
+        if self.config.model_provider_id != session.model_provider_id {
+            self.config.model_provider_id = session.model_provider_id.clone();
+            if let Some(provider) = self.config.model_providers.get(&session.model_provider_id) {
+                self.config.model_provider = provider.clone();
+            }
+            Arc::make_mut(&mut self.model_catalog).models.clear();
+            let request_id = uuid::Uuid::new_v4();
+            self.model_popup_request_id = Some(request_id);
+            self.app_event_tx.send(AppEvent::FetchModels { request_id });
+        }
+        self.realtime_conversation_available_for_thread = self.realtime_supported_by_provider()
+            && self.config.features.enabled(Feature::RealtimeConversation)
+            && codex_realtime_webrtc::RealtimeWebrtcSession::is_supported();
+        self.bottom_pane
+            .set_voice_command_enabled(self.realtime_conversation_available_for_thread);
         if connector_scope_changed {
             self.invalidate_connector_scope();
         }

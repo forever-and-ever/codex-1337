@@ -33,6 +33,8 @@ use crate::config_types::Verbosity;
 use crate::protocol::MultiAgentVersion;
 
 mod access_programs;
+#[path = "openai_models/anthropic.rs"]
+mod anthropic;
 #[path = "openai_models/guardian.rs"]
 mod guardian;
 pub use guardian::GuardianModelPolicy;
@@ -46,6 +48,8 @@ mod guardian_v2;
 mod reasoning_effort;
 
 pub use access_programs::ModelAccessPrograms;
+pub use anthropic::AnthropicModelCapabilities;
+pub use anthropic::AnthropicThinkingMode;
 pub use guardian_v2::GuardianV2ModelConfig;
 pub use guardian_v2::GuardianV2TranscriptModelConfig;
 
@@ -458,6 +462,14 @@ pub struct ModelInfo {
     /// context window when available.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_compact_token_limit: Option<i64>,
+    /// Accepts Anthropic signed checkpoints through the owned Claude transport.
+    /// Missing or unestablished model support remains disabled.
+    #[serde(default)]
+    pub supports_native_compaction: bool,
+    /// Native Messages capabilities advertised by Anthropic model discovery.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub anthropic: Option<AnthropicModelCapabilities>,
     /// Opaque identifier for compaction-compatible model configurations.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub comp_hash: Option<String>,
@@ -1085,6 +1097,8 @@ mod tests {
             context_window: None,
             max_context_window: None,
             auto_compact_token_limit: None,
+            supports_native_compaction: false,
+            anthropic: None,
             comp_hash: None,
             effective_context_window_percent: 95,
             experimental_supported_tools: vec![],

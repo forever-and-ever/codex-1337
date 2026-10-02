@@ -58,6 +58,7 @@ type McpToolApprovalMetadataMap =
 /// A session has at most 1 running task at a time, and can be interrupted by user input.
 pub(crate) struct Session {
     pub(crate) thread_id: ThreadId,
+    pub(crate) provider_id: String,
     pub(crate) installation_id: String,
     pub(super) tx_event: Sender<Event>,
     pub(super) agent_status: watch::Sender<AgentStatus>,
@@ -112,7 +113,7 @@ pub(crate) struct Session {
 pub(crate) struct SessionConfiguration {
     /// Runtime provider and its provider-specific execution policy.
     pub(super) provider: SharedModelProvider,
-    pub(super) account_selection: Arc<arc_swap::ArcSwapOption<String>>,
+    pub(super) account_selection: Arc<ProviderAccountSelections>,
 
     /// Desired configured inputs inherited by future turns.
     pub(super) step_settings: Arc<StepSettings>,
@@ -286,6 +287,8 @@ impl SessionConfiguration {
         ThreadConfigSnapshot {
             model: self.step_settings.collaboration_mode.model().to_string(),
             model_provider_id: self.original_config_do_not_use.model_provider_id.clone(),
+            model_provider_adapter: self.provider.info().adapter,
+            requires_openai_auth: self.provider.info().requires_openai_auth,
             service_tier: self.step_settings.service_tier.clone(),
             approval_policy: self.step_settings.approval_policy.value(),
             approvals_reviewer: self.step_settings.approvals_reviewer,
@@ -327,12 +330,18 @@ impl SessionConfiguration {
         ThreadSettingsSnapshot {
             account_id: self
                 .account_selection
-                .load_full()
-                .map(|id| (*id).clone())
+                .get(&self.original_config_do_not_use.model_provider_id)
+                .map(|selection| selection.id().to_owned())
                 .or_else(|| {
-                    self.provider
-                        .auth_manager()
-                        .and_then(|auth| auth.selected_account_id())
+                    self.original_config_do_not_use
+                        .model_provider
+                        .requires_openai_auth
+                        .then(|| {
+                            self.provider
+                                .auth_manager()
+                                .and_then(|auth| auth.selected_account_id())
+                        })
+                        .flatten()
                 }),
             model: self.step_settings.collaboration_mode.model().to_string(),
             model_provider_id: self.original_config_do_not_use.model_provider_id.clone(),
@@ -1550,6 +1559,7 @@ impl Session {
                 ContextManager::for_session(
                     &session_configuration.session_source,
                     &config.features,
+                    config.model_provider.adapter,
                 ),
             );
             state.base_instructions_provenance = base_instructions_provenance.clone();
@@ -1731,6 +1741,11 @@ impl Session {
             );
             let reasoning_effort_override_enabled =
                 config.features.enabled(Feature::ReasoningEffortOverride) && !title_request;
+            let initial_provider_account = (config.model_provider.adapter
+                == codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription)
+                .then(|| local_agent_runtime.account_selection.get(&config.model_provider_id))
+                .flatten()
+                .filter(|selection| matches!(selection.as_ref(), crate::agent::control::ProviderAccountSelection::ClaudeSubscription { .. }));
             let services = SessionServices {
                 // Start with an empty connection set. The initialized set is
                 // published after SessionConfigured so MCP events follow it.
@@ -1756,6 +1771,7 @@ impl Session {
                 .with_legacy_custom_ca_fallback(),
                 session_telemetry,
                 models_manager: Arc::clone(&models_manager),
+                agent_models_managers: Default::default(),
                 git_root_discovery,
                 tool_approvals: Mutex::new(ApprovalStore::default()),
                 runtime_handle: tokio::runtime::Handle::current(),
@@ -1807,6 +1823,7 @@ impl Session {
                     workspace_routing.as_ref().clone(),
                     extensions.model_request_contributors().to_vec(),
                 )
+                .with_provider_account(initial_provider_account)
                 .with_executed_tool_calls(executed_tool_calls.clone())
                 .with_restored_history(matches!(
                     &initial_history,
@@ -1834,6 +1851,7 @@ impl Session {
             let (mcp_prewarm_tx, mcp_prewarm_rx) = async_channel::bounded(1);
             let sess = Arc::new(Session {
                 thread_id,
+                provider_id: config.model_provider_id.clone(),
                 installation_id,
                 tx_event: tx_event.clone(),
                 agent_status,

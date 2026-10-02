@@ -166,14 +166,66 @@ impl AccountRequestProcessor {
                 AccountReadError::InvalidAccount(error) => invalid_request(error.to_string()),
                 AccountReadError::Routing(error) => internal_error(error.to_string()),
             })?;
+        let preferences = self.config_manager.load_non_project_config().await.ok();
+        let account_id = self.scoped_provider_account_id.clone().or_else(|| {
+            self.auth_manager
+                .is_account_scoped()
+                .then(|| self.auth_manager.selected_account_id())
+                .flatten()
+        });
+        let display_name =
+            account_id.as_deref().and_then(|id| {
+                let config = preferences
+                    .as_ref()
+                    .or(self.scoped_config.as_deref())
+                    .unwrap_or(self.config.as_ref());
+                let provider = if self.scoped_provider_account_id.is_some() {
+                    codex_app_server_protocol::SubscriptionAccountProvider::ClaudeSubscription
+                } else {
+                    codex_app_server_protocol::SubscriptionAccountProvider::Openai
+                };
+                config
+                    .wrangler
+                    .account_nicknames
+                    .get(provider.config_id())
+                    .and_then(|names| names.get(id))
+                    .cloned()
+                    .or_else(|| {
+                        (provider == codex_app_server_protocol::SubscriptionAccountProvider::Openai)
+                            .then(|| {
+                                config.wrangler.account_aliases.iter().find_map(
+                                    |(alias, account)| (account == id).then(|| alias.clone()),
+                                )
+                            })
+                            .flatten()
+                    })
+            });
         Ok(Some(
             GetAccountResponse {
-                account_id: self
-                    .auth_manager
-                    .is_account_scoped()
-                    .then(|| self.auth_manager.selected_account_id())
-                    .flatten(),
-                account: read.account_state.account.map(Account::from),
+                account_id,
+                display_name,
+                account: if let Some(id) = &self.scoped_provider_account_id {
+                    let config = preferences
+                        .as_ref()
+                        .or(self.scoped_config.as_deref())
+                        .unwrap_or(self.config.as_ref());
+                    let account_id: codex_login::anthropic::AccountId = id
+                        .parse()
+                        .map_err(|error: std::io::Error| invalid_request(error.to_string()))?;
+                    let email =
+                        codex_login::anthropic::AccountStore::new(config.codex_home.to_path_buf())
+                            .list()
+                            .map_err(|error| internal_error(error.to_string()))?
+                            .into_iter()
+                            .find(|account| account.identity.id() == account_id)
+                            .ok_or_else(|| {
+                                invalid_request("Claude subscription account is not saved")
+                            })?
+                            .email;
+                    Some(Account::ClaudeSubscription { email })
+                } else {
+                    read.account_state.account.map(Account::from)
+                },
                 requires_openai_auth: read.account_state.requires_openai_auth,
                 workspace_routing: read.workspace_routing.map(|routing| {
                     codex_app_server_protocol::WorkspaceRouting {
@@ -208,9 +260,13 @@ impl AccountRequestProcessor {
                             .await
                     }
                     None => {
-                        self.config_manager
-                            .load_latest_config(/*fallback_cwd*/ None)
-                            .await
+                        if let Some(config) = &self.scoped_config {
+                            Ok(config.as_ref().clone())
+                        } else {
+                            self.config_manager
+                                .load_latest_config(/*fallback_cwd*/ None)
+                                .await
+                        }
                     }
                 }
             };

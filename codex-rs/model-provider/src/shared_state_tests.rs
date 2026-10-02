@@ -499,6 +499,7 @@ async fn gateway_setup_errors_are_reported_when_authentication_is_requested() {
         info.clone(),
         Some(primary),
         Some(Err("failed to create provider OAuth HTTP client".into())),
+        /*anthropic_auth_context*/ None,
     );
     let error = endpoint
         .list_models(

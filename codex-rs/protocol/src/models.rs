@@ -35,6 +35,7 @@ use codex_utils_path_uri::PathUri;
 mod configuration_update;
 mod executed_tool_calls;
 mod item_metadata;
+mod native_compaction;
 
 pub use crate::local_media::MAX_PROMPT_AUDIO_INPUT_BYTES;
 pub use crate::local_media::snapshot_local_user_input;
@@ -53,6 +54,8 @@ pub use executed_tool_calls::bound_executed_tool_calls_for_prompt;
 pub use executed_tool_calls::bound_executed_tool_calls_for_prompt_prioritizing_recent;
 pub use executed_tool_calls::executed_tool_call_metadata_bytes;
 pub use item_metadata::ContentItemKind;
+pub use native_compaction::AnthropicSignedCompaction;
+pub use native_compaction::NativeCompaction;
 
 /// Controls the per-command sandbox override requested by a shell-like tool call.
 #[derive(
@@ -1234,6 +1237,14 @@ pub enum ResponseItem {
         #[ts(optional)]
         internal_chat_message_metadata_passthrough: Option<InternalChatMessageMetadataPassthrough>,
     },
+    /// Provider-native signed state, persisted and replayed without conversion.
+    NativeCompaction {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        id: Option<ResponseItemId>,
+        #[serde(flatten)]
+        compaction: NativeCompaction,
+    },
     /// A durable input control interpreted by the backend at its position in history.
     ConfigurationUpdate {
         reasoning: ConfigurationReasoning,
@@ -1278,6 +1289,7 @@ impl ResponseItem {
             | Self::Reasoning { id, .. }
             | Self::ImageGenerationCall { id, .. }
             | Self::Compaction { id, .. }
+            | Self::NativeCompaction { id, .. }
             | Self::ContextCompaction { id, .. } => id.as_ref(),
             Self::ConfigurationUpdate { .. } | Self::CompactionTrigger { .. } | Self::Other => None,
         }
@@ -1300,6 +1312,7 @@ impl ResponseItem {
             | Self::Reasoning { id, .. }
             | Self::ImageGenerationCall { id, .. }
             | Self::Compaction { id, .. }
+            | Self::NativeCompaction { id, .. }
             | Self::ContextCompaction { id, .. } => *id = new_id,
             Self::ConfigurationUpdate { .. } | Self::CompactionTrigger { .. } | Self::Other => {}
         }
@@ -1321,7 +1334,9 @@ impl ResponseItem {
             Self::ToolSearchOutput { .. } => Some("tso"),
             Self::WebSearchCall { .. } => Some("ws"),
             Self::ImageGenerationCall { .. } => Some("ig"),
-            Self::Compaction { .. } | Self::ContextCompaction { .. } => Some("cmp"),
+            Self::Compaction { .. }
+            | Self::NativeCompaction { .. }
+            | Self::ContextCompaction { .. } => Some("cmp"),
             Self::ConfigurationUpdate { .. } | Self::CompactionTrigger { .. } | Self::Other => None,
         }
     }
@@ -1458,6 +1473,7 @@ impl ResponseItem {
                 ..
             } => metadata.as_ref(),
             Self::ConfigurationUpdate { .. }
+            | Self::NativeCompaction { .. }
             | Self::CompactionTrigger { .. }
             | Self::AdditionalTools { .. }
             | Self::Other => None,
@@ -1525,6 +1541,7 @@ impl ResponseItem {
                 ..
             } => Some(metadata),
             Self::ConfigurationUpdate { .. }
+            | Self::NativeCompaction { .. }
             | Self::CompactionTrigger { .. }
             | Self::AdditionalTools { .. }
             | Self::Other => None,

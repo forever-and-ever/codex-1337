@@ -2,11 +2,13 @@
 source: tui/src/chatwidget/tests/popups_and_settings.rs
 expression: "render_bottom_popup(&chat, 100)"
 ---
-  Select Account
-  Conversation + agents; also the new-conversation default.
+  Accounts
+  ChatGPT changes this conversation; Claude sets its new-conversation default.
 
 
-› 1. work (current)   alice@example.com · pro · alice:personal
-  2. bob@example.com  switch pending · pro · bob:personal
+› 1. ChatGPT · personal (current)    alice@example.com · pro · alice:personal
+  2. ChatGPT · bob@example.com       switch pending · pro · bob:personal
+  3. Claude · work Claude (current)  claude@example.com
+  4. Add Claude account              Sign in with your Claude subscription
 
-  enter select · esc back
+  enter select · ctrl+r rename · esc back

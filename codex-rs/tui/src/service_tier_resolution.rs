@@ -20,6 +20,11 @@ pub(crate) fn effective_service_tier(
     model: &str,
     models: &[ModelPreset],
 ) -> Option<String> {
+    if config.model_provider.adapter
+        == codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription
+    {
+        return Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string());
+    }
     let configured = configured_service_tier(config, notices);
     if configured.as_deref() == Some(ServiceTier::Flex.request_value()) {
         return configured;

@@ -11,10 +11,10 @@ use crate::rollout_budget::RolloutBudget;
 use crate::thread_manager::ThreadIdGenerator;
 use crate::thread_manager::ThreadManagerState;
 use arc_swap::ArcSwap;
-use arc_swap::ArcSwapOption;
 use codex_extension_api::ThreadInstructionsProvider;
 use codex_protocol::SessionId;
 use codex_protocol::ThreadId;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::sync::Weak;
@@ -33,7 +33,7 @@ pub(crate) struct LocalAgentRuntime {
     pub(super) rollout_budget: Arc<RolloutBudget>,
     pub(super) lifecycle: Arc<tokio::sync::RwLock<()>>,
     pub(super) service_tiers: Arc<ArcSwap<super::service_tier::TierTree>>,
-    pub(crate) account_selection: Arc<ArcSwapOption<String>>,
+    pub(crate) account_selection: Arc<ProviderAccountSelections>,
     /// Retains the root's opt-in instruction provider even when the root is unloaded.
     pub(super) shared_thread_instructions_provider:
         Arc<OnceLock<Arc<dyn ThreadInstructionsProvider>>>,
@@ -71,6 +71,42 @@ impl LocalAgentRuntime {
             session_id,
             runtime: self.clone(),
         }
+    }
+}
+
+/// A family's desired account is keyed by its configured provider identity,
+/// never by a transport dialect shared by unrelated providers.
+#[derive(Default)]
+pub(crate) struct ProviderAccountSelections {
+    selected: ArcSwap<HashMap<String, Arc<ProviderAccountSelection>>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum ProviderAccountSelection {
+    Chatgpt { id: String },
+    ClaudeSubscription { id: String },
+}
+
+impl ProviderAccountSelection {
+    pub(crate) fn id(&self) -> &str {
+        match self {
+            Self::Chatgpt { id } | Self::ClaudeSubscription { id, .. } => id,
+        }
+    }
+}
+
+impl ProviderAccountSelections {
+    pub(crate) fn get(&self, provider_id: &str) -> Option<Arc<ProviderAccountSelection>> {
+        self.selected.load().get(provider_id).cloned()
+    }
+
+    pub(crate) fn select(&self, provider_id: &str, account: ProviderAccountSelection) {
+        let account = Arc::new(account);
+        self.selected.rcu(|current| {
+            let mut next = (**current).clone();
+            next.insert(provider_id.to_owned(), Arc::clone(&account));
+            next
+        });
     }
 }
 

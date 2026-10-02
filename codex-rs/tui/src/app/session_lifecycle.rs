@@ -302,6 +302,7 @@ impl App {
             .await
         {
             Ok(thread) => {
+                self.agent_navigation.record_model(&thread);
                 let is_parent_owned = thread_blocks_direct_input(&thread);
                 let agent_path = source_agent_path(&thread.source);
                 let is_closed = matches!(
@@ -958,6 +959,26 @@ impl App {
         initial_user_message: Option<crate::chatwidget::UserMessage>,
         new_thread_name: Option<String>,
     ) {
+        self.start_fresh_session_with_provider(
+            tui,
+            app_server,
+            session_start_source,
+            initial_user_message,
+            new_thread_name,
+            /*provider*/ None,
+        )
+        .await;
+    }
+
+    pub(super) async fn start_fresh_session_with_provider(
+        &mut self,
+        tui: &mut tui::Tui,
+        app_server: &mut AppServerSession,
+        session_start_source: Option<ThreadStartSource>,
+        initial_user_message: Option<crate::chatwidget::UserMessage>,
+        new_thread_name: Option<String>,
+        provider: Option<super::ProviderModelChoice>,
+    ) {
         if self.reject_pending_permission_root_switch() {
             if let Some(message) = initial_user_message {
                 self.chat_widget.restore_user_message_to_composer(message);
@@ -985,17 +1006,38 @@ impl App {
             &self.cli_kv_overrides,
             &self.harness_overrides,
         );
-        match app_server
-            .start_thread_with_session_start_source(
-                &self.local_settings,
-                &config,
-                session_start_source,
-                /*remote_cwd_override*/ None,
-                /*selected_profile*/ None,
-            )
-            .await
-        {
+        if let Some(choice) = &provider {
+            config.model_provider_id = choice.provider.id.clone();
+            if let Some(info) = config.model_providers.get(&choice.provider.id) {
+                config.model_provider = info.clone();
+            }
+            config.model = Some(choice.model.model.clone());
+            config.model_reasoning_effort = Some(choice.effort.clone());
+            // A new billing provider must not inherit an unrelated provider's /fast selection.
+            config.service_tier = Some("default".into());
+        }
+        let started = if let Some(choice) = &provider {
+            app_server
+                .start_provider_thread(&self.local_settings, &config, &choice.provider.id)
+                .await
+        } else {
+            app_server
+                .start_thread_with_session_start_source(
+                    &self.local_settings,
+                    &config,
+                    session_start_source,
+                    /*remote_cwd_override*/ None,
+                    /*selected_profile*/ None,
+                )
+                .await
+        };
+        match started {
             Ok(mut started) => {
+                if let Some(choice) = &provider {
+                    let catalog = Arc::make_mut(&mut self.model_catalog);
+                    catalog.models = vec![choice.model.clone()];
+                    app_server.set_available_models(catalog.models.clone());
+                }
                 if let Some(thread_id) = self.current_displayed_thread_id()
                     && let Some(blank) = self.agents_overview.blank_sessions.get_mut(&thread_id)
                 {
@@ -1052,8 +1094,27 @@ impl App {
                     self.chat_widget.add_error_message(format!(
                         "Failed to attach to fresh app-server thread: {err}"
                     ));
-                } else if let Some(err) = name_error {
-                    self.chat_widget.add_error_message(err);
+                } else {
+                    if let Some(choice) = provider
+                        && let Err(err) = self
+                            .persist_model_defaults(
+                                app_server.request_handle(),
+                                crate::config_update::build_model_selection_edits(
+                                    &choice.provider.id,
+                                    &choice.model.model,
+                                    Some(choice.effort),
+                                ),
+                                "default provider, model, and reasoning effort",
+                            )
+                            .await
+                    {
+                        self.chat_widget.add_error_message(format!(
+                            "Conversation started, but failed to save default model: {err}"
+                        ));
+                    }
+                    if let Some(err) = name_error {
+                        self.chat_widget.add_error_message(err);
+                    }
                 }
             }
             Err(err) => {
@@ -1196,6 +1257,11 @@ impl App {
 
         let mut refreshed_thread_ids = HashSet::new();
         for thread in find_loaded_subagent_threads_for_primary(threads, primary_thread_id) {
+            if let Some(model) = thread.model {
+                self.agent_navigation.models.insert(thread.thread_id, model);
+            } else {
+                self.agent_navigation.models.remove(&thread.thread_id);
+            }
             let agent_path = thread.agent_path;
             let is_closed = matches!(
                 thread.status,

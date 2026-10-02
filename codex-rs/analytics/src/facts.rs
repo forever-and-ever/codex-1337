@@ -466,6 +466,7 @@ pub enum CompactionReason {
 pub enum CompactionImplementation {
     Responses,
     ResponsesCompactionV2,
+    AnthropicNative,
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]

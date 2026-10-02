@@ -1,3 +1,4 @@
+use super::multi_agents_message::agent_message_parameters;
 use crate::agent::child_config::MAX_SPAWN_AGENT_MODEL_OVERRIDES;
 use crate::agent::child_config::model_supports_multi_agent_backend;
 use codex_protocol::openai_models::ModelPreset;
@@ -16,8 +17,7 @@ const MULTI_AGENT_V1_NAMESPACE_DESCRIPTION: &str = "Tools for spawning and manag
 
 const SPAWN_AGENT_INHERITED_MODEL_GUIDANCE: &str = "Spawned agents inherit your current model by default. Omit `model` to use that preferred default; set `model` only when an explicit override is needed.";
 const SPAWN_AGENT_TYPE_OVERRIDE_DESCRIPTION_V1: &str = "Agent type override for the new agent. Omit to inherit the parent agent type with a full-history fork; otherwise, `default` is used.";
-const SPAWN_AGENT_MODEL_OVERRIDE_DESCRIPTION: &str =
-    "Model override for the new agent. Omit unless an explicit override is needed.";
+const SPAWN_AGENT_MODEL_OVERRIDE_DESCRIPTION: &str = "Model override for the new agent. Omit unless an explicit override is needed. Use a listed provider/model selector or an unambiguous model name. Only fresh agents may change provider; history forks retain the parent's provider.";
 const MAX_REASONING_EFFORT_CHARS_IN_SPAWN_AGENT_DESCRIPTION: usize = 64;
 
 fn service_tier_parameter() -> JsonSchema {
@@ -159,11 +159,7 @@ pub fn create_spawn_agent_tool_v2(
         ),
         strict: false,
         defer_loading: None,
-        parameters: JsonSchema::object(
-            properties,
-            Some(vec!["task_name".to_string(), "message".to_string()]),
-            Some(false.into()),
-        ),
+        parameters: agent_message_parameters(properties, vec!["task_name".to_string()]),
         output_schema: Some(
             spawn_agent_output_schema_v2(options.hide_agent_type_model_reasoning).into(),
         ),
@@ -209,21 +205,12 @@ pub fn create_send_input_tool_v1() -> ToolSpec {
 }
 
 pub fn create_send_message_tool() -> ToolSpec {
-    let properties = BTreeMap::from([
-        (
-            "target".to_string(),
-            JsonSchema::string(Some(
-                "Relative or canonical task name to message (from spawn_agent).".to_string(),
-            )),
-        ),
-        (
-            "message".to_string(),
-            JsonSchema::string(Some(
-                "Message text to queue on the target agent.".to_string(),
-            ))
-            .with_encrypted(),
-        ),
-    ]);
+    let properties = BTreeMap::from([(
+        "target".to_string(),
+        JsonSchema::string(Some(
+            "Relative or canonical task name to message (from spawn_agent).".to_string(),
+        )),
+    )]);
 
     ToolSpec::Function(ResponsesApiTool {
         name: "send_message".to_string(),
@@ -231,32 +218,19 @@ pub fn create_send_message_tool() -> ToolSpec {
             .to_string(),
         strict: false,
         defer_loading: None,
-        parameters: JsonSchema::object(
-            properties,
-            Some(vec!["target".to_string(), "message".to_string()]),
-            Some(false.into()),
-        ),
+        parameters: agent_message_parameters(properties, vec!["target".to_string()]),
         output_schema: None,
     })
 }
 
 pub fn create_followup_task_tool() -> ToolSpec {
-    let properties = BTreeMap::from([
-        (
-            "target".to_string(),
-            JsonSchema::string(Some(
-                "Agent id or canonical task name to send a follow-up task to (from spawn_agent)."
-                    .to_string(),
-            )),
-        ),
-        (
-            "message".to_string(),
-            JsonSchema::string(Some(
-                "Message text to send to the target agent.".to_string(),
-            ))
-            .with_encrypted(),
-        ),
-    ]);
+    let properties = BTreeMap::from([(
+        "target".to_string(),
+        JsonSchema::string(Some(
+            "Agent id or canonical task name to send a follow-up task to (from spawn_agent)."
+                .to_string(),
+        )),
+    )]);
 
     ToolSpec::Function(ResponsesApiTool {
         name: "followup_task".to_string(),
@@ -264,7 +238,7 @@ pub fn create_followup_task_tool() -> ToolSpec {
             .to_string(),
         strict: false,
         defer_loading: None,
-        parameters: JsonSchema::object(properties, Some(vec!["target".to_string(), "message".to_string()]), Some(false.into())),
+        parameters: agent_message_parameters(properties, vec!["target".to_string()]),
         output_schema: None,
     })
 }
@@ -659,13 +633,6 @@ fn spawn_agent_common_properties_v1(agent_type_description: &str) -> BTreeMap<St
 fn spawn_agent_common_properties_v2(agent_type_description: &str) -> BTreeMap<String, JsonSchema> {
     BTreeMap::from([
         ("service_tier".to_string(), service_tier_parameter()),
-        (
-            "message".to_string(),
-            JsonSchema::string(Some(
-                "Initial plain-text task for the new agent.".to_string(),
-            ))
-            .with_encrypted(),
-        ),
         (
             "agent_type".to_string(),
             JsonSchema::string(Some(format!(

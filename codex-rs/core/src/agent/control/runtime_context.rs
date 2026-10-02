@@ -3,8 +3,10 @@
 
 use super::LocalAgentRuntime;
 use crate::agent::types::AgentMetadata;
+use crate::codex_thread::CodexThread;
 use crate::session_prefix::format_subagent_context_line;
 use crate::thread_manager::ThreadManagerState;
+use codex_protocol::AgentPath;
 use codex_protocol::ThreadId;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
@@ -12,6 +14,16 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 impl LocalAgentRuntime {
+    pub(crate) async fn root_thread(&self) -> CodexResult<Arc<CodexThread>> {
+        let id = self
+            .registry
+            .agent_id_for_path(&AgentPath::root())
+            .ok_or_else(|| {
+                CodexErr::UnsupportedOperation("family root is not registered".into())
+            })?;
+        self.upgrade()?.get_thread(id).await
+    }
+
     pub(crate) fn register_session_root(
         &self,
         current_thread_id: ThreadId,

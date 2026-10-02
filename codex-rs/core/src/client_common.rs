@@ -100,6 +100,7 @@ fn normalize_image_details(items: &mut [ResponseItem], model_info: &ModelInfo) {
             | ResponseItem::WebSearchCall { .. }
             | ResponseItem::ImageGenerationCall { .. }
             | ResponseItem::Compaction { .. }
+            | ResponseItem::NativeCompaction { .. }
             | ResponseItem::ConfigurationUpdate { .. }
             | ResponseItem::CompactionTrigger { .. }
             | ResponseItem::ContextCompaction { .. }

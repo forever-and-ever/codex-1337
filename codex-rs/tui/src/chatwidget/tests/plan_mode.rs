@@ -1618,6 +1618,7 @@ async fn rejected_initial_image_does_not_submit_later_queued_prompt() {
 
     let mut session = plan_test_session(ThreadId::new());
     session.model = current_model;
+    session.model_provider_id = chat.config.model_provider_id.clone();
     chat.handle_thread_session(session);
 
     assert_no_submit_op(&mut op_rx);

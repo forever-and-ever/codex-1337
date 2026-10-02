@@ -1581,7 +1581,18 @@ impl App {
                 self.refresh_rate_limits(app_server, origin);
             }
             AppEvent::OpenAccountPicker { thread_id } => self.open_account_picker(app_server, thread_id),
-            AppEvent::SelectAccount { thread_id, account_id } => self.select_account(app_server, thread_id, account_id),
+            AppEvent::SelectAccount { thread_id, account_id, provider } => self.select_account(app_server, thread_id, account_id, provider),
+            AppEvent::RenameAccountPrompt { thread_id, provider, account_id, nickname } => {
+                if self.current_displayed_thread_id() == Some(thread_id) {
+                    self.chat_widget.show_account_nickname_prompt(thread_id, provider, account_id, nickname);
+                }
+            }
+            AppEvent::SetAccountNickname { thread_id, provider, account_id, nickname } => self.set_account_nickname(app_server, thread_id, provider, account_id, nickname),
+            AppEvent::AccountNicknameSetFinished { thread_id, result } => self.finish_account_nickname_set(app_server, thread_id, result),
+            AppEvent::AddClaudeAccount { thread_id } => self.add_claude_account(app_server, thread_id),
+            AppEvent::ClaudeLoginStarted { thread_id, result } => self.finish_claude_login_start(thread_id, result),
+            AppEvent::CancelClaudeLogin { login_id } => self.cancel_claude_login(app_server, login_id),
+            AppEvent::ClaudeLoginCancelFailed { error } => self.chat_widget.add_error_message(error),
             AppEvent::AccountPickerLoaded { thread_id, serial, result } => self.apply_account_picker(thread_id, serial, result),
             AppEvent::AccountSelectionFinished { thread_id, result } => self.finish_account_selection(app_server, thread_id, result),
             AppEvent::RefreshConversationAccount { thread_id } => self.refresh_conversation_account(app_server, thread_id),
@@ -2042,7 +2053,7 @@ impl App {
             }
             AppEvent::FetchModels { request_id } => {
                 if self.chat_widget.model_popup_request_is_current(request_id) {
-                    app_server.fetch_models(request_id, self.app_event_tx.clone());
+                    app_server.fetch_models(request_id, self.chat_widget.config_ref().model_provider_id.clone(), self.app_event_tx.clone());
                 }
             }
             AppEvent::ModelsLoaded { request_id, result } => {
@@ -2052,6 +2063,8 @@ impl App {
                     self.sync_active_thread_service_tier_to_cached_session().await;
                 }
             }
+            AppEvent::ProviderModel(event) => self.handle_provider_model_event(tui, app_server, event).await,
+            AppEvent::OpenProviderReasoning { provider, model } => self.chat_widget.show_provider_reasoning(provider, model),
             AppEvent::OpenReasoningPopup { model } => {
                 self.chat_widget.open_reasoning_popup(model);
             }
@@ -2092,6 +2105,7 @@ impl App {
                     && let Err(err) = self.persist_model_defaults(
                         app_server.request_handle(),
                         crate::config_update::build_model_selection_edits(
+                            &self.chat_widget.config_ref().model_provider_id,
                             model.as_str(),
                             Some(default_effort),
                         ),
@@ -2298,12 +2312,14 @@ impl App {
             }
             AppEvent::PersistModelSelection { model, effort } => {
                 self.app_event_tx.send(AppEvent::FollowTranscript);
+                let edits = crate::config_update::build_model_selection_edits(
+                    &self.chat_widget.config_ref().model_provider_id,
+                    model.as_str(),
+                    effort.as_ref(),
+                );
                 match self.persist_model_defaults(
                     app_server.request_handle(),
-                    crate::config_update::build_model_selection_edits(
-                        model.as_str(),
-                        effort.as_ref(),
-                    ),
+                    edits,
                     "default model and reasoning effort",
                 )
                 .await

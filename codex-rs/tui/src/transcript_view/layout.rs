@@ -155,14 +155,6 @@ pub(super) struct CellPresentation {
 }
 
 impl TranscriptView {
-    pub(crate) fn set_output_estimates_enabled(&mut self, enabled: bool) {
-        if self.output_estimates_enabled != enabled {
-            self.output_estimates_enabled = enabled;
-            self.cache.clear();
-            self.live_key = None;
-        }
-    }
-
     pub(super) fn layout(
         &mut self,
         cells: &[Arc<dyn HistoryCell>],

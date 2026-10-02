@@ -27,7 +27,6 @@ use codex_history::ReconciledRetainedContext;
 use codex_history::RetainedContextEntry;
 use codex_history::RetainedContextOrder;
 use codex_history::RetainedUserMessage;
-use codex_protocol::AgentPath;
 use codex_protocol::ThreadId;
 use codex_protocol::items::AgentMessageContent;
 use codex_protocol::items::TurnItem;
@@ -44,15 +43,11 @@ impl LocalAgentControl {
         &self,
         thread_id: ThreadId,
     ) -> Option<GuardianRootSnapshot> {
-        let root_thread_id = self
-            .runtime
-            .registry
-            .agent_id_for_path(&AgentPath::root())?;
+        let root_thread = self.runtime.root_thread().await.ok()?;
+        let root_thread_id = root_thread.session.thread_id();
         if root_thread_id == thread_id {
             return None;
         }
-        let manager = self.runtime.upgrade().ok()?;
-        let root_thread = manager.get_thread(root_thread_id).await.ok()?;
         if root_thread.multi_agent_version() != Some(MultiAgentVersion::V2) {
             return None;
         }

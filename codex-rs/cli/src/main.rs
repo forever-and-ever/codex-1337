@@ -12,12 +12,15 @@ use codex_arg0::Arg0DispatchPaths;
 use codex_arg0::arg0_dispatch_or_else;
 use codex_chatgpt::apply_command::ApplyCommand;
 use codex_chatgpt::apply_command::run_apply_command;
+use codex_cli::LoginAction as LoginSubcommand;
 use codex_cli::read_access_token_from_stdin;
 use codex_cli::read_api_key_from_stdin;
+use codex_cli::run_claude_account_command;
 use codex_cli::run_login_status;
 use codex_cli::run_login_with_access_token;
 use codex_cli::run_login_with_api_key;
 use codex_cli::run_login_with_chatgpt;
+use codex_cli::run_login_with_claude_subscription;
 use codex_cli::run_login_with_device_code;
 use codex_cli::run_logout;
 use codex_cloud_tasks::Cli as CloudTasksCli;
@@ -508,6 +511,9 @@ enum ExecpolicySubcommand {
 
 #[derive(Debug, Parser)]
 struct LoginCommand {
+    /// Subscription provider; defaults to the existing OpenAI login flow.
+    #[arg(long, value_enum, conflicts_with_all = ["with_api_key", "with_access_token", "api_key", "use_device_code", "issuer_base_url", "client_id"])]
+    provider: Option<LoginProvider>,
     #[clap(skip)]
     config_overrides: CliConfigOverrides,
 
@@ -549,10 +555,12 @@ struct LoginCommand {
     action: Option<LoginSubcommand>,
 }
 
-#[derive(Debug, clap::Subcommand)]
-enum LoginSubcommand {
-    /// Show login status.
-    Status,
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+enum LoginProvider {
+    #[value(name = "openai")]
+    Openai,
+    #[value(name = "claude_subscription")]
+    ClaudeSubscription,
 }
 
 #[derive(Debug, Parser)]
@@ -1562,10 +1570,30 @@ async fn cli_main(
             );
             match login_cli.action {
                 Some(LoginSubcommand::Status) => {
+                    if matches!(login_cli.provider, Some(LoginProvider::ClaudeSubscription)) {
+                        run_claude_account_command(
+                            login_cli.config_overrides,
+                            LoginSubcommand::Status,
+                        )
+                        .await;
+                    }
                     run_login_status(login_cli.config_overrides).await;
                 }
+                Some(
+                    action @ (LoginSubcommand::Select { .. } | LoginSubcommand::Rename { .. }),
+                ) => {
+                    if !matches!(login_cli.provider, Some(LoginProvider::ClaudeSubscription)) {
+                        eprintln!(
+                            "Use --provider claude_subscription to select or rename a Claude account."
+                        );
+                        std::process::exit(1);
+                    }
+                    run_claude_account_command(login_cli.config_overrides, action).await;
+                }
                 None => {
-                    if login_cli.with_api_key && login_cli.with_access_token {
+                    if matches!(login_cli.provider, Some(LoginProvider::ClaudeSubscription)) {
+                        run_login_with_claude_subscription(login_cli.config_overrides).await;
+                    } else if login_cli.with_api_key && login_cli.with_access_token {
                         eprintln!(
                             "Choose one login credential source: --with-api-key or --with-access-token."
                         );

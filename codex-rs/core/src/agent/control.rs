@@ -59,6 +59,8 @@ use uuid::Uuid;
 
 pub(crate) use self::runtime::AgentControlInit;
 pub(crate) use self::runtime::LocalAgentRuntime;
+pub(crate) use self::runtime::ProviderAccountSelection;
+pub(crate) use self::runtime::ProviderAccountSelections;
 pub(crate) use self::watch::StatusSubscription;
 
 mod api;

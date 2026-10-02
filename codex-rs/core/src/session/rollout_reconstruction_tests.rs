@@ -127,6 +127,7 @@ async fn sender_context_follows_its_delivery_through_checkpoint_and_rollback() {
     let mut live = ContextManager::for_session(
         &SessionSource::default(),
         &crate::config::ManagedFeatures::from(codex_features::Features::with_defaults()),
+        codex_model_provider_info::ModelProviderAdapter::OpenaiCompatible,
     );
     let mut items = Vec::new();
     let mut snapshots = Vec::new();

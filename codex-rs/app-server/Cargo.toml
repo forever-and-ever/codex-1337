@@ -58,6 +58,7 @@ codex-file-watcher = { workspace = true }
 codex-hooks = { workspace = true }
 codex-history-notes-extension = { workspace = true }
 codex-http-client = { workspace = true }
+http = { workspace = true }
 codex-otel = { workspace = true }
 codex-plugin = { workspace = true }
 codex-shell-command = { workspace = true }
@@ -138,9 +139,6 @@ codex-utils-cargo-bin = { workspace = true }
 core_test_support = { workspace = true }
 flate2 = { workspace = true }
 hmac = { workspace = true }
-http = { workspace = true }
-opentelemetry = { workspace = true }
-opentelemetry_sdk = { workspace = true }
 pretty_assertions = { workspace = true }
 rcgen = { workspace = true }
 rmcp = { workspace = true, default-features = false, features = [
@@ -155,5 +153,4 @@ tar = { workspace = true }
 test-case = "3.3.1"
 tokio-rustls = { workspace = true }
 tokio-tungstenite = { workspace = true }
-tracing-opentelemetry = { workspace = true }
 wiremock = { workspace = true }

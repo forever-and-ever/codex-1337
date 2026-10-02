@@ -1,0 +1,11 @@
+---
+source: tui/src/chatwidget/tests/popups_and_settings.rs
+assertion_line: 76
+expression: "render_bottom_popup(&chat, 100)"
+---
+  Rename Claude account
+  Display only; empty clears; account routing never changes
+
+› work Claude
+
+  enter submit · esc back

@@ -167,8 +167,6 @@ async fn returned_batches_keep_one_disclosure_and_bill_across_live_replay_and_pa
                 "page {kind:?} ordinary={ordinary} split={split}"
             );
         }
-        app.transcript_view
-            .set_output_estimates_enabled(/*enabled*/ true);
         for (id, count) in [("a", 1000), ("b", 280), ("c", 20), ("a", 1000)] {
             app.transcript_view.record_tool_output_tokens(
                 format!("tool-output-tokens:{id}"),
@@ -176,6 +174,9 @@ async fn returned_batches_keep_one_disclosure_and_bill_across_live_replay_and_pa
                 Some(count),
             );
         }
+        // Exercise production rendering before checking the persisted batch totals.
+        let screen_size = tui.terminal.size().unwrap();
+        app.render_owned_transcript(&mut tui, screen_size).unwrap();
         assert_eq!(
             expected
                 .iter()
@@ -317,8 +318,6 @@ async fn patch_files_keep_disclosures_and_one_batch_bill_across_live_replay_and_
                 "file_count={file_count} with_command={with_command} split={split}"
             );
         }
-        app.transcript_view
-            .set_output_estimates_enabled(/*enabled*/ true);
         for (id, tokens) in [("a", 100), ("b", 23), ("a", 100)] {
             app.transcript_view.record_tool_output_tokens(
                 format!("tool-output-tokens:{id}"),

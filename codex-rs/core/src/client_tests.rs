@@ -102,6 +102,9 @@ use wiremock::matchers::path;
 
 const TEST_INSTALLATION_ID: &str = "11111111-1111-4111-8111-111111111111";
 
+#[path = "client_anthropic_tests.rs"]
+mod anthropic;
+
 fn test_model_client(session_source: SessionSource) -> ModelClient {
     test_model_client_with_thread_id(ThreadId::new(), session_source)
 }
@@ -360,9 +363,9 @@ async fn client_setup_accepts_command_credential_refresh() {
 }
 
 #[tokio::test]
-async fn client_setup_rebuilds_chatgpt_refresh_but_rejects_account_switches() {
-    for (user, workspace, expected_calls) in [
-        ("user-a", "workspace-a", 2),
+async fn client_setup_rebuilds_coherent_auth_after_refresh_and_account_switches() {
+    for (user, workspace, expected_owner_generation) in [
+        ("user-a", "workspace-a", 0),
         ("user-b", "workspace-a", 1),
         ("user-a", "workspace-b", 1),
     ] {
@@ -396,29 +399,25 @@ async fn client_setup_rebuilds_chatgpt_refresh_but_rejects_account_switches() {
         });
         let mut client = test_model_client(SessionSource::Exec);
         Arc::get_mut(&mut client.state).unwrap().provider = provider.clone();
-        let result = client
+        let setup = client
             .current_client_setup(super::ClientRouting::ConfiguredProvider)
-            .await;
-        if expected_calls == 2 {
-            let setup = result.unwrap();
-            let mut headers = http::HeaderMap::new();
-            setup.api_auth.add_auth_headers(&mut headers);
-            assert_eq!(
-                headers.get(http::header::AUTHORIZATION).unwrap(),
-                &format!("Bearer {refreshed_token}")
-            );
-            assert_eq!(setup.auth.unwrap().get_token().unwrap(), refreshed_token);
-            assert_eq!(
-                (setup.auth_revision, setup.auth_owner_generation),
-                (Some(*manager.auth_change_receiver().borrow()), Some(0))
-            );
-        } else {
-            assert_eq!(
-                result.err().expect("account switch must fail").to_string(),
-                "account changed while preparing model request"
-            );
-        }
-        assert_eq!(provider.setup_calls.load(Ordering::SeqCst), expected_calls);
+            .await
+            .unwrap();
+        let mut headers = http::HeaderMap::new();
+        setup.api_auth.add_auth_headers(&mut headers);
+        assert_eq!(
+            headers.get(http::header::AUTHORIZATION).unwrap(),
+            &format!("Bearer {refreshed_token}")
+        );
+        assert_eq!(setup.auth.unwrap().get_token().unwrap(), refreshed_token);
+        assert_eq!(
+            (setup.auth_revision, setup.auth_owner_generation),
+            (
+                Some(*manager.auth_change_receiver().borrow()),
+                Some(expected_owner_generation)
+            )
+        );
+        assert_eq!(provider.setup_calls.load(Ordering::SeqCst), 2);
     }
 }
 

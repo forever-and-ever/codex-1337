@@ -15,6 +15,7 @@
 //! found. The primary thread itself is never included in the output.
 
 use crate::app_server_session::thread_blocks_direct_input;
+use crate::subagent_roster::AgentModel;
 use codex_app_server_protocol::SessionSource;
 use codex_app_server_protocol::Thread;
 use codex_app_server_protocol::ThreadStatus;
@@ -25,8 +26,9 @@ use std::collections::HashSet;
 
 /// A subagent thread discovered by the spawn-tree walk, carrying just enough metadata for the
 /// TUI to register it in the navigation cache and rendering metadata map.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct LoadedSubagentThread {
+    pub(crate) model: Option<AgentModel>,
     pub(crate) thread_id: ThreadId,
     pub(crate) agent_nickname: Option<String>,
     pub(crate) agent_role: Option<String>,
@@ -88,6 +90,7 @@ pub(crate) fn find_loaded_subagent_threads_for_primary(
             threads_by_id
                 .remove(&thread_id)
                 .map(|thread| LoadedSubagentThread {
+                    model: AgentModel::from_thread(&thread),
                     blocks_direct_input: thread_blocks_direct_input(&thread),
                     status: thread.status.clone(),
                     thread_id,
@@ -210,6 +213,8 @@ mod tests {
         child.status = ThreadStatus::Active {
             active_flags: Vec::new(),
         };
+        child.model = Some("gpt-6.1-sol".into());
+        child.reasoning_effort = Some(codex_protocol::openai_models::ReasoningEffort::XHigh);
 
         let mut grandchild = test_thread(
             grandchild_thread_id,
@@ -238,6 +243,10 @@ mod tests {
             loaded,
             vec![
                 LoadedSubagentThread {
+                    model: Some(crate::subagent_roster::AgentModel {
+                        model: "gpt-6.1-sol".into(),
+                        effort: Some(codex_protocol::openai_models::ReasoningEffort::XHigh),
+                    }),
                     blocks_direct_input: false,
                     thread_id: child_thread_id,
                     agent_nickname: Some("Scout".to_string()),
@@ -248,6 +257,7 @@ mod tests {
                     },
                 },
                 LoadedSubagentThread {
+                    model: None,
                     blocks_direct_input: true,
                     thread_id: grandchild_thread_id,
                     agent_nickname: Some("Atlas".to_string()),

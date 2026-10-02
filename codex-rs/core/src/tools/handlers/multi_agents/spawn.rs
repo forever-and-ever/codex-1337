@@ -100,7 +100,9 @@ async fn handle_spawn_agent(
         step_context.as_ref(),
         SpawnConfigOptions {
             version: SpawnConfigVersion::V1,
-            full_history_fork: args.fork_context,
+            fork_mode: args
+                .fork_context
+                .then_some(&SpawnAgentForkMode::FullHistory),
             role_name,
             model: args.model.as_deref(),
             reasoning_effort: args.reasoning_effort.clone(),

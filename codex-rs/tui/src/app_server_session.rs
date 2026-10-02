@@ -503,6 +503,9 @@ impl AppServerSession {
                     .request_typed::<ModelListResponse>(ClientRequest::ModelList {
                         request_id: model_request_id,
                         params: ModelListParams {
+                            model_provider: self
+                                .thread_params_mode()
+                                .model_provider_from_config(config),
                             cursor: None,
                             limit: None,
                             include_hidden: Some(true),
@@ -591,9 +594,14 @@ impl AppServerSession {
                     true,
                 )
             }
-            Some(Account::AmazonBedrock { .. }) => {
-                (None, None, None, None, FeedbackAudience::External, false)
-            }
+            Some(Account::ClaudeSubscription { email }) => (
+                email.clone(),
+                None,
+                Some(StatusAccountDisplay::ClaudeSubscription { email }),
+                None,
+                FeedbackAudience::External,
+                false,
+            ),
             None => (None, None, None, None, FeedbackAudience::External, false),
         };
         Ok(AppServerBootstrap {
@@ -661,7 +669,6 @@ impl AppServerSession {
         remote_cwd_override: Option<&std::path::Path>,
         selected_profile: Option<&PermissionProfileSelection>,
     ) -> Result<AppServerStartedThread> {
-        let request_id = self.next_request_id();
         let session_config = self.session_config_with_effective_service_tier(config);
         let mut params = thread_start_params_from_config(
             &session_config,
@@ -677,6 +684,17 @@ impl AppServerSession {
             params.approvals_reviewer = selected_profile.approvals_reviewer.map(Into::into);
             remove_permission_config_overrides(&mut params.config);
         }
+        self.start_thread_with_params(local_settings, config, params)
+            .await
+    }
+
+    async fn start_thread_with_params(
+        &mut self,
+        local_settings: &LocalSettings,
+        config: &Config,
+        mut params: ThreadStartParams,
+    ) -> Result<AppServerStartedThread> {
+        let request_id = self.next_request_id();
         if self.history_support == ThreadHistorySupport::LegacyOnly {
             params.history_mode = None;
         }
@@ -1645,14 +1663,12 @@ pub(crate) fn status_account_display_from_auth_mode(
             email: None,
             plan: plan_type.map(plan_type_display_name),
         }),
-        Some(AuthMode::Headers)
-        | Some(AuthMode::BedrockApiKey)
-        | Some(AuthMode::BedrockAccessKeys) => None,
+        Some(AuthMode::Headers) => None,
         None => None,
     }
 }
 
-fn model_preset_from_api_model(model: ApiModel) -> ModelPreset {
+pub(crate) fn model_preset_from_api_model(model: ApiModel) -> ModelPreset {
     let upgrade = model.upgrade.map(|upgrade_id| {
         let upgrade_info = model.upgrade_info.clone();
         ModelUpgrade {
@@ -2469,6 +2485,7 @@ mod tests {
         let mut app_server = crate::start_embedded_app_server_for_picker(&config).await?;
         let next_request_id = app_server.next_request_id;
         let account = GetAccountResponse {
+            display_name: None,
             account_id: None,
             account: Some(Account::Chatgpt {
                 email: Some("teammate@openai.com".to_string()),

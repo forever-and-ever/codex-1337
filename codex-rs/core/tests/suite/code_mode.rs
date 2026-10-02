@@ -4833,8 +4833,9 @@ text((await tools.exec_command({{cmd: "printf 'phase 3'"}})).output);
         &server,
         sse(vec![
             responses::ev_response_created("resp-3"),
-            responses::ev_function_call(
+            responses::ev_function_call_with_namespace(
                 "call-2",
+                "functions",
                 "wait",
                 &serde_json::to_string(&serde_json::json!({
                     "cell_id": cell_id.clone(),
@@ -4880,8 +4881,9 @@ text((await tools.exec_command({{cmd: "printf 'phase 3'"}})).output);
         &server,
         sse(vec![
             responses::ev_response_created("resp-5"),
-            responses::ev_function_call(
+            responses::ev_function_call_with_namespace(
                 "call-3",
+                "",
                 "wait",
                 &serde_json::to_string(&serde_json::json!({
                     "cell_id": cell_id.clone(),
@@ -4918,6 +4920,57 @@ text((await tools.exec_command({{cmd: "printf 'phase 3'"}})).output);
         text_item(&third_items, /*index*/ 0),
     );
     assert_eq!(text_item(&third_items, /*index*/ 1), "phase 3");
+
+    // Qualified waits execute normally; their returned batches must also own their measurements.
+    let measurements = tool_output_measurements(&test, /*count*/ 3).await?;
+    test.codex.flush_rollout().await?;
+    let (rollout, _, _) = codex_rollout::RolloutRecorder::load_rollout_items(
+        test.session_configured
+            .rollout_path
+            .as_ref()
+            .expect("persisted rollout"),
+    )
+    .await?;
+    let batches = rollout
+        .iter()
+        .filter_map(|item| match item {
+            codex_rollout::RolloutItem::EventMsg(EventMsg::ItemCompleted(event)) => {
+                if let codex_protocol::items::TurnItem::FunctionCallOutput(item) = &event.item {
+                    Some(item)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    for (call_id, request) in [("call-2", &second_request), ("call-3", &third_request)] {
+        let delivered =
+            serde_json::from_value(request.function_call_output(call_id)["output"].clone())?;
+        let measured = measurements
+            .iter()
+            .filter(|item| item.call_id == call_id)
+            .collect::<Vec<_>>();
+        assert_eq!(measured.len(), 1);
+        let measured = measured[0];
+        let output_id = measured.id.strip_prefix("tool-output-tokens:").unwrap();
+        assert_eq!(
+            batches
+                .iter()
+                .filter(|batch| batch.id == output_id)
+                .map(|batch| (
+                    batch.name.as_str(),
+                    batch.namespace.as_deref(),
+                    &batch.output
+                ))
+                .collect::<Vec<_>>(),
+            vec![("wait", None, &delivered)]
+        );
+        assert_eq!(
+            measured.tokens,
+            codex_utils_output_truncation::count_o200k_text_tokens(&delivered)
+        );
+    }
 
     // Nested calls retain the original exec item and turn context when later
     // turns resume the cell with wait.

@@ -337,6 +337,9 @@ async fn direct_call_metadata_during_compaction_respects_provider_support(
     let arguments = json!({"plan": [{"step": "read", "status": "completed"}]});
     let summary = "The prior call finished.";
     let compact_output = match remote_compaction {
+        RemoteCompactionSupport::AnthropicSigned => panic!(
+            "this fixture exercises OpenAI-compatible providers, not the native Claude adapter"
+        ),
         RemoteCompactionSupport::Unsupported => ev_assistant_message("summary", summary),
         RemoteCompactionSupport::V2 => json!({
             "type": "response.output_item.done",
@@ -409,6 +412,9 @@ async fn direct_call_metadata_during_compaction_respects_provider_support(
             .any(|item| item["role"] == "user" && &item["content"] == user_content)
     );
     match remote_compaction {
+        RemoteCompactionSupport::AnthropicSigned => panic!(
+            "this fixture exercises OpenAI-compatible providers, not the native Claude adapter"
+        ),
         RemoteCompactionSupport::Unsupported => assert!(compacted.iter().any(|item| {
             item["role"] == "user"
                 && item["content"][0]["text"]
@@ -434,6 +440,9 @@ async fn direct_call_metadata_during_compaction_respects_provider_support(
     // The local case uses a third-party provider; compact_tests.rs separately covers
     // local compaction with an OpenAI provider that accepts passthrough metadata.
     match remote_compaction {
+        RemoteCompactionSupport::AnthropicSigned => panic!(
+            "this fixture exercises OpenAI-compatible providers, not the native Claude adapter"
+        ),
         RemoteCompactionSupport::Unsupported => assert!(
             compact_output
                 .get("internal_chat_message_metadata_passthrough")

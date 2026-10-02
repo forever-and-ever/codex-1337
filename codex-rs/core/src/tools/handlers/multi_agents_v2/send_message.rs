@@ -1,8 +1,9 @@
 use super::analytics::ToolCallAnalytics;
 use super::message_tool::SendMessageArgs;
-use super::message_tool::handle_message_string_tool;
+use super::message_tool::handle_agent_message_tool;
 use super::*;
 use crate::agent::types::MessageDeliveryMode;
+use crate::tools::handlers::multi_agents_message::parse_agent_message;
 use crate::tools::handlers::multi_agents_spec::create_send_message_tool;
 use codex_tools::ToolSpec;
 
@@ -38,11 +39,13 @@ impl Handler {
     ) -> Result<Box<dyn crate::tools::context::ToolOutput>, FunctionCallError> {
         let arguments = function_arguments(invocation.payload.clone())?;
         let args: SendMessageArgs = parse_arguments(&arguments)?;
-        handle_message_string_tool(
+        let message =
+            parse_agent_message(args.message, args.plaintext_message, &invocation.source)?;
+        handle_agent_message_tool(
             invocation,
             MessageDeliveryMode::QueueOnly,
             args.target,
-            args.message,
+            message,
             analytics,
         )
         .await

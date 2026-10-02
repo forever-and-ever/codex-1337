@@ -321,6 +321,7 @@ impl GatewayAuthManager {
                 .refresh::<TokenResponse>(RefreshTokenGrant {
                     refresh_token,
                     resource: self.state.config.resource.as_deref(),
+                    scope: None,
                 })
                 .await
             {
@@ -457,6 +458,7 @@ impl GatewayAuthManager {
                 redirect_uri: &redirect_uri,
                 pkce: &pkce,
                 resource: self.state.config.resource.as_deref(),
+                state: None,
             })
             .await
             .map_err(|error| {

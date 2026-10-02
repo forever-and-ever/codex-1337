@@ -1,11 +1,11 @@
 """Local distribution lifecycle and shared artifact-cache contracts."""
 
 import hashlib
-from concurrent.futures import ThreadPoolExecutor
 import os
 import subprocess
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 
@@ -48,7 +48,7 @@ class LocalInstallTest(unittest.TestCase):
                 "source_commit=reinstalled\ntui_revision=0\n",
             )
 
-    def test_gui_retirement_preserves_data_and_drains_daemon(self) -> None:
+    def test_daemon_lifecycle_preserves_data_and_drains_owned_services(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             config, data, prefix = (root / name for name in ("config", "data", "local"))
@@ -93,7 +93,20 @@ class LocalInstallTest(unittest.TestCase):
                 systemctl.reset_mock()
                 local_integration.integrate("install", prefix)
                 self.assertEqual(systemctl.call_args_list[0].args, ("daemon-reload",))
+                systemctl.reset_mock()
                 local_integration.integrate("uninstall", prefix)
+                self.assertEqual(
+                    [call.args for call in systemctl.call_args_list],
+                    [
+                        (
+                            "disable",
+                            "--now",
+                            "codex-app-server-refresh.path",
+                            "codex-app-server.service",
+                        ),
+                        ("daemon-reload",),
+                    ],
+                )
                 self.assertEqual(list(units.iterdir()), [])
                 self.assertEqual(roster.read_text(), "preserve")
 

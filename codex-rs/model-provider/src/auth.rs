@@ -189,6 +189,9 @@ pub(crate) fn auth_manager_for_provider(
     auth_manager: Option<Arc<AuthManager>>,
     provider: &ModelProviderInfo,
 ) -> Option<Arc<AuthManager>> {
+    if provider.adapter == codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription {
+        return None;
+    }
     match provider.auth.clone() {
         Some(config) => Some(AuthManager::external_bearer_only(config)),
         None => auth_manager,
@@ -199,6 +202,10 @@ pub(crate) fn resolve_provider_auth(
     auth: Option<&CodexAuth>,
     provider: &ModelProviderInfo,
 ) -> codex_protocol::error::Result<SharedAuthProvider> {
+    if provider.adapter == codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription {
+        provider.validate().map_err(CodexErr::InvalidRequest)?;
+        return Ok(unauthenticated_auth_provider());
+    }
     if let Some(auth) = bearer_auth_for_provider(provider)? {
         return Ok(Arc::new(auth));
     }
@@ -348,7 +355,6 @@ mod tests {
     use codex_model_provider_info::create_oss_provider_with_base_url;
     use codex_protocol::account::PlanType;
     use codex_protocol::config_types::ModelProviderAuthInfo;
-    use codex_protocol::error::CodexErrorDetails;
     use http::header::AUTHORIZATION;
     use pretty_assertions::assert_eq;
     use serde_json::json;

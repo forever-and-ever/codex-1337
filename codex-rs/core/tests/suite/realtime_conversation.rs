@@ -94,6 +94,81 @@ const MEMORY_PROMPT_PHRASE: &str =
 const REALTIME_CONVERSATION_TEST_SUBPROCESS_ENV_VAR: &str =
     "CODEX_REALTIME_CONVERSATION_TEST_SUBPROCESS";
 
+#[test_case(ConversationStartTransport::Websocket; "websocket")]
+#[test_case(ConversationStartTransport::Webrtc { sdp: "v=offer".into() }; "webrtc")]
+#[test_case(ConversationStartTransport::ExistingCall { call_id: "external-call".into(), sideband_base_url: None }; "existing call")]
+#[tokio::test]
+async fn claude_realtime_rejection_precedes_auth_and_transport_dispatch(
+    transport: ConversationStartTransport,
+) -> Result<()> {
+    // Realtime bypasses the Responses WebSocket capability and can otherwise fall back
+    // to a stored OpenAI credential or send unbound proxy credentials to a new endpoint.
+    let server = start_mock_server().await;
+    let realtime = start_websocket_server(Vec::new()).await;
+    let ws_url = realtime.uri().to_string();
+    let mut builder = test_codex()
+        .with_auth(CodexAuth::from_api_key("stored-openai-key"))
+        .with_config(move |config| {
+            config.model_provider.adapter =
+                codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription;
+            config.model_provider.requires_openai_auth = false;
+            config.model_provider.experimental_bearer_token = Some("proxy-key".into());
+            config.model_provider_id = "claude_subscription".into();
+            config.model_providers.insert(
+                config.model_provider_id.clone(),
+                config.model_provider.clone(),
+            );
+            config.experimental_realtime_ws_base_url = Some(ws_url);
+        });
+    let test = builder.build_with_auto_env(&server).await?;
+    server.reset().await;
+    test.codex
+        .submit(Op::RealtimeConversationStart(ConversationStartParams {
+            client_managed_handoffs: false,
+            delegation_ack_filler: None,
+            flush_transcript_tail_on_session_end: false,
+            codex_responses_as_items: false,
+            codex_response_item_prefix: None,
+            codex_response_handoff_mode:
+                codex_protocol::protocol::CodexResponseHandoffMode::Thinking,
+            backend_reasoning_status: false,
+            codex_response_handoff_channel_prefixes: None,
+            model: None,
+            output_modality: RealtimeOutputModality::Audio,
+            include_startup_context: false,
+            initial_items: Vec::new(),
+            realtime_start_instructions: None,
+            realtime_end_instructions: None,
+            prompt: None,
+            realtime_session_id: None,
+            transport: Some(transport),
+            version: None,
+            voice: None,
+        }))
+        .await?;
+    let error = wait_for_event_match(&test.codex, |event| match event {
+        EventMsg::RealtimeConversationRealtime(RealtimeConversationRealtimeEvent {
+            payload: RealtimeEvent::Error(message),
+        }) => Some(message.clone()),
+        _ => None,
+    })
+    .await;
+    assert_eq!(
+        error,
+        "Realtime conversations are not supported by Claude subscriptions."
+    );
+    assert!(
+        server
+            .received_requests()
+            .await
+            .context("request recording is enabled")?
+            .is_empty()
+    );
+    assert!(realtime.connections().is_empty());
+    realtime.shutdown().await;
+    Ok(())
+}
+
 #[derive(Debug, Clone)]
 struct RealtimeCallRequestCapture {
     requests: Arc<Mutex<Vec<WiremockRequest>>>,

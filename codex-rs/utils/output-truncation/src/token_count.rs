@@ -4,7 +4,7 @@ use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::FunctionCallOutputContentItem;
 
 /// Count completed, model-visible text using the bundled o200k vocabulary.
-/// This is an approximation for newer OpenAI models, including Astra, not API usage.
+/// This is an approximation for OpenAI and Claude models, not API usage.
 /// Mixed media returns no count rather than presenting a partial total.
 pub fn count_o200k_text_tokens(output: &FunctionCallOutputBody) -> Option<u64> {
     let tokenizer = tiktoken_rs::o200k_base_singleton();

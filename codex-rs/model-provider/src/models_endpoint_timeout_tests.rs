@@ -24,6 +24,7 @@ async fn catalog_deadline_returns_request_timeout() {
         ModelProviderInfo::create_openai_provider(Some(server.uri())),
         /*auth_manager*/ None,
         /*gateway_auth_manager*/ None,
+        /*anthropic_auth_context*/ None,
     );
 
     tokio::time::pause();

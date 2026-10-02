@@ -85,15 +85,19 @@ async fn run_review_preserves_evidence_during_parent_compaction() {
             /*reference_context_item*/ None,
             /*world_state_baseline*/ None,
             crate::compact::CompactedHistoryMetadata {
+                source_history: None,
                 message: String::new(),
-                window_number,
-                window_ids,
+                window: crate::compact::CompactionWindow::Existing {
+                    number: window_number,
+                    ids: window_ids,
+                },
                 compaction_response_id: None,
                 compaction_model_hash: Some("matching".to_owned()),
                 reviewer_compaction_hash: Some("matching".to_owned()),
             },
         )
-        .await;
+        .await
+        .unwrap();
     let ((outcome, _), submitted_text) = tokio::join!(manager.review(prepared), async {
         let submission = rx_sub.recv().await.unwrap();
         let id = submission.id;

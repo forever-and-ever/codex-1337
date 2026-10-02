@@ -3,7 +3,9 @@ use super::app_server_event_targets::ServerNotificationThreadTarget;
 use super::app_server_event_targets::server_notification_thread_target;
 use super::*;
 use codex_app_server_protocol::ServerNotification;
+use codex_app_server_protocol::SessionSource;
 use codex_app_server_protocol::ThreadStatus;
+use codex_protocol::protocol::SubAgentSource;
 
 impl App {
     pub(super) fn sync_subagent_roster(&mut self) {
@@ -12,7 +14,10 @@ impl App {
             .ordered_threads()
             .into_iter()
             .filter(|(id, entry)| {
-                !entry.is_closed
+                !matches!(
+                    self.agent_navigation.status(*id),
+                    Some(ThreadStatus::NotLoaded)
+                ) && !entry.is_closed
                     && Some(*id) != self.primary_thread_id
                     && !self.side_threads.contains_key(id)
             })
@@ -28,21 +33,96 @@ impl App {
                 )
             })
             .collect();
-        self.agent_navigation
+        let mut roster = self
+            .agent_navigation
             .roster
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .reconcile(agents, self.current_displayed_thread_id());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        roster.reconcile(agents, self.current_displayed_thread_id());
+        for row in &mut roster.rows {
+            row.model = self.agent_navigation.models.get(&row.id).cloned();
+            row.status = self.agent_navigation.status(row.id).cloned();
+            if row
+                .status
+                .as_ref()
+                .is_some_and(|status| !matches!(status, ThreadStatus::Active { .. }))
+            {
+                row.activity = None;
+            }
+        }
+        roster.sort_by_activity();
+        drop(roster);
         self.chat_widget.subagent_roster = self.agent_navigation.roster.clone();
     }
 
     pub(super) fn track_subagent_panel(&mut self, notification: &ServerNotification) {
+        match notification {
+            ServerNotification::ThreadStarted(event) => {
+                if let Ok(id) = ThreadId::from_string(&event.thread.id)
+                    && Some(id) == self.primary_thread_id
+                    && self.agent_navigation.status(id).is_none()
+                {
+                    self.agent_navigation
+                        .note_status(id, event.thread.status.clone());
+                    self.refresh_visible_agent_picker();
+                }
+                if let SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+                    parent_thread_id, ..
+                }) = &event.thread.source
+                    && (Some(*parent_thread_id) == self.primary_thread_id
+                        || self.agent_navigation.get(parent_thread_id).is_some())
+                {
+                    let Ok(id) = ThreadId::from_string(&event.thread.id) else {
+                        return;
+                    };
+                    self.agent_navigation.upsert(
+                        id,
+                        event.thread.agent_nickname.clone(),
+                        event.thread.agent_role.clone(),
+                        matches!(event.thread.status, ThreadStatus::NotLoaded),
+                    );
+                    self.agent_navigation.set_agent_path(
+                        id,
+                        crate::app_server_session::source_agent_path(&event.thread.source),
+                    );
+                    let status = self
+                        .agent_navigation
+                        .status(id)
+                        .cloned()
+                        .unwrap_or_else(|| event.thread.status.clone());
+                    self.agent_navigation.note_status(id, status);
+                    self.agent_navigation.record_model(&event.thread);
+                    self.sync_subagent_roster();
+                    self.refresh_visible_agent_picker();
+                    self.chat_widget.request_redraw();
+                }
+                return;
+            }
+            ServerNotification::ThreadSettingsUpdated(event) => {
+                if let Ok(id) = ThreadId::from_string(&event.thread_id)
+                    && self.agent_navigation.get(&id).is_some()
+                {
+                    self.agent_navigation.models.insert(
+                        id,
+                        crate::subagent_roster::AgentModel {
+                            model: event.thread_settings.model.clone(),
+                            effort: event.thread_settings.effort.clone(),
+                        },
+                    );
+                    self.sync_subagent_roster();
+                    self.chat_widget.request_redraw();
+                }
+                return;
+            }
+            _ => {}
+        }
         if let ServerNotification::ThreadDeleted(event) = notification
             && let Ok(id) = ThreadId::from_string(&event.thread_id)
             && self.agent_navigation.get(&id).is_some()
         {
             self.agent_navigation.remove(id);
             self.sync_subagent_roster();
+            self.refresh_visible_agent_picker();
             self.chat_widget.request_redraw();
             return;
         }
@@ -51,8 +131,6 @@ impl App {
             ServerNotification::ThreadStatusChanged(_)
                 | ServerNotification::ThreadWorkStatusUpdated(_)
                 | ServerNotification::ThreadTokenUsageUpdated(_)
-                | ServerNotification::TurnStarted(_)
-                | ServerNotification::TurnCompleted(_)
                 | ServerNotification::ThreadClosed(_)
         ) {
             return;
@@ -62,29 +140,26 @@ impl App {
         else {
             return;
         };
-        if (matches!(notification, ServerNotification::ThreadClosed(_))
-            || matches!(notification, ServerNotification::ThreadStatusChanged(event)
-                if matches!(event.status, ThreadStatus::NotLoaded)))
-            && self.agent_navigation.get(&id).is_some()
-        {
-            self.agent_navigation.mark_closed(id);
-            self.sync_subagent_roster();
-            self.chat_widget.request_redraw();
+        match notification {
+            ServerNotification::ThreadStatusChanged(event) => {
+                self.agent_navigation.note_status(id, event.status.clone());
+            }
+            ServerNotification::ThreadClosed(_) => {
+                self.agent_navigation
+                    .note_status(id, ThreadStatus::NotLoaded);
+            }
+            _ => {}
+        }
+        if self.agent_navigation.get(&id).is_none() && Some(id) != self.primary_thread_id {
             return;
         }
-        // Authoritative liveness can restore a previously unloaded descendant.
-        if let ServerNotification::ThreadStatusChanged(event) = notification
-            && !matches!(event.status, ThreadStatus::NotLoaded)
-            && let Some(entry) = self.agent_navigation.get(&id)
-            && entry.is_closed
-        {
-            self.agent_navigation.upsert(
-                id,
-                entry.agent_nickname.clone(),
-                entry.agent_role.clone(),
-                /*is_closed*/ false,
-            );
+        if matches!(
+            notification,
+            ServerNotification::ThreadStatusChanged(_) | ServerNotification::ThreadClosed(_)
+        ) {
             self.sync_subagent_roster();
+            self.refresh_visible_agent_picker();
+            self.chat_widget.request_redraw();
         }
         let mut roster = self
             .agent_navigation
@@ -99,7 +174,6 @@ impl App {
                 if !matches!(event.status, ThreadStatus::Active { .. }) {
                     row.activity = None;
                 }
-                row.status = Some(event.status.clone());
             }
             ServerNotification::ThreadWorkStatusUpdated(event) => {
                 if row
@@ -123,19 +197,6 @@ impl App {
             }
             ServerNotification::ThreadTokenUsageUpdated(event) => {
                 row.tokens = Some(TokenUsage::from(&event.token_usage.total).blended_total())
-            }
-            ServerNotification::TurnStarted(_) => {
-                row.status = Some(ThreadStatus::Active {
-                    active_flags: Vec::new(),
-                })
-            }
-            ServerNotification::TurnCompleted(event) => {
-                row.activity = None;
-                row.status = Some(if event.turn.error.is_some() {
-                    ThreadStatus::SystemError
-                } else {
-                    ThreadStatus::Idle
-                });
             }
             _ => return,
         }

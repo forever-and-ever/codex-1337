@@ -23,6 +23,13 @@
         "integer",
         "null"
       ]
+    },
+    "modelProvider": {
+      "description": "Configured provider whose catalog should be read on the server.",
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "title": "ModelListParams",

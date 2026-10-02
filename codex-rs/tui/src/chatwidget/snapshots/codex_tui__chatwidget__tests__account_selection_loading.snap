@@ -1,0 +1,10 @@
+---
+source: tui/src/chatwidget/tests/popups_and_settings.rs
+expression: "render_bottom_popup(&chat, 100)"
+---
+  Accounts
+
+
+›    Loading accounts…
+
+  enter select · esc back

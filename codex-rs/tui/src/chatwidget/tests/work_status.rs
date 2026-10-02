@@ -111,9 +111,18 @@ async fn work_status_below_composer_clears_without_transcript_entries() {
                 .collect(),
             None,
         );
-        for row in &mut roster.rows {
+        for (index, row) in roster.rows.iter_mut().enumerate() {
             row.status = Some(codex_app_server_protocol::ThreadStatus::Idle);
             row.tokens = Some(12_345);
+            row.model = Some(crate::subagent_roster::AgentModel {
+                model: if index == 7 {
+                    "claude-sonnet-4-6"
+                } else {
+                    "gpt-6.1-sol"
+                }
+                .into(),
+                effort: (index != 7).then_some(ReasoningEffortConfig::XHigh),
+            });
         }
         roster.rows[0].tokens = None;
         roster.rows[8].activity = Some("Checking the parser and its integration tests".into());

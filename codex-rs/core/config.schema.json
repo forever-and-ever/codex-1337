@@ -2480,6 +2480,14 @@
       },
       "type": "object"
     },
+    "ModelProviderAdapter": {
+      "description": "Provider semantics that cannot be inferred from the shared Responses wire format.",
+      "enum": [
+        "openai_compatible",
+        "claude_subscription"
+      ],
+      "type": "string"
+    },
     "ModelProviderAuthInfo": {
       "additionalProperties": false,
       "description": "Configuration for obtaining a provider bearer token from a command.",
@@ -2524,10 +2532,33 @@
       ],
       "type": "object"
     },
+    "ModelProviderContextDefaults": {
+      "additionalProperties": false,
+      "description": "Context policy defaults for one provider; explicit top-level values take precedence.",
+      "properties": {
+        "model_auto_compact_token_limit": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "model_context_window": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "ModelProviderInfo": {
       "additionalProperties": false,
       "description": "Serializable representation of a provider definition.",
       "properties": {
+        "adapter": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ModelProviderAdapter"
+            }
+          ],
+          "default": "openai_compatible"
+        },
         "auth": {
           "allOf": [
             {
@@ -6549,9 +6580,25 @@
           "description": "Short names accepted by `/account`, mapped to saved account identities.",
           "type": "object"
         },
+        "account_nicknames": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "default": {},
+          "description": "Display-only names keyed first by billing provider, then stable account ID.",
+          "type": "object"
+        },
         "default_account": {
           "default": null,
           "description": "Account identity selected explicitly with `/account`; used for new conversations.",
+          "type": "string"
+        },
+        "default_claude_account": {
+          "default": null,
+          "description": "Selected native Claude subscription identity for new conversations.",
           "type": "string"
         }
       },
@@ -7444,6 +7491,14 @@
       "description": "Provider to use from the model_providers map.",
       "type": "string"
     },
+    "model_provider_context_defaults": {
+      "additionalProperties": {
+        "$ref": "#/definitions/ModelProviderContextDefaults"
+      },
+      "default": {},
+      "description": "Context policy defaults keyed by provider ID. Explicit top-level values (including profile and CLI layers) override these defaults, which override catalog defaults. The selected model's advertised context maximum and automatic-compaction safety cap still apply. Defaults are resolved for the selected provider, including fresh cross-provider subagents.",
+      "type": "object"
+    },
     "model_providers": {
       "additionalProperties": {
         "$ref": "#/definitions/ModelProviderInfo"
@@ -7716,7 +7771,9 @@
       ],
       "default": {
         "account_aliases": {},
-        "default_account": null
+        "account_nicknames": {},
+        "default_account": null,
+        "default_claude_account": null
       },
       "description": "Downstream conversation-account preferences."
     }

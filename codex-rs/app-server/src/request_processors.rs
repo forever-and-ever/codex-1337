@@ -544,6 +544,7 @@ use codex_app_server_protocol::ServerRequest;
 mod account_processor;
 mod apps_processor;
 mod catalog_processor;
+mod claude_account_controller;
 mod command_exec_processor;
 mod config_processor;
 mod diagnostics;

@@ -24,11 +24,17 @@ use crate::multi_agents::SubAgentActivityDisplay;
 use crate::multi_agents::format_agent_picker_item_name;
 use crate::multi_agents::next_agent_shortcut;
 use crate::multi_agents::previous_agent_shortcut;
+use crate::subagent_roster::AgentModel;
+use codex_app_server_protocol::Thread;
+use codex_app_server_protocol::ThreadStatus;
 use codex_protocol::ThreadId;
 use ratatui::text::Span;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::collections::VecDeque;
 use uuid::Uuid;
+
+const MAX_UNDISCOVERED_STATUSES: usize = 1_000;
 
 /// Small state container for multi-agent picker ordering and labeling.
 ///
@@ -42,6 +48,11 @@ use uuid::Uuid;
 #[derive(Debug, Default)]
 pub(crate) struct AgentNavigationState {
     pub(super) roster: crate::subagent_roster::SharedRoster,
+    pub(super) models: HashMap<ThreadId, AgentModel>,
+    /// Server-owned status survives unloading and does not depend on TUI attachment.
+    statuses: HashMap<ThreadId, ThreadStatus>,
+    /// Global status broadcasts may precede the parent's spawn metadata.
+    undiscovered_statuses: VecDeque<ThreadId>,
     /// Latest picker metadata for each tracked thread id.
     threads: HashMap<ThreadId, AgentPickerThreadEntry>,
     /// Stable first-seen traversal order for keyboard cycling and picker tie-breaking.
@@ -57,6 +68,8 @@ pub(crate) struct AgentNavigationState {
     /// Coalesces root refreshes while rejecting replies from a previous session.
     pub(super) picker_refresh: Option<(ThreadId, Uuid)>,
     pub(super) picker_refresh_known: HashSet<ThreadId>,
+    /// Notifications received after a refresh began outrank its older snapshot.
+    pub(super) picker_refresh_changed: HashSet<ThreadId>,
 }
 
 /// Direction of keyboard traversal through the stable picker order.
@@ -69,12 +82,27 @@ pub(crate) enum AgentNavigationDirection {
 }
 
 impl AgentNavigationState {
+    pub(crate) fn record_model(&mut self, thread: &Thread) {
+        let Ok(id) = ThreadId::from_string(&thread.id) else {
+            return;
+        };
+        if self.retired_threads.contains(&id) {
+            return;
+        }
+        if let Some(model) = AgentModel::from_thread(thread) {
+            self.models.insert(id, model);
+        } else {
+            self.models.remove(&id);
+        }
+    }
+
     pub(crate) fn begin_picker_refresh(&mut self, thread_id: ThreadId) -> Option<Uuid> {
         if self.picker_refresh.is_some() {
             return None;
         }
         let request_id = Uuid::new_v4();
         self.picker_refresh = Some((thread_id, request_id));
+        self.picker_refresh_changed.clear();
         self.picker_refresh_known = self
             .threads
             .keys()
@@ -100,6 +128,39 @@ impl AgentNavigationState {
     /// this stays optional.
     pub(crate) fn get(&self, thread_id: &ThreadId) -> Option<&AgentPickerThreadEntry> {
         self.threads.get(thread_id)
+    }
+
+    pub(crate) fn status(&self, thread_id: ThreadId) -> Option<&ThreadStatus> {
+        self.statuses.get(&thread_id)
+    }
+
+    pub(crate) fn set_status(&mut self, thread_id: ThreadId, status: ThreadStatus) {
+        if self.retired_threads.contains(&thread_id) {
+            return;
+        }
+        if let Some(entry) = self.threads.get_mut(&thread_id) {
+            entry.is_running = matches!(status, ThreadStatus::Active { .. });
+            entry.is_closed = matches!(status, ThreadStatus::NotLoaded);
+        } else if !self.statuses.contains_key(&thread_id) {
+            if self.undiscovered_statuses.len() == MAX_UNDISCOVERED_STATUSES
+                && let Some(expired) = self.undiscovered_statuses.pop_front()
+            {
+                self.statuses.remove(&expired);
+                self.picker_refresh_changed.remove(&expired);
+            }
+            self.undiscovered_statuses.push_back(thread_id);
+        }
+        self.statuses.insert(thread_id, status);
+    }
+
+    pub(crate) fn note_status(&mut self, thread_id: ThreadId, status: ThreadStatus) {
+        if self.retired_threads.contains(&thread_id) {
+            return;
+        }
+        self.set_status(thread_id, status);
+        if self.picker_refresh.is_some() {
+            self.picker_refresh_changed.insert(thread_id);
+        }
     }
 
     pub(crate) fn is_parent_owned(&self, thread_id: ThreadId) -> bool {
@@ -152,6 +213,12 @@ impl AgentNavigationState {
                 is_closed,
             },
         );
+        self.undiscovered_statuses.retain(|id| *id != thread_id);
+        if let Some(status) = self.statuses.get(&thread_id).cloned() {
+            self.set_status(thread_id, status);
+        } else if is_closed {
+            self.set_status(thread_id, ThreadStatus::NotLoaded);
+        }
     }
 
     pub(crate) fn record_sub_agent_activity(&mut self, activity: SubAgentActivityDisplay) {
@@ -172,7 +239,12 @@ impl AgentNavigationState {
                     is_closed: false,
                 });
         entry.agent_path = Some(activity.agent_path);
-        if activity.is_running_hint
+        self.undiscovered_statuses
+            .retain(|id| *id != activity.thread_id);
+        if let Some(status) = self.statuses.get(&activity.thread_id) {
+            entry.is_running = matches!(status, ThreadStatus::Active { .. });
+            entry.is_closed = matches!(status, ThreadStatus::NotLoaded);
+        } else if activity.is_running_hint
             && !entry.is_closed
             && !self.stopped_threads.contains(&activity.thread_id)
         {
@@ -202,7 +274,9 @@ impl AgentNavigationState {
 
     pub(crate) fn set_running(&mut self, thread_id: ThreadId, is_running: bool) {
         if let Some(entry) = self.threads.get_mut(&thread_id) {
-            entry.is_running = is_running;
+            entry.is_running = self.statuses.get(&thread_id).map_or(is_running, |status| {
+                matches!(status, ThreadStatus::Active { .. })
+            });
         }
     }
 
@@ -221,6 +295,13 @@ impl AgentNavigationState {
     /// this up" by deleting the entry instead, wraparound navigation will silently change shape
     /// mid-session.
     pub(crate) fn mark_closed(&mut self, thread_id: ThreadId) {
+        // Buffered close events cannot override a later authoritative reload.
+        if self
+            .status(thread_id)
+            .is_some_and(|status| !matches!(status, ThreadStatus::NotLoaded))
+        {
+            return;
+        }
         if let Some(entry) = self.threads.get_mut(&thread_id) {
             entry.is_closed = true;
             entry.is_running = false;
@@ -229,6 +310,22 @@ impl AgentNavigationState {
                 thread_id, /*agent_nickname*/ None, /*agent_role*/ None,
                 /*is_closed*/ true,
             );
+        }
+        self.note_status(thread_id, ThreadStatus::NotLoaded);
+    }
+
+    pub(crate) fn clear_statuses(&mut self) {
+        self.statuses.clear();
+        self.undiscovered_statuses.clear();
+        self.picker_refresh_changed.clear();
+        for row in &mut self
+            .roster
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .rows
+        {
+            row.status = None;
+            row.activity = None;
         }
     }
 
@@ -239,6 +336,8 @@ impl AgentNavigationState {
     pub(crate) fn clear(&mut self) {
         self.roster = Default::default();
         self.threads.clear();
+        self.models.clear();
+        self.clear_statuses();
         self.order.clear();
         self.picker_order.clear();
         self.stopped_threads.clear();
@@ -253,6 +352,9 @@ impl AgentNavigationState {
     /// Used after authoritative roster reconciliation or retirement, not runtime unloading.
     pub(crate) fn remove(&mut self, thread_id: ThreadId) {
         self.threads.remove(&thread_id);
+        self.models.remove(&thread_id);
+        self.statuses.remove(&thread_id);
+        self.undiscovered_statuses.retain(|id| *id != thread_id);
         self.order.retain(|candidate| *candidate != thread_id);
         self.stopped_threads.remove(&thread_id);
         self.parent_owned_threads.remove(&thread_id);

@@ -178,10 +178,47 @@ impl CatalogRequestProcessor {
         &self,
         params: ModelListParams,
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
+        // Native discovery captures its configured account. Rebuild from current
+        // preferences rather than retaining the account chosen at server startup.
+        let (config, catalog) = if params
+            .model_provider
+            .as_ref()
+            .is_some_and(|provider| provider != &self.config.model_provider_id)
+            || self.config.model_provider.adapter
+                == codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription
+        {
+            let config = Arc::new(
+                self.config_manager
+                    .load_with_overrides(
+                        /*request_overrides*/ None,
+                        codex_core::config::ConfigOverrides {
+                            model_provider: Some(
+                                params
+                                    .model_provider
+                                    .clone()
+                                    .unwrap_or_else(|| self.config.model_provider_id.clone()),
+                            ),
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                    .map_err(|err| config_load_error(&err))?,
+            );
+            let manager =
+                codex_core::build_models_manager(&config, self.thread_manager.auth_manager());
+            let catalog = Arc::new(ModelCatalog::new(
+                self.config_manager.clone(),
+                config.clone(),
+                manager,
+            ));
+            (config, catalog)
+        } else {
+            (self.config.clone(), self.model_catalog.clone())
+        };
         // Gate the same provider used by the catalog, including when its model cache is warm.
         // Resolving credentials may refresh them, but explicit host policy prevents browser login.
         if let Some(gateway) = codex_model_provider::create_model_provider(
-            self.config.model_provider.clone(),
+            config.model_provider.clone(),
             Some(self.thread_manager.auth_manager()),
         )
         .gateway_auth_manager()
@@ -189,18 +226,24 @@ impl CatalogRequestProcessor {
         {
             // Refreshing credentials can contact the gateway before the catalog's own check.
             self.config_manager
-                .check_thread_model_provider(&self.config)
+                .check_thread_model_provider(&config)
                 .await
                 .map_err(|err| config_load_error(&err))?;
             if gateway.resolve_access_token().await.is_err() {
                 let current = self
                     .config_manager
-                    .load_latest_config(/*fallback_cwd*/ None)
+                    .load_with_overrides(
+                        /*request_overrides*/ None,
+                        codex_core::config::ConfigOverrides {
+                            model_provider: params.model_provider.clone(),
+                            ..Default::default()
+                        },
+                    )
                     .await
                     .map_err(|err| config_load_error(&err))?;
                 // Login RPCs use current config, while the catalog retains its startup provider.
-                if current.model_provider_id != self.config.model_provider_id
-                    || current.model_provider != self.config.model_provider
+                if current.model_provider_id != config.model_provider_id
+                    || current.model_provider != config.model_provider
                 {
                     return Err(invalid_request(
                         "Model provider settings changed. Restart Codex to apply them, then retry fetching the model list",
@@ -211,7 +254,7 @@ impl CatalogRequestProcessor {
                 ));
             }
         }
-        self.list_models(params)
+        self.list_models(params, &config, &catalog)
             .await
             .map(|response| Some(response.into()))
     }
@@ -280,24 +323,50 @@ impl CatalogRequestProcessor {
     async fn list_models(
         &self,
         params: ModelListParams,
+        config: &Config,
+        catalog: &ModelCatalog,
     ) -> Result<ModelListResponse, JSONRPCErrorError> {
         let ModelListParams {
             limit,
             cursor,
             include_hidden,
+            model_provider: _,
         } = params;
-        let presets = self
-            .model_catalog
+        let presets = catalog
             .list_models(codex_models_manager::manager::RefreshStrategy::OnlineIfUncached)
             .await
             .map_err(|err| config_load_error(&err))?;
         let models = supported_models(presets, include_hidden.unwrap_or(false));
         let total = models.len();
+        let mut providers = config
+            .model_providers
+            .iter()
+            .filter(|(id, _)| {
+                id.as_str() == codex_model_provider_info::OPENAI_PROVIDER_ID
+                    || id.as_str() == config.model_provider_id
+                    || config.config_layer_stack.layers_high_to_low().any(|layer| {
+                        layer
+                            .config
+                            .get("model_providers")
+                            .and_then(toml::Value::as_table)
+                            .is_some_and(|providers| providers.contains_key(id.as_str()))
+                    })
+            })
+            .map(
+                |(id, info)| codex_app_server_protocol::ModelProviderOption {
+                    id: id.clone(),
+                    name: info.name.clone(),
+                },
+            )
+            .collect::<Vec<_>>();
+        providers.sort_by(|a, b| a.id.cmp(&b.id));
 
         if total == 0 {
             return Ok(ModelListResponse {
                 data: Vec::new(),
                 next_cursor: None,
+                model_provider: Some(config.model_provider_id.clone()),
+                providers,
             });
         }
 
@@ -326,6 +395,8 @@ impl CatalogRequestProcessor {
         Ok(ModelListResponse {
             data: items,
             next_cursor,
+            model_provider: Some(config.model_provider_id.clone()),
+            providers,
         })
     }
 

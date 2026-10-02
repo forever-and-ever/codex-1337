@@ -25,7 +25,7 @@ impl CommandBackend {
             .spawn()?;
         // The helper may await a desktop action; it must not block input or frame rendering.
         tokio::spawn(async move {
-            match tokio::time::timeout(Duration::from_secs(360), child.wait()).await {
+            match tokio::time::timeout(Duration::from_secs(/*secs*/ 360), child.wait()).await {
                 Ok(Ok(status)) if status.success() => {}
                 Ok(Ok(status)) => tracing::warn!(%status, "Notification command failed"),
                 Ok(Err(error)) => tracing::warn!(%error, "Failed to reap notification command"),

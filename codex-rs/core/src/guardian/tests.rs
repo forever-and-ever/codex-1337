@@ -2639,15 +2639,19 @@ async fn guardian_reuses_prompt_cache_key_and_appends_prior_reviews() -> anyhow:
             /*reference_context_item*/ None,
             /*world_state_baseline*/ None,
             crate::compact::CompactedHistoryMetadata {
+                source_history: None,
                 message: String::new(),
-                window_number,
-                window_ids,
+                window: crate::compact::CompactionWindow::Existing {
+                    number: window_number,
+                    ids: window_ids,
+                },
                 compaction_response_id: None,
                 compaction_model_hash: Some("test-checkpoint".to_owned()),
                 reviewer_compaction_hash: Some("test-checkpoint".to_owned()),
             },
         )
-        .await;
+        .await
+        .unwrap();
     let third_request = GuardianApprovalRequest::ExecCommand {
         id: "shell-3".to_string(),
         environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),

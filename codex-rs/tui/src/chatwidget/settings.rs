@@ -108,7 +108,12 @@ impl ChatWidget {
             && !self.realtime_conversation_available_for_thread
         {
             self.add_info_message(
-                "Voice conversations will be available in new threads.".into(),
+                if self.realtime_supported_by_provider() {
+                    "Voice conversations will be available in new threads."
+                } else {
+                    "Voice conversations are unavailable with Claude subscriptions."
+                }
+                .into(),
                 /*hint*/ None,
             );
         }
@@ -200,6 +205,8 @@ impl ChatWidget {
         // Account-update notifications are the identity boundary. The visible account fields can
         // be identical across two accounts, so always invalidate account-scoped requests and data.
         self.model_popup_request_id = None;
+        self.bottom_pane
+            .dismiss_view_by_id(super::provider_models::PROVIDER_MODELS_VIEW);
         self.invalidate_permission_discovery();
         self.invalidate_connector_scope();
         self.clear_pending_rate_limit_reset_requests();

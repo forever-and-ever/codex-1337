@@ -92,7 +92,8 @@ fn keep_forked_rollout_item(item: &RolloutItem, preserve_context_baselines: bool
                 _ => false,
             },
             ResponseItem::FunctionCallOutput { call_id: None, .. }
-            | ResponseItem::ConfigurationUpdate { .. } => true,
+            | ResponseItem::ConfigurationUpdate { .. }
+            | ResponseItem::NativeCompaction { .. } => true,
             ResponseItem::AdditionalTools { .. }
             | ResponseItem::AgentMessage { .. }
             | ResponseItem::Reasoning { .. }

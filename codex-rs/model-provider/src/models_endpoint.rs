@@ -23,6 +23,7 @@ use codex_login::collect_auth_env_telemetry;
 use codex_login::default_client::ClientRedirectPolicy;
 use codex_login::default_client::create_client_for_route_async;
 use codex_model_provider_info::CHATGPT_CODEX_BASE_URL;
+use codex_model_provider_info::ModelProviderAdapter;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_models_manager::manager::ModelsEndpointClient;
 use codex_models_manager::manager::ModelsEndpointFuture;
@@ -30,11 +31,14 @@ use codex_models_manager::manager::ModelsEndpointResponse;
 use codex_otel::TelemetryAuthMode;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CoreResult;
+use codex_protocol::openai_models::ModelInfo;
 use codex_response_debug_context::extract_response_debug_context;
 use codex_response_debug_context::telemetry_transport_error_message;
 use http::HeaderMap;
+use http::Method;
 use tokio::time::timeout;
 
+use crate::AnthropicAuthContext;
 use crate::auth::ResolvedProviderAuth;
 use crate::auth::agent_identity_telemetry;
 use crate::auth::resolve_provider_auth;
@@ -45,12 +49,13 @@ const MODELS_ENDPOINT: &str = "/models";
 // Bound downloads from explicitly configured catalogs before decoding or caching them.
 const MAX_MODEL_CATALOG_BYTES: usize = 1024 * 1024;
 
-/// Provider-owned OpenAI-compatible `/models` endpoint.
+/// Provider-owned model catalogue, decoded according to the configured adapter.
 #[derive(Debug)]
 pub(crate) struct OpenAiModelsEndpoint {
     provider_info: ModelProviderInfo,
     auth_manager: Option<Arc<AuthManager>>,
     gateway_auth_manager: Option<Result<Arc<GatewayAuthManager>, String>>,
+    anthropic_auth_context: Option<Result<Arc<AnthropicAuthContext>, String>>,
     transport_builder: Arc<dyn ModelsTransportBuilder>,
 }
 
@@ -59,8 +64,11 @@ impl OpenAiModelsEndpoint {
         provider_info: ModelProviderInfo,
         auth_manager: Option<Arc<AuthManager>>,
         gateway_auth_manager: Option<Result<Arc<GatewayAuthManager>, String>>,
+        anthropic_auth_context: Option<Result<Arc<AnthropicAuthContext>, String>>,
     ) -> Self {
-        let redirect_policy = if provider_info.model_catalog_url.is_some() {
+        let redirect_policy = if provider_info.model_catalog_url.is_some()
+            || provider_info.adapter == ModelProviderAdapter::ClaudeSubscription
+        {
             ClientRedirectPolicy::Reject
         } else {
             ClientRedirectPolicy::Default
@@ -69,6 +77,7 @@ impl OpenAiModelsEndpoint {
             provider_info,
             auth_manager,
             gateway_auth_manager,
+            anthropic_auth_context,
             transport_builder: Arc::new(RouteAwareModelsTransportBuilder { redirect_policy }),
         }
     }
@@ -93,20 +102,36 @@ impl OpenAiModelsEndpoint {
         http_client_factory: HttpClientFactory,
     ) -> CoreResult<ModelsEndpointResponse> {
         let auth = self.auth().await;
-        let metric_auth_mode = if self.has_provider_api_key()
-            || auth.as_ref().is_some_and(CodexAuth::is_api_key_auth)
+        if self.provider_info.adapter == ModelProviderAdapter::ClaudeSubscription
+            && let Some(Err(message)) = &self.anthropic_auth_context
         {
-            "api_key"
-        } else if auth.is_some() {
-            "chatgpt"
-        } else {
-            "none"
-        };
+            return Err(CodexErr::InvalidRequest(message.clone()));
+        }
+        let metric_auth_mode =
+            if self.provider_info.adapter == ModelProviderAdapter::ClaudeSubscription {
+                "anthropic_subscription"
+            } else if self.has_provider_api_key()
+                || auth.as_ref().is_some_and(CodexAuth::is_api_key_auth)
+            {
+                "api_key"
+            } else if auth.is_some() {
+                "chatgpt"
+            } else {
+                "none"
+            };
         let _timer = codex_otel::start_global_timer(
             "codex.remote_models.fetch_update.duration_ms",
             &[("auth_mode", metric_auth_mode)],
         );
-        let identity = crate::models_identity::identity(&self.provider_info, auth.as_ref())?;
+        let identity = if self.provider_info.adapter == ModelProviderAdapter::ClaudeSubscription {
+            self.identity().ok_or_else(|| {
+                CodexErr::InvalidRequest(
+                    "select an Anthropic subscription account before listing models".into(),
+                )
+            })?
+        } else {
+            crate::models_identity::identity(&self.provider_info, auth.as_ref())?
+        };
         let auth_mode = auth.as_ref().map(CodexAuth::auth_mode);
         let mut api_provider = self.provider_info.to_api_provider(auth_mode)?;
         if (auth.as_ref().is_some_and(CodexAuth::is_api_key_auth) || self.has_provider_api_key())
@@ -117,20 +142,43 @@ impl OpenAiModelsEndpoint {
             // Codex metadata is served by the Codex backend, not the public /v1/models API.
             api_provider.base_url = CHATGPT_CODEX_BASE_URL.to_string();
         }
-        let resolved = compose_auth(
-            &self.provider_info,
-            self.gateway_auth_manager.as_ref(),
-            ResolvedProviderAuth::new(resolve_provider_auth(auth.as_ref(), &self.provider_info)?),
-        )
-        .await?;
-        let api_auth = resolved.auth;
-        let request_url = match self.provider_info.model_catalog_url.as_deref() {
+        let api_auth = if self.provider_info.adapter == ModelProviderAdapter::ClaudeSubscription {
+            self.anthropic_auth_context
+                .as_ref()
+                .ok_or_else(|| {
+                    CodexErr::InvalidRequest(
+                        "Anthropic subscription authentication is unavailable".into(),
+                    )
+                })?
+                .as_ref()
+                .map_err(|message| CodexErr::InvalidRequest(message.clone()))?
+                .discovery_auth()
+                .await?
+        } else {
+            compose_auth(
+                &self.provider_info,
+                self.gateway_auth_manager.as_ref(),
+                ResolvedProviderAuth::new(resolve_provider_auth(
+                    auth.as_ref(),
+                    &self.provider_info,
+                )?),
+            )
+            .await?
+            .auth
+        };
+        let catalog_url = (self.provider_info.adapter != ModelProviderAdapter::ClaudeSubscription)
+            .then_some(self.provider_info.model_catalog_url.as_deref())
+            .flatten();
+        let request_url = match catalog_url {
             Some(catalog_url) => ModelsClient::<ReqwestTransport>::catalog_request_url(
                 &api_provider,
                 catalog_url,
                 client_version,
             )
             .map_err(map_api_error)?,
+            None if self.provider_info.adapter == ModelProviderAdapter::ClaudeSubscription => {
+                api_provider.build_request(Method::GET, "models").url
+            }
             None => ModelsClient::<ReqwestTransport>::request_url(&api_provider, client_version),
         };
         let auth_telemetry = auth_header_telemetry(api_auth.as_ref());
@@ -140,7 +188,8 @@ impl OpenAiModelsEndpoint {
             None
         };
         let request_telemetry: Arc<dyn RequestTelemetry> = Arc::new(ModelsRequestTelemetry {
-            include_response_debug: self.provider_info.model_catalog_url.is_none(),
+            include_response_debug: self.provider_info.model_catalog_url.is_none()
+                && self.provider_info.adapter != ModelProviderAdapter::ClaudeSubscription,
             auth_mode: auth_mode.map(|mode| TelemetryAuthMode::from(mode).to_string()),
             auth_header_attached: auth_telemetry.attached,
             auth_header_name: auth_telemetry.name,
@@ -159,30 +208,43 @@ impl OpenAiModelsEndpoint {
                 .model_catalog_url
                 .as_ref()
                 .map(|_| MAX_MODEL_CATALOG_BYTES);
-            client
-                .list_models(request_url, HeaderMap::new(), response_body_limit_bytes)
-                .await
-                .map_err(|mut error| {
-                    if self.provider_info.model_catalog_url.is_some()
-                        && let codex_api::ApiError::Transport(TransportError::Http {
-                            url,
-                            headers,
-                            body,
-                            ..
-                        }) = &mut error
-                    {
-                        // Provider diagnostics may echo URL credentials or other secrets.
-                        *url = None;
-                        *headers = None;
-                        *body = None;
-                    }
-                    map_api_error(error)
-                })
+            let result = match self.provider_info.adapter {
+                ModelProviderAdapter::OpenaiCompatible => {
+                    client
+                        .list_models(request_url, HeaderMap::new(), response_body_limit_bytes)
+                        .await
+                }
+                ModelProviderAdapter::ClaudeSubscription => {
+                    crate::native_claude_catalog::list_models(&client, request_url).await
+                }
+            };
+            result.map_err(|mut error| {
+                if (self.provider_info.model_catalog_url.is_some()
+                    || self.provider_info.adapter == ModelProviderAdapter::ClaudeSubscription)
+                    && let codex_api::ApiError::Transport(TransportError::Http {
+                        url,
+                        headers,
+                        body,
+                        ..
+                    }) = &mut error
+                {
+                    // Provider diagnostics may echo URL credentials or other secrets.
+                    *url = None;
+                    *headers = None;
+                    *body = None;
+                }
+                map_api_error(error)
+            })
         })
         .await
         .map_err(|_| CodexErr::RequestTimeout)??;
         Ok(ModelsEndpointResponse {
-            models,
+            models: match self.provider_info.adapter {
+                ModelProviderAdapter::OpenaiCompatible => models,
+                ModelProviderAdapter::ClaudeSubscription => {
+                    crate::claude_catalog::normalize(models)
+                }
+            },
             etag,
             identity,
         })
@@ -198,14 +260,39 @@ impl OpenAiModelsEndpoint {
 }
 
 impl ModelsEndpointClient for OpenAiModelsEndpoint {
+    fn model_info_normalizer(&self) -> fn(ModelInfo) -> ModelInfo {
+        match self.provider_info.adapter {
+            ModelProviderAdapter::OpenaiCompatible => std::convert::identity,
+            ModelProviderAdapter::ClaudeSubscription => crate::claude_catalog::normalize_model_info,
+        }
+    }
+
+    fn fallback_models(&self) -> Vec<ModelInfo> {
+        match self.provider_info.adapter {
+            ModelProviderAdapter::OpenaiCompatible => {
+                codex_models_manager::bundled_models_response()
+                    .map(|catalog| catalog.models)
+                    .unwrap_or_default()
+            }
+            ModelProviderAdapter::ClaudeSubscription => Vec::new(),
+        }
+    }
+
     fn supports_api_key_models(&self) -> bool {
         self.provider_info.model_catalog_url.is_some()
             || (self.provider_info.is_openai() && self.provider_info.base_url.is_none())
     }
 
+    fn supports_unauthenticated_catalog(&self) -> bool {
+        // Subscription auth is captured above; this bypasses only the manager's
+        // unrelated OpenAI-login precondition, not native authentication.
+        self.provider_info.adapter == ModelProviderAdapter::ClaudeSubscription
+    }
+
     fn has_provider_api_key(&self) -> bool {
-        self.provider_info.env_key.is_some()
-            || self.provider_info.experimental_bearer_token.is_some()
+        self.provider_info.adapter != ModelProviderAdapter::ClaudeSubscription
+            && (self.provider_info.env_key.is_some()
+                || self.provider_info.experimental_bearer_token.is_some())
     }
 
     fn identity(&self) -> Option<String> {
@@ -213,7 +300,17 @@ impl ModelsEndpointClient for OpenAiModelsEndpoint {
             .auth_manager
             .as_ref()
             .and_then(|manager| manager.auth_cached());
-        crate::models_identity::identity(&self.provider_info, auth.as_ref()).ok()
+        let provider_identity =
+            crate::models_identity::identity(&self.provider_info, auth.as_ref()).ok()?;
+        if self.provider_info.adapter == ModelProviderAdapter::ClaudeSubscription {
+            let context = self.anthropic_auth_context.as_ref()?.as_ref().ok()?;
+            Some(format!(
+                "anthropic:{}:{provider_identity}",
+                context.discovery_account_id()?
+            ))
+        } else {
+            Some(provider_identity)
+        }
     }
 
     fn has_command_auth(&self) -> bool {
@@ -479,6 +576,7 @@ mod tests {
                 },
                 auth_manager: Some(auth.clone()),
                 gateway_auth_manager: None,
+                anthropic_auth_context: None,
                 transport_builder: capture.clone(),
             });
             let manager = OpenAiModelsManager::new_without_cache(endpoint.clone(), Some(auth));
@@ -519,6 +617,7 @@ mod tests {
                 },
                 auth_manager: auth_manager.clone(),
                 gateway_auth_manager: None,
+                anthropic_auth_context: None,
                 transport_builder: capture.clone(),
             });
             let manager = OpenAiModelsManager::new_without_cache(endpoint, auth_manager);
@@ -562,6 +661,7 @@ mod tests {
             provider_info_with_command_auth(),
             /*auth_manager*/ None,
             /*gateway_auth_manager*/ None,
+            /*anthropic_auth_context*/ None,
         );
 
         assert!(endpoint.has_command_auth());
@@ -573,6 +673,7 @@ mod tests {
             ModelProviderInfo::create_openai_provider(/*base_url*/ None),
             /*auth_manager*/ None,
             /*gateway_auth_manager*/ None,
+            /*anthropic_auth_context*/ None,
         );
 
         assert!(!endpoint.has_command_auth());
@@ -596,6 +697,7 @@ mod tests {
             provider_info: ModelProviderInfo::create_openai_provider(Some(server.uri())),
             auth_manager: None,
             gateway_auth_manager: None,
+            anthropic_auth_context: None,
             transport_builder: Arc::new(RecordingTransportBuilder {
                 observed_request: Arc::clone(&observed_request),
             }),
@@ -642,6 +744,7 @@ mod tests {
             provider_info,
             auth_manager: None,
             gateway_auth_manager: None,
+            anthropic_auth_context: None,
             transport_builder: Arc::new(RecordingTransportBuilder {
                 observed_request: Arc::new(Mutex::new(None)),
             }),
@@ -723,6 +826,7 @@ mod tests {
                 provider,
                 Some(auth.clone()),
                 /*gateway_auth_manager*/ None,
+                /*anthropic_auth_context*/ None,
             )),
             Some(auth.clone()),
         );
@@ -829,6 +933,7 @@ mod tests {
                 provider,
                 Some(auth_manager.clone()),
                 /*gateway_auth_manager*/ None,
+                /*anthropic_auth_context*/ None,
             ));
             let manager = OpenAiModelsManager::new(
                 home.path().to_path_buf(),
@@ -871,6 +976,7 @@ mod tests {
             },
             /*auth_manager*/ None,
             /*gateway_auth_manager*/ None,
+            /*anthropic_auth_context*/ None,
         );
         let error = endpoint
             .list_models(
@@ -913,6 +1019,7 @@ mod tests {
             },
             /*auth_manager*/ None,
             /*gateway_auth_manager*/ None,
+            /*anthropic_auth_context*/ None,
         );
         let error = endpoint
             .list_models(

@@ -1,0 +1,46 @@
+[
+  {
+    "slug": "claude-haiku-4-5-20251001",
+    "display_name": "Synthetic Haiku wire fixture",
+    "supported_reasoning_levels": [],
+    "shell_type": "disabled",
+    "visibility": "none",
+    "supported_in_api": true,
+    "priority": 0,
+    "support_verbosity": false,
+    "truncation_policy": {"mode": "tokens", "limit": 10000},
+    "experimental_supported_tools": [],
+    "input_modalities": ["text", "image"],
+    "context_window": 200000,
+    "supports_native_compaction": false,
+    "anthropic": {
+      "thinking": "manual",
+      "max_output_tokens": 64000,
+      "supported_efforts": [],
+      "supports_mid_conversation_system": false,
+      "supports_structured_outputs": true
+    }
+  },
+  {
+    "slug": "claude-opus-5-5",
+    "display_name": "Synthetic Opus wire fixture",
+    "supported_reasoning_levels": [{"effort": "low", "description": "Synthetic low effort"}],
+    "shell_type": "disabled",
+    "visibility": "none",
+    "supported_in_api": true,
+    "priority": 0,
+    "support_verbosity": false,
+    "truncation_policy": {"mode": "tokens", "limit": 10000},
+    "experimental_supported_tools": [],
+    "input_modalities": ["text", "image"],
+    "context_window": 1000000,
+    "supports_native_compaction": true,
+    "anthropic": {
+      "thinking": "adaptive",
+      "max_output_tokens": 128000,
+      "supported_efforts": ["low"],
+      "supports_mid_conversation_system": true,
+      "supports_structured_outputs": true
+    }
+  }
+]

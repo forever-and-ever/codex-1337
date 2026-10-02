@@ -660,7 +660,14 @@ impl TurnContext {
 
         let available_models = models_manager
             .list_models(
-                RefreshStrategy::OnlineIfUncached,
+                if self.provider.info().adapter
+                    == codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription
+                {
+                    // This is metadata-only model rebinding, not account discovery.
+                    RefreshStrategy::Offline
+                } else {
+                    RefreshStrategy::OnlineIfUncached
+                },
                 config.http_client_factory(),
             )
             .await;
@@ -1093,12 +1100,10 @@ impl Session {
             Arc::make_mut(&mut configuration.step_settings).service_tier = Some(service_tier);
         }
         if !crate::guardian::is_basic_session_source(&configuration.session_source) {
-            self.services
-                .models_manager
-                .refresh_after_auth_change(
-                    self.build_effective_session_config(&configuration)
-                        .http_client_factory(),
-                )
+            let config = self.build_effective_session_config(&configuration);
+            self.request_models_manager(&config)
+                .await?
+                .refresh_after_auth_change(config.http_client_factory())
                 .await;
         }
         let turn_environments = self.activate_turn_environments(&configuration).await;
@@ -1262,6 +1267,14 @@ impl Session {
             skills_snapshot,
         );
         turn_context.code_mode_available = self.services.code_mode_service.is_available();
+        if multi_agent_version != MultiAgentVersion::Disabled {
+            turn_context.available_models = crate::agent::model_catalog::advertised_agent_models(
+                &self
+                    .agent_model_catalogs(&turn_context.config, RefreshStrategy::Offline)
+                    .await,
+                multi_agent_version,
+            );
+        }
         turn_context.extension_data.insert(trusted_plugin_roots);
         turn_context.active_host_plugin_identities = Some(
             plugin_outcome

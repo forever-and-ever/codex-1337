@@ -1,9 +1,29 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "SubscriptionAccountProvider": {
+      "enum": [
+        "openai",
+        "claudeSubscription"
+      ],
+      "type": "string"
+    }
+  },
   "properties": {
     "accountId": {
       "description": "Saved identity or an alias from `[wrangler.account_aliases]`.",
       "type": "string"
+    },
+    "provider": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/SubscriptionAccountProvider"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Defaults to ChatGPT for pre-Claude clients; Claude selection must be explicit."
     },
     "threadId": {
       "type": "string"

@@ -2874,6 +2874,55 @@ async fn multi_agent_v2_message_schemas_are_encrypted() {
                 .and_then(|schema| schema.encrypted),
             Some(true)
         );
+        assert_eq!(
+            properties
+                .get("plaintext_message")
+                .and_then(|schema| schema.encrypted),
+            None
+        );
+        assert_eq!(tool.parameters.one_of.as_ref().map(Vec::len), Some(2));
+    }
+
+    // Old catalog schemas must not erase the explicit plaintext route or its XOR.
+    use crate::tools::handlers::multi_agents_v2::SendMessageHandler;
+    use crate::tools::multi_agent_tool::multi_agent_v2_handler;
+    let ToolSpec::Function(bundled) = SendMessageHandler.spec() else {
+        panic!("expected function");
+    };
+    let mut compatible = bundled.parameters.clone();
+    compatible
+        .properties
+        .as_mut()
+        .unwrap()
+        .get_mut("message")
+        .unwrap()
+        .encrypted = None;
+    let mut old = compatible.clone();
+    old.properties.as_mut().unwrap().remove("plaintext_message");
+    old.one_of = None;
+    let mut required_message = compatible.clone();
+    required_message
+        .required
+        .as_mut()
+        .unwrap()
+        .push("message".into());
+    let mut encrypted_plaintext = compatible.clone();
+    encrypted_plaintext
+        .properties
+        .as_mut()
+        .unwrap()
+        .get_mut("plaintext_message")
+        .unwrap()
+        .encrypted = Some(true);
+    for parameters in [compatible, old, required_message, encrypted_plaintext] {
+        let parameters = serde_json::to_string(&parameters).unwrap();
+        let handler = multi_agent_v2_handler(
+            SendMessageHandler,
+            /*namespace*/ None,
+            /*description_override*/ None,
+            Some(&parameters),
+        );
+        assert_eq!(handler.spec(), ToolSpec::Function(bundled.clone()));
     }
 }
 

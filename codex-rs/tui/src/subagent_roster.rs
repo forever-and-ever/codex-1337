@@ -1,12 +1,17 @@
 //! Inline view of loaded subagents. The picker retains unloaded family members.
 use crate::agent_status;
+use crate::bottom_pane::StatusLineItem;
+use crate::bottom_pane::status_line_from_segments;
+use crate::chatwidget::ChatWidget;
 use crate::line_truncation::truncate_line_to_width;
 use crate::render::Insets;
 use crate::render::RectExt as _;
 use crate::render::renderable::Renderable;
 use crate::status::format_tokens_compact;
+use codex_app_server_protocol::Thread;
 use codex_app_server_protocol::ThreadStatus;
 use codex_protocol::ThreadId;
+use codex_protocol::openai_models::ReasoningEffort;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Stylize;
@@ -25,6 +30,21 @@ pub(crate) enum Retirement {
     Reconciling(ThreadId),
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct AgentModel {
+    pub model: String,
+    pub effort: Option<ReasoningEffort>,
+}
+
+impl AgentModel {
+    pub fn from_thread(thread: &Thread) -> Option<Self> {
+        thread.model.as_ref().map(|model| Self {
+            model: model.clone(),
+            effort: thread.reasoning_effort.clone(),
+        })
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct AgentRow {
     pub id: ThreadId,
@@ -32,6 +52,7 @@ pub(crate) struct AgentRow {
     pub status: Option<ThreadStatus>,
     pub activity: Option<String>,
     pub tokens: Option<i64>,
+    pub model: Option<AgentModel>,
 }
 
 #[derive(Debug, Default)]
@@ -70,6 +91,7 @@ impl SubagentRoster {
                     status: None,
                     activity: None,
                     tokens: None,
+                    model: None,
                 },
             })
             .collect();
@@ -127,12 +149,15 @@ impl SubagentRoster {
     }
 }
 
-pub(crate) struct RosterView(pub SharedRoster);
+pub(crate) struct RosterView {
+    pub roster: SharedRoster,
+    pub use_theme_colors: bool,
+}
 
 impl Renderable for RosterView {
     fn desired_height(&self, _width: u16) -> u16 {
         let roster = self
-            .0
+            .roster
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if roster.rows.is_empty() {
@@ -150,7 +175,7 @@ impl Renderable for RosterView {
             return;
         }
         let mut roster = self
-            .0
+            .roster
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         // Preserve at least one selectable row when the terminal is vertically cramped.
@@ -219,6 +244,23 @@ impl Renderable for RosterView {
                 agent_status::marker(row.status.as_ref()),
                 " ".into(),
             ];
+            if let Some(model) = &row.model {
+                let mut label = model.model.clone();
+                if let Some(effort) = &model.effort {
+                    label.push(' ');
+                    label.push_str(&ChatWidget::status_line_reasoning_effort_label(Some(
+                        effort,
+                    )));
+                }
+                if let Some(line) = status_line_from_segments(
+                    [(StatusLineItem::ModelWithReasoning, label)],
+                    self.use_theme_colors,
+                    Some(row.id),
+                ) {
+                    spans.extend(line.spans);
+                    spans.push(" ".into());
+                }
+            }
             let name = truncate_line_to_width(Line::from(row.name.clone()), name_width);
             let padding = name_width.saturating_sub(name.width()) + 2;
             spans.extend(name.spans);

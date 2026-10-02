@@ -328,6 +328,7 @@ use self::plan_implementation::PLAN_IMPLEMENTATION_TITLE;
 mod model_popup_state;
 mod model_popups;
 mod notifications;
+mod provider_models;
 mod session_model_selection;
 use self::notifications::Notification;
 pub(crate) use self::session_model_selection::AstraModelPickerAction;
@@ -376,6 +377,7 @@ mod replay;
 mod review;
 mod review_popups;
 use self::review::ReviewState;
+mod account_picker;
 mod safety_buffering;
 mod service_tiers;
 mod settings;
@@ -547,6 +549,7 @@ pub(crate) struct ChatWidget {
     session_header: SessionHeader,
     pub(crate) initial_user_message: Option<UserMessage>,
     status_account_display: Option<StatusAccountDisplay>,
+    pub(crate) active_account_label: Option<String>,
     pub(crate) remote_connection: Option<RemoteConnectionStatus>,
     /// Remote app servers cannot read image paths on the TUI host.
     pub(crate) snapshot_local_images: bool,

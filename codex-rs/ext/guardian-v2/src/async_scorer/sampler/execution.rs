@@ -91,6 +91,7 @@ impl SamplingExecution {
                     | TransportError::Policy(_),
                 )
                 | ApiError::ContextWindowExceeded
+                | ApiError::NativeStream(_)
                 | ApiError::QuotaExceeded
                 | ApiError::UsageNotIncluded
                 | ApiError::RateLimit(_)
@@ -322,7 +323,10 @@ impl SamplingExecution {
     }
 }
 
-fn record_token_usage(metrics: Option<&dyn ExtensionMetrics>, token_usage: Option<&TokenUsage>) {
+pub(super) fn record_token_usage(
+    metrics: Option<&dyn ExtensionMetrics>,
+    token_usage: Option<&TokenUsage>,
+) {
     let (Some(metrics), Some(token_usage)) = (metrics, token_usage) else {
         return;
     };

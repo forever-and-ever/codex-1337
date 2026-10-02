@@ -69,8 +69,6 @@ const OPENAI_BETA_HEADER: &str = "OpenAI-Beta";
 const USER_AGENT_HEADER: &str = "user-agent";
 const WS_V2_BETA_HEADER_VALUE: &str = "responses_websockets=2026-02-06";
 const X_CLIENT_REQUEST_ID_HEADER: &str = "x-client-request-id";
-const WS_REQUEST_HEADER_RESPONSES_LITE_CLIENT_METADATA_KEY: &str =
-    "ws_request_header_x_openai_internal_codex_responses_lite";
 const TEST_INSTALLATION_ID: &str = "11111111-1111-4111-8111-111111111111";
 const TEST_WINDOW_ID: &str = "test-thread:0";
 const X_CODEX_WS_STREAM_REQUEST_START_MS_CLIENT_METADATA_KEY: &str =
@@ -2182,6 +2180,7 @@ fn websocket_provider_with_connect_timeout(
 ) -> ModelProviderInfo {
     ModelProviderInfo {
         name: "mock-ws".into(),
+        adapter: Default::default(),
         base_url: Some(format!("{}/v1", server.uri())),
         model_catalog_url: None,
         env_key: None,

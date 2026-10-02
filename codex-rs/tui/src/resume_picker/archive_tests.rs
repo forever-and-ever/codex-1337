@@ -1,7 +1,6 @@
 use super::super::PickerLoadRequest;
 use super::super::PickerLoader;
 use super::super::PickerState;
-use super::super::ProviderFilter;
 use super::super::Row;
 use super::super::SessionPickerAction;
 use super::super::SessionPickerLaunchContext;
@@ -39,7 +38,6 @@ fn archive_picker_state() -> (PickerState, Arc<Mutex<Vec<ThreadId>>>) {
     let state = PickerState::new(
         FrameRequester::test_dummy(),
         picker_loader,
-        ProviderFilter::Any,
         /*show_all*/ true,
         /*filter_cwd*/ None,
         SessionPickerAction::Resume,
@@ -178,7 +176,6 @@ fn archived_status_preserves_directory_filter_and_hides_archive_shortcut() {
     let mut state = PickerState::new(
         FrameRequester::test_dummy(),
         picker_loader,
-        ProviderFilter::Any,
         /*show_all*/ false,
         Some(PathBuf::from("/tmp/project")),
         SessionPickerAction::Resume,
@@ -193,7 +190,6 @@ fn archived_status_preserves_directory_filter_and_hides_archive_shortcut() {
             "/tmp/project".to_string(),
         )),
         SessionStatus::Archived,
-        ProviderFilter::Any,
         ThreadSortKey::UpdatedAt,
         /*include_non_interactive*/ false,
         /*use_state_db_only*/ false,

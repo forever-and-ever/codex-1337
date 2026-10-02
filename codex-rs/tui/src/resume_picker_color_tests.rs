@@ -27,7 +27,6 @@ fn thread_colors_and_selection_contrast_in_both_picker_layouts() {
     let mut state = PickerState::new(
         FrameRequester::test_dummy(),
         Arc::new(|_| {}),
-        ProviderFilter::Any,
         /*show_all*/ true,
         /*filter_cwd*/ None,
         SessionPickerAction::Resume,
@@ -151,7 +150,6 @@ fn compact_picker_keeps_metadata_and_labeled_primary_actions() {
     let mut state = PickerState::new(
         FrameRequester::test_dummy(),
         Arc::new(|_| {}),
-        ProviderFilter::Any,
         /*show_all*/ false,
         Some(PathBuf::from("/tmp/codex")),
         SessionPickerAction::Resume,
@@ -260,7 +258,6 @@ async fn narrow_toolbar_keeps_keyboard_focused_control_visible() {
             let mut state = PickerState::new(
                 FrameRequester::test_dummy(),
                 Arc::new(|_| {}),
-                ProviderFilter::Any,
                 /*show_all*/ false,
                 Some(PathBuf::from("/tmp/codex")),
                 action,

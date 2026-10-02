@@ -1,3 +1,4 @@
+mod anthropic;
 pub(crate) mod api_bridge;
 pub(crate) mod auth;
 pub(crate) mod common;
@@ -19,6 +20,22 @@ pub use codex_client::RequestTelemetry;
 pub use codex_client::ReqwestTransport;
 pub use codex_client::TransportError;
 
+pub use crate::anthropic::AnthropicCachePolicy;
+pub use crate::anthropic::AnthropicCacheTtl;
+pub use crate::anthropic::AnthropicClient;
+pub use crate::anthropic::AnthropicOperation;
+pub use crate::anthropic::AnthropicPrompt;
+pub use crate::anthropic::AnthropicRequest;
+pub use crate::anthropic::AnthropicRequestOptions;
+pub use crate::anthropic::AnthropicStopReason;
+pub use crate::anthropic::AnthropicStreamOptions;
+pub use crate::anthropic::AnthropicTool;
+pub use crate::anthropic::AnthropicToolIdentity;
+pub use crate::anthropic::anthropic_context_window_exceeded;
+pub use crate::anthropic::anthropic_function_input_schema;
+pub use crate::anthropic::anthropic_output_limit_exceeded;
+pub use crate::anthropic::anthropic_stop_reason;
+pub use crate::anthropic::encode_anthropic_request;
 pub use crate::api_bridge::map_api_error;
 pub use crate::auth::AgentIdentityTelemetry;
 pub use crate::auth::AuthError;

@@ -63,8 +63,10 @@ pub(crate) fn identity(
         ) && auth.get_account_id().is_some()
             && (auth.get_chatgpt_user_id().is_some() || auth.get_account_email().is_some())
     });
-    let explicit_bearer =
-        provider_info.api_key()?.is_some() || provider_info.experimental_bearer_token.is_some();
+    let explicit_bearer = provider_info.adapter
+        != codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription
+        && (provider_info.api_key()?.is_some()
+            || provider_info.experimental_bearer_token.is_some());
     // Command auth also returns opaque API keys. A changed key may belong to a
     // different account, so only credentials with stable owner metadata can be reused.
     if !has_stable_account || explicit_bearer {
@@ -85,6 +87,9 @@ pub(crate) fn identity(
     // Preserve existing identities for providers without gateway OAuth.
     if let Some(gateway_oauth) = &provider_info.gateway_oauth {
         field(&serde_json::to_vec(gateway_oauth)?);
+    }
+    if provider_info.adapter != codex_model_provider_info::ModelProviderAdapter::OpenaiCompatible {
+        field(&serde_json::to_vec(&provider_info.adapter)?);
     }
     Ok(format!("{:x}", digest.finalize()))
 }

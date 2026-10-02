@@ -396,6 +396,7 @@ impl Session {
         let mut history = ContextManager::for_session(
             &turn_context.session_source,
             &turn_context.config.features,
+            turn_context.config.model_provider.adapter,
         );
         let mut saw_legacy_compaction_without_replacement_history = false;
         if let Some(checkpoint) = history_checkpoint

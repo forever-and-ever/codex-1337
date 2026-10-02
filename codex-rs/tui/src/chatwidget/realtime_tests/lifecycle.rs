@@ -28,26 +28,41 @@ async fn enabling_voice_on_an_open_thread_snapshots_the_new_thread_notice() {
 }
 
 #[tokio::test]
-async fn voice_cannot_start_in_a_side_conversation() {
-    let (mut chat, _sender, mut events, mut ops) = make_chatwidget_manual_with_sender().await;
-    chat.set_side_conversation_active(/*active*/ true);
+async fn voice_cannot_start_in_an_unsupported_context() {
+    for provider in [
+        None,
+        Some(codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription),
+    ] {
+        let (mut chat, _sender, mut events, mut ops) = make_chatwidget_manual_with_sender().await;
+        if let Some(provider) = provider {
+            chat.config.model_provider.adapter = provider;
+        } else {
+            chat.set_side_conversation_active(/*active*/ true);
+        }
 
-    chat.toggle_realtime_conversation();
+        chat.toggle_realtime_conversation();
 
-    commit_realtime_history_events(&mut chat, &mut events);
-    let Ok(AppEvent::InsertHistoryCell(cell)) = events.try_recv() else {
-        panic!("voice should report that side conversations are unsupported");
-    };
-    assert!(
-        cell.display_lines(/*width*/ 80)
+        commit_realtime_history_events(&mut chat, &mut events);
+        let Ok(AppEvent::InsertHistoryCell(cell)) = events.try_recv() else {
+            panic!("voice should report the unsupported context");
+        };
+        let rendered = cell
+            .display_lines(/*width*/ 80)
             .iter()
-            .any(|line| line.to_string().contains("side conversations"))
-    );
-    assert!(ops.try_recv().is_err());
-    assert_eq!(
-        chat.realtime_conversation.phase,
-        RealtimeConversationPhase::Inactive
-    );
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        if provider.is_some() {
+            insta::assert_snapshot!(rendered, @"■ Voice conversations are unavailable with Claude subscriptions.");
+        } else {
+            assert!(rendered.contains("side conversations"));
+        }
+        assert!(ops.try_recv().is_err());
+        assert_eq!(
+            chat.realtime_conversation.phase,
+            RealtimeConversationPhase::Inactive
+        );
+    }
 }
 
 #[tokio::test]

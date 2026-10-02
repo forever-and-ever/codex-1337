@@ -37,6 +37,18 @@ const DEFAULT_MODEL_CACHE_TTL: Duration = Duration::from_secs(300);
 /// manager owns refresh policy, cache behavior, and catalog merging; it calls
 /// this endpoint only when it decides a remote refresh should happen.
 pub trait ModelsEndpointClient: fmt::Debug + Send + Sync {
+    /// Provider metadata policy, applied to resolved catalog entries and missing-model
+    /// fallbacks before explicit configuration overrides.
+    fn model_info_normalizer(&self) -> fn(ModelInfo) -> ModelInfo {
+        std::convert::identity
+    }
+
+    /// Catalog available without a successful remote read. Non-OpenAI providers
+    /// must not inherit bundled GPT choices or merge them into their own catalog.
+    fn fallback_models(&self) -> Vec<ModelInfo> {
+        load_remote_models_from_file().unwrap_or_default()
+    }
+
     /// Opaque identity of the current provider and credentials, without resolving auth.
     ///
     /// Must change when account, email, plan, provider, or API credentials change.
@@ -51,6 +63,12 @@ pub trait ModelsEndpointClient: fmt::Debug + Send + Sync {
 
     /// Returns whether this provider supports an authoritative catalog with OpenAI API keys.
     fn supports_api_key_models(&self) -> bool {
+        false
+    }
+
+    /// Whether the catalog can be fetched without login, API-key, or command auth.
+    /// Owned local adapters must not depend on an unrelated OpenAI credential.
+    fn supports_unauthenticated_catalog(&self) -> bool {
         false
     }
 
@@ -111,6 +129,12 @@ type SharedModelsEndpointClient = Arc<dyn ModelsEndpointClient>;
 
 /// Coordinates model discovery plus cached metadata on disk.
 pub trait ModelsManager: fmt::Debug + Send + Sync {
+    /// Provider metadata policy that also governs cold and unavailable catalogs.
+    /// Normalization precedes explicit configuration overrides, including context limits.
+    fn model_info_normalizer(&self) -> fn(ModelInfo) -> ModelInfo {
+        std::convert::identity
+    }
+
     /// Supply startup API-key discovery policy; live changes require a new session.
     /// Static catalogs ignore this setting.
     fn set_api_key_model_discovery_enabled(&self, _enabled: bool) {}
@@ -239,7 +263,12 @@ pub trait ModelsManager: fmt::Debug + Send + Sync {
         Box::pin(
             async move {
                 let remote_models = self.get_remote_models().await;
-                construct_model_info_from_candidates(model, &remote_models, config)
+                construct_model_info_from_candidates(
+                    model,
+                    &remote_models,
+                    config,
+                    self.model_info_normalizer(),
+                )
             }
             .instrument(tracing::info_span!("get_model_info", model = model)),
         )
@@ -276,6 +305,7 @@ pub struct OpenAiModelsManager {
 pub struct StaticModelsManager {
     remote_models: Vec<ModelInfo>,
     auth_manager: Option<Arc<AuthManager>>,
+    model_info_normalizer: fn(ModelInfo) -> ModelInfo,
 }
 
 impl OpenAiModelsManager {
@@ -321,7 +351,7 @@ impl OpenAiModelsManager {
         endpoint_client: Arc<dyn ModelsEndpointClient>,
         auth_manager: Option<Arc<AuthManager>>,
     ) -> Self {
-        let remote_models = load_remote_models_from_file().unwrap_or_default();
+        let remote_models = endpoint_client.fallback_models();
         Self {
             catalog_refresh: tokio::sync::Semaphore::new(/*permits*/ 1),
             remote_models: RwLock::new(ModelsCacheEntry {
@@ -342,14 +372,29 @@ impl OpenAiModelsManager {
 impl StaticModelsManager {
     /// Construct a static model manager from an authoritative catalog.
     pub fn new(auth_manager: Option<Arc<AuthManager>>, model_catalog: ModelsResponse) -> Self {
+        Self::new_with_model_info_normalizer(auth_manager, model_catalog, std::convert::identity)
+    }
+
+    /// Construct an authoritative catalog with provider-owned metadata policy that
+    /// remains active when a selected model has no catalog entry.
+    pub fn new_with_model_info_normalizer(
+        auth_manager: Option<Arc<AuthManager>>,
+        model_catalog: ModelsResponse,
+        model_info_normalizer: fn(ModelInfo) -> ModelInfo,
+    ) -> Self {
         Self {
             remote_models: model_catalog.models,
             auth_manager,
+            model_info_normalizer,
         }
     }
 }
 
 impl ModelsManager for OpenAiModelsManager {
+    fn model_info_normalizer(&self) -> fn(ModelInfo) -> ModelInfo {
+        self.endpoint_client.model_info_normalizer()
+    }
+
     fn invalidate_account(&self) -> ModelsManagerFuture<'_, ()> {
         Box::pin(async move {
             // An old in-flight response must finish publishing before invalidation.
@@ -363,7 +408,7 @@ impl ModelsManager for OpenAiModelsManager {
                 etag: None,
                 client_version: Some(crate::client_version_to_whole()),
                 identity: self.endpoint_client.identity(),
-                models: load_remote_models_from_file().unwrap_or_default(),
+                models: self.endpoint_client.fallback_models(),
             };
         })
     }
@@ -420,7 +465,7 @@ impl ModelsManager for OpenAiModelsManager {
             if entry.identity.is_some() && entry.identity == self.endpoint_client.identity() {
                 entry.models.clone()
             } else {
-                load_remote_models_from_file().unwrap_or_default()
+                self.endpoint_client.fallback_models()
             }
         })
     }
@@ -431,7 +476,7 @@ impl ModelsManager for OpenAiModelsManager {
             if entry.identity.is_some() && entry.identity == self.endpoint_client.identity() {
                 entry.models.clone()
             } else {
-                load_remote_models_from_file().unwrap_or_default()
+                self.endpoint_client.fallback_models()
             },
         )
     }
@@ -588,7 +633,8 @@ impl OpenAiModelsManager {
     }
 
     async fn should_refresh_models(&self) -> bool {
-        self.endpoint_client.uses_codex_backend().await
+        self.endpoint_client.supports_unauthenticated_catalog()
+            || self.endpoint_client.uses_codex_backend().await
             || self.endpoint_client.has_command_auth()
             || self.supports_api_key_discovery()
     }
@@ -611,7 +657,7 @@ impl OpenAiModelsManager {
                         .is_some_and(AuthMode::has_chatgpt_account)
                 }));
         if !remote_only {
-            let mut models = load_remote_models_from_file().unwrap_or_default();
+            let mut models = self.endpoint_client.fallback_models();
             for model in entry.models {
                 if let Some(index) = models
                     .iter()
@@ -670,6 +716,10 @@ impl OpenAiModelsManager {
 }
 
 impl ModelsManager for StaticModelsManager {
+    fn model_info_normalizer(&self) -> fn(ModelInfo) -> ModelInfo {
+        self.model_info_normalizer
+    }
+
     fn get_default_model<'a>(
         &'a self,
         model: &'a Option<String>,
@@ -808,6 +858,7 @@ pub(crate) fn construct_model_info_from_candidates(
     model: &str,
     candidates: &[ModelInfo],
     config: &ModelsManagerConfig,
+    normalize: fn(ModelInfo) -> ModelInfo,
 ) -> ModelInfo {
     // First use the normal longest-prefix match. If that misses, allow a narrowly scoped
     // retry for namespaced slugs like `custom/gpt-5.3-codex`.
@@ -822,7 +873,7 @@ pub(crate) fn construct_model_info_from_candidates(
     } else {
         model_info::model_info_from_slug(model)
     };
-    model_info::with_config_overrides(model_info, config)
+    model_info::with_config_overrides(normalize(model_info), config)
 }
 
 #[cfg(test)]

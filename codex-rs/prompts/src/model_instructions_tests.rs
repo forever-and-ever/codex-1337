@@ -40,6 +40,8 @@ fn test_model(model_messages: Option<ModelMessages>) -> ModelInfo {
         context_window: None,
         max_context_window: None,
         auto_compact_token_limit: None,
+        supports_native_compaction: false,
+        anthropic: None,
         comp_hash: None,
         effective_context_window_percent: 95,
         experimental_supported_tools: vec![],

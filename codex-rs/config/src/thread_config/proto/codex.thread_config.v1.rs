@@ -79,6 +79,8 @@ pub struct ModelProvider {
     pub supports_standalone_web_search: bool,
     #[prost(string, optional, tag = "19")]
     pub model_catalog_url: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(enumeration = "ModelProviderAdapter", tag = "20")]
+    pub adapter: i32,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct StringMap {
@@ -98,6 +100,32 @@ pub struct ModelProviderAuthInfo {
     pub refresh_interval_ms: u64,
     #[prost(string, tag = "5")]
     pub cwd: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum ModelProviderAdapter {
+    OpenaiCompatible = 0,
+    ClaudeSubscription = 1,
+}
+impl ModelProviderAdapter {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::OpenaiCompatible => "OPENAI_COMPATIBLE",
+            Self::ClaudeSubscription => "CLAUDE_SUBSCRIPTION",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "OPENAI_COMPATIBLE" => Some(Self::OpenaiCompatible),
+            "CLAUDE_SUBSCRIPTION" => Some(Self::ClaudeSubscription),
+            _ => None,
+        }
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]

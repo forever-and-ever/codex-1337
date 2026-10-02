@@ -806,9 +806,13 @@ pub(super) async fn run_main_inner(
             .await?;
     }
 
-    let otel_logger_layer = otel.as_ref().and_then(|o| o.logger_layer());
+    let otel_logger_layer = otel
+        .as_ref()
+        .and_then(codex_otel::OtelProvider::logger_layer);
 
-    let otel_tracing_layer = otel.as_ref().and_then(|o| o.tracing_layer());
+    let otel_tracing_layer = otel
+        .as_ref()
+        .and_then(codex_otel::OtelProvider::tracing_layer);
 
     let log_db = state_db
         .clone()

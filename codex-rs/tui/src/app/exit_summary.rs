@@ -29,6 +29,18 @@ impl App {
                 self.chat_widget.thread_id().or(self.primary_thread_id)
             }
         };
+        let resume_hint = resumable_thread(
+            thread_id,
+            self.chat_widget.thread_name(),
+            self.chat_widget.rollout_path().as_deref(),
+        );
+        // An empty local task has an allocated ID/path, but no saved conversation.
+        // Remote paths cannot be checked here; pending turns may still be persisting.
+        let thread_id = thread_id.filter(|_| {
+            !matches!(self.app_server_target, AppServerTarget::LocalDaemon { .. })
+                || resume_hint.is_some()
+                || self.chat_widget.is_user_turn_pending_or_running()
+        });
         let disconnect_info = thread_id.and_then(|_| {
             let command = match &self.app_server_target {
                 AppServerTarget::Embedded => return None,
@@ -65,11 +77,7 @@ impl App {
         AppExitInfo {
             token_usage: self.token_usage(),
             thread_id,
-            resume_hint: resumable_thread(
-                thread_id,
-                self.chat_widget.thread_name(),
-                self.chat_widget.rollout_path().as_deref(),
-            ),
+            resume_hint,
             disconnect_info,
             update_action: None,
             exit_reason,

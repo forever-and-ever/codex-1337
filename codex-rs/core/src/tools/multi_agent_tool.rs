@@ -27,15 +27,46 @@ pub(super) fn multi_agent_v2_handler(
     let parameters_override = parameters_override.map(|parameters| -> Result<JsonSchema, &str> {
         let mut parameters = super::catalog_parameters::parse(parameters)?;
         if let ToolSpec::Function(tool) = handler.spec()
-            && let Some(properties) = tool.parameters.properties
+            && let Some(properties) = &tool.parameters.properties
         {
+            if properties.contains_key("plaintext_message") {
+                // Catalog customization cannot change the work-order transport contract.
+                if parameters.required != tool.parameters.required
+                    || parameters.one_of != tool.parameters.one_of
+                    || parameters.any_of != tool.parameters.any_of
+                    || parameters.all_of != tool.parameters.all_of
+                    || parameters.schema_ref != tool.parameters.schema_ref
+                    || parameters.enum_values != tool.parameters.enum_values
+                    || parameters.encrypted == Some(true)
+                {
+                    return Err("schema changes agent message selection");
+                }
+                for name in ["message", "plaintext_message"] {
+                    let bundled = &properties[name];
+                    let mut property = parameters
+                        .properties
+                        .as_ref()
+                        .and_then(|properties| properties.get(name))
+                        .cloned()
+                        .ok_or("schema omits an agent message parameter")?;
+                    property.description.clone_from(&bundled.description);
+                    if name == "message" {
+                        property.encrypted = Some(true);
+                    } else if property.encrypted == Some(false) {
+                        property.encrypted = None;
+                    }
+                    if &property != bundled {
+                        return Err("schema changes agent message transport");
+                    }
+                }
+            }
             // Argument transport requires these markers even without server encryption config.
             for (name, schema) in properties {
                 if schema.encrypted == Some(true) {
                     let property = parameters
                         .properties
                         .as_mut()
-                        .and_then(|properties| properties.get_mut(&name))
+                        .and_then(|properties| properties.get_mut(name))
                         .ok_or("schema omits an encrypted parameter")?;
                     property.encrypted = Some(true);
                 }

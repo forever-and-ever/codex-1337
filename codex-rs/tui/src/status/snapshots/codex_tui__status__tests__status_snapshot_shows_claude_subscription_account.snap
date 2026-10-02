@@ -1,0 +1,16 @@
+---
+source: tui/src/status/tests.rs
+expression: "sanitize_directory(render_lines(&composite.display_lines(80))).join(\"\\n\")"
+---
+/status
+
+  >_ OpenAI Codex (v0.159.1-1337)
+
+  Model:        claude-sonnet-5-5 (reasoning none, summaries auto)
+  Directory:    [[workspace]]
+  Permissions:  Custom (workspace with network access, Ask for approval)
+  Agents.md:    <none>
+  Account:      Claude subscription · claude@example.com
+
+  Token usage:  0 total  (0 input + 0 output)
+  Limits:       data not available yet

@@ -11,6 +11,81 @@ fn all_model_presets() -> Vec<ModelPreset> {
 }
 
 #[tokio::test]
+async fn provider_picker_starts_a_new_conversation_and_does_not_reopen_after_escape() -> Result<()>
+{
+    use crate::app::ProviderModelEvent;
+    use crate::model_catalog::ModelListing;
+    use codex_app_server_protocol::ModelProviderOption;
+    use crossterm::event::KeyCode;
+    use crossterm::event::KeyEvent;
+    use crossterm::event::KeyModifiers;
+    let (mut app, mut events, _ops) = make_test_app_with_channels().await;
+    let original = app.chat_widget.current_model().to_owned();
+    let provider = ModelProviderOption {
+        id: "claude_subscription".into(),
+        name: "Claude".into(),
+    };
+    let mut model = all_model_presets().remove(0);
+    model.model = "claude-sonnet-5-5".into();
+    model.display_name = "Sonnet 5.5".into();
+    model.description = "Claude subscription".into();
+    let request_id = uuid::Uuid::new_v4();
+    app.chat_widget
+        .show_provider_models_loading(request_id, &provider);
+    app.chat_widget.show_provider_models(
+        request_id,
+        provider.clone(),
+        Ok(ModelListing {
+            models: vec![model.clone()],
+            providers: vec![provider.clone()],
+        }),
+    );
+    insta::assert_snapshot!(
+        "provider_new_conversation_picker",
+        render_bottom_popup(&app.chat_widget, /*width*/ 80)
+    );
+    app.chat_widget
+        .handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(
+        std::iter::from_fn(|| events.try_recv().ok())
+            .any(|event| matches!(event, AppEvent::OpenProviderReasoning { .. }))
+    );
+    app.chat_widget
+        .show_provider_reasoning(provider.clone(), model.clone());
+    app.chat_widget
+        .handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    let choice = std::iter::from_fn(|| events.try_recv().ok())
+        .find_map(|event| match event {
+            AppEvent::ProviderModel(ProviderModelEvent::Start(choice)) => Some(*choice),
+            _ => None,
+        })
+        .expect("new-provider selection");
+    assert_eq!(
+        (
+            choice.provider,
+            choice.model.model.as_str(),
+            app.chat_widget.current_model()
+        ),
+        (provider.clone(), "claude-sonnet-5-5", original.as_str())
+    );
+    let cancelled = uuid::Uuid::new_v4();
+    app.chat_widget
+        .show_provider_models_loading(cancelled, &provider);
+    app.chat_widget
+        .handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    app.chat_widget.show_provider_models(
+        cancelled,
+        provider,
+        Ok(ModelListing {
+            models: vec![model],
+            providers: Vec::new(),
+        }),
+    );
+    assert!(app.chat_widget.no_modal_or_popup_active());
+    Ok(())
+}
+
+#[tokio::test]
 async fn model_picker_refresh_updates_app_catalog_from_app_server() -> Result<()> {
     let (mut app, mut rx, _op_rx) = make_test_app_with_channels().await;
     let mut app_server = start_config_write_test_app_server(&app).await?;
@@ -19,6 +94,7 @@ async fn model_picker_refresh_updates_app_catalog_from_app_server() -> Result<()
     let thread_id = ThreadId::new();
     let mut session = test_thread_session(thread_id, test_path_buf("/tmp/project"));
     session.model = "gpt-5.5".to_string();
+    session.model_provider_id = app.config.model_provider_id.clone();
     app.primary_thread_id = Some(thread_id);
     app.active_thread_id = Some(thread_id);
     app.primary_session_configured = Some(session.clone());
@@ -31,10 +107,11 @@ async fn model_picker_refresh_updates_app_catalog_from_app_server() -> Result<()
         .set_feature_enabled(Feature::FastMode, /*enabled*/ true);
     app.chat_widget.open_model_popup();
     let request_id = std::iter::from_fn(|| rx.try_recv().ok())
-        .find_map(|event| match event {
+        .filter_map(|event| match event {
             AppEvent::FetchModels { request_id } => Some(request_id),
             _ => None,
         })
+        .last()
         .expect("initial model request");
     let mut hidden = all_model_presets();
     for preset in &mut hidden {
@@ -45,14 +122,18 @@ async fn model_picker_refresh_updates_app_catalog_from_app_server() -> Result<()
         &mut app_server,
         AppEvent::ModelsLoaded {
             request_id,
-            result: Ok(hidden),
+            result: Ok(crate::model_catalog::ModelListing {
+                models: hidden,
+                providers: Vec::new(),
+            }),
         },
     ))
     .await?;
     app.chat_widget.open_model_popup();
     assert!(app.chat_widget.no_modal_or_popup_active());
     let request = std::iter::from_fn(|| rx.try_recv().ok())
-        .find(|event| matches!(event, AppEvent::FetchModels { .. }))
+        .filter(|event| matches!(event, AppEvent::FetchModels { .. }))
+        .last()
         .expect("catalog request");
 
     Box::pin(app.handle_event(&mut tui, &mut app_server, request)).await?;
@@ -65,11 +146,13 @@ async fn model_picker_refresh_updates_app_catalog_from_app_server() -> Result<()
     })
     .await?;
     let AppEvent::ModelsLoaded {
-        result: Ok(models), ..
+        result: Ok(listing),
+        ..
     } = &mut loaded
     else {
-        panic!("model/list should return models");
+        panic!("model/list should return models: {loaded:?}");
     };
+    let models = &mut listing.models;
     assert!(!models.is_empty());
     for model in models.iter_mut() {
         model.is_default = model.model == "gpt-5.5";
@@ -90,15 +173,17 @@ async fn model_picker_refresh_updates_app_catalog_from_app_server() -> Result<()
         (&app.primary_session_configured, &cached),
         (&Some(session.clone()), &Some(session.clone()))
     );
-    app.chat_widget.handle_thread_session(test_thread_session(
-        ThreadId::new(),
-        test_path_buf("/tmp/other"),
-    ));
+    let mut other = test_thread_session(ThreadId::new(), test_path_buf("/tmp/other"));
+    other.model_provider_id = session.model_provider_id.clone();
+    app.chat_widget.handle_thread_session(other);
     app.chat_widget.handle_thread_session(cached.unwrap());
     assert_eq!(app.chat_widget.current_service_tier(), fast);
     let stale = AppEvent::ModelsLoaded {
         request_id: uuid::Uuid::new_v4(),
-        result: Ok(all_model_presets()),
+        result: Ok(crate::model_catalog::ModelListing {
+            models: all_model_presets(),
+            providers: Vec::new(),
+        }),
     };
     Box::pin(app.handle_event(&mut tui, &mut app_server, stale)).await?;
     assert_eq!(

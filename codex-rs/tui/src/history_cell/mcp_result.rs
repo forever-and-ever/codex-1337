@@ -51,7 +51,7 @@ impl McpToolResult {
     /// valid image.
     pub(super) fn new(result: CallToolResult, kind: McpResultKind) -> Self {
         let mut has_image = false;
-        let content = result
+        let mut content: Vec<McpContentBlock> = result
             .content
             .into_iter()
             .map(|block| {
@@ -101,6 +101,19 @@ impl McpToolResult {
                 }
             })
             .collect();
+
+        if let Some(structured) = &result.structured_content
+            && let Some(text) = super::returned_output::structured_text(
+                structured,
+                content.iter().filter_map(McpContentBlock::text),
+            )
+        {
+            content.push(McpContentBlock {
+                display: McpContentDisplay::Text(text),
+                is_image: false,
+                original_text: None,
+            });
+        }
 
         Self {
             content,

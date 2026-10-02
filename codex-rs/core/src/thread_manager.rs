@@ -4,11 +4,12 @@ mod shared_instructions;
 use crate::CodexAppsToolsCache;
 
 #[path = "thread_accounts.rs"]
-mod accounts;
+pub(crate) mod accounts;
 use crate::agent::LocalAgentControl;
 use crate::agent::api::AgentConfigUpdate;
 use crate::agent::api::AgentControl;
 use crate::agent::control::AgentControlInit;
+use crate::agent::control::ProviderAccountSelection;
 use crate::agents_md_manager::SessionInstructions;
 use crate::attestation::AttestationProvider;
 use crate::codex_thread::CodexThread;
@@ -411,6 +412,7 @@ pub(crate) struct ThreadManagerState {
     agent_control_factory: Option<AgentControlFactory>,
     auth_manager: Arc<AuthManager>,
     models_manager: SharedModelsManager,
+    model_catalog_provider: ModelProviderInfo,
     git_root_discovery: Arc<GitRootDiscovery>,
     environment_manager: Arc<EnvironmentManager>,
     starting_mcp_runtimes: std::sync::Mutex<Vec<std::sync::Weak<AtomicBool>>>,
@@ -436,13 +438,31 @@ pub fn build_models_manager(
     config: &Config,
     auth_manager: Arc<AuthManager>,
 ) -> SharedModelsManager {
-    let provider = create_model_provider(config.model_provider.clone(), Some(auth_manager));
+    build_models_manager_with_anthropic_account(
+        config,
+        auth_manager,
+        config.wrangler.default_claude_account.clone(),
+    )
+}
+
+pub(crate) fn build_models_manager_with_anthropic_account(
+    config: &Config,
+    auth_manager: Arc<AuthManager>,
+    discovery_account: Option<String>,
+) -> SharedModelsManager {
+    let provider = codex_model_provider::create_model_provider_with_anthropic_account(
+        config.model_provider.clone(),
+        Some(auth_manager),
+        discovery_account,
+    );
     let manager = provider.models_manager(
         config.codex_home.to_path_buf(),
         config.model_catalog.clone(),
     );
     manager.set_api_key_model_discovery_enabled(
-        config.features.enabled(Feature::ApiKeyModelDiscovery),
+        config.features.enabled(Feature::ApiKeyModelDiscovery)
+            || config.model_provider.adapter
+                == codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription,
     );
     manager
 }
@@ -573,6 +593,7 @@ impl ThreadManager {
                 thread_id_generator: default_thread_id_generator(),
                 agent_control_factory: None,
                 models_manager,
+                model_catalog_provider: config.model_provider.clone(),
                 git_root_discovery: Arc::default(),
                 environment_manager,
                 starting_mcp_runtimes: std::sync::Mutex::new(Vec::new()),
@@ -744,6 +765,7 @@ impl ThreadManager {
                 thread_created_tx,
                 thread_id_generator: default_thread_id_generator(),
                 agent_control_factory: None,
+                model_catalog_provider: provider.clone(),
                 models_manager: create_model_provider(provider, Some(auth_manager.clone()))
                     .models_manager(codex_home, /*config_model_catalog*/ None),
                 git_root_discovery: Arc::default(),
@@ -2255,11 +2277,26 @@ impl ThreadManagerState {
             plugins.inherit_remote_installed_plugins(&self.plugins_manager);
             (auth, models, plugins)
         } else {
-            (
-                auth_manager,
-                self.models_manager.clone(),
-                self.plugins_manager.clone(),
-            )
+            // account_for_spawn has resolved the saved/family binding before any
+            // discovery. A changed global default cannot reroute resumed threads.
+            let models = if config.model_provider.adapter
+                == codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription
+            {
+                let account = agent_control
+                    .runtime()
+                    .account_selection
+                    .get(&config.model_provider_id)
+                    .and_then(|selection| match selection.as_ref() {
+                        ProviderAccountSelection::ClaudeSubscription { id, .. } => Some(id.clone()),
+                        ProviderAccountSelection::Chatgpt { .. } => None,
+                    });
+                build_models_manager_with_anthropic_account(&config, auth_manager.clone(), account)
+            } else if config.model_provider == self.model_catalog_provider {
+                self.models_manager.clone()
+            } else {
+                build_models_manager(&config, auth_manager.clone())
+            };
+            (auth_manager, models, self.plugins_manager.clone())
         };
         let (instructions, inherited_exec_policy, extensions, mcp_manager, multi_agent_version) =
             if isolation == codex_extension_api::SessionIsolation::Isolated {

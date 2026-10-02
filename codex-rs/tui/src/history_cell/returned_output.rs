@@ -137,5 +137,30 @@ fn result_body(value: &Value) -> Option<String> {
             bodies.push(body);
         }
     }
+    if let Some(structured) = fields.get("structuredContent")
+        && let Some(text) = structured_text(structured, bodies.iter().map(String::as_str))
+    {
+        bodies.push(text);
+    }
     Some(bodies.join("\n"))
+}
+
+/// Render the domain payload, not the MCP envelope. Some servers also serialize the
+/// same value into a text block for older clients; show that result only once.
+pub(super) fn structured_text<'a>(
+    value: &Value,
+    text: impl Iterator<Item = &'a str>,
+) -> Option<String> {
+    if value.is_null()
+        || text.into_iter().any(|text| {
+            value.as_str() == Some(text)
+                || serde_json::from_str::<Value>(text).is_ok_and(|parsed| parsed == *value)
+        })
+    {
+        return None;
+    }
+    match value {
+        Value::String(text) => Some(text.clone()),
+        _ => serde_json::to_string_pretty(value).ok(),
+    }
 }

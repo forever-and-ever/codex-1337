@@ -427,7 +427,6 @@ fn code_mode_batches_display_their_own_counts_and_replay_without_double_counting
     );
     assert_eq!(cells.len(), 2);
     let mut view = TranscriptView::default();
-    view.set_output_estimates_enabled(/*enabled*/ true);
     for (id, tokens) in [("first", 1_000), ("second", 280), ("first", 1_000)] {
         view.record_tool_output_tokens(
             format!("tool-output-tokens:{id}"),
@@ -639,7 +638,6 @@ fn mixed_shell_reads_share_one_disclosure_and_output_bill() {
     assert_eq!(cell.activity_ids(), vec!["exec:mixed"]);
     let cells: Vec<Arc<dyn HistoryCell>> = vec![Arc::new(cell)];
     let mut view = TranscriptView::default();
-    view.set_output_estimates_enabled(/*enabled*/ true);
     for _ in 0..2 {
         view.record_tool_output_tokens("bill".into(), "mixed".into(), Some(1_280));
     }
@@ -669,7 +667,6 @@ fn activity_focus_keeps_controls_without_passive_hints() {
     let mut cells: Vec<Arc<dyn HistoryCell>> = Vec::new();
     let cell = Arc::new(ActivityCell::default());
     let mut view = TranscriptView::default();
-    view.set_output_estimates_enabled(true);
     let render_live = |view: &mut TranscriptView| {
         let expanded = view.sync_live_activity(&cells, cell.activity_ids());
         let tool_output_tokens = view.activity_output_tokens(&cell.activity_ids());

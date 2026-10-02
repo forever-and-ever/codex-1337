@@ -127,6 +127,7 @@ impl Classification {
             root_snapshot,
             score_authorization,
         } = self;
+        let provider_account_id = thread.committed_provider_account_id();
         let mut truncations = ClassificationTruncations::default();
         let trusted_tool_context = match mcp_tool.as_ref() {
             Some(tool) => {
@@ -273,9 +274,14 @@ impl Classification {
                 .unwrap_or_else(ResolvedModelMessages::bundled);
             let policy = config.resolve_guardian_policy(model_messages);
             let extra_policy = config.guardian_extra_policy.as_deref().unwrap_or_default();
-            let instructions = guardian_config.render_classifier_instructions(policy, extra_policy);
+            let instructions = guardian_config.render_classifier_instructions(
+                policy,
+                extra_policy,
+                sampler.output_instructions(),
+            );
             let output = match sampler
                 .sample(LunaSamplingRequest {
+                    provider_account_id,
                     parent_response_id,
                     instructions,
                     input: classification_input,

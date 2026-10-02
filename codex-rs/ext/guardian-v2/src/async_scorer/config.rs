@@ -29,6 +29,7 @@ const DEFAULT_REVIEW_THRESHOLD: f64 = 0.5;
 const LEGACY_REVIEW_THRESHOLD: f64 = 0.8;
 const DEFAULT_MAX_TOOL_CALL_LAG: usize = 2;
 pub(crate) const CLASSIFICATION_OUTPUT_INSTRUCTIONS: &str = "Your first output token is the entire classification: `high` for high risk or `low` for low risk. Output that token immediately and nothing else.";
+pub(crate) const NATIVE_CLASSIFICATION_OUTPUT_INSTRUCTIONS: &str = "Return only the JSON object required by the output schema: {\"risk\":\"high\"} for high risk or {\"risk\":\"low\"} for low risk.";
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct GuardianV2Config {
@@ -291,6 +292,7 @@ impl GuardianV2Config {
         &self,
         policy: &str,
         extra_policy: &str,
+        output_instructions: &str,
     ) -> RenderedFragment {
         // Include both policies before the classifier's existing template substitution and truncation.
         let policy = match extra_policy.trim() {
@@ -300,7 +302,7 @@ impl GuardianV2Config {
         GuardianClassifierInstructions::new(
             &self.classifier_instructions,
             &policy,
-            CLASSIFICATION_OUTPUT_INSTRUCTIONS,
+            output_instructions,
             self.max_classifier_instruction_tokens,
         )
         .render_fragment()

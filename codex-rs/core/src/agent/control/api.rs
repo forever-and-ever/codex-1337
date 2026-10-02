@@ -78,6 +78,8 @@ impl AgentControl for LocalAgentControl {
                             "spawn input must start the child turn".to_string(),
                         ));
                     }
+                    self.validate_message_provider(caller, &config.model_provider_id, &message)
+                        .await?;
                     let recipient = source.get_agent_path().ok_or_else(|| {
                         CodexErr::InvalidRequest(
                             "spawned agent is missing a canonical task name".to_string(),
@@ -141,6 +143,16 @@ impl AgentControl for LocalAgentControl {
                     })?;
                     self.ensure_v2_agent_loaded(resume_config, target, /*parent*/ None)
                         .await?;
+                    if matches!(&message, crate::agent::types::AgentMessage::Encrypted(_)) {
+                        let manager = self.runtime.upgrade()?;
+                        let recipient = manager.get_thread(target).await?;
+                        self.validate_message_provider(
+                            caller,
+                            &recipient.config_snapshot().await.model_provider_id,
+                            &message,
+                        )
+                        .await?;
+                    }
                     let communication = message.into_communication(author, receiver_path, mode);
                     let kind = match mode {
                         MessageDeliveryMode::QueueOnly => {

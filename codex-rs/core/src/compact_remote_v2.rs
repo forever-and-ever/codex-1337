@@ -77,6 +77,9 @@ const MAX_RETAINED_AGENT_MESSAGE_TOKENS: i64 = 10_000;
 // Compact attempts can run much longer than normal turns, so keep the per-transport
 // retry budget smaller than the general Responses stream retry budget.
 const MAX_REMOTE_COMPACTION_V2_STREAM_RETRIES: u64 = 2;
+// Includes connection/header wait as well as streaming. Summarizing a large
+// Claude context may take minutes; cancellation still drops this future early.
+const NATIVE_COMPACTION_ATTEMPT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
 
 pub(crate) async fn run_inline_remote_auto_compact_task(
     sess: Arc<Session>,
@@ -90,7 +93,16 @@ pub(crate) async fn run_inline_remote_auto_compact_task(
     let compaction_metadata = CompactionTurnMetadata::new(
         CompactionTrigger::Auto,
         reason,
-        CompactionImplementation::ResponsesCompactionV2,
+        if step_context
+            .turn
+            .provider
+            .remote_compaction_for_model(step_context.turn.model_info())
+            == codex_model_provider::RemoteCompactionSupport::AnthropicSigned
+        {
+            CompactionImplementation::AnthropicNative
+        } else {
+            CompactionImplementation::ResponsesCompactionV2
+        },
         phase,
     );
     run_remote_compact_task_inner(
@@ -117,7 +129,15 @@ pub(crate) async fn run_remote_compact_task(
     let compaction_metadata = CompactionTurnMetadata::new(
         CompactionTrigger::Manual,
         CompactionReason::UserRequested,
-        CompactionImplementation::ResponsesCompactionV2,
+        if turn_context
+            .provider
+            .remote_compaction_for_model(turn_context.model_info())
+            == codex_model_provider::RemoteCompactionSupport::AnthropicSigned
+        {
+            CompactionImplementation::AnthropicNative
+        } else {
+            CompactionImplementation::ResponsesCompactionV2
+        },
         CompactionPhase::StandaloneTurn,
     );
     run_remote_compact_task_inner(
@@ -288,11 +308,15 @@ async fn run_remote_compact_task_inner_impl(
             );
             match fallback_result {
                 Ok(attempt) => (attempt, fallback_turn_context),
+                Err(fallback_error) if !should_retry_with_current_model(&fallback_error) => {
+                    return Err(fallback_error);
+                }
                 Err(_) => return Err(error),
             }
         }
     };
     let RemoteCompactV2Attempt {
+        source_history,
         trace_input_history,
         prompt_input,
         prompt_input_metadata,
@@ -302,29 +326,39 @@ async fn run_remote_compact_task_inner_impl(
         owned_client_session: _owned_client_session,
     } = attempt;
     if let Some(token_usage) = token_usage {
-        sess.record_rollout_budget_usage(&token_usage).await?;
         analytics_details.active_context_tokens_before = Some(token_usage.input_tokens);
         analytics_details.compaction_summary_tokens = Some(token_usage.output_tokens);
         analytics_details.cached_input_tokens = Some(token_usage.cached_input_tokens);
         analytics_details.cache_write_input_tokens = Some(token_usage.cache_write_input_tokens);
     }
-    let (compacted_history, retained_images) = build_v2_compacted_history(
-        prompt_input,
-        prompt_input_metadata,
-        compaction_output,
-        sess.enabled(Feature::RetainClientDeveloperMessages),
-        if sess.enabled(Feature::CompactionImageBudget) {
-            RetainedImageBudget::Enabled
-        } else {
-            RetainedImageBudget::Disabled
-        },
-    );
+    let (compacted_history, retained_images) = if source_history.is_some() {
+        (vec![ResponseItemEnvelope::new(compaction_output)], 0)
+    } else {
+        build_v2_compacted_history(
+            prompt_input,
+            prompt_input_metadata,
+            compaction_output,
+            sess.enabled(Feature::RetainClientDeveloperMessages),
+            if sess.enabled(Feature::CompactionImageBudget) {
+                RetainedImageBudget::Enabled
+            } else {
+                RetainedImageBudget::Disabled
+            },
+        )
+    };
     analytics_details.retained_image_count = Some(retained_images);
-    let (new_window_number, new_window_ids) = sess.advance_auto_compact_window().await;
     let (initial_context, world_state_baseline) =
         build_compaction_initial_context(sess.as_ref(), &initial_context_injection).await;
-    let new_history =
-        insert_initial_context_before_last_real_user_or_summary(compacted_history, initial_context);
+    let new_history = if source_history.is_some() {
+        // Anthropic requires its signed checkpoint before conversation messages.
+        // Initial context can contain user-role AGENTS.md and environment fragments.
+        compacted_history
+            .into_iter()
+            .chain(initial_context)
+            .collect()
+    } else {
+        insert_initial_context_before_last_real_user_or_summary(compacted_history, initial_context)
+    };
 
     let reference_context_item = match initial_context_injection {
         InitialContextInjection::DoNotInject => None,
@@ -332,19 +366,10 @@ async fn run_remote_compact_task_inner_impl(
             Some(step_context.to_turn_context_item())
         }
     };
-    if let Some(trace_input_history) = trace_input_history.as_deref() {
-        let replacement_history = new_history
-            .iter()
-            .map(|envelope| envelope.item.clone())
-            .collect::<Vec<_>>();
-        compaction_trace.record_installed(&CompactionCheckpointTracePayload {
-            input_history: trace_input_history,
-            replacement_history: &replacement_history,
-        });
-    }
-    let reviewer_compaction_hash = if crate::context::GuardianContextMode::from_history(
-        sess.conversation_history_snapshot().await.as_ref(),
-    ) == crate::context::GuardianContextMode::Legacy
+    let reviewer_compaction_hash = if source_history.is_none()
+        && crate::context::GuardianContextMode::from_history(
+            sess.conversation_history_snapshot().await.as_ref(),
+        ) == crate::context::GuardianContextMode::Legacy
         && let Some(review_turn) = sess.turn_context_for_sub_id(&turn_context.sub_id).await
     {
         // Previous-model compaction must remain compatible with the continuing turn's
@@ -361,15 +386,27 @@ async fn run_remote_compact_task_inner_impl(
         reference_context_item,
         world_state_baseline,
         CompactedHistoryMetadata {
+            source_history,
             message: String::new(),
-            window_number: new_window_number,
-            window_ids: new_window_ids,
+            window: crate::compact::CompactionWindow::Advance,
             compaction_response_id: Some(compaction_response_id),
             compaction_model_hash: compaction_turn_context.model_info().comp_hash.clone(),
             reviewer_compaction_hash,
         },
     )
-    .await;
+    .await?;
+    if let Some(trace_input_history) = trace_input_history.as_deref() {
+        let replacement_history = sess
+            .clone_history()
+            .await
+            .raw_items()
+            .cloned()
+            .collect::<Vec<_>>();
+        compaction_trace.record_installed(&CompactionCheckpointTracePayload {
+            input_history: trace_input_history,
+            replacement_history: &replacement_history,
+        });
+    }
     sess.recompute_token_usage(compaction_turn_context).await;
 
     sess.emit_turn_item_completed(compaction_turn_context, compaction_item)
@@ -401,25 +438,38 @@ async fn run_remote_compaction_request_v2(
         sess.apply_pending_account().await.map_err(|error| {
             CodexErr::InvalidRequest(format!("Cannot apply account selection: {error}"))
         })?;
-        let result = match client_session
-            .stream(
-                prompt,
-                turn_context.model_info(),
-                &turn_context.session_telemetry,
-                sess.reasoning_effort_for_request(
-                    &turn_context.initial_settings,
-                    RequestEffortUsage::Compaction,
+        let request = async {
+            match client_session
+                .stream(
+                    prompt,
+                    turn_context.model_info(),
+                    &turn_context.session_telemetry,
+                    sess.reasoning_effort_for_request(
+                        &turn_context.initial_settings,
+                        RequestEffortUsage::Compaction,
+                    )
+                    .await,
+                    turn_context.reasoning_summary(),
+                    step_context.settings.service_tier.clone(),
+                    responses_metadata,
+                    &InferenceTraceContext::disabled(),
                 )
-                .await,
-                turn_context.reasoning_summary(),
-                step_context.settings.service_tier.clone(),
-                responses_metadata,
-                &InferenceTraceContext::disabled(),
-            )
-            .await
+                .await
+            {
+                Ok(stream) => collect_compaction_output(sess, turn_context, stream).await,
+                Err(err) => Err(err),
+            }
+        };
+        let result = if turn_context
+            .provider
+            .remote_compaction_for_model(turn_context.model_info())
+            == codex_model_provider::RemoteCompactionSupport::AnthropicSigned
         {
-            Ok(stream) => collect_compaction_output(sess, turn_context, stream).await,
-            Err(err) => Err(err),
+            tokio::time::timeout(NATIVE_COMPACTION_ATTEMPT_TIMEOUT, request)
+                .await
+                .map_err(|_| CodexErr::Fatal("Anthropic compaction outcome unknown after timeout; request was not replayed".into()))?
+        } else {
+            request.await
         };
 
         match result {
@@ -455,7 +505,16 @@ async fn collect_compaction_output(
         match event? {
             ResponseEvent::OutputItemDone(item) => {
                 output_item_count += 1;
-                if let ResponseItem::Compaction { .. } = item {
+                let expected_native = turn_context
+                    .provider
+                    .remote_compaction_for_model(turn_context.model_info())
+                    == codex_model_provider::RemoteCompactionSupport::AnthropicSigned;
+                let accepted = match &item {
+                    ResponseItem::NativeCompaction { .. } => expected_native,
+                    ResponseItem::Compaction { .. } => !expected_native,
+                    _ => false,
+                };
+                if accepted {
                     compaction_count += 1;
                     if compaction_output.is_none() {
                         compaction_output = Some(item);
@@ -475,6 +534,38 @@ async fn collect_compaction_output(
                     usage_metadata.as_ref(),
                 )
                 .await;
+                // Compaction is charged inference too. Record it once at the
+                // completion boundary, even if its checkpoint is rejected below.
+                // Installing the checkpoint later recomputes context occupancy,
+                // not cumulative usage.
+                sess.record_token_usage_info(
+                    turn_context,
+                    &turn_context.initial_settings,
+                    token_usage.as_ref(),
+                )
+                .await?;
+                if turn_context.provider.info().adapter
+                    == codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription
+                {
+                    let error = if usage_metadata
+                        .as_ref()
+                        .is_some_and(codex_api::anthropic_context_window_exceeded)
+                    {
+                        Some(CodexErr::ContextWindowExceeded)
+                    } else if usage_metadata
+                        .as_ref()
+                        .is_some_and(codex_api::anthropic_output_limit_exceeded)
+                    {
+                        Some(CodexErr::Fatal(
+                            "Anthropic compaction reached its output limit; no signed checkpoint was accepted".into(),
+                        ))
+                    } else {
+                        None
+                    };
+                    if let Some(error) = error {
+                        return Err(error);
+                    }
+                }
                 completed_response_id = Some(response_id);
                 completed_token_usage = token_usage;
                 break;
@@ -1302,3 +1393,7 @@ mod tests {
 #[cfg(test)]
 #[path = "compact_remote_v2_image_budget_tests.rs"]
 mod image_budget_tests;
+
+#[cfg(test)]
+#[path = "compact_remote_v2_native_tests.rs"]
+mod native_tests;

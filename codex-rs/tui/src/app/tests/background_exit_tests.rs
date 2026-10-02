@@ -191,7 +191,18 @@ async fn external_writer_view_respects_remapped_left() -> Result<()> {
 #[tokio::test]
 async fn daemon_disconnect_exit_summary_includes_reconnect_and_stop_instructions() -> Result<()> {
     let (mut app, _, _) = make_test_app_with_channels().await;
-    let thread_id = prepare_running_local_daemon(&mut app)?;
+    let thread_id = prepare_local_daemon_thread(&mut app)?;
+    // Allocating a task is not saving it: the empty task's ID cannot be resumed.
+    assert_snapshot!(
+        app.exit_info(ExitReason::UserRequested)
+            .format_exit_messages(/*color_enabled*/ false)
+            .join("\n"),
+        @""
+    );
+    app.chat_widget.handle_server_notification(
+        turn_started_notification(thread_id, "turn-1"),
+        /*replay_kind*/ None,
+    );
     app.keymap.agents.stop = vec![crate::key_hint::plain(KeyCode::F(10))];
     let mut exit_info = app.exit_info(ExitReason::UserRequested);
     exit_info.token_usage = TokenUsage {

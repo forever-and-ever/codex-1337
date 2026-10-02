@@ -41,6 +41,7 @@ async fn cyber_refusal_reads_eligibility_without_changing_the_model() -> Result<
     app.account_ui.displayed = Some((
         thread_id,
         codex_app_server_protocol::GetAccountResponse {
+            display_name: None,
             account_id: None,
             account: None,
             requires_openai_auth: true,

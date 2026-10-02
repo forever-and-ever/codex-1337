@@ -279,6 +279,7 @@ mod tests {
                     model_provider = "local"
 
                     [model_providers.local]
+                    adapter = "openai_compatible"
                     name = "local"
                     base_url = "http://127.0.0.1:8061/api/codex"
                     wire_api = "responses"
@@ -296,6 +297,7 @@ mod tests {
 
     fn test_provider(name: &str) -> ModelProviderInfo {
         ModelProviderInfo {
+            adapter: codex_model_provider_info::ModelProviderAdapter::default(),
             name: name.to_string(),
             base_url: Some("http://127.0.0.1:8061/api/codex".to_string()),
             model_catalog_url: None,

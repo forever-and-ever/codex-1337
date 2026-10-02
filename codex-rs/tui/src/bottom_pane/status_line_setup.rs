@@ -64,6 +64,9 @@ pub(crate) enum StatusLineItem {
     /// Current reasoning level.
     Reasoning,
 
+    /// Current subscription account, when this conversation has one.
+    ActiveAccount,
+
     /// Current working directory path.
     CurrentDir,
 
@@ -164,6 +167,9 @@ impl StatusLineItem {
             StatusLineItem::ModelName => "Current model name",
             StatusLineItem::ModelWithReasoning => "Current model name with reasoning level",
             StatusLineItem::Reasoning => "Current reasoning level",
+            StatusLineItem::ActiveAccount => {
+                "Active subscription account (omitted when unavailable)"
+            }
             StatusLineItem::CurrentDir => "Current working directory",
             StatusLineItem::ProjectRoot => "Project name (omitted when unavailable)",
             StatusLineItem::Hostname => "Current machine hostname (omitted when unavailable)",
@@ -223,6 +229,7 @@ impl StatusLineItem {
             StatusLineItem::ModelName => StatusSurfacePreviewItem::Model,
             StatusLineItem::ModelWithReasoning => StatusSurfacePreviewItem::ModelWithReasoning,
             StatusLineItem::Reasoning => StatusSurfacePreviewItem::Reasoning,
+            StatusLineItem::ActiveAccount => StatusSurfacePreviewItem::ActiveAccount,
             StatusLineItem::CurrentDir => StatusSurfacePreviewItem::CurrentDir,
             StatusLineItem::ProjectRoot => StatusSurfacePreviewItem::ProjectRoot,
             StatusLineItem::Hostname => StatusSurfacePreviewItem::Hostname,

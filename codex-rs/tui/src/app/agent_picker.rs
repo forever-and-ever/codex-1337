@@ -15,6 +15,15 @@ const AGENT_PICKER_PAGE_SIZE: u32 = 100;
 const AGENT_PICKER_MAX_THREADS: usize = 1_000;
 
 impl App {
+    pub(super) fn refresh_visible_agent_picker(&mut self) {
+        let selected = self
+            .chat_widget
+            .selected_index_for_present_view(AGENT_PICKER_VIEW_ID);
+        let params = self.agent_picker_selection_view_params(selected);
+        self.chat_widget
+            .replace_selection_view_if_present(AGENT_PICKER_VIEW_ID, params);
+    }
+
     pub(super) fn refresh_agent_picker_threads(
         &mut self,
         app_server: &AppServerSession,
@@ -102,9 +111,7 @@ impl App {
                 return;
             }
         };
-        let selected = self
-            .chat_widget
-            .selected_index_for_present_view(AGENT_PICKER_VIEW_ID);
+        let changed = std::mem::take(&mut self.agent_navigation.picker_refresh_changed);
         if threads.len() < AGENT_PICKER_MAX_THREADS {
             let reconciling = match self
                 .agent_navigation
@@ -122,6 +129,7 @@ impl App {
                 .collect();
             for id in std::mem::take(&mut self.agent_navigation.picker_refresh_known) {
                 if !retained.contains(&id)
+                    && !changed.contains(&id)
                     && (reconciling == Some(id)
                         || !self.thread_event_channels.get(&id).is_some_and(|channel| {
                             channel.attachment() == ThreadEventAttachment::Live
@@ -138,14 +146,17 @@ impl App {
             let Ok(thread_id) = ThreadId::from_string(&thread.id) else {
                 continue;
             };
-            let live = self
-                .thread_event_channels
-                .get(&thread_id)
-                .is_some_and(|channel| channel.attachment() == ThreadEventAttachment::Live);
+            self.agent_navigation.record_model(&thread);
             let previous = self.agent_navigation.get(&thread_id);
-            let is_running = matches!(thread.status, ThreadStatus::Active { .. });
-            let update_liveness = previous.is_none() || !is_running;
-            let is_closed = !live && matches!(thread.status, ThreadStatus::NotLoaded);
+            let status = if changed.contains(&thread_id) {
+                self.agent_navigation
+                    .status(thread_id)
+                    .cloned()
+                    .unwrap_or(thread.status)
+            } else {
+                thread.status
+            };
+            let is_closed = matches!(status, ThreadStatus::NotLoaded);
             let agent_path = crate::app_server_session::source_agent_path(&thread.source);
             let agent_nickname = thread
                 .agent_nickname
@@ -158,27 +169,7 @@ impl App {
             }
             self.upsert_agent_picker_thread(thread_id, agent_nickname, agent_role, is_closed);
             self.agent_navigation.set_agent_path(thread_id, agent_path);
-            if let Some(row) = self
-                .agent_navigation
-                .roster
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .rows
-                .iter_mut()
-                .find(|row| row.id == thread_id)
-            {
-                // Subscribed notifications win; unloaded roster entries rely on snapshots.
-                if live {
-                    if !matches!(thread.status, ThreadStatus::NotLoaded) {
-                        row.status.get_or_insert(thread.status);
-                    }
-                } else {
-                    row.status = Some(thread.status);
-                }
-            }
-            if !live && update_liveness {
-                self.agent_navigation.set_running(thread_id, is_running);
-            }
+            self.agent_navigation.set_status(thread_id, status);
         }
 
         self.sync_subagent_roster();
@@ -195,8 +186,6 @@ impl App {
                 roster.retiring = None;
             }
         }
-        let params = self.agent_picker_selection_view_params(selected);
-        self.chat_widget
-            .replace_selection_view_if_present(AGENT_PICKER_VIEW_ID, params);
+        self.refresh_visible_agent_picker();
     }
 }

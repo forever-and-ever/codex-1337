@@ -1,0 +1,25 @@
+---
+source: tui/src/app/agents_overview_tests.rs
+expression: "format!(\"Inline\\n{inline}\\nPicker\\n{}\",\nrender_bottom_popup(&app.chat_widget,\n90).replace(&root.to_string(),\n\"ROOT_ID\").replace(&child.to_string(),\n\"CHILD_ID\").replace(&unknown.to_string(), \"UNKNOWN_ID\"))"
+---
+Inline
+› Ask Codex to do anything
+
+──────────────────────────────────────────────────────────────────────────────────────────
+  Activity  —
+──────────────────────────────────────────────────────────────────────────────────────────
+  ● Worker   —                                                                         —
+  ? Unknown  —                                                                         —
+  Ctrl+X retire · ↑↓ select · Enter open · Esc back
+──────────────────────────────────────────────────────────────────────────────────────────
+  GPT-5.6-Sol default · /tmp/project · Main [default]
+Picker
+  Subagents
+  Empty prompt: Esc → main. ⌥+← previous, ⌥+→ next.
+
+
+  1. ● Worker                    CHILD_ID
+› 2. ? Main [default] (current)  ROOT_ID
+  3. ? Unknown                   UNKNOWN_ID
+
+  enter select · esc back

@@ -65,6 +65,7 @@ impl TranscriptHistory {
             || matches!(
                 item,
                 ResponseItem::Compaction { .. }
+                    | ResponseItem::NativeCompaction { .. }
                     | ResponseItem::ContextCompaction { .. }
                     | ResponseItem::CompactionTrigger { .. }
             )

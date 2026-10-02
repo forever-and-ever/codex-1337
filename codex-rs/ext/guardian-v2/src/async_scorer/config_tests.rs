@@ -13,7 +13,7 @@ use super::GuardianV2Config;
 
 fn rendered_classifier_text(config: &GuardianV2Config, policy: &str) -> String {
     let (_, content) = config
-        .render_classifier_instructions(policy, "")
+        .render_classifier_instructions(policy, "", CLASSIFICATION_OUTPUT_INSTRUCTIONS)
         .into_parts();
     let (ContentItem::InputText { text }, _) = content.into_parts() else {
         panic!("classifier instructions must be text");
@@ -48,7 +48,11 @@ fn extra_policy_reaches_templated_and_legacy_classifier_instructions() {
             ),
         ] {
             let (_, content) = config
-                .render_classifier_instructions(policy, extra_policy)
+                .render_classifier_instructions(
+                    policy,
+                    extra_policy,
+                    CLASSIFICATION_OUTPUT_INSTRUCTIONS,
+                )
                 .into_parts();
             let (ContentItem::InputText { text }, _) = content.into_parts() else {
                 panic!("classifier instructions must be text");

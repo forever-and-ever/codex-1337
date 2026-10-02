@@ -4,14 +4,17 @@
 //! inheritance, and validation messages remain the same for each multi-agent version.
 
 use crate::agent::control::normalize_agent_service_tier;
+use crate::agent::model_catalog::ProviderModels;
 use crate::agent::role::DEFAULT_ROLE_NAME;
 use crate::agent::role::apply_role_to_config;
+use crate::agent::types::SpawnAgentForkMode;
 use crate::config::Config;
 use crate::session::session::Session;
 use crate::session::step_context::StepContext;
 use crate::session::turn_context::TurnContext;
 use codex_models_manager::manager::RefreshStrategy;
 use codex_protocol::models::BaseInstructions;
+use codex_protocol::models::BaseInstructionsProvenance;
 use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::openai_models::ReasoningEffortPreset;
@@ -36,7 +39,7 @@ pub(crate) enum SpawnConfigVersion {
 
 pub(crate) struct SpawnConfigOptions<'a> {
     pub(crate) version: SpawnConfigVersion,
-    pub(crate) full_history_fork: bool,
+    pub(crate) fork_mode: Option<&'a SpawnAgentForkMode>,
     pub(crate) role_name: Option<&'a str>,
     pub(crate) model: Option<&'a str>,
     pub(crate) reasoning_effort: Option<ReasoningEffort>,
@@ -55,9 +58,10 @@ pub(crate) async fn prepare_agent_spawn_config(
     options: SpawnConfigOptions<'_>,
 ) -> Result<PreparedSpawnConfig, String> {
     let turn = step_context.turn.as_ref();
+    let full_history_fork = matches!(options.fork_mode, Some(SpawnAgentForkMode::FullHistory));
     let mut config =
         build_agent_spawn_config(&session.get_base_instructions().await, step_context)?;
-    if options.version == SpawnConfigVersion::V1 && options.full_history_fork {
+    if options.version == SpawnConfigVersion::V1 && full_history_fork {
         reject_full_fork_agent_type_override(options.role_name)?;
     }
     apply_requested_spawn_agent_model_overrides(
@@ -66,14 +70,15 @@ pub(crate) async fn prepare_agent_spawn_config(
         &mut config,
         options.model,
         options.reasoning_effort,
+        options.fork_mode,
     )
     .await?;
-    if !options.full_history_fork
+    if !full_history_fork
         || (options.version == SpawnConfigVersion::V2 && options.role_name.is_some())
     {
         apply_spawn_agent_role(session, &mut config, options.role_name).await?;
         if options.version == SpawnConfigVersion::V2
-            && options.full_history_fork
+            && full_history_fork
             && config.developer_instructions.is_none()
         {
             config
@@ -89,7 +94,7 @@ pub(crate) async fn prepare_agent_spawn_config(
         .role_name
         .or_else(|| {
             (options.version == SpawnConfigVersion::V2
-                && !options.full_history_fork
+                && !full_history_fork
                 && config
                     .agent_roles
                     .get(DEFAULT_ROLE_NAME)
@@ -200,6 +205,7 @@ async fn apply_requested_spawn_agent_model_overrides(
     config: &mut Config,
     requested_model: Option<&str>,
     requested_reasoning_effort: Option<ReasoningEffort>,
+    fork_mode: Option<&SpawnAgentForkMode>,
 ) -> Result<(), String> {
     let turn = step_context.turn.as_ref();
     let requested_model = requested_model.or(turn.config.agent_default_subagent_model.as_deref());
@@ -210,26 +216,35 @@ async fn apply_requested_spawn_agent_model_overrides(
     }
 
     if let Some(requested_model) = requested_model {
-        let available_models = session
-            .services
-            .models_manager
-            .list_models(RefreshStrategy::Offline, config.http_client_factory())
+        let catalogs = session
+            .agent_model_catalogs(config, RefreshStrategy::OnlineIfUncached)
             .await;
-        let selected_model_name = find_spawn_agent_model_name(
-            &available_models,
-            requested_model,
-            turn.multi_agent_version,
-        )?;
-        let selected_model_info = session
-            .services
-            .models_manager
-            .get_model_info(&selected_model_name, &config.to_models_manager_config())
+        let (catalog, selected_model_name) =
+            find_spawn_agent_model(&catalogs, requested_model, turn.multi_agent_version)?;
+        if catalog.provider_id != config.model_provider_id {
+            if fork_mode.is_some() {
+                return Err("History-forked agents must retain the parent model provider; use fork_turns=none for a different provider.".to_owned());
+            }
+            config.model_provider_id.clone_from(&catalog.provider_id);
+            config.model_provider = config.model_providers[&catalog.provider_id].clone();
+            config.model_catalog = None;
+            if matches!(
+                config.base_instructions_provenance,
+                Some(BaseInstructionsProvenance::Model { .. })
+            ) {
+                config.base_instructions = None;
+                config.base_instructions_provenance = None;
+            }
+        }
+        let selected_model_info = catalog
+            .manager
+            .get_model_info(selected_model_name, &config.to_models_manager_config())
             .await;
 
-        config.model = Some(selected_model_name.clone());
+        config.model = Some(selected_model_name.to_owned());
         if let Some(reasoning_effort) = requested_reasoning_effort {
             validate_spawn_agent_reasoning_effort(
-                &selected_model_name,
+                selected_model_name,
                 &selected_model_info.supported_reasoning_levels,
                 &reasoning_effort,
             )?;
@@ -264,8 +279,8 @@ pub(crate) async fn apply_spawn_agent_service_tier(
             "spawn_agent could not resolve the child model for service tier validation".to_owned()
         })?;
         let model_info = session
-            .services
-            .models_manager
+            .agent_models_manager(config)
+            .await?
             .get_model_info(model, &config.to_models_manager_config())
             .await;
         config.service_tier = normalize_agent_service_tier(
@@ -298,8 +313,8 @@ async fn apply_spawn_agent_role(
         "spawn_agent could not resolve the child model for reasoning effort validation".to_string()
     })?;
     let model_info = session
-        .services
-        .models_manager
+        .agent_models_manager(config)
+        .await?
         .get_model_info(&model, &config.to_models_manager_config())
         .await;
     if model_info.used_fallback_model_metadata {
@@ -313,31 +328,37 @@ async fn apply_spawn_agent_role(
     )
 }
 
-fn find_spawn_agent_model_name(
-    available_models: &[ModelPreset],
+fn find_spawn_agent_model<'a>(
+    catalogs: &'a [ProviderModels],
     requested_model: &str,
     multi_agent_version: MultiAgentVersion,
-) -> Result<String, String> {
-    available_models
+) -> Result<(&'a ProviderModels, &'a str), String> {
+    let mut matches = catalogs
         .iter()
-        .find(|model| {
-            model.model == requested_model
+        .flat_map(|catalog| catalog.models.iter().map(move |model| (catalog, model)))
+        .filter(|(catalog, model)| {
+            (model.model == requested_model
+                || requested_model.strip_prefix(&format!("{}/", catalog.provider_id))
+                    == Some(model.model.as_str()))
                 && model_supports_multi_agent_backend(model, multi_agent_version)
-        })
-        .map(|model| model.model.clone())
-        .ok_or_else(|| {
-            let available = available_models
-                .iter()
-                .filter(|model| model.show_in_picker)
-                .filter(|model| model_supports_multi_agent_backend(model, multi_agent_version))
-                .take(MAX_SPAWN_AGENT_MODEL_OVERRIDES)
-                .map(|model| model.model.as_str())
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!(
+        });
+    match (matches.next(), matches.next()) {
+        (Some((catalog, model)), None) => Ok((catalog, model.model.as_str())),
+        (Some(_), Some(_)) => Err(format!(
+            "Model `{requested_model}` is available from multiple providers; use a provider/model selector."
+        )),
+        (None, _) => {
+            let available =
+                crate::agent::model_catalog::advertised_agent_models(catalogs, multi_agent_version)
+                    .into_iter()
+                    .map(|model| model.model)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+            Err(format!(
                 "Unknown model `{requested_model}` for spawn_agent. Available models: {available}"
-            )
-        })
+            ))
+        }
+    }
 }
 
 fn validate_spawn_agent_reasoning_effort(

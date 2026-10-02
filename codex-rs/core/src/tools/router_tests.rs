@@ -57,6 +57,56 @@ fn tool_log_payload_redacts_plaintext_multi_agent_messages() {
         tool_log_payload(&payload, &ToolCallSource::Direct),
         payload.log_payload()
     );
+
+    // Explicit plaintext work orders remain private even when the upstream omits
+    // encryption metadata, and an upstream contradiction must fail before dispatch.
+    let payload = ToolPayload::Function {
+        arguments: json!({"target": "/root/worker", "plaintext_message": "secret work order"})
+            .to_string(),
+    };
+    for (namespace, name) in [
+        ("wrangler_agents", "spawn_agent"),
+        ("wrangler_agents", "send_message"),
+        ("agents", "followup_task"),
+    ] {
+        let call = ToolCall {
+            tool_name: ToolName::namespaced(namespace, name),
+            call_id: "plaintext-call".into(),
+            payload: payload.clone(),
+            encrypted_function_args: None,
+        };
+        assert_eq!(call.direct_source(), ToolCallSource::DirectPlaintextMessage);
+        assert_eq!(
+            tool_log_payload(&payload, &ToolCallSource::Direct),
+            "[plaintext arguments]"
+        );
+        let error = ToolRouter::build_tool_call(ResponseItem::FunctionCall {
+            id: None,
+            name: name.into(),
+            namespace: Some(namespace.into()),
+            arguments: match &payload {
+                ToolPayload::Function { arguments } => arguments.clone(),
+                _ => unreachable!(),
+            },
+            encrypted_function_args: Some(vec!["plaintext_message".into()]),
+            call_id: "bad-upstream-call".into(),
+            internal_chat_message_metadata_passthrough: None,
+        })
+        .unwrap_err();
+        assert!(
+            matches!(error, crate::function_tool::FunctionCallError::RespondToModel(message) if message.contains("Upstream encrypted plaintext_message"))
+        );
+    }
+    assert_eq!(
+        tool_log_payload(
+            &payload,
+            &ToolCallSource::CodeMode {
+                cell_id: "cell".into(),
+                runtime_tool_call_id: "call".into(),
+            }
+        ),
+        "[plaintext arguments]"
+    );
 }
 
 impl codex_extension_api::ToolContributor for ExtensionEchoContributor {

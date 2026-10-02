@@ -194,6 +194,7 @@ async fn model_default_saves_report_server_outcomes_and_target_server_profile() 
                 toml::from_str::<toml::Value>(&persisted)?,
                 toml::Value::Table(toml::toml! {
                     model = "gpt-5.5"
+                    model_provider = "openai"
                     model_reasoning_effort = "medium"
                     plan_mode_reasoning_effort = "high"
                     service_tier = "fast"

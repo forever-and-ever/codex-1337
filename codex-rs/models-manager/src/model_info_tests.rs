@@ -249,19 +249,28 @@ fn unknown_model_uses_builtin_instruction_template() {
 
 #[test]
 fn model_context_window_override_clamps_to_max_context_window() {
-    let mut model = model_info_from_slug("unknown-model");
-    model.context_window = Some(273_000);
-    model.max_context_window = Some(400_000);
-    let config = ModelsManagerConfig {
-        model_context_window: Some(500_000),
-        ..Default::default()
-    };
+    // Some provider catalogs advertise only context_window, not a separate maximum.
+    for (maximum, expected_window) in [(Some(400_000), 400_000), (None, 273_000)] {
+        let mut model = model_info_from_slug("unknown-model");
+        model.context_window = Some(273_000);
+        model.max_context_window = maximum;
+        let config = ModelsManagerConfig {
+            model_context_window: Some(500_000),
+            model_auto_compact_token_limit: Some(450_000),
+            ..Default::default()
+        };
 
-    let updated = with_config_overrides(model.clone(), &config);
-    let mut expected = model;
-    expected.context_window = Some(400_000);
+        let updated = with_config_overrides(model.clone(), &config);
+        let mut expected = model;
+        expected.context_window = Some(expected_window);
+        expected.auto_compact_token_limit = Some(450_000);
 
-    assert_eq!(updated, expected);
+        assert_eq!(updated, expected);
+        assert_eq!(
+            updated.auto_compact_token_limit(),
+            Some(expected_window * 9 / 10)
+        );
+    }
 }
 
 #[test]

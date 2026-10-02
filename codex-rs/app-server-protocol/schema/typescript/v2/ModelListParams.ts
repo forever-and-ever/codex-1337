@@ -4,6 +4,10 @@
 
 export type ModelListParams = {
 /**
+ * Configured provider whose catalog should be read on the server.
+ */
+modelProvider?: string | null,
+/**
  * Opaque pagination cursor returned by a previous call.
  */
 cursor?: string | null,

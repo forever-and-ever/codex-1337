@@ -214,8 +214,13 @@ pub(crate) async fn run_turn(
             .await;
         // Publish the failure only after prompt hooks finish, so clients cannot react to
         // an error by steering follow-up input into a turn still preserving its prompt.
-        let message_prefix = match turn_context.provider.capabilities().remote_compaction {
-            RemoteCompactionSupport::V2 => Some("Error running remote compact task".to_string()),
+        let message_prefix = match turn_context
+            .provider
+            .remote_compaction_for_model(turn_context.model_info())
+        {
+            RemoteCompactionSupport::V2 | RemoteCompactionSupport::AnthropicSigned => {
+                Some("Error running remote compact task".to_string())
+            }
             RemoteCompactionSupport::Unsupported => None,
         };
         sess.send_event(
@@ -338,7 +343,9 @@ pub(crate) async fn run_turn(
         // Token-budget compaction resets history, which can discard the evidence
         // referenced by a pending delta review. Leave budget failures unreusable.
         if !matches!(error.details(), CodexErrorDetails::ContextWindowExceeded)
-            || turn_context.config.features.enabled(Feature::TokenBudget)
+            || (turn_context.config.features.enabled(Feature::TokenBudget)
+                && turn_context.provider.capabilities().remote_compaction
+                    != RemoteCompactionSupport::AnthropicSigned)
         {
             return Err(error);
         }
@@ -726,7 +733,9 @@ pub(crate) async fn run_turn(
                     // policy. Keep summarizing compaction in this task to serialize history updates.
                     let config = &turn_context.config;
                     if config.model_post_turn_compact_threshold_percent > 0
-                        && !config.features.enabled(Feature::TokenBudget)
+                        && (!config.features.enabled(Feature::TokenBudget)
+                            || turn_context.provider.capabilities().remote_compaction
+                                == RemoteCompactionSupport::AnthropicSigned)
                         && super::context_window::context_window_token_status(
                             sess.as_ref(),
                             turn_context.as_ref(),
@@ -761,7 +770,9 @@ pub(crate) async fn run_turn(
             Err(err)
                 if matches!(err.details(), CodexErrorDetails::ContextWindowExceeded)
                     && !guardian_budget_compacted
-                    && !turn_context.config.features.enabled(Feature::TokenBudget)
+                    && (!turn_context.config.features.enabled(Feature::TokenBudget)
+                        || turn_context.provider.capabilities().remote_compaction
+                            == RemoteCompactionSupport::AnthropicSigned)
                     && sess
                         .services
                         .thread_extension_data
@@ -1477,7 +1488,13 @@ async fn run_auto_compact(
 ) -> CodexResult<()> {
     let turn_context = &step_context.turn;
     let _profile_guard = turn_context.turn_timing_state.begin_compaction();
-    if turn_context.config.features.enabled(Feature::TokenBudget) {
+    let support = turn_context
+        .provider
+        .remote_compaction_for_model(turn_context.model_info());
+    if turn_context.config.features.enabled(Feature::TokenBudget)
+        && turn_context.provider.capabilities().remote_compaction
+            != RemoteCompactionSupport::AnthropicSigned
+    {
         // Compaction is the reset request, so force a new context window
         // instead of consuming a pending `new_context` tool request.
         crate::compact_token_budget::run_inline_auto_compact_task(
@@ -1489,11 +1506,15 @@ async fn run_auto_compact(
         return Ok(());
     }
 
-    match turn_context.provider.capabilities().remote_compaction {
-        RemoteCompactionSupport::V2 => {
+    match support {
+        RemoteCompactionSupport::V2 | RemoteCompactionSupport::AnthropicSigned => {
             emit_compact_metric(
                 &sess.services.session_telemetry,
-                "remote_v2",
+                if support == RemoteCompactionSupport::AnthropicSigned {
+                    "anthropic_native"
+                } else {
+                    "remote_v2"
+                },
                 /*manual*/ false,
             );
             run_inline_remote_auto_compact_task_v2(
@@ -2770,6 +2791,7 @@ async fn try_run_sampling_request(
                     | ResponseItem::WebSearchCall { .. }
                     | ResponseItem::ImageGenerationCall { .. }
                     | ResponseItem::Compaction { .. }
+                    | ResponseItem::NativeCompaction { .. }
                     | ResponseItem::ConfigurationUpdate { .. }
                     | ResponseItem::CompactionTrigger { .. }
                     | ResponseItem::ContextCompaction { .. }
@@ -2936,8 +2958,8 @@ async fn try_run_sampling_request(
             }
             ResponseEvent::ModelsEtag(etag) => {
                 // Update internal state with latest models etag
-                sess.services
-                    .models_manager
+                sess.request_models_manager(&turn_context.config)
+                    .await?
                     .refresh_if_new_etag(etag, turn_context.config.http_client_factory())
                     .await;
             }
@@ -2982,6 +3004,26 @@ async fn try_run_sampling_request(
                 should_emit_turn_diff = true;
                 if let Err(err) = budget_result {
                     break Err(err);
+                }
+                if turn_context.provider.info().adapter
+                    == codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription
+                    && usage_metadata
+                        .as_ref()
+                        .is_some_and(codex_api::anthropic_context_window_exceeded)
+                {
+                    break Err(CodexErr::ContextWindowExceeded);
+                }
+                if turn_context.provider.info().adapter
+                    == codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription
+                    && usage_metadata
+                        .as_ref()
+                        .is_some_and(codex_api::anthropic_output_limit_exceeded)
+                {
+                    // Output items and charged usage are already retained. Replaying
+                    // identical history would require an unsafe assistant prefill.
+                    break Err(CodexErr::Fatal(
+                        "Anthropic response reached its output limit; partial output was retained, but automatic continuation is unsafe".into(),
+                    ));
                 }
                 if let Some(false) = end_turn {
                     needs_follow_up = true;

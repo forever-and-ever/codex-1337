@@ -1,6 +1,41 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "ClaudeSubscriptionAccount": {
+      "properties": {
+        "available": {
+          "description": "Whether this saved identity can be selected; not an upstream availability check.",
+          "type": "boolean"
+        },
+        "email": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "Stable upstream subscription identity; never a bearer token.",
+          "type": "string"
+        },
+        "nickname": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "available",
+        "id"
+      ],
+      "type": "object"
+    },
     "SavedAccount": {
       "properties": {
         "alias": {
@@ -18,6 +53,12 @@
         "id": {
           "type": "string"
         },
+        "nickname": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "plan": {
           "type": [
             "string",
@@ -29,6 +70,13 @@
         "id"
       ],
       "type": "object"
+    },
+    "SubscriptionAccountProvider": {
+      "enum": [
+        "openai",
+        "claudeSubscription"
+      ],
+      "type": "string"
     }
   },
   "properties": {
@@ -38,8 +86,36 @@
       },
       "type": "array"
     },
+    "claudeAccounts": {
+      "items": {
+        "$ref": "#/definitions/ClaudeSubscriptionAccount"
+      },
+      "type": "array"
+    },
+    "claudeManagementError": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "conversationProvider": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/SubscriptionAccountProvider"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "pendingAccountId": {
       "description": "Selected target whose handoff is not yet complete.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "pendingClaudeAccountId": {
       "type": [
         "string",
         "null"
@@ -50,10 +126,17 @@
         "string",
         "null"
       ]
+    },
+    "selectedClaudeAccountId": {
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "required": [
-    "accounts"
+    "accounts",
+    "claudeAccounts"
   ],
   "title": "ThreadAccountListResponse",
   "type": "object"

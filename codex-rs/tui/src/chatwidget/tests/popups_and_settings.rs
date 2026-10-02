@@ -16,7 +16,9 @@ use pretty_assertions::assert_eq;
 
 #[tokio::test]
 async fn account_picker_snapshot() {
+    use codex_app_server_protocol::ClaudeSubscriptionAccount;
     use codex_app_server_protocol::SavedAccount;
+    use codex_app_server_protocol::SubscriptionAccountProvider;
     use codex_app_server_protocol::ThreadAccountListResponse;
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     let thread_id = ThreadId::new();
@@ -26,21 +28,43 @@ async fn account_picker_snapshot() {
     assert!(
         matches!(rx.try_recv(), Ok(AppEvent::OpenAccountPicker { thread_id: id }) if id == thread_id)
     );
+    chat.show_account_picker_loading();
+    assert_chatwidget_snapshot!(
+        "account_selection_loading",
+        render_bottom_popup(&chat, /*width*/ 100)
+    );
+    chat.handle_key_event(KeyEvent::from(KeyCode::Esc));
+    assert!(!chat.finish_account_picker_loading());
     chat.show_account_picker(
         thread_id,
         ThreadAccountListResponse {
+            conversation_provider: Some(SubscriptionAccountProvider::Openai),
             selected_account_id: Some("alice:personal".into()),
             pending_account_id: Some("bob:personal".into()),
+            selected_claude_account_id: Some(
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".into(),
+            ),
+            pending_claude_account_id: None,
+            claude_management_error: None,
+            claude_accounts: vec![ClaudeSubscriptionAccount {
+                id: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".into(),
+                email: Some("claude@example.com".into()),
+                nickname: Some("work Claude".into()),
+                available: true,
+                status: None,
+            }],
             accounts: vec![
                 SavedAccount {
                     id: "alice:personal".into(),
                     alias: Some("work".into()),
+                    nickname: Some("personal".into()),
                     email: Some("alice@example.com".into()),
                     plan: Some("pro".into()),
                 },
                 SavedAccount {
                     id: "bob:personal".into(),
                     alias: None,
+                    nickname: None,
                     email: Some("bob@example.com".into()),
                     plan: Some("pro".into()),
                 },
@@ -49,6 +73,21 @@ async fn account_picker_snapshot() {
     );
     assert_chatwidget_snapshot!(
         "account_selection_popup",
+        render_bottom_popup(&chat, /*width*/ 100)
+    );
+    chat.show_account_nickname_prompt(
+        thread_id,
+        SubscriptionAccountProvider::ClaudeSubscription,
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".into(),
+        Some("work Claude".into()),
+    );
+    assert_chatwidget_snapshot!(
+        "account_nickname_prompt",
+        render_bottom_popup(&chat, /*width*/ 100)
+    );
+    chat.show_claude_login_pending("synthetic-login-id".to_owned());
+    assert_chatwidget_snapshot!(
+        "claude_login_pending",
         render_bottom_popup(&chat, /*width*/ 100)
     );
 }
@@ -3351,7 +3390,13 @@ async fn model_selection_popup_snapshot() {
 
 fn apply_model_list_response(chat: &mut ChatWidget, presets: Vec<ModelPreset>) {
     let request_id = chat.model_popup_request_id.expect("pending model request");
-    assert!(chat.on_models_loaded(request_id, Ok(presets)));
+    assert!(chat.on_models_loaded(
+        request_id,
+        Ok(crate::model_catalog::ModelListing {
+            models: presets,
+            providers: Vec::new()
+        })
+    ));
 }
 
 #[tokio::test]
@@ -3366,7 +3411,13 @@ async fn model_picker_refresh_rejects_obsolete_and_unusable_replies() {
     chat.handle_key_event(KeyEvent::from(KeyCode::Esc));
     chat.open_model_popup();
     let current_request = chat.model_popup_request_id.unwrap();
-    assert!(!chat.on_models_loaded(old_request, Ok(refreshed.clone())));
+    assert!(!chat.on_models_loaded(
+        old_request,
+        Ok(crate::model_catalog::ModelListing {
+            models: refreshed.clone(),
+            providers: Vec::new()
+        })
+    ));
     assert!(chat.model_popup_request_is_current(current_request));
     // Identical visible account fields still mark an account boundary.
     chat.update_account_state(
@@ -3375,7 +3426,13 @@ async fn model_picker_refresh_rejects_obsolete_and_unusable_replies() {
         chat.has_chatgpt_account,
         chat.has_codex_backend_auth,
     );
-    assert!(!chat.on_models_loaded(current_request, Ok(refreshed.clone())));
+    assert!(!chat.on_models_loaded(
+        current_request,
+        Ok(crate::model_catalog::ModelListing {
+            models: refreshed.clone(),
+            providers: Vec::new()
+        })
+    ));
     assert_eq!(chat.model_catalog.try_list_models().unwrap(), initial);
 
     for result in [
@@ -3387,7 +3444,13 @@ async fn model_picker_refresh_rejects_obsolete_and_unusable_replies() {
         chat.open_model_popup();
         let request_id = chat.model_popup_request_id.unwrap();
         let before = render_bottom_popup(&chat, /*width*/ 80);
-        assert!(!chat.on_models_loaded(request_id, result));
+        assert!(!chat.on_models_loaded(
+            request_id,
+            result.map(|models| crate::model_catalog::ModelListing {
+                models,
+                providers: Vec::new()
+            })
+        ));
         assert!(!chat.model_popup_request_is_current(request_id));
         assert_eq!(chat.model_catalog.try_list_models().unwrap(), initial);
         assert_eq!(render_bottom_popup(&chat, /*width*/ 80), before);

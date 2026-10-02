@@ -24,6 +24,10 @@ pub(crate) async fn compose_auth(
     manager: Option<&std::result::Result<Arc<GatewayAuthManager>, String>>,
     mut resolved: ResolvedProviderAuth,
 ) -> Result<ResolvedProviderAuth> {
+    if provider.adapter == codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription {
+        provider.validate().map_err(CodexErr::InvalidRequest)?;
+        return Ok(resolved);
+    }
     let Some(config) = provider.gateway_oauth.as_ref() else {
         return Ok(resolved);
     };

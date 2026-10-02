@@ -822,6 +822,7 @@ async fn send_code_exchange_request(
             redirect_uri,
             pkce,
             resource: None,
+            state: None,
         })
         .await;
     Ok((client, result))

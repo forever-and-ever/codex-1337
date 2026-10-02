@@ -16,8 +16,8 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (request) --
-00:additional_tools/developer (3; hash=6d6649fc311311c3):
-        - namespace/functions; hash=a6522cc172c2ef68
+00:additional_tools/developer (3; hash=dfb24dcf60c7b25c):
+        - namespace/functions; hash=561d57cc208d51cb
           - custom/exec
           - function/wait
           - function/update_work_status

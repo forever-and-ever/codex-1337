@@ -1641,7 +1641,7 @@ async fn apply_patch_events_emit_history_cells() {
         "expected approval request to surface via modal without emitting history cells"
     );
 
-    // 2) Begin apply -> per-file apply block cell (no global header)
+    // 2) Begin apply -> compact header and per-file apply block.
     let mut changes2 = HashMap::new();
     changes2.insert(
         PathBuf::from("foo.txt"),
@@ -1654,7 +1654,8 @@ async fn apply_patch_events_emit_history_cells() {
     assert!(!cells.is_empty(), "expected apply block cell to be sent");
     let blob = lines_to_single_string(cells.last().unwrap());
     insta::assert_snapshot!(blob, @"
-    • Added foo.txt (+16 -0)
+    • Edited
+      foo.txt (+16, -0)
          1 +line 1
          2 +line 2
          3 +line 3
@@ -1732,7 +1733,7 @@ async fn apply_patch_manual_approval_adjusts_header() {
     assert!(!cells.is_empty(), "expected apply block cell to be sent");
     let blob = lines_to_single_string(cells.last().unwrap());
     assert!(
-        blob.contains("Added foo.txt") || blob.contains("Edited foo.txt"),
+        blob.starts_with("• Edited\n  foo.txt (+1, -0)\n"),
         "expected apply summary header for foo.txt: {blob:?}"
     );
 }

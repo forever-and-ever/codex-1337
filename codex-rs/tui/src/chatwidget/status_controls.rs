@@ -424,16 +424,13 @@ impl ChatWidget {
         self.token_info
             .as_ref()
             .and_then(|info| info.model_context_window)
-            .or(self.config.model_context_window)
     }
 
     pub(super) fn status_line_context_remaining_percent(&self) -> Option<i64> {
         if self.token_usage_pending {
             return None;
         }
-        let Some(context_window) = self.status_line_context_window_size() else {
-            return Some(100);
-        };
+        let context_window = self.status_line_context_window_size()?;
         let default_usage = TokenUsage::default();
         let usage = self
             .token_info
@@ -469,7 +466,7 @@ impl ChatWidget {
         Some(format!("{label} {remaining:.0}% left"))
     }
 
-    pub(super) fn status_line_reasoning_effort_label(
+    pub(crate) fn status_line_reasoning_effort_label(
         effort: Option<&ReasoningEffortConfig>,
     ) -> String {
         match effort {

@@ -48,22 +48,24 @@
         },
         {
           "properties": {
+            "email": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "type": {
               "enum": [
-                "amazonBedrock"
+                "claudeSubscription"
               ],
-              "title": "AmazonBedrockAccountType",
+              "title": "ClaudeSubscriptionAccountType",
               "type": "string"
-            },
-            "usesCodexManagedCredentials": {
-              "default": false,
-              "type": "boolean"
             }
           },
           "required": [
             "type"
           ],
-          "title": "AmazonBedrockAccount",
+          "title": "ClaudeSubscriptionAccount",
           "type": "object"
         }
       ]
@@ -133,6 +135,13 @@
     },
     "accountId": {
       "description": "Saved conversation binding; null for an unscoped global-account read.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "displayName": {
+      "description": "Stored nickname or legacy ChatGPT alias; display-only, never a routing selector.",
       "type": [
         "string",
         "null"

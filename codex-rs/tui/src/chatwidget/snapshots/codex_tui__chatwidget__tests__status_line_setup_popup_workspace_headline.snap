@@ -13,8 +13,8 @@ expression: status_line_popup_snapshot(&mut chat)
   [ ] model                 Current model name
   [ ] model-with-reasoning  Current model name with reasoning level
   [ ] reasoning             Current reasoning level
+  [ ] active-account        Active subscription account (omitted when unavailable)
   [ ] current-dir           Current working directory
-  [ ] project-name          Project name (omitted when unavailable)
 ↓
   Workspace maintenance starts at 5pm
   space toggle · ←/→ reorder · enter save · esc cancel

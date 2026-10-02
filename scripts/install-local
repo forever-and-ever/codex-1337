@@ -14,7 +14,7 @@ root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 # rustup selects the workspace toolchain by cwd, not Cargo's --manifest-path.
 cd "$root/codex-rs"
 
-for command in bwrap cargo clang cut git install ln mktemp mold mv python3 readlink rg rm rustc sccache sed uname zsh; do
+for command in bash bwrap cargo cat clang cut git install ln mktemp mold mv python3 readlink rg rm rustc sccache sed uname zsh; do
     command -v "$command" >/dev/null 2>&1 || die "required command is absent: $command"
 done
 

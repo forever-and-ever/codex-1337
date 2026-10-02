@@ -5,4 +5,7 @@ pub(crate) enum StatusAccountDisplay {
         plan: Option<String>,
     },
     ApiKey,
+    ClaudeSubscription {
+        email: Option<String>,
+    },
 }

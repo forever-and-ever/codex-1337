@@ -21,6 +21,7 @@ pub fn with_config_overrides(mut model: ModelInfo, config: &ModelsManagerConfig)
         model.context_window = Some(
             model
                 .max_context_window
+                .or(model.context_window)
                 .map_or(context_window, |max_context_window| {
                     context_window.min(max_context_window)
                 }),
@@ -98,6 +99,11 @@ fn is_h1_heading(line: &str) -> bool {
 /// Build a minimal fallback model descriptor for missing/unknown slugs.
 pub fn model_info_from_slug(slug: &str) -> ModelInfo {
     warn!("Unknown model {slug} is used. This will use fallback model metadata.");
+    model_info_with_local_defaults(slug)
+}
+
+/// Local harness defaults for a model whose provider metadata is applied by the caller.
+pub fn model_info_with_local_defaults(slug: &str) -> ModelInfo {
     ModelInfo {
         slug: slug.to_string(),
         display_name: slug.to_string(),
@@ -129,6 +135,8 @@ pub fn model_info_from_slug(slug: &str) -> ModelInfo {
         context_window: Some(272_000),
         max_context_window: Some(272_000),
         auto_compact_token_limit: None,
+        supports_native_compaction: false,
+        anthropic: None,
         comp_hash: None,
         effective_context_window_percent: 95,
         experimental_supported_tools: Vec::new(),

@@ -1650,6 +1650,7 @@ async fn request_chatgpt_token_refresh(
         .refresh(RefreshTokenGrant {
             refresh_token: &refresh_token,
             resource: None,
+            scope: None,
         })
         .await
     {

@@ -1317,6 +1317,11 @@ async fn prepare_realtime_start(
     params: ConversationStartParams,
 ) -> CodexResult<PreparedRealtimeConversationStart> {
     let provider = sess.provider().await;
+    if provider.adapter == codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription {
+        return Err(CodexErr::InvalidRequest(
+            "Realtime conversations are not supported by Claude subscriptions.".into(),
+        ));
+    }
     let auth_manager = sess
         .services
         .model_client

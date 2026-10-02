@@ -110,7 +110,6 @@ fn file_disclosures_are_independent_and_not_copied() {
             .collect::<Vec<_>>(),
         vec![true, true],
     );
-    view.set_output_estimates_enabled(/*enabled*/ true);
     view.record_tool_output_tokens(
         "tool-output-tokens:batch".into(),
         "outer-exec".into(),

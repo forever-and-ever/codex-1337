@@ -11,6 +11,9 @@ use super::step_settings::StepSettingsUpdate;
 pub(crate) use super::step_settings::tests::update_selected_settings_for_test;
 use super::turn_context::TurnEnvironment;
 use super::*;
+
+#[path = "native_compaction_tests.rs"]
+mod native_compaction;
 use crate::agents_md_manager::AgentsMdManager;
 use crate::agents_md_manager::SessionInstructions;
 use crate::compact::InitialContextInjection;
@@ -126,13 +129,6 @@ use crate::tools::router::ToolCallSource;
 use crate::turn_diff_tracker::TurnDiffTracker;
 use codex_config::config_toml::ConfigToml;
 use codex_config::config_toml::ProjectConfig;
-use codex_config::permissions_toml::FilesystemPermissionToml;
-use codex_config::permissions_toml::FilesystemPermissionsToml;
-use codex_config::permissions_toml::NetworkToml;
-use codex_config::permissions_toml::PermissionProfileToml;
-use codex_config::permissions_toml::PermissionsToml;
-use codex_execpolicy::Decision;
-use codex_execpolicy::Policy;
 use codex_history::CodexHarnessMetadata;
 use codex_history::CompactedItem;
 use codex_history::InitialHistory;
@@ -3069,7 +3065,8 @@ async fn start_new_context_window_persists_checkpoint_state() {
 
     session
         .start_new_context_window(&step_context, world_state)
-        .await;
+        .await
+        .expect("new context window");
 
     let live_history = session.clone_history().await;
     assert!(live_history.raw_items().next().is_some());
@@ -4804,9 +4801,12 @@ async fn settings_checkpoint_waits_for_accepted_settings_persistence() {
             /*reference_context_item*/ None,
             /*world_state_baseline*/ None,
             CompactedHistoryMetadata {
+                source_history: None,
                 message: "summary".to_string(),
-                window_number,
-                window_ids,
+                window: crate::compact::CompactionWindow::Existing {
+                    number: window_number,
+                    ids: window_ids,
+                },
                 compaction_response_id: None,
                 compaction_model_hash: None,
                 reviewer_compaction_hash: None,
@@ -4839,7 +4839,7 @@ async fn settings_checkpoint_waits_for_accepted_settings_persistence() {
     assert_ne!(committed, restored);
     drop(refresh_guard);
     update.await.expect("accepted settings update");
-    checkpoint.await;
+    checkpoint.await.unwrap();
     settings_checkpoint
         .await
         .expect("checkpoint current settings");
@@ -4937,15 +4937,19 @@ async fn mcp_attribution_checkpoints_cover_batch_prefixes_compaction_and_restore
             /*reference_context_item*/ None,
             /*world_state_baseline*/ None,
             CompactedHistoryMetadata {
+                source_history: None,
                 message: "summary".to_string(),
-                window_number,
-                window_ids,
+                window: crate::compact::CompactionWindow::Existing {
+                    number: window_number,
+                    ids: window_ids,
+                },
                 compaction_response_id: None,
                 compaction_model_hash: None,
                 reviewer_compaction_hash: None,
             },
         )
-        .await;
+        .await
+        .unwrap();
     session
         .flush_rollout()
         .await
@@ -5068,15 +5072,19 @@ async fn compaction_persists_resume_metadata_and_companion_records() {
                 with_baselines.then_some(turn_context_baseline.clone()),
                 with_baselines.then_some(Arc::clone(&world_state)),
                 CompactedHistoryMetadata {
+                    source_history: None,
                     message: String::new(),
-                    window_number,
-                    window_ids,
+                    window: crate::compact::CompactionWindow::Existing {
+                        number: window_number,
+                        ids: window_ids,
+                    },
                     compaction_response_id: None,
                     compaction_model_hash: None,
                     reviewer_compaction_hash: None,
                 },
             )
-            .await;
+            .await
+            .unwrap();
     }
 
     session.flush_rollout().await.expect("flush checkpoints");
@@ -5687,8 +5695,11 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
     );
 
     let mut state = SessionState::new(session_configuration.clone());
-    state.history =
-        ContextManager::for_session(&session_configuration.session_source, &config.features);
+    state.history = ContextManager::for_session(
+        &session_configuration.session_source,
+        &config.features,
+        config.model_provider.adapter,
+    );
     let (environment_manager, resolved_environments) =
         resolved_environments_for_configuration(&session_configuration, &default_environments)
             .await;
@@ -5738,6 +5749,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
     let services = SessionServices {
         mcp_runtime,
         mcp_handler_cache: Default::default(),
+        agent_models_managers: Default::default(),
         unified_exec_manager: UnifiedExecProcessManager::new(
             config.background_terminal_max_timeout,
         ),
@@ -5827,6 +5839,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
 
     let session = Session {
         thread_id,
+        provider_id: config.model_provider_id.clone(),
         installation_id: "11111111-1111-4111-8111-111111111111".to_string(),
         tx_event,
         agent_status: agent_status_tx,
@@ -7751,8 +7764,11 @@ where
     );
 
     let mut state = SessionState::new(session_configuration.clone());
-    state.history =
-        ContextManager::for_session(&session_configuration.session_source, &config.features);
+    state.history = ContextManager::for_session(
+        &session_configuration.session_source,
+        &config.features,
+        config.model_provider.adapter,
+    );
     let (environment_manager, resolved_turn_environments) =
         resolved_environments_for_configuration(&session_configuration, &default_environments)
             .await;
@@ -7801,6 +7817,7 @@ where
     let services = SessionServices {
         mcp_runtime,
         mcp_handler_cache: Default::default(),
+        agent_models_managers: Default::default(),
         unified_exec_manager: UnifiedExecProcessManager::new(
             config.background_terminal_max_timeout,
         ),
@@ -7890,6 +7907,7 @@ where
 
     let session = Arc::new(Session {
         thread_id,
+        provider_id: config.model_provider_id.clone(),
         installation_id: "11111111-1111-4111-8111-111111111111".to_string(),
         tx_event,
         agent_status: agent_status_tx,

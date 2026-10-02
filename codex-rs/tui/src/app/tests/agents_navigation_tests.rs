@@ -11,6 +11,30 @@ async fn agents_navigation_roster_tracks_background_metadata_without_replaying_a
     app.upsert_agent_picker_thread(child, Some("worker".into()), None, false);
     let other = ThreadId::new();
     app.upsert_agent_picker_thread(other, Some("alpha".into()), None, false);
+    let mut settings = codex_app_server_protocol::ThreadSettingsUpdatedNotification {
+        thread_id: child.to_string(),
+        thread_settings: codex_app_server_protocol::ThreadSettings {
+            disabled_plugin_ids: Vec::new(),
+            cwd: app.config.cwd.clone(),
+            approval_policy: AskForApproval::OnRequest,
+            approvals_reviewer: codex_app_server_protocol::ApprovalsReviewer::AutoReview,
+            sandbox_policy: codex_app_server_protocol::SandboxPolicy::ReadOnly {
+                network_access: false,
+            },
+            active_permission_profile: None,
+            model: "gpt-6.1-sol".into(),
+            model_provider: "openai".into(),
+            service_tier: None,
+            effort: Some(ReasoningEffortConfig::XHigh),
+            summary: None,
+            collaboration_mode: app.chat_widget.current_collaboration_mode().clone(),
+            multi_agent_mode: Default::default(),
+            personality: None,
+        },
+    };
+    app.track_subagent_panel(&ServerNotification::ThreadSettingsUpdated(settings.clone()));
+    // A label-only navigation upsert must preserve the server's model selection.
+    app.upsert_agent_picker_thread(child, Some("worker".into()), None, false);
     let status = |status| {
         ServerNotification::ThreadStatusChanged(
             codex_app_server_protocol::ThreadStatusChangedNotification {
@@ -58,12 +82,25 @@ async fn agents_navigation_roster_tracks_background_metadata_without_replaying_a
                 row.activity.as_deref(),
                 row.tokens,
                 roster.watched,
-                roster.focused
+                roster.focused,
+                row.model.clone(),
             ),
-            (Some("Inspect parser"), Some(1_500_000), Some(root), None)
+            (
+                Some("Inspect parser"),
+                Some(1_500_000),
+                Some(root),
+                None,
+                Some(crate::subagent_roster::AgentModel {
+                    model: "gpt-6.1-sol".into(),
+                    effort: Some(ReasoningEffortConfig::XHigh),
+                }),
+            )
         );
     }
     app.track_subagent_panel(&status(codex_app_server_protocol::ThreadStatus::Idle));
+    settings.thread_settings.model = "claude-sonnet-4-6".into();
+    settings.thread_settings.effort = None;
+    app.track_subagent_panel(&ServerNotification::ThreadSettingsUpdated(settings));
     app.track_subagent_panel(&activity);
     let roster = app.agent_navigation.roster.lock().unwrap();
     assert_eq!(
@@ -102,9 +139,16 @@ async fn agents_navigation_roster_tracks_background_metadata_without_replaying_a
         roster
             .rows
             .iter()
-            .map(|row| (row.id, row.status.clone()))
+            .map(|row| (row.id, row.status.clone(), row.model.clone()))
             .collect::<Vec<_>>(),
-        vec![(child, Some(codex_app_server_protocol::ThreadStatus::Idle))]
+        vec![(
+            child,
+            Some(codex_app_server_protocol::ThreadStatus::Idle),
+            Some(crate::subagent_roster::AgentModel {
+                model: "claude-sonnet-4-6".into(),
+                effort: None,
+            }),
+        )]
     );
     drop(roster);
     app.agent_navigation.roster.lock().unwrap().down();

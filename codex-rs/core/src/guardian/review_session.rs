@@ -211,6 +211,7 @@ impl GuardianReviewSessionReuseKey {
         parent_history_version: u64,
         context_mode: GuardianContextMode,
     ) -> Self {
+        let model_policy = spawn_config.to_models_manager_config();
         Self {
             root_review_version: None,
             parent_reset_version: 0,
@@ -227,8 +228,8 @@ impl GuardianReviewSessionReuseKey {
             model: spawn_config.model.clone(),
             model_provider_id: spawn_config.model_provider_id.clone(),
             model_provider: spawn_config.model_provider.clone(),
-            model_context_window: spawn_config.model_context_window,
-            model_auto_compact_token_limit: spawn_config.model_auto_compact_token_limit,
+            model_context_window: model_policy.model_context_window,
+            model_auto_compact_token_limit: model_policy.model_auto_compact_token_limit,
             model_auto_compact_token_limit_scope: spawn_config.model_auto_compact_token_limit_scope,
             model_reasoning_effort: spawn_config.model_reasoning_effort.clone(),
             model_reasoning_summary: spawn_config.model_reasoning_summary,

@@ -414,6 +414,65 @@ fn projected_content_preserves_full_rendering() {
 }
 
 #[test]
+fn structured_content_remains_disclosable_in_direct_and_code_mode_results() {
+    // LSP servers legitimately return only structuredContent. Display projection must
+    // not mistake an empty legacy content array for an empty result.
+    let value = json!({"symbol": "Widget", "file": "src/widget.rs", "line": 42});
+    let mut snapshots = Vec::new();
+    for (label, content) in [
+        ("structured only", Vec::new()),
+        (
+            "with summary",
+            vec![json!({"type": "text", "text": "One definition"})],
+        ),
+        (
+            "legacy duplicate",
+            vec![json!({"type": "text", "text": value.to_string()})],
+        ),
+    ] {
+        let result = CallToolResult {
+            structured_content: Some(value.clone()),
+            ..result(content)
+        };
+        let mut direct = new_active_mcp_tool_call(
+            "definition".into(),
+            McpInvocation {
+                server: "lsp".into(),
+                tool: "definition".into(),
+                arguments: Some(json!({"query": "Widget"})),
+            },
+            /*animations_enabled*/ false,
+        );
+        let body = codex_protocol::models::FunctionCallOutputBody::Text(
+            serde_json::to_string(&result).unwrap(),
+        );
+        direct.complete(Duration::ZERO, Ok(result));
+        let batch = ToolOutputCell::from_output(
+            "output",
+            Some("exec"),
+            "exec",
+            /*namespace*/ None,
+            &body,
+        )
+        .unwrap();
+        for (path, cell) in [
+            ("direct", &direct as &dyn HistoryCell),
+            ("code mode", &batch as &dyn HistoryCell),
+        ] {
+            assert!(cell.activity_disclosure(/*width*/ 100).is_some());
+            let text = visible_lines(cell.expanded_hyperlink_lines(/*width*/ 100))
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert_eq!(text.matches("src/widget.rs").count(), 1);
+            snapshots.push(format!("{label}, {path}\n{text}"));
+        }
+    }
+    insta::assert_snapshot!(snapshots.join("\n\n"));
+}
+
+#[test]
 fn projected_image_marker_still_requires_a_complete_image() {
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(PNG)

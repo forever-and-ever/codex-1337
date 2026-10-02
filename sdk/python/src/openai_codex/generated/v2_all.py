@@ -33,14 +33,12 @@ class ApiKeyAccount(BaseModel):
     type: Annotated[Literal["apiKey"], Field(title="ApiKeyAccountType")]
 
 
-class AmazonBedrockAccount(BaseModel):
+class ClaudeSubscriptionAccount(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    type: Annotated[Literal["amazonBedrock"], Field(title="AmazonBedrockAccountType")]
-    uses_codex_managed_credentials: Annotated[
-        bool | None, Field(alias="usesCodexManagedCredentials")
-    ] = False
+    email: str | None = None
+    type: Annotated[Literal["claudeSubscription"], Field(title="ClaudeSubscriptionAccountType")]
 
 
 class AccountRoutingOverride(Enum):
@@ -403,8 +401,6 @@ class AuthMode(Enum):
     headers = "headers"
     agent_identity = "agentIdentity"
     personal_access_token = "personalAccessToken"
-    bedrock_api_key = "bedrockApiKey"
-    bedrock_access_keys = "bedrockAccessKeys"
 
 
 class AuthRecoveryNotification(BaseModel):
@@ -527,6 +523,24 @@ class CapabilityRootLocation(RootModel[EnvironmentCapabilityRootLocation]):
         EnvironmentCapabilityRootLocation,
         Field(description="Location used to resolve a selected capability root."),
     ]
+
+
+class ClaudeSubscriptionAccount1(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    available: Annotated[
+        bool,
+        Field(
+            description="Whether this saved identity can be selected; not an upstream availability check."
+        ),
+    ]
+    email: str | None = None
+    id: Annotated[
+        str, Field(description="Stable upstream subscription identity; never a bearer token.")
+    ]
+    nickname: str | None = None
+    status: str | None = None
 
 
 class CliAuthCredentialsStoreMode(Enum):
@@ -2259,6 +2273,15 @@ class LocalShellStatus(Enum):
     incomplete = "incomplete"
 
 
+class ClaudeSubscriptionLoginAccountParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Annotated[
+        Literal["claudeSubscription"], Field(title="ClaudeSubscriptionv2::LoginAccountParamsType")
+    ]
+
+
 class ApiKeyLoginAccountParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -2306,28 +2329,14 @@ class ChatgptAuthTokensLoginAccountParams(BaseModel):
     ]
 
 
-class AmazonBedrockLoginAccountParams(BaseModel):
+class ClaudeSubscriptionLoginAccountResponse(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    api_key: Annotated[str, Field(alias="apiKey")]
-    region: str
+    auth_url: Annotated[str, Field(alias="authUrl")]
+    login_id: Annotated[str, Field(alias="loginId")]
     type: Annotated[
-        Literal["amazonBedrock"], Field(title="AmazonBedrockv2::LoginAccountParamsType")
-    ]
-
-
-class AmazonBedrockAccessKeysLoginAccountParams(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    access_key_id: Annotated[str, Field(alias="accessKeyId")]
-    region: str
-    secret_access_key: Annotated[str, Field(alias="secretAccessKey")]
-    session_token: Annotated[str | None, Field(alias="sessionToken")] = None
-    type: Annotated[
-        Literal["amazonBedrockAccessKeys"],
-        Field(title="AmazonBedrockAccessKeysv2::LoginAccountParamsType"),
+        Literal["claudeSubscription"], Field(title="ClaudeSubscriptionv2::LoginAccountResponseType")
     ]
 
 
@@ -2383,33 +2392,24 @@ class ChatgptAuthTokensLoginAccountResponse(BaseModel):
     ]
 
 
-class AmazonBedrockLoginAccountResponse(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    type: Annotated[
-        Literal["amazonBedrock"], Field(title="AmazonBedrockv2::LoginAccountResponseType")
-    ]
-
-
 class LoginAccountResponse(
     RootModel[
-        ApiKeyLoginAccountResponse
+        ClaudeSubscriptionLoginAccountResponse
+        | ApiKeyLoginAccountResponse
         | ChatgptLoginAccountResponse
         | ChatgptDeviceCodeLoginAccountResponse
         | ChatgptAuthTokensLoginAccountResponse
-        | AmazonBedrockLoginAccountResponse
     ]
 ):
     model_config = ConfigDict(
         populate_by_name=True,
     )
     root: Annotated[
-        ApiKeyLoginAccountResponse
+        ClaudeSubscriptionLoginAccountResponse
+        | ApiKeyLoginAccountResponse
         | ChatgptLoginAccountResponse
         | ChatgptDeviceCodeLoginAccountResponse
-        | ChatgptAuthTokensLoginAccountResponse
-        | AmazonBedrockLoginAccountResponse,
+        | ChatgptAuthTokensLoginAccountResponse,
         Field(title="LoginAccountResponse"),
     ]
 
@@ -2809,6 +2809,13 @@ class ModelListParams(BaseModel):
         int | None,
         Field(description="Optional page size; defaults to a reasonable server-side value.", ge=0),
     ] = None
+    model_provider: Annotated[
+        str | None,
+        Field(
+            alias="modelProvider",
+            description="Configured provider whose catalog should be read on the server.",
+        ),
+    ] = None
 
 
 class ModelProviderCapabilitiesReadParams(BaseModel):
@@ -2825,6 +2832,14 @@ class ModelProviderCapabilitiesReadResponse(BaseModel):
     image_generation: Annotated[bool, Field(alias="imageGeneration")]
     namespace_tools: Annotated[bool, Field(alias="namespaceTools")]
     web_search: Annotated[bool, Field(alias="webSearch")]
+
+
+class ModelProviderOption(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: str
+    name: str
 
 
 class ModelRerouteReason(RootModel[Literal["highRiskCyberActivity"]]):
@@ -4071,6 +4086,17 @@ class CompactionResponseItem(BaseModel):
     type: Annotated[Literal["compaction"], Field(title="CompactionResponseItemType")]
 
 
+class NativeCompactionResponseItem(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: str | None = None
+    type: Annotated[Literal["native_compaction"], Field(title="NativeCompactionResponseItemType")]
+    content: str
+    provider: Literal["anthropic"]
+    signature: str
+
+
 class CompactionTriggerResponseItem(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -4294,6 +4320,7 @@ class SavedAccount(BaseModel):
     alias: str | None = None
     email: str | None = None
     id: str
+    nickname: str | None = None
     plan: str | None = None
 
 
@@ -5053,6 +5080,11 @@ class SubagentMigration(BaseModel):
     name: str
 
 
+class SubscriptionAccountProvider(Enum):
+    openai = "openai"
+    claude_subscription = "claudeSubscription"
+
+
 class TerminalInteractionNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -5113,6 +5145,11 @@ class ThreadAccountListResponse(BaseModel):
         populate_by_name=True,
     )
     accounts: list[SavedAccount]
+    claude_accounts: Annotated[list[ClaudeSubscriptionAccount1], Field(alias="claudeAccounts")]
+    claude_management_error: Annotated[str | None, Field(alias="claudeManagementError")] = None
+    conversation_provider: Annotated[
+        SubscriptionAccountProvider | None, Field(alias="conversationProvider")
+    ] = None
     pending_account_id: Annotated[
         str | None,
         Field(
@@ -5120,7 +5157,9 @@ class ThreadAccountListResponse(BaseModel):
             description="Selected target whose handoff is not yet complete.",
         ),
     ] = None
+    pending_claude_account_id: Annotated[str | None, Field(alias="pendingClaudeAccountId")] = None
     selected_account_id: Annotated[str | None, Field(alias="selectedAccountId")] = None
+    selected_claude_account_id: Annotated[str | None, Field(alias="selectedClaudeAccountId")] = None
 
 
 class ThreadAccountSelectParams(BaseModel):
@@ -5134,6 +5173,12 @@ class ThreadAccountSelectParams(BaseModel):
             description="Saved identity or an alias from `[wrangler.account_aliases]`.",
         ),
     ]
+    provider: Annotated[
+        SubscriptionAccountProvider | None,
+        Field(
+            description="Defaults to ChatGPT for pre-Claude clients; Claude selection must be explicit."
+        ),
+    ] = None
     thread_id: Annotated[str, Field(alias="threadId")]
 
 
@@ -5142,6 +5187,13 @@ class ThreadAccountSelectResponse(BaseModel):
         populate_by_name=True,
     )
     account_id: Annotated[str, Field(alias="accountId")]
+    conversation_changed: Annotated[
+        bool,
+        Field(
+            alias="conversationChanged",
+            description="False when choosing the other provider's new-conversation default.",
+        ),
+    ]
     default_saved: Annotated[
         bool,
         Field(
@@ -5152,6 +5204,7 @@ class ThreadAccountSelectResponse(BaseModel):
     pending: Annotated[
         bool | None, Field(description="Whether this thread's account handoff is still pending.")
     ] = False
+    provider: SubscriptionAccountProvider
 
 
 class ThreadActiveFlag(Enum):
@@ -6777,11 +6830,11 @@ class ChatgptAccount(BaseModel):
     type: Annotated[Literal["chatgpt"], Field(title="ChatgptAccountType")]
 
 
-class Account(RootModel[ApiKeyAccount | ChatgptAccount | AmazonBedrockAccount]):
+class Account(RootModel[ApiKeyAccount | ChatgptAccount | ClaudeSubscriptionAccount]):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    root: ApiKeyAccount | ChatgptAccount | AmazonBedrockAccount
+    root: ApiKeyAccount | ChatgptAccount | ClaudeSubscriptionAccount
 
 
 class AccountLoginCompletedNotification(BaseModel):
@@ -6794,6 +6847,26 @@ class AccountLoginCompletedNotification(BaseModel):
         DesktopOnboardingEntrypoint | None, Field(alias="onboardingEntrypoint")
     ] = None
     success: bool
+
+
+class AccountNicknameSetParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    account_id: Annotated[str, Field(alias="accountId")]
+    nickname: Annotated[
+        str, Field(description="Empty or whitespace-only text clears the nickname.")
+    ]
+    provider: SubscriptionAccountProvider
+
+
+class AccountNicknameSetResponse(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    account_id: Annotated[str, Field(alias="accountId")]
+    nickname: str | None = None
+    provider: SubscriptionAccountProvider
 
 
 class AccountUpdatedNotification(BaseModel):
@@ -7088,6 +7161,17 @@ class ThreadAccountSelectRequest(BaseModel):
         Literal["thread/account/select"], Field(title="Thread/account/selectRequestMethod")
     ]
     params: ThreadAccountSelectParams
+
+
+class AccountNicknameSetRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[
+        Literal["account/nickname/set"], Field(title="Account/nickname/setRequestMethod")
+    ]
+    params: AccountNicknameSetParams
 
 
 class ThreadUnarchiveRequest(BaseModel):
@@ -8443,6 +8527,13 @@ class GetAccountResponse(BaseModel):
             description="Saved conversation binding; null for an unscoped global-account read.",
         ),
     ] = None
+    display_name: Annotated[
+        str | None,
+        Field(
+            alias="displayName",
+            description="Stored nickname or legacy ChatGPT alias; display-only, never a routing selector.",
+        ),
+    ] = None
     requires_openai_auth: Annotated[bool, Field(alias="requiresOpenaiAuth")]
 
 
@@ -8725,24 +8816,22 @@ class ChatgptLoginAccountParams(BaseModel):
 
 class LoginAccountParams(
     RootModel[
-        ApiKeyLoginAccountParams
+        ClaudeSubscriptionLoginAccountParams
+        | ApiKeyLoginAccountParams
         | ChatgptLoginAccountParams
         | ChatgptDeviceCodeLoginAccountParams
         | ChatgptAuthTokensLoginAccountParams
-        | AmazonBedrockLoginAccountParams
-        | AmazonBedrockAccessKeysLoginAccountParams
     ]
 ):
     model_config = ConfigDict(
         populate_by_name=True,
     )
     root: Annotated[
-        ApiKeyLoginAccountParams
+        ClaudeSubscriptionLoginAccountParams
+        | ApiKeyLoginAccountParams
         | ChatgptLoginAccountParams
         | ChatgptDeviceCodeLoginAccountParams
-        | ChatgptAuthTokensLoginAccountParams
-        | AmazonBedrockLoginAccountParams
-        | AmazonBedrockAccessKeysLoginAccountParams,
+        | ChatgptAuthTokensLoginAccountParams,
         Field(title="LoginAccountParams"),
     ]
 
@@ -8933,6 +9022,13 @@ class ModelListResponse(BaseModel):
         populate_by_name=True,
     )
     data: list[Model]
+    model_provider: Annotated[
+        str | None,
+        Field(
+            alias="modelProvider",
+            description="Provider that supplied this catalog; absent only on older servers.",
+        ),
+    ] = None
     next_cursor: Annotated[
         str | None,
         Field(
@@ -8940,6 +9036,12 @@ class ModelListResponse(BaseModel):
             description="Opaque cursor to pass to the next call to continue after the last item. If None, there are no more items to return.",
         ),
     ] = None
+    providers: Annotated[
+        list[ModelProviderOption] | None,
+        Field(
+            description="Providers available for starting a new conversation, without auth material."
+        ),
+    ] = []
 
 
 class NewThreadModelDefaults(BaseModel):
@@ -11271,6 +11373,7 @@ class ResponseItem(
         | WebSearchCallResponseItem
         | ImageGenerationCallResponseItem
         | CompactionResponseItem
+        | NativeCompactionResponseItem
         | ConfigurationUpdateResponseItem
         | CompactionTriggerResponseItem
         | ContextCompactionResponseItem
@@ -11294,6 +11397,7 @@ class ResponseItem(
         | WebSearchCallResponseItem
         | ImageGenerationCallResponseItem
         | CompactionResponseItem
+        | NativeCompactionResponseItem
         | ConfigurationUpdateResponseItem
         | CompactionTriggerResponseItem
         | ContextCompactionResponseItem
@@ -12752,6 +12856,7 @@ class ClientRequest(
         | ThreadSectionMoveRequest
         | ThreadAccountListRequest
         | ThreadAccountSelectRequest
+        | AccountNicknameSetRequest
         | ThreadUnarchiveRequest
         | ThreadCompactStartRequest
         | ThreadShellCommandRequest
@@ -12868,6 +12973,7 @@ class ClientRequest(
         | ThreadSectionMoveRequest
         | ThreadAccountListRequest
         | ThreadAccountSelectRequest
+        | AccountNicknameSetRequest
         | ThreadUnarchiveRequest
         | ThreadCompactStartRequest
         | ThreadShellCommandRequest

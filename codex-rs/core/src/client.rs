@@ -25,6 +25,7 @@
 //! WebSocket prewarm is treated as the first websocket connection attempt for a turn. If it
 //! fails, normal stream retry/fallback logic handles recovery on the same turn.
 
+use arc_swap::ArcSwapOption;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
@@ -35,7 +36,14 @@ use std::sync::atomic::Ordering;
 #[path = "client_tool_metadata.rs"]
 mod tool_metadata;
 
+#[path = "client_anthropic_tools.rs"]
+pub(crate) mod anthropic_tools;
+
+#[path = "client_anthropic.rs"]
+mod anthropic;
+
 use crate::CodexResponsesHeaders;
+use crate::agent::control::ProviderAccountSelection;
 use crate::tools::ExecutedToolCalls;
 use async_channel::Sender;
 use codex_api::AgentIdentityTelemetry;
@@ -148,6 +156,7 @@ use codex_model_provider::WorkspaceRoutingContext;
 use codex_model_provider::create_model_provider;
 #[cfg(test)]
 use codex_model_provider_info::DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS;
+use codex_model_provider_info::ModelProviderAdapter;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::WireApi;
 use codex_protocol::error::CodexErr;
@@ -202,6 +211,9 @@ fn session_telemetry_for_request(
 struct ModelClientState {
     thread_id: ThreadId,
     provider: SharedModelProvider,
+    /// Committed route, separate from the family-wide desired account. A step
+    /// retains this route until its safe account handoff boundary.
+    provider_account: ArcSwapOption<ProviderAccountRoute>,
     workspace_routing: WorkspaceRoutingContext,
     auth_env_telemetry: AuthEnvTelemetry,
     session_source: SessionSource,
@@ -218,6 +230,12 @@ struct ModelClientState {
     disable_websockets: AtomicBool,
     agent_identity_session_fallback: AgentIdentitySessionFallback,
     cached_websocket_session: StdMutex<WebsocketSession>,
+}
+
+#[derive(Debug)]
+struct ProviderAccountRoute {
+    selection: ProviderAccountSelection,
+    generation: u64,
 }
 
 enum ClientRouting {
@@ -517,6 +535,7 @@ impl ModelClient {
             state: Arc::new(ModelClientState {
                 thread_id,
                 provider: model_provider,
+                provider_account: ArcSwapOption::empty(),
                 workspace_routing,
                 auth_env_telemetry,
                 session_source,
@@ -575,16 +594,14 @@ impl ModelClient {
 
     fn prompt_cache_key(&self, responses_metadata: &CodexResponsesMetadata) -> String {
         if let Some(prompt_cache_key) = &self.prompt_cache_key_override {
-            return prompt_cache_key.clone();
-        }
-
-        if let SessionSource::Internal(source) = &self.state.session_source
+            prompt_cache_key.clone()
+        } else if let SessionSource::Internal(source) = &self.state.session_source
             && let Some(parent_thread_id) = responses_metadata.parent_thread_id
         {
-            return format!("{source}:{parent_thread_id}");
+            format!("{source}:{parent_thread_id}")
+        } else {
+            responses_metadata.session_id.clone()
         }
-
-        responses_metadata.session_id.clone()
     }
 
     // ChatGPT derives cache affinity from the Responses session-id header. Keep the
@@ -621,6 +638,15 @@ impl ModelClient {
     }
 
     fn auth_owner_generation(&self) -> Option<u64> {
+        if self.uses_claude_subscription() {
+            return Some(
+                self.state
+                    .provider_account
+                    .load()
+                    .as_ref()
+                    .map_or(0, |route| route.generation),
+            );
+        }
         self.auth_manager().map(|manager| {
             manager
                 .auth_change_state_receiver()
@@ -655,6 +681,53 @@ impl ModelClient {
         self.state
             .disable_websockets
             .store(false, Ordering::Relaxed);
+    }
+
+    pub(crate) fn with_provider_account(
+        self,
+        account: Option<Arc<ProviderAccountSelection>>,
+    ) -> Self {
+        self.state.provider_account.store(account.map(|selection| {
+            Arc::new(ProviderAccountRoute {
+                selection: (*selection).clone(),
+                generation: 0,
+            })
+        }));
+        self
+    }
+
+    pub(crate) fn provider_account_id(&self) -> Option<String> {
+        self.state
+            .provider_account
+            .load_full()
+            .map(|route| route.selection.id().to_owned())
+    }
+
+    pub(crate) fn provider_account_selection(&self) -> Option<ProviderAccountSelection> {
+        self.state
+            .provider_account
+            .load_full()
+            .map(|route| route.selection.clone())
+    }
+
+    pub(crate) fn uses_claude_subscription(&self) -> bool {
+        self.state.provider.info().adapter == ModelProviderAdapter::ClaudeSubscription
+    }
+
+    pub(crate) fn commit_provider_account(&self, selection: ProviderAccountSelection) {
+        let generation = self
+            .state
+            .provider_account
+            .load()
+            .as_ref()
+            .map_or(0, |route| route.generation);
+        self.state
+            .provider_account
+            .store(Some(Arc::new(ProviderAccountRoute {
+                selection,
+                generation: generation.wrapping_add(1),
+            })));
+        self.invalidate_account();
     }
 
     fn store_cached_websocket_session(&self, websocket_session: WebsocketSession) {
@@ -753,6 +826,11 @@ impl ModelClient {
     ) -> Result<Vec<ApiMemorySummarizeOutput>> {
         if raw_memories.is_empty() {
             return Ok(Vec::new());
+        }
+        if self.uses_claude_subscription() {
+            return Err(CodexErr::InvalidRequest(
+                "Memory summarization is unavailable for Claude subscriptions".into(),
+            ));
         }
 
         let client_setup = self
@@ -994,12 +1072,7 @@ impl ModelClient {
             prompt.output_schema_strict,
         );
         let prompt_cache_key = Some(self.prompt_cache_key(responses_metadata));
-        let service_tier = if self.state.provider.info().is_amazon_bedrock() {
-            // Bedrock only supports the implicit default tier, including with custom catalogs.
-            None
-        } else {
-            model_info.service_tier_for_request(service_tier)
-        };
+        let service_tier = model_info.service_tier_for_request(service_tier);
         if !include_internal {
             for item in &mut input {
                 item.clear_tool_result_metadata();
@@ -1042,7 +1115,8 @@ impl ModelClient {
     ///
     /// WebSocket use is controlled by provider capability and session-scoped fallback state.
     pub fn responses_websocket_enabled(&self) -> bool {
-        if !self.state.provider.info().supports_websockets
+        if self.uses_claude_subscription()
+            || !self.state.provider.info().supports_websockets
             || self.state.disable_websockets.load(Ordering::Relaxed)
         {
             return false;
@@ -1056,15 +1130,14 @@ impl ModelClient {
     /// This centralizes setup used by both prewarm and normal request paths so they stay in
     /// lockstep when auth/provider resolution changes.
     async fn current_client_setup(&self, routing: ClientRouting) -> Result<CurrentClientSetup> {
-        // Capture before resolving credentials so an account switch during setup cannot label
-        // an old connection with the new owner's revision.
-        let auth_owner_generation = self.auth_owner_generation();
         let auth_changes = self
             .state
             .provider
             .auth_manager()
             .map(|manager| manager.auth_change_receiver());
         loop {
+            // Capture before resolving credentials so a route change forces a fresh setup.
+            let auth_owner_generation = self.auth_owner_generation();
             let revision = auth_changes.as_ref().map(|changes| *changes.borrow());
             let auth = self.state.provider.auth().await;
             let (api_provider, redirect_policy) = match routing {
@@ -1097,10 +1170,7 @@ impl ModelClient {
             // revisions so a refresh during setup still invalidates cached WebSocket state.
             if self.state.provider.info().auth.is_none() {
                 if self.auth_owner_generation() != auth_owner_generation {
-                    return Err(std::io::Error::other(
-                        "account changed while preparing model request",
-                    )
-                    .into());
+                    continue;
                 }
                 // Rebuild the entire bundle after a credential-only refresh, including routing.
                 if auth_changes.as_ref().map(|changes| *changes.borrow()) != revision {
@@ -1139,7 +1209,6 @@ impl ModelClient {
             && provider.env_key.is_none()
             && provider.experimental_bearer_token.is_none()
             && provider.auth.is_none()
-            && provider.aws.is_none()
     }
 
     fn set_guardian_metadata(
@@ -1218,6 +1287,9 @@ impl ModelClient {
     }
 
     pub(crate) async fn prewarm_auth(&self) -> Result<()> {
+        if self.uses_claude_subscription() {
+            return self.capture_anthropic_auth().await.map(|_| ());
+        }
         self.current_client_setup(ClientRouting::Workspace)
             .await
             .map(|_| ())
@@ -1756,7 +1828,10 @@ impl ModelClientSession {
             self.client
                 .prepare_response_items_for_request(&mut request.input);
             if crate::guardian::is_basic_session_source(&self.client.state.session_source) {
-                crate::guardian::observe_guardian_request(session_telemetry, &request);
+                crate::guardian::observe_guardian_request(
+                    session_telemetry,
+                    crate::guardian::estimate_request_tokens(&request),
+                );
             }
             let request_session_telemetry =
                 session_telemetry_for_request(session_telemetry, &request);
@@ -1969,7 +2044,10 @@ impl ModelClientSession {
             if !warmup
                 && crate::guardian::is_basic_session_source(&self.client.state.session_source)
             {
-                crate::guardian::observe_guardian_request(session_telemetry, &request);
+                crate::guardian::observe_guardian_request(
+                    session_telemetry,
+                    crate::guardian::estimate_request_tokens(&request),
+                );
             }
             let mut client_metadata = self.client.build_ws_client_metadata(
                 responses_metadata,
@@ -2248,6 +2326,39 @@ impl ModelClientSession {
         responses_metadata: &CodexResponsesMetadata,
         inference_trace: &InferenceTraceContext,
     ) -> Result<ResponseStream> {
+        if !self.client.uses_claude_subscription()
+            && prompt
+                .input
+                .iter()
+                .any(|item| matches!(item, ResponseItem::NativeCompaction { .. }))
+        {
+            return Err(CodexErr::InvalidRequest(
+                "An Anthropic signed checkpoint cannot be sent to another provider".into(),
+            ));
+        }
+        if self.client.uses_claude_subscription()
+            && !model_info.supports_native_compaction
+            && prompt
+                .input
+                .iter()
+                .any(|item| matches!(item, ResponseItem::NativeCompaction { .. }))
+        {
+            return Err(CodexErr::InvalidRequest(
+                "The selected Claude model cannot continue the existing signed checkpoint".into(),
+            ));
+        }
+        if self.client.uses_claude_subscription() {
+            return self
+                .stream_anthropic(
+                    prompt,
+                    model_info,
+                    session_telemetry,
+                    effort,
+                    responses_metadata,
+                    inference_trace,
+                )
+                .await;
+        }
         let owner = self.client.auth_owner_generation();
         if self.websocket_session.auth_owner_generation != owner {
             // HTTP sticky routing is account-bound too, not just WS continuation IDs.
@@ -2594,9 +2705,7 @@ impl AuthRequestTelemetryContext {
         let auth_telemetry = auth_header_telemetry(api_auth);
         Self {
             auth_mode: auth_mode.map(|mode| match mode {
-                AuthMode::ApiKey | AuthMode::BedrockApiKey | AuthMode::BedrockAccessKeys => {
-                    "ApiKey"
-                }
+                AuthMode::ApiKey => "ApiKey",
                 AuthMode::Chatgpt
                 | AuthMode::ChatgptAuthTokens
                 | AuthMode::Headers

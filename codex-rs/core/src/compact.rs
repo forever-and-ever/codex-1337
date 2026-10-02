@@ -77,12 +77,21 @@ pub(crate) enum InitialContextInjection {
 /// `Session::replace_compacted_history` assigns missing item IDs before constructing the persisted
 /// `CompactedItem`, ensuring the live and persisted histories remain identical.
 pub(crate) struct CompactedHistoryMetadata {
+    pub(crate) source_history: Option<Arc<Vec<ResponseItemEnvelope>>>,
     pub(crate) message: String,
-    pub(crate) window_number: u64,
-    pub(crate) window_ids: AutoCompactWindowIds,
+    pub(crate) window: CompactionWindow,
     pub(crate) compaction_response_id: Option<String>,
     pub(crate) compaction_model_hash: Option<String>,
     pub(crate) reviewer_compaction_hash: Option<String>,
+}
+
+pub(crate) enum CompactionWindow {
+    Existing {
+        number: u64,
+        ids: AutoCompactWindowIds,
+    },
+    /// Advance only after validating the captured prefix, under the history lock.
+    Advance,
 }
 
 pub(crate) async fn build_compaction_initial_context(
@@ -399,15 +408,18 @@ async fn run_compact_task_inner_impl(
         reference_context_item,
         world_state_baseline,
         CompactedHistoryMetadata {
+            source_history: None,
             message: summary_text,
-            window_number,
-            window_ids,
+            window: CompactionWindow::Existing {
+                number: window_number,
+                ids: window_ids,
+            },
             compaction_response_id: Some(compaction_response.response_id),
             compaction_model_hash: turn_context.model_info().comp_hash.clone(),
             reviewer_compaction_hash: None,
         },
     )
-    .await;
+    .await?;
     sess.recompute_token_usage(&turn_context).await;
 
     sess.emit_turn_item_completed(&turn_context, compaction_item)
@@ -643,7 +655,9 @@ pub(crate) fn insert_initial_context_before_last_real_user_or_summary(
         .find_map(|(i, item)| {
             matches!(
                 &item.item,
-                ResponseItem::Compaction { .. } | ResponseItem::ContextCompaction { .. }
+                ResponseItem::Compaction { .. }
+                    | ResponseItem::NativeCompaction { .. }
+                    | ResponseItem::ContextCompaction { .. }
             )
             .then_some(i)
         });

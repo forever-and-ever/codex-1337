@@ -1203,6 +1203,54 @@
           "type": "object"
         },
         {
+          "description": "Provider-native signed state, persisted and replayed without conversion.",
+          "oneOf": [
+            {
+              "description": "An exact Anthropic summary/signature pair. Reject oversized blocks rather than truncate either signed field. Only the content is visible to the model. The owned summarization request caps output at 4096 provider tokens; this decoded-byte bound is an additional resource limit, not a tokenizer claim.",
+              "properties": {
+                "content": {
+                  "type": "string"
+                },
+                "provider": {
+                  "enum": [
+                    "anthropic"
+                  ],
+                  "type": "string"
+                },
+                "signature": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "content",
+                "provider",
+                "signature"
+              ],
+              "type": "object"
+            }
+          ],
+          "properties": {
+            "id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "enum": [
+                "native_compaction"
+              ],
+              "title": "NativeCompactionResponseItemType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "NativeCompactionResponseItem",
+          "type": "object"
+        },
+        {
           "description": "A durable input control interpreted by the backend at its position in history.",
           "properties": {
             "reasoning": {

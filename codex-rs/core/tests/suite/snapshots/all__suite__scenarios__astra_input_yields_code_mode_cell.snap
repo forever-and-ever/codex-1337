@@ -6,8 +6,8 @@ Scenario: Astra continues after new user input yields a running code cell, then 
 
 ## Window 1
 -- request 1 (turn) --
-00:additional_tools/developer (3; hash=5c862b7b98ce761d):
-        - namespace/functions; hash=25e38d397aee9622
+00:additional_tools/developer (3; hash=4c509e23399db40a):
+        - namespace/functions; hash=34b63eb6e1d63731
           - custom/exec
           - function/wait
           - function/update_work_status

@@ -10,6 +10,7 @@ use crate::agent::api::AgentInput;
 use crate::agent::api::AgentTarget;
 use crate::agent::api::SendRequest;
 use crate::agent::child_config::build_agent_resume_config;
+use crate::agent::types::AgentMessage;
 use crate::agent::types::MessageDeliveryMode;
 use crate::tools::context::FunctionToolOutput;
 
@@ -18,7 +19,8 @@ use crate::tools::context::FunctionToolOutput;
 /// Input for the MultiAgentV2 `send_message` tool.
 pub(crate) struct SendMessageArgs {
     pub(crate) target: String,
-    pub(crate) message: String,
+    pub(crate) message: Option<String>,
+    pub(crate) plaintext_message: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -26,32 +28,22 @@ pub(crate) struct SendMessageArgs {
 /// Input for the MultiAgentV2 `followup_task` tool.
 pub(crate) struct FollowupTaskArgs {
     pub(crate) target: String,
-    pub(crate) message: String,
-}
-
-pub(super) fn message_content(message: String) -> Result<String, FunctionCallError> {
-    if message.trim().is_empty() {
-        return Err(FunctionCallError::RespondToModel(
-            "Empty message can't be sent to an agent".to_string(),
-        ));
-    }
-    Ok(message)
+    pub(crate) message: Option<String>,
+    pub(crate) plaintext_message: Option<String>,
 }
 
 /// Handles the shared MultiAgentV2 message flow for both `send_message` and `followup_task`.
-pub(super) async fn handle_message_string_tool(
+pub(super) async fn handle_agent_message_tool(
     invocation: ToolInvocation,
     mode: MessageDeliveryMode,
     target: String,
-    message: String,
+    message: AgentMessage,
     analytics: &mut ToolCallAnalytics,
 ) -> Result<FunctionToolOutput, FunctionCallError> {
-    let message = message_content(message)?;
     let ToolInvocation {
         session,
         turn,
         call_id,
-        source,
         ..
     } = invocation;
     let receiver_thread_id = resolve_agent_target(&session, &turn, &target).await?;
@@ -65,10 +57,7 @@ pub(super) async fn handle_message_string_tool(
             caller: session.thread_id,
             target: AgentTarget::Id(receiver_thread_id),
             resume_config,
-            input: AgentInput::Message {
-                message: agent_message_from_tool(message, &source),
-                mode,
-            },
+            input: AgentInput::Message { message, mode },
             start_options: TurnStartOptions {
                 parent_turn_id: (mode == MessageDeliveryMode::TriggerTurn)
                     .then(|| turn.sub_id.clone()),

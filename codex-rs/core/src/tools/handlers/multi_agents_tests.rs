@@ -1072,6 +1072,11 @@ async fn spawn_agent_errors_when_manager_dropped() {
 
 #[tokio::test]
 async fn multi_agent_v2_spawn_returns_path_and_send_message_accepts_relative_path() {
+    use crate::agent::api::AgentInput;
+    use crate::agent::api::SpawnRequest;
+    use crate::agent::types::AgentMessage;
+    use crate::agent::types::MessageDeliveryMode;
+    use crate::agent::types::SpawnAgentOptions;
     #[derive(Debug, Deserialize)]
     struct SpawnAgentResult {
         task_name: String,
@@ -1187,6 +1192,133 @@ async fn multi_agent_v2_spawn_returns_path_and_send_message_accepts_relative_pat
                         && !communication.trigger_turn
             )
     }));
+
+    // A work order is either encrypted or explicitly plaintext, never both.
+    let mut before = manager.list_thread_ids().await;
+    before.sort_by_cached_key(ToString::to_string);
+    for arguments in [
+        json!({"task_name": "invalid", "message": "opaque", "plaintext_message": "plain"}),
+        json!({"task_name": "invalid"}),
+    ] {
+        let error = SpawnAgentHandlerV2::default()
+            .handle(invocation(
+                session.clone(),
+                turn.clone(),
+                "spawn_agent",
+                function_payload(arguments),
+            ))
+            .await
+            .err()
+            .expect("ambiguous work order must fail");
+        assert!(
+            matches!(error, FunctionCallError::RespondToModel(message) if message.contains("exactly one"))
+        );
+    }
+    let mut after = manager.list_thread_ids().await;
+    after.sort_by_cached_key(ToString::to_string);
+    assert_eq!(after, before);
+
+    // Opaque provider-owned content must fail before child allocation. An explicit
+    // plaintext work order can use the other configured provider without decoding it.
+    let mut foreign_config = (*turn.config).clone();
+    foreign_config.model_provider_id = "other-provider".into();
+    foreign_config.model_providers.insert(
+        "other-provider".into(),
+        foreign_config.model_provider.clone(),
+    );
+    let foreign_source = SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+        parent_thread_id: session.thread_id,
+        depth: 1,
+        agent_path: Some(AgentPath::try_from("/root/foreign").unwrap()),
+        agent_nickname: None,
+        agent_role: None,
+    });
+    let error = session
+        .services
+        .agent_control
+        .spawn(SpawnRequest {
+            caller: session.thread_id,
+            config: foreign_config.clone(),
+            input: AgentInput::Message {
+                message: AgentMessage::Encrypted("opaque work order".into()),
+                mode: MessageDeliveryMode::TriggerTurn,
+            },
+            source: foreign_source.clone(),
+            options: SpawnAgentOptions::default(),
+        })
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("retry using plaintext_message"));
+    let mut after = manager.list_thread_ids().await;
+    after.sort_by_cached_key(ToString::to_string);
+    assert_eq!(after, before);
+
+    let (foreign, _) = session
+        .services
+        .agent_control
+        .spawn(SpawnRequest {
+            caller: session.thread_id,
+            config: foreign_config,
+            input: AgentInput::Message {
+                message: AgentMessage::Plaintext("plain foreign work order".into()),
+                mode: MessageDeliveryMode::TriggerTurn,
+            },
+            source: foreign_source,
+            options: SpawnAgentOptions::default(),
+        })
+        .await
+        .expect("plaintext foreign work order should start the child");
+    assert!(manager.captured_ops().iter().any(|(id, op)| {
+        *id == foreign.thread_id && matches!(op, Op::InterAgentCommunication { communication, .. }
+            if communication.encrypted_content.is_none() && communication.content.contains("plain foreign work order"))
+    }));
+    let error = SendMessageHandlerV2
+        .handle(invocation(
+            session.clone(),
+            turn.clone(),
+            "send_message",
+            function_payload(json!({"target": "foreign", "message": "opaque followup"})),
+        ))
+        .await
+        .err()
+        .expect("foreign encrypted message must fail");
+    assert!(
+        matches!(error, FunctionCallError::RespondToModel(message) if message.contains("plaintext_message"))
+    );
+    SendMessageHandlerV2
+        .handle(invocation(
+            session.clone(),
+            turn.clone(),
+            "send_message",
+            function_payload(
+                json!({"target": "foreign", "plaintext_message": "plain foreign message"}),
+            ),
+        ))
+        .await
+        .expect("explicit plaintext message should cross providers");
+    FollowupTaskHandlerV2
+        .handle(invocation(
+            session.clone(),
+            turn.clone(),
+            "followup_task",
+            function_payload(
+                json!({"target": "foreign", "plaintext_message": "plain foreign followup"}),
+            ),
+        ))
+        .await
+        .expect("explicit plaintext followup should cross providers");
+    for (content, trigger_turn) in [
+        ("plain foreign message", false),
+        ("plain foreign followup", true),
+    ] {
+        assert!(manager.captured_ops().iter().any(|(id, op)| {
+            *id == foreign.thread_id
+                && matches!(op, Op::InterAgentCommunication { communication, .. }
+                if communication.encrypted_content.is_none()
+                    && communication.content.contains(content)
+                    && communication.trigger_turn == trigger_turn)
+        }));
+    }
 }
 
 #[tokio::test]
