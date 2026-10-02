@@ -179,6 +179,12 @@ fn map_api_error_details(err: ApiError) -> CodexErr {
                 } else if status == http::StatusCode::INTERNAL_SERVER_ERROR {
                     CodexErr::InternalServerError
                 } else if status == http::StatusCode::TOO_MANY_REQUESTS {
+                    if let Some(limit) = headers
+                        .as_ref()
+                        .and_then(crate::anthropic::limits::parse_usage_limit)
+                    {
+                        return CodexErr::UsageLimitReached(limit);
+                    }
                     if let Ok(body) = serde_json::from_str::<Value>(&body_text)
                         && let Some(error) = body.get("error").and_then(parse_flex_unavailable)
                     {
@@ -204,6 +210,7 @@ fn map_api_error_details(err: ApiError) -> CodexErr {
                                 .resets_at
                                 .and_then(|seconds| DateTime::<Utc>::from_timestamp(seconds, 0));
                             return CodexErr::UsageLimitReached(UsageLimitReachedError {
+                                provider_message: None,
                                 plan_type: err.error.plan_type,
                                 resets_at,
                                 limit_window_minutes: err

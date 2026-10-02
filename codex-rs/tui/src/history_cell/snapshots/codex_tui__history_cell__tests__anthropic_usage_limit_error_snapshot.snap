@@ -1,0 +1,6 @@
+---
+source: tui/src/history_cell/tests.rs
+assertion_line: 1014
+expression: rendered
+---
+■ You’ve hit your Claude weekly usage limit. Extra usage credits are exhausted. Try again later.

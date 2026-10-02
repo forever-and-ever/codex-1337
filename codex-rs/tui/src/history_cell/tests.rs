@@ -996,6 +996,24 @@ fn error_event_oversized_input_snapshot() {
     insta::assert_snapshot!(rendered);
 }
 
+#[test]
+fn anthropic_usage_limit_error_snapshot() {
+    let error = codex_protocol::error::UsageLimitReachedError {
+        provider_message: Some(
+            "You’ve hit your Claude weekly usage limit. Extra usage credits are exhausted.".into(),
+        ),
+        plan_type: None,
+        resets_at: None,
+        limit_window_minutes: Some(10_080),
+        rate_limits: None,
+        promo_message: None,
+        rate_limit_reached_type: None,
+    };
+    let cell = new_error_event(error.to_string());
+    let rendered = render_lines(&cell.display_lines(/*width*/ 80)).join("\n");
+    insta::assert_snapshot!(rendered);
+}
+
 #[tokio::test]
 async fn mcp_tools_output_masks_sensitive_values() {
     let mut config = test_config().await;

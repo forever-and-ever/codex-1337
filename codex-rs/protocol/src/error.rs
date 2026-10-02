@@ -674,6 +674,8 @@ impl std::fmt::Display for RetryLimitReachedError {
 
 #[derive(Debug)]
 pub struct UsageLimitReachedError {
+    /// Provider-specific diagnosis, before the shared reset-time suffix.
+    pub provider_message: Option<String>,
     pub plan_type: Option<PlanType>,
     pub resets_at: Option<DateTime<Utc>>,
     /// Server-selected window responsible for the limit, in minutes.
@@ -685,6 +687,9 @@ pub struct UsageLimitReachedError {
 
 impl std::fmt::Display for UsageLimitReachedError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(message) = &self.provider_message {
+            return write!(f, "{message}{}", retry_suffix(self.resets_at.as_ref()));
+        }
         // Reserve is a fallback for exhausted ordinary usage, so keep the standard
         // promo/plan recovery copy below instead of suggesting another model.
         if let Some(limit_name) = self

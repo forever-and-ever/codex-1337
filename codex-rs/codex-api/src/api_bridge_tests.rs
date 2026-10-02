@@ -458,6 +458,94 @@ fn map_api_error_distinguishes_http_quota_errors_from_rate_limits() {
 }
 
 #[test]
+fn map_api_error_distinguishes_anthropic_subscription_exhaustion() {
+    // The real subscription failure has a generic rate_limit_error body, a
+    // multi-day Retry-After, and x-should-retry=true. Only admission headers
+    // distinguish it from temporary throttling; retry advice is not authority.
+    for (status, claim, reset, expected) in [
+        (None, "seven_day", "1791320400", None),
+        (Some("allowed"), "seven_day", "1791320400", None),
+        (Some("allowed_warning"), "seven_day", "1791320400", None),
+        (
+            Some("rejected"),
+            "seven_day",
+            "1791320400",
+            Some(("weekly ", Some(10_080), Some(1791320400))),
+        ),
+        (
+            Some("rejected"),
+            "five_hour",
+            "invalid",
+            Some(("five-hour ", Some(300), None)),
+        ),
+        (Some("rejected"), "future_limit", "", Some(("", None, None))),
+    ] {
+        let mut headers: HeaderMap = [
+            ("x-should-retry", "true"),
+            ("anthropic-ratelimit-unified-5h-status", "allowed"),
+            ("anthropic-ratelimit-unified-7d-status", "rejected"),
+            ("anthropic-ratelimit-unified-representative-claim", claim),
+            ("anthropic-ratelimit-unified-reset", reset),
+            ("anthropic-ratelimit-unified-overage-status", "rejected"),
+            (
+                "anthropic-ratelimit-unified-overage-disabled-reason",
+                "out_of_credits",
+            ),
+        ]
+        .into_iter()
+        .map(|(name, value)| (http::HeaderName::from_static(name), value.parse().unwrap()))
+        .collect();
+        if let Some(status) = status {
+            headers.insert(
+                "anthropic-ratelimit-unified-status",
+                status.parse().unwrap(),
+            );
+        }
+        let err = map_api_error(ApiError::Transport(TransportError::Http {
+            retry_after: RetryAfter::from_delay(std::time::Duration::from_secs(/*secs*/ 371_463)),
+            status: http::StatusCode::TOO_MANY_REQUESTS,
+            url: Some("https://api.anthropic.com/v1/messages".into()),
+            headers: Some(headers),
+            body: Some(serde_json::json!({"type":"error","error":{
+                "type":"rate_limit_error", "message":"This request would exceed your account's rate limit. Please try again later."
+            }}).to_string()),
+        }));
+        assert_eq!(err.retry_delay(/*retry_count*/ 1), None);
+        if let Some((window, minutes, reset)) = expected {
+            let CodexErrorDetails::UsageLimitReached(limit) = err.details() else {
+                panic!("expected subscription exhaustion, got {err:?}");
+            };
+            let message = format!(
+                "You’ve hit your Claude {window}usage limit. Extra usage credits are exhausted."
+            );
+            assert_eq!(
+                (
+                    err.to_codex_protocol_error(),
+                    limit.provider_message.as_deref(),
+                    limit.limit_window_minutes,
+                    limit.resets_at.map(|at| at.timestamp()),
+                    limit.plan_type.as_ref()
+                ),
+                (
+                    CodexErrorInfo::UsageLimitExceeded,
+                    Some(message.as_str()),
+                    minutes,
+                    reset,
+                    None
+                )
+            );
+        } else {
+            assert_eq!(
+                err.to_codex_protocol_error(),
+                CodexErrorInfo::ResponseTooManyFailedAttempts {
+                    http_status_code: Some(429),
+                }
+            );
+        }
+    }
+}
+
+#[test]
 fn map_api_error_preserves_optional_usage_limit_window() {
     let cases = [
         (None, None),
