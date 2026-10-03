@@ -84,6 +84,7 @@ impl CodeModeSessionDelegate for RemoteDelegate {
     }
 
     fn cell_finished(&self, cell_id: &CellId, outcome: codex_code_mode_protocol::CellOutcome) {
-        self.peer.finish_cell(self.session_id.clone(), cell_id.clone(), outcome);
+        self.peer
+            .finish_cell(self.session_id.clone(), cell_id.clone(), outcome);
     }
 }

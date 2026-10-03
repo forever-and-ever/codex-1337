@@ -310,8 +310,13 @@ impl runtime::SessionRuntimeDelegate for ProtocolDelegate {
         self.delegate.cell_closed(&protocol_cell_id(cell_id));
     }
 
-    fn cell_finished(&self, cell_id: &runtime::CellId, outcome: codex_code_mode_protocol::CellOutcome) {
-        self.delegate.cell_finished(&protocol_cell_id(cell_id), outcome);
+    fn cell_finished(
+        &self,
+        cell_id: &runtime::CellId,
+        outcome: codex_code_mode_protocol::CellOutcome,
+    ) {
+        self.delegate
+            .cell_finished(&protocol_cell_id(cell_id), outcome);
     }
 }
 

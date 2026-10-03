@@ -20,8 +20,16 @@ pub struct CodeModeItem {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS, JsonSchema)]
-#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
-#[ts(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+#[ts(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 #[ts(export_to = "v2/")]
 pub enum CodeModeEvent {
     Started { call_id: String },

@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
 use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 
 use opentelemetry::context::FutureExt;
@@ -302,10 +302,17 @@ impl<D: SessionRuntimeDelegate> CellHost for RuntimeCellHost<D> {
             stored_values = self.inner.stored_values.lock() => stored_values,
         };
         let outcome = match &event {
-            CellEvent::Completed { error_text: None, .. } => codex_code_mode_protocol::CellOutcome::Completed,
-            CellEvent::Completed { error_text: Some(_), .. } => codex_code_mode_protocol::CellOutcome::Failed,
+            CellEvent::Completed {
+                error_text: None, ..
+            } => codex_code_mode_protocol::CellOutcome::Completed,
+            CellEvent::Completed {
+                error_text: Some(_),
+                ..
+            } => codex_code_mode_protocol::CellOutcome::Failed,
             CellEvent::Terminated { .. } => codex_code_mode_protocol::CellOutcome::Terminated,
-            CellEvent::Yielded { .. } | CellEvent::Pending { .. } => unreachable!("completion must be terminal"),
+            CellEvent::Yielded { .. } | CellEvent::Pending { .. } => {
+                unreachable!("completion must be terminal")
+            }
         };
         let committed = cell_state.commit_completion(event, pending_initial_yield_items, || {
             stored_values.extend(stored_value_writes);
@@ -320,7 +327,10 @@ impl<D: SessionRuntimeDelegate> CellHost for RuntimeCellHost<D> {
     async fn closed(&self) {
         self.inner.cells.lock().await.remove(&self.cell_id);
         if !self.terminal_reported.swap(true, Ordering::AcqRel) {
-            self.delegate.cell_finished(&self.cell_id, codex_code_mode_protocol::CellOutcome::Terminated);
+            self.delegate.cell_finished(
+                &self.cell_id,
+                codex_code_mode_protocol::CellOutcome::Terminated,
+            );
         }
         self.delegate.cell_closed(&self.cell_id);
     }

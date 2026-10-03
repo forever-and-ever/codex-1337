@@ -146,21 +146,31 @@ impl CodeModeService {
             terminal_reported: AtomicBool::new(false),
             exec_call_id: exec_call_id.clone(),
         });
-        let started = self.session()
+        let started = self
+            .session()
             .await?
             .execute(request, delegate, preempt)
             .await?;
-        self.transcript_calls.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+        self.transcript_calls
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(started.cell_id.clone(), exec_call_id);
         Ok(started)
     }
 
     pub(super) fn transcript_exec_call(&self, cell_id: &CellId) -> Option<String> {
-        self.transcript_calls.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(cell_id).cloned()
+        self.transcript_calls
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(cell_id)
+            .cloned()
     }
 
     pub(super) fn finish_transcript_output(&self, cell_id: &CellId) {
-        self.transcript_calls.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(cell_id);
+        self.transcript_calls
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(cell_id);
     }
 
     pub(crate) async fn wait(

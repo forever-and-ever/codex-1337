@@ -142,13 +142,13 @@ impl CodeModeExecuteHandler {
             .services
             .code_mode_service
             .mark_cell_ready_for_dispatch(&cell_id, originating_call);
-        let response = started_cell
-            .initial_response()
-            .await
-            .map_err(|error| {
-                exec.session.services.code_mode_service.finish_transcript_output(&cell_id);
-                FunctionCallError::RespondToModel(error)
-            })?;
+        let response = started_cell.initial_response().await.map_err(|error| {
+            exec.session
+                .services
+                .code_mode_service
+                .finish_transcript_output(&cell_id);
+            FunctionCallError::RespondToModel(error)
+        })?;
         if let Some(code_mode_host_duration) = response.code_mode_host_duration() {
             telemetry.record_code_mode_host_duration(code_mode_host_duration);
         }
@@ -159,7 +159,10 @@ impl CodeModeExecuteHandler {
         // Yielded cells keep running, so terminal lifecycle is only emitted
         // here when the first response also ended the runtime.
         if !matches!(response, codex_code_mode::RuntimeResponse::Yielded { .. }) {
-            exec.session.services.code_mode_service.finish_transcript_output(&cell_id);
+            exec.session
+                .services
+                .code_mode_service
+                .finish_transcript_output(&cell_id);
             code_cell_trace.record_ended(&response);
             exec.session
                 .services

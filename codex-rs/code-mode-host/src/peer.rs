@@ -265,7 +265,12 @@ impl HostPeer {
         let _ = self.route_cell_message((session_id, cell_id), CellMessage::Closed);
     }
 
-    pub(super) fn finish_cell(&self, session_id: SessionId, cell_id: CellId, outcome: codex_code_mode_protocol::CellOutcome) {
+    pub(super) fn finish_cell(
+        &self,
+        session_id: SessionId,
+        cell_id: CellId,
+        outcome: codex_code_mode_protocol::CellOutcome,
+    ) {
         let _ = self.route_cell_message((session_id, cell_id), CellMessage::Finished(outcome));
     }
 

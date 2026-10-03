@@ -8,13 +8,23 @@ use pretty_assertions::assert_eq;
 use tonic::Code;
 use tonic::Request;
 
-async fn assert_finished_event(events: &mut GrpcStream<proto::SessionEvent>, execution_id: &str, cell_id: &str) {
-    assert_eq!(events.next().await.unwrap().unwrap(), proto::SessionEvent {
-        event: Some(proto::session_event::Event::CellFinished(proto::CellFinished {
-            execution_id: execution_id.into(), cell_id: cell_id.into(),
-            outcome: proto::cell_finished::Outcome::Completed as i32,
-        })),
-    });
+async fn assert_finished_event(
+    events: &mut GrpcStream<proto::SessionEvent>,
+    execution_id: &str,
+    cell_id: &str,
+) {
+    assert_eq!(
+        events.next().await.unwrap().unwrap(),
+        proto::SessionEvent {
+            event: Some(proto::session_event::Event::CellFinished(
+                proto::CellFinished {
+                    execution_id: execution_id.into(),
+                    cell_id: cell_id.into(),
+                    outcome: proto::cell_finished::Outcome::Completed as i32,
+                }
+            )),
+        }
+    );
 }
 
 #[tokio::test]
@@ -26,13 +36,25 @@ async fn pending_outcome_is_enqueued_before_callback_retirement() {
     // Pure scripts may commit and close before their admission handoff finishes.
     session.finish_cell("cell", codex_code_mode_protocol::CellOutcome::Completed);
     session.close_cell("cell");
-    session.admit_execution("early".into(), "cell".into(), host.state.cell_permit().unwrap(), /*traceparent*/ None).unwrap();
+    session
+        .admit_execution(
+            "early".into(),
+            "cell".into(),
+            host.state.cell_permit().unwrap(),
+            /*traceparent*/ None,
+        )
+        .unwrap();
     assert_finished_event(&mut events, "early", "cell").await;
-    assert_eq!(events.next().await.unwrap().unwrap(), proto::SessionEvent {
-        event: Some(proto::session_event::Event::CellClosed(proto::CellClosed {
-            execution_id: "early".into(), cell_id: "cell".into(), final_tool_call_sequence: 0,
-        })),
-    });
+    assert_eq!(
+        events.next().await.unwrap().unwrap(),
+        proto::SessionEvent {
+            event: Some(proto::session_event::Event::CellClosed(proto::CellClosed {
+                execution_id: "early".into(),
+                cell_id: "cell".into(),
+                final_tool_call_sequence: 0,
+            })),
+        }
+    );
 }
 
 pub(super) async fn open_session(

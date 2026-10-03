@@ -36,7 +36,10 @@ struct RecordingDelegate {
 
 impl CodeModeSessionDelegate for RecordingDelegate {
     fn cell_finished(&self, cell_id: &CellId, outcome: codex_code_mode_protocol::CellOutcome) {
-        self.finished.lock().expect("finished cells lock").push((cell_id.clone(), outcome));
+        self.finished
+            .lock()
+            .expect("finished cells lock")
+            .push((cell_id.clone(), outcome));
     }
     fn invoke_tool<'a>(
         &'a self,
@@ -163,7 +166,13 @@ async fn reconnect_maps_every_delegate_callback_to_its_generation() {
             "notice".to_string()
         )]
     );
-    assert_eq!(*recording.finished.lock().expect("finished cells lock"), vec![(public_id.clone(), codex_code_mode_protocol::CellOutcome::Failed)]);
+    assert_eq!(
+        *recording.finished.lock().expect("finished cells lock"),
+        vec![(
+            public_id.clone(),
+            codex_code_mode_protocol::CellOutcome::Failed
+        )]
+    );
     assert_eq!(
         *recording.closed.lock().expect("closed cells lock"),
         vec![public_id]
