@@ -4,6 +4,7 @@ pub(crate) mod execute_spec;
 mod output;
 mod response_adapter;
 mod telemetry;
+mod transcript;
 mod wait_handler;
 pub(crate) mod wait_spec;
 
@@ -72,6 +73,7 @@ pub(crate) struct ExecContext {
 }
 
 pub(crate) struct CodeModeService {
+    transcript_calls: std::sync::Mutex<std::collections::HashMap<CellId, String>>,
     session: OnceCell<Arc<dyn CodeModeSession>>,
     session_provider: Arc<dyn CodeModeSessionProvider>,
     availability: Result<(), String>,
@@ -91,6 +93,7 @@ impl CodeModeService {
         let dispatch_broker = Arc::new(CodeModeDispatchBroker::new(thread_id, executed_tool_calls));
         let availability = session_provider.availability();
         Self {
+            transcript_calls: std::sync::Mutex::default(),
             session: OnceCell::new(),
             session_provider,
             availability,
@@ -129,19 +132,35 @@ impl CodeModeService {
         &self,
         mut request: codex_code_mode::ExecuteRequest,
         step_context: Arc<StepContext>,
+        session: std::sync::Weak<Session>,
     ) -> Result<codex_code_mode::StartedCell, String> {
         request
             .yield_time_ms
             .get_or_insert(self.default_exec_yield_time_ms);
         let preempt = step_context.preempt.clone();
+        let exec_call_id = request.tool_call_id.clone();
         let delegate = Arc::new(CodeModeCellDelegate {
             broker: Arc::clone(&self.dispatch_broker),
             step_context,
+            session,
+            terminal_reported: AtomicBool::new(false),
+            exec_call_id: exec_call_id.clone(),
         });
-        self.session()
+        let started = self.session()
             .await?
             .execute(request, delegate, preempt)
-            .await
+            .await?;
+        self.transcript_calls.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(started.cell_id.clone(), exec_call_id);
+        Ok(started)
+    }
+
+    pub(super) fn transcript_exec_call(&self, cell_id: &CellId) -> Option<String> {
+        self.transcript_calls.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(cell_id).cloned()
+    }
+
+    pub(super) fn finish_transcript_output(&self, cell_id: &CellId) {
+        self.transcript_calls.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(cell_id);
     }
 
     pub(crate) async fn wait(

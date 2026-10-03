@@ -1,0 +1,44 @@
+//! Append-only execution facts for human transcript projection, never model history.
+
+use crate::session::session::Session;
+use crate::session::turn_context::TurnContext;
+use codex_protocol::code_mode::CodeModeEvent;
+use codex_protocol::code_mode::CodeModeItem;
+use codex_protocol::items::TurnItem;
+use codex_protocol::protocol::EventMsg;
+use codex_protocol::protocol::ItemCompletedEvent;
+
+pub(super) async fn record(
+    session: &Session,
+    turn: &TurnContext,
+    cell_id: &str,
+    exec_call_id: &str,
+    event: CodeModeEvent,
+    timestamp_ms: i64,
+) {
+    let suffix = match &event {
+        CodeModeEvent::Started { call_id } => format!("start:{call_id}"),
+        CodeModeEvent::ToolCall { call_id } => format!("tool:{call_id}"),
+        CodeModeEvent::WaitStarted { call_id } => format!("wait-start:{call_id}"),
+        CodeModeEvent::WaitCompleted { call_id } => format!("wait-end:{call_id}"),
+        CodeModeEvent::Finished { .. } => "end".into(),
+    };
+    session
+        .send_event(
+            turn,
+            EventMsg::ItemCompleted(ItemCompletedEvent {
+                thread_id: session.thread_id,
+                turn_id: turn.sub_id.clone(),
+                item: TurnItem::CodeMode(CodeModeItem {
+                    id: format!("code-mode:{exec_call_id}:{suffix}"),
+                    cell_id: cell_id.to_owned(),
+                    exec_call_id: exec_call_id.to_owned(),
+                    created_at: timestamp_ms.div_euclid(1_000),
+                    event,
+                }),
+                started_at_ms: None,
+                completed_at_ms: timestamp_ms,
+            }),
+        )
+        .await;
+}

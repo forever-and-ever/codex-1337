@@ -128,6 +128,9 @@ async fn detached_code_mode_callback_keeps_thread_id_on_dispatch_span() -> anyho
     let _untraced = tracing::Dispatch::new(tracing::subscriber::NoSubscriber::default());
     let _subscriber = tracing::subscriber::set_default(subscriber);
     let delegate = CodeModeCellDelegate {
+        session: std::sync::Weak::new(),
+        terminal_reported: std::sync::atomic::AtomicBool::new(false),
+        exec_call_id: "original-exec".into(),
         broker: Arc::clone(&broker),
         step_context: Arc::clone(&step),
     };
@@ -184,6 +187,9 @@ async fn dropped_tool_callbacks_release_the_origin_before_dispatch() {
         /*executed_tool_calls*/ Default::default(),
     ));
     let delegate = CodeModeCellDelegate {
+        session: std::sync::Weak::new(),
+        terminal_reported: std::sync::atomic::AtomicBool::new(false),
+        exec_call_id: "original-exec".into(),
         broker: Arc::clone(&broker),
         step_context: StepContext::for_test(Arc::clone(&turn)),
     };
