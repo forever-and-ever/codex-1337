@@ -56,12 +56,20 @@ impl PatchHistoryCell {
         let width = usize::from(width).max(/*other*/ 1);
         let path = truncate_line_with_ellipsis_if_overflow(
             Line::from(path.replace(['\n', '\r', '\t'], " ")),
-            width.saturating_sub(counts.width() + 2),
+            width.saturating_sub(counts.width() + 4),
         );
         let mut spans = vec!["  ".into()];
         spans.extend(path.spans);
         spans.extend(counts.spans);
-        lines.push(truncate_line_with_ellipsis_if_overflow(Line::from(spans), width).into());
+        // Retain the summary's existing copy source; only its extra nesting is synthetic.
+        lines.extend(crate::terminal_hyperlinks::prefix_hyperlink_lines(
+            vec![
+                truncate_line_with_ellipsis_if_overflow(Line::from(spans), width.saturating_sub(2))
+                    .into(),
+            ],
+            "  ".into(),
+            "    ".into(),
+        ));
         lines
     }
 }

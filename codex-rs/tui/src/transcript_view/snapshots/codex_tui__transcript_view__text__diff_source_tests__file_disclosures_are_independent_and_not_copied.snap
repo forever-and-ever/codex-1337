@@ -1,6 +1,5 @@
 ---
 source: tui/src/transcript_view/diff_source_tests.rs
-assertion_line: 237
 expression: "snapshots.join(\"\\n\\n\")"
 ---
 collapsed
@@ -8,8 +7,8 @@ Buffer {
     area: Rect { x: 0, y: 0, width: 70, height: 10 },
     content: [
         "    • Edited                                                          ",
-        "[+]   alpha.rs (+2, -0)                                               ",
-        "[+]   beta.rs (+2, -0)                                                ",
+        "[+]     alpha.rs (+2, -0)                                             ",
+        "[+]     beta.rs (+2, -0)                                              ",
         "                                                                      ",
         "                                                                      ",
         "                                                                      ",
@@ -25,16 +24,16 @@ Buffer {
         x: 12, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 0, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
         x: 3, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 16, y: 1, fg: Green, bg: Reset, underline: Reset, modifier: NONE,
-        x: 18, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 20, y: 1, fg: Red, bg: Reset, underline: Reset, modifier: NONE,
-        x: 22, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 18, y: 1, fg: Green, bg: Reset, underline: Reset, modifier: NONE,
+        x: 20, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 22, y: 1, fg: Red, bg: Reset, underline: Reset, modifier: NONE,
+        x: 24, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 0, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
         x: 3, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 15, y: 2, fg: Green, bg: Reset, underline: Reset, modifier: NONE,
-        x: 17, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 19, y: 2, fg: Red, bg: Reset, underline: Reset, modifier: NONE,
-        x: 21, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 17, y: 2, fg: Green, bg: Reset, underline: Reset, modifier: NONE,
+        x: 19, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 21, y: 2, fg: Red, bg: Reset, underline: Reset, modifier: NONE,
+        x: 23, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }
 
@@ -43,8 +42,8 @@ Buffer {
     area: Rect { x: 0, y: 0, width: 70, height: 10 },
     content: [
         "    • Edited                                                          ",
-        "[+]   alpha.rs (+2, -0)                                               ",
-        "[-]   beta.rs (+2, -0)                                                ",
+        "[+]     alpha.rs (+2, -0)                                             ",
+        "[-]     beta.rs (+2, -0)                                              ",
         "        1 +beta body                                                  ",
         "        2 +second beta line                                           ",
         "                                                                      ",
@@ -60,16 +59,16 @@ Buffer {
         x: 12, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 0, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
         x: 3, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 16, y: 1, fg: Green, bg: Reset, underline: Reset, modifier: NONE,
-        x: 18, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 20, y: 1, fg: Red, bg: Reset, underline: Reset, modifier: NONE,
-        x: 22, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 18, y: 1, fg: Green, bg: Reset, underline: Reset, modifier: NONE,
+        x: 20, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 22, y: 1, fg: Red, bg: Reset, underline: Reset, modifier: NONE,
+        x: 24, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 0, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
         x: 3, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 15, y: 2, fg: Green, bg: Reset, underline: Reset, modifier: NONE,
-        x: 17, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 19, y: 2, fg: Red, bg: Reset, underline: Reset, modifier: NONE,
-        x: 21, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 17, y: 2, fg: Green, bg: Reset, underline: Reset, modifier: NONE,
+        x: 19, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 21, y: 2, fg: Red, bg: Reset, underline: Reset, modifier: NONE,
+        x: 23, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 8, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
         x: 10, y: 3, fg: Green, bg: Reset, underline: Reset, modifier: NONE,
         x: 11, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
@@ -81,40 +80,40 @@ Buffer {
 
 both files expanded with batch bill
     • Edited (~ 123 tokens)
-[-]   alpha.rs (+2, -0)
+[-]     alpha.rs (+2, -0)
         1 +alpha body
         2 +second alpha line
-[-]   beta.rs (+2, -0)
+[-]     beta.rs (+2, -0)
         1 +beta body
         2 +second beta line
 
 first file collapsed
     • Edited (~ 123 tokens)
-[+]   alpha.rs (+2, -0)
-[-]   beta.rs (+2, -0)
+[+]     alpha.rs (+2, -0)
+[-]     beta.rs (+2, -0)
         1 +beta body
         2 +second beta line
 
 adjacent calls
     • Edited (~ 123 tokens)
-[+]   alpha.rs (+2, -0)
-[+]   beta.rs (+2, -0)
-[+]   gamma.rs (+1, -0) (~ 55 tokens)
+[+]     alpha.rs (+2, -0)
+[+]     beta.rs (+2, -0)
+[+]     gamma.rs (+1, -0) (~ 55 tokens)
 
 next file expanded
     • Edited (~ 123 tokens)
-[+]   alpha.rs (+2, -0)
-[+]   beta.rs (+2, -0)
-[-]   gamma.rs (+1, -0) (~ 55 tokens)
+[+]     alpha.rs (+2, -0)
+[+]     beta.rs (+2, -0)
+[-]     gamma.rs (+1, -0) (~ 55 tokens)
         1 +gamma body
 
 message boundary
     • Edited (~ 123 tokens)
-[+]   alpha.rs (+2, -0)
-[+]   beta.rs (+2, -0)
+[+]     alpha.rs (+2, -0)
+[+]     beta.rs (+2, -0)
 
 A separate message
 
     • Edited (~ 55 tokens)
-[-]   gamma.rs (+1, -0)
+[-]     gamma.rs (+1, -0)
         1 +gamma body

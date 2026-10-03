@@ -553,7 +553,7 @@ fn empty_tool_disclosures_follow_invocation_truncation() {
             let mut buffer = Buffer::empty(area);
             view.render(area, &mut buffer, &cells);
             let layout = view.current_layout(&cells, /*index*/ 0).unwrap();
-            let expandable = script != "true" && (width == 24 || !output.is_empty());
+            let expandable = script != "true" && (width <= 44 || !output.is_empty());
             assert_eq!(layout.disclosure, expandable);
             snapshots.push(format!(
                 "{script}, width={width}\n{}",

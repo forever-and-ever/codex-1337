@@ -16,46 +16,51 @@ printf '%s' a_long_argument >/dev/null, width=100
 
 printf '%s' a_long_argument >/dev/null, width=44
     • Ran
-      printf '%s' a_long_argument >/dev/null
+[+]     printf '%s' a_long_argument >/dev...
+
+expanded
+    • Ran
+[-]     printf '%s' a_long_argument >/dev/
+        null
 
 printf '%s' a_long_argument >/dev/null, width=24
     • Ran
-[+]   printf '%s' a_l...
+[+]     printf '%s' a...
 
 expanded
     • Ran
-[-]   printf '%s'
-      a_long_argument >/
-      dev/null
+[-]     printf '%s'
+        a_long_argument
+        >/dev/null
 
 cat config.json, width=100
 [+] • Explored
-      Read config.json (whole file)
+        Read config.json (whole file)
 
 expanded
 [-] • Explored
-      Read config.json (whole file)
+        Read config.json (whole file)
 
       {"content":[],"output":"real file data"}
 
 cat config.json, width=44
 [+] • Explored
-      Read config.json (whole file)
+        Read config.json (whole file)
 
 expanded
 [-] • Explored
-      Read config.json (whole file)
+        Read config.json (whole file)
 
       {"content":[],"output":"real file
       data"}
 
 cat config.json, width=24
 [+] • Explored
-      Read config.jso...
+        Read config.j...
 
 expanded
 [-] • Explored
-      Read config.jso...
+        Read config.j...
 
       {"content":
       [],"output":"real

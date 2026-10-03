@@ -198,7 +198,7 @@ pub(crate) fn command_parts(
                 let id = row_id(call, row);
                 let open = row.summary.is_none() && expanded.contains(&id);
                 let connector = row.segment.connector.map_or("", Connector::suffix);
-                let available = usize::from(width).saturating_sub(2 + connector.len());
+                let available = usize::from(width).saturating_sub(4 + connector.len());
                 let mut source_lines = row
                     .summary
                     .clone()
@@ -218,16 +218,16 @@ pub(crate) fn command_parts(
                     }
                     lines.extend(prefix_hyperlink_lines(
                         plain_hyperlink_lines(source_lines),
-                        "  ".into(),
-                        "  ".into(),
+                        "    ".into(),
+                        "    ".into(),
                     ));
                 } else {
                     let mut preview = compact_header(preview, available);
                     preview.push_span(connector.dim());
                     lines.extend(prefix_hyperlink_lines(
                         vec![preview.into()],
-                        "  ".into(),
-                        "  ".into(),
+                        "    ".into(),
+                        "    ".into(),
                     ));
                 }
             }

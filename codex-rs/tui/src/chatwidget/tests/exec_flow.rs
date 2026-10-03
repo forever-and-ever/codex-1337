@@ -1733,7 +1733,7 @@ async fn apply_patch_manual_approval_adjusts_header() {
     assert!(!cells.is_empty(), "expected apply block cell to be sent");
     let blob = lines_to_single_string(cells.last().unwrap());
     assert!(
-        blob.starts_with("• Edited\n  foo.txt (+1, -0)\n"),
+        blob.starts_with("• Edited\n    foo.txt (+1, -0)\n"),
         "expected apply summary header for foo.txt: {blob:?}"
     );
 }

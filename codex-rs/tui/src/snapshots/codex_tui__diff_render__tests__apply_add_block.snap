@@ -3,7 +3,7 @@ source: tui/src/diff_render.rs
 expression: terminal.backend()
 ---
 "• Edited                                                                        "
-"  new_file.txt (+2, -0)                                                         "
+"    new_file.txt (+2, -0)                                                       "
 "    1 +alpha                                                                    "
 "    2 +beta                                                                     "
 "                                                                                "

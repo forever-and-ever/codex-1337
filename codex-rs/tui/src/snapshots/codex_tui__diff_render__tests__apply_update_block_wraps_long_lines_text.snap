@@ -3,7 +3,7 @@ source: tui/src/diff_render.rs
 expression: text
 ---
 • Edited
-  w… (+2, -2)
+    wrap_demo.txt (+2, -2)
     1  1
     2 -2
     2 +added long line which
