@@ -152,16 +152,15 @@ pub(super) async fn update_thread_metadata(
     if paginated {
         // Paginated metadata lives in SQLite. Keep the name index update, then stop before the
         // legacy SessionMeta compatibility path below.
-        if let Some(name) = patch.name.as_ref() {
-            append_thread_name(
+        if let Some(name) = patch.name.as_ref()
+            && let Err(err) = append_thread_name(
                 store.config.codex_home.as_path(),
                 thread_id,
                 name.as_deref().unwrap_or_default().trim(),
             )
             .await
-            .map_err(|err| ThreadStoreError::Internal {
-                message: format!("failed to index paginated thread name for {thread_id}: {err}"),
-            })?;
+        {
+            warn!("failed to index paginated thread name for {thread_id}: {err}");
         }
         if pending_patch.is_some() {
             remove_pending_thread_metadata(store, thread_id, &mut pending_metadata).await;
@@ -1193,7 +1192,7 @@ mod tests {
         let session_index_path = home.path().join("session_index.jsonl");
         std::fs::remove_file(&session_index_path).expect("remove session index");
         std::fs::create_dir(&session_index_path).expect("block session index writes");
-        let err = store
+        let thread = store
             .update_thread_metadata(UpdateThreadMetadataParams {
                 thread_id,
                 patch: ThreadMetadataPatch {
@@ -1203,8 +1202,9 @@ mod tests {
                 include_archived: false,
             })
             .await
-            .expect_err("name projection failure must be reported");
-        assert!(matches!(err, ThreadStoreError::Internal { .. }));
+            .expect("set paginated thread name with unavailable index")
+            .expect("local store returns updated thread");
+        assert_eq!(thread.name.as_deref(), Some("Updated SQLite name"));
 
         let err = LocalThreadStore::new(test_config(home.path()), /*state_db*/ None)
             .update_thread_metadata(UpdateThreadMetadataParams {

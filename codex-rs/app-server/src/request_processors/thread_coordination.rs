@@ -253,6 +253,7 @@ impl ThreadCoordinationService {
         &self,
         caller: ThreadId,
         model: Option<String>,
+        title: Option<String>,
     ) -> Result<(ThreadStartResponse, ThreadRuntimeLease), JSONRPCErrorError> {
         let source = self
             .threads
@@ -307,7 +308,21 @@ impl ThreadCoordinationService {
                 serde_json::to_value(effort).map_err(|err| internal_error(err.to_string()))?,
             );
         }
-        let (response, lease) = self
+        let _permit = self.threads.acquire_thread_list_state_permit().await?;
+        let name = title
+            .map(|name| {
+                codex_core::util::normalize_thread_name(&name)
+                    .ok_or_else(|| invalid_request("title must not be empty"))
+            })
+            .transpose()?;
+        if let Some(name) = &name {
+            self.threads
+                .release_confirmed_name_owners(
+                    name, /*claimant*/ None, /*confirmed_ids*/ None,
+                )
+                .await?;
+        }
+        let (mut response, lease) = self
             .threads
             .thread_start_inner(
                 /*request_id*/ None,
@@ -320,6 +335,26 @@ impl ThreadCoordinationService {
             .await?;
         let lease = lease
             .ok_or_else(|| internal_error("headless startup did not retain its runtime lease"))?;
+        if let Some(name) = name {
+            let id = ThreadId::from_string(&response.thread.id)
+                .map_err(|err| internal_error(format!("invalid created thread id: {err}")))?;
+            response.thread.name = Some(
+                self.threads
+                    .claim_thread_name(
+                        id,
+                        &name,
+                        codex_app_server_protocol::ThreadNameMode::Explicit,
+                    )
+                    .await
+                    .map_err(|mut err| {
+                        let data = err.data.get_or_insert_with(|| json!({}));
+                        data["createdThreadId"] = json!(id.to_string());
+                        err.message =
+                            format!("Task {id} was created, but naming failed: {}", err.message);
+                        err
+                    })?,
+            );
+        }
         Ok((response, lease))
     }
 

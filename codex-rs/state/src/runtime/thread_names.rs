@@ -51,7 +51,7 @@ FROM threads WHERE id = ?"#,
         {
             let base = format!(
                 "{name}_unarchived_{}",
-                Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+                Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, /*use_z*/ true)
             );
             let mut candidate = name;
             let mut suffix = 0_u64;
@@ -74,7 +74,7 @@ WHERE archived = 0 AND id != ? AND name = ? COLLATE NOCASE
                 candidate = if suffix == 0 {
                     base.clone()
                 } else {
-                    format!("{base}({suffix})")
+                    format!("{base} ({suffix})")
                 };
                 suffix = suffix
                     .checked_add(1)

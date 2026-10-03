@@ -241,25 +241,10 @@ impl CoordinationTool {
                 let output =
                     delegated_output(service, &caller, &self.function.name, args.prompt).await?;
                 let (started, _runtime_lease) = service
-                    .create(self.caller, args.model)
+                    .create(self.caller, args.model, args.title)
                     .await
                     .map_err(error)?;
                 let thread_id = started.thread.id;
-                if let Some(title) = args.title
-                    && let Err(error) = service
-                        .rename(ThreadSetNameParams {
-                            thread_id: thread_id.clone(),
-                            name: title.trim().to_owned(),
-                            ..Default::default()
-                        })
-                        .await
-                {
-                    tracing::warn!(
-                        thread_id,
-                        error = error.message,
-                        "failed to name independent task"
-                    );
-                }
                 service
                     .send(&thread_id, output, /*model*/ None)
                     .await

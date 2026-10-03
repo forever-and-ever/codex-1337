@@ -11,6 +11,9 @@ mod extension_lease;
 mod coordination;
 pub(crate) use coordination::ThreadCoordinationService;
 
+#[path = "thread_naming.rs"]
+mod thread_naming;
+
 use super::persisted_resume_settings::PersistedResumeSettings;
 use super::persisted_resume_settings::latest_persisted_resume_settings;
 use super::thread_enrichment::enrich_loaded_threads;
@@ -1912,40 +1915,6 @@ impl ThreadRequestProcessor {
             count,
             paused: count > 0,
         })
-    }
-
-    async fn thread_set_name_response_inner(
-        &self,
-        params: ThreadSetNameParams,
-    ) -> Result<(ThreadSetNameResponse, Option<ThreadNameUpdatedNotification>), JSONRPCErrorError>
-    {
-        let ThreadSetNameParams { thread_id, name } = params;
-        let thread_id = ThreadId::from_string(&thread_id)
-            .map_err(|err| invalid_request(format!("invalid thread id: {err}")))?;
-        let Some(name) = codex_core::util::normalize_thread_name(&name) else {
-            return Err(invalid_request("thread name must not be empty"));
-        };
-
-        let _thread_list_state_permit = self.acquire_thread_list_state_permit().await?;
-        self.thread_manager
-            .update_thread_metadata(
-                thread_id,
-                StoreThreadMetadataPatch {
-                    name: Some(Some(name.clone())),
-                    ..Default::default()
-                },
-                /*include_archived*/ false,
-            )
-            .await
-            .map_err(|err| core_thread_write_error("set thread name", err))?;
-
-        Ok((
-            ThreadSetNameResponse {},
-            Some(ThreadNameUpdatedNotification {
-                thread_id: thread_id.to_string(),
-                thread_name: Some(name),
-            }),
-        ))
     }
 
     async fn thread_memory_mode_set_response_inner(
@@ -4955,8 +4924,13 @@ impl ThreadRequestProcessor {
         app_server_client_version: Option<String>,
         client_mcp_extensions: ClientMcpExtensions,
     ) -> Result<ThreadForkResponse, JSONRPCErrorError> {
+        // Acquire before prepare_fork takes a source lifecycle reservation; archive uses the
+        // same order. Confirmed takeover happens only after that reservation has been consumed.
+        let _name_permit = self.acquire_thread_list_state_permit().await?;
         let ThreadForkParams {
             thread_id,
+            name,
+            conflict_thread_ids,
             last_turn_id,
             before_turn_id,
             path,
@@ -5021,6 +4995,17 @@ impl ThreadRequestProcessor {
             .name
             .as_deref()
             .and_then(codex_core::util::normalize_thread_name);
+        let explicit_name = name
+            .map(|name| {
+                codex_core::util::normalize_thread_name(&name)
+                    .ok_or_else(|| invalid_request("thread name must not be empty"))
+            })
+            .transpose()?;
+        if ephemeral && explicit_name.is_some() {
+            return Err(invalid_request(
+                "ephemeral forks cannot claim a conversation name",
+            ));
+        }
         let mut prepared_fork = if paginated_source {
             let boundary = match (last_turn_id.as_deref(), before_turn_id.as_deref()) {
                 (Some(turn_id), None) => {
@@ -5256,6 +5241,38 @@ impl ThreadRequestProcessor {
             .then(|| restored_token_usage_turn_id(&history_items, ephemeral_turns.as_slice()));
         let token_usage_history_items = paginated_source.then(|| Arc::clone(&history_items));
         let inherited_project_id = source_thread.project_id.clone();
+        let naming_mode = if explicit_name.is_some() {
+            codex_app_server_protocol::ThreadNameMode::Explicit
+        } else {
+            codex_app_server_protocol::ThreadNameMode::Generated
+        };
+        let fork_name = explicit_name.or_else(|| {
+            (!ephemeral)
+                .then(|| {
+                    source_thread_name.map(|name| {
+                        let timestamp = chrono::Utc::now()
+                            .to_rfc3339_opts(chrono::SecondsFormat::Millis, /*use_z*/ true);
+                        format!("{name}_fork_{timestamp}")
+                    })
+                })
+                .flatten()
+        });
+        if naming_mode == codex_app_server_protocol::ThreadNameMode::Explicit {
+            self.confirmed_name_owners(
+                fork_name
+                    .as_deref()
+                    .ok_or_else(|| internal_error("explicit fork name unavailable"))?,
+                /*claimant*/ None,
+                conflict_thread_ids.as_deref(),
+            )
+            .await?;
+        } else {
+            if conflict_thread_ids.is_some() {
+                return Err(invalid_request(
+                    "anonymous or generated forks cannot archive name owners",
+                ));
+            }
+        }
         let reserved_thread_id = if config.ephemeral {
             None
         } else {
@@ -5322,21 +5339,44 @@ impl ThreadRequestProcessor {
             app_server_client_version,
         )
         .await?;
-        if session_configured.rollout_path.is_some()
-            && let Some(name) = source_thread_name.clone()
-        {
-            self.thread_manager
-                .update_thread_metadata(
-                    thread_id,
-                    StoreThreadMetadataPatch {
-                        name: Some(Some(name)),
-                        ..Default::default()
-                    },
-                    /*include_archived*/ true,
-                )
-                .await
-                .map_err(|err| core_thread_write_error("inherit source thread name", err))?;
-        }
+        let fork_name = if let Some(name) = fork_name {
+            let archived_name_owners =
+                if naming_mode == codex_app_server_protocol::ThreadNameMode::Explicit {
+                    self.release_confirmed_name_owners(
+                        &name,
+                        Some(thread_id),
+                        conflict_thread_ids.as_deref(),
+                    )
+                    .await
+                    .map_err(|mut err| {
+                        let data = err.data.get_or_insert_with(|| serde_json::json!({}));
+                        data["createdThreadId"] = serde_json::json!(thread_id.to_string());
+                        err.message = format!(
+                            "Fork {thread_id} was created, but takeover failed: {}",
+                            err.message
+                        );
+                        err
+                    })?
+                } else {
+                    Vec::new()
+                };
+            Some(
+                self.claim_thread_name(thread_id, &name, naming_mode)
+                    .await
+                    .map_err(|mut err| {
+                        let data = err.data.get_or_insert_with(|| serde_json::json!({}));
+                        data["createdThreadId"] = serde_json::json!(thread_id.to_string());
+                        data["archivedThreadIds"] = serde_json::json!(archived_name_owners);
+                        err.message = format!(
+                            "Fork {thread_id} was created, but naming failed: {}",
+                            err.message
+                        );
+                        err
+                    })?,
+            )
+        } else {
+            None
+        };
         let inherited_goal = if defer_goal_continuation
             && session_configured.rollout_path.is_some()
             && goals_enabled
@@ -5439,9 +5479,7 @@ impl ThreadRequestProcessor {
                 thread.turns.as_slice(),
             ));
         }
-        if let Some(name) = source_thread_name {
-            set_thread_name_from_title(&mut thread, name);
-        }
+        thread.name = fork_name;
         thread.can_accept_direct_input = Some(can_accept_direct_input(
             forked_thread.multi_agent_version(),
             &config_snapshot.session_source,

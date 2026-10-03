@@ -61,7 +61,7 @@ pub(crate) fn tool_specs() -> Vec<DynamicToolSpec> {
         ),
         (
             "send_message_to_thread",
-            "Send a message to an existing Codex task: start if idle, otherwise steer its active turn. Provide exactly one of threadId or threadName. Names match unarchived tasks exactly, ignoring surrounding whitespace and ASCII case; ambiguous names require an ID. The destination must have a connected subscriber, an active turn, or updatedAt within 24 hours; otherwise open it or send it a user message first. Omit model unless the user explicitly requests an override.",
+            "Send a message to an existing Codex task: start if idle, otherwise steer its active turn. Provide exactly one of threadId or threadName. Names target unarchived independent conversations, ignoring surrounding whitespace and ASCII case; subagents require threadId. Ambiguous names require an ID. The destination must have a connected subscriber, an active turn, or updatedAt within 24 hours; otherwise open it or send it a user message first. Omit model unless the user explicitly requests an override.",
             json!({"threadId": thread_id, "threadName": {"type": "string", "minLength": 1}, "prompt": prompt, "model": {"type": "string", "minLength": 1}}),
             vec!["prompt"],
         ),
