@@ -2037,6 +2037,30 @@
             },
             "method": {
               "enum": [
+                "thread/farm"
+              ],
+              "title": "Thread/farmRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ThreadFarmParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Thread/farmRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "enum": [
                 "thread/name/set"
               ],
               "title": "Thread/name/setRequestMethod",
@@ -19595,6 +19619,60 @@
     },
     "ThreadExtra": {
       "description": "Extra app-server data for a thread.",
+      "type": "object"
+    },
+    "ThreadFarmMode": {
+      "enum": [
+        "fullHistory",
+        "fresh"
+      ],
+      "type": "string"
+    },
+    "ThreadFarmParams": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "description": "Direct user delegation, without starting or steering the parent conversation.",
+      "properties": {
+        "input": {
+          "items": {
+            "$ref": "#/definitions/UserInput"
+          },
+          "type": "array"
+        },
+        "mode": {
+          "$ref": "#/definitions/ThreadFarmMode"
+        },
+        "requestId": {
+          "description": "UUID identifying this submission across reconnects. Reuse only with identical input/mode.",
+          "type": "string"
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "input",
+        "mode",
+        "requestId",
+        "threadId"
+      ],
+      "title": "ThreadFarmParams",
+      "type": "object"
+    },
+    "ThreadFarmResponse": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "agentPath": {
+          "type": "string"
+        },
+        "childThreadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "agentPath",
+        "childThreadId"
+      ],
+      "title": "ThreadFarmResponse",
       "type": "object"
     },
     "ThreadForkParams": {

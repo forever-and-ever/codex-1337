@@ -1430,6 +1430,29 @@
       },
       "type": "object"
     },
+    "FarmConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "instructions": {
+          "default": null,
+          "description": "Appended to inherited developer instructions, never used for ordinary spawns.",
+          "type": "string"
+        },
+        "model": {
+          "default": null,
+          "type": "string"
+        },
+        "reasoning_effort": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ReasoningEffort"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
+    },
     "FeatureToggleToml": {
       "additionalProperties": false,
       "description": "Optional enablement of a configured feature.",
@@ -6616,6 +6639,19 @@
           "default": null,
           "description": "Selected native Claude subscription identity for new conversations.",
           "type": "string"
+        },
+        "farm": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/FarmConfig"
+            }
+          ],
+          "default": {
+            "instructions": null,
+            "model": null,
+            "reasoning_effort": null
+          },
+          "description": "Executor and additive child instructions for direct user delegation."
         }
       },
       "type": "object"
@@ -7795,7 +7831,12 @@
         "account_aliases": {},
         "account_nicknames": {},
         "default_account": null,
-        "default_claude_account": null
+        "default_claude_account": null,
+        "farm": {
+          "instructions": null,
+          "model": null,
+          "reasoning_effort": null
+        }
       },
       "description": "Downstream conversation-account preferences."
     }

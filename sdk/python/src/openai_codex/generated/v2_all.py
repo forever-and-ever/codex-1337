@@ -5393,6 +5393,19 @@ class ThreadExtra(BaseModel):
     )
 
 
+class ThreadFarmMode(Enum):
+    full_history = "fullHistory"
+    fresh = "fresh"
+
+
+class ThreadFarmResponse(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    agent_path: Annotated[str, Field(alias="agentPath")]
+    child_thread_id: Annotated[str, Field(alias="childThreadId")]
+
+
 class ThreadGoalClearParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -10036,6 +10049,22 @@ class SubAgentSource(
     root: SubAgentSourceValue | ThreadSpawnSubAgentSource | OtherSubAgentSource
 
 
+class ThreadFarmParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    input: list[UserInput]
+    mode: ThreadFarmMode
+    request_id: Annotated[
+        str,
+        Field(
+            alias="requestId",
+            description="UUID identifying this submission across reconnects. Reuse only with identical input/mode.",
+        ),
+    ]
+    thread_id: Annotated[str, Field(alias="threadId")]
+
+
 class ThreadForkParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -10861,6 +10890,15 @@ class ThreadForkRequest(BaseModel):
     id: RequestId
     method: Annotated[Literal["thread/fork"], Field(title="Thread/forkRequestMethod")]
     params: ThreadForkParams
+
+
+class ThreadFarmRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[Literal["thread/farm"], Field(title="Thread/farmRequestMethod")]
+    params: ThreadFarmParams
 
 
 class ThreadGoalSetRequest(BaseModel):
@@ -12916,6 +12954,7 @@ class ClientRequest(
         | ThreadRetireRequest
         | ThreadDeleteRequest
         | ThreadUnsubscribeRequest
+        | ThreadFarmRequest
         | ThreadNameSetRequest
         | ThreadGoalSetRequest
         | ThreadGoalGetRequest
@@ -13033,6 +13072,7 @@ class ClientRequest(
         | ThreadRetireRequest
         | ThreadDeleteRequest
         | ThreadUnsubscribeRequest
+        | ThreadFarmRequest
         | ThreadNameSetRequest
         | ThreadGoalSetRequest
         | ThreadGoalGetRequest
