@@ -9,8 +9,10 @@ use serde_json::Value as JsonValue;
 use std::collections::BTreeMap;
 
 use crate::PUBLIC_TOOL_NAME;
-use crate::json_schema_types::render_json_schema_to_typescript;
+use crate::json_schema_types::DEFAULT_INPUT_SCHEMA_MAX_BYTES;
+use crate::json_schema_types::RenderedJsonSchema;
 use crate::json_schema_types::render_json_schema_to_typescript_with_budget;
+use std::collections::BTreeSet;
 
 const MAX_JS_SAFE_INTEGER: u64 = (1_u64 << 53) - 1;
 const DEFERRED_NESTED_TOOLS_GUIDANCE: &str = r#"Some deferred nested tools may be omitted from this description. They are still available on the global `tools` object and listed in `ALL_TOOLS`.
@@ -429,6 +431,7 @@ pub fn render_code_mode_sample(
 }
 
 fn render_code_mode_sample_for_definition(definition: &ToolDefinition) -> String {
+    let mut names = BTreeSet::new();
     let input_name = match definition.kind {
         CodeModeToolKind::Function => "args",
         CodeModeToolKind::Freeform => "input",
@@ -437,35 +440,54 @@ fn render_code_mode_sample_for_definition(definition: &ToolDefinition) -> String
         CodeModeToolKind::Function => definition
             .input_schema
             .as_ref()
-            .map(|schema| match definition.input_schema_max_bytes {
-                Some(max_bytes) => render_json_schema_to_typescript_with_budget(schema, max_bytes),
-                None => render_json_schema_to_typescript(schema),
+            .map(|schema| {
+                render_json_schema_to_typescript_with_budget(
+                    schema,
+                    definition
+                        .input_schema_max_bytes
+                        .unwrap_or(DEFAULT_INPUT_SCHEMA_MAX_BYTES),
+                    &mut names,
+                )
             })
-            .unwrap_or_else(|| "unknown".to_string()),
-        CodeModeToolKind::Freeform => "string".to_string(),
+            .unwrap_or_else(|| RenderedJsonSchema::inline("unknown")),
+        CodeModeToolKind::Freeform => RenderedJsonSchema::inline("string"),
     };
     let output_type = if let Some(structured_content_schema) =
         mcp_structured_content_schema(definition.output_schema.as_ref())
     {
-        let structured_content_type = render_json_schema_to_typescript(structured_content_schema);
-        if structured_content_type == "unknown" {
+        let mut structured_content_type = render_json_schema_to_typescript_with_budget(
+            structured_content_schema,
+            DEFAULT_INPUT_SCHEMA_MAX_BYTES,
+            &mut names,
+        );
+        structured_content_type.root_type = if structured_content_type.root_type == "unknown" {
             "CallToolResult".to_string()
         } else {
-            format!("CallToolResult<{structured_content_type}>")
-        }
+            format!("CallToolResult<{}>", structured_content_type.root_type)
+        };
+        structured_content_type
     } else {
         definition
             .output_schema
             .as_ref()
-            .map(render_json_schema_to_typescript)
-            .unwrap_or_else(|| "unknown".to_string())
+            .map(|schema| {
+                render_json_schema_to_typescript_with_budget(
+                    schema,
+                    DEFAULT_INPUT_SCHEMA_MAX_BYTES,
+                    &mut names,
+                )
+            })
+            .unwrap_or_else(|| RenderedJsonSchema::inline("unknown"))
     };
-    render_code_mode_sample(
-        &definition.description,
+    let declaration = render_code_mode_tool_declaration(
         &definition.name,
         input_name,
-        input_type,
-        output_type,
+        &input_type.root_type,
+        &output_type.root_type,
+    );
+    format!(
+        "{}\n\nexec tool declaration:\n```ts\n{}{}declare const tools: {{ {declaration} }};\n```",
+        definition.description, input_type.declarations, output_type.declarations
     )
 }
 
@@ -721,9 +743,49 @@ mod tests {
         };
 
         let description = augment_tool_definition(definition).description;
-        assert!(description.contains(
-            "mcp__sample__search(args: {}): Promise<CallToolResult<{ results: Array<{ id: string; score: number; }>; }>>;"
-        ));
+        assert_eq!(
+            description,
+            "Search\n\nexec tool declaration:\n```ts\ntype T_Result_item_v1 = { id: string; score: number; };\ndeclare const tools: { mcp__sample__search(args: {}): Promise<CallToolResult<{ results: Array<T_Result_item_v1>; }>>; };\n```"
+        );
+    }
+
+    #[test]
+    fn code_mode_types_shared_alias_scope_and_required_branches() {
+        // Aliases share a scope across inputs and outputs, but schema refs do not.
+        let definition = ToolDefinition {
+            name: "send_message".to_string(),
+            tool_name: ToolName::plain("send_message"),
+            description: "Send".to_string(),
+            kind: CodeModeToolKind::Function,
+            input_schema: Some(json!({
+                "type": "object",
+                "properties": {
+                    "prompt": { "type": "string" },
+                    "threadId": { "$ref": "#/$defs/Target~1Node" },
+                    "threadName": { "$ref": "#/$defs/Target_Node" }
+                },
+                "required": ["prompt"],
+                "additionalProperties": false,
+                "oneOf": [{ "required": ["threadId"] }, { "required": ["threadName"] }],
+                "$defs": {
+                    "Target/Node": { "type": "string" },
+                    "Target_Node": { "type": ["string", "null"] }
+                }
+            })),
+            input_schema_max_bytes: None,
+            output_schema: Some(json!({
+                "$ref": "#/$defs/Target_Node",
+                "$defs": { "Target_Node": {
+                    "type": "object", "properties": {
+                        "next": { "$ref": "#/$defs/Target_Node" }
+                    }, "required": ["next"], "additionalProperties": false
+                } }
+            })),
+        };
+        assert_eq!(
+            augment_tool_definition(definition).description,
+            "Send\n\nexec tool declaration:\n```ts\ntype T_Target_Node = string;\ntype T_Target_Node_2 = string | null;\ntype T_Target_Node_3 = { next: T_Target_Node_3; };\ndeclare const tools: { send_message(args: { prompt: string; threadId?: T_Target_Node; threadName?: T_Target_Node_2; } & ({ threadId: unknown; [key: string]: unknown; } | { threadName: unknown; [key: string]: unknown; })): Promise<T_Target_Node_3>; };\n```"
+        );
     }
 
     #[test]

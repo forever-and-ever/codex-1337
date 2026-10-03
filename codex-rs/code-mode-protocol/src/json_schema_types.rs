@@ -1,61 +1,100 @@
 use serde_json::Value as JsonValue;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 
 use crate::description::normalize_code_mode_identifier;
 
-// Expose one nested recursive shape, then fall back to `unknown` on the next
-// occurrence so generated tool declarations remain finite.
-const MAX_LOCAL_REF_EXPANSIONS_PER_PATH: usize = 2;
-// Bound repeated refs and DAG fan-out separately from cycle depth so one
-// compact schema cannot expand into an arbitrarily large model-visible item.
-const MAX_TOTAL_LOCAL_REF_EXPANSIONS: usize = 32;
 // Bound individual schema rendering before assembling the final declaration.
 pub const DEFAULT_INPUT_SCHEMA_MAX_BYTES: usize = 16_000;
-// Charge intermediate render strings as they are built so repeated local refs
-// cannot allocate unbounded expanded copies before the final schema cap runs.
 const RENDER_WORK_MULTIPLIER: usize = 4;
+const MAX_SCHEMA_DEPTH: usize = 64;
 
-pub fn render_json_schema_to_typescript(schema: &JsonValue) -> String {
-    render_json_schema_to_typescript_with_budget(schema, DEFAULT_INPUT_SCHEMA_MAX_BYTES)
+/// Type declarations and their root expression; declarations precede the tool signature.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RenderedJsonSchema {
+    pub declarations: String,
+    pub root_type: String,
+}
+
+impl RenderedJsonSchema {
+    pub(crate) fn inline(root_type: &str) -> Self {
+        Self {
+            declarations: String::new(),
+            root_type: root_type.to_string(),
+        }
+    }
+}
+
+pub fn render_json_schema_to_typescript(schema: &JsonValue) -> RenderedJsonSchema {
+    render_json_schema_to_typescript_with_budget(
+        schema,
+        DEFAULT_INPUT_SCHEMA_MAX_BYTES,
+        &mut BTreeSet::new(),
+    )
 }
 
 pub(crate) fn render_json_schema_to_typescript_with_budget(
     schema: &JsonValue,
     max_bytes: usize,
-) -> String {
-    let rendered = JsonSchemaTypeRenderer::new(schema, max_bytes).render(schema);
-    if rendered.len() > max_bytes {
-        "unknown".to_string()
-    } else {
-        rendered
+    names: &mut BTreeSet<String>,
+) -> RenderedJsonSchema {
+    let mut renderer = JsonSchemaTypeRenderer::new(schema, max_bytes, names.clone());
+    let root_type = renderer.render(schema);
+    let mut declarations = Vec::new();
+    let mut index = 0;
+    let mut output_bytes = root_type.len();
+    while index < renderer.pending_refs.len() && !renderer.render_work_budget_exhausted {
+        let (target, alias) = renderer.pending_refs[index].clone();
+        let body = renderer.render(target);
+        let declaration = format!("type {alias} = {body};\n");
+        output_bytes = output_bytes.saturating_add(declaration.len());
+        if output_bytes > max_bytes || !renderer.consume_render_work(declaration.len()) {
+            return RenderedJsonSchema::inline("unknown");
+        }
+        declarations.push(declaration);
+        index += 1;
+    }
+    if renderer.render_work_budget_exhausted || output_bytes > max_bytes {
+        return RenderedJsonSchema::inline("unknown");
+    }
+    *names = renderer.names;
+    RenderedJsonSchema {
+        declarations: declarations.concat(),
+        root_type,
     }
 }
 
 struct JsonSchemaTypeRenderer<'a> {
     root: &'a JsonValue,
     nested_schema_resource_depth: usize,
-    active_local_ref_expansions: BTreeMap<String, usize>,
-    remaining_local_ref_expansions: usize,
+    aliases: BTreeMap<String, String>,
+    pending_refs: Vec<(&'a JsonValue, String)>,
+    names: BTreeSet<String>,
+    schema_depth: usize,
     remaining_render_work_bytes: usize,
     render_work_budget_exhausted: bool,
 }
 
 impl<'a> JsonSchemaTypeRenderer<'a> {
-    fn new(root: &'a JsonValue, max_bytes: usize) -> Self {
+    fn new(root: &'a JsonValue, max_bytes: usize, names: BTreeSet<String>) -> Self {
         Self {
             root,
             nested_schema_resource_depth: 0,
-            active_local_ref_expansions: BTreeMap::new(),
-            remaining_local_ref_expansions: MAX_TOTAL_LOCAL_REF_EXPANSIONS,
+            aliases: BTreeMap::new(),
+            pending_refs: Vec::new(),
+            names,
+            schema_depth: 0,
             remaining_render_work_bytes: max_bytes.saturating_mul(RENDER_WORK_MULTIPLIER),
             render_work_budget_exhausted: false,
         }
     }
 
     fn render(&mut self, schema: &JsonValue) -> String {
-        if self.render_work_budget_exhausted {
+        if self.schema_depth >= MAX_SCHEMA_DEPTH || !self.consume_render_work(1) {
+            self.render_work_budget_exhausted = true;
             return "unknown".to_string();
         }
+        self.schema_depth += 1;
 
         // A nested `$id` starts a new schema resource. Fragment-only refs below
         // it are scoped to that resource, not to the outer document root.
@@ -76,6 +115,7 @@ impl<'a> JsonSchemaTypeRenderer<'a> {
         if enters_nested_schema_resource {
             self.nested_schema_resource_depth -= 1;
         }
+        self.schema_depth -= 1;
         self.finish_render(rendered)
     }
 
@@ -87,19 +127,65 @@ impl<'a> JsonSchemaTypeRenderer<'a> {
         if map.contains_key("$ref") {
             return self.render_ref(map);
         }
+        self.render_constraints(map)
+    }
 
+    fn render_constraints(&mut self, map: &serde_json::Map<String, JsonValue>) -> String {
+        if ["anyOf", "oneOf", "allOf"]
+            .iter()
+            .any(|key| map.contains_key(*key))
+        {
+            let mut intersections = Vec::new();
+            let base = self.render_base(map);
+            if base != "unknown" {
+                intersections.push(base);
+            }
+            for key in ["anyOf", "oneOf", "allOf"] {
+                if let Some(variants) = map.get(key).and_then(JsonValue::as_array) {
+                    let mut rendered = Vec::new();
+                    for variant in variants {
+                        if self.render_work_budget_exhausted {
+                            return "unknown".to_string();
+                        }
+                        let variant = self.render(variant);
+                        rendered.push(if key == "allOf" {
+                            parenthesize_union_for_intersection(variant)
+                        } else {
+                            variant
+                        });
+                    }
+                    if !rendered.is_empty() {
+                        intersections.push(rendered.join(if key == "allOf" {
+                            " & "
+                        } else {
+                            " | "
+                        }));
+                    }
+                }
+            }
+            if intersections.len() == 1 {
+                return intersections.remove(0);
+            }
+            if !intersections.is_empty() {
+                return intersections
+                    .into_iter()
+                    .map(parenthesize_union_for_intersection)
+                    .collect::<Vec<_>>()
+                    .join(" & ");
+            }
+        }
+        self.render_base(map)
+    }
+
+    fn render_base(&mut self, map: &serde_json::Map<String, JsonValue>) -> String {
         if let Some(value) = map.get("const") {
             return self.render_literal(value);
         }
-
         if let Some(values) = map.get("enum").and_then(JsonValue::as_array) {
             let mut rendered = Vec::new();
             for value in values {
                 let literal = self.render_literal(value);
-                if self.render_work_budget_exhausted {
-                    return "unknown".to_string();
-                }
-                if !self.consume_render_work(literal.len()) {
+                if self.render_work_budget_exhausted || !self.consume_render_work(literal.len()) {
                     return "unknown".to_string();
                 }
                 rendered.push(literal);
@@ -108,35 +194,6 @@ impl<'a> JsonSchemaTypeRenderer<'a> {
                 return rendered.join(" | ");
             }
         }
-
-        for key in ["anyOf", "oneOf"] {
-            if let Some(variants) = map.get(key).and_then(JsonValue::as_array) {
-                let mut rendered = Vec::new();
-                for variant in variants {
-                    if self.render_work_budget_exhausted {
-                        return "unknown".to_string();
-                    }
-                    rendered.push(self.render(variant));
-                }
-                if !rendered.is_empty() {
-                    return rendered.join(" | ");
-                }
-            }
-        }
-
-        if let Some(variants) = map.get("allOf").and_then(JsonValue::as_array) {
-            let mut rendered = Vec::new();
-            for variant in variants {
-                if self.render_work_budget_exhausted {
-                    return "unknown".to_string();
-                }
-                rendered.push(parenthesize_union_for_intersection(self.render(variant)));
-            }
-            if !rendered.is_empty() {
-                return rendered.join(" & ");
-            }
-        }
-
         if let Some(schema_type) = map.get("type") {
             if let Some(types) = schema_type.as_array() {
                 let mut rendered = Vec::new();
@@ -176,38 +233,49 @@ impl<'a> JsonSchemaTypeRenderer<'a> {
         } else {
             map.get("$ref")
                 .and_then(JsonValue::as_str)
+                .filter(|reference| {
+                    if reference.len() > self.remaining_render_work_bytes {
+                        self.render_work_budget_exhausted = true;
+                        false
+                    } else {
+                        true
+                    }
+                })
                 .and_then(local_json_pointer)
                 .and_then(|pointer| {
-                    let active_expansions = self
-                        .active_local_ref_expansions
-                        .get(&pointer)
-                        .copied()
-                        .unwrap_or_default();
-                    if active_expansions >= MAX_LOCAL_REF_EXPANSIONS_PER_PATH {
-                        return Some("unknown".to_string());
+                    if let Some(alias) = self.aliases.get(&pointer) {
+                        return Some(alias.clone());
                     }
-                    if self.remaining_local_ref_expansions == 0 {
-                        return Some("unknown".to_string());
+                    let target = self.root.pointer(&pointer)?;
+                    if !self.consume_render_work(pointer.len()) {
+                        return None;
                     }
-
-                    let root = self.root;
-                    let target = if pointer.is_empty() {
-                        Some(root)
-                    } else {
-                        root.pointer(&pointer)
-                    }?;
-                    self.remaining_local_ref_expansions -= 1;
-                    self.active_local_ref_expansions
-                        .insert(pointer.clone(), active_expansions + 1);
-
-                    let rendered = self.render(target);
-                    if active_expansions == 0 {
-                        self.active_local_ref_expansions.remove(&pointer);
-                    } else {
-                        self.active_local_ref_expansions
-                            .insert(pointer, active_expansions);
+                    let segment = pointer
+                        .rsplit('/')
+                        .next()
+                        .unwrap_or_default()
+                        .replace("~1", "/")
+                        .replace("~0", "~");
+                    // This short prefix keeps schema names out of the keyword and
+                    // shared MCP preamble namespaces without a keyword registry.
+                    let base = format!(
+                        "T_{}",
+                        normalize_code_mode_identifier(if segment.is_empty() {
+                            "Root"
+                        } else {
+                            &segment
+                        })
+                    );
+                    let mut alias = base.clone();
+                    let mut suffix = 2;
+                    while self.names.contains(&alias) {
+                        alias = format!("{base}_{suffix}");
+                        suffix += 1;
                     }
-                    Some(rendered)
+                    self.names.insert(alias.clone());
+                    self.aliases.insert(pointer.clone(), alias.clone());
+                    self.pending_refs.push((target, alias.clone()));
+                    Some(alias)
                 })
         }
         .unwrap_or_else(|| "unknown".to_string());
@@ -215,16 +283,11 @@ impl<'a> JsonSchemaTypeRenderer<'a> {
             return "unknown".to_string();
         }
 
-        let siblings = map
-            .iter()
-            .filter(|(key, _)| !matches!(key.as_str(), "$ref" | "$defs" | "definitions"))
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect();
-        if !has_renderable_schema_keywords(&siblings) {
+        if !has_renderable_schema_keywords(map) {
             return referenced_type;
         }
 
-        let sibling_type = self.render_map(&siblings);
+        let sibling_type = self.render_constraints(map);
         match (referenced_type.as_str(), sibling_type.as_str()) {
             ("unknown", _) => sibling_type,
             (_, "unknown") => referenced_type,
@@ -339,7 +402,17 @@ impl<'a> JsonSchemaTypeRenderer<'a> {
             .and_then(JsonValue::as_object)
             .unwrap_or(&empty_properties);
 
-        let mut sorted_properties = properties.iter().collect::<Vec<_>>();
+        // Required-only branches constrain keys defined in a sibling object.
+        let unconstrained = JsonValue::Bool(true);
+        let mut sorted_properties = properties
+            .iter()
+            .map(|(name, value)| (name.as_str(), value))
+            .collect::<Vec<_>>();
+        for name in &required {
+            if !properties.contains_key(*name) {
+                sorted_properties.push((*name, &unconstrained));
+            }
+        }
         sorted_properties.sort_unstable_by_key(|(name_a, _)| *name_a);
         if sorted_properties
             .iter()
