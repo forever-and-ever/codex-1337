@@ -32,6 +32,7 @@ use codex_protocol::ThreadId;
 use codex_protocol::mcp::ClientMcpExtensions;
 use codex_protocol::protocol::AgentStatus;
 use codex_protocol::protocol::ThreadSettingsOverrides;
+use serde_json::json;
 
 use super::super::thread_input::ensure_direct_input_allowed;
 use super::ThreadRequestProcessor;
@@ -67,6 +68,59 @@ impl ThreadCoordinationService {
             })
             .await?
             .thread)
+    }
+
+    pub(crate) async fn resolve_message_name(
+        &self,
+        name: &str,
+    ) -> Result<(String, String), JSONRPCErrorError> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(invalid_request("threadName must not be empty"));
+        }
+        let _permit = self.threads.acquire_thread_list_state_permit().await?;
+        let state = self.threads.state_db.as_ref().ok_or_else(|| {
+            internal_error("threadName resolution is unavailable without authoritative state")
+        })?;
+        self.threads
+            .thread_store
+            .ensure_thread_name_claims()
+            .await
+            .map_err(|err| {
+                internal_error(format!("failed to load canonical thread names: {err}"))
+            })?;
+        let owners = state
+            .find_thread_name_owners(name)
+            .await
+            .map_err(|err| internal_error(format!("failed to resolve threadName: {err}")))?;
+        match owners.as_slice() {
+            [] => {
+                let mut error = invalid_request("No unarchived Codex task has this threadName");
+                error.data = Some(json!({"type": "threadNameNotFound"}));
+                Err(error)
+            }
+            [owner] => Ok((
+                owner.id.to_string(),
+                owner
+                    .name
+                    .clone()
+                    .ok_or_else(|| internal_error("threadName owner has no canonical name"))?,
+            )),
+            _ => {
+                let mut error =
+                    invalid_request("threadName is ambiguous; use a candidate threadId instead");
+                // Historical collisions can exceed the model output budget.
+                const MAX_CANDIDATES: usize = 50;
+                error.data = Some(json!({
+                    "type": "threadNameAmbiguous",
+                    "candidateThreadIds": owners.iter().take(MAX_CANDIDATES)
+                        .map(|owner| owner.id.to_string()).collect::<Vec<_>>(),
+                    "candidateCount": owners.len(),
+                    "candidatesTruncated": owners.len() > MAX_CANDIDATES
+                }));
+                Err(error)
+            }
+        }
     }
 
     pub(crate) async fn turns(

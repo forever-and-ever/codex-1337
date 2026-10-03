@@ -4,6 +4,7 @@ use crate::request_processors::ThreadCoordinationService;
 use codex_app_server_protocol::DynamicToolFunctionSpec;
 use codex_app_server_protocol::DynamicToolNamespaceTool;
 use codex_app_server_protocol::DynamicToolSpec;
+use codex_app_server_protocol::JSONRPCErrorError;
 use codex_app_server_protocol::SortDirection;
 use codex_app_server_protocol::ThreadArchiveParams;
 use codex_app_server_protocol::ThreadForkParams;
@@ -164,7 +165,14 @@ impl<'call> ToolExecutor<ToolCall<'call>> for CoordinationTool {
                 .execute(&service, &call.turn_id, arguments)
                 .await
                 .map_err(|err| {
-                    FunctionCallError::RespondToModel(render::truncate(&err, MAX_ERROR_CHARS))
+                    let message = match err {
+                        ExecutionError::Message(message) => {
+                            render::truncate(&message, MAX_ERROR_CHARS)
+                        }
+                        ExecutionError::Rpc(error) => response::serialize(json!({"error": error}))
+                            .unwrap_or_else(std::convert::identity),
+                    };
+                    FunctionCallError::RespondToModel(message)
                 })?;
             let text = response::serialize(result).map_err(FunctionCallError::RespondToModel)?;
             let result = serde_json::from_str(&text)
@@ -180,32 +188,46 @@ impl CoordinationTool {
         service: &ThreadCoordinationService,
         turn_id: &str,
         arguments: Value,
-    ) -> Result<Value, String> {
+    ) -> Result<Value, ExecutionError> {
         let caller = self.caller.to_string();
         match self.function.name.as_str() {
             "list_threads" | "list_archived_threads" => {
-                queries::list(service, &self.function.name, arguments).await
+                Ok(queries::list(service, &self.function.name, arguments).await?)
             }
-            "read_thread" => queries::read(service, arguments).await,
-            "wait_threads" => queries::wait(service, &caller, arguments).await,
+            "read_thread" => Ok(queries::read(service, arguments).await?),
+            "wait_threads" => Ok(queries::wait(service, &caller, arguments).await?),
             "send_message_to_thread" => {
                 let args: SendArguments = parse(arguments)?;
                 if args.model.as_deref().is_some_and(str::is_empty) {
                     return Err("model must not be empty".into());
                 }
+                let (thread_id, thread_name) = match args.target {
+                    MessageTarget::Id(id) => (id, None),
+                    MessageTarget::Name(name) => {
+                        let (id, name) = service
+                            .resolve_message_name(&name)
+                            .await
+                            .map_err(ExecutionError::Rpc)?;
+                        (id, Some(name))
+                    }
+                };
                 // Execution is already approved here. Check before the send can
                 // restore the destination or inject input into its active turn.
                 service
-                    .ensure_message_recipient(&args.thread_id)
+                    .ensure_message_recipient(&thread_id)
                     .await
                     .map_err(error)?;
                 let output =
                     delegated_output(service, &caller, &self.function.name, args.prompt).await?;
                 service
-                    .send(&args.thread_id, output, args.model)
+                    .send(&thread_id, output, args.model)
                     .await
                     .map_err(error)?;
-                Ok(json!({"threadId": args.thread_id}))
+                let mut receipt = json!({"threadId": thread_id});
+                if let Some(name) = thread_name {
+                    receipt["threadName"] = json!(name);
+                }
+                Ok(receipt)
             }
             "create_thread" => {
                 let args: CreateArguments = parse(arguments)?;
@@ -228,6 +250,7 @@ impl CoordinationTool {
                         .rename(ThreadSetNameParams {
                             thread_id: thread_id.clone(),
                             name: title.trim().to_owned(),
+                            ..Default::default()
                         })
                         .await
                 {
@@ -293,6 +316,7 @@ impl CoordinationTool {
                     .rename(ThreadSetNameParams {
                         thread_id: thread_id.clone(),
                         name: args.title.clone(),
+                        ..Default::default()
                     })
                     .await
                     .map_err(error)?;
@@ -321,8 +345,25 @@ impl CoordinationTool {
                 }
                 Ok(json!({"threadId": thread_id, "archived": args.archived}))
             }
-            tool => Err(format!("Unsupported coordination tool: {tool}")),
+            tool => Err(format!("Unsupported coordination tool: {tool}").into()),
         }
+    }
+}
+
+enum ExecutionError {
+    Message(String),
+    Rpc(JSONRPCErrorError),
+}
+
+impl From<String> for ExecutionError {
+    fn from(message: String) -> Self {
+        Self::Message(message)
+    }
+}
+
+impl From<&str> for ExecutionError {
+    fn from(message: &str) -> Self {
+        Self::Message(message.to_owned())
     }
 }
 
@@ -394,11 +435,44 @@ struct ForkArguments {
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(try_from = "RawSendArguments")]
 struct SendArguments {
-    thread_id: String,
+    target: MessageTarget,
     prompt: String,
     model: Option<String>,
+}
+
+enum MessageTarget {
+    Id(String),
+    Name(String),
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RawSendArguments {
+    thread_id: Option<String>,
+    thread_name: Option<String>,
+    prompt: String,
+    model: Option<String>,
+}
+
+impl TryFrom<RawSendArguments> for SendArguments {
+    type Error = &'static str;
+
+    fn try_from(args: RawSendArguments) -> Result<Self, Self::Error> {
+        let target = match (args.thread_id, args.thread_name) {
+            (Some(id), None) => MessageTarget::Id(id),
+            (None, Some(name)) => MessageTarget::Name(name),
+            (None, None) | (Some(_), Some(_)) => {
+                return Err("provide exactly one of threadId or threadName");
+            }
+        };
+        Ok(Self {
+            target,
+            prompt: args.prompt,
+            model: args.model,
+        })
+    }
 }
 
 #[derive(Deserialize)]

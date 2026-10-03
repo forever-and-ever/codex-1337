@@ -15,7 +15,7 @@ pub(super) fn thread_summary(thread: &Thread) -> Value {
         "id": thread.id,
         "kind": "codex",
         "projectId": thread.project_id,
-        "title": thread.name.as_deref().map(|title| truncate(title, DEFAULT_OUTPUT_CHARS)),
+        "title": thread.name,
         "summary": truncate(&thread.preview, /*limit*/ 300),
         "status": match &thread.status {
             ThreadStatus::Idle => "idle",

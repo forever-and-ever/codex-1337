@@ -67,49 +67,66 @@ pub(super) fn serialize(mut value: Value) -> Result<String, String> {
 
     // Search from the original compact result each time: a failed fit must not
     // permanently erase text that fits once a smaller per-field limit is chosen.
-    let mut low = 0;
-    let mut high = MAX_RESPONSE_BYTES;
-    let mut best = None;
-    while low <= high {
-        let limit = low + (high - low) / 2;
-        let mut candidate = value.clone();
-        truncate_content(&mut candidate, limit);
-        let text = candidate.to_string();
-        if text.len() <= MAX_RESPONSE_BYTES {
-            best = Some(text);
-            low = limit + 1;
-        } else if limit == 0 {
-            break;
-        } else {
-            high = limit - 1;
+    // Names are routing keys. Sacrifice supporting text before shortening names.
+    for shorten_titles in [false, true] {
+        let mut low = 0;
+        let mut high = MAX_RESPONSE_BYTES;
+        let mut best = None;
+        while low <= high {
+            let limit = low + (high - low) / 2;
+            let mut candidate = value.clone();
+            truncate_content(&mut candidate, limit, shorten_titles);
+            if shorten_titles {
+                candidate["routingNotice"] = json!(
+                    "Use threadId for entries with titleTruncated; their titles are incomplete."
+                );
+            }
+            let text = candidate.to_string();
+            if text.len() <= MAX_RESPONSE_BYTES {
+                best = Some(text);
+                low = limit + 1;
+            } else if limit == 0 {
+                break;
+            } else {
+                high = limit - 1;
+            }
+        }
+        if let Some(text) = best {
+            return Ok(text);
         }
     }
-    best.ok_or_else(|| "Task response metadata exceeds the output budget".to_string())
+    Err("Task response metadata exceeds the output budget".to_string())
 }
 
-fn truncate_content(value: &mut Value, limit: usize) {
+fn truncate_content(value: &mut Value, limit: usize, shorten_titles: bool) {
     match value {
         Value::Object(object) => {
             let mut truncated = false;
+            let mut title_truncated = false;
             for (key, value) in object.iter_mut() {
                 // IDs, cursors, phases, status, and other protocol fields are never shortened.
-                if matches!(key.as_str(), "text" | "title" | "summary" | "message")
+                if (matches!(key.as_str(), "text" | "summary" | "message")
+                    || (shorten_titles && key == "title"))
                     && let Some(text) = value.as_str()
                     && text.chars().count() > limit
                 {
                     *value = Value::String(text.chars().take(limit).collect());
                     truncated = true;
+                    title_truncated |= key == "title";
                 } else {
-                    truncate_content(value, limit);
+                    truncate_content(value, limit, shorten_titles);
                 }
             }
             if truncated {
                 object.insert("truncated".to_string(), Value::Bool(true));
             }
+            if title_truncated {
+                object.insert("titleTruncated".to_string(), Value::Bool(true));
+            }
         }
         Value::Array(values) => {
             for value in values {
-                truncate_content(value, limit);
+                truncate_content(value, limit, shorten_titles);
             }
         }
         Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
