@@ -51,7 +51,19 @@ fn flush_computer(
     cells: &mut TranscriptCells,
 ) {
     if let Some(group) = pending.take() {
-        cells.push(Arc::new(group));
+        push_activity_cell(cells, Arc::new(group));
+    }
+}
+
+fn push_activity_cell(cells: &mut TranscriptCells, cell: Arc<dyn HistoryCell>) {
+    if let Some(members) = crate::history_cell::split_code_mode_members(cells, &cell) {
+        for member in members { push_activity_cell(cells, member); }
+        return;
+    }
+    if let Some((range, replacements)) = crate::history_cell::reconcile_code_mode(cells, &cell) {
+        cells.splice(range, replacements);
+    } else {
+        cells.push(cell);
     }
 }
 
@@ -130,9 +142,10 @@ pub(crate) fn thread_items_to_transcript_cells(
     let mut cells: TranscriptCells = Vec::new();
     let mut pending: Option<crate::history_cell::ComputerActivityCell> = None;
     for item in items {
-        if (matches!(item, ThreadItem::Reasoning { .. })
-            || crate::history_cell::ToolOutputCell::is_item(&item))
+        if matches!(item, ThreadItem::Reasoning { .. })
             && let Some(group) = &mut pending
+            && !cells.iter().filter_map(|cell| cell.as_any().downcast_ref::<crate::history_cell::CodeModeCell>())
+                .any(|block| block.owns(group))
         {
             let returned = crate::history_cell::ToolOutputCell::is_item(&item);
             for cell in item_to_cells(
@@ -150,7 +163,7 @@ pub(crate) fn thread_items_to_transcript_cells(
         }
         if let Some(cell) = tools::historical_tool_fallback(&item) {
             flush_computer(&mut pending, &mut cells);
-            cells.push(Arc::new(cell));
+            push_activity_cell(&mut cells, Arc::new(crate::history_cell::ToolItemCell::new(item.id().into(), cell)));
             continue;
         }
         match item {
@@ -164,13 +177,13 @@ pub(crate) fn thread_items_to_transcript_cells(
                 } else {
                     flush_computer(&mut pending, &mut cells);
                     let cell = call.into_cell();
-                    cells.push(Arc::new(cell));
+                    push_activity_cell(&mut cells, Arc::new(cell));
                 }
             }
             item @ ThreadItem::CommandExecution { .. } => {
                 flush_computer(&mut pending, &mut cells);
                 if let Some(command) = tools::CommandHistory::from_item(item) {
-                    cells.push(Arc::new(command.into_cell()));
+                    push_activity_cell(&mut cells, Arc::new(command.into_cell()));
                 }
             }
             item => {
@@ -184,7 +197,8 @@ pub(crate) fn thread_items_to_transcript_cells(
                     flush_computer(&mut pending, &mut cells);
                     for cell in projected {
                         if let Some((range, replacements)) =
-                            crate::history_cell::ToolOutputGroup::attach(&cells, Arc::clone(&cell))
+                            crate::history_cell::reconcile_code_mode(&cells, &cell)
+                            .or_else(|| crate::history_cell::ToolOutputGroup::attach(&cells, Arc::clone(&cell)))
                         {
                             cells.splice(range, replacements);
                         } else {

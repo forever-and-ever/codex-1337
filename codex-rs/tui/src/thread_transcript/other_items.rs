@@ -16,8 +16,10 @@ use ratatui::style::Stylize as _;
 use std::sync::Arc;
 
 pub(super) fn cells(item: ThreadItem, cwd: &AbsolutePathBuf) -> TranscriptCells {
+    let call_id = matches!(item, ThreadItem::FileChange { .. } | ThreadItem::CollabAgentToolCall { .. } | ThreadItem::ImageView { .. } | ThreadItem::ImageGeneration(_)).then(|| item.id().to_owned());
     let mut cells: TranscriptCells = Vec::new();
     match item {
+        ThreadItem::CodeMode(item) => cells.push(Arc::new(history_cell::CodeModeFactCell(item, /*animations_enabled*/ false))),
         ThreadItem::FileChange {
             id,
             changes,
@@ -145,7 +147,13 @@ pub(super) fn cells(item: ThreadItem, cwd: &AbsolutePathBuf) -> TranscriptCells 
         | ThreadItem::McpToolCall { .. }
         | ThreadItem::Sleep(_) => {}
     }
-    cells
+    match call_id {
+        Some(call_id) => cells.into_iter().map(|inner| {
+            if inner.tool_call_ids().is_empty() { Arc::new(history_cell::ToolItemCell { call_id: call_id.clone(), inner }) as Arc<dyn history_cell::HistoryCell> }
+            else { inner }
+        }).collect(),
+        None => cells,
+    }
 }
 
 #[cfg(test)]

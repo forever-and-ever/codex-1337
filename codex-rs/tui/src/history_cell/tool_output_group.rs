@@ -38,9 +38,7 @@ impl ToolOutputGroup {
     ) -> Option<(Range<usize>, Vec<Arc<dyn HistoryCell>>)> {
         output.as_any().downcast_ref::<ToolOutputCell>()?;
         if let Some(start) = Self::patch_owner(cells) {
-            if cells[start].outer_call_id().is_some()
-                && cells[start].outer_call_id() != output.outer_call_id()
-            {
+            if cells[start].outer_call_id() != output.outer_call_id() {
                 return None;
             }
             let details = cells[start + 1..].iter().filter(|cell| {
@@ -87,18 +85,10 @@ impl ToolOutputGroup {
             }
             let ids = cell.activity_ids();
             if ids.is_empty() {
-                if cell
-                    .as_any()
-                    .downcast_ref::<ReasoningSummaryCell>()
-                    .is_some_and(ReasoningSummaryCell::is_transcript_only)
-                {
-                    start -= 1;
-                    continue;
-                }
                 break;
             }
-            has_activity = true;
-            start -= 1;
+            // Legacy rows do not establish parentage. Keep their independent disclosures.
+            break;
         }
         if !has_activity || start == cells.len() {
             return None;
@@ -212,22 +202,7 @@ impl ToolOutputGroup {
         }
         let same_call =
             older.outer_call_id().is_some() && older.outer_call_id() == newer.outer_call_id();
-        if !older.as_any().is::<Self>() && !newer.as_any().is::<Self>() && !same_call {
-            return None;
-        }
-        // Pagination may reunite outputs from one invocation, never two different invocations.
-        if older.outer_call_id().is_some() && newer.outer_call_id().is_some() && !same_call {
-            return None;
-        }
-        // File disclosures cannot absorb a neighboring visible activity across a page boundary.
-        if !same_call
-            && (Self::patch_owner(std::slice::from_ref(older)).is_some()
-                || older.outer_call_id().is_some())
-            && newer
-                .as_any()
-                .downcast_ref::<Self>()
-                .is_none_or(|group| group.detail_members().is_none())
-        {
+        if !same_call {
             return None;
         }
         let ids = older

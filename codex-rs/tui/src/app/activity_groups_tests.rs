@@ -55,6 +55,16 @@ fn turn(items: Vec<ThreadItem>) -> Turn {
     }
 }
 
+fn code_mode(exec: &str, event: codex_app_server_protocol::CodeModeEvent) -> ThreadItem {
+    ThreadItem::CodeMode(codex_app_server_protocol::CodeModeItem {
+        id: format!("fact:{exec}:{event:?}"),
+        cell_id: "reused-runtime-cell".into(),
+        exec_call_id: exec.into(),
+        created_at: 0,
+        event,
+    })
+}
+
 fn project(app: &App, items: &[ThreadItem]) -> Vec<Arc<dyn HistoryCell>> {
     thread_items_to_transcript_cells(
         /*thread_id*/ None,
@@ -66,9 +76,102 @@ fn project(app: &App, items: &[ThreadItem]) -> Vec<Arc<dyn HistoryCell>> {
 }
 
 #[tokio::test]
+async fn interleaved_scripts_keep_exact_ownership_after_terminal_wait_and_replay() {
+    use codex_app_server_protocol::CodeModeEvent;
+    use codex_app_server_protocol::CodeModeStatus;
+    use codex_protocol::models::FunctionCallOutputBody;
+
+    let (mut app, mut rx, _) = crate::app::tests::make_test_app_with_channels().await;
+    let mut tui = crate::tui::test_support::make_test_tui().unwrap();
+    tui.set_owned_screen(/*owned*/ true).unwrap();
+    let output = |id: &str, call: &str, name: &str| ThreadItem::FunctionCallOutput {
+        id: id.into(), call_id: Some(call.into()), name: name.into(), namespace: None,
+        output: FunctionCallOutputBody::Text(format!("visible {id}")),
+    };
+    let current = turn(vec![
+        code_mode("exec-a", CodeModeEvent::Started { call_id: "exec-a".into() }),
+        code_mode("exec-a", CodeModeEvent::ToolCall { call_id: "child-a1".into() }),
+        call("child-a1", ActivityKind::Computer, "inProgress"),
+        code_mode("exec-b", CodeModeEvent::Started { call_id: "exec-b".into() }),
+        code_mode("exec-b", CodeModeEvent::ToolCall { call_id: "child-b".into() }),
+        call("child-b", ActivityKind::Computer, "inProgress"),
+        call("direct", ActivityKind::Computer, "completed"),
+        code_mode("exec-a", CodeModeEvent::ToolCall { call_id: "child-a2".into() }),
+        call("child-a2", ActivityKind::Computer, "completed"),
+        code_mode("exec-a", CodeModeEvent::ToolCall { call_id: "view-a".into() }),
+        ThreadItem::ImageView { id: "view-a".into(), path: codex_utils_path_uri::LegacyAppPathString::from_string("diagram.png") },
+        code_mode("exec-a", CodeModeEvent::ToolCall { call_id: "image-a".into() }),
+        ThreadItem::ImageGeneration(codex_app_server_protocol::ImageGenerationItem {
+            id: "image-a".into(), status: "completed".into(), revised_prompt: Some("A precise diagram".into()),
+            result: String::new(), transparent_background: None, failure: None, saved_path: None,
+            imagegen_request_id: None, generation_id: None,
+        }),
+        output("notify-a", "exec-a", "exec"),
+        call("child-b", ActivityKind::Computer, "completed"),
+        call("child-a1", ActivityKind::Computer, "completed"),
+        code_mode("exec-a", CodeModeEvent::WaitStarted { call_id: "wait-a".into() }),
+        code_mode("exec-b", CodeModeEvent::Finished { status: CodeModeStatus::Interrupted }),
+        code_mode("exec-a", CodeModeEvent::Finished { status: CodeModeStatus::Failed }),
+        // Completion can precede consumption. Neither the later reference nor output moves it.
+        code_mode("exec-a", CodeModeEvent::WaitCompleted { call_id: "wait-a".into() }),
+        output("wait-output-a", "wait-a", "wait"),
+    ]);
+    for item in &current.items {
+        app.chat_widget.replay_thread_item(item.clone(), current.id.clone(), crate::chatwidget::ReplayKind::ResumeInitialMessages);
+        while let Ok(event) = rx.try_recv() {
+            if let AppEvent::InsertHistoryCell(cell) = event { app.insert_history_cell(&mut tui, cell); }
+        }
+    }
+    let rendered = |cells: &[Arc<dyn HistoryCell>]| cells.iter().map(|cell| (
+        cell.compact_hyperlink_lines(90), cell.expanded_hyperlink_lines(90), cell.activity_ids(),
+    )).collect::<Vec<_>>();
+    // Persisted thread history materializes lifecycle updates by item identity.
+    let mut materialized = Vec::<ThreadItem>::new();
+    for item in &current.items {
+        if let Some(old) = materialized.iter_mut().find(|old| old.id() == item.id()) {
+            *old = item.clone();
+        } else {
+            materialized.push(item.clone());
+        }
+    }
+    let current = turn(materialized);
+    let expected = project(&app, &current.items);
+    assert_eq!(rendered(&app.transcript_cells), rendered(&expected));
+    assert_eq!(expected.len(), 4);
+    let text = |cell: &Arc<dyn HistoryCell>| cell.display_lines(90).iter().map(Line::to_string).collect::<Vec<_>>().join("\n");
+    assert!(text(&expected[0]).contains("direct"));
+    assert!(text(&expected[1]).contains("Waited on"));
+    assert!(text(&expected[2]).contains("Interrupted (Code Mode"));
+    assert!(text(&expected[3]).contains("Failed (Code Mode"));
+    assert!(!text(&expected[3]).contains("direct"));
+    assert!(!text(&expected[3]).contains("child-b"));
+    assert!(!text(&expected[3]).contains("visible notify-a"));
+    assert!(expected[3].expanded_hyperlink_lines(90).iter().any(|line| line.line.to_string().contains("visible wait-output-a")));
+    assert!(expected[3].expanded_hyperlink_lines(90).iter().any(|line| line.line.to_string().contains("A precise diagram")));
+    insta::assert_snapshot!("interleaved_code_mode", expected.iter().enumerate().map(|(index, cell)| {
+        let collapsed = text(cell);
+        let expanded = cell.expanded_hyperlink_lines(90).iter().map(|line| line.line.to_string()).collect::<Vec<_>>().join("\n");
+        format!("cell {index} collapsed\n{collapsed}\nexpanded\n{expanded}")
+    }).collect::<Vec<_>>().join("\n\n"));
+    for split in 1..current.items.len() {
+        let older = project(&app, &current.items[..split]);
+        let boundary = older.len();
+        app.transcript_cells = older.into_iter().chain(project(&app, &current.items[split..])).collect();
+        app.join_older_activity_group(boundary, std::slice::from_ref(&current));
+        assert_eq!(rendered(&app.transcript_cells), rendered(&expected), "split={split}");
+    }
+    for (id, call, count) in [("notify-a", "exec-a", 17), ("wait-output-a", "wait-a", 23), ("notify-a", "exec-a", 17), ("raw-child", "child-a1", 999)] {
+        app.transcript_view.record_tool_output_tokens(format!("tool-output-tokens:{id}"), call.into(), Some(count));
+    }
+    assert_eq!(expected.iter().map(|cell| app.transcript_view.activity_output_tokens(&cell.activity_ids())).collect::<Vec<_>>(), vec![None, None, None, Some(40)]);
+}
+
+#[tokio::test]
 async fn returned_batches_keep_one_disclosure_and_bill_across_live_replay_and_pages() {
     use crate::chatwidget::ReplayKind;
     use codex_protocol::models::FunctionCallOutputBody;
+    use codex_app_server_protocol::CodeModeEvent;
+    use codex_app_server_protocol::CodeModeStatus;
 
     let output = |id: &str| ThreadItem::FunctionCallOutput {
         id: id.to_owned(),
@@ -113,16 +216,23 @@ async fn returned_batches_keep_one_disclosure_and_bill_across_live_replay_and_pa
             item
         };
         let current = turn(vec![
+            code_mode("a", CodeModeEvent::Started { call_id: "a".into() }),
+            code_mode("a", CodeModeEvent::ToolCall { call_id: "first".into() }),
             command("first"),
+            code_mode("a", CodeModeEvent::ToolCall { call_id: "nested".into() }),
             command("nested"),
             output("a"),
             reasoning("between-outputs"),
             output("b"),
+            code_mode("a", CodeModeEvent::Finished { status: CodeModeStatus::Completed }),
+            code_mode("c", CodeModeEvent::Started { call_id: "c".into() }),
+            code_mode("c", CodeModeEvent::ToolCall { call_id: "second".into() }),
             command("second"),
             output("c"),
+            code_mode("c", CodeModeEvent::Finished { status: CodeModeStatus::Completed }),
         ]);
         let expected = project(&app, &current.items);
-        assert_eq!(expected.len(), 2);
+        assert_eq!(expected.len(), 3);
 
         // Nested calls and notify() outputs share a call; a different call starts a new unit.
         for item in &current.items {
@@ -184,7 +294,7 @@ async fn returned_batches_keep_one_disclosure_and_bill_across_live_replay_and_pa
                     .transcript_view
                     .activity_output_tokens(&cell.activity_ids()))
                 .collect::<Vec<_>>(),
-            vec![Some(1280), Some(20)]
+            vec![None, Some(1280), Some(20)]
         );
         for expanded in [false, true] {
             if expanded {
@@ -224,14 +334,14 @@ async fn returned_batches_keep_one_disclosure_and_bill_across_live_replay_and_pa
 }
 
 #[tokio::test]
-async fn patch_files_keep_disclosures_and_one_batch_bill_across_live_replay_and_pages() {
+async fn legacy_patch_files_keep_independent_outputs_across_live_replay_and_pages() {
     use crate::chatwidget::ReplayKind;
     use codex_app_server_protocol::FileUpdateChange;
     use codex_app_server_protocol::PatchApplyStatus;
     use codex_app_server_protocol::PatchChangeKind;
     use codex_protocol::models::FunctionCallOutputBody;
 
-    // Batch output must enrich Edited without absorbing its independently disclosed files.
+    // Legacy output without explicit script ownership must not inherit a neighboring patch.
     let output = |id: &str| ThreadItem::FunctionCallOutput {
         id: id.into(),
         call_id: Some(id.into()),
@@ -290,7 +400,7 @@ async fn patch_files_keep_disclosures_and_one_batch_bill_across_live_replay_and_
         let mut tui = crate::tui::test_support::make_test_tui().unwrap();
         tui.set_owned_screen(/*owned*/ true).unwrap();
         let expected = project(&app, &current.items);
-        assert_eq!(expected.len(), file_count + usize::from(with_command) + 2);
+        assert_eq!(expected.len(), file_count + usize::from(with_command) + 3);
         for item in &current.items {
             app.chat_widget.replay_thread_item(
                 item.clone(),
@@ -334,7 +444,7 @@ async fn patch_files_keep_disclosures_and_one_batch_bill_across_live_replay_and_
                 .collect::<Vec<_>>(),
             (0..expected.len())
                 .map(|index| {
-                    if index == if with_command { file_count } else { 0 } {
+                    if index == file_count + usize::from(with_command) {
                         Some(100)
                     } else if index == expected.len() - 1 {
                         Some(23)
