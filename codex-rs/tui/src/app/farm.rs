@@ -427,3 +427,6 @@ impl App {
     }
 }
 
+#[cfg(test)]
+#[path = "farm_tests.rs"]
+mod tests;
