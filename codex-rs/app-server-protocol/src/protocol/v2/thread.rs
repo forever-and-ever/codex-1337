@@ -857,7 +857,7 @@ pub enum ThreadNameMode {
 pub struct ThreadNameConflict {
     pub thread_id: String,
     pub name: String,
-    pub path: Option<PathBuf>,
+    pub cwd: PathBuf,
     pub status: ThreadStatus,
 }
 
@@ -882,7 +882,7 @@ pub struct ThreadUnarchiveParams {
 #[ts(export_to = "v2/")]
 pub struct ThreadSetNameResponse {
     /// Persisted spelling, including any generated collision suffix.
-    pub thread_name: String,
+    pub thread_name: Option<String>,
 }
 
 v2_enum_from_core! {
