@@ -3,6 +3,7 @@ use super::*;
 
 #[path = "thread_accounts.rs"]
 mod accounts;
+mod farm;
 use codex_agent_extension::AgentInvocation;
 use codex_agent_extension::AgentRun;
 use codex_agent_extension::AgentRunner;
