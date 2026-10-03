@@ -154,17 +154,22 @@ async fn plan_menu_allows_transcript_wheel_scrolling_and_keeps_keyboard_ownershi
         let bottom = app.render_owned_transcript(&mut tui, size)?;
         let latest = screen(&tui);
         let menu = render_bottom_popup(&app.chat_widget, /*width*/ 80);
-        for kind in [
-            MouseEventKind::ScrollUp,
-            MouseEventKind::ScrollDown,
-            MouseEventKind::ScrollUp,
+        for (kind, ticks) in [
+            (MouseEventKind::ScrollUp, 8),
+            (MouseEventKind::ScrollDown, 8),
+            (MouseEventKind::ScrollUp, 1),
         ] {
-            app.handle_tui_event(
-                &mut tui,
-                &mut server,
-                pointer_event(kind, /*column*/ 1, /*row*/ 1),
-            )
-            .await?;
+            let painted = screen(&tui);
+            for _ in 0..ticks {
+                app.handle_tui_event(
+                    &mut tui,
+                    &mut server,
+                    pointer_event(kind, /*column*/ 1, /*row*/ 1),
+                )
+                .await?;
+                // Painting between wheel ticks makes the FIFO input backlog wait on rendering.
+                assert_eq!(screen(&tui), painted);
+            }
             app.render_owned_transcript(&mut tui, size)?;
             assert_eq!(render_bottom_popup(&app.chat_widget, /*width*/ 80), menu);
             if kind == MouseEventKind::ScrollDown {

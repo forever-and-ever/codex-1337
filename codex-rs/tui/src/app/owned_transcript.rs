@@ -398,7 +398,11 @@ impl App {
         }
         if let TuiEvent::Mouse(mouse) = event {
             let composer_ready = self.chat_widget.prepare_composer_mouse(*mouse);
-            if mouse.kind != MouseEventKind::Moved {
+            // Wheel input uses the painted viewport; only pointer gestures need fresh hit testing.
+            if matches!(
+                mouse.kind,
+                MouseEventKind::Down(_) | MouseEventKind::Drag(_) | MouseEventKind::Up(_)
+            ) {
                 let size = tui.prepare_draw_size()?;
                 self.render_owned_transcript(tui, size)?;
             }
