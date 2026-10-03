@@ -84,7 +84,7 @@ pub(super) fn prepare_update(overrides: ThreadSettingsOverrides) -> SessionSetti
 }
 
 /// Acquires the shared permit before capturing or changing persistent settings.
-pub(super) async fn acquire_persistence_lock(session: &Session) -> SemaphorePermit<'_> {
+pub(crate) async fn acquire_persistence_lock(session: &Session) -> SemaphorePermit<'_> {
     session
         .thread_settings_persistence
         .acquire()

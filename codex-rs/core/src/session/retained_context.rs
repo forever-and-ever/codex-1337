@@ -46,6 +46,37 @@ impl Default for CodeModeMessageTasks {
 }
 
 impl Session {
+    /// Persists a host-accepted genuine assignment without queuing it for parent execution.
+    pub(crate) async fn record_user_delegation(
+        &self,
+        message: RetainedUserMessage,
+    ) -> std::io::Result<()> {
+        let acceptance_order = self.reserve_user_input_order().await;
+        let _guard = thread_settings::acquire_persistence_lock(self).await;
+        let mut event = RetainedContextEvent::UserDelegation {
+            message,
+            acceptance_order,
+        };
+        event.bound();
+        let live_thread = self
+            .live_thread_for_persistence("record user delegation")
+            .map_err(std::io::Error::other)?;
+        if self
+            .state
+            .lock()
+            .await
+            .history
+            .record_retained_context(&event)
+        {
+            live_thread
+                .append_items(&[RolloutItem::RetainedContext(event)])
+                .await
+                .map_err(std::io::Error::other)?;
+            live_thread.flush().await.map_err(std::io::Error::other)?;
+        }
+        Ok(())
+    }
+
     /// Reserve before deriving display items, including plans, from the source message.
     /// Completion-only responses use the same path before publishing their text.
     pub(super) async fn reserve_assistant_message_order(

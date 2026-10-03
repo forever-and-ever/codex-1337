@@ -159,6 +159,8 @@ pub struct FeatureToggleToml {
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
 #[serde(default)]
 pub struct WranglerConfig {
+    /// Executor and additive child instructions for direct user delegation.
+    pub farm: FarmConfig,
     /// Account identity selected explicitly with `/account`; used for new conversations.
     pub default_account: Option<String>,
     /// Selected native Claude subscription identity for new conversations.
@@ -168,6 +170,16 @@ pub struct WranglerConfig {
     /// Display-only names keyed first by billing provider, then stable account ID.
     pub account_nicknames:
         std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct FarmConfig {
+    pub model: Option<String>,
+    pub reasoning_effort: Option<ReasoningEffort>,
+    /// Appended to inherited developer instructions, never used for ordinary spawns.
+    pub instructions: Option<String>,
 }
 
 /// Context policy defaults for one provider; explicit top-level values take precedence.
