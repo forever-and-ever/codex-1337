@@ -26,11 +26,6 @@ pub(super) async fn unarchive_thread(
     // rollout files. Unarchive must participate before it moves those files back.
     let _writer_lock = store.acquire_writer_lock(thread_id)?;
     let state_db_ctx = store.state_db().await;
-    if state_db_ctx.is_none() {
-        return Err(ThreadStoreError::Unsupported {
-            operation: "canonical_name_unarchive",
-        });
-    }
     let selected_archived_path =
         thread_rollout_resolver::resolve_current_including_archived(store, thread_id)
             .await?
@@ -39,6 +34,54 @@ pub(super) async fn unarchive_thread(
             .ok_or_else(|| ThreadStoreError::InvalidRequest {
                 message: format!("no archived rollout found for thread id {thread_id}"),
             })?;
+    if let Some(db) = state_db_ctx.as_ref() {
+        if db
+            .get_thread(thread_id)
+            .await
+            .map_err(|err| ThreadStoreError::Internal {
+                message: format!("failed to read archived thread metadata: {err}"),
+            })?
+            .is_none()
+        {
+            codex_rollout::state_db::reconcile_rollout(
+                Some(db),
+                &selected_archived_path,
+                &store.config.default_model_provider_id,
+                /*builder*/ None,
+                &[],
+                /*archived_only*/ Some(true),
+                /*new_thread_memory_mode*/ None,
+            )
+            .await;
+            if db
+                .get_thread(thread_id)
+                .await
+                .map_err(|err| ThreadStoreError::Internal {
+                    message: format!("failed to read repaired archived thread metadata: {err}"),
+                })?
+                .is_none()
+            {
+                return Err(ThreadStoreError::Internal {
+                    message: format!(
+                        "canonical metadata unavailable before unarchiving {thread_id}"
+                    ),
+                });
+            }
+        }
+    } else if super::read_thread::read_thread_by_rollout_path(
+        store,
+        selected_archived_path.clone(),
+        /*include_archived*/ true,
+        /*include_history*/ false,
+    )
+    .await?
+    .name
+    .is_some()
+    {
+        return Err(ThreadStoreError::Unsupported {
+            operation: "canonical_name_unarchive",
+        });
+    }
 
     let mut rollout_paths = owned_rollout_paths(store, thread_id).await?;
     if !rollout_paths.contains(&selected_archived_path) {
