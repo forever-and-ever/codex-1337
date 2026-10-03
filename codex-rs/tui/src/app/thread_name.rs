@@ -50,6 +50,15 @@ impl App {
         let TypedRequestError::Server { source, .. } = error else {
             return false;
         };
+        // A partial fork already has an identity. Retrying the fork from a popup would create
+        // another conversation; the server's error identifies the one to recover instead.
+        if source
+            .data
+            .as_ref()
+            .is_some_and(|data| data.get("createdThreadId").is_some())
+        {
+            return false;
+        }
         let Some(conflict) = source
             .data
             .clone()
@@ -66,12 +75,11 @@ impl App {
         conflict: ThreadNameConflictError,
         request: ThreadNameRequest,
     ) {
-        let mut lines = vec![
-            format!("“{}” is already in use", conflict.name)
-                .bold()
-                .into(),
-        ];
-        for owner in &conflict.conflicts {
+        let ThreadNameConflictError::Conflict {
+            name, conflicts, ..
+        } = conflict;
+        let mut lines = vec![format!("“{name}” is already in use").bold().into()];
+        for owner in &conflicts {
             let status = match &owner.status {
                 ThreadStatus::NotLoaded => "Not loaded",
                 ThreadStatus::Idle => "Idle",
@@ -90,11 +98,12 @@ impl App {
             };
             lines.push(format!("{} · {status}", owner.name).into());
             lines.push(owner.thread_id.clone().into());
-            lines.push(owner.cwd.display().to_string().dim().into());
+            lines.push(owner.cwd.as_str().to_owned().dim().into());
         }
-        lines.push("Archiving the old owners stops their descendant agents. Actively working families cannot be archived to reuse a name.".into());
-        let conflict_thread_ids = conflict
-            .conflicts
+        lines.push(
+            "Archiving stops this conversation and its subagents, including running work.".into(),
+        );
+        let conflict_thread_ids = conflicts
             .into_iter()
             .map(|owner| owner.thread_id)
             .collect::<Vec<_>>();

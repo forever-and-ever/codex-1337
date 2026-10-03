@@ -1,0 +1,17 @@
+---
+source: tui/src/app/thread_name_tests.rs
+assertion_line: 37
+expression: "render_bottom_popup(&app.chat_widget, 78)"
+---
+  “Repair login” is already in use
+  Repair login · Idle
+  00000000-0000-0000-0000-000000000001
+  /work/repair-login
+  Archiving stops this conversation and its subagents, including running
+  work.
+
+
+› 1. Cancel
+  2. Archive old owners and use this name
+
+  enter select · esc back

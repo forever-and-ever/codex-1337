@@ -2,6 +2,7 @@ use super::*;
 use crate::chatwidget::tests::helpers::render_bottom_popup;
 use codex_app_server_protocol::JSONRPCErrorError;
 use codex_app_server_protocol::ThreadNameConflict;
+use codex_utils_path_uri::LegacyAppPathString;
 use crossterm::event::KeyCode;
 use pretty_assertions::assert_eq;
 
@@ -19,12 +20,12 @@ async fn name_conflict_cancels_by_default_and_confirms_concrete_owners() {
             code: -32602,
             message: "Name is already in use".to_string(),
             data: Some(
-                serde_json::to_value(ThreadNameConflictError {
+                serde_json::to_value(ThreadNameConflictError::Conflict {
                     name: "Repair login".to_string(),
                     conflicts: vec![ThreadNameConflict {
                         thread_id: owner.clone(),
                         name: "Repair login".to_string(),
-                        cwd: "/work/repair-login".into(),
+                        cwd: LegacyAppPathString::from_string("/work/repair-login"),
                         status: ThreadStatus::Idle,
                     }],
                     archive_stops_descendants: true,

@@ -1401,6 +1401,7 @@ async fn paginated_thread_name_set_is_reflected_in_read_list_and_metadata_resume
         .send_thread_set_name_request(ThreadSetNameParams {
             thread_id: conversation_id.clone(),
             name: new_name.to_string(),
+            ..Default::default()
         })
         .await?;
     let _: ThreadSetNameResponse =

@@ -491,6 +491,7 @@ async fn managed_reviewers_reuse_fork_and_resume_after_parent_shutdown(
             params: ThreadSetNameParams {
                 thread_id: reviewer_id.clone(),
                 name: "Named Guardian review".to_string(),
+                ..Default::default()
             },
         })
         .await?;

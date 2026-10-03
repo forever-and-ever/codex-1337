@@ -640,6 +640,7 @@ async fn metadata_and_mcp_requests_complete_while_unrelated_resume_loads_config(
                     params: ThreadSetNameParams {
                         thread_id: thread.id.clone(),
                         name: "Viewer thread".to_string(),
+                        ..Default::default()
                     },
                 }),
                 sender.request(ClientRequest::ThreadMetadataUpdate {
@@ -720,7 +721,9 @@ async fn metadata_and_mcp_requests_complete_while_unrelated_resume_loads_config(
     assert!(resume_pending, "resume completed early");
     assert_eq!(
         serde_json::from_value::<ThreadSetNameResponse>(rename.expect("set thread name"))?,
-        ThreadSetNameResponse {},
+        ThreadSetNameResponse {
+            thread_name: Some("Viewer thread".to_string())
+        },
     );
     let updated: ThreadMetadataUpdateResponse =
         serde_json::from_value(metadata.expect("update thread metadata"))?;

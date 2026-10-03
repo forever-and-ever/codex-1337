@@ -1137,7 +1137,7 @@ async fn thread_fork_defers_inherited_active_goal_until_next_turn() -> Result<()
 }
 
 #[tokio::test]
-async fn thread_fork_inherits_explicit_source_name_from_session_index() -> Result<()> {
+async fn thread_fork_allocates_and_persists_opaque_source_name() -> Result<()> {
     let server = create_mock_responses_server_repeating_assistant("Done").await;
     let codex_home = TempDir::new()?;
     MockResponsesConfig::new(&server.uri()).write(codex_home.path())?;
@@ -1151,7 +1151,7 @@ async fn thread_fork_inherits_explicit_source_name_from_session_index() -> Resul
         /*git_info*/ None,
     )?;
     let source_thread_id = ThreadId::from_string(&conversation_id)?;
-    let source_name = "Renamed parent thread";
+    let source_name = "Renamed parent thread (1)_fork_opaque";
     append_thread_name(codex_home.path(), source_thread_id, source_name).await?;
 
     let mut mcp = TestAppServer::builder()
@@ -1174,7 +1174,13 @@ async fn thread_fork_inherits_explicit_source_name_from_session_index() -> Resul
         .iter()
         .find(|candidate| candidate.id == thread.id)
         .expect("thread/list should include the forked thread");
-    assert_eq!(listed.name.as_deref(), Some(source_name));
+    let fork_name = thread
+        .name
+        .as_deref()
+        .expect("named parent allocates a fork name");
+    assert!(fork_name.starts_with(&format!("{source_name}_fork_")));
+    chrono::DateTime::parse_from_rfc3339(&fork_name[format!("{source_name}_fork_").len()..])?;
+    assert_eq!(listed.name, thread.name);
 
     Ok(())
 }
@@ -1656,6 +1662,33 @@ async fn thread_fork_creates_reference_backed_paginated_thread() -> Result<()> {
             .thread_id,
         ThreadId::from_string(forked_thread_id.as_str())?
     );
+    // A named takeover of the source must consume prepare_fork's lifecycle reservation before
+    // archival. Archiving while that guard is held deadlocks on the source we are forking.
+    let source_name = "Paginated source (1)";
+    let _: codex_app_server_protocol::ThreadSetNameResponse = mcp
+        .request(|request_id| ClientRequest::ThreadSetName {
+            request_id,
+            params: codex_app_server_protocol::ThreadSetNameParams {
+                thread_id: forked_thread_id.clone(),
+                name: source_name.to_string(),
+                ..Default::default()
+            },
+        })
+        .await?;
+    let takeover_id = mcp
+        .send_thread_fork_request(ThreadForkParams {
+            thread_id: forked_thread_id.clone(),
+            name: Some(source_name.to_string()),
+            conflict_thread_ids: Some(vec![forked_thread_id.clone()]),
+            exclude_turns: true,
+            ..Default::default()
+        })
+        .await?;
+    let takeover: ThreadForkResponse =
+        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(takeover_id)).await??;
+    assert_ne!(takeover.thread.id, forked_thread_id);
+    assert_eq!(takeover.thread.name.as_deref(), Some(source_name));
+    assert_eq!(takeover.thread.forked_from_id, Some(forked_thread_id));
     Ok(())
 }
 

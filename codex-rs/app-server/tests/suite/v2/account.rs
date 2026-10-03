@@ -168,12 +168,6 @@ shell_snapshot = false
     std::fs::write(config_toml, contents)
 }
 
-fn read_config_toml(codex_home: &Path) -> Result<toml::Value> {
-    Ok(toml::from_str(&std::fs::read_to_string(
-        codex_home.join("config.toml"),
-    )?)?)
-}
-
 fn load_file_auth(codex_home: &Path) -> Result<Option<AuthDotJson>> {
     Ok(load_auth_dot_json(
         codex_home,
