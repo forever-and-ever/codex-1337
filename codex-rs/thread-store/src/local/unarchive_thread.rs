@@ -20,11 +20,17 @@ pub(super) async fn unarchive_thread(
     params: ArchiveThreadParams,
 ) -> ThreadStoreResult<StoredThread> {
     let thread_id = params.thread_id;
+    super::thread_names::ensure_thread_name_claims(store).await?;
     let _lifecycle_guard = store.live_writer_locks.lock_lifecycle(thread_id).await;
     // Archive, delete, and revert use the same cross-process lock while moving or selecting
     // rollout files. Unarchive must participate before it moves those files back.
     let _writer_lock = store.acquire_writer_lock(thread_id)?;
     let state_db_ctx = store.state_db().await;
+    if state_db_ctx.is_none() {
+        return Err(ThreadStoreError::Unsupported {
+            operation: "canonical_name_unarchive",
+        });
+    }
     let selected_archived_path =
         thread_rollout_resolver::resolve_current_including_archived(store, thread_id)
             .await?

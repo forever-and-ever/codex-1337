@@ -2472,20 +2472,6 @@ async fn migration_preserves_legacy_displayed_thread_names() {
         );
     }
     let store = indexed_store(home.path()).await;
-    store
-        .update_thread_metadata(UpdateThreadMetadataParams {
-            thread_id: title_thread_id,
-            patch: ThreadMetadataPatch {
-                name: Some(Some("renamed title".to_string())),
-                ..Default::default()
-            },
-            include_archived: false,
-        })
-        .await
-        .expect("rename legacy thread");
-    codex_rollout::append_thread_name(home.path(), title_thread_id, "stale index title")
-        .await
-        .expect("write stale legacy index name");
     codex_rollout::append_thread_name(home.path(), index_thread_id, "indexed title")
         .await
         .expect("write legacy index name");
@@ -2505,6 +2491,20 @@ async fn migration_preserves_legacy_displayed_thread_names() {
     codex_rollout::append_thread_name(home.path(), guardian_thread_id, "indexed Guardian name")
         .await
         .expect("write legacy Guardian name");
+    store
+        .update_thread_metadata(UpdateThreadMetadataParams {
+            thread_id: title_thread_id,
+            patch: ThreadMetadataPatch {
+                name: Some(Some("renamed title".to_string())),
+                ..Default::default()
+            },
+            include_archived: false,
+        })
+        .await
+        .expect("rename legacy thread");
+    codex_rollout::append_thread_name(home.path(), title_thread_id, "stale index title")
+        .await
+        .expect("write stale legacy index name");
 
     for history_mode in [ThreadHistoryMode::Legacy, ThreadHistoryMode::Paginated] {
         if history_mode == ThreadHistoryMode::Paginated {
@@ -2561,63 +2561,6 @@ async fn migration_preserves_legacy_displayed_thread_names() {
             );
         }
     }
-}
-
-#[tokio::test]
-async fn migration_repairs_a_missing_paginated_name_when_rerun() {
-    let home = TempDir::new().expect("create Codex home");
-    let thread_id = ThreadId::new();
-    write_rollout(
-        home.path(),
-        thread_id,
-        SessionSource::Cli,
-        vec![user_message("question")],
-    );
-    let store = indexed_store(home.path()).await;
-    store
-        .update_thread_metadata(UpdateThreadMetadataParams {
-            thread_id,
-            patch: ThreadMetadataPatch {
-                name: Some(Some("renamed title".to_string())),
-                ..Default::default()
-            },
-            include_archived: false,
-        })
-        .await
-        .expect("rename legacy thread");
-    store
-        .migrate_rollouts(apply_options())
-        .await
-        .expect("migrate named rollout");
-    let state_db = store.state_db().await.expect("state runtime");
-    state_db
-        .update_thread_title(thread_id, "question")
-        .await
-        .expect("restore derived title");
-    state_db
-        .update_thread_name(thread_id, /*name*/ None)
-        .await
-        .expect("clear migrated name");
-
-    let report = store
-        .migrate_rollouts(apply_options())
-        .await
-        .expect("repair migrated name");
-
-    assert_eq!(
-        report.outcomes[0].status,
-        RolloutMigrationStatus::AlreadyPaginated
-    );
-    assert_eq!(
-        state_db
-            .get_thread(thread_id)
-            .await
-            .expect("read repaired metadata")
-            .expect("repaired thread")
-            .name
-            .as_deref(),
-        Some("renamed title")
-    );
 }
 
 #[cfg(unix)]

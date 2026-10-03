@@ -1089,6 +1089,10 @@ impl LocalThreadStore {
                 .ok_or_else(|| {
                     migration_error(format!("thread {thread_id} is missing its SQLite metadata"))
                 })?;
+            let claims_imported = state_db
+                .thread_name_claims_imported()
+                .await
+                .map_err(migration_error)?;
             if metadata.history_mode == ThreadHistoryMode::Paginated
                 && metadata
                     .name
@@ -1099,7 +1103,9 @@ impl LocalThreadStore {
             }
             let title = distinct_thread_metadata_title(&metadata);
             let indexed_name = legacy_names.get(&thread_id).cloned();
-            let legacy_name = if has_guardian_default_title(&metadata) {
+            let legacy_name = if claims_imported {
+                metadata.name.clone()
+            } else if has_guardian_default_title(&metadata) {
                 indexed_name.or(title)
             } else {
                 title.or(indexed_name)

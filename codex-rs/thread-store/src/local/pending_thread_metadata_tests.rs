@@ -94,7 +94,7 @@ async fn pending_rollout_compatible_metadata_does_not_deadlock() {
         .await
         .expect("sqlite metadata read")
         .expect("sqlite metadata");
-    assert_eq!(metadata.title, "staged-name");
+    assert_eq!(metadata.name.as_deref(), Some("staged-name"));
     assert_eq!(metadata.model_provider, "test-provider");
     assert_eq!(metadata.model.as_deref(), Some("updated-model"));
     assert_pending_metadata_consumed(&store, thread_id).await;

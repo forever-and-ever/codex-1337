@@ -19,6 +19,7 @@ mod search_threads;
 mod thread_attachments;
 mod thread_history;
 mod thread_history_materialization;
+mod thread_names;
 mod thread_rollout_resolver;
 mod thread_sections;
 mod unarchive_thread;
@@ -148,6 +149,7 @@ pub struct LocalThreadStore {
     writer_lock_coordinator: Arc<WriterLockCoordinator>,
     state_db: Option<StateDbHandle>,
     thread_history_db: Arc<OnceCell<sqlx::SqlitePool>>,
+    thread_name_claims: Arc<OnceCell<()>>,
     thread_data_cleanup: Option<Arc<ThreadDataCleanup>>,
 }
 
@@ -266,6 +268,7 @@ impl LocalThreadStore {
             writer_lock_coordinator,
             state_db,
             thread_history_db: Arc::new(OnceCell::new()),
+            thread_name_claims: Arc::new(OnceCell::new()),
             thread_data_cleanup: None,
         }
     }
@@ -474,6 +477,10 @@ impl LocalThreadStore {
 }
 
 impl ThreadStore for LocalThreadStore {
+    fn ensure_thread_name_claims(&self) -> ThreadStoreFuture<'_, ()> {
+        Box::pin(thread_names::ensure_thread_name_claims(self))
+    }
+
     fn default_history_mode(&self) -> ThreadHistoryMode {
         ThreadHistoryMode::Paginated
     }

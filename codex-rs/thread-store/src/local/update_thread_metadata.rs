@@ -50,6 +50,9 @@ pub(super) async fn update_thread_metadata(
         merged_patch.merge(patch);
         patch = merged_patch;
     }
+    if patch.name.is_some() {
+        super::thread_names::ensure_thread_name_claims(store).await?;
+    }
     if patch.project_id.is_some() && store.state_db().await.is_none() {
         return Err(ThreadStoreError::Unsupported {
             operation: "projects",
@@ -149,15 +152,16 @@ pub(super) async fn update_thread_metadata(
     if paginated {
         // Paginated metadata lives in SQLite. Keep the name index update, then stop before the
         // legacy SessionMeta compatibility path below.
-        if let Some(name) = patch.name.as_ref()
-            && let Err(err) = append_thread_name(
+        if let Some(name) = patch.name.as_ref() {
+            append_thread_name(
                 store.config.codex_home.as_path(),
                 thread_id,
-                name.as_deref().unwrap_or_default(),
+                name.as_deref().unwrap_or_default().trim(),
             )
             .await
-        {
-            warn!("failed to index paginated thread name for {thread_id}: {err}");
+            .map_err(|err| ThreadStoreError::Internal {
+                message: format!("failed to index paginated thread name for {thread_id}: {err}"),
+            })?;
         }
         if pending_patch.is_some() {
             remove_pending_thread_metadata(store, thread_id, &mut pending_metadata).await;
@@ -219,7 +223,7 @@ pub(super) async fn update_thread_metadata(
         append_thread_name(
             store.config.codex_home.as_path(),
             thread_id,
-            &name.unwrap_or_default(),
+            name.as_deref().unwrap_or_default().trim(),
         )
         .await
         .map_err(|err| ThreadStoreError::Internal {
@@ -555,24 +559,8 @@ async fn apply_metadata_update(
                     })?;
             }
             if let Some(name) = patch.name.as_ref() {
-                let history_mode = history_mode.ok_or_else(|| ThreadStoreError::Internal {
-                    message: format!(
-                        "thread history mode unavailable before name update: {thread_id}"
-                    ),
-                })?;
-                let updated = match history_mode {
-                    ThreadHistoryMode::Legacy => {
-                        state_db
-                            .update_thread_title(thread_id, name.as_deref().unwrap_or_default())
-                            .await
-                    }
-                    ThreadHistoryMode::Paginated => {
-                        state_db
-                            .update_thread_name(thread_id, name.as_deref())
-                            .await
-                    }
-                }
-                .map_err(|err| ThreadStoreError::Internal {
+                let updated = state_db.update_thread_name(thread_id, name.as_deref()).await
+                .map_err(|err| ThreadStoreError::Conflict {
                     message: format!("failed to set thread name: {err}"),
                 })?;
                 if !updated {
@@ -731,12 +719,14 @@ fn requires_rollout_compatibility_update(patch: &ThreadMetadataPatch) -> bool {
 
 fn sqlite_write_failure_should_block(patch: &ThreadMetadataPatch) -> bool {
     // Before live metadata sync moved above the rollout writer, SQLite sync failures for
-    // transcript-derived metadata, thread names, and memory-mode indexing were log-only. Keep that
+    // transcript-derived metadata and memory-mode indexing were log-only. Keep that
     // failure isolation so a corrupted optional state DB does not make JSONL transcript durability
     // look broken. Explicit git-only updates still require SQLite because partial git patches need
     // the existing SQLite value to preserve unspecified fields. Project and Daybreak updates
-    // require SQLite because those preferences only exist in the state database.
-    patch.project_id.is_some()
+    // require SQLite because those preferences only exist in the state database. Names require
+    // the canonical SQLite claim before writing the legacy compatibility projection.
+    patch.name.is_some()
+        || patch.project_id.is_some()
         || patch.daybreak_enabled.is_some()
         || (patch.git_info.is_some() && !has_observed_metadata_facts(patch))
 }
@@ -1203,7 +1193,7 @@ mod tests {
         let session_index_path = home.path().join("session_index.jsonl");
         std::fs::remove_file(&session_index_path).expect("remove session index");
         std::fs::create_dir(&session_index_path).expect("block session index writes");
-        let thread = store
+        let err = store
             .update_thread_metadata(UpdateThreadMetadataParams {
                 thread_id,
                 patch: ThreadMetadataPatch {
@@ -1213,9 +1203,8 @@ mod tests {
                 include_archived: false,
             })
             .await
-            .expect("set paginated thread name with unavailable index")
-            .expect("local store returns updated thread");
-        assert_eq!(thread.name.as_deref(), Some("Updated SQLite name"));
+            .expect_err("name projection failure must be reported");
+        assert!(matches!(err, ThreadStoreError::Internal { .. }));
 
         let err = LocalThreadStore::new(test_config(home.path()), /*state_db*/ None)
             .update_thread_metadata(UpdateThreadMetadataParams {
@@ -1965,10 +1954,6 @@ mod tests {
 
     #[test]
     fn sqlite_failures_are_best_effort_for_legacy_rollout_compat_updates() {
-        assert!(!sqlite_write_failure_should_block(&ThreadMetadataPatch {
-            name: Some(Some("User chosen name".to_string())),
-            ..Default::default()
-        }));
         assert!(!sqlite_write_failure_should_block(&ThreadMetadataPatch {
             memory_mode: Some(ThreadMemoryMode::Disabled),
             ..Default::default()

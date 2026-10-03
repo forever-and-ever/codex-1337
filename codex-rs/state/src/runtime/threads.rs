@@ -72,27 +72,22 @@ WHERE threads.id = ?
         thread_id: ThreadId,
         legacy_name: Option<&str>,
     ) -> anyhow::Result<bool> {
-        // Legacy threads display `title`, then fall back to the name index. Paginated threads
-        // display `name`; `title` remains derived metadata used for search. Preserve an existing
-        // `name`, unless it is the Guardian default seeded by metadata cleanup.
+        // Promotion preserves the canonical claim. Legacy import may supply a missing name,
+        // but a stale rollout or index must never replace a claim already held in SQLite.
         let result = sqlx::query(
             r#"
 UPDATE threads
 SET
     history_mode = 'paginated',
     name = CASE
-        WHEN name IS NULL OR trim(name) = '' THEN ?
-        WHEN history_mode = 'legacy'
-            AND source = '{"subagent":{"other":"guardian"}}'
-            AND name = ? THEN COALESCE(?, name)
+        WHEN (name IS NULL OR trim(name) = '')
+            AND NOT EXISTS (SELECT 1 FROM thread_name_claims_import) THEN ?
         ELSE name
     END
 WHERE id = ?
             "#,
         )
-        .bind(legacy_name)
-        .bind(crate::GUARDIAN_THREAD_TITLE)
-        .bind(legacy_name)
+        .bind(legacy_name.map(str::trim).filter(|name| !name.is_empty()))
         .bind(thread_id.to_string())
         .execute(self.pool.as_ref())
         .await?;
@@ -695,7 +690,7 @@ ON CONFLICT(id) DO NOTHING
         .bind(metadata.cwd.display().to_string())
         .bind(metadata.cli_version.as_str())
         .bind(metadata.title.as_str())
-        .bind(metadata.name.as_deref())
+        .bind(super::thread_names::initial_thread_name(metadata))
         .bind(preview)
         .bind(metadata.sandbox_policy.as_str())
         .bind(metadata.approval_mode.as_str())
@@ -764,8 +759,12 @@ ON CONFLICT(id) DO NOTHING
         thread_id: ThreadId,
         name: Option<&str>,
     ) -> anyhow::Result<bool> {
+        anyhow::ensure!(
+            self.thread_name_claims_imported().await?,
+            "legacy thread names must be imported before assigning name claims"
+        );
         let result = sqlx::query("UPDATE threads SET name = ? WHERE id = ?")
-            .bind(name)
+            .bind(name.map(str::trim).filter(|name| !name.is_empty()))
             .bind(thread_id.to_string())
             .execute(self.pool.as_ref())
             .await?;
@@ -1031,7 +1030,7 @@ ON CONFLICT(id) DO UPDATE SET
         .bind(metadata.cwd.display().to_string())
         .bind(metadata.cli_version.as_str())
         .bind(metadata.title.as_str())
-        .bind(metadata.name.as_deref())
+        .bind(super::thread_names::initial_thread_name(metadata))
         .bind(preview)
         .bind(metadata.sandbox_policy.as_str())
         .bind(metadata.approval_mode.as_str())
@@ -1131,21 +1130,8 @@ ON CONFLICT(id) DO UPDATE SET
         thread_id: ThreadId,
         rollout_path: &Path,
     ) -> anyhow::Result<()> {
-        let Some(mut metadata) = self.get_thread(thread_id).await? else {
-            return Ok(());
-        };
-        metadata.archived_at = None;
-        metadata.rollout_path = rollout_path.to_path_buf();
-        if let Some(updated_at) = file_modified_time_utc(rollout_path).await {
-            metadata.updated_at = updated_at;
-        }
-        if metadata.id != thread_id {
-            warn!(
-                "thread id mismatch during unarchive: expected {thread_id}, got {}",
-                metadata.id
-            );
-        }
-        self.upsert_thread(&metadata).await
+        self.unarchive_with_name_claim(thread_id, rollout_path)
+            .await
     }
 
     /// Delete a thread and all associated state by id.

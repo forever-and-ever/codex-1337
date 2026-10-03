@@ -37,6 +37,7 @@ pub(super) async fn search_threads(
     store: &LocalThreadStore,
     params: SearchThreadsParams,
 ) -> ThreadStoreResult<ThreadSearchPage> {
+    super::thread_names::ensure_thread_name_claims(store).await?;
     let search_term = params.search_term.as_str();
     if search_term.is_empty() {
         return Err(ThreadStoreError::InvalidRequest {

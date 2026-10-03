@@ -91,6 +91,12 @@ impl PersistContext {
 
 /// Storage-neutral thread persistence boundary.
 pub trait ThreadStore: Any + Send + Sync {
+    /// Establish canonical persisted name claims before resolving or assigning root names.
+    /// Nonpersistent stores need no legacy-name import.
+    fn ensure_thread_name_claims(&self) -> ThreadStoreFuture<'_, ()> {
+        Box::pin(async { Ok(()) })
+    }
+
     /// Return this store as [`Any`] for implementation-owned escape hatches.
     fn as_any(&self) -> &dyn Any;
 

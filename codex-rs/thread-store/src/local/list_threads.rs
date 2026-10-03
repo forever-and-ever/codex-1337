@@ -25,6 +25,7 @@ pub(super) async fn list_threads(
     store: &LocalThreadStore,
     params: ListThreadsParams,
 ) -> ThreadStoreResult<ThreadPage> {
+    super::thread_names::ensure_thread_name_claims(store).await?;
     if params.sort_key == ThreadSortKey::SectionPosition {
         return list_section_threads(store, params).await;
     }

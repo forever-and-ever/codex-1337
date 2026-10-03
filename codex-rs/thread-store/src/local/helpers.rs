@@ -248,28 +248,20 @@ pub(super) async fn resolve_thread_names(
             (history_mode == ThreadHistoryMode::Legacy).then_some(thread_id)
         })
         .collect::<HashSet<_>>();
-    let mut names = find_thread_names_by_ids(store.config.codex_home.as_path(), &legacy_thread_ids)
-        .await
-        .unwrap_or_default();
+    let mut names = HashMap::new();
     if let Some(state_db_ctx) = store.state_db().await {
-        for (&thread_id, &history_mode) in thread_history_modes {
+        for &thread_id in thread_history_modes.keys() {
             let Ok(Some(metadata)) = state_db_ctx.get_thread(thread_id).await else {
                 continue;
             };
-            let name = match history_mode {
-                ThreadHistoryMode::Legacy => distinct_thread_metadata_title(&metadata),
-                ThreadHistoryMode::Paginated => sqlite_thread_name(&metadata),
-            };
-            if let Some(name) = name {
-                if history_mode == ThreadHistoryMode::Legacy
-                    && has_guardian_default_title(&metadata)
-                {
-                    names.entry(thread_id).or_insert(name);
-                } else {
-                    names.insert(thread_id, name);
-                }
+            if let Some(name) = sqlite_thread_name(&metadata) {
+                names.insert(thread_id, name);
             }
         }
+    } else {
+        names = find_thread_names_by_ids(store.config.codex_home.as_path(), &legacy_thread_ids)
+            .await
+            .unwrap_or_default();
     }
     names
 }
@@ -292,9 +284,7 @@ pub(super) fn distinct_thread_metadata_title(metadata: &ThreadMetadata) -> Optio
 }
 
 pub(super) fn set_thread_name(thread: &mut StoredThread, name: String) {
-    if thread.history_mode == ThreadHistoryMode::Paginated || thread.preview.trim() != name.trim() {
-        thread.name = Some(name);
-    }
+    thread.name = Some(name);
 }
 
 fn parse_rfc3339(value: Option<&str>) -> Option<DateTime<Utc>> {

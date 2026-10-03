@@ -12,9 +12,7 @@ use codex_rollout::read_thread_item_from_rollout;
 use codex_state::ThreadMetadata;
 
 use super::LocalThreadStore;
-use super::helpers::distinct_thread_metadata_title;
 use super::helpers::git_info_from_parts;
-use super::helpers::has_guardian_default_title;
 use super::helpers::permission_profile_from_metadata_value;
 use super::helpers::rollout_path_is_archived;
 use super::helpers::set_thread_name;
@@ -32,8 +30,9 @@ pub(super) async fn read_thread(
     store: &LocalThreadStore,
     params: ReadThreadParams,
 ) -> ThreadStoreResult<StoredThread> {
+    super::thread_names::ensure_thread_name_claims(store).await?;
     let thread_id = params.thread_id;
-    let sqlite_metadata = read_sqlite_metadata(store, thread_id).await;
+    let sqlite_metadata = read_sqlite_metadata(store, thread_id).await?;
     let persisted_model_settings = sqlite_metadata
         .as_ref()
         .map(|metadata| (metadata.model.clone(), metadata.reasoning_effort.clone()));
@@ -70,9 +69,7 @@ pub(super) async fn read_thread(
             if !thread.cwd.as_os_str().is_empty() {
                 rollout_thread.cwd = thread.cwd;
             }
-            if thread.name.is_some() {
-                rollout_thread.name = thread.name;
-            }
+            rollout_thread.name = thread.name;
             rollout_thread.project_id = thread.project_id;
             rollout_thread.daybreak_enabled = thread.daybreak_enabled;
             rollout_thread.model = thread.model;
@@ -138,6 +135,7 @@ pub(super) async fn read_thread_by_rollout_path(
     include_archived: bool,
     include_history: bool,
 ) -> ThreadStoreResult<StoredThread> {
+    super::thread_names::ensure_thread_name_claims(store).await?;
     let path = resolve_requested_rollout_path(store, rollout_path).await?;
     let mut thread = read_thread_from_rollout_path(store, path.clone()).await?;
     if !include_archived && thread.archived_at.is_some() {
@@ -145,13 +143,14 @@ pub(super) async fn read_thread_by_rollout_path(
             message: format!("thread {} is archived", thread.thread_id),
         });
     }
-    if let Some(mut metadata) = read_sqlite_metadata(store, thread.thread_id).await {
+    if let Some(mut metadata) = read_sqlite_metadata(store, thread.thread_id).await? {
         if thread.history_mode == ThreadHistoryMode::Paginated {
             // Paginated display metadata lives in SQLite because rollout history may be partial.
             metadata.rollout_path = path;
             metadata.archived_at = thread.archived_at;
             thread = stored_thread_from_sqlite_metadata(store, metadata).await?;
         } else {
+            thread.name = sqlite_thread_name(&metadata);
             thread.recency_at = metadata.recency_at;
             thread.section = metadata.section;
             thread.section_position = metadata.section_position;
@@ -310,9 +309,16 @@ pub(super) async fn load_history_items(
 async fn read_sqlite_metadata(
     store: &LocalThreadStore,
     thread_id: codex_protocol::ThreadId,
-) -> Option<ThreadMetadata> {
-    let runtime = store.state_db().await?;
-    runtime.get_thread(thread_id).await.ok().flatten()
+) -> ThreadStoreResult<Option<ThreadMetadata>> {
+    let Some(runtime) = store.state_db().await else {
+        return Ok(None);
+    };
+    runtime
+        .get_thread(thread_id)
+        .await
+        .map_err(|err| ThreadStoreError::Internal {
+            message: format!("failed to read canonical thread metadata for {thread_id}: {err}"),
+        })
 }
 
 pub(super) async fn stored_thread_from_sqlite_metadata(
@@ -354,7 +360,7 @@ pub(super) async fn stored_thread_from_sqlite_metadata(
         .as_ref()
         .map(|meta| meta.history_mode)
         .unwrap_or(metadata.history_mode);
-    let name = thread_name_from_metadata(store, &metadata, history_mode).await;
+    let name = sqlite_thread_name(&metadata);
     let mut thread = stored_thread_from_state_metadata(store, metadata, parent_thread_id);
     thread.originator = thread.originator.or_else(|| {
         session_meta
@@ -372,10 +378,7 @@ pub(super) fn stored_thread_from_state_metadata(
     metadata: ThreadMetadata,
     parent_thread_id: Option<codex_protocol::ThreadId>,
 ) -> StoredThread {
-    let name = match metadata.history_mode {
-        ThreadHistoryMode::Paginated => sqlite_thread_name(&metadata),
-        ThreadHistoryMode::Legacy => distinct_thread_metadata_title(&metadata),
-    };
+    let name = sqlite_thread_name(&metadata);
     let rollout_path = codex_rollout::plain_rollout_path(metadata.rollout_path.as_path());
     let preview = metadata
         .preview
@@ -427,29 +430,6 @@ pub(super) fn stored_thread_from_state_metadata(
         token_usage: None,
         first_user_message: metadata.first_user_message,
         history: None,
-    }
-}
-
-async fn thread_name_from_metadata(
-    store: &LocalThreadStore,
-    metadata: &ThreadMetadata,
-    history_mode: ThreadHistoryMode,
-) -> Option<String> {
-    match history_mode {
-        ThreadHistoryMode::Paginated => sqlite_thread_name(metadata),
-        ThreadHistoryMode::Legacy => {
-            let title = distinct_thread_metadata_title(metadata);
-            if title.is_some() && !has_guardian_default_title(metadata) {
-                title
-            } else {
-                find_thread_name_by_id(store.config.codex_home.as_path(), &metadata.id)
-                    .await
-                    .ok()
-                    .flatten()
-                    .filter(|name| !name.trim().is_empty())
-                    .or(title)
-            }
-        }
     }
 }
 
@@ -693,7 +673,7 @@ mod tests {
             .expect("read thread by rollout path");
 
         let git_info = thread.git_info.expect("git info should be present");
-        assert_eq!(thread.name.as_deref(), Some("Latest index name"));
+        assert_eq!(thread.name.as_deref(), Some("Stale SQLite name"));
         assert_eq!(thread.recency_at, recency_at);
         assert_eq!(
             thread.section.as_ref().map(|section| section.id.as_str()),
