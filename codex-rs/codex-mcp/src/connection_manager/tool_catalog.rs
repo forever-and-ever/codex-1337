@@ -17,11 +17,14 @@ use tracing::trace_span;
 
 use super::McpConnectionSet;
 use super::McpServerMetadata;
+use super::McpServerView;
 use crate::binding::McpBinding;
 use crate::binding::PreparedMcpCall;
 use crate::binding_clients::McpBindingClients;
 use crate::client_tool_catalog::ClientToolCatalogRevision;
 use crate::client_tool_catalog::CodexAppsToolSnapshot;
+use crate::client_tool_catalog::NotificationRefresh;
+use crate::client_tool_catalog::ToolCatalogRefresh;
 use crate::client_tool_catalog::ToolCatalogSnapshot;
 use crate::mcp::CODEX_APPS_MCP_SERVER_NAME;
 use crate::rmcp_client::CODEX_APPS_REFRESH_DURATION_METRIC;
@@ -65,6 +68,40 @@ pub fn tool_is_model_visible(tool: &ToolInfo) -> bool {
 pub(crate) enum BindingCatalogRevision {
     Ready(ClientToolCatalogRevision),
     Cached(u64),
+}
+
+impl McpServerView {
+    pub(super) async fn refresh_regular_tool_catalog(
+        &self,
+        server_name: &str,
+        client: &ManagedClient,
+        refresh: NotificationRefresh,
+    ) -> Result<ToolCatalogRefresh> {
+        if self.connection.client.is_codex_apps_mcp_server {
+            return Ok(ToolCatalogRefresh::Current);
+        }
+        client
+            .tool_catalog
+            .refresh_if_changed(
+                refresh,
+                || client.client.tool_list_revision(),
+                || {
+                    list_tools_for_client_uncached(
+                        server_name,
+                        /*is_codex_apps_mcp_server*/ false,
+                        "list_changed",
+                        &client.client,
+                        self.tool_timeout,
+                        self.catalog_item_limit,
+                        client.server_instructions.as_deref(),
+                    )
+                },
+            )
+            .await
+            .inspect_err(|error| {
+                tracing::warn!(server_name, error = %error, "MCP catalog refresh failed; retaining last successful catalog");
+            })
+    }
 }
 
 impl McpConnectionSet {
@@ -165,6 +202,9 @@ impl McpConnectionSet {
             if client.client.is_closed().await {
                 return None;
             }
+            let _ = view
+                .refresh_regular_tool_catalog(server_name, &client, NotificationRefresh::Boundary)
+                .await;
             let revision = client.tool_catalog.read(|catalog| catalog.revision).await;
             revisions.insert(
                 server_name.clone(),
@@ -204,7 +244,7 @@ impl McpConnectionSet {
                         .startup_complete
                         .load(Ordering::Acquire);
                     let server_tools = view
-                        .listed_tools(&self.tool_plugin_context)
+                        .listed_tools(server_name, &self.tool_plugin_context)
                         .instrument(trace_span!(
                             "list_tools_for_server",
                             server_name = %server_name,
@@ -368,6 +408,7 @@ impl McpConnectionSet {
                     return None;
                 };
                 client.tool_timeout = view.tool_timeout;
+                let _ = view.refresh_regular_tool_catalog(server_name, &client, NotificationRefresh::Boundary).await;
                 let snapshot = client.tool_catalog.read(Arc::new).await;
                 let server_tools = snapshot.tools.to_vec();
                 (Some((Arc::new(client), snapshot)), server_tools)
@@ -470,6 +511,18 @@ impl McpConnectionSet {
         }
         let mut client = view.connection.client().await.ok()?;
         client.tool_timeout = view.tool_timeout;
+        if view
+            .refresh_regular_tool_catalog(
+                server_name,
+                &client,
+                NotificationRefresh::CallPreparation,
+            )
+            .await
+            .ok()?
+            != ToolCatalogRefresh::Current
+        {
+            return None;
+        }
         let snapshot = client.tool_catalog.read(Arc::new).await;
         let current_tool = snapshot.tools.iter().find(|tool| {
             tool.server_name == *server_name
@@ -489,6 +542,12 @@ impl McpConnectionSet {
         }
         .pop()?;
         if !tool_is_model_visible(&tool_info) {
+            return None;
+        }
+        if tool_info.tool != advertised_tool.tool
+            || tool_info.openai_file_input_optional_fields
+                != advertised_tool.openai_file_input_optional_fields
+        {
             return None;
         }
         tool_info = Self::with_server_metadata(tool_info, &view.metadata);

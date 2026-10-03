@@ -194,9 +194,23 @@ impl McpServerView {
 
     async fn listed_tools(
         &self,
+        server_name: &str,
         tool_plugin_context: &ToolPluginContext,
     ) -> Result<Vec<ToolInfo>, StartupOutcomeError> {
-        let tools = self.connection.client.listed_tools().await?;
+        let mut tools = self.connection.client.listed_tools().await?;
+        if !self.connection.client.is_codex_apps_mcp_server
+            && let Some(client) = self.connection.client.ready_client()
+        {
+            // Startup may have completed while listing. Consume its pending notifications too.
+            let _ = self
+                .refresh_regular_tool_catalog(
+                    server_name,
+                    &client,
+                    crate::client_tool_catalog::NotificationRefresh::Boundary,
+                )
+                .await;
+            tools = client.listed_tools().await;
+        }
         let tools = filter_tools(tools, &self.tool_filter);
         Ok(if self.connection.client.is_codex_apps_mcp_server {
             prepare_codex_apps_tools_for_model(tools, tool_plugin_context)

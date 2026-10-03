@@ -1106,6 +1106,10 @@ pub(crate) fn emit_duration(metric: &str, duration: Duration, tags: &[(&str, &st
 }
 
 #[cfg(test)]
+#[path = "runtime/catalog_refresh_tests.rs"]
+mod catalog_refresh_tests;
+
+#[cfg(test)]
 mod tests {
     use std::collections::HashMap;
 

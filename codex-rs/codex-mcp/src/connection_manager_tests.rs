@@ -96,6 +96,9 @@ use tokio::io::DuplexStream;
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
+#[path = "connection_manager/tool_catalog_refresh_tests.rs"]
+pub(crate) mod catalog_refresh;
+
 impl McpConnectionSet {
     fn new_uninitialized(
         approval_policy: &Constrained<AskForApproval>,
@@ -336,25 +339,77 @@ impl InProcessTransportFactory for RefreshTestTransportFactory {
 struct MutableToolsServer {
     tools: Arc<tokio::sync::RwLock<Vec<Tool>>>,
     block_tool_listing: Arc<AtomicBool>,
+    refresh_control: Option<Arc<catalog_refresh::RefreshControl>>,
 }
 
 impl ServerHandler for MutableToolsServer {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+        ServerInfo::new(
+            ServerCapabilities::builder()
+                .enable_tools()
+                .enable_tool_list_changed()
+                .build(),
+        )
     }
 
     async fn list_tools(
         &self,
         _request: Option<rmcp::model::PaginatedRequestParams>,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, rmcp::ErrorData> {
+        let tools = self.tools.read().await.clone();
+        if let Some(control) = &self.refresh_control {
+            *control.peer.lock().await = Some(context.peer);
+            control.requests.fetch_add(1, Ordering::AcqRel);
+            if control.fail.load(Ordering::Acquire) {
+                return Err(McpError::internal_error(
+                    "injected tools/list failure",
+                    None,
+                ));
+            }
+            if control.pause.load(Ordering::Acquire) {
+                control.started.notify_one();
+                control.release.notified().await;
+            }
+        }
         if self.block_tool_listing.load(Ordering::Acquire) {
             std::future::pending::<()>().await;
         }
         Ok(ListToolsResult {
-            tools: self.tools.read().await.clone(),
+            tools,
             ..Default::default()
         })
+    }
+
+    async fn call_tool(
+        &self,
+        request: rmcp::model::CallToolRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<rmcp::model::CallToolResponse, McpError> {
+        if let Some(control) = &self.refresh_control {
+            control.calls.fetch_add(1, Ordering::AcqRel);
+        }
+        if !self
+            .tools
+            .read()
+            .await
+            .iter()
+            .any(|tool| tool.name == request.name)
+        {
+            return Err(McpError::invalid_params("unknown tool", None));
+        }
+        if let Some(control) = &self.refresh_control
+            && control.pause_call.load(Ordering::Acquire)
+        {
+            control.call_started.notify_one();
+            control.release_call.notified().await;
+        }
+        Ok(
+            rmcp::model::CallToolResult::success(vec![rmcp::model::ContentBlock::text(
+                request.name,
+            )])
+            .into(),
+        )
     }
 }
 
@@ -520,7 +575,17 @@ async fn prepared_call_timeout_includes_trusted_access_lookup() {
         default_tools_approval_mode: None,
         tool_approval_modes: HashMap::new(),
     };
-    let client = Arc::new(create_test_managed_client(vec![tool.clone()]).await);
+    let fixture = catalog_refresh::MutableCatalog::from_tools(vec![tool.tool.clone()])
+        .await
+        .expect("initialize tools client");
+    let client = Arc::new(
+        fixture
+            .connections
+            .test_client("docs")
+            .client()
+            .await
+            .expect("ready tools client"),
+    );
     let catalog_snapshot = client.tool_catalog.read(Arc::new).await;
     let prepared = crate::PreparedMcpCall::new(
         manager,
@@ -5262,11 +5327,11 @@ async fn apps_catalog_broadcast_preserves_running_calls_and_rejects_stale_calls(
     );
 
     let (release, released) = tokio::sync::oneshot::channel::<()>();
-    let running = catalog.run_with_snapshot(&snapshot, || async { released.await.unwrap() });
+    let running = catalog.run_with_snapshot(&snapshot, |_| async { released.await.unwrap() });
     tokio::pin!(running);
     assert!(futures::poll!(&mut running).is_pending());
     store_current_tools(&context, updated.clone());
-    let stale = catalog.run_with_snapshot(&snapshot, || async { panic!("stale preparation") });
+    let stale = catalog.run_with_snapshot(&snapshot, |_| async { panic!("stale preparation") });
     tokio::pin!(stale);
     assert!(
         futures::poll!(&mut stale).is_pending(),
@@ -5310,7 +5375,7 @@ async fn apps_catalog_broadcast_restores_equivalent_calls() -> anyhow::Result<()
     store_current_tools(&context, changed);
     assert_eq!(
         catalog
-            .run_with_snapshot(&snapshot, || async { panic!("changed preparation") })
+            .run_with_snapshot(&snapshot, |_| async { panic!("changed preparation") })
             .await,
         None::<()>
     );
@@ -5320,7 +5385,7 @@ async fn apps_catalog_broadcast_restores_equivalent_calls() -> anyhow::Result<()
     store_current_tools(&context, restored);
     assert_eq!(
         catalog
-            .run_with_snapshot(&snapshot, || async { "prepared" })
+            .run_with_snapshot(&snapshot, |_| async { "prepared" })
             .await,
         Some("prepared")
     );
@@ -5332,7 +5397,7 @@ async fn apps_catalog_broadcast_restores_equivalent_calls() -> anyhow::Result<()
         .await?;
     assert_eq!(
         catalog
-            .run_with_snapshot(&snapshot, || async { panic!("refreshed preparation") })
+            .run_with_snapshot(&snapshot, |_| async { panic!("refreshed preparation") })
             .await,
         None::<()>
     );
@@ -5502,6 +5567,7 @@ async fn reconciliation_reuses_connection_without_relisting_regular_tools() -> a
             server: MutableToolsServer {
                 tools: Arc::clone(&tools),
                 block_tool_listing: Arc::clone(&block_tool_listing),
+                refresh_control: None,
             },
         }))
         .await?,
@@ -6242,6 +6308,7 @@ async fn reconciliation_replaces_closed_connections() -> anyhow::Result<()> {
                     Arc::new(JsonObject::default()),
                 )])),
                 block_tool_listing: Arc::new(AtomicBool::new(false)),
+                refresh_control: None,
             },
             disconnect: disconnect.clone(),
         }))

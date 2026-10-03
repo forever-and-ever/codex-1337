@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::io;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
@@ -10,13 +9,10 @@ use codex_config::types::ApprovalsReviewer;
 use codex_protocol::mcp::McpServerInfo;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::protocol::AskForApproval;
-use codex_rmcp_client::InProcessTransportFactory;
 use codex_rmcp_client::RmcpClient;
-use futures::FutureExt;
 use pretty_assertions::assert_eq;
 use rmcp::model::JsonObject;
 use rmcp::model::Tool;
-use tokio::io::DuplexStream;
 use tokio::sync::Notify;
 
 use super::McpBinding;
@@ -24,6 +20,7 @@ use super::PreparedMcpCall;
 use crate::binding_clients::McpBindingClients;
 use crate::client_tool_catalog::ClientToolCatalog;
 use crate::connection_manager::McpConnectionSet;
+use crate::connection_manager::tests::catalog_refresh::MutableCatalog;
 use crate::rmcp_client::ManagedClient;
 use crate::server::McpServerMetadata;
 use crate::server::McpServerOrigin;
@@ -31,18 +28,6 @@ use crate::tools::ToolInfo;
 
 const SERVER_NAME: &str = "docs";
 const TOOL_NAME: &str = "search";
-
-struct TestInProcessTransportFactory;
-
-impl InProcessTransportFactory for TestInProcessTransportFactory {
-    fn open(&self) -> futures::future::BoxFuture<'static, io::Result<DuplexStream>> {
-        async {
-            let (client_stream, _server_stream) = tokio::io::duplex(1);
-            Ok(client_stream)
-        }
-        .boxed()
-    }
-}
 
 struct TestStep {
     step: Arc<McpBinding>,
@@ -72,11 +57,10 @@ async fn test_step(
         connector_name: None,
         plugin_display_names: Vec::new(),
     };
-    let client = Arc::new(
-        RmcpClient::new_in_process_client(Arc::new(TestInProcessTransportFactory))
-            .await
-            .expect("create in-process MCP client"),
-    );
+    let fixture = MutableCatalog::from_tools(vec![tool.tool.clone()])
+        .await
+        .expect("initialize in-process MCP client");
+    let client = Arc::clone(&fixture.client);
     let tool_catalog = Arc::new(ClientToolCatalog::new(
         vec![tool.clone()],
         /*updates*/ None,

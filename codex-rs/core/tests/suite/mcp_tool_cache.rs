@@ -893,7 +893,9 @@ async fn cached_mcp_startup_is_eager_for_root_and_lazy_for_subagents() -> anyhow
         /*sandbox*/ None,
     )
     .await?;
-    let expected_error = format!("MCP tool `{SERVER_NAME}/cwd` is not available to the model");
+    let expected_error = format!(
+        "MCP tool `{SERVER_NAME}/cwd` is unavailable or its definition changed. No call was dispatched. Inspect the current catalog on the next model step before retrying."
+    );
     assert_eq!(cached_turn.await??, second_process);
     assert!(
         binding_captures.load(Ordering::SeqCst) > 1,

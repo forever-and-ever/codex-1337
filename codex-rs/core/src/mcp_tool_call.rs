@@ -176,7 +176,7 @@ pub(crate) async fn handle_mcp_tool_call(
             &call_id,
             invocation,
             item_metadata,
-            format!("MCP tool `{server}/{tool_name}` is not available to the model"),
+            format!("MCP tool `{server}/{tool_name}` is unavailable or its definition changed. No call was dispatched. Inspect the current catalog on the next model step before retrying."),
             /*already_started*/ false,
         )
         .await;

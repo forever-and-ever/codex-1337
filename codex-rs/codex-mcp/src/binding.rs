@@ -311,6 +311,21 @@ impl PreparedMcpCall {
             .await
     }
 
+    async fn check_tool_list_revision(&self, tool_list_revision: Option<u64>) -> Result<()> {
+        // Apps may opt out of shared catalogs; their explicit refresh path still owns updates.
+        if self.server_name == crate::mcp::CODEX_APPS_MCP_SERVER_NAME {
+            return Ok(());
+        }
+        if let Some(tool_list_revision) = tool_list_revision
+            && self.client.client.tool_list_revision().await? != tool_list_revision
+        {
+            anyhow::bail!(
+                "tool catalog update pending; no MCP call was dispatched; inspect the current catalog on the next model step before retrying"
+            );
+        }
+        Ok(())
+    }
+
     /// Runs irreversible call preparation and execution under the authority of
     /// this call's captured catalog and the extensions owned by the Codex session.
     /// A caller-supplied timeout can further restrict the server's configured timeout.
@@ -340,7 +355,10 @@ impl PreparedMcpCall {
             let tool_name = self.tool_info.tool.name.to_string();
             self.client
             .tool_catalog
-            .run_with_snapshot(&self.catalog_snapshot, || async {
+            .run_with_snapshot(&self.catalog_snapshot, |tool_list_revision| {
+                let tool_name = &tool_name;
+                async move {
+                self.check_tool_list_revision(tool_list_revision).await?;
                 let (arguments, meta) = prepare().await?;
                 let timeout_deadline =
                     effective_timeout.map(|timeout| tokio::time::Instant::now() + timeout);
@@ -372,6 +390,9 @@ impl PreparedMcpCall {
                     }
                     None => None,
                 };
+                // Preparation may await uploads or policy enrichment. Do not dispatch a
+                // definition invalidated during those waits; preparation is not replayed.
+                self.check_tool_list_revision(tool_list_revision).await?;
                 if self
                     .lease_guard
                     .as_ref()
@@ -384,6 +405,7 @@ impl PreparedMcpCall {
                     .call_tool(tool_name.clone(), arguments, meta, remaining_timeout)
                     .await
                     .with_context(|| format!("tool call failed for `{}/{tool_name}`", self.server_name))
+                }
             })
             .await
             .ok_or_else(|| anyhow::anyhow!(

@@ -44,7 +44,10 @@ struct CatalogState {
 
 /// Ordinary MCP clients own their tools; Apps clients observe the shared provider.
 enum CatalogSource {
-    Local(Arc<[ToolInfo]>),
+    Local {
+        tools: Arc<[ToolInfo]>,
+        tool_list_revision: u64,
+    },
     Live {
         updates: ToolCatalogUpdates,
         tools_version: u64,
@@ -54,6 +57,17 @@ enum CatalogSource {
 pub(crate) struct ToolCatalogSnapshot {
     pub(crate) revision: u64,
     pub(crate) tools: Arc<[ToolInfo]>,
+}
+
+pub(crate) enum NotificationRefresh {
+    Boundary,
+    CallPreparation,
+}
+
+#[derive(PartialEq, Eq)]
+pub(crate) enum ToolCatalogRefresh {
+    Current,
+    Deferred,
 }
 
 impl ClientToolCatalog {
@@ -73,7 +87,11 @@ impl ClientToolCatalog {
                     tools_version,
                 }
             }
-            None => CatalogSource::Local(tools.into()),
+            None => CatalogSource::Local {
+                tools: tools.into(),
+                // Notifications during startup discovery must survive publication.
+                tool_list_revision: 0,
+            },
         };
         Self {
             current: RwLock::new(CatalogState {
@@ -96,7 +114,7 @@ impl ClientToolCatalog {
             {
                 let current = self.current.read().await;
                 let tools = match &current.source {
-                    CatalogSource::Local(tools) => Some(Arc::clone(tools)),
+                    CatalogSource::Local { tools, .. } => Some(Arc::clone(tools)),
                     CatalogSource::Live { updates, .. } => {
                         // Hold the watch borrow while checking its version so the tools and
                         // revision come from the same publication.
@@ -131,7 +149,7 @@ impl ClientToolCatalog {
                     *tools_version = version;
                     changed
                 }
-                CatalogSource::Local(_) => false,
+                CatalogSource::Local { .. } => false,
             };
             if changed {
                 current.revision += 1;
@@ -156,7 +174,10 @@ impl ClientToolCatalog {
         let mut current = self.current.write().await;
         let result = publish(&tools, context);
         match &mut current.source {
-            CatalogSource::Local(current_tools) => *current_tools = tools.into(),
+            CatalogSource::Local {
+                tools: current_tools,
+                ..
+            } => *current_tools = tools.into(),
             CatalogSource::Live {
                 updates,
                 tools_version,
@@ -172,6 +193,78 @@ impl ClientToolCatalog {
         Ok(result)
     }
 
+    /// Consume only notifications preceding the fetch. Later notifications and failed
+    /// fetches remain dirty for the next boundary; concurrent readers coalesce here.
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "notification refreshes share explicit refresh serialization"
+    )]
+    pub(crate) async fn refresh_if_changed<R, RFut, F, FFut>(
+        &self,
+        refresh: NotificationRefresh,
+        revision: R,
+        fetch: F,
+    ) -> Result<ToolCatalogRefresh>
+    where
+        R: Fn() -> RFut,
+        RFut: Future<Output = Result<u64>>,
+        F: FnOnce() -> FFut,
+        FFut: Future<Output = Result<Vec<ToolInfo>>>,
+    {
+        let consumed = match &self.current.read().await.source {
+            CatalogSource::Local {
+                tool_list_revision, ..
+            } => *tool_list_revision,
+            CatalogSource::Live { .. } => return Ok(ToolCatalogRefresh::Current),
+        };
+        let observed = revision().await?;
+        if consumed == observed {
+            return Ok(ToolCatalogRefresh::Current);
+        }
+        let _refresh = match refresh {
+            NotificationRefresh::Boundary => self.refresh_lock.lock().await,
+            NotificationRefresh::CallPreparation => match self.refresh_lock.try_lock() {
+                Ok(guard) => guard,
+                Err(_) => return Ok(ToolCatalogRefresh::Deferred),
+            },
+        };
+        let observed = revision().await?;
+        if let CatalogSource::Local {
+            tool_list_revision, ..
+        } = &self.current.read().await.source
+            && *tool_list_revision == observed
+        {
+            return Ok(ToolCatalogRefresh::Current);
+        }
+        // Do not ask a serial backend to list while an existing call owns authority.
+        if self.current.try_write().is_err() {
+            return Ok(ToolCatalogRefresh::Deferred);
+        }
+        let tools = fetch().await?;
+        let Ok(mut current) = self.current.try_write() else {
+            return Ok(ToolCatalogRefresh::Deferred);
+        };
+        let CatalogSource::Local {
+            tools: current_tools,
+            tool_list_revision,
+        } = &mut current.source
+        else {
+            unreachable!("catalog source cannot change after startup")
+        };
+        let changed = current_tools.as_ref() != tools.as_slice();
+        *current_tools = tools.into();
+        *tool_list_revision = observed;
+        if changed {
+            current.revision += 1;
+        }
+        drop(current);
+        Ok(if revision().await? == observed {
+            ToolCatalogRefresh::Current
+        } else {
+            ToolCatalogRefresh::Deferred
+        })
+    }
+
     /// Reject stale calls before preparation and hold catalog authority until execution finishes.
     #[expect(
         clippy::await_holding_invalid_type,
@@ -183,7 +276,7 @@ impl ClientToolCatalog {
         run: F,
     ) -> Option<R>
     where
-        F: FnOnce() -> Fut,
+        F: FnOnce(Option<u64>) -> Fut,
         Fut: Future<Output = R>,
     {
         let (current, snapshot) = self.read_current().await;
@@ -193,7 +286,13 @@ impl ClientToolCatalog {
         {
             return None;
         }
-        let result = run().await;
+        let tool_list_revision = match &current.source {
+            CatalogSource::Local {
+                tool_list_revision, ..
+            } => Some(*tool_list_revision),
+            CatalogSource::Live { .. } => None,
+        };
+        let result = run(tool_list_revision).await;
         drop(current);
         Some(result)
     }
