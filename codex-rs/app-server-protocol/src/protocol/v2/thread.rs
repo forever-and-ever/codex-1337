@@ -10,6 +10,7 @@ use super::ThreadRealtimeItem;
 use super::ThreadSection;
 use super::ThreadSectionAppearance;
 use super::ThreadSource;
+use super::ThreadStatus;
 use super::Turn;
 use super::TurnEnvironmentParams;
 use super::TurnError;
@@ -574,6 +575,12 @@ impl From<ThreadTurnsListResponse> for TurnsPage {
 /// Prefer using thread_id whenever possible.
 pub struct ThreadForkParams {
     pub thread_id: String,
+    /// Explicit name for the new conversation; omission allocates a fork name.
+    #[ts(optional = nullable)]
+    pub name: Option<String>,
+    /// Concrete owners the caller confirmed may be archived to release the name.
+    #[ts(optional = nullable)]
+    pub conflict_thread_ids: Option<Vec<String>>,
 
     /// Optional last turn id to fork through, inclusive.
     ///
@@ -823,12 +830,44 @@ pub struct ThreadDecrementElicitationResponse {
     pub paused: bool,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct ThreadSetNameParams {
     pub thread_id: String,
     pub name: String,
+    #[ts(optional = nullable)]
+    pub naming_mode: Option<ThreadNameMode>,
+    /// Concrete owners the caller confirmed may be archived to release the name.
+    #[ts(optional = nullable)]
+    pub conflict_thread_ids: Option<Vec<String>>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase", export_to = "v2/")]
+pub enum ThreadNameMode {
+    Explicit,
+    Generated,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadNameConflict {
+    pub thread_id: String,
+    pub name: String,
+    pub path: Option<PathBuf>,
+    pub status: ThreadStatus,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(tag = "type", rename = "threadNameConflict", rename_all = "camelCase")]
+#[ts(tag = "type", rename = "threadNameConflict", export_to = "v2/")]
+pub struct ThreadNameConflictError {
+    pub name: String,
+    pub conflicts: Vec<ThreadNameConflict>,
+    pub archive_stops_descendants: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
@@ -841,7 +880,10 @@ pub struct ThreadUnarchiveParams {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
-pub struct ThreadSetNameResponse {}
+pub struct ThreadSetNameResponse {
+    /// Persisted spelling, including any generated collision suffix.
+    pub thread_name: String,
+}
 
 v2_enum_from_core! {
     pub enum ThreadGoalStatus from CoreThreadGoalStatus {
