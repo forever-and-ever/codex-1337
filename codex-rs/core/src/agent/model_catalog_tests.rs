@@ -1,6 +1,7 @@
 use super::*;
 use crate::agent::child_config::SpawnConfigOptions;
 use crate::agent::child_config::SpawnConfigVersion;
+use crate::agent::child_config::SpawnModelPrecedence;
 use crate::agent::child_config::prepare_agent_spawn_config;
 use crate::agent::types::SpawnAgentForkMode;
 use crate::session::step_context::StepContext;
@@ -128,6 +129,7 @@ async fn fresh_child_routes_model_and_provider_but_history_forks_stay_locked(
             &step,
             SpawnConfigOptions {
                 version: SpawnConfigVersion::V2,
+                model_precedence: SpawnModelPrecedence::RoleOverrides,
                 fork_mode: None,
                 role_name: None,
                 model: Some(&requested),
@@ -179,6 +181,7 @@ async fn fresh_child_routes_model_and_provider_but_history_forks_stay_locked(
                 &step,
                 SpawnConfigOptions {
                     version: SpawnConfigVersion::V2,
+                    model_precedence: SpawnModelPrecedence::RoleOverrides,
                     fork_mode: Some(&fork_mode),
                     role_name: None,
                     model: Some(&requested),

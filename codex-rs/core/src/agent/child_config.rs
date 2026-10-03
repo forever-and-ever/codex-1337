@@ -11,6 +11,7 @@ use crate::agent::types::SpawnAgentForkMode;
 use crate::config::Config;
 use crate::session::session::Session;
 use crate::session::step_context::StepContext;
+use crate::session::step_settings::ResolvedStepSettings;
 use crate::session::turn_context::TurnContext;
 use codex_models_manager::manager::RefreshStrategy;
 use codex_protocol::models::BaseInstructions;
@@ -37,8 +38,16 @@ pub(crate) enum SpawnConfigVersion {
     V2,
 }
 
+/// Ordinary tool spawns retain role precedence; direct user executors own model selection.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SpawnModelPrecedence {
+    RoleOverrides,
+    RequestedOverrides,
+}
+
 pub(crate) struct SpawnConfigOptions<'a> {
     pub(crate) version: SpawnConfigVersion,
+    pub(crate) model_precedence: SpawnModelPrecedence,
     pub(crate) fork_mode: Option<&'a SpawnAgentForkMode>,
     pub(crate) role_name: Option<&'a str>,
     pub(crate) model: Option<&'a str>,
@@ -57,34 +66,47 @@ pub(crate) async fn prepare_agent_spawn_config(
     step_context: &StepContext,
     options: SpawnConfigOptions<'_>,
 ) -> Result<PreparedSpawnConfig, String> {
-    let turn = step_context.turn.as_ref();
+    prepare_agent_spawn_config_from_settings(
+        session,
+        step_context.turn.as_ref(),
+        &step_context.settings,
+        options,
+    )
+    .await
+}
+
+/// Also serves standalone user actions, which capture settings without preparing inference.
+pub(crate) async fn prepare_agent_spawn_config_from_settings(
+    session: &Session,
+    turn: &TurnContext,
+    settings: &ResolvedStepSettings,
+    options: SpawnConfigOptions<'_>,
+) -> Result<PreparedSpawnConfig, String> {
     let full_history_fork = matches!(options.fork_mode, Some(SpawnAgentForkMode::FullHistory));
     let mut config =
-        build_agent_spawn_config(&session.get_base_instructions().await, step_context)?;
+        build_agent_spawn_config(&session.get_base_instructions().await, turn, settings)?;
     if options.version == SpawnConfigVersion::V1 && full_history_fork {
         reject_full_fork_agent_type_override(options.role_name)?;
     }
+    if options.model_precedence == SpawnModelPrecedence::RequestedOverrides {
+        apply_spawn_role_inheritance(session, turn, &mut config, &options).await?;
+        // Farm's absent executor preferences inherit the captured parent selection,
+        // not a role's model. Explicit/general defaults still use the same resolver below.
+        config.model = Some(settings.model_info.slug.clone());
+        config.model_reasoning_effort = settings.effective_reasoning_effort();
+    }
     apply_requested_spawn_agent_model_overrides(
         session,
-        step_context,
+        turn,
+        settings,
         &mut config,
         options.model,
-        options.reasoning_effort,
+        options.reasoning_effort.clone(),
         options.fork_mode,
     )
     .await?;
-    if !full_history_fork
-        || (options.version == SpawnConfigVersion::V2 && options.role_name.is_some())
-    {
-        apply_spawn_agent_role(session, &mut config, options.role_name).await?;
-        if options.version == SpawnConfigVersion::V2
-            && full_history_fork
-            && config.developer_instructions.is_none()
-        {
-            config
-                .developer_instructions
-                .clone_from(&turn.developer_instructions);
-        }
+    if options.model_precedence == SpawnModelPrecedence::RoleOverrides {
+        apply_spawn_role_inheritance(session, turn, &mut config, &options).await?;
     }
     apply_spawn_agent_service_tier(session, &mut config, options.service_tier).await?;
     apply_spawn_agent_runtime_overrides(&mut config, turn)?;
@@ -93,7 +115,8 @@ pub(crate) async fn prepare_agent_spawn_config(
     let role_name = options
         .role_name
         .or_else(|| {
-            (options.version == SpawnConfigVersion::V2
+            (options.model_precedence == SpawnModelPrecedence::RequestedOverrides
+                && options.version == SpawnConfigVersion::V2
                 && !full_history_fork
                 && config
                     .agent_roles
@@ -105,6 +128,36 @@ pub(crate) async fn prepare_agent_spawn_config(
     Ok(PreparedSpawnConfig { config, role_name })
 }
 
+async fn apply_spawn_role_inheritance(
+    session: &Session,
+    turn: &TurnContext,
+    config: &mut Config,
+    options: &SpawnConfigOptions<'_>,
+) -> Result<(), String> {
+    let full_history_fork = matches!(options.fork_mode, Some(SpawnAgentForkMode::FullHistory));
+    if !full_history_fork
+        || (options.version == SpawnConfigVersion::V2 && options.role_name.is_some())
+    {
+        match options.model_precedence {
+            SpawnModelPrecedence::RoleOverrides => {
+                apply_spawn_agent_role(session, config, options.role_name).await?
+            }
+            SpawnModelPrecedence::RequestedOverrides => {
+                apply_role_to_config(config, options.role_name).await?
+            }
+        }
+        if options.version == SpawnConfigVersion::V2
+            && full_history_fork
+            && config.developer_instructions.is_none()
+        {
+            config
+                .developer_instructions
+                .clone_from(&turn.developer_instructions);
+        }
+    }
+    Ok(())
+}
+
 /// Builds the base config snapshot for a newly spawned sub-agent.
 ///
 /// The returned config starts from the parent's effective config and then refreshes the
@@ -114,10 +167,10 @@ pub(crate) async fn prepare_agent_spawn_config(
 /// agent out with the wrong provider or runtime policy.
 pub(crate) fn build_agent_spawn_config(
     base_instructions: &BaseInstructions,
-    step_context: &StepContext,
+    turn: &TurnContext,
+    settings: &ResolvedStepSettings,
 ) -> Result<Config, String> {
-    let mut config = build_agent_shared_config(step_context.turn.as_ref())?;
-    let settings = &step_context.settings;
+    let mut config = build_agent_shared_config(turn)?;
     config.model = Some(settings.model_info.slug.clone());
     config.model_reasoning_effort = settings.effective_reasoning_effort();
     config.model_reasoning_summary = Some(settings.reasoning_summary);
@@ -201,13 +254,13 @@ fn apply_spawn_agent_runtime_overrides(
 
 async fn apply_requested_spawn_agent_model_overrides(
     session: &Session,
-    step_context: &StepContext,
+    turn: &TurnContext,
+    settings: &ResolvedStepSettings,
     config: &mut Config,
     requested_model: Option<&str>,
     requested_reasoning_effort: Option<ReasoningEffort>,
     fork_mode: Option<&SpawnAgentForkMode>,
 ) -> Result<(), String> {
-    let turn = step_context.turn.as_ref();
     let requested_model = requested_model.or(turn.config.agent_default_subagent_model.as_deref());
     let requested_reasoning_effort = requested_reasoning_effort
         .or_else(|| turn.config.agent_default_subagent_reasoning_effort.clone());
@@ -258,8 +311,8 @@ async fn apply_requested_spawn_agent_model_overrides(
 
     if let Some(reasoning_effort) = requested_reasoning_effort {
         validate_spawn_agent_reasoning_effort(
-            &step_context.settings.model_info.slug,
-            &step_context.settings.model_info.supported_reasoning_levels,
+            &settings.model_info.slug,
+            &settings.model_info.supported_reasoning_levels,
             &reasoning_effort,
         )?;
         config.model_reasoning_effort = Some(reasoning_effort);

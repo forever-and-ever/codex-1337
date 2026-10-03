@@ -3,6 +3,7 @@ use crate::agent::api::AgentInput;
 use crate::agent::api::SpawnRequest;
 use crate::agent::child_config::SpawnConfigOptions;
 use crate::agent::child_config::SpawnConfigVersion;
+use crate::agent::child_config::SpawnModelPrecedence;
 use crate::agent::child_config::prepare_agent_spawn_config;
 use crate::agent::next_thread_spawn_depth;
 use crate::agent::role::DEFAULT_ROLE_NAME;
@@ -135,6 +136,7 @@ async fn handle_spawn_agent(
         step_context.as_ref(),
         SpawnConfigOptions {
             version: SpawnConfigVersion::V2,
+            model_precedence: SpawnModelPrecedence::RoleOverrides,
             fork_mode: fork_mode.as_ref(),
             role_name,
             model: args.model.as_deref(),
@@ -195,6 +197,7 @@ async fn handle_spawn_agent(
             source: spawn_source,
             options: SpawnAgentOptions {
                 fork_parent_spawn_call_id: fork_mode.as_ref().map(|_| call_id.clone()),
+                user_request: None,
                 fork_mode: fork_mode.clone(),
                 parent_thread_id: Some(session.thread_id),
                 parent_turn_id: Some(turn.sub_id.clone()),
