@@ -127,6 +127,21 @@ impl WebSearchCell {
 }
 
 impl HistoryCell for WebSearchCell {
+    fn tool_call_ids(&self) -> Vec<&str> {
+        vec![self.call_id()]
+    }
+
+    fn nested_summary_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        let mut nested = self.clone();
+        nested.completed_at = None;
+        nested.compact_hyperlink_lines(width)
+    }
+
+    fn nested_detail_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        let mut nested = self.clone();
+        nested.completed_at = None;
+        nested.expanded_hyperlink_lines(width)
+    }
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         let bullet = if self.completed {
             "•".dim()

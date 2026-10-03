@@ -11,6 +11,14 @@
 //! rendered transcript output can change.
 
 mod activity_group;
+mod code_mode;
+mod tool_item;
+pub(crate) use tool_item::ToolItemCell;
+pub(crate) use code_mode::CodeModeCell;
+pub(crate) use code_mode::CodeModeFactCell;
+pub(crate) use code_mode::reconcile_code_mode;
+pub(crate) use code_mode::reunite_code_mode;
+pub(crate) use code_mode::split_code_mode_members;
 pub(crate) mod activity_parts;
 mod delegation;
 mod returned_output;
@@ -271,6 +279,29 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
     /// Enclosing model tool call, when its returned output supplies explicit ownership.
     fn outer_call_id(&self) -> Option<&str> {
         None
+    }
+
+    /// Concrete invocation identities, independent of presentation/disclosure identities.
+    fn tool_call_ids(&self) -> Vec<&str> {
+        self.outer_call_id().into_iter().collect()
+    }
+
+    /// Summary inside an explicitly attributed execution block, without timestamps or output.
+    fn nested_summary_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        self.compact_hyperlink_lines(width)
+    }
+
+    fn nested_detail_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        self.transcript_hyperlink_lines(width)
+    }
+
+    fn nested_activity_parts(&self, width: u16, expanded: &std::collections::HashSet<String>) -> Option<activity_parts::ActivityParts> {
+        self.activity_parts(width, /*header_reserve*/ 0, expanded)
+    }
+
+    /// Whether the enclosing block has meaningful child detail, including human-only attachments.
+    fn has_nested_details(&self, width: u16) -> bool {
+        self.activity_disclosure(width).is_some() || self.activity_arguments_truncated(width)
     }
 
     /// Available activity details, preserving source order and any upstream truncation notices.

@@ -73,6 +73,7 @@ impl McpInvocation {
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum McpToolCallRenderMode {
+    Summary,
     /// Compact presentation used in normal conversation history.
     Display,
     /// Complete invocation and result used by the Ctrl+T transcript.
@@ -165,7 +166,8 @@ impl McpToolCallCell {
         let mut lines: Vec<HyperlinkLine> = Vec::new();
         let status = self.success();
         let node_repl = self.result_kind() == McpResultKind::NodeRepl;
-        let compact = node_repl && mode == McpToolCallRenderMode::Display;
+        let compact = node_repl
+            && matches!(mode, McpToolCallRenderMode::Display | McpToolCallRenderMode::Summary);
         let bullet = match status {
             Some(true) => "•".green().bold(),
             Some(false) => "•".red().bold(),
@@ -199,7 +201,7 @@ impl McpToolCallCell {
             line_to_static(&format_mcp_invocation(&self.invocation))
         };
         let mut compact_spans = vec![bullet.clone(), " ".into()];
-        if status.is_some() {
+        if status.is_some() && mode != McpToolCallRenderMode::Summary {
             compact_spans.extend(self.completed_at.map(HistoryTimestamp::span));
         }
         compact_spans.extend([header_text.bold(), " ".into()]);
@@ -209,12 +211,12 @@ impl McpToolCallCell {
         let inline_invocation = !matches!(
             mode,
             McpToolCallRenderMode::Arguments | McpToolCallRenderMode::Expanded
-        ) && (compact
+        ) && (mode == McpToolCallRenderMode::Summary || compact
             || invocation_line.width() <= (width as usize).saturating_sub(reserved));
 
         if inline_invocation {
             compact_header.extend(invocation_line.spans.clone());
-            lines.push(mcp_header_line(if compact {
+            lines.push(mcp_header_line(if compact || mode == McpToolCallRenderMode::Summary {
                 truncate_line_with_ellipsis_if_overflow(compact_header, width as usize)
             } else {
                 compact_header
@@ -237,7 +239,7 @@ impl McpToolCallCell {
             ));
         }
 
-        let detail_lines = if mode == McpToolCallRenderMode::Arguments {
+        let detail_lines = if matches!(mode, McpToolCallRenderMode::Arguments | McpToolCallRenderMode::Summary) {
             Vec::new()
         } else {
             self.render_detail_lines(width, mode)
@@ -386,6 +388,25 @@ impl McpToolCallCell {
 }
 
 impl HistoryCell for McpToolCallCell {
+    fn tool_call_ids(&self) -> Vec<&str> {
+        vec![self.call_id()]
+    }
+
+    fn nested_summary_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        self.render_hyperlink_lines(width, McpToolCallRenderMode::Summary)
+    }
+
+    fn nested_detail_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        let mut nested = self.clone();
+        nested.completed_at = None;
+        nested.expanded_hyperlink_lines(width)
+    }
+
+    fn nested_activity_parts(&self, width: u16, expanded: &std::collections::HashSet<String>) -> Option<super::activity_parts::ActivityParts> {
+        let mut nested = self.clone();
+        nested.completed_at = None;
+        nested.activity_parts(width, /*header_reserve*/ 0, expanded)
+    }
     fn activity_header(&self) -> Option<super::activity_parts::ActivityHeader> {
         let mut heading = Line::default();
         if self.result.is_some() {

@@ -12,6 +12,9 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 pub(crate) fn has_running_tool_calls(cell: &dyn HistoryCell) -> bool {
+    if let Some(block) = cell.as_any().downcast_ref::<super::CodeModeCell>() {
+        return block.is_active();
+    }
     if let Some(group) = cell.as_any().downcast_ref::<ToolOutputGroup>() {
         return group
             .members
