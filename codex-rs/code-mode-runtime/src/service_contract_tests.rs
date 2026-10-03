@@ -169,6 +169,7 @@ fn execute_request(source: &str) -> ExecuteRequest {
 
 fn blocking_tool() -> ToolDefinition {
     ToolDefinition {
+        summary: String::new(),
         name: "block".to_string(),
         tool_name: ToolName::plain("block"),
         description: String::new(),

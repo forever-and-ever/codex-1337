@@ -5,6 +5,7 @@ use super::DEFERRED_NESTED_TOOLS_GUIDANCE;
 use super::ImageDetailVisibility;
 use super::LEGACY_IMAGE_HELPER_DESCRIPTION;
 use super::MCP_TYPESCRIPT_PREAMBLE;
+use super::TOOL_DISCOVERY_GUIDANCE;
 use super::ToolDefinition;
 use super::UNIFIED_IMAGE_HELPER_DESCRIPTION;
 use super::build_exec_tool_description;
@@ -46,7 +47,7 @@ fn exec_override_renders_only_known_literal_placeholders() {
         assert_eq!(
             description,
             format!(
-                " \nDefaults to 10000 ms. 4567 ms.\n{image_helper}\n{{{{ unknown }}}} {{{{default_exec_yield_time_ms}}}}\t "
+                " \nDefaults to 10000 ms. 4567 ms.\n{image_helper}\n{{{{ unknown }}}} {{{{default_exec_yield_time_ms}}}}\t \n\n{TOOL_DISCOVERY_GUIDANCE}"
             ),
         );
     }
@@ -75,7 +76,11 @@ fn exec_override_preserves_empty_and_whitespace_only_text() {
                     ..Default::default()
                 }),
             ),
-            description_override,
+            if description_override.is_empty() {
+                TOOL_DISCOVERY_GUIDANCE.to_string()
+            } else {
+                format!("{description_override}\n\n{TOOL_DISCOVERY_GUIDANCE}")
+            },
         );
     }
 }
@@ -83,6 +88,7 @@ fn exec_override_preserves_empty_and_whitespace_only_text() {
 #[test]
 fn exec_override_preserves_runtime_sections() {
     let enabled_tools = [ToolDefinition {
+        summary: String::new(),
         name: "alpha".to_string(),
         tool_name: ToolName::plain("alpha"),
         description: "First tool".to_string(),
@@ -92,6 +98,7 @@ fn exec_override_preserves_runtime_sections() {
         output_schema: None,
     }];
     let deferred_tools = [ToolDefinition {
+        summary: String::new(),
         name: "mcp__sample__beta".to_string(),
         tool_name: ToolName::namespaced("mcp__sample__", "beta"),
         description: "Deferred tool".to_string(),
@@ -155,7 +162,7 @@ fn exec_override_preserves_runtime_sections() {
                     ..Default::default()
                 }),
             ),
-            expected,
+            format!("{TOOL_DISCOVERY_GUIDANCE}\n\n{expected}"),
         );
     }
 }

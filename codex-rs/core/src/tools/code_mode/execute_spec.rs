@@ -54,6 +54,7 @@ mod tests {
     #[test]
     fn create_code_mode_tool_matches_expected_spec() {
         let enabled_tools = vec![codex_code_mode::ToolDefinition {
+            summary: String::new(),
             name: "update_plan".to_string(),
             tool_name: ToolName::plain("update_plan"),
             description: "Update the plan".to_string(),

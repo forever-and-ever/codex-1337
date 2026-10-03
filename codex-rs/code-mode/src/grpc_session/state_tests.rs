@@ -16,6 +16,7 @@ fn request(execution_id: &str) -> grpc::ExecuteRequest {
         tool_call_id: "call".to_string(),
         source: String::new(),
         enabled_tools: vec![grpc::ToolDefinition {
+            summary: String::new(),
             name: "tool".to_string(),
             tool_name: Some(grpc::ToolName {
                 name: "tool".to_string(),

@@ -38,6 +38,7 @@ pub fn augment_tool_spec_for_code_mode(
                         let tool_name =
                             ToolName::namespaced(namespace.name.clone(), tool.name.clone());
                         let definition = CodeModeToolDefinition {
+                            summary: String::new(),
                             name: code_mode_name_for_tool_name(&tool_name),
                             tool_name,
                             description: tool.description.clone(),
@@ -59,6 +60,7 @@ pub fn augment_tool_spec_for_code_mode(
                         let tool_name =
                             ToolName::namespaced(namespace.name.clone(), tool.name.clone());
                         let definition = CodeModeToolDefinition {
+                            summary: String::new(),
                             name: code_mode_name_for_tool_name(&tool_name),
                             tool_name,
                             description: tool.description.clone(),
@@ -95,7 +97,10 @@ pub fn collect_code_mode_tool_definitions<'a>(
         .into_iter()
         .flat_map(|spec| {
             let mut definitions =
-                code_mode_tool_definitions_for_spec(spec, code_mode_input_schema_max_bytes);
+                code_mode_tool_definitions_for_spec(spec, code_mode_input_schema_max_bytes)
+                    .into_iter()
+                    .map(codex_code_mode::augment_tool_definition)
+                    .collect::<Vec<_>>();
             if let ToolSpec::Namespace(namespace) = spec {
                 let namespace_description = namespace.description.trim();
                 if !namespace_description.is_empty() {
@@ -108,7 +113,6 @@ pub fn collect_code_mode_tool_definitions<'a>(
             definitions
         })
         .filter(|definition| codex_code_mode::is_code_mode_nested_tool(&definition.name))
-        .map(codex_code_mode::augment_tool_definition)
         .collect::<Vec<_>>();
     tool_definitions.sort_by(|left, right| left.name.cmp(&right.name));
     tool_definitions.dedup_by(|left, right| left.name == right.name);
@@ -166,6 +170,7 @@ fn code_mode_tool_definitions_for_spec(
         ToolSpec::Function(tool) => {
             let name = tool.name.clone();
             vec![CodeModeToolDefinition {
+                summary: String::new(),
                 tool_name: ToolName::plain(name.clone()),
                 name,
                 description: tool.description.clone(),
@@ -181,6 +186,7 @@ fn code_mode_tool_definitions_for_spec(
         ToolSpec::Freeform(tool) => {
             let name = tool.name.clone();
             vec![CodeModeToolDefinition {
+                summary: String::new(),
                 tool_name: ToolName::plain(name.clone()),
                 name,
                 description: tool.description.clone(),
@@ -197,6 +203,7 @@ fn code_mode_tool_definitions_for_spec(
                 ResponsesApiNamespaceTool::Function(tool) => {
                     let tool_name = ToolName::namespaced(namespace.name.clone(), tool.name.clone());
                     CodeModeToolDefinition {
+                        summary: String::new(),
                         name: code_mode_name_for_tool_name(&tool_name),
                         tool_name,
                         description: tool.description.clone(),
@@ -212,6 +219,7 @@ fn code_mode_tool_definitions_for_spec(
                 ResponsesApiNamespaceTool::Custom(tool) => {
                     let tool_name = ToolName::namespaced(namespace.name.clone(), tool.name.clone());
                     CodeModeToolDefinition {
+                        summary: String::new(),
                         name: code_mode_name_for_tool_name(&tool_name),
                         tool_name,
                         description: tool.description.clone(),

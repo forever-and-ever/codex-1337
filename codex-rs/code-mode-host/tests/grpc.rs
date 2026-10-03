@@ -119,6 +119,7 @@ fn request(source: &str) -> ExecuteRequest {
 
 fn tool(name: &str) -> ToolDefinition {
     ToolDefinition {
+        summary: String::new(),
         name: name.to_string(),
         tool_name: ToolName::plain(name),
         description: String::new(),

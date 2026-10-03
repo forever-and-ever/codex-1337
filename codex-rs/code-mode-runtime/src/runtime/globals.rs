@@ -11,6 +11,8 @@ use super::callbacks::store_callback;
 use super::callbacks::text_callback;
 use super::callbacks::tool_callback;
 use super::callbacks::yield_control_callback;
+use super::discovery::describe_tool_callback;
+use super::discovery::search_tools_callback;
 
 pub(super) fn install_globals(scope: &mut v8::PinScope<'_, '_>) -> Result<(), String> {
     let global = scope.get_current_context().global(scope);
@@ -21,6 +23,8 @@ pub(super) fn install_globals(scope: &mut v8::PinScope<'_, '_>) -> Result<(), St
 
     let tools = build_tools_object(scope)?;
     let all_tools = build_all_tools_value(scope)?;
+    let describe_tool = helper_function(scope, "describe_tool", describe_tool_callback)?;
+    let search_tools = helper_function(scope, "search_tools", search_tools_callback)?;
     let clear_timeout = helper_function(scope, "clearTimeout", clear_timeout_callback)?;
     let set_timeout = helper_function(scope, "setTimeout", set_timeout_callback)?;
     let text = helper_function(scope, "text", text_callback)?;
@@ -35,6 +39,8 @@ pub(super) fn install_globals(scope: &mut v8::PinScope<'_, '_>) -> Result<(), St
 
     set_global(scope, global, "tools", tools.into())?;
     set_global(scope, global, "ALL_TOOLS", all_tools)?;
+    set_global(scope, global, "describe_tool", describe_tool.into())?;
+    set_global(scope, global, "search_tools", search_tools.into())?;
     set_global(scope, global, "clearTimeout", clear_timeout.into())?;
     set_global(scope, global, "setTimeout", set_timeout.into())?;
     set_global(scope, global, "text", text.into())?;
@@ -84,7 +90,7 @@ fn build_all_tools_value<'s>(
         let item = v8::Object::new(scope);
         let name = v8::String::new(scope, &tool.global_name)
             .ok_or_else(|| "failed to allocate ALL_TOOLS name".to_string())?;
-        let description = v8::String::new(scope, &tool.description)
+        let description = v8::String::new(scope, &tool.summary)
             .ok_or_else(|| "failed to allocate ALL_TOOLS description".to_string())?;
 
         if item.set(scope, name_key.into(), name.into()) != Some(true) {

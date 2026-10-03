@@ -54,6 +54,7 @@ fn tool_definition(definition: proto::ToolDefinition) -> Result<ToolDefinition, 
         .ok_or_else(|| Status::invalid_argument("tool definition is missing its tool name"))?;
     validation::tool_name(&name)?;
     Ok(ToolDefinition {
+        summary: definition.summary,
         name: definition.name,
         tool_name: ToolName::new(name.namespace, name.name),
         description: definition.description,

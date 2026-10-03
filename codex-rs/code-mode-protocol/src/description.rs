@@ -15,8 +15,17 @@ use crate::json_schema_types::render_json_schema_to_typescript_with_budget;
 use std::collections::BTreeSet;
 
 const MAX_JS_SAFE_INTEGER: u64 = (1_u64 << 53) - 1;
-const DEFERRED_NESTED_TOOLS_GUIDANCE: &str = r#"Some deferred nested tools may be omitted from this description. They are still available on the global `tools` object and listed in `ALL_TOOLS`.
-To find one, filter `ALL_TOOLS` by `name` and `description`."#;
+const MAX_SUMMARY_CHARACTERS: usize = 160;
+const DEFERRED_NESTED_TOOLS_GUIDANCE: &str = "Some deferred nested tools may be omitted from this description. They are still available on the global `tools` object and listed in `ALL_TOOLS`.";
+const TOOL_DISCOVERY_GUIDANCE: &str = r#"Tool discovery helpers (synchronous):
+- `ALL_TOOLS`: `{ name, description }` catalogue; exact callable names and purpose summaries, not signatures or full instructions.
+- `search_tools(query: string, options?: { namespace?: string, limit?: number, offset?: number })`: returns `{ matches: Array<{ name, description }>, truncated: boolean, next_offset: number | null }`. All case-insensitive literal query words must match a name or summary; an empty query browses. `namespace` restricts the normalized namespace or callable-name prefix (`functions` for plain tools). Limit defaults to 8, capped at 20. Continue with the same query/options and `offset: next_offset`.
+- `describe_tool(name: string)`: returns full instructions and declaration, including namespace guidance. Retrieve this contract when it is missing from context.
+Print bounded search results, not the whole catalogue:
+```js
+text(search_tools("symbol", { namespace: "mcp__depot", limit: 5 }));
+text(describe_tool("mcp__depot__lsp_symbols"));
+```"#;
 const LEGACY_IMAGE_HELPER_DESCRIPTION: &str = r#"`image(imageUrlOrItem: string | { image_url: string; detail?: "auto" | "low" | "high" | "original" | null } | ImageContent, detail?: "auto" | "low" | "high" | "original" | null)`: Appends an image item. `image_url` should be a base64-encoded `data:` URL. To forward an MCP tool image, pass an individual `ImageContent` block from `result.content`, for example `image(result.content[0])`. MCP image blocks may request detail with `_meta: { "codex/imageDetail": "original" }`. When provided, the second `detail` argument overrides any detail embedded in the first argument."#;
 const UNIFIED_IMAGE_HELPER_DESCRIPTION: &str = r#"`image(imageUrlOrItem: string | { image_url: string } | ImageContent)`: Appends an image item. `image_url` should be a base64-encoded `data:` URL. To forward an MCP tool image, pass an individual `ImageContent` block from `result.content`, for example `image(result.content[0])`."#;
 const EXEC_DESCRIPTION_TEMPLATE: &str = r#"Run JavaScript code to orchestrate/compose tool calls
@@ -42,7 +51,6 @@ const EXEC_DESCRIPTION_TEMPLATE: &str = r#"Run JavaScript code to orchestrate/co
 - `notify(value: string | number | boolean | undefined | null)`: immediately injects an extra `custom_tool_call_output` for the current `exec` call. Values are stringified like `text(...)`.
 - `setTimeout(callback: () => void, delayMs?: number)`: schedules a callback to run later and returns a timeout id. Pending timeouts do not keep `exec` alive by themselves; await an explicit promise if you need to wait for one.
 - `clearTimeout(timeoutId?: number)`: cancels a timeout created by `setTimeout`.
-- `ALL_TOOLS`: metadata for the enabled nested tools as `{ name, description }` entries.
 - `yield_control()`: yields the accumulated output to the model immediately while the script keeps running."#;
 const WAIT_DESCRIPTION_TEMPLATE: &str = r#"- Use `wait` only after `exec` returns `Script running with cell ID ...`.
 - `cell_id` identifies the running `exec` cell to resume.
@@ -144,6 +152,8 @@ pub struct ToolDefinition {
     pub name: String,
     pub tool_name: ToolName,
     pub description: String,
+    #[serde(default)]
+    pub summary: String,
     pub kind: CodeModeToolKind,
     pub input_schema: Option<JsonValue>,
     /// Internal budget used while rendering the input declaration, before sending it to the host.
@@ -294,6 +304,7 @@ pub fn build_exec_tool_description(
     if !description.is_empty() {
         sections.push(description);
     }
+    sections.push(TOOL_DISCOVERY_GUIDANCE.to_string());
     if !deferred_tools.is_empty() {
         let guidance = messages
             .and_then(|messages| messages.deferred_nested_tools_guidance.as_deref())
@@ -394,6 +405,7 @@ pub fn normalize_code_mode_identifier(tool_key: &str) -> String {
 
 pub fn augment_tool_definition(mut definition: ToolDefinition) -> ToolDefinition {
     if definition.name != PUBLIC_TOOL_NAME {
+        definition.summary = compact_tool_summary(&definition.description);
         definition.description = render_code_mode_sample_for_definition(&definition);
     }
     definition
@@ -404,6 +416,7 @@ pub fn enabled_tool_metadata(definition: &ToolDefinition) -> EnabledToolMetadata
         tool_name: definition.tool_name.clone(),
         global_name: normalize_code_mode_identifier(&definition.name),
         description: definition.description.clone(),
+        summary: compact_tool_summary(&definition.summary),
         kind: definition.kind,
     }
 }
@@ -413,7 +426,28 @@ pub struct EnabledToolMetadata {
     pub tool_name: ToolName,
     pub global_name: String,
     pub description: String,
+    pub summary: String,
     pub kind: CodeModeToolKind,
+}
+
+fn compact_tool_summary(purpose: &str) -> String {
+    let mut characters = purpose
+        .split_whitespace()
+        .enumerate()
+        .flat_map(|(index, word)| (index > 0).then_some(' ').into_iter().chain(word.chars()));
+    let mut prefix = characters
+        .by_ref()
+        .take(MAX_SUMMARY_CHARACTERS)
+        .collect::<String>();
+    if characters.next().is_none() {
+        return prefix;
+    }
+    prefix.pop();
+    if let Some(boundary) = prefix.rfind(' ') {
+        prefix.truncate(boundary);
+    }
+    prefix.push('…');
+    prefix
 }
 
 pub fn render_code_mode_sample(
@@ -629,6 +663,7 @@ mod tests {
     #[test]
     fn augment_tool_definition_appends_typed_declaration() {
         let definition = ToolDefinition {
+            summary: String::new(),
             name: "hidden_dynamic_tool".to_string(),
             tool_name: ToolName::plain("hidden_dynamic_tool"),
             description: "Test tool".to_string(),
@@ -659,6 +694,7 @@ mod tests {
     #[test]
     fn augment_tool_definition_includes_property_descriptions_as_comments() {
         let definition = ToolDefinition {
+            summary: String::new(),
             name: "weather_tool".to_string(),
             tool_name: ToolName::plain("weather_tool"),
             description: "Weather tool".to_string(),
@@ -708,6 +744,7 @@ mod tests {
     #[test]
     fn code_mode_types_structured_content_result_refs() {
         let definition = ToolDefinition {
+            summary: String::new(),
             name: "mcp__sample__search".to_string(),
             tool_name: ToolName::namespaced("mcp__sample__", "search"),
             description: "Search".to_string(),
@@ -755,6 +792,7 @@ mod tests {
         let definition = ToolDefinition {
             name: "send_message".to_string(),
             tool_name: ToolName::plain("send_message"),
+            summary: String::new(),
             description: "Send".to_string(),
             kind: CodeModeToolKind::Function,
             input_schema: Some(json!({
@@ -792,6 +830,7 @@ mod tests {
     fn code_mode_only_description_includes_nested_tools() {
         let description = build_exec_tool_description(
             &[ToolDefinition {
+                summary: String::new(),
                 name: "foo".to_string(),
                 tool_name: ToolName::plain("foo"),
                 description: "bar".to_string(),
@@ -842,6 +881,7 @@ bar"
         let description = build_exec_tool_description(
             &[
                 ToolDefinition {
+                    summary: String::new(),
                     name: "mcp__sample__alpha".to_string(),
                     tool_name: ToolName::namespaced("mcp__sample__", "alpha"),
                     description: "First tool".to_string(),
@@ -859,6 +899,7 @@ bar"
                     }))),
                 },
                 ToolDefinition {
+                    summary: String::new(),
                     name: "mcp__sample__beta".to_string(),
                     tool_name: ToolName::namespaced("mcp__sample__", "beta"),
                     description: "Second tool".to_string(),
@@ -904,6 +945,7 @@ bar"
         )]);
         let description = build_exec_tool_description(
             &[ToolDefinition {
+                summary: String::new(),
                 name: "mcp__sample__alpha".to_string(),
                 tool_name: ToolName::namespaced("mcp__sample__", "alpha"),
                 description: "First tool".to_string(),
@@ -935,6 +977,7 @@ bar"
     #[test]
     fn code_mode_only_description_renders_shared_mcp_types_once() {
         let first_tool = augment_tool_definition(ToolDefinition {
+            summary: String::new(),
             name: "mcp__sample__alpha".to_string(),
             tool_name: ToolName::namespaced("mcp__sample__", "alpha"),
             description: "First tool".to_string(),
@@ -970,6 +1013,7 @@ bar"
             })),
         });
         let second_tool = augment_tool_definition(ToolDefinition {
+            summary: String::new(),
             name: "mcp__sample__beta".to_string(),
             tool_name: ToolName::namespaced("mcp__sample__", "beta"),
             description: "Second tool".to_string(),
@@ -1008,6 +1052,7 @@ bar"
         let description = build_exec_tool_description(
             &[
                 ToolDefinition {
+                    summary: String::new(),
                     name: first_tool.name,
                     tool_name: first_tool.tool_name,
                     description: "First tool".to_string(),
@@ -1017,6 +1062,7 @@ bar"
                     output_schema: first_tool.output_schema,
                 },
                 ToolDefinition {
+                    summary: String::new(),
                     name: second_tool.name,
                     tool_name: second_tool.tool_name,
                     description: "Second tool".to_string(),
@@ -1046,6 +1092,7 @@ bar"
     #[test]
     fn code_mode_only_description_renders_shared_mcp_types_for_deferred_tools() {
         let deferred_tool = ToolDefinition {
+            summary: String::new(),
             name: "mcp__sample__alpha".to_string(),
             tool_name: ToolName::namespaced("mcp__sample__", "alpha"),
             description: "Deferred tool".to_string(),
@@ -1083,6 +1130,7 @@ bar"
         let description = build_exec_tool_description(
             &[],
             &[ToolDefinition {
+                summary: String::new(),
                 name: "deferred_tool".to_string(),
                 tool_name: ToolName::plain("deferred_tool"),
                 description: "Deferred tool".to_string(),
@@ -1099,7 +1147,7 @@ bar"
         );
 
         assert!(description.contains("Some deferred nested tools may be omitted"));
-        assert!(description.contains("filter `ALL_TOOLS` by `name` and `description`"));
-        assert!(!description.contains("do not print the full `ALL_TOOLS` array"));
+        assert!(description.contains("search_tools(query: string"));
+        assert!(description.contains("describe_tool(name: string)"));
     }
 }

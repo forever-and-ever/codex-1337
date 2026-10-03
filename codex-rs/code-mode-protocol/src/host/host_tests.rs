@@ -79,6 +79,7 @@ fn execute_request() -> WireExecuteRequest {
         tool_call_id: "call-1".to_string(),
         enabled_tools: vec![
             WireToolDefinition {
+                summary: "Function purpose".to_string(),
                 name: "function_tool".to_string(),
                 tool_name: WireToolName {
                     name: "function_tool".to_string(),
@@ -90,6 +91,7 @@ fn execute_request() -> WireExecuteRequest {
                 output_schema: None,
             },
             WireToolDefinition {
+                summary: "Freeform purpose".to_string(),
                 name: "freeform_tool".to_string(),
                 tool_name: WireToolName {
                     name: "freeform_tool".to_string(),
@@ -323,6 +325,7 @@ fn client_to_host_v1_variants_are_pinned() {
                             "name": "function_tool",
                             "tool_name": { "name": "function_tool", "namespace": null },
                             "description": "function tool",
+                            "summary": "Function purpose",
                             "kind": "function",
                             "input_schema": { "type": "object" },
                             "output_schema": null,
@@ -334,6 +337,7 @@ fn client_to_host_v1_variants_are_pinned() {
                                 "namespace": "mcp__sample__",
                             },
                             "description": "freeform tool",
+                            "summary": "Freeform purpose",
                             "kind": "freeform",
                             "input_schema": null,
                             "output_schema": { "type": "string" },

@@ -110,6 +110,7 @@ pub(crate) struct ToolDefinition {
     pub(crate) name: String,
     pub(crate) tool_name: ToolName,
     pub(crate) description: String,
+    pub(crate) summary: String,
     pub(crate) kind: ToolKind,
 }
 

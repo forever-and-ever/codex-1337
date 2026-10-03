@@ -17,6 +17,7 @@ use super::wait_response;
 #[test]
 fn rejects_missing_names_unknown_tool_kinds_and_invalid_json_schemas() {
     let definition = proto::ToolDefinition {
+        summary: String::new(),
         name: "echo".to_string(),
         tool_name: None,
         description: String::new(),

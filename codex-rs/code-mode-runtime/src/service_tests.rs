@@ -473,6 +473,7 @@ fn cell_id(value: &str) -> CellId {
 
 fn echo_tool() -> ToolDefinition {
     ToolDefinition {
+        summary: String::new(),
         name: "echo".to_string(),
         tool_name: ToolName::plain("echo"),
         description: String::new(),
@@ -992,18 +993,84 @@ text("done");
 #[tokio::test]
 async fn global_scope_contains_only_allowed_items() {
     let service = InProcessCodeModeSession::new();
-
-    let response = execute(
-        &service,
-        ExecuteRequest {
-            enabled_tools: vec![echo_tool()],
-            source: "text(JSON.stringify(Object.getOwnPropertyNames(globalThis).sort()));"
-                .to_string(),
-            yield_time_ms: None,
-            ..execute_request("")
+    let delegate = Arc::new(ReleasableToolDelegate::default());
+    delegate.release_tool();
+    let mut enabled_tools = (0..24)
+        .map(|index| {
+            let mut tool = codex_code_mode_protocol::augment_tool_definition(ToolDefinition {
+                name: format!("mcp__sample__echo-{index:02}"),
+                tool_name: ToolName::namespaced("mcp__sample__", format!("echo-{index:02}")),
+                description: format!(
+                    "Echo requested input. {}",
+                    "Detailed purpose λ. ".repeat(20)
+                ),
+                ..echo_tool()
+            });
+            tool.description = format!(
+                "Namespace instructions: preserve input.\n\n{}",
+                tool.description
+            );
+            tool
+        })
+        .collect::<Vec<_>>();
+    enabled_tools.push(codex_code_mode_protocol::augment_tool_definition(
+        ToolDefinition {
+            name: "mcp__sample__alpha".to_string(),
+            tool_name: ToolName::namespaced("mcp__sample__", "alpha"),
+            description: "Echo through a summary-only match".to_string(),
+            ..echo_tool()
         },
-    )
-    .await;
+    ));
+    enabled_tools.push(codex_code_mode_protocol::augment_tool_definition(
+        ToolDefinition {
+            name: "other__echo".to_string(),
+            tool_name: ToolName::namespaced("other", "echo"),
+            description: "Echo from another namespace".to_string(),
+            ..echo_tool()
+        },
+    ));
+    let metadata = enabled_tools
+        .iter()
+        .map(codex_code_mode_protocol::enabled_tool_metadata)
+        .map(|tool| serde_json::json!({"name": tool.global_name, "description": tool.summary}))
+        .collect::<Vec<_>>();
+    let full_description = enabled_tools[0].description.clone();
+
+    let response = service
+        .execute(
+            ExecuteRequest {
+                enabled_tools,
+                source: r#"
+text(Object.getOwnPropertyNames(globalThis).sort());
+const page = search_tools("ECHO", {namespace: "mcp__sample"});
+text(page);
+text(search_tools("echo", {namespace: "mcp__sample", offset: page.next_offset}));
+text(search_tools("echo", {namespace: "mcp__sample", limit: 100}));
+text(search_tools("echo", {namespace: "mcp__sample__echo"}));
+text(search_tools("echo", {namespace: "mcp__sample", offset: 20}));
+text(search_tools("mcp__sample__echo_00", {namespace: "mcp__sample"}));
+text(search_tools("missing"));
+text(search_tools("preserve input"));
+text(ALL_TOOLS.find(tool => tool.name === page.matches[0].name));
+text(describe_tool(page.matches[0].name));
+text(await tools[page.matches[0].name]({message: "same input"}));
+text([() => describe_tool("missing"), () => search_tools("", {limit: 0}),
+      () => search_tools("", {offset: -1})].map(run => {
+    try {run(); return false;} catch {return true;}
+}));
+"#
+                .to_string(),
+                yield_time_ms: None,
+                ..execute_request("")
+            },
+            delegate.clone(),
+            /*preempt*/ None,
+        )
+        .await
+        .unwrap()
+        .initial_response()
+        .await
+        .unwrap();
 
     let RuntimeResponse::Result {
         content_items,
@@ -1013,7 +1080,7 @@ async fn global_scope_contains_only_allowed_items() {
     else {
         panic!("global scope inspection failed unexpectedly: {response:?}");
     };
-    let [FunctionCallOutputContentItem::InputText { text }] = content_items.as_slice() else {
+    let Some(FunctionCallOutputContentItem::InputText { text }) = content_items.first() else {
         panic!("global scope inspection returned unexpected output: {content_items:?}");
     };
     let globals = serde_json::from_str::<Vec<String>>(text)
@@ -1077,6 +1144,7 @@ async fn global_scope_contains_only_allowed_items() {
         "audio",
         "decodeURI",
         "decodeURIComponent",
+        "describe_tool",
         "encodeURI",
         "encodeURIComponent",
         "escape",
@@ -1092,6 +1160,7 @@ async fn global_scope_contains_only_allowed_items() {
         "parseFloat",
         "parseInt",
         "setTimeout",
+        "search_tools",
         "store",
         "text",
         "tools",
@@ -1105,6 +1174,42 @@ async fn global_scope_contains_only_allowed_items() {
             "unexpected global {global} in {globals:?}"
         );
     }
+    let page = |start: usize, count: usize| {
+        let next = start + count;
+        serde_json::json!({
+            "matches": metadata[start..next],
+            "truncated": next < 25,
+            "next_offset": (next < 25).then_some(next),
+        })
+    };
+    let actual = content_items[1..]
+        .iter()
+        .map(|item| {
+            let FunctionCallOutputContentItem::InputText { text } = item else {
+                panic!("unexpected discovery output: {item:?}");
+            };
+            serde_json::from_str::<JsonValue>(text).unwrap_or_else(|_| serde_json::json!(text))
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        actual,
+        vec![
+            page(0, 8),
+            page(8, 8),
+            page(0, 20),
+            page(0, 8),
+            page(20, 5),
+            serde_json::json!({"matches": [metadata[0]], "truncated": false, "next_offset": null}),
+            serde_json::json!({"matches": [], "truncated": false, "next_offset": null}),
+            serde_json::json!({"matches": [], "truncated": false, "next_offset": null}),
+            metadata[0].clone(),
+            serde_json::json!(full_description),
+            JsonValue::Null,
+            serde_json::json!([true, true, true]),
+        ]
+    );
+    assert!(delegate.tool_started.load(Ordering::Acquire));
+    assert!(metadata[0]["description"].as_str().unwrap().chars().count() <= 160);
 }
 
 #[tokio::test]

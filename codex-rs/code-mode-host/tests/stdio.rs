@@ -241,6 +241,7 @@ async fn interrupt_yields_observations_without_stopping_the_cell() {
     let mut request = execute_request("await tools.block({}); text('done');");
     request.yield_time_ms = Some(60_000);
     request.enabled_tools = vec![ToolDefinition {
+        summary: String::new(),
         name: "block".to_string(),
         tool_name: ToolName::plain("block"),
         description: String::new(),
@@ -414,6 +415,7 @@ text(result.value);
     );
     callback_request.tool_call_id = "call-2".to_string();
     callback_request.enabled_tools = vec![ToolDefinition {
+        summary: String::new(),
         name: "echo".to_string(),
         tool_name: ToolName::plain("echo"),
         description: String::new(),
@@ -615,6 +617,7 @@ return;
     ]
     .into_iter()
     .map(|name| ToolDefinition {
+        summary: String::new(),
         name: name.to_string(),
         tool_name: ToolName::plain(name),
         description: String::new(),
@@ -757,6 +760,7 @@ async fn oversized_delegate_payloads_fail_only_the_tool_call() {
         .await
         .expect("create remote session");
     let tool = |name: &str| ToolDefinition {
+        summary: String::new(),
         name: name.to_string(),
         tool_name: ToolName::plain(name),
         description: String::new(),
@@ -929,6 +933,7 @@ async fn child_process_loss_cleans_up_and_rebuilds_the_shared_host() {
     let mut request_a = execute_request("await tools.tool_call_slow({});");
     request_a.yield_time_ms = Some(1);
     request_a.enabled_tools = vec![ToolDefinition {
+        summary: String::new(),
         name: "tool_call_slow".to_string(),
         tool_name: ToolName::plain("tool_call_slow"),
         description: String::new(),

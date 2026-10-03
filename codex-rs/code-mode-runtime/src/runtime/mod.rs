@@ -1,5 +1,6 @@
 mod audio;
 mod callbacks;
+mod discovery;
 mod globals;
 mod module_loader;
 mod timers;

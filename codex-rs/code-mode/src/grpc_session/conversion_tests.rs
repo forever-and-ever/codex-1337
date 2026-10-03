@@ -23,6 +23,7 @@ fn execute_request_preserves_tool_schemas_namespaces_and_limits() {
     let request = ExecuteRequest {
         tool_call_id: "outer".to_string(),
         enabled_tools: vec![ToolDefinition {
+            summary: "Search the workspace".to_string(),
             name: "search".to_string(),
             tool_name: ToolName::namespaced("work", "search"),
             description: "search the workspace".to_string(),
@@ -44,6 +45,7 @@ fn execute_request_preserves_tool_schemas_namespaces_and_limits() {
             tool_call_id: "outer".to_string(),
             source: "text('hello')".to_string(),
             enabled_tools: vec![grpc::ToolDefinition {
+                summary: "Search the workspace".to_string(),
                 name: "search".to_string(),
                 tool_name: Some(grpc::ToolName {
                     name: "search".to_string(),

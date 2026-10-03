@@ -96,6 +96,7 @@ pub(super) fn execute_request(
 
 pub(super) fn tool(name: &str) -> proto::ToolDefinition {
     proto::ToolDefinition {
+        summary: String::new(),
         name: name.to_string(),
         tool_name: Some(proto::ToolName {
             name: name.to_string(),

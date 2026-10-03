@@ -76,8 +76,7 @@ impl<'a> IndirectNamespacePrefixes<'a> {
         })
     }
 
-    /// ALL_TOOLS is flat, so each entry carries its namespace's guidance.
-    /// Its eventual model-visible output is subject to normal tool-output truncation.
+    /// Preserves namespace guidance in explicit full help without changing purpose summaries.
     pub fn apply_code_mode(&self, tools: &mut [ToolDefinition]) {
         if self.prefixes.is_empty() {
             return;

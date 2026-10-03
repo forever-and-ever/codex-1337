@@ -183,6 +183,7 @@ fn tool_spec_to_code_mode_tool_definition_returns_augmented_nested_tools() {
     assert_eq!(
         tool_spec_to_code_mode_tool_definition(&spec),
         Some(codex_code_mode::ToolDefinition {
+            summary: "Apply a patch".to_string(),
             name: "apply_patch".to_string(),
             tool_name: ToolName::plain("apply_patch"),
             description: r#"Apply a patch
@@ -220,6 +221,7 @@ fn tool_spec_to_code_mode_tool_definition_supports_namespaced_custom_tools() {
     assert_eq!(
         tool_spec_to_code_mode_tool_definition(&spec),
         Some(codex_code_mode::ToolDefinition {
+            summary: "Apply a patch".to_string(),
             name: "editor__apply_patch".to_string(),
             tool_name: ToolName::namespaced("editor", "apply_patch"),
             description: r#"Apply a patch
@@ -234,6 +236,25 @@ declare const tools: { editor__apply_patch(input: string): Promise<unknown>; };
             input_schema_max_bytes: None,
             output_schema: None,
         })
+    );
+    let definitions = super::collect_code_mode_tool_definitions(
+        [&spec],
+        /*code_mode_input_schema_max_bytes*/ None,
+    );
+    let [definition] = definitions.as_slice() else {
+        panic!("expected the namespaced custom tool");
+    };
+    let metadata = codex_code_mode::enabled_tool_metadata(definition);
+    assert_eq!(metadata.summary, "Apply a patch");
+    assert!(
+        metadata
+            .description
+            .starts_with("Editing tools\n\nApply a patch")
+    );
+    assert!(
+        metadata
+            .description
+            .contains("editor__apply_patch(input: string)")
     );
 }
 

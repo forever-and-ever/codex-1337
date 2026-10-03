@@ -14,6 +14,7 @@ fn plain_tools_join_an_existing_functions_group_only_with_a_prefix() {
         ToolName::namespaced("functions", "namespaced"),
     ]
     .map(|tool_name| ToolDefinition {
+        summary: String::new(),
         name: tool_name.name.clone(),
         tool_name,
         description: "Tool guidance.".to_string(),
@@ -89,6 +90,7 @@ fn flat_tool_descriptions_use_trimmed_namespace_prefixes() {
         ..Default::default()
     };
     let original = ToolDefinition {
+        summary: String::new(),
         name: "inspect".to_string(),
         tool_name: ToolName::plain("inspect"),
         description: "Inspect.".to_string(),
@@ -125,6 +127,7 @@ fn matching_prefixes_cover_each_namespace_once() {
         mcp_servers: Some(servers),
     };
     let original = ["gmail", "calendar", "drive", "slack"].map(|app| ToolDefinition {
+        summary: String::new(),
         name: format!("mcp__codex_apps__{app}__search"),
         tool_name: ToolName::namespaced(format!("mcp__codex_apps__{app}"), "search"),
         description: "Search.".to_string(),

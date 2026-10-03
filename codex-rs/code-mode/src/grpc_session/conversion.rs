@@ -38,6 +38,7 @@ pub(super) fn execute_request(
 
 fn tool_definition(definition: ToolDefinition) -> Result<grpc::ToolDefinition, String> {
     Ok(grpc::ToolDefinition {
+        summary: definition.summary,
         name: definition.name,
         tool_name: Some(grpc::ToolName {
             name: definition.tool_name.name,

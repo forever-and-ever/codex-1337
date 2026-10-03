@@ -327,6 +327,7 @@ fn runtime_request(request: ExecuteRequest) -> runtime::CreateCellRequest {
             .enabled_tools
             .into_iter()
             .map(|definition| runtime::ToolDefinition {
+                summary: definition.summary,
                 name: definition.name,
                 tool_name: runtime::ToolName {
                     name: definition.tool_name.name,

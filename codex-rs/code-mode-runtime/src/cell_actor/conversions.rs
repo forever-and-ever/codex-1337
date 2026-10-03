@@ -17,6 +17,7 @@ pub(super) fn runtime_request(request: CellRequest) -> ExecuteRequest {
             .enabled_tools
             .into_iter()
             .map(|definition| ToolDefinition {
+                summary: definition.summary,
                 name: definition.name,
                 tool_name: ToolName {
                     name: definition.tool_name.name,
