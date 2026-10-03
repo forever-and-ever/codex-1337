@@ -14,6 +14,10 @@ mod result;
 #[path = "mcp_preview.rs"]
 mod preview;
 
+#[path = "mcp_file_changes.rs"]
+mod file_changes;
+use file_changes::FileChangeDetail;
+
 #[path = "computer_activity.rs"]
 mod computer_activity;
 pub(crate) use computer_activity::ComputerActivityCell;
@@ -89,6 +93,25 @@ struct NodeReplExecOutput {
 }
 
 impl McpToolCallCell {
+    fn file_change_lines(&self, width: u16, detail: FileChangeDetail) -> Vec<HyperlinkLine> {
+        let Some(Ok(result)) = &self.result else {
+            return Vec::new();
+        };
+        let Some(receipt) = &result.file_changes else {
+            return Vec::new();
+        };
+        let (lines, _) = receipt.lines(
+            width.saturating_sub(crate::transcript_geometry::CHILD_INDENT),
+            detail,
+            &self.call_id,
+            &Default::default(),
+        );
+        prefix_hyperlink_lines(
+            lines,
+            crate::transcript_geometry::CHILD_PREFIX.into(),
+            crate::transcript_geometry::CHILD_PREFIX.into(),
+        )
+    }
     fn header_verb(&self) -> &'static str {
         if self.result.is_some() {
             "Called"
@@ -393,7 +416,9 @@ impl HistoryCell for McpToolCallCell {
     }
 
     fn nested_summary_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        self.render_hyperlink_lines(width, McpToolCallRenderMode::Summary)
+        let mut lines = self.render_hyperlink_lines(width, McpToolCallRenderMode::Summary);
+        lines.extend(self.file_change_lines(width, FileChangeDetail::Summary));
+        lines
     }
 
     fn nested_detail_lines(&self, width: u16) -> Vec<HyperlinkLine> {
@@ -405,7 +430,56 @@ impl HistoryCell for McpToolCallCell {
     fn nested_activity_parts(&self, width: u16, expanded: &std::collections::HashSet<String>) -> Option<super::activity_parts::ActivityParts> {
         let mut nested = self.clone();
         nested.completed_at = None;
-        nested.activity_parts(width, /*header_reserve*/ 0, expanded)
+        let mut expanded = expanded.clone();
+        expanded.extend(self.activity_ids());
+        nested.activity_parts(width, /*header_reserve*/ 0, &expanded)
+    }
+
+    fn has_nested_details(&self, width: u16) -> bool {
+        self.result.as_ref().is_some_and(|result| matches!(result, Ok(result) if result.file_changes.is_some()))
+            || self.activity_disclosure(width).is_some()
+            || self.activity_arguments_truncated(width)
+    }
+
+    fn activity_parts(
+        &self,
+        width: u16,
+        header_reserve: usize,
+        expanded: &std::collections::HashSet<String>,
+    ) -> Option<super::activity_parts::ActivityParts> {
+        let Some(Ok(result)) = &self.result else {
+            return None;
+        };
+        let receipt = result.file_changes.as_ref()?;
+        let output_expanded = self.activity_ids().iter().any(|id| expanded.contains(id));
+        let mut lines = if output_expanded {
+            self.render_hyperlink_lines(width, McpToolCallRenderMode::Expanded)
+        } else {
+            self.compact_mcp_lines(
+                width.saturating_sub(u16::try_from(header_reserve).unwrap_or(u16::MAX)),
+            )
+        };
+        let offset = lines.len();
+        let (file_lines, mut controls) = receipt.lines(
+            width.saturating_sub(crate::transcript_geometry::CHILD_INDENT),
+            FileChangeDetail::Disclosed,
+            &self.call_id,
+            expanded,
+        );
+        for control in &mut controls {
+            control.line += offset;
+        }
+        lines.extend(prefix_hyperlink_lines(
+            file_lines,
+            crate::transcript_geometry::CHILD_PREFIX.into(),
+            crate::transcript_geometry::CHILD_PREFIX.into(),
+        ));
+        Some(super::activity_parts::ActivityParts {
+            lines,
+            header: self.activity_header(),
+            output: self.activity_disclosure(width),
+            controls,
+        })
     }
     fn activity_header(&self) -> Option<super::activity_parts::ActivityHeader> {
         let mut heading = Line::default();
@@ -442,7 +516,9 @@ impl HistoryCell for McpToolCallCell {
     }
 
     fn compact_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        self.compact_mcp_lines(width)
+        let mut lines = self.compact_mcp_lines(width);
+        lines.extend(self.file_change_lines(width, FileChangeDetail::Summary));
+        lines
     }
 
     fn activity_argument_lines(&self, width: u16) -> Vec<HyperlinkLine> {
@@ -450,7 +526,9 @@ impl HistoryCell for McpToolCallCell {
     }
 
     fn expanded_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        self.render_hyperlink_lines(width, McpToolCallRenderMode::Expanded)
+        let mut lines = self.render_hyperlink_lines(width, McpToolCallRenderMode::Expanded);
+        lines.extend(self.file_change_lines(width, FileChangeDetail::Full));
+        lines
     }
 
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
@@ -462,11 +540,15 @@ impl HistoryCell for McpToolCallCell {
     }
 
     fn display_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        self.render_hyperlink_lines(width, McpToolCallRenderMode::Display)
+        let mut lines = self.render_hyperlink_lines(width, McpToolCallRenderMode::Display);
+        lines.extend(self.file_change_lines(width, FileChangeDetail::Summary));
+        lines
     }
 
     fn transcript_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        self.render_hyperlink_lines(width, McpToolCallRenderMode::Transcript)
+        let mut lines = self.render_hyperlink_lines(width, McpToolCallRenderMode::Transcript);
+        lines.extend(self.file_change_lines(width, FileChangeDetail::Full));
+        lines
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
@@ -492,6 +574,9 @@ impl HistoryCell for McpToolCallCell {
             }
         }
 
+        lines.extend(visible_lines(
+            self.file_change_lines(u16::MAX, FileChangeDetail::Full),
+        ));
         lines
     }
 

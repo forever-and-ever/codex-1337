@@ -56,6 +56,7 @@ use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ServerRequest;
 use codex_app_server_protocol::ServerResponse;
+use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::Turn;
 use codex_app_server_protocol::TurnCompletedNotification;
 use codex_app_server_protocol::TurnError;
@@ -838,7 +839,25 @@ impl AnalyticsEventsClient {
         ) {
             return;
         }
-        self.record_fact(AnalyticsFact::Notification(Box::new(notification.clone())));
+        let mut notification = notification.clone();
+        let item = match &mut notification {
+            ServerNotification::ItemStarted(event) => Some(&mut event.item),
+            ServerNotification::ItemCompleted(event) => Some(&mut event.item),
+            _ => None,
+        };
+        if let Some(ThreadItem::McpToolCall {
+            result: Some(result),
+            ..
+        }) = item
+            && let Some(meta) = result
+                .meta
+                .as_mut()
+                .and_then(serde_json::Value::as_object_mut)
+        {
+            // Receipts belong to the human transcript, not the analytics fact queue.
+            meta.remove(codex_protocol::mcp_file_changes::FILE_CHANGES_META_KEY);
+        }
+        self.record_fact(AnalyticsFact::Notification(Box::new(notification)));
     }
 }
 

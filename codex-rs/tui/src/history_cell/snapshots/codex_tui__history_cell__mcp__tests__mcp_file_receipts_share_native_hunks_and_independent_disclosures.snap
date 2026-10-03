@@ -1,0 +1,120 @@
+---
+source: tui/src/history_cell/mcp_tests.rs
+assertion_line: 97
+expression: "snapshots.join(\"\\n\\n\")"
+---
+text and rename
+Compact
+• Called semedit.edit()
+    Edited
+        /workspace/a.rs (+1, -1)
+        //remote/workspace/old name.rs → //remote/workspace/new name.rs (+1, -1)
+First file expanded
+• Called semedit.edit()
+    Edited
+        /workspace/a.rs (+1, -1)
+        1 -old
+        1 +new
+        //remote/workspace/old name.rs → //remote/workspace/new name.rs (+1, -1)
+Transcript
+• Called semedit.edit()
+  └ ordinary result remains accessible
+    Edited
+        /workspace/a.rs (+1, -1)
+        1 -old
+        1 +new
+        //remote/workspace/old name.rs → //remote/workspace/new name.rs (+1, -1)
+        1 -old
+        1 +new
+
+partial failure
+Compact
+• Failed semedit.edit()
+    Partially applied
+        /workspace/a.rs (+1, -1)
+        /workspace/refused.rs — not applied; content unavailable
+First file expanded
+• Failed semedit.edit()
+    Partially applied
+        /workspace/a.rs (+1, -1)
+        1 -old
+        1 +new
+        /workspace/refused.rs — not applied; content unavailable
+Transcript
+• Called semedit.edit()
+  └ Publication partially failed; do not retry.
+    Partially applied
+        /workspace/a.rs (+1, -1)
+        1 -old
+        1 +new
+        /workspace/refused.rs — not applied; content unavailable
+
+metadata only
+Compact
+• Called semedit.edit()
+    Edited
+        /workspace/a  \u{202e}.rs (+1, -1)
+First file expanded
+• Called semedit.edit()
+    Edited
+        /workspace/a  \u{202e}.rs (+1, -1)
+        1 -old
+        1 +new
+Transcript
+• Called semedit.edit()
+    Edited
+        /workspace/a  \u{202e}.rs (+1, -1)
+        1 -old
+        1 +new
+
+preview
+Compact
+• Called semedit.edit()
+    Preview — not applied
+        /workspace/a.rs (+1, -1) — preview
+First file expanded
+• Called semedit.edit()
+    Preview — not applied
+        /workspace/a.rs (+1, -1) — preview
+        1 -old
+        1 +new
+Transcript
+• Called semedit.edit()
+  └ ordinary result remains accessible
+    Preview — not applied
+        /workspace/a.rs (+1, -1) — preview
+        1 -old
+        1 +new
+
+summary and omissions
+Compact
+• Called semedit.edit()
+    Edited
+        /workspace/blob.bin — binary; full diff unavailable
+    2 additional files omitted; full diffs unavailable
+First file expanded
+• Called semedit.edit()
+    Edited
+        /workspace/blob.bin — binary; full diff unavailable
+    2 additional files omitted; full diffs unavailable
+Transcript
+• Called semedit.edit()
+  └ ordinary result remains accessible
+    Edited
+        /workspace/blob.bin — binary; full diff unavailable
+    2 additional files omitted; full diffs unavailable
+
+unknown
+Compact
+• Called semedit.edit()
+    Changes uncertain
+    Paths and effects unavailable; changes may have occurred.
+First file expanded
+• Called semedit.edit()
+    Changes uncertain
+    Paths and effects unavailable; changes may have occurred.
+Transcript
+• Called semedit.edit()
+  └ ordinary result remains accessible
+    Changes uncertain
+    Paths and effects unavailable; changes may have occurred.
