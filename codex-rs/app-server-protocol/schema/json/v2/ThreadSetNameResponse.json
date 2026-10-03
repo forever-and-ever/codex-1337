@@ -1,5 +1,14 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "threadName": {
+      "description": "Persisted spelling, including any generated collision suffix.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
   "title": "ThreadSetNameResponse",
   "type": "object"
 }

@@ -5774,6 +5774,11 @@ class ThreadMetadataUpdateParams(BaseModel):
     thread_id: Annotated[str, Field(alias="threadId")]
 
 
+class ThreadNameMode(Enum):
+    explicit = "explicit"
+    generated = "generated"
+
+
 class ThreadNameUpdatedNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -6229,15 +6234,29 @@ class ThreadSetNameParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
+    conflict_thread_ids: Annotated[
+        list[str] | None,
+        Field(
+            alias="conflictThreadIds",
+            description="Concrete owners the caller confirmed may be archived to release the name.",
+        ),
+    ] = None
     name: str
+    naming_mode: Annotated[ThreadNameMode | None, Field(alias="namingMode")] = None
     thread_id: Annotated[str, Field(alias="threadId")]
 
 
 class ThreadSetNameResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
+    thread_name: Annotated[
+        str | None,
+        Field(
+            alias="threadName",
+            description="Persisted spelling, including any generated collision suffix.",
+        ),
+    ] = None
 
 
 class ThreadShellCommandParams(BaseModel):
@@ -10031,6 +10050,13 @@ class ThreadForkParams(BaseModel):
     ] = None
     base_instructions: Annotated[str | None, Field(alias="baseInstructions")] = None
     config: dict[str, Any] | None = None
+    conflict_thread_ids: Annotated[
+        list[str] | None,
+        Field(
+            alias="conflictThreadIds",
+            description="Concrete owners the caller confirmed may be archived to release the name.",
+        ),
+    ] = None
     cwd: str | None = None
     developer_instructions: Annotated[str | None, Field(alias="developerInstructions")] = None
     ephemeral: bool | None = None
@@ -10052,6 +10078,12 @@ class ThreadForkParams(BaseModel):
         str | None, Field(description="Configuration overrides for the forked thread, if any.")
     ] = None
     model_provider: Annotated[str | None, Field(alias="modelProvider")] = None
+    name: Annotated[
+        str | None,
+        Field(
+            description="Explicit name for the new conversation; omission allocates a fork name."
+        ),
+    ] = None
     sandbox: SandboxMode | None = None
     service_tier: Annotated[str | None, Field(alias="serviceTier")] = None
     thread_id: Annotated[str, Field(alias="threadId")]
@@ -10339,6 +10371,38 @@ class ThreadListParams(BaseModel):
             description="If true, return from the state DB without scanning JSONL rollouts to repair thread metadata. Omitted or false preserves scan-and-repair behavior.",
         ),
     ] = None
+
+
+class ThreadNameConflict(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    cwd: LegacyAppPathString
+    name: str
+    status: ThreadStatus
+    thread_id: Annotated[str, Field(alias="threadId")]
+
+
+class ThreadNameConflictThreadNameConflictError(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    archive_stops_descendants: bool
+    conflicts: list[ThreadNameConflict]
+    name: str
+    type: Annotated[
+        Literal["threadNameConflict"],
+        Field(title="ThreadNameConflictv2::ThreadNameConflictErrorType"),
+    ]
+
+
+class ThreadNameConflictError(RootModel[ThreadNameConflictThreadNameConflictError]):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: Annotated[
+        ThreadNameConflictThreadNameConflictError, Field(title="ThreadNameConflictError")
+    ]
 
 
 class TranscriptSegmentThreadRealtimeItem(BaseModel):

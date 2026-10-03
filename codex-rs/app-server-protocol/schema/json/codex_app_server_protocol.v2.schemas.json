@@ -19635,6 +19635,16 @@
             "null"
           ]
         },
+        "conflictThreadIds": {
+          "description": "Concrete owners the caller confirmed may be archived to release the name.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "cwd": {
           "type": [
             "string",
@@ -19669,6 +19679,13 @@
           ]
         },
         "modelProvider": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "Explicit name for the new conversation; omission allocates a fork name.",
           "type": [
             "string",
             "null"
@@ -21349,6 +21366,73 @@
       "title": "ThreadMetadataUpdateResponse",
       "type": "object"
     },
+    "ThreadNameConflict": {
+      "properties": {
+        "cwd": {
+          "$ref": "#/definitions/LegacyAppPathString"
+        },
+        "name": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/ThreadStatus"
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "cwd",
+        "name",
+        "status",
+        "threadId"
+      ],
+      "type": "object"
+    },
+    "ThreadNameConflictError": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "oneOf": [
+        {
+          "properties": {
+            "archive_stops_descendants": {
+              "type": "boolean"
+            },
+            "conflicts": {
+              "items": {
+                "$ref": "#/definitions/ThreadNameConflict"
+              },
+              "type": "array"
+            },
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "threadNameConflict"
+              ],
+              "title": "ThreadNameConflictv2::ThreadNameConflictErrorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "archive_stops_descendants",
+            "conflicts",
+            "name",
+            "type"
+          ],
+          "title": "ThreadNameConflictv2::ThreadNameConflictError",
+          "type": "object"
+        }
+      ],
+      "title": "ThreadNameConflictError"
+    },
+    "ThreadNameMode": {
+      "enum": [
+        "explicit",
+        "generated"
+      ],
+      "type": "string"
+    },
     "ThreadNameUpdatedNotification": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
@@ -22552,8 +22636,28 @@
     "ThreadSetNameParams": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
+        "conflictThreadIds": {
+          "description": "Concrete owners the caller confirmed may be archived to release the name.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "name": {
           "type": "string"
+        },
+        "namingMode": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadNameMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "threadId": {
           "type": "string"
@@ -22568,6 +22672,15 @@
     },
     "ThreadSetNameResponse": {
       "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "threadName": {
+          "description": "Persisted spelling, including any generated collision suffix.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
       "title": "ThreadSetNameResponse",
       "type": "object"
     },

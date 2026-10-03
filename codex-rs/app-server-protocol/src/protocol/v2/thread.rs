@@ -10,7 +10,6 @@ use super::ThreadRealtimeItem;
 use super::ThreadSection;
 use super::ThreadSectionAppearance;
 use super::ThreadSource;
-use super::ThreadStatus;
 use super::Turn;
 use super::TurnEnvironmentParams;
 use super::TurnError;
@@ -857,17 +856,30 @@ pub enum ThreadNameMode {
 pub struct ThreadNameConflict {
     pub thread_id: String,
     pub name: String,
-    pub cwd: PathBuf,
+    pub cwd: LegacyAppPathString,
     pub status: ThreadStatus,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(tag = "type", rename = "threadNameConflict", rename_all = "camelCase")]
-#[ts(tag = "type", rename = "threadNameConflict", export_to = "v2/")]
-pub struct ThreadNameConflictError {
-    pub name: String,
-    pub conflicts: Vec<ThreadNameConflict>,
-    pub archive_stops_descendants: bool,
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+#[ts(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    export_to = "v2/"
+)]
+pub enum ThreadNameConflictError {
+    #[serde(rename = "threadNameConflict")]
+    #[ts(rename = "threadNameConflict")]
+    Conflict {
+        name: String,
+        conflicts: Vec<ThreadNameConflict>,
+        archive_stops_descendants: bool,
+    },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]

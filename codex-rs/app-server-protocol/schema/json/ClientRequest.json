@@ -4452,6 +4452,16 @@
             "null"
           ]
         },
+        "conflictThreadIds": {
+          "description": "Concrete owners the caller confirmed may be archived to release the name.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "cwd": {
           "type": [
             "string",
@@ -4486,6 +4496,13 @@
           ]
         },
         "modelProvider": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "Explicit name for the new conversation; omission allocates a fork name.",
           "type": [
             "string",
             "null"
@@ -4900,6 +4917,13 @@
         "threadId"
       ],
       "type": "object"
+    },
+    "ThreadNameMode": {
+      "enum": [
+        "explicit",
+        "generated"
+      ],
+      "type": "string"
     },
     "ThreadReadParams": {
       "properties": {
@@ -5348,8 +5372,28 @@
     },
     "ThreadSetNameParams": {
       "properties": {
+        "conflictThreadIds": {
+          "description": "Concrete owners the caller confirmed may be archived to release the name.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "name": {
           "type": "string"
+        },
+        "namingMode": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadNameMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "threadId": {
           "type": "string"

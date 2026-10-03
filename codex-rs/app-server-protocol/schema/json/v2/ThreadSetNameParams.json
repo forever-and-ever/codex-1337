@@ -1,8 +1,37 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ThreadNameMode": {
+      "enum": [
+        "explicit",
+        "generated"
+      ],
+      "type": "string"
+    }
+  },
   "properties": {
+    "conflictThreadIds": {
+      "description": "Concrete owners the caller confirmed may be archived to release the name.",
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
     "name": {
       "type": "string"
+    },
+    "namingMode": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ThreadNameMode"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "threadId": {
       "type": "string"

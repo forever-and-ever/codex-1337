@@ -18,6 +18,12 @@ import type { ThreadSource } from "./ThreadSource";
  * Prefer using thread_id whenever possible.
  */
 export type ThreadForkParams = {threadId: string, /**
+ * Explicit name for the new conversation; omission allocates a fork name.
+ */
+name?: string | null, /**
+ * Concrete owners the caller confirmed may be archived to release the name.
+ */
+conflictThreadIds?: Array<string> | null, /**
  * Optional last turn id to fork through, inclusive.
  *
  * When specified, turns after `last_turn_id` are omitted from the fork.
