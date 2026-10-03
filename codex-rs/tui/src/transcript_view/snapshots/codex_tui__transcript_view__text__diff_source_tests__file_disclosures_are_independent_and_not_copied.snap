@@ -1,5 +1,6 @@
 ---
 source: tui/src/transcript_view/diff_source_tests.rs
+assertion_line: 241
 expression: "snapshots.join(\"\\n\\n\")"
 ---
 collapsed
@@ -112,7 +113,7 @@ message boundary
 [+]     alpha.rs (+2, -0)
 [+]     beta.rs (+2, -0)
 
-A separate message
+    A separate message
 
     • Edited (~ 55 tokens)
 [-]     gamma.rs (+1, -0)

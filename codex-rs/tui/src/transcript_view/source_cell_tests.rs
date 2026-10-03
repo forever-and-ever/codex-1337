@@ -136,7 +136,12 @@ fn recap_copy_preserves_hard_lines_and_reflows_only_soft_wraps() {
             "retained copy at {width} columns"
         );
         view.end_selection(&cells);
-        let lines = cells[0].display_hyperlink_lines(width);
+        let lines = crate::transcript_geometry::rich_lines(cells[0].display_hyperlink_lines(
+            crate::transcript_geometry::content_width(
+                width,
+                crate::history_cell::HistoryRenderMode::Rich,
+            ),
+        ));
         let area = Rect::new(/*x*/ 0, /*y*/ 0, width, /*height*/ 64);
         let mut expected = Buffer::empty(area);
         HyperlinkParagraph::new(&lines, Style::default()).render(area, &mut expected);

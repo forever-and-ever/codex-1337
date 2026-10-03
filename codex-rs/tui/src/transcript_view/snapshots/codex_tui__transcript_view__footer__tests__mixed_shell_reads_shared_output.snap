@@ -1,5 +1,6 @@
 ---
 source: tui/src/transcript_view/footer_tests.rs
+assertion_line: 664
 expression: "snapshots.join(\"\\n\")"
 ---
 expanded=false
@@ -47,8 +48,8 @@ Buffer {
         "        Read lib.rs:20–80;                                                                          ",
         "        Read log.txt                                                                                ",
         "                                                                                                    ",
-        "      combined output                                                                               ",
-        "      final error                                                                                   ",
+        "        combined output                                                                             ",
+        "        final error                                                                                 ",
         "                                                                                                    ",
         "                                                                                                    ",
         "                                                                                                    ",

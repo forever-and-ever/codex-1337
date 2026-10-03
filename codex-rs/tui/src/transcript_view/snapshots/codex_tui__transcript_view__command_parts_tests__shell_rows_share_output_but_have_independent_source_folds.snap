@@ -1,5 +1,6 @@
 ---
 source: tui/src/transcript_view/command_parts_tests.rs
+assertion_line: 109
 expression: "snapshots.join(\"\\n\\n\")"
 ---
 collapsed
@@ -18,7 +19,7 @@ output only
 [+]     git diff --stat --ignore-all-space -- src/very_lon... &&
         echo 'not;a&&boundary'
 
-      combined output
+        combined output
 
 opaque command expanded
 [-] • Ran (~ 2,352 tokens)
@@ -29,7 +30,7 @@ opaque command expanded
         very_long_directory_name &&
         echo 'not;a&&boundary'
 
-      combined output
+        combined output
 
 narrow
 [-] • Ran (~ 2,352 tokens)
@@ -41,7 +42,7 @@ narrow
         very_long_directory_name &&
         echo 'not;a&&boundary'
 
-      combined output
+        combined output
 
 wide
 [-] • Ran (~ 2,352 tokens)
@@ -51,7 +52,7 @@ wide
 [-]     git diff --stat --ignore-all-space -- src/very_long_directory_name &&
         echo 'not;a&&boundary'
 
-      combined output
+        combined output
 
 opaque command open, output closed
 [+] • Ran (~ 2,352 tokens)

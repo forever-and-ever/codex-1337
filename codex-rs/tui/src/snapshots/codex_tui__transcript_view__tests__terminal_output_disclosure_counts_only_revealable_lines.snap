@@ -1,33 +1,50 @@
 ---
 source: tui/src/transcript_view_tests.rs
+assertion_line: 219
 expression: "frames.join(\"\\n\\n\")"
 ---
-three visible
-• Ran echo
-  └ a
-    b
-    c
+empty result, collapsed
+    • Ran true
 
-one hidden
-• Ran echo
-  └ b
-    c
-    d
-    + 1 line (ctrl+t to expand)
+three lines, collapsed
+[+] • Ran echo
 
-clipped line
-• Ran echo
-  └ abcdefghijklmno…
-    + 1 line
+three lines, expanded
+[-] • Ran echo
 
-command only
-• Ran echo a …
-  └ (no output)
-    + Show details
+        a
+        b
+        c
 
-storage truncated
-• Running echo
-  └ x
-    x
-    x
-    + 97 lines (ctrl+t to expand)
+four lines, collapsed
+[+] • Ran echo
+
+four lines, expanded
+[-] • Ran echo
+
+        a
+        b
+        c
+        d
+
+clipped line, collapsed
+[+] • Ran echo
+
+clipped line, expanded
+[-] • Ran echo
+
+        abcdefghijkl
+        mnopqrstuvwx
+        yz
+
+command only, collapsed
+    • Ran
+[+]     echo a
+
+command only, expanded
+    • Ran
+[-]     echo a
+        echo b
+
+storage truncated, collapsed
+[+] • Running echo

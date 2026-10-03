@@ -92,6 +92,8 @@ fn terminal_output_disclosure_follows_live_history_and_keymap() {
         /*expanded*/ false,
         |width, _| {
             Some(ActivityTranscriptLines {
+                is_tool_entry: cell.is_tool_entry(),
+                header: cell.activity_header(),
                 controls: Vec::new(),
                 activity: cell.compact_hyperlink_lines(width),
                 auxiliary: Vec::new(),
@@ -151,8 +153,9 @@ fn terminal_output_disclosure_counts_only_revealable_lines() {
 
     let mut frames = Vec::new();
     for (name, command, output, width, streamed) in [
-        ("three visible", "echo", "a\nb\nc\n".to_owned(), 64, false),
-        ("one hidden", "echo", "a\nb\nc\nd\n".to_owned(), 64, false),
+        ("empty result", "true", String::new(), 64, false),
+        ("three lines", "echo", "a\nb\nc\n".to_owned(), 64, false),
+        ("four lines", "echo", "a\nb\nc\nd\n".to_owned(), 64, false),
         (
             "clipped line",
             "echo",
@@ -182,21 +185,38 @@ fn terminal_output_disclosure_counts_only_revealable_lines() {
         } else {
             cell.complete_call(
                 "output-test",
-                CommandOutput::new(/*exit_code*/ 0, output),
+                CommandOutput::new(/*exit_code*/ 0, output.clone()),
                 std::time::Duration::from_secs(/*secs*/ 1),
             );
         }
         let cells: [Arc<dyn HistoryCell>; 1] = [Arc::new(cell)];
+        let mut view = TranscriptView::default();
         frames.push(format!(
-            "{name}\n{}",
-            text(&render(
-                &mut TranscriptView::default(),
-                &cells,
-                width,
-                /*height*/ 6,
-            ))
-            .trim_end()
+            "{name}, collapsed\n{}",
+            text(&render(&mut view, &cells, width, /*height*/ 6,)).trim_end()
         ));
+        let targets = view
+            .current_layout(&cells, /*index*/ 0)
+            .unwrap()
+            .fold_targets();
+        assert_eq!(
+            targets.contains(&crate::history_cell::activity_parts::FoldTarget::Activity),
+            !output.trim().is_empty()
+        );
+        if !streamed && !targets.is_empty() {
+            for target in targets {
+                view.disclosure
+                    .expanded
+                    .extend(target.ids(&cells[0].activity_ids()));
+            }
+            view.cache.clear();
+            view.jump_to_beginning(&cells);
+            let expanded = render(&mut view, &cells, width, /*height*/ 8);
+            let layout = view.current_layout(&cells, /*index*/ 0).unwrap();
+            assert!(layout.text().contains(command));
+            assert!(layout.text().contains(output.trim_end_matches('\n')));
+            frames.push(format!("{name}, expanded\n{}", text(&expanded).trim_end()));
+        }
     }
     insta::assert_snapshot!(frames.join("\n\n"));
 }
@@ -527,7 +547,7 @@ fn single_row_scrolling_crosses_an_entry_separator_in_both_directions() {
             &mut view, &cells, /*width*/ 20, /*height*/ 1,
         )));
     }
-    assert_eq!(frames, ["", "first", "", "second"]);
+    assert_eq!(frames, ["", "    first", "", "    second"]);
 }
 
 #[test]
@@ -561,7 +581,7 @@ fn selecting_within_an_edge_row_does_not_start_selection_autoscroll() {
         view.handle_mouse(
             MouseEvent {
                 kind: MouseEventKind::Drag(MouseButton::Left),
-                column: 3,
+                column: 7,
                 row: edge,
                 modifiers: KeyModifiers::NONE,
             },
@@ -718,9 +738,9 @@ fn only_visible_history_is_laid_out_and_repeated_frames_reuse_it() {
 fn selection_copies_source_across_wraps_and_survives_prepend() {
     let mut cells = vec![cell("alpha beta gamma delta")];
     let mut view = TranscriptView::default();
-    render(&mut view, &cells, /*width*/ 10, /*height*/ 5);
+    render(&mut view, &cells, /*width*/ 14, /*height*/ 5);
     view.begin_selection(&cells, /*column*/ 0, /*row*/ 0, /*clicks*/ 1);
-    view.extend_selection(/*column*/ 5, /*row*/ 2);
+    view.extend_selection(/*column*/ 9, /*row*/ 2);
     assert_eq!(
         view.selected_text(&cells),
         Some("alpha beta gamma delta".to_string())
@@ -753,7 +773,7 @@ fn resize_keeps_the_logical_reading_anchor() {
         text(&render(
             &mut view, &cells, /*width*/ 20, /*height*/ 2
         )),
-        "final answer\n"
+        "    final answer\n"
     );
     assert!(!view.is_following());
     assert!(!view.unseen_activity);
@@ -988,7 +1008,7 @@ fn resizing_repeated_lines_keeps_the_same_occurrence() {
     ))];
     let mut view = TranscriptView::default();
     view.jump_to_entry(&cells, /*index*/ 0);
-    render(&mut view, &cells, /*width*/ 12, /*height*/ 2);
+    render(&mut view, &cells, /*width*/ 16, /*height*/ 2);
     view.scroll(&cells, /*rows*/ 3);
     let original = cells[0]
         .raw_lines()
@@ -1001,15 +1021,15 @@ fn resizing_repeated_lines_keeps_the_same_occurrence() {
     let replacement = cell(format!("older report\n\n{original}"));
     view.replace_group(&cells, 0..2, &replacement);
     cells.splice(0..2, [replacement]);
-    let wide = render(&mut view, &cells, /*width*/ 24, /*height*/ 2);
+    let wide = render(&mut view, &cells, /*width*/ 28, /*height*/ 2);
     insta::assert_snapshot!(text(&wide), @"
-    alpha beta gamma delta
-    second occurrence ends
+        alpha beta gamma delta
+        second occurrence ends
     ");
-    let narrow = render(&mut view, &cells, /*width*/ 12, /*height*/ 2);
+    let narrow = render(&mut view, &cells, /*width*/ 16, /*height*/ 2);
     insta::assert_snapshot!(text(&narrow), @"
-    gamma delta
-    second
+        gamma delta
+        second
     ");
 }
 

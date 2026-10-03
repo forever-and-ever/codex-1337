@@ -1,9 +1,9 @@
 ---
 source: tui/src/transcript_view/tool_entries_tests.rs
-assertion_line: 62
+assertion_line: 215
 expression: rendered
 ---
-Before tools
+    Before tools
 
     • Started `/root/worker`
     • Waited (~ 47 tokens) · still running
@@ -19,4 +19,4 @@ Before tools
     • Completed `/root/worker`
     • Waited · finished, exit 0
 
-After tools
+    After tools

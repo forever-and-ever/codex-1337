@@ -1,12 +1,12 @@
 ---
 source: tui/src/transcript_view/input_tests.rs
-assertion_line: 73
+assertion_line: 119
 expression: "frames.join(\"\\n\\n\")"
 ---
 Buffer {
     area: Rect { x: 2, y: 1, width: 24, height: 8 },
     content: [
-        "• alpha beta gamma      ",
+        "    • alpha beta gamma  ",
         "                        ",
         "                        ",
         "                        ",
@@ -16,17 +16,18 @@ Buffer {
         "                        ",
     ],
     styles: [
-        x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
-        x: 2, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 8, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: REVERSED,
-        x: 18, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 4, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 6, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 12, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: REVERSED,
+        x: 22, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }
 
 Buffer {
     area: Rect { x: 2, y: 1, width: 24, height: 8 },
     content: [
-        "• alpha beta gamma      ",
+        "    • alpha beta gamma  ",
         "                        ",
         "                        ",
         "                        ",
@@ -36,16 +37,17 @@ Buffer {
         "                        ",
     ],
     styles: [
-        x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
-        x: 2, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: REVERSED,
-        x: 12, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 4, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 6, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: REVERSED,
+        x: 16, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }
 
 Buffer {
     area: Rect { x: 2, y: 1, width: 24, height: 8 },
     content: [
-        "• alpha beta gamma      ",
+        "    • alpha beta gamma  ",
         "                        ",
         "                        ",
         "                        ",
@@ -55,9 +57,10 @@ Buffer {
         "                        ",
     ],
     styles: [
-        x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
-        x: 2, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 8, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: REVERSED,
-        x: 18, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 4, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 6, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 12, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: REVERSED,
+        x: 22, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }

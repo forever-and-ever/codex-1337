@@ -18,7 +18,7 @@ fn transcript(markdown: &str, width: u16) -> (TranscriptView, Vec<Arc<dyn Histor
 fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
     MouseEvent {
         kind,
-        column,
+        column: column + crate::transcript_geometry::GUTTER_COLUMNS,
         row,
         modifiers: KeyModifiers::NONE,
     }
@@ -47,7 +47,9 @@ fn hover_links_match_wrapped_click_targets_and_refresh_after_scrolling() {
         let action = view.handle_mouse(
             MouseEvent {
                 modifiers: KeyModifiers::CONTROL,
-                ..mouse(MouseEventKind::Down(MouseButton::Left), *column, *row)
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: *column,
+                row: *row,
             },
             &cells,
         );
@@ -121,7 +123,7 @@ fn shift_click_extends_a_double_clicked_word_in_both_directions() {
 fn shift_click_preserves_selection_units_and_allows_dragging() {
     for (clicks, expected) in [(1, "beta gam"), (3, "alpha beta gamma")] {
         let (mut view, cells) = transcript("alpha beta gamma", /*width*/ 24);
-        view.begin_selection(&cells, /*column*/ 10, /*row*/ 1, clicks);
+        view.begin_selection(&cells, /*column*/ 14, /*row*/ 1, clicks);
         view.handle_mouse(
             mouse(
                 MouseEventKind::Drag(MouseButton::Left),

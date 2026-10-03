@@ -86,7 +86,7 @@ fn file_disclosures_are_independent_and_not_copied() {
     let layout = view
         .current_layout(&cells, /*index*/ 1)
         .expect("second file");
-    let copy = "  beta.rs (+2, -0)\n+beta body\n+second beta line";
+    let copy = "beta.rs (+2, -0)\n+beta body\n+second beta line";
     assert_eq!(layout.text(), copy);
     assert_eq!(layout.rewrap(/*width*/ 40).text(), copy);
     view.handle_key(
@@ -126,7 +126,7 @@ fn file_disclosures_are_independent_and_not_copied() {
         view.current_layout(&cells, /*index*/ 0)
             .expect("first file")
             .text(),
-        "• Edited\n  alpha.rs (+2, -0)\n+alpha body\n+second alpha line",
+        "• Edited\nalpha.rs (+2, -0)\n+alpha body\n+second alpha line",
     );
     for (label, collapse_first) in [
         ("both files expanded with batch bill", false),
@@ -259,7 +259,7 @@ fn wrapped_added_code_keeps_indentation_and_graphemes_when_copied_and_resized() 
         patch.expanded_hyperlink_lines(/*width*/ 40),
         /*width*/ 40,
     );
-    let expected = "• Edited\n  test.rs (+2, -0)\n+    let message = \"a long value with 界 e\u{301} and 👩‍💻 inside\";\n+    return message;";
+    let expected = "• Edited\ntest.rs (+2, -0)\n+    let message = \"a long value with 界 e\u{301} and 👩‍💻 inside\";\n+    return message;";
     assert_eq!(layout.text(), expected);
     assert_eq!(layout.rewrap(/*width*/ 18).text(), expected);
     assert!(layout.row_count() > 3);

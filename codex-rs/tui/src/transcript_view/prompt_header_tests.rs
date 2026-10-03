@@ -123,15 +123,15 @@ fn mouse_selection_preserves_header_reservation_at_turn_boundaries() {
         user("Second question"),
         cell("done 10:16 AM"),
     ];
-    for width in [40, 15] {
+    for width in [44, 15] {
         for height in [6, 7, 8] {
             for drag in [false, true] {
                 let mut view = TranscriptView::default();
                 let before = render(&mut view, &cells, width, height);
                 let down = MouseEvent {
                     kind: MouseEventKind::Down(MouseButton::Left),
-                    column: 5,
-                    row: height - 1,
+                    column: 9,
+                    row: height - 1 - u16::from(width < 16),
                     modifiers: KeyModifiers::NONE,
                 };
                 view.handle_mouse(down, &cells);
@@ -161,7 +161,8 @@ fn mouse_selection_preserves_header_reservation_at_turn_boundaries() {
                 }
                 let end = MouseEvent {
                     kind: MouseEventKind::Drag(MouseButton::Left),
-                    column: 13,
+                    column: if width < 16 { 6 } else { 17 },
+                    row: height - 1,
                     ..down
                 };
                 view.handle_mouse(end, &cells);
@@ -190,7 +191,7 @@ fn mouse_selection_preserves_header_reservation_at_turn_boundaries() {
                         .filter(|cell| cell.modifier.contains(Modifier::REVERSED))
                         .map(ratatui::buffer::Cell::symbol)
                         .collect::<String>(),
-                    copied
+                    if width < 16 { "10:16AM" } else { &copied }
                 );
             }
         }

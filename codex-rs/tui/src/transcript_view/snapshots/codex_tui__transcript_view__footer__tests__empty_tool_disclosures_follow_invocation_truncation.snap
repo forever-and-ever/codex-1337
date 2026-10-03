@@ -1,5 +1,6 @@
 ---
 source: tui/src/transcript_view/footer_tests.rs
+assertion_line: 607
 expression: "snapshots.join(\"\\n\\n\")"
 ---
 true, width=100
@@ -41,7 +42,7 @@ expanded
 [-] • Explored
         Read config.json (whole file)
 
-      {"content":[],"output":"real file data"}
+        {"content":[],"output":"real file data"}
 
 cat config.json, width=44
 [+] • Explored
@@ -51,8 +52,8 @@ expanded
 [-] • Explored
         Read config.json (whole file)
 
-      {"content":[],"output":"real file
-      data"}
+        {"content":[],"output":"real file
+        data"}
 
 cat config.json, width=24
 [+] • Explored
@@ -62,6 +63,6 @@ expanded
 [-] • Explored
         Read config.j...
 
-      {"content":
-      [],"output":"real
-      file data"}
+        {"content":
+        [],"output":"rea
+        l file data"}

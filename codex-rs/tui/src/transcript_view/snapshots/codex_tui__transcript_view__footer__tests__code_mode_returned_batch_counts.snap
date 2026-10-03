@@ -1,6 +1,6 @@
 ---
 source: tui/src/transcript_view/footer_tests.rs
-assertion_line: 494
+assertion_line: 501
 expression: "snapshots.join(\"\\n\")"
 ---
 expanded=false
@@ -38,11 +38,11 @@ Buffer {
     area: Rect { x: 0, y: 0, width: 80, height: 10 },
     content: [
         "[-] • Returned (~ 1,000 tokens)                                                 ",
-        "      first returned batch                                                      ",
-        "      Only emitted text, after truncation.                                      ",
+        "        first returned batch                                                    ",
+        "        Only emitted text, after truncation.                                    ",
         "[-] • Returned (~ 280 tokens)                                                   ",
-        "      second returned batch                                                     ",
-        "      Only emitted text, after truncation.                                      ",
+        "        second returned batch                                                   ",
+        "        Only emitted text, after truncation.                                    ",
         "                                                                                ",
         "                                                                                ",
         "                                                                                ",
@@ -67,12 +67,12 @@ message boundaries
 Buffer {
     area: Rect { x: 0, y: 0, width: 80, height: 10 },
     content: [
-        "Before tools                                                                    ",
+        "    Before tools                                                                ",
         "                                                                                ",
         "[+] • Returned (~ 1,000 tokens)                                                 ",
         "[+] • Returned (~ 280 tokens)                                                   ",
         "                                                                                ",
-        "After tools                                                                     ",
+        "    After tools                                                                 ",
         "                                                                                ",
         "                                                                                ",
         "                                                                                ",

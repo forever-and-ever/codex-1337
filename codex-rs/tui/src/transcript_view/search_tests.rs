@@ -399,7 +399,7 @@ fn previous_match_finds_the_prepended_part_of_a_regrouped_entry() {
     let mut buffer = Buffer::empty(area);
     view.render(area, &mut buffer, &cells);
     assert_eq!(view.visible[0].key, EntryKey::cell(&older));
-    assert!(buffer[(0, 0)].modifier.contains(Modifier::REVERSED));
+    assert!(buffer[(4, 0)].modifier.contains(Modifier::REVERSED));
 
     view.handle_search_key(
         KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL),
@@ -567,7 +567,7 @@ fn next_previous_highlight_and_cancel_share_the_transcript_position() {
     let mut buffer = Buffer::empty(area);
     view.render(area, &mut buffer, &cells);
     assert_eq!(
-        (0..10)
+        (4..14)
             .map(|column| buffer[(column, 0)].modifier.contains(Modifier::REVERSED))
             .collect::<Vec<_>>(),
         vec![
@@ -959,7 +959,7 @@ fn leaving_a_regrouped_search_match_restarts_from_current_history() {
     let mut buffer = Buffer::empty(area);
     view.render(area, &mut buffer, &cells);
     assert_eq!(view.visible[0].key, EntryKey::cell(&replacement));
-    assert!(buffer[(7, 0)].modifier.contains(Modifier::REVERSED));
+    assert!(buffer[(11, 0)].modifier.contains(Modifier::REVERSED));
 }
 
 #[test]

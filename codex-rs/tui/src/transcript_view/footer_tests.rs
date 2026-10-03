@@ -62,7 +62,7 @@ fn selection_at_bottom_restores_footer_without_resuming_following() {
                 view.handle_mouse(
                     MouseEvent {
                         kind,
-                        column,
+                        column: column + crate::transcript_geometry::GUTTER_COLUMNS,
                         row,
                         modifiers: KeyModifiers::NONE,
                     },
@@ -142,7 +142,7 @@ fn selection_hints_follow_selected_text_instead_of_mouse_down() {
             view.handle_mouse(
                 MouseEvent {
                     kind,
-                    column,
+                    column: column + crate::transcript_geometry::GUTTER_COLUMNS,
                     row: 0,
                     modifiers: KeyModifiers::NONE,
                 },
@@ -468,6 +468,8 @@ fn code_mode_batches_display_their_own_counts_and_replay_without_double_counting
         view.sync_live_activity(committed, ids);
         view.sync_live_activity_tail(/*width*/ 80, /*key*/ None, expanded, |width, _| {
             Some(ActivityTranscriptLines {
+                is_tool_entry: tail.is_tool_entry(),
+                header: tail.activity_header(),
                 controls: Vec::new(),
                 activity: if expanded {
                     tail.expanded_hyperlink_lines(width)
@@ -672,6 +674,8 @@ fn activity_focus_keeps_controls_without_passive_hints() {
         let tool_output_tokens = view.activity_output_tokens(&cell.activity_ids());
         view.sync_live_activity_tail(/*width*/ 32, /*key*/ None, expanded, |width, _| {
             Some(ActivityTranscriptLines {
+                is_tool_entry: cell.is_tool_entry(),
+                header: cell.activity_header(),
                 controls: Vec::new(),
                 activity: if expanded {
                     cell.expanded_hyperlink_lines(width)

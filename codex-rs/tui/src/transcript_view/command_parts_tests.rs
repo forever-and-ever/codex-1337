@@ -92,9 +92,11 @@ fn shell_rows_share_output_but_have_independent_source_folds() {
         /*expanded*/ false,
         |width, expanded| {
             let parts = cells[0]
-                .activity_parts(width - 4, /*header_reserve*/ 17, expanded)
+                .activity_parts(width, /*header_reserve*/ 17, expanded)
                 .unwrap();
             Some(ActivityTranscriptLines {
+                is_tool_entry: cells[0].is_tool_entry(),
+                header: parts.header,
                 activity: parts.lines,
                 auxiliary: Vec::new(),
                 tool_output_tokens: Some(2352),

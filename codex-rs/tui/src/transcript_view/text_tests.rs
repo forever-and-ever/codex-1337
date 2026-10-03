@@ -332,21 +332,37 @@ fn command_and_output_copy_preserve_hard_lines_across_resize() {
             bg: (20, 20, 20),
         },
         || {
+            let parts = cell
+                .activity_parts(
+                    /*width*/ 32,
+                    /*header_reserve*/ 0,
+                    &std::collections::HashSet::new(),
+                )
+                .unwrap();
+            let expanded = cell
+                .activity_ids()
+                .into_iter()
+                .chain(parts.controls.into_iter().map(|control| control.id))
+                .collect();
             [
                 (
-                    "compact_command_copy",
-                    cell.display_hyperlink_lines(/*width*/ 32),
+                    "expanded_command_copy",
+                    cell.activity_parts(/*width*/ 32, /*header_reserve*/ 0, &expanded)
+                        .unwrap()
+                        .lines,
+                    format!("• Running\n{command}\n\n{output}"),
                 ),
                 (
                     "detailed_command_copy",
                     cell.transcript_hyperlink_lines(/*width*/ 32),
+                    format!("{command}\n{output}"),
                 ),
             ]
         },
     );
-    for (name, lines) in rendered {
+    for (name, lines, expected) in rendered {
         let layout = TextLayout::new(lines, /*width*/ 32);
-        assert_eq!(layout.text(), format!("{command}\n{output}"));
+        assert_eq!(layout.text(), expected);
         let narrow = layout.rewrap(/*width*/ 24);
         let wide = narrow.rewrap(/*width*/ 64);
         assert_eq!((narrow.text(), wide.text()), (layout.text(), layout.text()));
