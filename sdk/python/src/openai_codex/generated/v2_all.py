@@ -6796,6 +6796,13 @@ class WorkStatus(BaseModel):
         populate_by_name=True,
     )
     activity: str
+    emitted_at: Annotated[
+        int | None,
+        Field(
+            alias="emittedAt",
+            description="Unix seconds when the live update was emitted; absent on older servers.",
+        ),
+    ] = None
     turn_id: Annotated[str, Field(alias="turnId")]
 
 

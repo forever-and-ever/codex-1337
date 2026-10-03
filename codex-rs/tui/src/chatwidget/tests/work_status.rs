@@ -1,10 +1,11 @@
 use super::*;
+use chrono::TimeZone;
 use codex_protocol::protocol::WorkStatus;
 use pretty_assertions::assert_eq;
 use ratatui::backend::TestBackend;
 
 #[tokio::test]
-async fn work_status_below_composer_clears_without_transcript_entries() {
+async fn work_status_below_composer_clears_with_activity_transcript_entries() {
     let (mut chat, mut rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.thread_id = Some(ThreadId::new());
     chat.bottom_pane
@@ -12,6 +13,13 @@ async fn work_status_below_composer_clears_without_transcript_entries() {
     let status = WorkStatus {
         turn_id: "turn-1".into(),
         activity: "Check lifecycle and narrow-terminal wrapping".into(),
+        emitted_at: Some(
+            chrono::Local
+                .with_ymd_and_hms(2026, 10, 2, 13, 4, 5)
+                .single()
+                .unwrap()
+                .timestamp(),
+        ),
     };
     let turn = Turn {
         id: "turn-1".into(),
@@ -31,6 +39,28 @@ async fn work_status_below_composer_clears_without_transcript_entries() {
         },
     );
     chat.handle_server_notification(notification.clone(), /*replay_kind*/ None);
+    assert_eq!(chat.current_work_status, Some(status.clone()));
+    let mut history: Vec<Arc<dyn HistoryCell>> = std::iter::from_fn(|| rx.try_recv().ok())
+        .filter_map(|event| match event {
+            AppEvent::InsertHistoryCell(cell) => Some(Arc::from(cell)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(history.len(), 1);
+    assert!(!history[0].is_tool_entry());
+    // Timestamp changes, buffered replay, and another thread must not duplicate this update.
+    let mut repeated = notification.clone();
+    if let ServerNotification::ThreadWorkStatusUpdated(update) = &mut repeated {
+        update.status.emitted_at = status.emitted_at.map(|time| time + 60);
+    }
+    chat.handle_server_notification(repeated, /*replay_kind*/ None);
+    chat.handle_server_notification(notification.clone(), Some(ReplayKind::ThreadSnapshot));
+    let mut misrouted = notification.clone();
+    if let ServerNotification::ThreadWorkStatusUpdated(update) = &mut misrouted {
+        update.thread_id = ThreadId::new().to_string();
+        update.status.activity = "Other conversation".into();
+    }
+    chat.handle_server_notification(misrouted, /*replay_kind*/ None);
     assert_eq!(chat.current_work_status, Some(status.clone()));
     assert!(drain_insert_history(&mut rx).is_empty());
     chat.on_agent_reasoning_delta("**Checking the lifecycle**".into());
@@ -74,6 +104,55 @@ async fn work_status_below_composer_clears_without_transcript_entries() {
         }
     }
     insta::assert_snapshot!("work_status_below_composer", panels.join("\n\n"));
+    let mut changed = notification.clone();
+    if let ServerNotification::ThreadWorkStatusUpdated(update) = &mut changed {
+        update.status.activity = "Verify transcript spacing".into();
+        update.status.emitted_at = status.emitted_at.map(|time| time + 1);
+    }
+    chat.handle_server_notification(changed.clone(), Some(ReplayKind::ResumeInitialMessages));
+    assert!(drain_insert_history(&mut rx).is_empty());
+    chat.handle_server_notification(changed, /*replay_kind*/ None);
+    history.extend(
+        std::iter::from_fn(|| rx.try_recv().ok()).filter_map(|event| match event {
+            AppEvent::InsertHistoryCell(cell) => Some(Arc::from(cell)),
+            _ => None,
+        }),
+    );
+    assert_eq!(history.len(), 2);
+    let mut tool = history_cell::PlainHistoryCell::new(vec!["• Ran before".into()]);
+    tool.tool_entry = true;
+    history.insert(0, Arc::new(tool));
+    let mut tool = history_cell::PlainHistoryCell::new(vec!["• Ran next".into()]);
+    tool.tool_entry = true;
+    history.insert(1, Arc::new(tool));
+    let mut tool = history_cell::PlainHistoryCell::new(vec!["• Ran after".into()]);
+    tool.tool_entry = true;
+    history.push(Arc::new(tool));
+    let area = Rect::new(
+        /*x*/ 0, /*y*/ 0, /*width*/ 80, /*height*/ 8,
+    );
+    let mut buffer = Buffer::empty(area);
+    crate::transcript_view::TranscriptView::default().render(area, &mut buffer, &history);
+    let transcript = buffer
+        .content()
+        .chunks(usize::from(area.width))
+        .map(|row| {
+            row.iter()
+                .map(ratatui::buffer::Cell::symbol)
+                .collect::<String>()
+                .trim_end()
+                .to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    insta::assert_snapshot!("work_status_transcript_spacing", transcript);
+    let mut cleared = notification.clone();
+    if let ServerNotification::ThreadWorkStatusUpdated(update) = &mut cleared {
+        update.status.activity.clear();
+    }
+    chat.handle_server_notification(cleared, /*replay_kind*/ None);
+    assert_eq!(chat.current_work_status, None);
+    assert!(drain_insert_history(&mut rx).is_empty());
     for final_status in [
         TurnStatus::Completed,
         TurnStatus::Interrupted,

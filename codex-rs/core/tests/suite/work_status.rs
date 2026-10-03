@@ -80,20 +80,31 @@ async fn work_status_replaces_activity_without_entering_history() -> Result<()> 
         .expect("work status was emitted")
         .turn_id
         .clone();
+    for status in &mut snapshots {
+        assert!(
+            status
+                .emitted_at
+                .take()
+                .is_some_and(|timestamp| timestamp > 0)
+        );
+    }
     assert_eq!(
         snapshots,
         vec![
             WorkStatus {
                 turn_id: turn_id.clone(),
-                activity: "Read renderer".into()
+                activity: "Read renderer".into(),
+                emitted_at: None,
             },
             WorkStatus {
                 turn_id: turn_id.clone(),
-                activity: "Write tests".into()
+                activity: "Write tests".into(),
+                emitted_at: None,
             },
             WorkStatus {
                 turn_id,
-                activity: "Release".into()
+                activity: "Release".into(),
+                emitted_at: None,
             },
         ]
     );

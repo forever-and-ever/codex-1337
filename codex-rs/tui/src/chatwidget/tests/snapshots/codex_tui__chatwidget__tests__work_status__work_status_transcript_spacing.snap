@@ -1,0 +1,12 @@
+---
+source: tui/src/chatwidget/tests/work_status.rs
+expression: transcript
+---
+    • Ran before
+    • Ran next
+
+• 13:04:05 Activity Check lifecycle and narrow-terminal wrapping
+
+• 13:04:06 Activity Verify transcript spacing
+
+    • Ran after

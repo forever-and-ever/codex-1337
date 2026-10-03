@@ -88,7 +88,13 @@ impl App {
                 self.repaint_agents_overview();
                 self.refresh_agents_overview_threads(app_server_client);
             }
-            AppServerEvent::ServerNotification(notification) => {
+            AppServerEvent::ServerNotification(mut notification) => {
+                if let ServerNotification::ThreadWorkStatusUpdated(update) = notification.as_mut()
+                    && update.status.emitted_at.is_none()
+                {
+                    // Capture the old-server fallback before per-thread buffering, not replay.
+                    update.status.emitted_at = Some(chrono::Utc::now().timestamp());
+                }
                 let request_resolved = matches!(
                     notification.as_ref(),
                     ServerNotification::ServerRequestResolved(_)

@@ -52,6 +52,7 @@ async fn agents_navigation_roster_tracks_background_metadata_without_replaying_a
             status: codex_protocol::protocol::WorkStatus {
                 turn_id: "turn".into(),
                 activity: "Inspect parser".into(),
+                emitted_at: None,
             },
         },
     );

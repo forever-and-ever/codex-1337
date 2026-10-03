@@ -65,7 +65,8 @@ impl ChatWidget {
                 self.on_thread_goal_updated(notification.goal, notification.turn_id);
             }
             ServerNotification::ThreadWorkStatusUpdated(notification) => {
-                if replay_kind.is_none()
+                // Thread switches reconstruct buffered live updates; resume has no Activity log.
+                if replay_kind != Some(ReplayKind::ResumeInitialMessages)
                     && self
                         .thread_id
                         .is_some_and(|id| id.to_string() == notification.thread_id)
@@ -73,8 +74,7 @@ impl ChatWidget {
                     && self.turn_lifecycle.last_turn_id.as_deref()
                         == Some(notification.status.turn_id.as_str())
                 {
-                    self.current_work_status = Some(notification.status);
-                    self.request_redraw();
+                    self.on_work_status_updated(notification.status);
                 }
             }
             ServerNotification::ThreadGoalCleared(notification) => {

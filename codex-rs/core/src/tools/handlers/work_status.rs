@@ -59,6 +59,7 @@ impl ToolExecutor<ToolInvocation> for WorkStatusHandler {
             let status = WorkStatus {
                 turn_id: invocation.turn.sub_id.clone(),
                 activity: summary(update.activity)?,
+                emitted_at: Some(chrono::Utc::now().timestamp()),
             };
             invocation
                 .session

@@ -1,5 +1,9 @@
-//! Bounded Goal / Activity / Reasoning display between the entry box and its footer.
+//! Live Activity transcript entries and bounded Goal / Activity / Reasoning display.
 
+use super::ChatWidget;
+use crate::history_cell::HistoryTimestamp;
+use crate::history_cell::PrefixedWrappedHistoryCell;
+use crate::history_cell::agent_prefix;
 use crate::line_truncation::truncate_line_to_width;
 use crate::render::renderable::Renderable;
 use crate::ui_consts::LIVE_PREFIX_COLS;
@@ -12,6 +16,34 @@ use ratatui::style::Stylize;
 use ratatui::text::Line;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
+
+impl ChatWidget {
+    pub(super) fn on_work_status_updated(&mut self, status: WorkStatus) {
+        if status.activity.trim().is_empty() {
+            self.current_work_status = None;
+            self.request_redraw();
+            return;
+        }
+        if self
+            .current_work_status
+            .as_ref()
+            .is_some_and(|current| current.activity == status.activity)
+        {
+            return;
+        }
+        let emitted_at = status
+            .emitted_at
+            .unwrap_or_else(|| chrono::Utc::now().timestamp());
+        let timestamp = HistoryTimestamp::from_millis(emitted_at.saturating_mul(1000));
+        self.add_to_history(PrefixedWrappedHistoryCell::new(
+            Line::from(vec!["Activity ".bold(), status.activity.clone().into()]),
+            Line::from(agent_prefix(timestamp, /*first*/ true)),
+            Line::from(agent_prefix(timestamp, /*first*/ false)),
+        ));
+        self.current_work_status = Some(status);
+        self.request_redraw();
+    }
+}
 
 pub(super) struct WorkStatusView<'a> {
     pub goal: Option<&'a str>,

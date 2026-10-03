@@ -1448,7 +1448,7 @@ pub enum EventMsg {
     /// Updated long-running goal metadata for the thread.
     ThreadGoalUpdated(ThreadGoalUpdatedEvent),
 
-    /// Ephemeral task/activity display for the active turn; never persisted or replayed.
+    /// Ephemeral Activity for the active turn; excluded from persisted rollout history.
     WorkStatusUpdated(WorkStatus),
 
     /// A durable thread-scoped user-message queue changed.
@@ -4160,6 +4160,10 @@ pub struct ThreadGoalUpdatedEvent {
 pub struct WorkStatus {
     pub turn_id: String,
     pub activity: String,
+    /// Unix seconds when the live update was emitted; absent on older servers.
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub emitted_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema, TS)]

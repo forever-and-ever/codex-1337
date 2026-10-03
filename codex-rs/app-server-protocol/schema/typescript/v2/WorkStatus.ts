@@ -5,4 +5,8 @@
 /**
  * What the agent is currently working on, scoped to one live turn.
  */
-export type WorkStatus = { turnId: string, activity: string, };
+export type WorkStatus = { turnId: string, activity: string,
+/**
+ * Unix seconds when the live update was emitted; absent on older servers.
+ */
+emittedAt: number | null, };
