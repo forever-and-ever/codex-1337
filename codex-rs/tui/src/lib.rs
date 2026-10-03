@@ -144,6 +144,7 @@ mod auto_review_denials;
 mod cwd_prompt;
 mod debug_config;
 mod diff_model;
+mod file_change_view;
 mod diff_render;
 mod dynamic_tools;
 mod empty_state_animation;
