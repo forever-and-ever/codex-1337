@@ -264,7 +264,7 @@ pub(crate) mod startup_prewarm;
 mod step_activation;
 pub(crate) mod step_context;
 pub(crate) mod step_settings;
-mod thread_settings;
+pub(crate) mod thread_settings;
 pub(crate) mod time_reminder;
 mod token_budget;
 mod tool_output_tokens;

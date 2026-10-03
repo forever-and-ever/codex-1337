@@ -128,6 +128,7 @@ mod thread_archive;
 mod thread_attachments;
 mod thread_delete;
 mod thread_environments;
+mod thread_farm;
 mod thread_fork;
 #[path = "thread_fork_multi_agent_tests.rs"]
 mod thread_fork_multi_agent;

@@ -296,7 +296,8 @@ impl ContextManager {
             return false;
         }
         match event {
-            RetainedContextEvent::VerifiedAnswer { .. } => {
+            RetainedContextEvent::VerifiedAnswer { .. }
+            | RetainedContextEvent::UserDelegation { .. } => {
                 self.user_message_revision =
                     self.user_message_revision.saturating_add(/*rhs*/ 1);
             }

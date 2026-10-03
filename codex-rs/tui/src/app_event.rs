@@ -444,6 +444,30 @@ pub(crate) enum AppEvent {
         parent_thread_id: ThreadId,
         user_message: Option<UserMessage>,
     },
+    Farm {
+        thread_id: ThreadId,
+        mode: codex_app_server_protocol::ThreadFarmMode,
+        submission: crate::chatwidget::FarmSubmission,
+    },
+    FarmFinished {
+        request_id: String,
+        result: Result<codex_app_server_protocol::ThreadFarmResponse, crate::app::FarmFailure>,
+    },
+    OpenFarmRecovery {
+        thread_id: ThreadId,
+    },
+    ReconcileFarm {
+        request_id: String,
+    },
+    DiscardFarm {
+        request_id: String,
+    },
+    RestoreFarmDraft {
+        request_id: String,
+    },
+    RestoreFarmReceipts {
+        thread_id: ThreadId,
+    },
 
     /// Submit an op to the specified thread, regardless of current focus.
     SubmitThreadOp {

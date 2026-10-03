@@ -3,10 +3,12 @@
 
 use crate::context::MultiAgentRoleInstructions;
 use crate::environment_selection::TurnEnvironmentSnapshot;
+use codex_history::RolloutItem;
 use codex_protocol::AgentPath;
 use codex_protocol::ThreadId;
 use codex_protocol::protocol::AgentStatus;
 use codex_protocol::turn_input::CyberAccessProgram;
+use std::sync::Arc;
 
 /// Registry identity shared by loaded and unloaded agents.
 /// Registered agents have an `agent_id`; a reserved spawn can still be awaiting its ID.
@@ -27,6 +29,8 @@ pub enum SpawnAgentForkMode {
 #[derive(Clone, Debug, Default)]
 pub struct SpawnAgentOptions {
     pub fork_parent_spawn_call_id: Option<String>,
+    /// Host-captured boundary for a direct user action, never an assistant tool invocation.
+    pub user_request: Option<UserSpawnRequest>,
     pub fork_mode: Option<SpawnAgentForkMode>,
     pub parent_thread_id: Option<ThreadId>,
     pub parent_turn_id: Option<String>,
@@ -37,6 +41,15 @@ pub struct SpawnAgentOptions {
     pub environments: Option<TurnEnvironmentSnapshot>,
     pub multi_agent_v2_usage_hints: Option<ResolvedMultiAgentV2UsageHints>,
     pub cyber_access_program: Option<CyberAccessProgram>,
+}
+
+#[derive(Clone, Debug)]
+pub struct UserSpawnRequest {
+    pub request_id: String,
+    pub instructions: String,
+    pub parent_developer_instructions: Option<String>,
+    /// The ordinary stored fork input, captured together with the parent's current settings.
+    pub fork_history: Option<Arc<Vec<RolloutItem>>>,
 }
 
 /// Identity and status observed from a loaded agent, without a handle to its runtime.

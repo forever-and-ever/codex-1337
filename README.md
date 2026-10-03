@@ -122,6 +122,35 @@ paths are unchanged.
 Before adding another account, let the old app-server drain and restart. Old
 Codex binaries do not preserve the multi-account credential document.
 
+### Direct delegation
+
+Use `/farm <task>` in the main conversation to start a child immediately with the
+ordinary full-history fork. `/farm_fresh <task>` starts with empty conversation
+history. Both remain in the main view, preserve normal instructions and permissions,
+and report through the existing agent family; completion alone does not wake an idle parent.
+
+Configure the dedicated executor in `config.toml`, for example:
+
+```toml
+[wrangler.farm]
+model = "gpt-6.1-sol"
+reasoning_effort = "high"
+# instructions = "Additional child-only instructions (at most 512 bytes)."
+```
+
+Unspecified model/effort use the general subagent defaults, then the parent's
+selection. Farm's executor takes precedence over role model preferences, not role
+restrictions. `/farm` cannot switch providers; choose `/farm_fresh` explicitly for
+that. Full forks retain the ordinary native-checkpoint compatibility restrictions.
+Tasks must fit the existing bounded retained-user authorization limit.
+
+If a receipt is missing, enter `/farm` without a task to check the **same** request
+or discard its local recovery state. Discard never cancels a possibly running child;
+inspect `/agents` before intentionally submitting another task. Submitted rich drafts
+are retained without overwriting newer edits; restore explicitly into an empty composer.
+Resolve or discard retained farm requests/drafts before reloading or idle upgrading
+the TUI. Abrupt process exit cannot preserve this transient recovery state.
+
 ## Docs
 
 - [**Codex Documentation**](https://developers.openai.com/codex)

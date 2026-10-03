@@ -591,6 +591,11 @@ client_request_definitions! {
         serialization: thread_id(params.thread_id),
         response: v2::ThreadDecrementElicitationResponse,
     },
+    ThreadFarm => "thread/farm" {
+        params: v2::ThreadFarmParams,
+        serialization: None,
+        response: v2::ThreadFarmResponse,
+    },
     ThreadSetName => "thread/name/set" {
         params: v2::ThreadSetNameParams,
         serialization: thread_id(params.thread_id),

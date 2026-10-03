@@ -1003,6 +1003,7 @@ impl MessageProcessor {
 
         let (turn_admission, recheck_turn_admission) = match &codex_request {
             ClientRequest::ThreadStart { .. }
+            | ClientRequest::ThreadFarm { .. }
             | ClientRequest::ThreadFork { .. }
             | ClientRequest::ThreadResume { .. }
             | ClientRequest::ThreadRevert { .. }
@@ -1336,6 +1337,9 @@ impl MessageProcessor {
                         client_mcp_extensions.clone(),
                     )
                     .await
+            }
+            ClientRequest::ThreadFarm { params, .. } => {
+                self.turn_processor.thread_farm(&request_id, params).await
             }
             ClientRequest::ThreadArchive { params, .. } => {
                 self.thread_processor

@@ -8,6 +8,8 @@ use std::time::Duration;
 use anyhow::Context;
 use anyhow::Result;
 use codex_core::CodexThread;
+use codex_core::FarmMode;
+use codex_core::FarmRequest;
 use codex_core::ForkSnapshot;
 use codex_core::TurnInputRequest;
 use codex_core::config::Config;
@@ -407,6 +409,196 @@ async fn compact_and_assert_answers(
         expected
     );
     Ok(actual.clone())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn farm_authorization_survives_handoff_checkpoint_and_cold_reload() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    const TASK: &str = "Inspect staging only; never publish.";
+    const RESTRICTION: &str = "Keep the inherited deployment restriction.";
+    let server = start_mock_server().await;
+    let mut extensions = ExtensionRegistryBuilder::<Config>::new();
+    extensions.thread_lifecycle_contributor(Arc::new(ForkTestLifecycle::default()));
+    let test = test_codex()
+        .with_extensions(Arc::new(extensions.build()))
+        .with_history_mode(ThreadHistoryMode::Paginated)
+        .with_config(|config| {
+            config.experimental_thread_store = ThreadStoreConfig::Local;
+            config.model_provider.name = "Local compaction test provider".to_owned();
+            config.developer_instructions = Some(RESTRICTION.to_owned());
+            config.wrangler.farm.instructions = Some("Report evidence, not guesses.".to_owned());
+            let role = config.codex_home.join("farm-default.toml");
+            std::fs::write(&role, format!("model = \"gpt-5.6-luna\"\nmodel_reasoning_effort = \"low\"\ndeveloper_instructions = {:?}\n", format!("{RESTRICTION} Never publish from a delegated role."))).expect("role config");
+            config.agent_roles.entry("default".to_owned()).or_default().config_file = Some(role.to_path_buf());
+            config.features.disable(Feature::TokenBudget).expect("local compaction");
+            for feature in [Feature::Collab, Feature::MultiAgentV2, Feature::GuardianThreadContext] {
+                config.features.enable(feature).expect("farm test feature");
+            }
+        })
+        .build_with_auto_env(&server)
+        .await?;
+    let responses = mount_sse_sequence(
+        &server,
+        vec![
+            sse(vec![ev_completed("background")]),
+            sse(vec![
+                ev_assistant_message("child-done", "Inspection complete."),
+                ev_completed("child"),
+            ]),
+            sse(vec![
+                ev_assistant_message("summary", "The parent delegated a staging-only inspection."),
+                ev_completed("compact"),
+            ]),
+        ],
+    )
+    .await;
+    test.codex
+        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+            text: "Continue deployment planning.".to_owned(),
+            text_elements: Vec::new(),
+        }]))
+        .await?;
+    wait_for_event(&test.codex, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+    wait_for_thread_idle(&test.codex).await;
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let input = vec![UserInput::Text {
+        text: TASK.to_owned(),
+        text_elements: Vec::new(),
+    }];
+    let receipt = test
+        .codex
+        .farm(FarmRequest {
+            request_id: request_id.clone(),
+            mode: FarmMode::Fresh,
+            input: input.clone(),
+        })
+        .await
+        .map_err(|error| anyhow::anyhow!("{error:?}"))?;
+    let child = test
+        .thread_manager
+        .get_thread(receipt.child_thread_id)
+        .await?;
+    assert_eq!(
+        child.config_snapshot().await.model,
+        test.codex.config_snapshot().await.model,
+        "absent farm/general defaults inherit the parent executor, not a role model"
+    );
+    wait_for_event(&child, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+    wait_for_thread_idle(&child).await;
+    let expected_instructions = child.config().await.developer_instructions.clone();
+    assert!(
+        expected_instructions
+            .as_ref()
+            .is_some_and(|text| text.contains(RESTRICTION)
+                && text.contains("Never publish from a delegated role.")
+                && text.matches("Report evidence, not guesses.").count() == 1)
+    );
+
+    // A later ordinary tool handoff selects a recent three-message window. The genuine
+    // farm assignment must remain selected by persisted identity, not a fabricated tool call.
+    let mut later_items = (0..3)
+        .map(|index| ResponseItem::Message {
+            id: None,
+            role: "user".to_owned(),
+            phase: None,
+            content: vec![ContentItem::InputText {
+                text: format!("Later instruction {index}."),
+            }],
+            internal_chat_message_metadata_passthrough: None,
+        })
+        .collect::<Vec<_>>();
+    later_items.push(ResponseItem::FunctionCall {
+        id: None,
+        namespace: Some("wrangler_agents".to_owned()),
+        name: "send_message".to_owned(),
+        arguments: json!({"target": &receipt.agent_path, "message": "Report your status."})
+            .to_string(),
+        call_id: "later-handoff".to_owned(),
+        encrypted_function_args: None,
+        internal_chat_message_metadata_passthrough: None,
+    });
+    test.codex.inject_response_items(later_items).await?;
+    let original = codex_core::GuardianRootMessage::User(format!("/farm_fresh {TASK}"));
+    assert!(
+        child
+            .guardian_root_snapshot()
+            .await
+            .context("root authorization")?
+            .messages
+            .contains(&original)
+    );
+    let retained = compact_and_assert_answers(&test, &test.codex, &[]).await?;
+    assert!(retained.ordered_entries().any(|(_, entry)| matches!(entry, RetainedContextEntry::UserMessage(message)
+        if message.message_id.as_deref() == Some(format!("farm:{request_id}").as_str()) && message.text == format!("/farm_fresh {TASK}") && message.complete && message.turn_id.is_empty())));
+
+    child.shutdown_and_wait().await?;
+    test.thread_manager
+        .remove_thread(&receipt.child_thread_id)
+        .await;
+    let root = resume(&test, &test.codex).await?;
+    assert_eq!(
+        root.conversation_history_snapshot()
+            .await
+            .retained_context()
+            .context("restored retained users")?
+            .ordered_entries()
+            .filter_map(|(_, entry)| match entry {
+                RetainedContextEntry::UserMessage(message) => Some(message.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+        retained
+            .ordered_entries()
+            .filter_map(|(_, entry)| match entry {
+                RetainedContextEntry::UserMessage(message) => Some(message.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+    );
+    assert_eq!(
+        root.farm(FarmRequest {
+            request_id,
+            mode: FarmMode::Fresh,
+            input
+        })
+        .await
+        .map_err(|error| anyhow::anyhow!("{error:?}"))?,
+        receipt
+    );
+    test.thread_manager
+        .ensure_multi_agent_v2_child_loaded(receipt.child_thread_id)
+        .await?;
+    let cold_child = test
+        .thread_manager
+        .get_thread(receipt.child_thread_id)
+        .await?;
+    assert_eq!(
+        cold_child.config().await.developer_instructions,
+        expected_instructions
+    );
+    assert_eq!(
+        cold_child.config_snapshot().await.reasoning_effort,
+        child.config_snapshot().await.reasoning_effort
+    );
+    assert!(
+        cold_child
+            .guardian_root_snapshot()
+            .await
+            .context("cold root authorization")?
+            .messages
+            .contains(&original)
+    );
+    assert_eq!(
+        responses.requests().len(),
+        3,
+        "completion and replay never wake the idle parent or child"
+    );
+    cold_child.shutdown_and_wait().await?;
+    root.shutdown_and_wait().await?;
+    Ok(())
 }
 
 #[derive(Clone, Copy)]

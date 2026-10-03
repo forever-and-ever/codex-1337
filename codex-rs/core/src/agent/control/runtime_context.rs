@@ -141,7 +141,7 @@ impl LocalAgentRuntime {
         Ok(descendants)
     }
 
-    pub(super) fn upgrade(&self) -> CodexResult<Arc<ThreadManagerState>> {
+    pub(crate) fn upgrade(&self) -> CodexResult<Arc<ThreadManagerState>> {
         self.manager
             .upgrade()
             .ok_or_else(|| CodexErr::UnsupportedOperation("thread manager dropped".to_string()))

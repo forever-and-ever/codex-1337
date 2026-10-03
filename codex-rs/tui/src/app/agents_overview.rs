@@ -917,6 +917,7 @@ impl App {
                 .await;
         }
 
+        self.queue_farm_receipt_replay();
         Ok(AppRunControl::Continue)
     }
 

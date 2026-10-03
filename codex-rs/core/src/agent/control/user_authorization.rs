@@ -292,7 +292,7 @@ impl LocalAgentControl {
         messages.sort_by_key(|(order, _)| *order);
         let mut review_context_revision = history.guardian_review_context_revision();
         if let Some(worker) = worker_path
-            && let Some(selected) = super::root_handoff::selected_message_indices(
+            && let Some(mut selected) = super::root_handoff::selected_message_indices(
                 root_history.annotated_items(),
                 &messages,
                 &worker,
@@ -304,6 +304,19 @@ impl LocalAgentControl {
                     .as_deref(),
             )
         {
+            // Direct user delegation has no assistant tool call to establish a handoff window.
+            // Keep its genuine retained source selected for this persisted farm branch.
+            if let Some(db) = root_thread.state_db()
+                && let Ok(Some(request_id)) = db.farm_request_id_for_path(root_thread_id, worker.as_str()).await
+                && let Some((order, _)) = reconciled.ordered_entries().find(|(_, entry)| {
+                    matches!(entry, RetainedContextEntry::UserMessage(message)
+                        if message.message_id.as_deref() == Some(format!("farm:{request_id}").as_str()))
+                })
+            {
+                selected.extend(messages.iter().enumerate().filter_map(|(index, (message_order, message))| {
+                    (*message_order == Some(order) && matches!(message, GuardianRootMessage::User(_))).then_some(index)
+                }));
+            }
             // A handoff can change the selection without adding a new root user message.
             let mut revision = DefaultHasher::new();
             review_context_revision.hash(&mut revision);

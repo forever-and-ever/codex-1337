@@ -1,0 +1,15 @@
+---
+source: tui/src/chatwidget/tests/farm_tests.rs
+expression: "render_bottom_popup(&chat, 80)"
+---
+  Farm receipt missing
+
+
+› 1. Check receipt            Ask about the same request; never create a second
+                              task.
+  2. Discard pending request  A child may still be running. Allow new tasks
+                              without resending this one.
+  3. Restore submitted draft  Restore into an empty composer; keep the same
+                              pending request.
+
+  enter select · esc back

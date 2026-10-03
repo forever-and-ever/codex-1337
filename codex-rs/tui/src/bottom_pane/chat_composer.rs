@@ -100,6 +100,12 @@
 //! after existing text. The separator and recovered answer form one Vim edit; large answers
 //! use atomic paste placeholders backed by their original text.
 //!
+//! # Farm Delegation
+//!
+//! `/farm` and `/farm_fresh` bypass the queue binding: delegation is immediate even
+//! during an active turn. Dispatch prepares a copy and retains the rich original draft
+//! until the server confirms acceptance; rejection and uncertain delivery never consume it.
+//!
 //! # Startup Draft Handoff
 //!
 //! Startup uses a provisional plain-text composer: editing remains available while its owner
@@ -3159,6 +3165,26 @@ impl ChatComposer {
 
         if let Some(result) = self.handle_parent_owned_submission() {
             return result;
+        }
+        // Farm is immediate delegation even when the user presses the queue binding.
+        // Dispatch validates and retains this rich draft until its server receipt arrives.
+        if parse_slash_name(self.draft.textarea.text()).is_some_and(|(name, _, _)| {
+            matches!(
+                self.slash_input().command(name),
+                Some(SlashCommandItem::Builtin(
+                    SlashCommand::Farm | SlashCommand::FarmFresh
+                ))
+            )
+        }) {
+            if let Some(pasted) = self.draft.paste_burst.flush_before_modified_input() {
+                self.apply_paste(pasted);
+            }
+            if let Some(result) = self
+                .try_dispatch_bare_slash_command()
+                .or_else(|| self.try_dispatch_slash_command_with_args())
+            {
+                return (result, true);
+            }
         }
         if should_queue {
             if let Some(pasted) = self.draft.paste_burst.flush_before_modified_input() {

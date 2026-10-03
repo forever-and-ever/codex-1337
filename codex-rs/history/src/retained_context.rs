@@ -145,6 +145,12 @@ impl std::fmt::Debug for VerifiedAnswer {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RetainedContextEvent {
+    /// A genuine user assignment accepted outside a parent turn. Never produce this from tools.
+    UserDelegation {
+        #[serde(flatten)]
+        message: RetainedUserMessage,
+        acceptance_order: u64,
+    },
     VerifiedAnswer {
         #[serde(flatten)]
         answer: VerifiedAnswer,
@@ -203,6 +209,11 @@ fn bound_family<T: Serialize>(items: &mut VecDeque<Ordered<T>>, incomplete: &mut
 }
 
 impl RetainedUserMessage {
+    /// Admission can reject an oversized genuine request rather than silently omit its grant.
+    pub fn fits_storage_bound(&self) -> bool {
+        serde_json::to_vec(self).is_ok_and(|bytes| bytes.len() <= MAX_RECORD_BYTES)
+    }
+
     fn bound(&mut self) {
         if serde_json::to_vec(self).map_or(true, |bytes| bytes.len() > MAX_RECORD_BYTES) {
             self.text.clear();
@@ -232,7 +243,8 @@ impl RetainedContextEvent {
                         .truncate(answer.call_id.floor_char_boundary(1_024));
                 }
             }
-            Self::DeliveredAssistantMessage { message, .. } => message.bound(),
+            Self::DeliveredAssistantMessage { message, .. }
+            | Self::UserDelegation { message, .. } => message.bound(),
         }
     }
 }
@@ -443,6 +455,24 @@ impl RetainedContext {
         let mut event = event.clone();
         event.bound();
         match event {
+            RetainedContextEvent::UserDelegation {
+                message,
+                acceptance_order,
+            } => {
+                if self.user_messages.iter().any(|entry| {
+                    message.message_id.is_some()
+                        && entry.value.message_id == message.message_id
+                        && entry.value == message
+                        && !entry.inherited
+                }) {
+                    return false;
+                }
+                self.record_user_message(
+                    message,
+                    RetainedInputSource::Local(Some(acceptance_order)),
+                );
+                true
+            }
             RetainedContextEvent::VerifiedAnswer {
                 answer,
                 acceptance_order,

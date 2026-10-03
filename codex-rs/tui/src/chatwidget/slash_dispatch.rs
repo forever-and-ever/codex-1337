@@ -164,6 +164,10 @@ impl ChatWidget {
         cmd: SlashCommand,
         source: SlashCommandDispatchSource,
     ) {
+        if matches!(cmd, SlashCommand::Farm | SlashCommand::FarmFresh) {
+            self.dispatch_farm(cmd);
+            return;
+        }
         if cmd != SlashCommand::Copy {
             self.transcript.last_status_copy_targets = None;
         }
@@ -201,6 +205,7 @@ impl ChatWidget {
                 self.bottom_pane.show_selection_view(params);
                 self.request_redraw();
             }
+            SlashCommand::Farm | SlashCommand::FarmFresh => unreachable!("handled above"),
             SlashCommand::New => {
                 self.show_session_checkout_picker(ManagedWorktreeMode::New, /*name*/ None);
             }
@@ -642,6 +647,10 @@ impl ChatWidget {
         args: String,
         text_elements: Vec<TextElement>,
     ) {
+        if matches!(cmd, SlashCommand::Farm | SlashCommand::FarmFresh) {
+            self.dispatch_farm(cmd);
+            return;
+        }
         if cmd != SlashCommand::Copy {
             self.transcript.last_status_copy_targets = None;
         }
@@ -1279,6 +1288,8 @@ impl ChatWidget {
             | SlashCommand::Clear
             | SlashCommand::Resume
             | SlashCommand::Fork
+            | SlashCommand::Farm
+            | SlashCommand::FarmFresh
             | SlashCommand::Init
             | SlashCommand::Compact
             | SlashCommand::Review

@@ -157,7 +157,7 @@ fn retain_forked_developer_message(item: &mut ResponseItem, usage_hint_texts: &[
     !content.is_empty() && set_annotated_content(item, content).is_some()
 }
 
-async fn load_agent_model_context(
+pub(crate) async fn load_agent_model_context(
     state: &ThreadManagerState,
     thread_id: ThreadId,
     history_mode: ThreadHistoryMode,
@@ -413,7 +413,7 @@ impl LocalAgentControl {
         } else {
             None
         };
-        config.model_reasoning_effort = stored_reasoning_effort;
+        config.model_reasoning_effort = stored_reasoning_effort.clone();
         if let Some(role_name) = session_source.get_agent_role() {
             let runtime_approval_policy = config.permissions.approval_policy.value();
             let runtime_approvals_reviewer = config.approvals_reviewer;
@@ -468,6 +468,31 @@ impl LocalAgentControl {
         let parent_thread_id = owner_thread_id
             .or_else(|| initial_history.get_resumed_parent_thread_id())
             .or(stored_parent_thread_id);
+        // Farm's additive instructions are captured at acceptance, not re-read from current
+        // executor preferences. Ordinary spawned agents have no record and remain unchanged.
+        let instructions_parent = match parent.as_ref() {
+            Some((parent, _)) => Some(Arc::clone(parent)),
+            None => match parent_thread_id {
+                Some(parent) => state.get_thread(parent).await.ok(),
+                None => None,
+            },
+        };
+        if let Some(parent) = instructions_parent
+            && let Some(db) = parent.state_db()
+            && let Some(instructions) =
+                db.farm_child_instructions(thread_id)
+                    .await
+                    .map_err(|error| {
+                        CodexErr::Fatal(format!(
+                            "could not restore delegated child instructions: {error}"
+                        ))
+                    })?
+        {
+            crate::agent::farm::apply_farm_instructions(&mut config, &instructions);
+            // Role permissions/instructions still reload, but this direct user's executor
+            // selection retains precedence over a role's reasoning preference too.
+            config.model_reasoning_effort = stored_reasoning_effort;
+        }
         let (inherited_environments, inherited_exec_policy, client_mcp_extensions) = if let Some(
             (parent, parent_environments),
         ) =
@@ -788,6 +813,29 @@ impl LocalAgentControl {
         };
         agent_metadata.agent_id = Some(new_thread.thread_id);
         let mut pending_spawn = PendingSpawn::new(Arc::clone(&state), new_thread.thread_id);
+        if let Some(user_request) = &options.user_request {
+            let parent = options.parent_thread_id.ok_or_else(|| {
+                CodexErr::InvalidRequest("user delegation requires a parent".to_owned())
+            })?;
+            let parent = state.get_thread(parent).await?;
+            let db = parent.state_db().ok_or_else(|| {
+                CodexErr::InvalidRequest("user delegation requires durable state".to_owned())
+            })?;
+            let path = agent_metadata.agent_path.as_ref().ok_or_else(|| {
+                CodexErr::InvalidRequest("user delegation requires a child path".to_owned())
+            })?;
+            db.record_farm_child(
+                parent.session.thread_id,
+                &user_request.request_id,
+                new_thread.thread_id,
+                path.as_str(),
+                &user_request.instructions,
+            )
+            .await
+            .map_err(|error| {
+                CodexErr::Fatal(format!("could not persist delegated child: {error}"))
+            })?;
+        }
 
         if let Some(SessionSource::SubAgent(
             subagent_source @ SubAgentSource::ThreadSpawn {
@@ -943,9 +991,9 @@ impl LocalAgentControl {
             environments: inherited_environments,
             exec_policy: inherited_exec_policy,
         } = inheritance;
-        if options.fork_parent_spawn_call_id.is_none() {
+        if options.fork_parent_spawn_call_id.is_none() && options.user_request.is_none() {
             return Err(CodexErr::Fatal(
-                "spawn_agent fork requires a parent spawn call id".to_string(),
+                "spawn_agent fork requires a tool invocation or user request boundary".to_string(),
             ));
         }
         let Some(fork_mode) = options.fork_mode.as_ref() else {
@@ -975,13 +1023,17 @@ impl LocalAgentControl {
             (MultiAgentVersion::V2, override_instructions)
                 if override_instructions.is_some() || session_source.get_agent_role().is_some() =>
             {
-                let parent_developer_instructions = match parent_thread
-                    .session
-                    .new_default_turn()
-                    .await
-                    .developer_instructions
-                    .clone()
-                {
+                let parent_instructions = if let Some(boundary) = &options.user_request {
+                    boundary.parent_developer_instructions.clone()
+                } else {
+                    parent_thread
+                        .session
+                        .new_default_turn()
+                        .await
+                        .developer_instructions
+                        .clone()
+                };
+                let parent_developer_instructions = match parent_instructions {
                     Some(instructions) if !instructions.is_empty() => Some(instructions),
                     Some(_) | None => None,
                 };
@@ -996,19 +1048,33 @@ impl LocalAgentControl {
         let parent_history_mode = parent_thread.config_snapshot().await.history_mode;
         // `record_conversation_items` only queues persistence writes asynchronously.
         // Flush before snapshotting store history for a fork.
-        parent_thread.ensure_rollout_materialized().await;
-        parent_thread.flush_rollout().await?;
+        if options.user_request.is_none() {
+            parent_thread.ensure_rollout_materialized().await;
+            parent_thread.flush_rollout().await?;
+        }
 
         let destination_history_mode = matches!(parent_history_mode, ThreadHistoryMode::Paginated)
             .then_some(ThreadHistoryMode::Paginated);
-        let mut forked_rollout_items =
+        let mut forked_rollout_items = if let Some(boundary) = &options.user_request {
+            boundary
+                .fork_history
+                .as_ref()
+                .ok_or_else(|| {
+                    CodexErr::InvalidRequest(
+                        "full user delegation requires captured history".to_owned(),
+                    )
+                })?
+                .as_ref()
+                .clone()
+        } else {
             load_agent_model_context(state, parent_thread_id, parent_history_mode)
                 .await?
                 .ok_or_else(|| {
                     CodexErr::Fatal(format!(
                         "parent thread history unavailable for fork: {parent_thread_id}"
                     ))
-                })?;
+                })?
+        };
 
         let selected_capability_roots = forked_rollout_items
             .iter()

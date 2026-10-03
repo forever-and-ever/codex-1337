@@ -4,6 +4,9 @@ use super::*;
 
 impl App {
     pub(super) fn ready_for_idle_restart(&self) -> bool {
+        if self.farm.pending.is_some() || self.farm.saved.is_some() {
+            return false;
+        }
         #[cfg(target_os = "linux")]
         if crate::reload::worker::is_hosted() {
             return self.can_reload_ui();

@@ -34,6 +34,9 @@ pub enum SlashCommand {
     Delete,
     Resume,
     Fork,
+    Farm,
+    #[strum(serialize = "farm_fresh")]
+    FarmFresh,
     Worktree,
     App,
     Init,
@@ -102,6 +105,8 @@ impl SlashCommand {
             SlashCommand::Delete => "permanently delete this session",
             SlashCommand::Clear => "clear the terminal and start a new chat",
             SlashCommand::Fork => "fork the current chat",
+            SlashCommand::Farm => "delegate a task with the current conversation",
+            SlashCommand::FarmFresh => "delegate a task without conversation history",
             SlashCommand::Worktree => "start or continue a conversation in a new worktree",
             SlashCommand::App => "continue this session in the Desktop app",
             SlashCommand::Quit | SlashCommand::Exit => "exit Codex",
@@ -176,6 +181,8 @@ impl SlashCommand {
                 | SlashCommand::New
                 | SlashCommand::Clear
                 | SlashCommand::Fork
+                | SlashCommand::Farm
+                | SlashCommand::FarmFresh
                 | SlashCommand::Plan
                 | SlashCommand::Goal
                 | SlashCommand::Voice
@@ -217,7 +224,10 @@ impl SlashCommand {
     /// Whether dispatch needs thread state to validate this command before consuming its draft.
     /// The composer must defer busy-state rejection and draft clearing for these commands.
     pub(crate) fn requires_dispatch_validation(self) -> bool {
-        matches!(self, SlashCommand::Review)
+        matches!(
+            self,
+            SlashCommand::Review | SlashCommand::Farm | SlashCommand::FarmFresh
+        )
     }
 
     /// Commands that do not require a writable current thread. The server must still be connected.
@@ -301,6 +311,7 @@ impl SlashCommand {
             | SlashCommand::Exit
             | SlashCommand::Side
             | SlashCommand::Btw => true,
+            SlashCommand::Farm | SlashCommand::FarmFresh => true,
             SlashCommand::Rollout => true,
             SlashCommand::TestApproval => true,
             SlashCommand::Agents | SlashCommand::MultiAgents => true,

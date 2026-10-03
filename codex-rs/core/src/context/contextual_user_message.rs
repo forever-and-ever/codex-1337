@@ -14,6 +14,7 @@ use super::LegacyUnifiedExecProcessLimitWarning;
 use super::RecommendedPluginsInstructions;
 use super::SubagentNotification;
 use super::TurnAborted;
+use super::UserDelegationReceipt;
 use super::UserGoalUpdate;
 use super::UserInstructions;
 use super::UserShellCommand;
@@ -21,6 +22,7 @@ use super::world_state::EnvironmentsState;
 
 const CONTEXTUAL_USER_FRAGMENT_MATCHERS: &[fn(&str) -> bool] = &[
     UserInstructions::matches_text,
+    UserDelegationReceipt::matches_text,
     EnvironmentsState::matches_text,
     AdditionalContextUserFragment::matches_text,
     AgentMessageBoardNotification::matches_text,
