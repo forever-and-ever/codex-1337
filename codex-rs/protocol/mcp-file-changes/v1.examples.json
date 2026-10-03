@@ -1,0 +1,150 @@
+[
+  {
+    "name": "applied text modification",
+    "schemaValid": true,
+    "receipt": {
+      "version": 1, "outcome": "applied", "omittedFiles": 0,
+      "files": [{
+        "kind": "text", "publication": "applied", "operation": "modify",
+        "before": { "uri": "file:///workspace/a.txt", "sha256": "01d09d19c2139a46aebfb577780d123d7396e97201bc7ead210a2ebff8239dee", "bytes": 4 },
+        "after": { "uri": "file:///workspace/a.txt", "sha256": "7aa7a5359173d05b63cfd682e3c38487f3cb4f7f1d60659fe59fab1505977d4c", "bytes": 4 },
+        "unifiedDiff": "--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\n"
+      }]
+    }
+  },
+  {
+    "name": "preview is not publication",
+    "schemaValid": true,
+    "receipt": {
+      "version": 1, "outcome": "preview", "omittedFiles": 0,
+      "files": [{
+        "kind": "text", "publication": "preview", "operation": "modify",
+        "before": { "uri": "file:///workspace/a.txt", "sha256": "01d09d19c2139a46aebfb577780d123d7396e97201bc7ead210a2ebff8239dee", "bytes": 4 },
+        "after": { "uri": "file:///workspace/a.txt", "sha256": "7aa7a5359173d05b63cfd682e3c38487f3cb4f7f1d60659fe59fab1505977d4c", "bytes": 4 },
+        "unifiedDiff": "--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\n"
+      }]
+    }
+  },
+  {
+    "name": "binary summary without invented text diff",
+    "schemaValid": true,
+    "receipt": {
+      "version": 1, "outcome": "applied", "omittedFiles": 0,
+      "files": [{
+        "kind": "summary", "publication": "applied", "operation": "modify", "reason": "binary",
+        "before": { "uri": "file:///workspace/a.bin", "sha256": "054edec1d0211f624fed0cbca9d4f9400b0e491c43742af2c5b0abebf0c990d8", "bytes": 4 },
+        "after": { "uri": "file:///workspace/a.bin", "sha256": "4c660defac5dabb4b4d02e701f5df046fffb5cd61f968208522ba083f5ec12a8", "bytes": 4 }
+      }]
+    }
+  },
+  {
+    "name": "oversized complete diff is omitted, not truncated",
+    "schemaValid": true,
+    "receipt": {
+      "version": 1, "outcome": "applied", "omittedFiles": 0,
+      "files": [{
+        "kind": "summary", "publication": "applied", "operation": "modify", "reason": "oversized",
+        "before": { "uri": "file:///workspace/large.txt", "sha256": "66915c0872933db504e7578828dd85b7e74a4e0a061f9756793b89c4151bd4b5", "bytes": 70000 },
+        "after": { "uri": "file:///workspace/large.txt", "sha256": "e17a5aac4901b92f9dc2e602fd96e40ad98697213ec71392f66042541e8434ea", "bytes": 70000 }
+      }]
+    }
+  },
+  {
+    "name": "publication refused: paths assert no snapshots",
+    "schemaValid": true,
+    "receipt": {
+      "version": 1, "outcome": "notApplied", "omittedFiles": 0,
+      "files": [{ "kind": "pathOnly", "publication": "notApplied", "operation": "modify", "beforeUri": "file:///workspace/a.txt", "afterUri": "file:///workspace/a.txt" }]
+    }
+  },
+  {
+    "name": "partial publication: one committed file and one untouched",
+    "schemaValid": true,
+    "receipt": {
+      "version": 1, "outcome": "partial", "omittedFiles": 0,
+      "files": [
+        {
+          "kind": "text", "publication": "applied", "operation": "modify",
+          "before": { "uri": "file:///workspace/a.txt", "sha256": "01d09d19c2139a46aebfb577780d123d7396e97201bc7ead210a2ebff8239dee", "bytes": 4 },
+          "after": { "uri": "file:///workspace/a.txt", "sha256": "7aa7a5359173d05b63cfd682e3c38487f3cb4f7f1d60659fe59fab1505977d4c", "bytes": 4 },
+          "unifiedDiff": "--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\n"
+        },
+        { "kind": "pathOnly", "publication": "notApplied", "operation": "create", "beforeUri": null, "afterUri": "file:///workspace/b.txt" }
+      ]
+    }
+  },
+  {
+    "name": "unknown publication must not display planned content as committed",
+    "schemaValid": true,
+    "receipt": {
+      "version": 1, "outcome": "unknown", "omittedFiles": 0,
+      "files": [{ "kind": "pathOnly", "publication": "unknown", "operation": "rename", "beforeUri": "file:///workspace/a.txt", "afterUri": "file:///workspace/b.txt" }]
+    }
+  },
+  {
+    "name": "proven no-op",
+    "schemaValid": true,
+    "receipt": { "version": 1, "outcome": "applied", "files": [], "omittedFiles": 0 }
+  },
+  {
+    "name": "no-op preview",
+    "schemaValid": true,
+    "receipt": { "version": 1, "outcome": "preview", "files": [], "omittedFiles": 0 }
+  },
+  {
+    "name": "unknown with unavailable paths is not a no-op",
+    "schemaValid": true,
+    "receipt": { "version": 1, "outcome": "unknown", "files": [], "omittedFiles": 0 }
+  },
+  {
+    "name": "bounded omission is explicit even if no inline records fit",
+    "schemaValid": true,
+    "receipt": { "version": 1, "outcome": "applied", "files": [], "omittedFiles": 3 }
+  },
+  {
+    "name": "empty-file creation is an edit without expandable content",
+    "schemaValid": true,
+    "receipt": {
+      "version": 1, "outcome": "applied", "omittedFiles": 0,
+      "files": [{
+        "kind": "text", "publication": "applied", "operation": "create", "before": null,
+        "after": { "uri": "file:///workspace/empty.txt", "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "bytes": 0 },
+        "unifiedDiff": ""
+      }]
+    }
+  },
+  {
+    "name": "invalid: preview envelope containing a publication",
+    "schemaValid": false,
+    "receipt": {
+      "version": 1, "outcome": "preview", "omittedFiles": 0,
+      "files": [{
+        "kind": "text", "publication": "applied", "operation": "create", "before": null,
+        "after": { "uri": "file:///workspace/empty.txt", "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "bytes": 0 },
+        "unifiedDiff": ""
+      }]
+    }
+  },
+  {
+    "name": "invalid: unknown with an asserted after snapshot",
+    "schemaValid": false,
+    "receipt": {
+      "version": 1, "outcome": "unknown", "omittedFiles": 0,
+      "files": [{
+        "kind": "text", "publication": "unknown", "operation": "create", "before": null,
+        "after": { "uri": "file:///workspace/empty.txt", "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "bytes": 0 },
+        "unifiedDiff": ""
+      }]
+    }
+  },
+  {
+    "name": "invalid: v1 has no artifact transport",
+    "schemaValid": false,
+    "receipt": { "version": 1, "outcome": "applied", "files": [], "omittedFiles": 1, "artifact": "file:///tmp/diff" }
+  },
+  {
+    "name": "invalid: partial cannot assert no known effects",
+    "schemaValid": false,
+    "receipt": { "version": 1, "outcome": "partial", "files": [], "omittedFiles": 0 }
+  }
+]

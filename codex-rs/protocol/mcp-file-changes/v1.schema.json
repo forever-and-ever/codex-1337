@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:codex-1337:mcp-file-change-receipt:1",
+  "title": "Codex MCP file-change receipt v1 (inline only)",
+  "$comment": "Authoritative candidate contract for the value of CallToolResult._meta['codex/fileChanges']. Acceptance requires BOTH this JSON Schema and x-codex-validation. No artifact/resource references in v1. No producer-supplied call, turn, thread or environment IDs.",
+  "x-codex-validation": {
+    "attachmentBytesMax": 262144,
+    "inlineDiffUtf8BytesMax": 65536,
+    "uriUtf8BytesMax": 4096,
+    "attachmentEncoding": "UTF-8 compact JSON; no insignificant whitespace; Unicode unescaped except JSON-required escaping. Measure the decoded attachment reserialized this way, not the original transport's whitespace.",
+    "rules": [
+      "Metadata describes producer-reported captured effects, not host-verified filesystem truth, approval, permission, or replay authority.",
+      "outcome preview: no publication attempted. outcome applied: requested file publication completed, possibly a no-op. outcome notApplied: positively known no publication. outcome partial: positively known published effects but incomplete requested publication; no unresolved effects. outcome unknown: publication is unresolved anywhere, even when some individual effects are known.",
+      "publication applied: before/after are actual captured endpoints of this file's published transition, not a promise that the overall request succeeded. publication preview: before is captured input and after is prospective, not proof of a write. Path-only entries carry intended path identity and no existence/content assertions.",
+      "A null before/after snapshot means absence, never unknown. Unknown content or publication MUST use pathOnly, not fabricated hashes or a planned after snapshot labeled applied.",
+      "URI must be an absolute file URI with absolute path, no userinfo/query/fragment, valid percent escapes, no raw control characters. Compare the producer's URI strings without resolving paths or symlinks. URI identity is scoped to the originating MCP binding; never infer host-local identity from file:// or localhost.",
+      "For modify, before.uri equals after.uri (or beforeUri equals afterUri). For rename, these strings differ. Before URIs must be unique among listed records; after URIs must be unique among listed records. A producer coalesces its own repeated writes to one captured transition per logical file; cross-file swaps are allowed. Do not merge unrelated filesystem state into the receipt.",
+      "Snapshot sha256 is lowercase SHA-256 of original bytes, without text/EOL normalization. bytes is that original byte length. Consumer validates representation, not the truth of an unavailable snapshot.",
+      "Text entries must describe UTF-8 text and provide a complete single-file unified diff, with ---/+++ headers and complete hunks when content changes. Preserve no-final-newline markers. Diff headers never determine routing/path identity. No raw git binary patches, multiple-file patches, or truncated hunks.",
+      "Empty unifiedDiff is allowed only for empty-file creation/deletion or content-preserving rename. A modify with identical before/after hash and byte length is a no-op and is omitted, not a fake edit row. Pure mode/permission changes are outside v1; keep them in ordinary model-visible output.",
+      "Summary binary means content classified as binary; nonUtf8 means text cannot be represented losslessly in this UTF-8 channel; oversized means the complete text diff or inline attachment budget prevented inclusion. Do not put a partial diff or source excerpt into summary. Unknown hash/content is not a summary: use pathOnly with publication unknown.",
+      "omittedFiles is the exact count of additional file records deliberately excluded for inline bounds, not a count of writes. Their publication categories must obey the global outcome. Never truncate silently. If the count cannot be determined, omit the optional presentation attachment rather than fabricate completeness.",
+      "outcome applied with files=[] and omittedFiles=0 is a proven no-op. preview with the same empty shape is a no-op preview. unknown with empty files does NOT assert that no writes occurred; paths/effects may be unavailable. partial requires at least one listed applied transition or omittedFiles>0.",
+      "Reject malformed/over-limit/unsupported metadata as one presentation attachment. Preserve the original MCP success/failure and ordinary model-facing result; never retry an edit to repair presentation. Unknown versions are not v1 and must not be interpreted using this schema.",
+      "Host assigns source binding, thread/turn/nested-call identity and outer-call grouping. Persist only a bounded normalized human-transcript attachment; exclude source bytes from model/Guardian history, compaction, Code Mode results, token estimates, and telemetry.",
+      "The model-visible result must retain outcome, counts, assurances, failures and recovery information. Publication failures use isError:true CallToolResult with the full existing fault/hint/retryability plus private receipt; protocol/selection/validation errors need not migrate. This changes rejected-promise behavior to a resolved error result and must be explicit to callers.",
+      "v1 offers no full-diff inspection route for omitted/summary-only changes. Show that limitation explicitly; do not fetch URIs, open paths, emit fake native apply_patch approvals/events, or silently substitute current worktree content. Resource transport requires a later separately agreed version."
+    ]
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "outcome", "files", "omittedFiles"],
+  "properties": {
+    "version": { "const": 1 },
+    "outcome": { "enum": ["preview", "applied", "notApplied", "partial", "unknown"] },
+    "files": {
+      "type": "array",
+      "maxItems": 128,
+      "items": { "$ref": "#/$defs/file" }
+    },
+    "omittedFiles": { "$ref": "#/$defs/count" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "outcome": { "const": "preview" } } },
+      "then": { "properties": { "files": { "items": { "properties": { "publication": { "const": "preview" } } } } } }
+    },
+    {
+      "if": { "properties": { "outcome": { "const": "applied" } } },
+      "then": { "properties": { "files": { "items": { "properties": { "publication": { "const": "applied" } } } } } }
+    },
+    {
+      "if": { "properties": { "outcome": { "const": "notApplied" } } },
+      "then": { "properties": { "files": { "items": { "properties": { "publication": { "const": "notApplied" } } } } } }
+    },
+    {
+      "if": { "properties": { "outcome": { "const": "partial" } } },
+      "then": {
+        "properties": { "files": { "items": { "properties": { "publication": { "enum": ["applied", "notApplied"] } } } } },
+        "anyOf": [
+          { "properties": { "omittedFiles": { "minimum": 1 } } },
+          { "properties": { "files": { "contains": { "properties": { "publication": { "const": "applied" } }, "required": ["publication"] } } } }
+        ]
+      }
+    },
+    {
+      "if": { "properties": { "outcome": { "const": "unknown" } } },
+      "then": { "properties": { "files": { "items": { "properties": { "publication": { "enum": ["applied", "notApplied", "unknown"] } } } } } }
+    }
+  ],
+  "$defs": {
+    "count": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+    "uri": { "type": "string", "format": "uri", "pattern": "^file://", "maxLength": 4096 },
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["uri", "sha256", "bytes"],
+      "properties": {
+        "uri": { "$ref": "#/$defs/uri" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "bytes": { "$ref": "#/$defs/count" }
+      }
+    },
+    "nullableSnapshot": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/snapshot" }] },
+    "nullableUri": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/uri" }] },
+    "operation": { "enum": ["create", "modify", "delete", "rename"] },
+    "capturedOperation": {
+      "allOf": [
+        {
+          "if": { "properties": { "operation": { "const": "create" } } },
+          "then": { "properties": { "before": { "type": "null" }, "after": { "$ref": "#/$defs/snapshot" } } }
+        },
+        {
+          "if": { "properties": { "operation": { "const": "delete" } } },
+          "then": { "properties": { "before": { "$ref": "#/$defs/snapshot" }, "after": { "type": "null" } } }
+        },
+        {
+          "if": { "properties": { "operation": { "enum": ["modify", "rename"] } } },
+          "then": { "properties": { "before": { "$ref": "#/$defs/snapshot" }, "after": { "$ref": "#/$defs/snapshot" } } }
+        }
+      ]
+    },
+    "pathOperation": {
+      "allOf": [
+        {
+          "if": { "properties": { "operation": { "const": "create" } } },
+          "then": { "properties": { "beforeUri": { "type": "null" }, "afterUri": { "$ref": "#/$defs/uri" } } }
+        },
+        {
+          "if": { "properties": { "operation": { "const": "delete" } } },
+          "then": { "properties": { "beforeUri": { "$ref": "#/$defs/uri" }, "afterUri": { "type": "null" } } }
+        },
+        {
+          "if": { "properties": { "operation": { "enum": ["modify", "rename"] } } },
+          "then": { "properties": { "beforeUri": { "$ref": "#/$defs/uri" }, "afterUri": { "$ref": "#/$defs/uri" } } }
+        }
+      ]
+    },
+    "file": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "publication", "operation", "before", "after", "unifiedDiff"],
+          "properties": {
+            "kind": { "const": "text" },
+            "publication": { "enum": ["applied", "preview"] },
+            "operation": { "$ref": "#/$defs/operation" },
+            "before": { "$ref": "#/$defs/nullableSnapshot" },
+            "after": { "$ref": "#/$defs/nullableSnapshot" },
+            "unifiedDiff": { "type": "string", "maxLength": 65536 }
+          },
+          "allOf": [{ "$ref": "#/$defs/capturedOperation" }]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "publication", "operation", "before", "after", "reason"],
+          "properties": {
+            "kind": { "const": "summary" },
+            "publication": { "enum": ["applied", "preview"] },
+            "operation": { "$ref": "#/$defs/operation" },
+            "before": { "$ref": "#/$defs/nullableSnapshot" },
+            "after": { "$ref": "#/$defs/nullableSnapshot" },
+            "reason": { "enum": ["binary", "nonUtf8", "oversized"] }
+          },
+          "allOf": [{ "$ref": "#/$defs/capturedOperation" }]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "publication", "operation", "beforeUri", "afterUri"],
+          "properties": {
+            "kind": { "const": "pathOnly" },
+            "publication": { "enum": ["notApplied", "unknown"] },
+            "operation": { "$ref": "#/$defs/operation" },
+            "beforeUri": { "$ref": "#/$defs/nullableUri" },
+            "afterUri": { "$ref": "#/$defs/nullableUri" }
+          },
+          "allOf": [{ "$ref": "#/$defs/pathOperation" }]
+        }
+      ]
+    }
+  }
+}

@@ -1083,7 +1083,7 @@ fn truncate_mcp_tool_result_for_event_preserves_small_result() {
         meta: Some(serde_json::json!({"k": "v"})),
     };
 
-    let got = truncate_mcp_tool_result_for_event(&Ok(original.clone()))
+    let got = truncate_mcp_tool_result_for_event(&Ok(original.clone()), /*file_changes*/ None)
         .expect("small result should remain successful");
 
     assert_eq!(got, original);
@@ -1105,7 +1105,7 @@ fn truncate_mcp_tool_result_for_event_bounds_large_result() {
         })),
     };
 
-    let got = truncate_mcp_tool_result_for_event(&Ok(original))
+    let got = truncate_mcp_tool_result_for_event(&Ok(original), /*file_changes*/ None)
         .expect("large result should remain successful");
     let serialized = serde_json::to_string(&got).expect("truncated result should serialize");
 
@@ -1127,9 +1127,95 @@ fn truncate_mcp_tool_result_for_event_bounds_large_result() {
 }
 
 #[test]
+fn mcp_receipt_survives_event_bounds_without_entering_model_result() {
+    use codex_protocol::mcp_file_changes::take_file_changes;
+    let receipt = serde_json::json!({
+        "version":1,"outcome":"partial","omittedFiles":1,
+        "files":[{"kind":"text","publication":"applied","operation":"modify",
+            "before":{"uri":"file:///remote/a.rs","sha256":"0".repeat(64),"bytes":15},
+            "after":{"uri":"file:///remote/a.rs","sha256":"1".repeat(64),"bytes":14},
+            "unifiedDiff":"--- a/a.rs\n+++ b/a.rs\n@@ -1 +1 @@\n-private_before\n+private_after\n"}]
+    });
+    for metadata in [
+        receipt.clone(),
+        serde_json::json!({"version":2,"body":"private_before"}),
+    ] {
+        let mut model_result = CallToolResult {
+            content: vec![
+                serde_json::json!({"type":"text","text":"Publication failed, partial effects; do not retry.\n".repeat(10_000)}),
+            ],
+            structured_content: None,
+            is_error: Some(true),
+            meta: Some(serde_json::json!({"codex/fileChanges":metadata})),
+        };
+        let captured = take_file_changes(&mut model_result);
+        let event_result =
+            truncate_mcp_tool_result_for_event(&Ok(model_result.clone()), captured).unwrap();
+        assert_eq!(event_result.is_error, Some(true));
+        assert!(
+            !serde_json::to_string(&model_result)
+                .unwrap()
+                .contains("private_before")
+        );
+        assert!(
+            !event_result.content[0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("private_before")
+        );
+        // The persisted transcript copy is independent of model input and survives serde replay.
+        let item: McpToolCallItem = serde_json::from_value(serde_json::json!({
+            "id":"edit", "server":"remote", "tool":"edit", "arguments":{},
+            "status":"failed", "result":event_result
+        }))
+        .unwrap();
+        let persisted = codex_history::RolloutItem::EventMsg(EventMsg::ItemCompleted(
+            codex_protocol::protocol::ItemCompletedEvent {
+                thread_id: codex_protocol::ThreadId::new(),
+                turn_id: "turn".into(),
+                item: TurnItem::McpToolCall(item),
+                started_at_ms: None,
+                completed_at_ms: 0,
+            },
+        ));
+        let replayed: codex_history::RolloutItem =
+            serde_json::from_str(&serde_json::to_string(&persisted).unwrap()).unwrap();
+        let codex_history::RolloutItem::EventMsg(EventMsg::ItemCompleted(completed)) = replayed
+        else {
+            panic!("expected persisted human item");
+        };
+        let TurnItem::McpToolCall(replayed) = completed.item else {
+            panic!("expected persisted MCP call");
+        };
+        assert_eq!(replayed.result, Some(event_result.clone()));
+        assert_eq!(
+            event_result
+                .meta
+                .as_ref()
+                .and_then(|meta| meta.get(FILE_CHANGES_META_KEY)),
+            (metadata["version"] == 1).then_some(&receipt)
+        );
+        let model_item: codex_protocol::models::ResponseItem =
+            codex_protocol::models::ResponseInputItem::McpToolCallOutput {
+                call_id: "edit".into(),
+                output: model_result,
+            }
+            .into();
+        assert!(
+            !serde_json::to_string(&model_item)
+                .unwrap()
+                .contains("private_before")
+        );
+    }
+}
+
+#[test]
 fn truncate_mcp_tool_result_for_event_bounds_large_error() {
-    let got = truncate_mcp_tool_result_for_event(&Err("error-message-".repeat(200_000)))
-        .expect_err("large error should remain an error");
+    let got = truncate_mcp_tool_result_for_event(
+        &Err("error-message-".repeat(200_000)),
+        /*file_changes*/ None,
+    )
+    .expect_err("large error should remain an error");
 
     // `truncate_text` includes its own marker, so allow a small amount of
     // overhead beyond the requested byte budget.

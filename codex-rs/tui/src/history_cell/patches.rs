@@ -34,14 +34,6 @@ impl PatchHistoryCell {
         if !self.continuation {
             lines.push(Line::from(vec!["• ".dim(), "Edited".bold()]).into());
         }
-        let (added, removed) = crate::diff_render::line_counts(&self.change);
-        let counts = Line::from(vec![
-            " (".into(),
-            format!("+{added}").green(),
-            ", ".into(),
-            format!("-{removed}").red(),
-            ")".into(),
-        ]);
         let mut path = crate::diff_render::display_path_for(&self.path, &self.cwd);
         if let FileChange::Update {
             move_path: Some(destination),
@@ -54,22 +46,17 @@ impl PatchHistoryCell {
             ));
         }
         let width = usize::from(width).max(/*other*/ 1);
-        let path = truncate_line_with_ellipsis_if_overflow(
-            Line::from(path.replace(['\n', '\r', '\t'], " ")),
-            width.saturating_sub(
-                counts.width() + usize::from(crate::transcript_geometry::CHILD_INDENT),
-            ),
-        );
-        let mut spans = Vec::new();
-        spans.extend(path.spans);
-        spans.extend(counts.spans);
         lines.extend(crate::terminal_hyperlinks::prefix_hyperlink_lines(
             vec![
-                truncate_line_with_ellipsis_if_overflow(
-                    Line::from(spans),
+                crate::file_change_view::FileChangeView {
+                    label: path.into(),
+                    syntax_path: &self.path,
+                    change: Some(&self.change),
+                    qualifier: None,
+                }
+                .summary(
                     width.saturating_sub(usize::from(crate::transcript_geometry::CHILD_INDENT)),
-                )
-                .into(),
+                ),
             ],
             crate::transcript_geometry::CHILD_PREFIX.into(),
             crate::transcript_geometry::CHILD_PREFIX.into(),
@@ -112,9 +99,13 @@ impl HistoryCell for PatchHistoryCell {
     fn display_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         let mut lines = self.summary(width);
         lines.extend(crate::terminal_hyperlinks::prefix_hyperlink_lines(
-            crate::diff_render::file_change_lines(
-                &self.change,
-                &self.path,
+            crate::file_change_view::FileChangeView {
+                label: "".into(),
+                syntax_path: &self.path,
+                change: Some(&self.change),
+                qualifier: None,
+            }
+            .body(
                 usize::from(width)
                     .saturating_sub(usize::from(crate::transcript_geometry::CHILD_INDENT)),
             ),

@@ -26,6 +26,7 @@ codex-utils-path-uri = { workspace = true }
 codex-utils-redacted-string = { workspace = true }
 codex-utils-string = { workspace = true }
 encoding_rs = { workspace = true }
+diffy = { workspace = true }
 gix-url = { workspace = true }
 globset = { workspace = true }
 http = { workspace = true }
@@ -49,6 +50,7 @@ ts-rs = { workspace = true, features = [
     "no-serde-warnings",
 ] }
 uuid = { workspace = true, features = ["serde", "v7", "v4"] }
+url = { workspace = true }
 wildmatch = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
