@@ -871,6 +871,9 @@ impl App {
                     }
                     ThreadBufferedEvent::HistoryEntryResponse(_)
                     | ThreadBufferedEvent::FeedbackSubmission(_) => true,
+                    ThreadBufferedEvent::FarmReceipt {
+                        thread_id: origin, ..
+                    } => *origin == thread_id,
                 });
                 self.pending_app_server_requests.clear();
                 let mut unsupported_requests = Vec::new();

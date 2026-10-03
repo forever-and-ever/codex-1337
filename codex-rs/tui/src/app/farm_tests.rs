@@ -145,7 +145,34 @@ async fn farm_receipt_reconciles_identity_and_draft_without_steering_or_navigati
         uncertain: false,
     });
     let mut tui = crate::tui::test_support::make_test_tui().expect("test tui");
-    app.set_farm_receipt(&mut tui, root, &id, "Farming task…".into());
+    tui.set_owned_screen(/*owned*/ true).unwrap();
+    let message = |text: &str| {
+        ServerNotification::ItemCompleted(codex_app_server_protocol::ItemCompletedNotification {
+            thread_id: root.to_string(),
+            turn_id: "farm-turn".into(),
+            completed_at_ms: 0,
+            item: ThreadItem::UserMessage {
+                id: text.into(),
+                client_id: None,
+                content: vec![codex_app_server_protocol::UserInput::Text {
+                    text: text.into(),
+                    text_elements: Vec::new(),
+                }],
+            },
+        })
+    };
+    app.ensure_thread_channel(root)
+        .store
+        .lock()
+        .await
+        .push_notification(message("Before farming"));
+    app.set_farm_receipt(&mut tui, root, &id, "Farming task…".into())
+        .await;
+    app.ensure_thread_channel(root)
+        .store
+        .lock()
+        .await
+        .push_notification(message("After farming"));
     let before = app.transcript_cells.len();
     app.finish_farm(
         &mut tui,
@@ -202,7 +229,7 @@ async fn farm_receipt_reconciles_identity_and_draft_without_steering_or_navigati
         store.session = Some(session);
         store.input_state = original_input;
     }
-    let root_transcript = std::mem::take(&mut app.transcript_cells);
+    app.transcript_cells.clear();
     let child = ThreadId::new();
     app.active_thread_id = Some(child);
     app.native_history = Default::default();
@@ -232,32 +259,54 @@ async fn farm_receipt_reconciles_identity_and_draft_without_steering_or_navigati
             .all(|(current, previous)| Arc::ptr_eq(current, previous))
     );
     assert_eq!(app.transcript_cells.len(), child_transcript.len());
-    app.restore_farm_receipts(&mut tui, root);
+    app.restore_farm_receipt(&mut tui, root, &id);
     assert_eq!(app.transcript_cells.len(), child_transcript.len());
 
-    // Existing replay wiring restores the latest root receipt, not the stale pending row.
+    // Rebuild from actual buffered events, not saved rendered cells. Repeated switches
+    // must update the original receipt position instead of appending it after newer text.
     app.active_thread_id = Some(root);
-    app.transcript_cells = root_transcript;
     app.native_history = Default::default();
     let snapshot = app.thread_event_channels[&root]
         .store
         .lock()
         .await
         .snapshot();
-    app.replay_thread_snapshot(snapshot, /*resume_restored_queue*/ false);
-    loop {
-        if let AppEvent::RestoreFarmReceipts { thread_id } =
-            events.try_recv().expect("receipt replay event")
-        {
-            assert_eq!(thread_id, root);
-            app.restore_farm_receipts(&mut tui, thread_id);
-            break;
+    for _ in 0..2 {
+        app.transcript_cells.clear();
+        app.replay_thread_snapshot(snapshot.clone(), /*resume_restored_queue*/ false);
+        while let Ok(event) = events.try_recv() {
+            match event {
+                AppEvent::InsertHistoryCell(cell) => app.insert_history_cell(&mut tui, cell),
+                AppEvent::RestoreFarmReceipt {
+                    thread_id,
+                    request_id,
+                } => {
+                    assert_eq!((thread_id, &request_id), (root, &id));
+                    app.restore_farm_receipt(&mut tui, thread_id, &request_id);
+                }
+                _ => {}
+            }
         }
+        app.restore_farm_receipt(&mut tui, root, &id);
+        let relevant: Vec<_> = app
+            .transcript_cells
+            .iter()
+            .flat_map(|cell| cell.display_lines(80))
+            .map(|line| line.to_string())
+            .filter(|line| line.contains("farming") || line.contains("Farmed to"))
+            .map(|line| line.trim().to_owned())
+            .collect();
+        insta::assert_snapshot!("farm_receipt_chronology", relevant.join("\n"));
+        assert_eq!(
+            app.transcript_cells
+                .iter()
+                .filter(|cell| cell.as_any().is::<FarmReceipt>())
+                .count(),
+            1
+        );
     }
-    app.restore_farm_receipts(&mut tui, root);
     assert_eq!(app.active_thread_id, Some(root));
     assert_eq!(app.chat_widget.composer_text_with_pending(), "");
-    assert_eq!(app.transcript_cells.len(), before);
     let receipt = app
         .transcript_cells
         .iter()

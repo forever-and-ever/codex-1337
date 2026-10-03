@@ -38,7 +38,7 @@ impl App {
                 &event,
                 AppEvent::OpenDaemonMenu
                     | AppEvent::FarmFinished { .. }
-                    | AppEvent::RestoreFarmReceipts { .. }
+                    | AppEvent::RestoreFarmReceipt { .. }
                     | AppEvent::OpenWarnings
                     | AppEvent::Queue(_)
                     | AppEvent::CopyWarning(_)
@@ -2696,16 +2696,16 @@ impl App {
                     .await;
             }
             AppEvent::Farm { thread_id, mode, submission } => {
-                self.start_farm(tui, app_server, thread_id, mode, submission);
+                self.start_farm(tui, app_server, thread_id, mode, submission).await;
             }
             AppEvent::FarmFinished { request_id, result } => {
                 self.finish_farm(tui, request_id, result).await;
             }
             AppEvent::OpenFarmRecovery { thread_id } => self.open_farm_recovery(thread_id),
-            AppEvent::ReconcileFarm { request_id } => self.reconcile_farm(tui, app_server, &request_id),
+            AppEvent::ReconcileFarm { request_id } => self.reconcile_farm(tui, app_server, &request_id).await,
             AppEvent::DiscardFarm { request_id } => self.discard_farm(tui, &request_id).await,
             AppEvent::RestoreFarmDraft { request_id } => self.restore_farm_draft(&request_id),
-            AppEvent::RestoreFarmReceipts { thread_id } => self.restore_farm_receipts(tui, thread_id),
+            AppEvent::RestoreFarmReceipt { thread_id, request_id } => self.restore_farm_receipt(tui, thread_id, &request_id),
             AppEvent::OpenSkillsList => {
                 self.chat_widget.open_skills_list();
             }

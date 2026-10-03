@@ -49,7 +49,7 @@ impl HistoryCell for FarmReceipt {
 }
 
 impl App {
-    pub(super) fn start_farm(
+    pub(super) async fn start_farm(
         &mut self,
         tui: &mut tui::Tui,
         server: &mut AppServerSession,
@@ -87,10 +87,10 @@ impl App {
             submission,
             uncertain: false,
         });
-        self.send_pending_farm(tui, server);
+        self.send_pending_farm(tui, server).await;
     }
 
-    fn send_pending_farm(&mut self, tui: &mut tui::Tui, server: &mut AppServerSession) {
+    async fn send_pending_farm(&mut self, tui: &mut tui::Tui, server: &mut AppServerSession) {
         let Some(pending) = self.farm.pending.as_mut() else {
             return;
         };
@@ -103,7 +103,8 @@ impl App {
             mode: pending.mode,
             input: pending.submission.input.clone(),
         };
-        self.set_farm_receipt(tui, origin, &request_id, "Farming task…".into());
+        self.set_farm_receipt(tui, origin, &request_id, "Farming task…".into())
+            .await;
         let handle = server.request_handle();
         let rpc_id = server.next_request_id();
         let tx = self.app_event_tx.clone();
@@ -169,7 +170,7 @@ impl App {
         }
     }
 
-    pub(super) fn reconcile_farm(
+    pub(super) async fn reconcile_farm(
         &mut self,
         tui: &mut tui::Tui,
         server: &mut AppServerSession,
@@ -182,7 +183,7 @@ impl App {
                 && self.current_displayed_thread_id() == self.primary_thread_id
                 && !self.chat_widget.is_parent_owned_thread()
         }) {
-            self.send_pending_farm(tui, server);
+            self.send_pending_farm(tui, server).await;
         }
     }
 
@@ -230,7 +231,8 @@ impl App {
                 pending.thread_id,
                 request_id,
                 "Farm request discarded; a child may still be running. Nothing resent.".into(),
-            );
+            )
+            .await;
         }
     }
 
@@ -307,10 +309,11 @@ impl App {
                 )
             }
         };
-        self.set_farm_receipt(tui, origin, &request_id, message);
+        self.set_farm_receipt(tui, origin, &request_id, message)
+            .await;
     }
 
-    fn set_farm_receipt(
+    async fn set_farm_receipt(
         &mut self,
         tui: &mut tui::Tui,
         thread_id: ThreadId,
@@ -333,6 +336,16 @@ impl App {
                 self.farm.receipts.pop_front();
             }
             self.farm.receipts.push_back(receipt.clone());
+            // Keep the receipt at its first appearance, not after all replayed output.
+            // Status changes replace this same identity in place, including while hidden.
+            self.ensure_thread_channel(thread_id)
+                .store
+                .lock()
+                .await
+                .push_buffered_event(ThreadBufferedEvent::FarmReceipt {
+                    thread_id,
+                    request_id: request_id.into(),
+                });
         }
         if self.current_displayed_thread_id() == Some(thread_id) {
             self.present_farm_receipt(tui, receipt);
@@ -340,30 +353,34 @@ impl App {
     }
 
     pub(super) fn queue_farm_receipt_replay(&self) {
-        if let Some(thread_id) = self.current_displayed_thread_id()
-            && self
-                .farm
-                .receipts
-                .iter()
-                .any(|receipt| receipt.thread_id == thread_id)
-        {
-            self.app_event_tx
-                .send(AppEvent::RestoreFarmReceipts { thread_id });
+        // Only unresolved work needs a fallback if a refreshed/evicted replay buffer
+        // lost its original position. Never resurrect old success notices at the tail.
+        for retained in self.farm.pending.iter().chain(self.farm.saved.iter()) {
+            if self.current_displayed_thread_id() == Some(retained.thread_id) {
+                self.app_event_tx.send(AppEvent::RestoreFarmReceipt {
+                    thread_id: retained.thread_id,
+                    request_id: retained.request_id.clone(),
+                });
+            }
         }
     }
 
-    pub(super) fn restore_farm_receipts(&mut self, tui: &mut tui::Tui, thread_id: ThreadId) {
+    pub(super) fn restore_farm_receipt(
+        &mut self,
+        tui: &mut tui::Tui,
+        thread_id: ThreadId,
+        request_id: &str,
+    ) {
         if self.current_displayed_thread_id() != Some(thread_id) {
             return;
         }
-        let receipts: Vec<_> = self
+        if let Some(receipt) = self
             .farm
             .receipts
             .iter()
-            .filter(|receipt| receipt.thread_id == thread_id)
+            .find(|receipt| receipt.thread_id == thread_id && receipt.request_id == request_id)
             .cloned()
-            .collect();
-        for receipt in receipts {
+        {
             self.present_farm_receipt(tui, receipt);
         }
     }

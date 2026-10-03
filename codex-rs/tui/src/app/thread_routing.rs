@@ -1689,6 +1689,15 @@ impl App {
                 ThreadBufferedEvent::FeedbackSubmission(event) => {
                     self.enqueue_thread_feedback_event(thread_id, event).await;
                 }
+                ThreadBufferedEvent::FarmReceipt {
+                    thread_id,
+                    request_id,
+                } => {
+                    self.app_event_tx.send(AppEvent::RestoreFarmReceipt {
+                        thread_id,
+                        request_id,
+                    });
+                }
             }
         }
         self.chat_widget
@@ -2147,6 +2156,15 @@ impl App {
             ThreadBufferedEvent::FeedbackSubmission(event) => {
                 self.handle_feedback_thread_event(event);
             }
+            ThreadBufferedEvent::FarmReceipt {
+                thread_id,
+                request_id,
+            } => {
+                self.app_event_tx.send(AppEvent::RestoreFarmReceipt {
+                    thread_id,
+                    request_id,
+                });
+            }
         }
         if needs_refresh {
             self.refresh_status_line();
@@ -2176,6 +2194,15 @@ impl App {
             }
             ThreadBufferedEvent::FeedbackSubmission(event) => {
                 self.handle_feedback_thread_event(event);
+            }
+            ThreadBufferedEvent::FarmReceipt {
+                thread_id,
+                request_id,
+            } => {
+                self.app_event_tx.send(AppEvent::RestoreFarmReceipt {
+                    thread_id,
+                    request_id,
+                });
             }
         }
     }

@@ -24,6 +24,11 @@ pub(super) enum ThreadBufferedEvent {
     Request(Box<ServerRequest>),
     HistoryEntryResponse(HistoryLookupResponse),
     FeedbackSubmission(FeedbackThreadEvent),
+    // Local receipt position only: no task creation or durable server state.
+    FarmReceipt {
+        thread_id: ThreadId,
+        request_id: String,
+    },
 }
 
 fn is_voice_handoff_item(item: &ThreadItem) -> bool {
@@ -101,7 +106,8 @@ impl ThreadEventStore {
                     | ServerNotification::HookCompleted(_)
                     | ServerNotification::McpServerStatusUpdated(_)
             ),
-            ThreadBufferedEvent::HistoryEntryResponse(_) => false,
+            ThreadBufferedEvent::HistoryEntryResponse(_)
+            | ThreadBufferedEvent::FarmReceipt { .. } => false,
         }
     }
 
@@ -339,7 +345,8 @@ impl ThreadEventStore {
                 ThreadBufferedEvent::Request(_)
                 | ThreadBufferedEvent::Notification(_)
                 | ThreadBufferedEvent::HistoryEntryResponse(_)
-                | ThreadBufferedEvent::FeedbackSubmission(_) => None,
+                | ThreadBufferedEvent::FeedbackSubmission(_)
+                | ThreadBufferedEvent::FarmReceipt { .. } => None,
             })
             .collect()
     }
@@ -368,7 +375,8 @@ impl ThreadEventStore {
                         .should_replay_snapshot_request(request.as_ref()),
                     ThreadBufferedEvent::Notification(_)
                     | ThreadBufferedEvent::HistoryEntryResponse(_)
-                    | ThreadBufferedEvent::FeedbackSubmission(_) => true,
+                    | ThreadBufferedEvent::FeedbackSubmission(_)
+                    | ThreadBufferedEvent::FarmReceipt { .. } => true,
                 })
                 .cloned()
                 .collect(),

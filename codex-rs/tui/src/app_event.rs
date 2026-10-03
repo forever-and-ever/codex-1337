@@ -465,8 +465,9 @@ pub(crate) enum AppEvent {
     RestoreFarmDraft {
         request_id: String,
     },
-    RestoreFarmReceipts {
+    RestoreFarmReceipt {
         thread_id: ThreadId,
+        request_id: String,
     },
 
     /// Submit an op to the specified thread, regardless of current focus.
