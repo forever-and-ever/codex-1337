@@ -1,0 +1,18 @@
+---
+source: tui/src/chatwidget/tests/status_and_layout.rs
+assertion_line: 453
+expression: "snapshots.join(\"\\n\\n\").replace(&clock, \"14:17:54\")"
+---
+width=80
+    • 14:17:54  Name     Notes
+      ━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+       alpha    tail held until final table render
+
+width=36
+    • 14:17:54  Name     Notes
+      ━━━━━━━  ━━━━━━━━━━━━
+       alpha    tail held
+                until
+                final
+                table
+                render

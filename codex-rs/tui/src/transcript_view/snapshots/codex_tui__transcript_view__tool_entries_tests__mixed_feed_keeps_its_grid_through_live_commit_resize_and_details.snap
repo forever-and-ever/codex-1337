@@ -1,0 +1,134 @@
+---
+source: tui/src/transcript_view/tool_entries_tests.rs
+assertion_line: 182
+expression: "snapshots.join(\"\\n\\n\").replace(&clock, \"14:17:54\")"
+---
+width=64
+
+    › Review the layout
+
+
+    • 14:17:54 Activity Reviewing layout
+
+      More text
+
+[+] • 14:17:54 Explored (~ 128 tokens)
+        Read foo.rs (whole file)
+    • 14:17:54 Called tools.inspect()
+    • Edited
+[+]     foo.rs (+1, -0)
+[+]     bar.rs (+1, -0)
+
+    • 14:17:54 The layout keeps prose, code, and tools aligned.
+
+        source_indent();
+
+expanded width=64
+
+    › Review the layout
+
+
+    • 14:17:54 Activity Reviewing layout
+
+      More text
+
+[-]     $ poll foo
+
+    • 14:17:54 Explored
+        $ cat foo.rs
+
+    • 14:17:54 Called
+      └ tools.inspect()
+
+        combined result
+    • Edited
+[+]     foo.rs (+1, -0)
+[+]     bar.rs (+1, -0)
+
+    • 14:17:54 The layout keeps prose, code, and tools aligned.
+
+        source_indent();
+
+detailed width=64
+
+    › Review the layout
+
+
+    • 14:17:54 Activity Reviewing layout
+
+      More text
+
+        $ poll foo
+
+    • 14:17:54 Explored
+        $ cat foo.rs
+
+    • 14:17:54 Called
+      └ tools.inspect()
+
+        combined result
+    • Edited
+        foo.rs (+1, -0)
+        1 +new line
+    • Edited
+        bar.rs (+1, -0)
+        1 +new line
+
+    • 14:17:54 The layout keeps prose, code, and tools aligned.
+
+        source_indent();
+
+width=32
+
+    › Review the layout
+
+
+    • 14:17:54 Activity
+      Reviewing layout
+
+      More text
+
+[+] • 14:17:54 Explored
+        Read foo.rs (whole file)
+    • 14:17:54 Called tools.i...
+    • Edited
+[+]     foo.rs (+1, -0)
+[+]     bar.rs (+1, -0)
+
+    • 14:17:54 The layout keeps
+      prose, code, and tools
+      aligned.
+
+        source_indent();
+
+detailed width=32
+
+    › Review the layout
+
+
+    • 14:17:54 Activity
+      Reviewing layout
+
+      More text
+
+        $ poll foo
+
+    • 14:17:54 Explored
+        $ cat foo.rs
+
+    • 14:17:54 Called
+      └ tools.inspect()
+
+        combined result
+    • Edited
+        foo.rs (+1, -0)
+        1 +new line
+    • Edited
+        bar.rs (+1, -0)
+        1 +new line
+
+    • 14:17:54 The layout keeps
+      prose, code, and tools
+      aligned.
+
+        source_indent();

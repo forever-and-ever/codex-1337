@@ -10,6 +10,187 @@ use codex_protocol::models::FunctionCallOutputContentItem;
 use pretty_assertions::assert_eq;
 
 #[test]
+fn mixed_feed_keeps_its_grid_through_live_commit_resize_and_details() {
+    use crate::diff_model::FileChange;
+    use crate::exec_cell::CommandOutput;
+    use crate::exec_cell::new_active_exec_command;
+    use crate::history_cell::AgentMarkdownCell;
+    use crate::history_cell::HistoryTimestamp;
+    use crate::history_cell::McpInvocation;
+    use crate::history_cell::PrefixedWrappedHistoryCell;
+    use crate::history_cell::ToolOutputGroup;
+    use crate::history_cell::new_active_mcp_tool_call;
+    use crate::history_cell::new_patch_events;
+    use crate::history_cell::new_user_prompt;
+    use codex_app_server_protocol::CommandExecutionSource;
+    use codex_shell_command::parse_command::parse_command;
+    use std::collections::HashMap;
+    use std::path::Path;
+    use std::time::Duration;
+
+    let cwd = Path::new(".");
+    let timestamp = HistoryTimestamp::from_millis(1_700_000_000_000);
+    let prose = |source: &str| {
+        let mut cell = AgentMarkdownCell::new(source.into(), cwd);
+        cell.timestamp = timestamp;
+        Arc::new(cell) as Arc<dyn HistoryCell>
+    };
+    let command = vec!["bash".into(), "-lc".into(), "cat foo.rs".into()];
+    let mut shell = new_active_exec_command(
+        "shell".into(),
+        command.clone(),
+        parse_command(&command),
+        CommandExecutionSource::UnifiedExecStartup,
+        /*interaction_input*/ None,
+        /*animations_enabled*/ false,
+    );
+    shell.complete_call(
+        "shell",
+        CommandOutput::new(/*exit_code*/ 0, "source".into()),
+        Duration::ZERO,
+    );
+    shell.completed_at = timestamp;
+    let mut poll = new_active_exec_command(
+        "poll".into(),
+        vec!["bash".into(), "-lc".into(), "poll foo".into()],
+        Vec::new(),
+        CommandExecutionSource::UnifiedExecInteraction,
+        /*interaction_input*/ None,
+        /*animations_enabled*/ false,
+    );
+    poll.complete_call(
+        "poll",
+        CommandOutput::new(/*exit_code*/ 0, String::new()),
+        Duration::ZERO,
+    );
+    let mut mcp = new_active_mcp_tool_call(
+        "mcp".into(),
+        McpInvocation {
+            server: "tools".into(),
+            tool: "inspect".into(),
+            arguments: None,
+        },
+        /*animations_enabled*/ false,
+    );
+    mcp.complete(
+        Duration::ZERO,
+        Ok(codex_protocol::mcp::CallToolResult {
+            content: Vec::new(),
+            structured_content: None,
+            is_error: None,
+            meta: None,
+        }),
+    );
+    mcp.completed_at = timestamp;
+    let batch = ToolOutputCell::from_output(
+        "batch",
+        Some("outer"),
+        "exec",
+        /*namespace*/ None,
+        &FunctionCallOutputBody::Text("combined result".into()),
+    )
+    .unwrap();
+    let group = ToolOutputGroup::from_cells([
+        Arc::new(poll) as Arc<dyn HistoryCell>,
+        Arc::new(shell) as Arc<dyn HistoryCell>,
+        Arc::new(mcp),
+        Arc::new(batch),
+    ]);
+    let mut cells: Vec<Arc<dyn HistoryCell>> = vec![
+        Arc::new(new_user_prompt(
+            "Review the layout".into(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )),
+        Arc::new(PrefixedWrappedHistoryCell::new(
+            "Activity Reviewing layout\n\nMore text",
+            crate::history_cell::agent_prefix(timestamp, /*first*/ true),
+            crate::history_cell::agent_prefix(timestamp, /*first*/ false),
+        )),
+        group,
+    ];
+    // Distinct calls coalesce only their Edited heading, never their file controls or bills.
+    for file in ["foo.rs", "bar.rs"] {
+        cells.extend(
+            new_patch_events(
+                HashMap::from([(
+                    file.into(),
+                    FileChange::Add {
+                        content: "new line\n".into(),
+                    },
+                )]),
+                cwd,
+            )
+            .into_iter()
+            .map(|cell| Arc::new(cell) as Arc<dyn HistoryCell>),
+        );
+    }
+    let tail = prose(
+        "The layout keeps prose, code, and tools aligned.\n\n```rust\n  source_indent();\n``` ",
+    );
+    let mut view = TranscriptView::default();
+    view.record_tool_output_tokens("tool-output-tokens:batch".into(), "outer".into(), Some(128));
+    let mut snapshots = Vec::new();
+    for width in [64, 32] {
+        view.set_presentation(/*detailed*/ false, HistoryRenderMode::Rich);
+        view.jump_to_latest();
+        // Normal live prose travels through the auxiliary activity-presentation boundary.
+        view.sync_live_activity_tail(
+            width,
+            /*key*/ None,
+            /*expanded*/ false,
+            |width, _| {
+                Some(ActivityTranscriptLines {
+                    is_tool_entry: false,
+                    header: None,
+                    activity: Vec::new(),
+                    auxiliary: tail.compact_hyperlink_lines(width),
+                    tool_output_tokens: None,
+                    disclosure: None,
+                    controls: Vec::new(),
+                })
+            },
+        );
+        let live = tests::render(&mut view, &cells, width, /*height*/ 50);
+        view.sync_live_tail(width, /*key*/ None, |_| None);
+        cells.push(Arc::clone(&tail));
+        let committed = tests::render(&mut view, &cells, width, /*height*/ 50);
+        assert_eq!(live, committed);
+        let text = tests::text(&committed);
+        assert_eq!(text.matches("128 tokens").count(), usize::from(width == 64));
+        assert_eq!(text.matches("Edited").count(), 1);
+        let layout = view.current_layout(&cells, cells.len() - 1).unwrap();
+        assert!(layout.text().contains("  source_indent();"));
+        assert!(!layout.text().starts_with(' '));
+        snapshots.push(format!("width={width}\n{}", text.trim_end()));
+        if width == 64 {
+            view.disclosure.expanded.extend(cells[2].activity_ids());
+            let expanded = tests::render(&mut view, &cells, width, /*height*/ 50);
+            let text = tests::text(&expanded);
+            assert!(text.contains("$ poll foo"));
+            assert!(!text.contains("tokens"));
+            snapshots.push(format!("expanded width={width}\n{}", text.trim_end()));
+            view.disclosure.expanded.clear();
+        }
+        view.set_presentation(/*detailed*/ true, HistoryRenderMode::Rich);
+        view.jump_to_latest();
+        let detailed = tests::render(&mut view, &cells, width, /*height*/ 50);
+        snapshots.push(format!(
+            "detailed width={width}\n{}",
+            tests::text(&detailed).trim_end()
+        ));
+        cells.pop();
+    }
+    let clock = timestamp.unwrap().span().content.trim().to_owned();
+    insta::assert_snapshot!(snapshots.join("\n\n").replace(&clock, "14:17:54"));
+    view.set_presentation(/*detailed*/ false, HistoryRenderMode::Raw);
+    view.jump_to_latest();
+    let raw = tests::render(&mut view, &cells, /*width*/ 64, /*height*/ 50);
+    assert!(tests::text(&raw).starts_with("Review the layout\n"));
+}
+
+#[test]
 fn waits_and_agent_events_keep_status_without_empty_disclosures_or_extra_gaps() {
     let process = |state: Option<i64>| {
         serde_json::json!({
@@ -142,6 +323,8 @@ fn waits_and_agent_events_keep_status_without_empty_disclosures_or_extra_gaps() 
         /*expanded*/ false,
         |width, _| {
             Some(ActivityTranscriptLines {
+                is_tool_entry: tail.is_tool_entry(),
+                header: tail.activity_header(),
                 activity: tail.compact_hyperlink_lines(width),
                 auxiliary: Vec::new(),
                 tool_output_tokens: None,

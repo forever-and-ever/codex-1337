@@ -406,12 +406,16 @@ async fn flush_answer_stream_keeps_default_reflow_for_plain_text_tail() {
 async fn flush_answer_stream_requests_scrollback_reflow_for_live_table_tail() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     let cwd = chat.config.cwd.to_path_buf();
+    chat.local_settings.transcript_mode = crate::transcript_mode::TranscriptMode::Owned;
+    let timestamp = history_cell::HistoryTimestamp::from_millis(1_700_000_000_000);
+    chat.on_terminal_resize(/*width*/ 80);
 
     let mut controller = crate::streaming::controller::StreamController::new(
-        Some(80),
+        chat.current_stream_width(history_cell::agent_prefix(timestamp, /*first*/ true).width()),
         cwd.as_path(),
         HistoryRenderMode::Rich,
     );
+    controller.timestamp = timestamp;
     controller.push("| Name | Notes |\n");
     controller.push("| --- | --- |\n");
     controller.push("| alpha | tail held until final table render |\n");
@@ -420,6 +424,55 @@ async fn flush_answer_stream_requests_scrollback_reflow_for_live_table_tail() {
         "expected table holdback to leave a live tail for this regression",
     );
     chat.stream_controller = Some(controller);
+
+    // A retained table tail and its source-backed completion must use the same width before
+    // wrapping. Padding a table already rendered at viewport width would split its borders.
+    let source =
+        "| Name | Notes |\n| --- | --- |\n| alpha | tail held until final table render |\n";
+    let mut snapshots = Vec::new();
+    for width in [80, 36] {
+        chat.on_terminal_resize(width);
+        let mut view = crate::transcript_view::TranscriptView::default();
+        view.sync_live_activity_tail(
+            width,
+            chat.active_cell_transcript_key(),
+            /*expanded*/ false,
+            |width, expanded| {
+                chat.active_cell_owned_transcript_lines(
+                    width, /*expanded*/ false, expanded, /*tool_output_tokens*/ None,
+                )
+            },
+        );
+        let area = Rect::new(/*x*/ 0, /*y*/ 0, width, /*height*/ 16);
+        let mut live = Buffer::empty(area);
+        view.render(area, &mut live, &[]);
+        let mut completed = history_cell::AgentMarkdownCell::new(source.into(), &cwd);
+        completed.timestamp = timestamp;
+        let cells: Vec<Arc<dyn HistoryCell>> = vec![Arc::new(completed)];
+        view.sync_live_tail(width, /*key*/ None, |_| None);
+        let mut committed = Buffer::empty(area);
+        view.render(area, &mut committed, &cells);
+        assert_eq!(live, committed);
+        snapshots.push(format!(
+            "width={width}\n{}",
+            live.content
+                .chunks(usize::from(width))
+                .map(|row| row
+                    .iter()
+                    .map(ratatui::buffer::Cell::symbol)
+                    .collect::<String>()
+                    .trim_end()
+                    .to_owned())
+                .collect::<Vec<_>>()
+                .join("\n")
+                .trim_end()
+        ));
+    }
+    let clock = timestamp.unwrap().span().content.trim().to_owned();
+    insta::assert_snapshot!(
+        "owned_live_table_resize",
+        snapshots.join("\n\n").replace(&clock, "14:17:54")
+    );
 
     while rx.try_recv().is_ok() {}
 
