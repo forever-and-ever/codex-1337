@@ -450,10 +450,20 @@ enum MessageTarget {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct RawSendArguments {
+    #[serde(default, deserialize_with = "present_message_target")]
     thread_id: Option<String>,
+    #[serde(default, deserialize_with = "present_message_target")]
     thread_name: Option<String>,
     prompt: String,
     model: Option<String>,
+}
+
+fn present_message_target<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    // Only omission means absence; a supplied null must not bypass exclusivity.
+    String::deserialize(deserializer).map(Some)
 }
 
 impl TryFrom<RawSendArguments> for SendArguments {
@@ -461,8 +471,11 @@ impl TryFrom<RawSendArguments> for SendArguments {
 
     fn try_from(args: RawSendArguments) -> Result<Self, Self::Error> {
         let target = match (args.thread_id, args.thread_name) {
-            (Some(id), None) => MessageTarget::Id(id),
-            (None, Some(name)) => MessageTarget::Name(name),
+            (Some(id), None) if !id.trim().is_empty() => MessageTarget::Id(id),
+            (None, Some(name)) if !name.trim().is_empty() => MessageTarget::Name(name),
+            (Some(_), None) | (None, Some(_)) => {
+                return Err("threadId or threadName must not be empty");
+            }
             (None, None) | (Some(_), Some(_)) => {
                 return Err("provide exactly one of threadId or threadName");
             }
