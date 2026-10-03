@@ -19,6 +19,7 @@ pub(crate) async fn make_test_app() -> App {
 
     App {
         reload_requested: false,
+        farm: Default::default(),
         feature_write_lock: Arc::default(),
         model_catalog: chat_widget.model_catalog(),
         session_telemetry,

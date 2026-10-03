@@ -1694,6 +1694,7 @@ impl App {
         self.chat_widget
             .set_initial_user_message_submit_suppressed(/*suppressed*/ false);
         self.chat_widget.submit_initial_user_message_if_pending();
+        self.queue_farm_receipt_replay();
         Ok(())
     }
 
@@ -2021,6 +2022,7 @@ impl App {
             self.chat_widget.maybe_send_next_queued_input();
         }
         self.refresh_status_line();
+        self.queue_farm_receipt_replay();
     }
 
     pub(super) fn should_wait_for_initial_session(session_selection: &SessionSelection) -> bool {

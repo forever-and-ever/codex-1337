@@ -1,0 +1,226 @@
+//! Farm input is prepared without consuming the rich composer draft. Acceptance or
+//! explicit discard clears only the unchanged draft; later edits are never overwritten.
+
+use super::*;
+use codex_app_server_protocol::ThreadFarmMode;
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct FarmDraft {
+    composer: ThreadComposerState,
+    cursor: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct FarmSubmission {
+    pub(crate) draft: FarmDraft,
+    pub(crate) input: Vec<UserInput>,
+}
+
+pub(crate) enum FarmRecovery {
+    MissingReceipt,
+    SavedDraft,
+}
+
+impl ThreadInputState {
+    pub(crate) fn clear_farm_draft(&mut self, draft: &FarmDraft) {
+        if self.composer.as_ref() == Some(&draft.composer) {
+            self.composer = None;
+        }
+    }
+}
+
+impl ChatWidget {
+    fn farm_draft(&self) -> FarmDraft {
+        let draft = self.bottom_pane.composer_draft_snapshot();
+        FarmDraft {
+            composer: ThreadComposerState {
+                text: draft.text,
+                local_images: draft.local_images,
+                remote_image_urls: draft.remote_image_urls,
+                text_elements: draft.text_elements,
+                mention_bindings: draft.mention_bindings,
+                pending_pastes: draft.pending_pastes,
+            },
+            cursor: draft.cursor,
+        }
+    }
+
+    pub(crate) fn clear_farm_draft(&mut self, draft: &FarmDraft) {
+        if self.farm_draft().composer == draft.composer {
+            self.restore_composer_state(ThreadComposerState::default());
+        }
+        self.request_redraw();
+    }
+
+    pub(crate) fn restore_farm_draft(&mut self, draft: &FarmDraft) -> bool {
+        let mut current = self.farm_draft().composer;
+        if matches!(current.text.trim(), "/farm" | "/farm_fresh") {
+            current.text.clear();
+        }
+        if current.has_content() && current != draft.composer {
+            self.add_error_message(
+                "Clear the current draft before restoring the submitted farm task.".into(),
+            );
+            return false;
+        }
+        self.restore_composer_state(draft.composer.clone());
+        self.bottom_pane.set_composer_cursor(draft.cursor);
+        self.request_redraw();
+        true
+    }
+
+    pub(super) fn dispatch_farm(&mut self, command: SlashCommand) {
+        if self.is_parent_owned_thread() || self.active_side_conversation {
+            self.add_error_message("Return to the main conversation before farming a task.".into());
+            return;
+        }
+        let Some(thread_id) = self.thread_id else {
+            self.add_error_message(
+                "Wait for the main conversation to start before farming a task.".into(),
+            );
+            return;
+        };
+        self.bottom_pane.flush_composer_paste_burst();
+        let draft = self.farm_draft();
+        if crate::bottom_pane::prompt_args::parse_slash_name(&draft.composer.text)
+            .is_some_and(|(_, args, _)| args.trim().is_empty())
+        {
+            self.app_event_tx
+                .send(AppEvent::OpenFarmRecovery { thread_id });
+            return;
+        }
+        if self.snapshot_local_images && !draft.composer.local_images.is_empty() {
+            self.add_error_message("Farm cannot send local image attachments to a remote server yet; remove them or use an inline image.".into());
+            return;
+        }
+        let prepared = self
+            .bottom_pane
+            .prepare_inline_args_submission(/*record_history*/ false);
+        let local_images = self
+            .bottom_pane
+            .take_recent_submission_images_with_placeholders();
+        let remote_images = self.take_remote_image_urls();
+        let bindings = self.bottom_pane.take_recent_submission_mention_bindings();
+        self.restore_composer_state(draft.composer.clone());
+        self.bottom_pane.set_composer_cursor(draft.cursor);
+        let Some((text, elements)) = prepared else {
+            self.add_error_message(format!("Usage: /{} <task>", command.command()));
+            return;
+        };
+        if text.trim().is_empty() {
+            self.add_error_message(format!("Usage: /{} <task>", command.command()));
+            return;
+        }
+        let mut input: Vec<UserInput> = remote_images
+            .into_iter()
+            .map(|url| UserInput::Image {
+                image: codex_app_server_protocol::ImageReference::Inline { url },
+                detail: None,
+            })
+            .collect();
+        input.extend(local_images.into_iter().map(|image| UserInput::LocalImage {
+            path: image.path,
+            detail: None,
+        }));
+        input.push(UserInput::Text {
+            text,
+            text_elements: app_server_text_elements(&elements),
+        });
+        for binding in bindings {
+            let skill_path = binding
+                .path
+                .strip_prefix("skill://")
+                .map(PathBuf::from)
+                .or_else(|| {
+                    self.bottom_pane.skills().and_then(|skills| {
+                        skills
+                            .iter()
+                            .find(|skill| skill.path.as_path() == Path::new(&binding.path))
+                            .map(|skill| skill.path.to_path_buf())
+                    })
+                });
+            input.push(if let Some(path) = skill_path {
+                UserInput::Skill {
+                    name: binding.mention,
+                    path,
+                }
+            } else {
+                UserInput::Mention {
+                    name: binding.mention,
+                    path: binding.path,
+                }
+            });
+        }
+        self.app_event_tx.send(AppEvent::Farm {
+            thread_id,
+            mode: match command {
+                SlashCommand::Farm => ThreadFarmMode::FullHistory,
+                SlashCommand::FarmFresh => ThreadFarmMode::Fresh,
+                _ => unreachable!("farm dispatch only"),
+            },
+            submission: FarmSubmission { draft, input },
+        });
+    }
+
+    pub(crate) fn open_farm_recovery(&mut self, request_id: String, recovery: FarmRecovery) {
+        let reconcile_id = request_id.clone();
+        let restore_id = request_id.clone();
+        let (title, items) = match recovery {
+            FarmRecovery::MissingReceipt => ("Farm receipt missing", vec![
+                SelectionItem {
+                    name: "Check receipt".into(),
+                    description: Some(
+                        "Ask about the same request; never create a second task.".into(),
+                    ),
+                    actions: vec![Box::new(move |tx| {
+                        tx.send(AppEvent::ReconcileFarm {
+                            request_id: reconcile_id.clone(),
+                        })
+                    })],
+                    dismiss_on_select: true,
+                    ..Default::default()
+                },
+                SelectionItem {
+                    name: "Discard pending request".into(),
+                    description: Some(
+                        "A child may still be running. Allow new tasks without resending this one."
+                            .into(),
+                    ),
+                    actions: vec![Box::new(move |tx| {
+                        tx.send(AppEvent::DiscardFarm {
+                            request_id: request_id.clone(),
+                        })
+                    })],
+                    dismiss_on_select: true,
+                    ..Default::default()
+                },
+                SelectionItem {
+                    name: "Restore submitted draft".into(),
+                    description: Some("Restore into an empty composer; keep the same pending request.".into()),
+                    actions: vec![Box::new(move |tx| tx.send(AppEvent::RestoreFarmDraft { request_id: restore_id.clone() }))],
+                    dismiss_on_select: true,
+                    ..Default::default()
+                },
+            ]),
+            FarmRecovery::SavedDraft => ("Submitted farm draft", vec![SelectionItem {
+                name: "Restore submitted draft".into(),
+                description: Some("Restore into an empty composer. Nothing resent; a new submission may create another child.".into()),
+                actions: vec![Box::new(move |tx| tx.send(AppEvent::RestoreFarmDraft { request_id: restore_id.clone() }))],
+                dismiss_on_select: true,
+                ..Default::default()
+            }, SelectionItem {
+                name: "Discard saved draft".into(),
+                description: Some("Release the saved farm request without resending it.".into()),
+                actions: vec![Box::new(move |tx| tx.send(AppEvent::DiscardFarm { request_id: request_id.clone() }))],
+                dismiss_on_select: true,
+                ..Default::default()
+            }]),
+        };
+        self.bottom_pane.show_selection_view(SelectionViewParams {
+            title: Some(title.into()),
+            items,
+            ..Default::default()
+        });
+        self.request_redraw();
+    }
+}

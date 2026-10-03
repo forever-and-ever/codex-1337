@@ -222,6 +222,8 @@ mod empty_state_policy;
 mod event_dispatch;
 mod exit_summary;
 mod experimental_features;
+mod farm;
+pub(crate) use farm::FarmFailure;
 mod feedback_upload;
 mod file_change_approvals;
 mod history_pagination;
@@ -534,6 +536,7 @@ struct InitialHistoryReplayBuffer {
 
 pub(crate) struct App {
     pub(super) reload_requested: bool,
+    farm: farm::FarmUi,
     feature_write_lock: Arc<tokio::sync::Mutex<()>>,
     model_catalog: Arc<ModelCatalog>,
     pub(crate) session_telemetry: SessionTelemetry,

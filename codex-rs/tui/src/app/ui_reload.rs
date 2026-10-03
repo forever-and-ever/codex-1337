@@ -1,4 +1,8 @@
 //! Reload at an event-loop boundary, never through the user-exit/shutdown path.
+//!
+//! Farm identities and saved submissions remain process-local. Refuse replacement
+//! until they are resolved/discarded, preserving the v1 supervisor checkpoint format
+//! and avoiding protocol-upgrade rollback loops in already-running supervisors.
 
 use super::*;
 
@@ -38,6 +42,8 @@ impl App {
             && !matches!(self.app_server_target, AppServerTarget::Embedded)
             && !self.reconnect.offline
             && self.chat_widget.can_reload_ui()
+            && self.farm.pending.is_none()
+            && self.farm.saved.is_none()
             && self.queued_messages.mutations.is_empty()
             && self.overlay.is_none()
             && self.temporary_structured_requests.is_empty()
@@ -53,6 +59,9 @@ impl App {
 
     #[cfg(target_os = "linux")]
     async fn capture_reload_input(&mut self) -> Result<crate::reload::RetainedInput, String> {
+        if self.farm.pending.is_some() || self.farm.saved.is_some() {
+            return Err("Resolve/discard farm request before reload.".into());
+        }
         if !self.can_reload_ui() {
             return Err(
                 "Close the active dialog or let the pending UI action finish before reloading."

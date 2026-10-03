@@ -6004,6 +6004,7 @@ async fn make_test_app() -> Box<App> {
 
     Box::new(App {
         reload_requested: false,
+        farm: Default::default(),
         feature_write_lock: Arc::default(),
         model_catalog: chat_widget.model_catalog(),
         session_telemetry,
@@ -6120,6 +6121,7 @@ pub(super) async fn make_test_app_with_channels() -> (
     (
         Box::new(App {
             reload_requested: false,
+            farm: Default::default(),
             feature_write_lock: Arc::default(),
             model_catalog: chat_widget.model_catalog(),
             session_telemetry,
@@ -6444,7 +6446,7 @@ async fn replace_goal_confirmation_snapshot() {
     );
 }
 
-fn test_thread_session(thread_id: ThreadId, cwd: PathBuf) -> ThreadSessionState {
+pub(super) fn test_thread_session(thread_id: ThreadId, cwd: PathBuf) -> ThreadSessionState {
     ThreadSessionState {
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id,
