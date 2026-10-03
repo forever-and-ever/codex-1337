@@ -100,6 +100,8 @@ impl StartedCell {
 /// The session retains the supplied delegate while starting and running the cell,
 /// including across yields, and releases it through its existing close/cancel paths.
 pub trait CodeModeSessionDelegate: Send + Sync {
+    /// Observes the runtime's committed terminal outcome, without consuming returned output.
+    fn cell_finished(&self, _cell_id: &CellId, _outcome: CellOutcome) {}
     fn invoke_tool<'a>(
         &'a self,
         invocation: CodeModeNestedToolCall,
@@ -116,6 +118,14 @@ pub trait CodeModeSessionDelegate: Send + Sync {
 
     /// Releases delegate state associated with a cell after it reaches a terminal state.
     fn cell_closed(&self, cell_id: &CellId);
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CellOutcome {
+    Completed,
+    Failed,
+    Terminated,
 }
 
 /// A session delegate for clients that do not expose nested tools or notifications.

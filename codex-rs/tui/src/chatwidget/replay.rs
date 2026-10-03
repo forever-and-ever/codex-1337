@@ -276,6 +276,13 @@ impl ChatWidget {
         let from_replay = render_source.is_replay();
         let replay_kind = render_source.replay_kind();
         match item {
+            ThreadItem::CodeMode(item) => {
+                self.flush_active_cell();
+                self.add_to_history(history_cell::CodeModeFactCell(
+                    item,
+                    self.local_settings.tui.animations && self.local_settings.tui.effects.progress,
+                ));
+            }
             ThreadItem::UserMessage {
                 content, client_id, ..
             } => {
@@ -424,8 +431,8 @@ impl ChatWidget {
                     timestamp,
                 );
             }
-            ThreadItem::ImageView { id: _, path } => {
-                self.on_view_image_tool_call(path, timestamp);
+            ThreadItem::ImageView { id, path } => {
+                self.on_view_image_tool_call(id, path, timestamp);
             }
             ThreadItem::ImageGeneration(item) => {
                 self.on_image_generation_end(

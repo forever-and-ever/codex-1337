@@ -174,6 +174,14 @@ async fn dropping_an_unread_buffered_execution_outcome_retires_its_cell() {
 
     drop(execution);
 
+    let finished = tokio::time::timeout(Duration::from_secs(/*secs*/ 2), events.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(finished.event, Some(proto::session_event::Event::CellFinished(finished)) if finished.outcome == proto::cell_finished::Outcome::Terminated as i32)
+    );
     assert_eq!(
         tokio::time::timeout(Duration::from_secs(/*secs*/ 2), events.next())
             .await

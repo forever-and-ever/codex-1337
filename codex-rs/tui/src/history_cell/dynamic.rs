@@ -173,6 +173,9 @@ impl DynamicToolCallData {
 }
 
 impl HistoryCell for DynamicToolCallCell {
+    fn tool_call_ids(&self) -> Vec<&str> {
+        vec![self.call_id()]
+    }
     fn activity_header(&self) -> Option<super::activity_parts::ActivityHeader> {
         Some(
             self.data

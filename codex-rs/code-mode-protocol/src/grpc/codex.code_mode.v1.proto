@@ -54,6 +54,7 @@ message SessionEvent {
     Notification notification = 3;
     NotificationCancelled notification_cancelled = 4;
     CellClosed cell_closed = 5;
+    CellFinished cell_finished = 6;
   }
 }
 
@@ -146,6 +147,19 @@ message CellClosed {
   // Last tool-call sequence issued before closure. Clients may retire the cell
   // immediately and reject tool calls delivered after its closure.
   uint64 final_tool_call_sequence = 3;
+}
+
+// A committed runtime outcome, distinct from callback retirement and output consumption.
+message CellFinished {
+  string execution_id = 1;
+  string cell_id = 2;
+  enum Outcome {
+    OUTCOME_UNSPECIFIED = 0;
+    COMPLETED = 1;
+    FAILED = 2;
+    TERMINATED = 3;
+  }
+  Outcome outcome = 3;
 }
 
 message ExecuteRequest {

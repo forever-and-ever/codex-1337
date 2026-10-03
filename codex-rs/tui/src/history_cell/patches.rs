@@ -12,6 +12,7 @@ mod tests;
 #[derive(Debug)]
 pub(crate) struct PatchHistoryCell {
     activity_id: String,
+    call_id: String,
     path: PathBuf,
     change: FileChange,
     cwd: PathBuf,
@@ -20,6 +21,7 @@ pub(crate) struct PatchHistoryCell {
 
 impl PatchHistoryCell {
     pub(crate) fn with_activity_id(mut self, id: String) -> Self {
+        self.call_id = id.clone();
         // The first file owns the call's token bill; sibling disclosures have separate IDs.
         self.activity_id = if self.continuation {
             format!("patch-file:{id}:{:?}", self.path)
@@ -66,6 +68,12 @@ impl PatchHistoryCell {
 }
 
 impl HistoryCell for PatchHistoryCell {
+    fn tool_call_ids(&self) -> Vec<&str> {
+        vec![&self.call_id]
+    }
+    fn outer_call_id(&self) -> Option<&str> {
+        (!self.call_id.is_empty()).then_some(self.call_id.as_str())
+    }
     fn activity_header(&self) -> Option<super::activity_parts::ActivityHeader> {
         (!self.continuation).then(|| {
             super::activity_parts::ActivityHeader::at_end(&Line::from(vec![
@@ -139,6 +147,7 @@ pub(crate) fn new_patch_events(
         .map(|(index, (path, change))| {
             PatchHistoryCell {
                 activity_id: String::new(),
+                call_id: String::new(),
                 path,
                 change,
                 cwd: cwd.to_path_buf(),
@@ -235,7 +244,7 @@ impl HistoryCell for PatchFailureCell {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct ViewImageHistoryCell {
     filename: String,
     path_label: String,
@@ -243,6 +252,16 @@ pub(crate) struct ViewImageHistoryCell {
 }
 
 impl HistoryCell for ViewImageHistoryCell {
+    fn nested_summary_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        let mut nested = self.clone();
+        nested.timestamp = None;
+        nested.compact_hyperlink_lines(width)
+    }
+    fn nested_detail_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        let mut nested = self.clone();
+        nested.timestamp = None;
+        nested.transcript_hyperlink_lines(width)
+    }
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         let line = vec![
             agent_prefix(self.timestamp, /*first*/ true),

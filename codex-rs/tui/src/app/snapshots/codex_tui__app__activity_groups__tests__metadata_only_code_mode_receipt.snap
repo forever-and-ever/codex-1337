@@ -1,0 +1,32 @@
+---
+source: tui/src/app/activity_groups_tests.rs
+assertion_line: 126
+expression: "format!(\"Collapsed\\n{}\\nBlock expanded\\n{}\\nFile expanded\\n{}\\nTranscript\\n{}\",\ntext(&closed.lines), text(&opened.lines), text(&diff.lines),\ntext(&expected[0].transcript_hyperlink_lines(90)))"
+---
+Collapsed
+• Called (Code Mode ωρρλ)
+    • Called semedit.edit({})
+        Edited
+            /workspace/receipt.rs (+1, -1)
+Block expanded
+• Called (Code Mode ωρρλ)
+    • Called
+      └ semedit.edit({})
+        Edited
+            /workspace/receipt.rs (+1, -1)
+File expanded
+• Called (Code Mode ωρρλ)
+    • Called
+      └ semedit.edit({})
+        Edited
+            /workspace/receipt.rs (+1, -1)
+            1 -old
+            1 +new
+Transcript
+• Called (Code Mode ωρρλ)
+    • Called
+      └ semedit.edit({})
+        Edited
+            /workspace/receipt.rs (+1, -1)
+            1 -old
+            1 +new

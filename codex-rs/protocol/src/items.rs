@@ -44,6 +44,7 @@ use ts_rs::TS;
 #[serde(tag = "type")]
 #[ts(tag = "type")]
 pub enum TurnItem {
+    CodeMode(crate::code_mode::CodeModeItem),
     UserMessage(UserMessageItem),
     FunctionCallOutput(FunctionCallOutputItem),
     ToolOutputTokens(ToolOutputTokensItem),
@@ -765,6 +766,7 @@ fn serialize_hook_prompt_fragment(text: &str, hook_run_id: &str) -> Option<Strin
 impl TurnItem {
     pub fn id(&self) -> String {
         match self {
+            TurnItem::CodeMode(item) => item.id.clone(),
             TurnItem::UserMessage(item) => item.id.clone(),
             TurnItem::FunctionCallOutput(item) => item.id.clone(),
             TurnItem::ToolOutputTokens(item) => item.id.clone(),

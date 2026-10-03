@@ -20,13 +20,14 @@ impl ChatWidget {
 
     pub(super) fn on_view_image_tool_call(
         &mut self,
+        call_id: String,
         path: LegacyAppPathString,
         timestamp: Option<history_cell::HistoryTimestamp>,
     ) {
         self.flush_answer_stream_with_separator();
         let mut cell = history_cell::new_view_image_tool_call(path);
         cell.timestamp = timestamp;
-        self.add_to_history(cell);
+        self.add_to_history(history_cell::ToolItemCell::new(call_id, cell));
         self.request_redraw();
     }
 
@@ -46,10 +47,14 @@ impl ChatWidget {
         timestamp: Option<history_cell::HistoryTimestamp>,
     ) {
         self.flush_answer_stream_with_separator();
-        let mut cell =
-            history_cell::new_image_generation_call(call_id, &status, revised_prompt, saved_path);
+        let mut cell = history_cell::new_image_generation_call(
+            call_id.clone(),
+            &status,
+            revised_prompt,
+            saved_path,
+        );
         cell.timestamp = timestamp;
-        self.add_to_history(cell);
+        self.add_to_history(history_cell::ToolItemCell::new(call_id, cell));
         self.request_redraw();
     }
 
@@ -158,7 +163,9 @@ impl ChatWidget {
             |thread_id| self.collab_agent_metadata(thread_id),
         ) {
             cell.timestamp = timestamp;
-            self.on_collab_event(cell);
+            self.flush_answer_stream_with_separator();
+            self.add_to_history(history_cell::ToolItemCell::new(id.clone(), cell));
+            self.request_redraw();
         }
     }
 
@@ -189,13 +196,16 @@ impl ChatWidget {
     }
 
     pub(crate) fn handle_file_change_completed_now(&mut self, item: CompletedItem) {
-        let ThreadItem::FileChange { status, .. } = item.item else {
+        let ThreadItem::FileChange { id, status, .. } = item.item else {
             return;
         };
         // If the patch was successful, just let the "Edited" block stand.
         // Otherwise, add a failure block.
         if matches!(status, codex_app_server_protocol::PatchApplyStatus::Failed) {
-            self.add_to_history(history_cell::new_patch_apply_failure(String::new()));
+            self.add_to_history(history_cell::ToolItemCell::new(
+                id,
+                history_cell::new_patch_apply_failure(String::new()),
+            ));
         }
     }
 

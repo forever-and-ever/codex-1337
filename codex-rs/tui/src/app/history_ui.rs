@@ -27,6 +27,13 @@ impl App {
     }
 
     fn insert_retained_history_cell(&mut self, tui: &mut tui::Tui, cell: Arc<dyn HistoryCell>) {
+        if let Some(members) = history_cell::split_code_mode_members(&self.transcript_cells, &cell)
+        {
+            for member in members {
+                self.insert_retained_history_cell(tui, member);
+            }
+            return;
+        }
         // Global deprecations can be delivered again by hidden threads. Scope deduplication to
         // retained history so clearing or rebuilding a transcript can show the notice again.
         if let Some(notice) = cell
@@ -55,6 +62,38 @@ impl App {
             return;
         }
         let is_session_header = cell.as_any().is::<history_cell::SessionInfoCell>();
+        if let Some((range, replacements)) =
+            history_cell::reconcile_code_mode(&self.transcript_cells, &cell)
+        {
+            let previous = self.transcript_cells[range.clone()]
+                .iter()
+                .filter(|old| !replacements.iter().any(|new| Arc::ptr_eq(old, new)))
+                .cloned()
+                .collect::<Vec<_>>();
+            if let Some(block) = replacements
+                .iter()
+                .find(|cell| cell.as_any().is::<history_cell::CodeModeCell>())
+            {
+                let old_blocks = previous
+                    .iter()
+                    .filter(|cell| cell.as_any().is::<history_cell::CodeModeCell>())
+                    .cloned()
+                    .collect::<Vec<_>>();
+                self.native_history.consolidate(&old_blocks, block);
+            }
+            self.transcript_view.replace_group_members(
+                &self.transcript_cells,
+                range.clone(),
+                &replacements,
+            );
+            if let Some(Overlay::Transcript(overlay)) = self.overlay.as_mut() {
+                overlay.regroup_cell_members(range.clone(), &replacements);
+            }
+            self.transcript_cells.splice(range, replacements);
+            tui.frame_requester().schedule_frame();
+            self.chat_widget.request_pending_usage_output_insertion();
+            return;
+        }
         let reconciliation = history_cell::reconcile_tool_calls(&self.transcript_cells, &cell);
         if !reconciliation.replacements.is_empty() {
             for (index, replacement) in reconciliation.replacements {

@@ -1,6 +1,6 @@
 ---
 source: tui/src/history_cell/mcp_tests.rs
-assertion_line: 452
+assertion_line: 472
 expression: "snapshots.join(\"\\n\\n\")"
 ---
 structured only, direct
@@ -14,11 +14,11 @@ structured only, direct
 
 structured only, code mode
 • Returned
-  {
-    "symbol": "Widget",
-    "file": "src/widget.rs",
-    "line": 42
-  }
+    {
+      "symbol": "Widget",
+      "file": "src/widget.rs",
+      "line": 42
+    }
 
 with summary, direct
 • Called
@@ -32,12 +32,12 @@ with summary, direct
 
 with summary, code mode
 • Returned
-  One definition
-  {
-    "symbol": "Widget",
-    "file": "src/widget.rs",
-    "line": 42
-  }
+    One definition
+    {
+      "symbol": "Widget",
+      "file": "src/widget.rs",
+      "line": 42
+    }
 
 legacy duplicate, direct
 • Called
@@ -46,4 +46,4 @@ legacy duplicate, direct
 
 legacy duplicate, code mode
 • Returned
-  {"symbol":"Widget","file":"src/widget.rs","line":42}
+    {"symbol":"Widget","file":"src/widget.rs","line":42}

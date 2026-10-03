@@ -210,6 +210,35 @@ fn activity_marker(start_time: Option<Instant>, animations_enabled: bool) -> Spa
 }
 
 impl HistoryCell for ExecCell {
+    fn tool_call_ids(&self) -> Vec<&str> {
+        self.group
+            .calls
+            .iter()
+            .map(|call| call.call_id.as_str())
+            .collect()
+    }
+
+    fn nested_summary_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        let mut nested = self.clone();
+        nested.completed_at = None;
+        nested.compact_hyperlink_lines(width)
+    }
+
+    fn nested_detail_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        let mut nested = self.clone();
+        nested.completed_at = None;
+        nested.expanded_hyperlink_lines(width)
+    }
+
+    fn nested_activity_parts(
+        &self,
+        width: u16,
+        expanded: &std::collections::HashSet<String>,
+    ) -> Option<crate::history_cell::activity_parts::ActivityParts> {
+        let mut nested = self.clone();
+        nested.completed_at = None;
+        nested.activity_parts(width, /*header_reserve*/ 0, expanded)
+    }
     fn activity_header(&self) -> Option<crate::history_cell::activity_parts::ActivityHeader> {
         if self.compact_header_hidden()
             || self.group.calls.iter().any(ExecCall::is_user_shell_command)

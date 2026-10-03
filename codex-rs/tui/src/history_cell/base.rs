@@ -21,6 +21,30 @@ impl PlainHistoryCell {
 }
 
 impl HistoryCell for PlainHistoryCell {
+    fn nested_summary_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        plain_hyperlink_lines(
+            self.lines
+                .first()
+                .map(|line| {
+                    crate::line_truncation::truncate_line_with_ellipsis_if_overflow(
+                        line.clone(),
+                        usize::from(width),
+                    )
+                })
+                .into_iter()
+                .collect(),
+        )
+    }
+    fn nested_detail_lines(&self, _width: u16) -> Vec<HyperlinkLine> {
+        plain_hyperlink_lines(self.lines.clone())
+    }
+    fn has_nested_details(&self, width: u16) -> bool {
+        self.lines.len() > 1
+            || self
+                .lines
+                .first()
+                .is_some_and(|line| line.width() > usize::from(width))
+    }
     fn is_tool_entry(&self) -> bool {
         self.tool_entry
     }

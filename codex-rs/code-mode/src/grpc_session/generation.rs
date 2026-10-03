@@ -44,6 +44,11 @@ impl CodeModeSessionDelegate for GenerationDelegate {
         self.delegate
             .cell_closed(&public_cell_id(self.generation, cell_id));
     }
+
+    fn cell_finished(&self, cell_id: &CellId, outcome: codex_code_mode_protocol::CellOutcome) {
+        self.delegate
+            .cell_finished(&public_cell_id(self.generation, cell_id), outcome);
+    }
 }
 
 fn public_cell_id(generation: u64, cell_id: &CellId) -> CellId {

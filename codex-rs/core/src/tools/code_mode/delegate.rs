@@ -45,6 +45,9 @@ pub(super) struct CodeModeDispatchBroker {
 pub(super) struct CodeModeCellDelegate {
     pub(super) broker: Arc<CodeModeDispatchBroker>,
     pub(super) step_context: Arc<StepContext>,
+    pub(super) session: Weak<Session>,
+    pub(super) terminal_reported: std::sync::atomic::AtomicBool,
+    pub(super) exec_call_id: String,
 }
 
 struct CellDispatchGate {
@@ -197,6 +200,24 @@ impl CodeModeDispatchBroker {
                         let track_completeness =
                             ExecutedToolCalls::is_enabled(&step_context.turn.config.features);
                         let host = Arc::clone(&host);
+                        if let Some(exec_call_id) = host
+                            .session
+                            .services
+                            .code_mode_service
+                            .transcript_exec_call(&cell_id)
+                        {
+                            super::transcript::record(
+                                &host.session,
+                                &step_context.turn,
+                                cell_id.as_str(),
+                                &exec_call_id,
+                                codex_protocol::code_mode::CodeModeEvent::ToolCall {
+                                    call_id: dispatch_trace.call_id.clone(),
+                                },
+                                crate::turn_timing::now_unix_timestamp_ms(),
+                            )
+                            .await;
+                        }
                         let dispatch_gates = Arc::clone(&dispatch_gates);
                         let span = dispatch_trace.span.clone();
                         tokio::spawn(async move {
@@ -401,7 +422,61 @@ impl CodeModeSessionDelegate for CodeModeCellDelegate {
     }
 
     fn cell_closed(&self, cell_id: &CellId) {
+        self.record_terminal(
+            cell_id,
+            codex_protocol::code_mode::CodeModeStatus::Interrupted,
+        );
+        if let Some(session) = self.session.upgrade() {
+            session
+                .services
+                .code_mode_service
+                .finish_transcript_output(cell_id);
+        }
         self.broker.close_cell(cell_id);
+    }
+
+    fn cell_finished(&self, cell_id: &CellId, outcome: codex_code_mode::CellOutcome) {
+        let status = match outcome {
+            codex_code_mode::CellOutcome::Completed => {
+                codex_protocol::code_mode::CodeModeStatus::Completed
+            }
+            codex_code_mode::CellOutcome::Failed => {
+                codex_protocol::code_mode::CodeModeStatus::Failed
+            }
+            codex_code_mode::CellOutcome::Terminated => {
+                codex_protocol::code_mode::CodeModeStatus::Interrupted
+            }
+        };
+        self.record_terminal(cell_id, status);
+    }
+}
+
+impl CodeModeCellDelegate {
+    fn record_terminal(&self, cell_id: &CellId, status: codex_protocol::code_mode::CodeModeStatus) {
+        if self
+            .terminal_reported
+            .swap(true, std::sync::atomic::Ordering::AcqRel)
+        {
+            return;
+        }
+        let Some(session) = self.session.upgrade() else {
+            return;
+        };
+        let turn = Arc::clone(&self.step_context.turn);
+        let cell_id = cell_id.to_string();
+        let exec_call_id = self.exec_call_id.clone();
+        let timestamp_ms = crate::turn_timing::now_unix_timestamp_ms();
+        tokio::spawn(async move {
+            super::transcript::record(
+                &session,
+                &turn,
+                &cell_id,
+                &exec_call_id,
+                codex_protocol::code_mode::CodeModeEvent::Finished { status },
+                timestamp_ms,
+            )
+            .await;
+        });
     }
 }
 

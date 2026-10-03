@@ -176,6 +176,12 @@ pub enum HostToClient {
         session_id: SessionId,
         cell_id: WireCellId,
     },
+    #[serde(rename = "cell/finished")]
+    CellFinished {
+        session_id: SessionId,
+        cell_id: WireCellId,
+        outcome: crate::CellOutcome,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

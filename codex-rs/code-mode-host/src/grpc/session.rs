@@ -58,6 +58,7 @@ pub(super) struct SessionState {
     pub(super) cells: HashMap<String, ExecutionState>,
     pending_executions: HashSet<String>,
     pending_closures: HashSet<String>,
+    pending_finishes: HashMap<String, codex_code_mode_protocol::CellOutcome>,
     pub(super) seen_executions: BoundedIds,
     pub(super) execution_yields: HashMap<String, CancellationToken>,
     pub(super) yielded_executions: BoundedIds,
@@ -322,6 +323,14 @@ impl GrpcSession {
             tool_call_sequence: 0,
             permit,
         });
+        if let Some(outcome) = state.pending_finishes.remove(&cell_id) {
+            // Nonblocking enqueue under the admission lock: retirement cannot overtake outcome.
+            self.send_cell_finished(
+                state.cells[&cell_id].execution_id.clone(),
+                &cell_id,
+                outcome,
+            );
+        }
         let closed = state.pending_closures.remove(&cell_id);
         let closed_execution = closed.then(|| state.cells.remove(&cell_id)).flatten();
         drop(state);
@@ -378,6 +387,50 @@ impl GrpcSession {
                 _ = changed => {}
             }
         }
+    }
+
+    pub(super) fn finish_cell(
+        &self,
+        cell_id: &str,
+        outcome: codex_code_mode_protocol::CellOutcome,
+    ) {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        match state.cells.get(cell_id) {
+            Some(execution) => {
+                self.send_cell_finished(execution.execution_id.clone(), cell_id, outcome)
+            }
+            None if state.pending_finishes.len() < MAX_ACTIVE_CELLS => {
+                state.pending_finishes.insert(cell_id.to_owned(), outcome);
+            }
+            None => {
+                self.closed.cancel();
+            }
+        }
+    }
+
+    fn send_cell_finished(
+        &self,
+        execution_id: String,
+        cell_id: &str,
+        outcome: codex_code_mode_protocol::CellOutcome,
+    ) {
+        let outcome = match outcome {
+            codex_code_mode_protocol::CellOutcome::Completed => {
+                proto::cell_finished::Outcome::Completed
+            }
+            codex_code_mode_protocol::CellOutcome::Failed => proto::cell_finished::Outcome::Failed,
+            codex_code_mode_protocol::CellOutcome::Terminated => {
+                proto::cell_finished::Outcome::Terminated
+            }
+        };
+        let _ = self.send_event_now(
+            proto::session_event::Event::CellFinished(proto::CellFinished {
+                execution_id,
+                cell_id: cell_id.to_owned(),
+                outcome: outcome as i32,
+            }),
+            None,
+        );
     }
 
     pub(super) fn close_cell(&self, cell_id: &str) {

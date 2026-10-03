@@ -90,6 +90,31 @@ impl SessionInner {
                 self.handle_notification(notification)
             }
             grpc::session_event::Event::NotificationCancelled(_) => Ok(()),
+            grpc::session_event::Event::CellFinished(finished) => {
+                let outcome = match grpc::cell_finished::Outcome::try_from(finished.outcome) {
+                    Ok(grpc::cell_finished::Outcome::Completed) => {
+                        codex_code_mode_protocol::CellOutcome::Completed
+                    }
+                    Ok(grpc::cell_finished::Outcome::Failed) => {
+                        codex_code_mode_protocol::CellOutcome::Failed
+                    }
+                    Ok(grpc::cell_finished::Outcome::Terminated) => {
+                        codex_code_mode_protocol::CellOutcome::Terminated
+                    }
+                    Ok(grpc::cell_finished::Outcome::Unspecified) | Err(_) => {
+                        return Err("code-mode completion has no terminal outcome".to_string());
+                    }
+                };
+                let (cell_id, delegate) = self
+                    .state
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .finished_cell(&finished.execution_id, &finished.cell_id)?;
+                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    delegate.cell_finished(&cell_id, outcome);
+                }));
+                Ok(())
+            }
             grpc::session_event::Event::CellClosed(closed) => {
                 let cell = self
                     .state

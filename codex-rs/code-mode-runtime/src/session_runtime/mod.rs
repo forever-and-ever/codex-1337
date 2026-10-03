@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 
@@ -169,6 +170,7 @@ impl SessionRuntime {
     ) -> Result<RuntimeEventFuture, Error> {
         let stored_values = self.inner.stored_values.lock().await.clone();
         let host = Arc::new(RuntimeCellHost {
+            terminal_reported: AtomicBool::new(false),
             delegate,
             cell_id: cell_id.clone(),
             inner: Arc::clone(&self.inner),
@@ -243,6 +245,7 @@ impl PendingEvent {
 }
 
 struct RuntimeCellHost<D: SessionRuntimeDelegate> {
+    terminal_reported: AtomicBool,
     delegate: Arc<D>,
     cell_id: CellId,
     inner: Arc<Inner>,
@@ -298,13 +301,37 @@ impl<D: SessionRuntimeDelegate> CellHost for RuntimeCellHost<D> {
             }
             stored_values = self.inner.stored_values.lock() => stored_values,
         };
-        cell_state.commit_completion(event, pending_initial_yield_items, || {
+        let outcome = match &event {
+            CellEvent::Completed {
+                error_text: None, ..
+            } => codex_code_mode_protocol::CellOutcome::Completed,
+            CellEvent::Completed {
+                error_text: Some(_),
+                ..
+            } => codex_code_mode_protocol::CellOutcome::Failed,
+            CellEvent::Terminated { .. } => codex_code_mode_protocol::CellOutcome::Terminated,
+            CellEvent::Yielded { .. } | CellEvent::Pending { .. } => {
+                unreachable!("completion must be terminal")
+            }
+        };
+        let committed = cell_state.commit_completion(event, pending_initial_yield_items, || {
             stored_values.extend(stored_value_writes);
-        })
+        });
+        if committed == CompletionCommit::Committed {
+            self.terminal_reported.store(true, Ordering::Release);
+            self.delegate.cell_finished(&self.cell_id, outcome);
+        }
+        committed
     }
 
     async fn closed(&self) {
         self.inner.cells.lock().await.remove(&self.cell_id);
+        if !self.terminal_reported.swap(true, Ordering::AcqRel) {
+            self.delegate.cell_finished(
+                &self.cell_id,
+                codex_code_mode_protocol::CellOutcome::Terminated,
+            );
+        }
         self.delegate.cell_closed(&self.cell_id);
     }
 }

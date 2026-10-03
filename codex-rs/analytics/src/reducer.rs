@@ -511,6 +511,7 @@ impl TurnToolCounts {
             | ThreadItem::AgentMessage { .. }
             | ThreadItem::FunctionCallOutput { .. }
             | ThreadItem::ToolOutputTokens { .. }
+            | ThreadItem::CodeMode(_)
             | ThreadItem::Plan { .. }
             | ThreadItem::Reasoning { .. }
             | ThreadItem::ImageView { .. }
@@ -2669,6 +2670,7 @@ pub(crate) fn tracked_tool_item_id(item: &ThreadItem) -> Option<&str> {
         | ThreadItem::AgentMessage { .. }
         | ThreadItem::FunctionCallOutput { .. }
         | ThreadItem::ToolOutputTokens { .. }
+        | ThreadItem::CodeMode(_)
         | ThreadItem::Plan { .. }
         | ThreadItem::Reasoning { .. }
         | ThreadItem::SubAgentActivity { .. }

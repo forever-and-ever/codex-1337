@@ -8,6 +8,55 @@ use pretty_assertions::assert_eq;
 use tonic::Code;
 use tonic::Request;
 
+async fn assert_finished_event(
+    events: &mut GrpcStream<proto::SessionEvent>,
+    execution_id: &str,
+    cell_id: &str,
+) {
+    assert_eq!(
+        events.next().await.unwrap().unwrap(),
+        proto::SessionEvent {
+            event: Some(proto::session_event::Event::CellFinished(
+                proto::CellFinished {
+                    execution_id: execution_id.into(),
+                    cell_id: cell_id.into(),
+                    outcome: proto::cell_finished::Outcome::Completed as i32,
+                }
+            )),
+        }
+    );
+}
+
+#[tokio::test]
+async fn pending_outcome_is_enqueued_before_callback_retirement() {
+    let host = GrpcCodeModeHost::new();
+    let (session_id, mut events) = open_session(&host).await;
+    let session = host.state.session(&session_id).unwrap();
+    session.reserve_execution("early").unwrap();
+    // Pure scripts may commit and close before their admission handoff finishes.
+    session.finish_cell("cell", codex_code_mode_protocol::CellOutcome::Completed);
+    session.close_cell("cell");
+    session
+        .admit_execution(
+            "early".into(),
+            "cell".into(),
+            host.state.cell_permit().unwrap(),
+            /*traceparent*/ None,
+        )
+        .unwrap();
+    assert_finished_event(&mut events, "early", "cell").await;
+    assert_eq!(
+        events.next().await.unwrap().unwrap(),
+        proto::SessionEvent {
+            event: Some(proto::session_event::Event::CellClosed(proto::CellClosed {
+                execution_id: "early".into(),
+                cell_id: "cell".into(),
+                final_tool_call_sequence: 0,
+            })),
+        }
+    );
+}
+
 pub(super) async fn open_session(
     host: &GrpcCodeModeHost,
 ) -> (String, GrpcStream<proto::SessionEvent>) {
@@ -146,6 +195,7 @@ async fn execute_stream_starts_immediately_and_wait_preserves_missing_cells() {
             )),
         }
     );
+    assert_finished_event(&mut session_events, "execution-1", &cell_id).await;
     assert_eq!(
         session_events.next().await.unwrap().unwrap(),
         proto::SessionEvent {
@@ -316,6 +366,7 @@ async fn filtered_subscriptions_receive_ordered_calls_and_unary_completions() {
             }
         ))
     ));
+    assert_finished_event(&mut session_events, "execution-tools", &cell_id).await;
     assert_eq!(
         session_events.next().await.unwrap().unwrap(),
         proto::SessionEvent {
@@ -418,6 +469,7 @@ async fn notifications_do_not_delay_cell_completion() {
             }
         ))
     ));
+    assert_finished_event(&mut session_events, "execution-notify", &cell_id).await;
     assert_eq!(
         session_events.next().await.unwrap().unwrap(),
         proto::SessionEvent {

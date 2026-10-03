@@ -31,16 +31,14 @@ impl ToolOutputGroup {
             })
             .then_some(&self.members)
     }
-    /// Consume only the contiguous activity suffix. Messages and turn separators are barriers.
+    /// Attach a matching outer return without inferring ownership from activity proximity.
     pub(crate) fn attach(
         cells: &[Arc<dyn HistoryCell>],
         output: Arc<dyn HistoryCell>,
     ) -> Option<(Range<usize>, Vec<Arc<dyn HistoryCell>>)> {
         output.as_any().downcast_ref::<ToolOutputCell>()?;
         if let Some(start) = Self::patch_owner(cells) {
-            if cells[start].outer_call_id().is_some()
-                && cells[start].outer_call_id() != output.outer_call_id()
-            {
+            if cells[start].outer_call_id() != output.outer_call_id() {
                 return None;
             }
             let details = cells[start + 1..].iter().filter(|cell| {
@@ -70,39 +68,16 @@ impl ToolOutputGroup {
                     .collect(),
             ));
         }
-        let mut start = cells.len();
-        let mut has_activity = false;
-        for cell in cells.iter().rev() {
-            // File disclosures must survive arrival of their enclosing batch's output.
-            if cell.as_any().is::<PatchHistoryCell>() {
-                break;
-            }
-            // notify() can return several batches for one call, but the next call is a barrier.
-            if let Some(call_id) = cell.outer_call_id() {
-                if Some(call_id) == output.outer_call_id() {
-                    start -= 1;
-                    has_activity = true;
-                }
-                break;
-            }
-            let ids = cell.activity_ids();
-            if ids.is_empty() {
-                if cell
-                    .as_any()
-                    .downcast_ref::<ReasoningSummaryCell>()
-                    .is_some_and(ReasoningSummaryCell::is_transcript_only)
-                {
-                    start -= 1;
-                    continue;
-                }
-                break;
-            }
-            has_activity = true;
-            start -= 1;
-        }
-        if !has_activity || start == cells.len() {
+        // Only a concrete matching invocation owns this return. Legacy activity proximity
+        // cannot establish parentage, and independently disclosed files remain separate.
+        let cell = cells.last()?;
+        if cell.as_any().is::<PatchHistoryCell>()
+            || cell.outer_call_id().is_none()
+            || cell.outer_call_id() != output.outer_call_id()
+        {
             return None;
         }
+        let start = cells.len() - 1;
         Some((
             start..cells.len(),
             vec![Self::from_cells(
@@ -212,22 +187,7 @@ impl ToolOutputGroup {
         }
         let same_call =
             older.outer_call_id().is_some() && older.outer_call_id() == newer.outer_call_id();
-        if !older.as_any().is::<Self>() && !newer.as_any().is::<Self>() && !same_call {
-            return None;
-        }
-        // Pagination may reunite outputs from one invocation, never two different invocations.
-        if older.outer_call_id().is_some() && newer.outer_call_id().is_some() && !same_call {
-            return None;
-        }
-        // File disclosures cannot absorb a neighboring visible activity across a page boundary.
-        if !same_call
-            && (Self::patch_owner(std::slice::from_ref(older)).is_some()
-                || older.outer_call_id().is_some())
-            && newer
-                .as_any()
-                .downcast_ref::<Self>()
-                .is_none_or(|group| group.detail_members().is_none())
-        {
+        if !same_call {
             return None;
         }
         let ids = older

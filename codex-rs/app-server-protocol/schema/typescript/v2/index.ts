@@ -68,6 +68,9 @@ export type { ChatgptAuthTokensRefreshReason } from "./ChatgptAuthTokensRefreshR
 export type { ChatgptAuthTokensRefreshResponse } from "./ChatgptAuthTokensRefreshResponse";
 export type { ClaudeSubscriptionAccount } from "./ClaudeSubscriptionAccount";
 export type { CliAuthCredentialsStoreMode } from "./CliAuthCredentialsStoreMode";
+export type { CodeModeEvent } from "./CodeModeEvent";
+export type { CodeModeItem } from "./CodeModeItem";
+export type { CodeModeStatus } from "./CodeModeStatus";
 export type { CodexErrorInfo } from "./CodexErrorInfo";
 export type { CollabAgentState } from "./CollabAgentState";
 export type { CollabAgentStatus } from "./CollabAgentStatus";

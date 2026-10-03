@@ -1,0 +1,46 @@
+---
+source: tui/src/app/activity_groups_tests.rs
+assertion_line: 218
+expression: "expected.iter().enumerate().map(|(index, cell)|\n{\n    let collapsed = text(cell); let expanded =\n    cell.expanded_hyperlink_lines(90).iter().map(|line|\n    line.line.to_string()).collect::<Vec<_>>().join(\"\\n\");\n    format!(\"cell {index} collapsed\\n{collapsed}\\nexpanded\\n{expanded}\")\n}).collect::<Vec<_>>().join(\"\\n\\n\")"
+---
+cell 0 collapsed
+• Used computer · 1 action
+  └ Inspect direct
+expanded
+• Called
+  └ cua_repl.js({"title":"Inspect direct"})
+    Result direct
+
+cell 1 collapsed
+• Waited on ψγζζ
+expanded
+• Waited on ψγζζ
+
+cell 2 collapsed
+• Interrupted (Code Mode δοτζ)
+    • Called Inspect child-b
+expanded
+• Interrupted (Code Mode δοτζ)
+    • Called
+      └ cua_repl.js({"title":"Inspect child-b"})
+        Result child-b
+
+cell 3 collapsed
+• Failed (Code Mode ψγζζ)
+    • Called Inspect child-a1
+    • Called Inspect child-a2
+    • Viewed image diagram.png
+    • Generated Image:
+expanded
+• Failed (Code Mode ψγζζ)
+    • Called
+      └ cua_repl.js({"title":"Inspect child-a1"})
+        Result child-a1
+    • Called
+      └ cua_repl.js({"title":"Inspect child-a2"})
+        Result child-a2
+    • Viewed image diagram.png
+    • Generated Image:
+      └ A precise diagram
+        visible notify-a
+        visible wait-output-a

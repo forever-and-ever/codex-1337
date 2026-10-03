@@ -153,6 +153,17 @@ pub(super) struct CellPresentation {
 }
 
 impl TranscriptView {
+    /// Only visible, unfrozen retained activity requests another animation frame.
+    pub(crate) fn has_visible_animation(&self, cells: &[Arc<dyn HistoryCell>]) -> bool {
+        self.is_following()
+            && self.snapshot().is_none()
+            && self.visible.iter().any(|row| {
+                cells.get(row.index).is_some_and(|cell| {
+                    row.key == EntryKey::cell(cell) && cell.transcript_animation_tick().is_some()
+                })
+            })
+    }
+
     pub(super) fn layout(
         &mut self,
         cells: &[Arc<dyn HistoryCell>],

@@ -221,6 +221,25 @@ fn layouts_refresh_for_width_animation_and_mutable_frames() {
             },
         );
     }
+    let mut history: Vec<Arc<dyn HistoryCell>> = vec![Arc::new(Cell::default())];
+    let mut view = TranscriptView::default();
+    let area = Rect::new(
+        /*x*/ 0, /*y*/ 0, /*width*/ 20, /*height*/ 2,
+    );
+    let mut buffer = Buffer::empty(area);
+    view.render(area, &mut buffer, &history);
+    assert!(view.has_visible_animation(&history));
+    view.begin_selection(
+        &history, /*column*/ 1, /*row*/ 0, /*clicks*/ 3,
+    );
+    assert!(!view.has_visible_animation(&history));
+    view.end_selection(&history);
+    view.jump_to_latest();
+    history.push(Arc::new(crate::history_cell::PlainHistoryCell::new(
+        vec!["plain".into(); 4],
+    )));
+    view.render(area, &mut buffer, &history);
+    assert!(!view.has_visible_animation(&history));
 }
 
 #[test]

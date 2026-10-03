@@ -183,6 +183,7 @@ impl GoalAccountingState {
             TurnItem::UserMessage(_)
             | TurnItem::FunctionCallOutput(_)
             | TurnItem::ToolOutputTokens(_)
+            | TurnItem::CodeMode(_)
             | TurnItem::HookPrompt(_)
             | TurnItem::Plan(_)
             | TurnItem::CommandExecution(_)

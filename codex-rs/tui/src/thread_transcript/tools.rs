@@ -218,7 +218,7 @@ impl McpHistory {
                     content: result.content,
                     structured_content: result.structured_content,
                     is_error: Some(status == McpToolCallStatus::Failed),
-                    meta: None,
+                    meta: result.meta,
                 })
             }
             (None, None) => Err("MCP tool call completed without a result".to_string()),
