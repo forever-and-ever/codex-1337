@@ -55,7 +55,10 @@ async fn read_legacy_names(
         if line.trim().is_empty() {
             continue;
         }
-        let entry: LegacyNameEntry = serde_json::from_str(&line).map_err(name_claim_error)?;
+        let Ok(entry) = serde_json::from_str::<LegacyNameEntry>(&line) else {
+            tracing::warn!("skipping malformed legacy thread name-index entry");
+            continue;
+        };
         names.insert(entry.id, entry.thread_name.trim().to_string());
     }
     for (&id, name) in &names {

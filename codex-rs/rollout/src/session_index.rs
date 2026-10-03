@@ -185,6 +185,31 @@ pub async fn find_thread_meta_candidates_by_name_str(
     if name.trim().is_empty() {
         return Ok(Vec::new());
     }
+    if let Some(db) = state_db_ctx
+        && db
+            .thread_name_claims_imported()
+            .await
+            .map_err(std::io::Error::other)?
+    {
+        let owners = db
+            .find_thread_name_owners(name)
+            .await
+            .map_err(std::io::Error::other)?;
+        let mut candidates = Vec::with_capacity(owners.len());
+        for owner in owners {
+            if let Some(path) =
+                super::list::find_thread_path_by_id_str(codex_home, &owner.id.to_string(), Some(db))
+                    .await?
+                && let Ok(meta) = super::list::read_session_meta_line(&path).await
+                && matches_name_lookup_filters(&meta, allowed_sources, allowed_model_providers)
+            {
+                candidates.push((path, meta));
+            }
+        }
+        // After import, the append-only index is a compatibility projection, not a fallback.
+        // In particular it may still contain an archived thread's pre-restore name.
+        return Ok(candidates);
+    }
     let path = session_index_path(codex_home);
     if !path.exists() {
         return Ok(Vec::new());
@@ -207,14 +232,7 @@ pub async fn find_thread_meta_candidates_by_name_str(
         )
         .await?
             && let Ok(session_meta) = super::list::read_session_meta_line(&path).await
-            && (allowed_sources.is_empty() || allowed_sources.contains(&session_meta.meta.source))
-            && session_meta
-                .meta
-                .model_provider
-                .as_ref()
-                .is_none_or(|provider| {
-                    allowed_model_providers.is_empty() || allowed_model_providers.contains(provider)
-                })
+            && matches_name_lookup_filters(&session_meta, allowed_sources, allowed_model_providers)
         {
             let modified = tokio::fs::metadata(&path)
                 .await
@@ -230,6 +248,17 @@ pub async fn find_thread_meta_candidates_by_name_str(
         .into_iter()
         .map(|(_, path, session_meta)| (path, session_meta))
         .collect())
+}
+
+fn matches_name_lookup_filters(
+    meta: &SessionMetaLine,
+    allowed_sources: &[SessionSource],
+    allowed_model_providers: &[String],
+) -> bool {
+    (allowed_sources.is_empty() || allowed_sources.contains(&meta.meta.source))
+        && meta.meta.model_provider.as_ref().is_none_or(|provider| {
+            allowed_model_providers.is_empty() || allowed_model_providers.contains(provider)
+        })
 }
 
 fn session_index_path(codex_home: &Path) -> PathBuf {
