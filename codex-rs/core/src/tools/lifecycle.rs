@@ -9,6 +9,8 @@ use codex_extension_api::ToolFinishInput;
 use codex_extension_api::ToolStartInput;
 use codex_file_system::ExecutorFileSystem;
 use codex_protocol::mcp::CallToolResult;
+use codex_protocol::mcp_file_changes::FileChangeReceipt;
+use codex_protocol::mcp_file_changes::take_file_changes;
 use codex_tools::ToolName;
 use codex_utils_path_uri::PathUri;
 
@@ -90,7 +92,8 @@ pub(crate) async fn process_mcp_tool_result(
     mcp_tool: &McpToolContext,
     arguments: &serde_json::Value,
     result: &mut CallToolResult,
-) {
+) -> Option<FileChangeReceipt> {
+    let file_changes = take_file_changes(result);
     for contributor in session.services.extensions.tool_lifecycle_contributors() {
         contributor
             .on_mcp_tool_result(McpToolResultInput {
@@ -105,6 +108,7 @@ pub(crate) async fn process_mcp_tool_result(
             })
             .await;
     }
+    file_changes
 }
 
 pub(crate) async fn notify_tool_finish(invocation: &ToolInvocation, outcome: ToolCallOutcome) {

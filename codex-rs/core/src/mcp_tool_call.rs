@@ -71,6 +71,8 @@ use codex_protocol::mcp_approval_meta::TOOL_DESCRIPTION_KEY as MCP_TOOL_APPROVAL
 use codex_protocol::mcp_approval_meta::TOOL_PARAMS_DISPLAY_KEY as MCP_TOOL_APPROVAL_TOOL_PARAMS_DISPLAY_KEY;
 use codex_protocol::mcp_approval_meta::TOOL_PARAMS_KEY as MCP_TOOL_APPROVAL_TOOL_PARAMS_KEY;
 use codex_protocol::mcp_approval_meta::TOOL_TITLE_KEY as MCP_TOOL_APPROVAL_TOOL_TITLE_KEY;
+use codex_protocol::mcp_file_changes::FILE_CHANGES_META_KEY;
+use codex_protocol::mcp_file_changes::FileChangeReceipt;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::openai_models::InputModality;
 use codex_protocol::protocol::AskForApproval;
@@ -456,6 +458,7 @@ async fn handle_approved_mcp_tool_call(
     let connector_id = metadata.connector_id.as_deref();
     let connector_name = metadata.connector_name.as_deref();
     let server_origin = prepared_call.server_origin().map(str::to_string);
+    let mut file_changes = None;
 
     let start = Instant::now();
     let mut tool_input = arguments_value
@@ -559,7 +562,7 @@ async fn handle_approved_mcp_tool_call(
                 &prepared_call,
                 turn_context.config.mcp_servers.get().get(&server),
             );
-            process_mcp_tool_result(
+            file_changes = process_mcp_tool_result(
                 sess,
                 turn_context,
                 call_id,
@@ -629,7 +632,7 @@ async fn handle_approved_mcp_tool_call(
         invocation,
         item_metadata,
         duration,
-        truncate_mcp_tool_result_for_event(&result),
+        truncate_mcp_tool_result_for_event(&result, file_changes),
     )
     .await;
     maybe_track_codex_app_used(sess, step_context, &server, &metadata, elicitation_type).await;
@@ -976,46 +979,53 @@ fn sanitize_mcp_tool_result_for_model(
 
 fn truncate_mcp_tool_result_for_event(
     result: &Result<CallToolResult, String>,
+    file_changes: Option<FileChangeReceipt>,
 ) -> Result<CallToolResult, String> {
-    match result {
+    let mut event_result = match result {
         Ok(call_tool_result) => {
             // The app-server rebuilds `ThreadItem::McpToolCall` from this item,
             // so avoid persisting multi-megabyte results in rollout storage.
-            let Ok(serialized) = serde_json::to_string(call_tool_result) else {
-                return Ok(call_tool_result.clone());
-            };
+            let serialized = serde_json::to_string(call_tool_result)
+                .expect("MCP result contains only serializable JSON values");
             if serialized.len() <= MCP_TOOL_CALL_EVENT_RESULT_MAX_BYTES {
-                return Ok(call_tool_result.clone());
+                Ok(call_tool_result.clone())
+            } else {
+                // A huge MCP result can put bytes in `content`, `structuredContent`,
+                // or `_meta`. Collapse the event copy to a text preview of the whole
+                // serialized result so the UI still has useful context without
+                // preserving a multi-megabyte structured payload.
+                //
+                // This budget applies to the preview text, not the final event JSON.
+                // The preview is itself serialized into a JSON string, so quotes and
+                // backslashes can be escaped again and the stored event may end up
+                // somewhat larger than this byte budget.
+                let truncated = truncate_text(
+                    &serialized,
+                    TruncationPolicy::Bytes(MCP_TOOL_CALL_EVENT_RESULT_MAX_BYTES),
+                );
+                Ok(CallToolResult {
+                    content: vec![serde_json::json!({
+                        "type": "text",
+                        "text": truncated,
+                    })],
+                    structured_content: None,
+                    is_error: call_tool_result.is_error,
+                    meta: None,
+                })
             }
-
-            // A huge MCP result can put bytes in `content`, `structuredContent`,
-            // or `_meta`. Collapse the event copy to a text preview of the whole
-            // serialized result so the UI still has useful context without
-            // preserving a multi-megabyte structured payload.
-            //
-            // This budget applies to the preview text, not the final event JSON.
-            // The preview is itself serialized into a JSON string, so quotes and
-            // backslashes can be escaped again and the stored event may end up
-            // somewhat larger than this byte budget.
-            let truncated = truncate_text(
-                &serialized,
-                TruncationPolicy::Bytes(MCP_TOOL_CALL_EVENT_RESULT_MAX_BYTES),
-            );
-            Ok(CallToolResult {
-                content: vec![serde_json::json!({
-                    "type": "text",
-                    "text": truncated,
-                })],
-                structured_content: None,
-                is_error: call_tool_result.is_error,
-                meta: None,
-            })
         }
         Err(message) => Err(truncate_text(
             message,
             TruncationPolicy::Bytes(MCP_TOOL_CALL_EVENT_RESULT_MAX_BYTES),
         )),
+    };
+    if let (Ok(result), Some(receipt)) = (&mut event_result, file_changes) {
+        let meta = result.meta.get_or_insert_with(|| serde_json::json!({}));
+        if let Some(meta) = meta.as_object_mut() {
+            meta.insert(FILE_CHANGES_META_KEY.to_string(), receipt.into_value());
+        }
     }
+    event_result
 }
 
 async fn notify_mcp_tool_call_started(
@@ -2525,7 +2535,7 @@ async fn notify_mcp_tool_call_skip(
         invocation,
         item_metadata,
         Duration::ZERO,
-        truncate_mcp_tool_result_for_event(&Err(message.clone())),
+        truncate_mcp_tool_result_for_event(&Err(message.clone()), /*file_changes*/ None),
     )
     .await;
     Err(message)

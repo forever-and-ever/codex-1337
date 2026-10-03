@@ -31,6 +31,7 @@ mod legacy_events;
 pub mod local_media;
 pub mod mcp;
 pub mod mcp_approval_meta;
+pub mod mcp_file_changes;
 pub mod mcp_policy;
 pub mod memory_citation;
 mod memory_version;

@@ -131,7 +131,31 @@ impl Serialize for ToolRuntimePayload<'_> {
             ToolRuntimePayload::PatchApplyBegin(event) => event.serialize(serializer),
             ToolRuntimePayload::PatchApplyEnd(event) => event.serialize(serializer),
             ToolRuntimePayload::McpToolCallBegin(event) => event.serialize(serializer),
-            ToolRuntimePayload::McpToolCallEnd(event) => event.serialize(serializer),
+            ToolRuntimePayload::McpToolCallEnd(event) => {
+                if !event
+                    .result
+                    .as_ref()
+                    .ok()
+                    .and_then(|result| result.meta.as_ref())
+                    .is_some_and(|meta| {
+                        meta.get(codex_protocol::mcp_file_changes::FILE_CHANGES_META_KEY)
+                            .is_some()
+                    })
+                {
+                    return event.serialize(serializer);
+                }
+                // Human diff evidence is deliberately absent from source-bearing telemetry.
+                let mut event = (*event).clone();
+                if let Ok(result) = &mut event.result
+                    && let Some(meta) = result
+                        .meta
+                        .as_mut()
+                        .and_then(serde_json::Value::as_object_mut)
+                {
+                    meta.remove(codex_protocol::mcp_file_changes::FILE_CHANGES_META_KEY);
+                }
+                event.serialize(serializer)
+            }
             ToolRuntimePayload::CollabAgentSpawnBegin(event) => event.serialize(serializer),
             ToolRuntimePayload::CollabAgentSpawnEnd(event) => event.serialize(serializer),
             ToolRuntimePayload::CollabAgentInteractionBegin(event) => event.serialize(serializer),
