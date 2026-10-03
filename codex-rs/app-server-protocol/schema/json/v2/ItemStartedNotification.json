@@ -51,6 +51,118 @@
       ],
       "type": "object"
     },
+    "CodeModeEvent": {
+      "oneOf": [
+        {
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "started"
+              ],
+              "title": "StartedCodeModeEventType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "call_id",
+            "type"
+          ],
+          "title": "StartedCodeModeEvent",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "toolCall"
+              ],
+              "title": "ToolCallCodeModeEventType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "call_id",
+            "type"
+          ],
+          "title": "ToolCallCodeModeEvent",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "waitStarted"
+              ],
+              "title": "WaitStartedCodeModeEventType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "call_id",
+            "type"
+          ],
+          "title": "WaitStartedCodeModeEvent",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "waitCompleted"
+              ],
+              "title": "WaitCompletedCodeModeEventType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "call_id",
+            "type"
+          ],
+          "title": "WaitCompletedCodeModeEvent",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "status": {
+              "$ref": "#/definitions/CodeModeStatus"
+            },
+            "type": {
+              "enum": [
+                "finished"
+              ],
+              "title": "FinishedCodeModeEventType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "type"
+          ],
+          "title": "FinishedCodeModeEvent",
+          "type": "object"
+        }
+      ]
+    },
+    "CodeModeStatus": {
+      "enum": [
+        "completed",
+        "failed",
+        "interrupted"
+      ],
+      "type": "string"
+    },
     "CollabAgentState": {
       "properties": {
         "message": {
@@ -774,6 +886,45 @@
     },
     "ThreadItem": {
       "oneOf": [
+        {
+          "properties": {
+            "cellId": {
+              "description": "Full runtime identity, including its session generation.",
+              "type": "string"
+            },
+            "createdAt": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "event": {
+              "$ref": "#/definitions/CodeModeEvent"
+            },
+            "execCallId": {
+              "description": "Original exec invocation: durable within the thread even if a runtime restarts.",
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "codeMode"
+              ],
+              "title": "CodeModeThreadItemType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "cellId",
+            "createdAt",
+            "event",
+            "execCallId",
+            "id",
+            "type"
+          ],
+          "title": "CodeModeThreadItem",
+          "type": "object"
+        },
         {
           "properties": {
             "clientId": {

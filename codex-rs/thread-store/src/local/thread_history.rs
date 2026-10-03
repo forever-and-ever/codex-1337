@@ -526,6 +526,7 @@ WHERE thread_id = ?
             | ThreadItem::HookPrompt { .. }
             | ThreadItem::FunctionCallOutput { .. }
             | ThreadItem::ToolOutputTokens { .. }
+            | ThreadItem::CodeMode(_)
             | ThreadItem::Plan { .. }
             | ThreadItem::Reasoning { .. }
             | ThreadItem::CommandExecution { .. }

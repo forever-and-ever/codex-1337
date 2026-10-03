@@ -102,7 +102,8 @@ pub fn should_persist_event_msg(ev: &EventMsg, history_mode: ThreadHistoryMode) 
             matches!(history_mode, ThreadHistoryMode::Paginated)
                 || matches!(
                     event.item,
-                    TurnItem::FunctionCallOutput(_)
+                    TurnItem::CodeMode(_)
+                        | TurnItem::FunctionCallOutput(_)
                         | TurnItem::ToolOutputTokens(_)
                         | TurnItem::Plan(_)
                         | TurnItem::Extension(ExtensionItem::Sleep(_))

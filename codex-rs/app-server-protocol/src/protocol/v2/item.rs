@@ -25,6 +25,9 @@ use codex_protocol::approvals::GuardianAssessmentAction as CoreGuardianAssessmen
 use codex_protocol::approvals::GuardianAssessmentDecisionSource as CoreGuardianAssessmentDecisionSource;
 use codex_protocol::approvals::GuardianCommandSource as CoreGuardianCommandSource;
 use codex_protocol::items::AgentMessageContent as CoreAgentMessageContent;
+pub use codex_protocol::code_mode::CodeModeEvent;
+pub use codex_protocol::code_mode::CodeModeItem;
+pub use codex_protocol::code_mode::CodeModeStatus;
 pub use codex_protocol::items::AgentMessageDelivery;
 pub use codex_protocol::items::AsyncUserInputQuestion;
 use codex_protocol::items::CollabAgentTool as CoreCollabAgentTool;
@@ -234,6 +237,7 @@ impl CommandAction {
 #[ts(tag = "type")]
 #[ts(export_to = "v2/")]
 pub enum ThreadItem {
+    CodeMode(CodeModeItem),
     #[serde(rename_all = "camelCase")]
     #[ts(rename_all = "camelCase")]
     UserMessage {
@@ -466,6 +470,7 @@ pub struct HookPromptFragment {
 impl ThreadItem {
     pub fn id(&self) -> &str {
         match self {
+            ThreadItem::CodeMode(item) => &item.id,
             ThreadItem::UserMessage { id, .. }
             | ThreadItem::HookPrompt { id, .. }
             | ThreadItem::AgentMessage { id, .. }
@@ -886,6 +891,7 @@ pub(crate) fn web_search_action_from_core(
 impl From<CoreTurnItem> for ThreadItem {
     fn from(value: CoreTurnItem) -> Self {
         match value {
+            CoreTurnItem::CodeMode(item) => ThreadItem::CodeMode(item),
             CoreTurnItem::UserMessage(user) => ThreadItem::UserMessage {
                 id: user.id,
                 client_id: user.client_id,

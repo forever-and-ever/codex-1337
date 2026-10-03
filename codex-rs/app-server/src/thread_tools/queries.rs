@@ -318,6 +318,7 @@ pub(super) async fn wait(
                                 ThreadItem::UserMessage { .. }
                                 | ThreadItem::FunctionCallOutput { .. }
                                 | ThreadItem::ToolOutputTokens { .. }
+                                | ThreadItem::CodeMode(_)
                                 | ThreadItem::HookPrompt { .. }
                                 | ThreadItem::AgentMessage { .. }
                                 | ThreadItem::Plan { .. }

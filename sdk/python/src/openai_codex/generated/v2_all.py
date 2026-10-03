@@ -559,6 +559,44 @@ class ClientInfo(BaseModel):
     version: str
 
 
+class StartedCodeModeEvent(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    call_id: str
+    type: Annotated[Literal["started"], Field(title="StartedCodeModeEventType")]
+
+
+class ToolCallCodeModeEvent(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    call_id: str
+    type: Annotated[Literal["toolCall"], Field(title="ToolCallCodeModeEventType")]
+
+
+class WaitStartedCodeModeEvent(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    call_id: str
+    type: Annotated[Literal["waitStarted"], Field(title="WaitStartedCodeModeEventType")]
+
+
+class WaitCompletedCodeModeEvent(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    call_id: str
+    type: Annotated[Literal["waitCompleted"], Field(title="WaitCompletedCodeModeEventType")]
+
+
+class CodeModeStatus(Enum):
+    completed = "completed"
+    failed = "failed"
+    interrupted = "interrupted"
+
+
 class CodexErrorInfoValue(Enum):
     context_window_exceeded = "contextWindowExceeded"
     session_budget_exceeded = "sessionBudgetExceeded"
@@ -7955,6 +7993,35 @@ class FuzzyFileSearchRequest(BaseModel):
     params: FuzzyFileSearchParams
 
 
+class FinishedCodeModeEvent(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    status: CodeModeStatus
+    type: Annotated[Literal["finished"], Field(title="FinishedCodeModeEventType")]
+
+
+class CodeModeEvent(
+    RootModel[
+        StartedCodeModeEvent
+        | ToolCallCodeModeEvent
+        | WaitStartedCodeModeEvent
+        | WaitCompletedCodeModeEvent
+        | FinishedCodeModeEvent
+    ]
+):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: (
+        StartedCodeModeEvent
+        | ToolCallCodeModeEvent
+        | WaitStartedCodeModeEvent
+        | WaitCompletedCodeModeEvent
+        | FinishedCodeModeEvent
+    )
+
+
 class ActiveTurnNotSteerable(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -10172,6 +10239,29 @@ class ThreadGoalUpdatedNotification(BaseModel):
     turn_id: Annotated[str | None, Field(alias="turnId")] = None
 
 
+class CodeModeThreadItem(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    cell_id: Annotated[
+        str,
+        Field(
+            alias="cellId", description="Full runtime identity, including its session generation."
+        ),
+    ]
+    created_at: Annotated[int, Field(alias="createdAt")]
+    event: CodeModeEvent
+    exec_call_id: Annotated[
+        str,
+        Field(
+            alias="execCallId",
+            description="Original exec invocation: durable within the thread even if a runtime restarts.",
+        ),
+    ]
+    id: str
+    type: Annotated[Literal["codeMode"], Field(title="CodeModeThreadItemType")]
+
+
 class UserMessageThreadItem(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -11808,7 +11898,8 @@ class FunctionCallOutputThreadItem(BaseModel):
 
 class ThreadItem(
     RootModel[
-        UserMessageThreadItem
+        CodeModeThreadItem
+        | UserMessageThreadItem
         | HookPromptThreadItem
         | AgentMessageThreadItem
         | FunctionCallOutputThreadItem
@@ -11834,7 +11925,8 @@ class ThreadItem(
         populate_by_name=True,
     )
     root: (
-        UserMessageThreadItem
+        CodeModeThreadItem
+        | UserMessageThreadItem
         | HookPromptThreadItem
         | AgentMessageThreadItem
         | FunctionCallOutputThreadItem
