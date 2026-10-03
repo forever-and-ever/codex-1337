@@ -98,6 +98,7 @@ async fn termination_rejects_a_waiting_store_commit_before_the_next_cell_can_loa
     let runtime = SessionRuntime::new();
     let cell_state = Arc::new(CellState::new(CancellationToken::new()));
     let host = RuntimeCellHost {
+        terminal_reported: std::sync::atomic::AtomicBool::new(false),
         delegate: Arc::new(RecordingDelegate),
         cell_id: CellId::new("terminating-writer"),
         inner: Arc::clone(&runtime.inner),

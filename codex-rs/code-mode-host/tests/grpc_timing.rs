@@ -31,6 +31,47 @@ use recording_delegate::RecordingDelegate;
 
 const TEST_TIMEOUT: Duration = Duration::from_secs(/*secs*/ 20);
 
+/// Lifecycle observation must not drain a yielded cell or wait for another model invocation.
+#[tokio::test]
+async fn background_completion_reports_outcome_without_consuming_yielded_output() -> Result<()> {
+    let host = HostHarness::start("grpc://127.0.0.1:0").await?;
+    let providers: [Arc<dyn CodeModeSessionProvider>; 2] = [
+        Arc::new(ProcessOwnedCodeModeSessionProvider::with_host_program(codex_utils_cargo_bin::cargo_bin("codex-code-mode-host")?)),
+        Arc::new(GrpcCodeModeSessionProvider::new(host.endpoint)),
+    ];
+    for provider in providers {
+        let session = provider.create_session().await.map_err(anyhow::Error::msg)?;
+        for (source, expected) in [
+            ("yield_control(); text('retained');", codex_code_mode::CellOutcome::Completed),
+            ("yield_control(); throw new Error('failed');", codex_code_mode::CellOutcome::Failed),
+            ("yield_control(); await new Promise(() => {});", codex_code_mode::CellOutcome::Terminated),
+        ] {
+            let delegate = Arc::new(RecordingDelegate::default());
+            let started = session.execute(ExecuteRequest {
+                tool_call_id: format!("call-{expected:?}"), source: source.into(), enabled_tools: Vec::new(),
+                yield_time_ms: Some(5_000), max_output_tokens: Some(1_000),
+            }, delegate.clone(), /*preempt*/ None).await.map_err(anyhow::Error::msg)?;
+            let cell_id = started.cell_id.clone();
+            assert!(matches!(started.initial_response().await.map_err(anyhow::Error::msg)?, RuntimeResponse::Yielded { .. }));
+            let terminal = if expected == codex_code_mode::CellOutcome::Terminated {
+                Some(session.terminate(cell_id.clone()).await.map_err(anyhow::Error::msg)?)
+            } else { None };
+            timeout(TEST_TIMEOUT, delegate.finished.notified()).await.context("background terminal fact was not delivered")?;
+            assert_eq!(*delegate.finished_cells.lock().unwrap(), vec![(cell_id.clone(), expected)]);
+            if terminal.is_none() {
+                assert!(delegate.closed_cells.lock().unwrap().is_empty(), "terminal notification must not retire unconsumed output");
+            }
+            let terminal = match terminal {
+                Some(outcome) => outcome,
+                None => session.wait(WaitRequest { cell_id, yield_time_ms: 5_000 }, /*preempt*/ None).await.map_err(anyhow::Error::msg)?,
+            };
+            assert!(matches!(terminal, WaitOutcome::LiveCell(RuntimeResponse::Result { .. } | RuntimeResponse::Terminated { .. })));
+        }
+        session.shutdown().await.map_err(anyhow::Error::msg)?;
+    }
+    Ok(())
+}
+
 /// Successful and failed JavaScript include computation and timers in their host timing.
 /// Waiting to read a finished execution must not increase that measurement.
 #[tokio::test]
@@ -74,6 +115,15 @@ async fn execution_timing_includes_javascript_but_excludes_delayed_reads() -> Re
         let Some(grpc::execute_event::Event::Started(started)) = started.event else {
             anyhow::bail!("expected execution admission");
         };
+        let finished = timeout(TEST_TIMEOUT, events.message())
+            .await??
+            .context("session ended")?;
+        assert!(matches!(finished.event, Some(grpc::session_event::Event::CellFinished(finished))
+            if finished.cell_id == started.cell_id && finished.outcome == if suffix.is_empty() {
+                grpc::cell_finished::Outcome::Completed as i32
+            } else {
+                grpc::cell_finished::Outcome::Failed as i32
+            }));
         let closed = timeout(TEST_TIMEOUT, events.message())
             .await??
             .context("session ended")?;

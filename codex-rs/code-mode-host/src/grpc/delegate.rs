@@ -115,6 +115,12 @@ impl CodeModeSessionDelegate for GrpcDelegate {
             session.close_cell(cell_id.as_str());
         }
     }
+
+    fn cell_finished(&self, cell_id: &CellId, outcome: codex_code_mode_protocol::CellOutcome) {
+        if let Some(session) = self.session.upgrade() {
+            session.finish_cell(cell_id.as_str(), outcome);
+        }
+    }
 }
 
 struct PendingToolCall {

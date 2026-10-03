@@ -312,6 +312,15 @@ impl SessionState {
         self.invocations.remove(invocation_id);
     }
 
+    pub(super) fn finished_cell(&mut self, execution_id: &str, cell_id: &str) -> Result<ClosedCell, String> {
+        self.require_open()?;
+        self.check_cell_ownership(execution_id, cell_id)?;
+        let execution = self.executions.get_mut(execution_id)
+            .ok_or_else(|| "code-mode completion references an unknown execution".to_string())?;
+        execution.accept_cell(cell_id)?;
+        Ok((CellId::new(cell_id.to_owned()), Arc::clone(&execution.delegate)))
+    }
+
     pub(super) fn close_cell(
         &mut self,
         closed: grpc::CellClosed,

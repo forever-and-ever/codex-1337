@@ -31,9 +31,13 @@ struct RecordingDelegate {
     calls: Mutex<Vec<CodeModeNestedToolCall>>,
     notifications: Mutex<Vec<(String, CellId, String)>>,
     closed: Mutex<Vec<CellId>>,
+    finished: Mutex<Vec<(CellId, codex_code_mode_protocol::CellOutcome)>>,
 }
 
 impl CodeModeSessionDelegate for RecordingDelegate {
+    fn cell_finished(&self, cell_id: &CellId, outcome: codex_code_mode_protocol::CellOutcome) {
+        self.finished.lock().expect("finished cells lock").push((cell_id.clone(), outcome));
+    }
     fn invoke_tool<'a>(
         &'a self,
         invocation: CodeModeNestedToolCall,
@@ -141,6 +145,7 @@ async fn reconnect_maps_every_delegate_callback_to_its_generation() {
             .await,
         Ok(())
     );
+    delegate.cell_finished(&wire_id, codex_code_mode_protocol::CellOutcome::Failed);
     delegate.cell_closed(&wire_id);
 
     assert_eq!(
@@ -158,6 +163,7 @@ async fn reconnect_maps_every_delegate_callback_to_its_generation() {
             "notice".to_string()
         )]
     );
+    assert_eq!(*recording.finished.lock().expect("finished cells lock"), vec![(public_id.clone(), codex_code_mode_protocol::CellOutcome::Failed)]);
     assert_eq!(
         *recording.closed.lock().expect("closed cells lock"),
         vec![public_id]

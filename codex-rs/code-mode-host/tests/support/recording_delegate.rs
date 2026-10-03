@@ -16,9 +16,15 @@ pub(crate) struct RecordingDelegate {
     pub(crate) notifications: Mutex<Vec<(String, CellId, String)>>,
     pub(crate) notification_delivered: Notify,
     pub(crate) closed_cells: Mutex<Vec<CellId>>,
+    pub(crate) finished_cells: Mutex<Vec<(CellId, codex_code_mode::CellOutcome)>>,
+    pub(crate) finished: Notify,
 }
 
 impl CodeModeSessionDelegate for RecordingDelegate {
+    fn cell_finished(&self, cell_id: &CellId, outcome: codex_code_mode::CellOutcome) {
+        self.finished_cells.lock().unwrap_or_else(PoisonError::into_inner).push((cell_id.clone(), outcome));
+        self.finished.notify_one();
+    }
     fn invoke_tool<'a>(
         &'a self,
         invocation: CodeModeNestedToolCall,

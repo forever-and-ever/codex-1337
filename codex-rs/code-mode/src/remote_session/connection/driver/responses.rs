@@ -103,6 +103,10 @@ impl ConnectionDriver {
                 !self.sessions.contains_cell(session_id, cell_id)
                     && self.requests.has_pending_execute_for_session(session_id)
             }
+            HostToClient::CellFinished { session_id, cell_id, .. } => {
+                !self.sessions.contains_cell(session_id, cell_id)
+                    && self.requests.has_pending_execute_for_session(session_id)
+            }
             HostToClient::Response { .. }
             | HostToClient::InitialResponse { .. }
             | HostToClient::CellClosed { .. }
@@ -139,6 +143,17 @@ impl ConnectionDriver {
                 session_id,
                 cell_id,
             } => self.close_cell(session_id, cell_id),
+            HostToClient::CellFinished { session_id, cell_id, outcome } => {
+                match self.sessions.delegate_target(&session_id, &cell_id) {
+                    Ok(target) => {
+                        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            target.delegate.cell_finished(&target.cell_id, outcome);
+                        }));
+                        true
+                    }
+                    Err(error) => { self.fail(error); false }
+                }
+            }
             HostToClient::HostHello(_) | HostToClient::HandshakeRejected { .. } => {
                 self.fail("code-mode host sent a second handshake response".to_string());
                 false
