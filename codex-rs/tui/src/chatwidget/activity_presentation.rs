@@ -35,15 +35,15 @@ impl ChatWidget {
             && active.is_some_and(|cell| !cell.activity_ids().is_empty());
         let parts = active.filter(|_| has_activity).and_then(|cell| {
             cell.activity_parts(
-                width.saturating_sub(4),
+                width,
                 tool_output_tokens
                     .map(history_cell::activity_parts::token_label)
                     .map_or(0, |label| label.len()),
                 expanded_parts,
             )
         });
-        let (activity, disclosure, controls) = if let Some(parts) = parts {
-            (parts.lines, parts.output, parts.controls)
+        let (activity, header, disclosure, controls) = if let Some(parts) = parts {
+            (parts.lines, parts.header, parts.output, parts.controls)
         } else {
             let activity = active.map_or_else(Vec::new, |cell| {
                 if expanded && has_activity {
@@ -55,7 +55,18 @@ impl ChatWidget {
             let disclosure = active
                 .filter(|_| has_activity)
                 .and_then(|cell| cell.activity_disclosure(width));
-            (activity, disclosure, Vec::new())
+            (
+                activity,
+                active.and_then(|cell| {
+                    if expanded && has_activity {
+                        cell.expanded_activity_header()
+                    } else {
+                        cell.activity_header()
+                    }
+                }),
+                disclosure,
+                Vec::new(),
+            )
         };
         let mut auxiliary = self
             .active_cell_hyperlink_lines_with(width, |cell, width| {
@@ -73,7 +84,9 @@ impl ChatWidget {
             auxiliary.insert(/*index*/ 0, HyperlinkLine::from(""));
         }
         Some(ActivityTranscriptLines {
+            is_tool_entry: active.is_some_and(HistoryCell::is_tool_entry),
             activity,
+            header,
             auxiliary,
             tool_output_tokens,
             disclosure,

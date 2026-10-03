@@ -27,8 +27,27 @@ pub(crate) struct PartControl {
 
 pub(crate) struct ActivityParts {
     pub(crate) lines: Vec<HyperlinkLine>,
+    pub(crate) header: Option<ActivityHeader>,
     pub(crate) output: Option<ActivityDisclosure>,
     pub(crate) controls: Vec<PartControl>,
+}
+
+/// Token insertion anchor supplied by the header's owner, never inferred from rendered styling.
+#[derive(Clone, Copy)]
+pub(crate) struct ActivityHeader {
+    /// Byte offset in selectable header source, excluding synthetic marker/timestamp prefixes.
+    pub(crate) source_offset: usize,
+    /// Visible columns before the estimate, excluding the outer disclosure gutter.
+    pub(crate) columns: usize,
+}
+
+impl ActivityHeader {
+    pub(crate) fn at_end(line: &ratatui::text::Line<'_>) -> Self {
+        Self {
+            source_offset: line.spans.iter().map(|span| span.content.len()).sum(),
+            columns: line.width(),
+        }
+    }
 }
 
 pub(crate) fn token_label(tokens: u64) -> String {

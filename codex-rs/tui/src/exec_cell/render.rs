@@ -210,6 +210,19 @@ fn activity_marker(start_time: Option<Instant>, animations_enabled: bool) -> Spa
 }
 
 impl HistoryCell for ExecCell {
+    fn activity_header(&self) -> Option<crate::history_cell::activity_parts::ActivityHeader> {
+        if self.compact_header_hidden()
+            || self.group.calls.iter().any(ExecCall::is_user_shell_command)
+        {
+            // Hidden interactions have no header. Tokenless user-shell rows use a synthetic
+            // "You ran" prefix, not this source header.
+            None
+        } else if self.is_agent_command_group() {
+            Some(super::rows::command_header(&[self]).1)
+        } else {
+            self.command_heading().1
+        }
+    }
     fn activity_parts(
         &self,
         width: u16,
@@ -352,8 +365,11 @@ impl HistoryCell for ExecCell {
             lines.extend(adaptive_wrap_hyperlink_lines(
                 &plain_hyperlink_lines(highlight_bash_to_lines(&script)),
                 RtOptions::new(usize::from(width))
-                    .initial_indent("$ ".magenta().into())
-                    .subsequent_indent("    ".into()),
+                    .initial_indent(Line::from(vec![
+                        crate::transcript_geometry::CHILD_PREFIX.into(),
+                        "$ ".magenta(),
+                    ]))
+                    .subsequent_indent(crate::transcript_geometry::CHILD_PREFIX.into()),
             ));
         }
         lines

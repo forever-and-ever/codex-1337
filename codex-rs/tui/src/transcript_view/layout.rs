@@ -17,7 +17,9 @@ const MAX_CACHED_TEXT_BYTES: usize = 8 * 1024 * 1024;
 
 /// The selected activity presentation and any live content that follows it.
 pub(crate) struct ActivityTranscriptLines {
+    pub(crate) is_tool_entry: bool,
     pub(crate) activity: Vec<HyperlinkLine>,
+    pub(crate) header: Option<crate::history_cell::activity_parts::ActivityHeader>,
     pub(crate) auxiliary: Vec<HyperlinkLine>,
     pub(crate) tool_output_tokens: Option<u64>,
     pub(crate) disclosure: Option<ActivityDisclosure>,
@@ -40,35 +42,33 @@ pub(super) fn activity_layout(
         Some(ActivityDisclosure::EditedFile { header }) => usize::from(header),
         _ => 0,
     };
-    let mut heading_width = 0;
-    if let Some(header) = lines.activity.first() {
-        for span in &header.line.spans {
-            let action = span.content.split_whitespace().next().unwrap_or_default();
-            if span
-                .style
-                .add_modifier
-                .contains(ratatui::style::Modifier::BOLD)
-                && action.chars().any(char::is_alphabetic)
-            {
-                heading_width += crate::width::display_width(action);
-                break;
-            }
-            heading_width += span.width();
-        }
-    }
+    let heading_width = lines.header.map_or(0, |header| header.columns);
     let estimate = lines
         .tool_output_tokens
         .map(crate::history_cell::activity_parts::token_label)
-        .filter(|label| label.len() + 4 + heading_width + 3 <= usize::from(width));
+        .filter(|label| {
+            lines.header.is_some()
+                && label.len()
+                    + usize::from(crate::transcript_geometry::GUTTER_COLUMNS)
+                    + heading_width
+                    + 3
+                    <= usize::from(width)
+        });
     // Reserve the estimate before clipping, so invocation arguments never wrap collapsed.
-    if !expanded && !lines.controls.iter().any(|control| control.expanded) {
+    if lines.is_tool_entry
+        && (lines.header.is_some() || lines.disclosure.is_some() || !lines.controls.is_empty())
+        && !expanded
+        && !lines.controls.iter().any(|control| control.expanded)
+    {
         for (index, header) in lines.activity.iter_mut().enumerate() {
             let estimate_width = if index == 0 {
                 estimate.as_ref().map_or(0, String::len)
             } else {
                 0
             };
-            let available = usize::from(width).saturating_sub(4 + estimate_width);
+            let available = usize::from(width).saturating_sub(
+                usize::from(crate::transcript_geometry::GUTTER_COLUMNS) + estimate_width,
+            );
             if header.width() > available {
                 lines.disclosure.get_or_insert(ActivityDisclosure::Generic);
                 let prefix_bytes = header
@@ -90,14 +90,12 @@ pub(super) fn activity_layout(
         }
     }
     let has_details = !lines.activity.is_empty() && (expanded || lines.disclosure.is_some());
-    lines.activity = crate::terminal_hyperlinks::prefix_hyperlink_lines(
-        lines.activity,
-        "    ".into(),
-        "    ".into(),
-    );
     lines.activity.extend(lines.auxiliary);
-    let mut layout = TextLayout::new(lines.activity, width);
-    if let Some(estimate) = estimate {
+    let mut layout = TextLayout::new(
+        crate::transcript_geometry::rich_lines(lines.activity),
+        width,
+    );
+    if let (Some(estimate), Some(header)) = (estimate, lines.header) {
         layout = if matches!(
             lines.disclosure,
             Some(ActivityDisclosure::EditedFile { header: false })
@@ -106,7 +104,7 @@ pub(super) fn activity_layout(
             let offset = layout.text().find('\n').unwrap_or(layout.text().len());
             layout.with_estimate_at(offset, estimate)
         } else {
-            layout.with_activity_estimate(estimate)
+            layout.with_estimate_at(header.source_offset, estimate)
         };
     }
     if has_details {
@@ -197,9 +195,11 @@ impl TranscriptView {
                 return None;
             }
             let live = self.live.as_ref()?;
-            let follows_tool_entry = !self.disclosure.live_ids.is_empty()
-                && previous.is_some_and(|cell| cell.is_tool_entry());
-            if cells.is_empty() || self.live_continuation || follows_tool_entry {
+            if !crate::transcript_geometry::separated(
+                previous.map(AsRef::as_ref),
+                self.live_tool_entry,
+                self.live_continuation,
+            ) {
                 return Some(Arc::clone(live));
             }
             let width = self.area.width.max(/*other*/ 1);
@@ -225,12 +225,14 @@ impl TranscriptView {
             && !cell.is_stream_continuation()
             && ToolOutputGroup::is_patch(cell.as_ref())
             && previous.is_some_and(|previous| ToolOutputGroup::is_patch(previous.as_ref()));
-        let follows_tool_entry =
-            cell.is_tool_entry() && previous.is_some_and(|cell| cell.is_tool_entry());
         if expanded {
             self.disclosure.expanded.extend(ids);
         }
-        let separated = index > 0 && !cell.is_stream_continuation() && !follows_tool_entry;
+        let separated = crate::transcript_geometry::separated(
+            previous.map(AsRef::as_ref),
+            cell.is_tool_entry(),
+            cell.is_stream_continuation(),
+        );
         let presentation = CellPresentation {
             separated,
             turn_tip_space: self.turn_tip_key == Some(EntryKey::cell(cell)),
@@ -244,16 +246,17 @@ impl TranscriptView {
             .primary_hint(KeymapContext::Global, "open_transcript");
         let expanded_parts = &self.disclosure.expanded;
         Some(self.cache.get(cell, width, presentation, || {
+            let content_width = crate::transcript_geometry::content_width(width, mode);
             if disclosure {
                 let reserve = tool_output_tokens
                     .map(crate::history_cell::activity_parts::token_label)
                     .map_or(0, |label| label.len());
-                if let Some(parts) =
-                    cell.activity_parts(width.saturating_sub(4), reserve, expanded_parts)
-                {
+                if let Some(parts) = cell.activity_parts(content_width, reserve, expanded_parts) {
                     return activity_layout(
                         ActivityTranscriptLines {
+                            is_tool_entry: cell.is_tool_entry(),
                             activity: parts.lines,
+                            header: parts.header,
                             auxiliary: Vec::new(),
                             tool_output_tokens,
                             disclosure: parts.output,
@@ -265,19 +268,25 @@ impl TranscriptView {
                     );
                 }
                 let mut activity = if expanded {
-                    cell.expanded_hyperlink_lines(width)
+                    cell.expanded_hyperlink_lines(content_width)
                 } else {
-                    cell.compact_hyperlink_lines(width)
+                    cell.compact_hyperlink_lines(content_width)
                 };
                 let disclosure = if continued_edit {
                     activity.remove(0);
                     Some(ActivityDisclosure::EditedFile { header: false })
                 } else {
-                    cell.activity_disclosure(width)
+                    cell.activity_disclosure(content_width)
                 };
                 activity_layout(
                     ActivityTranscriptLines {
+                        is_tool_entry: cell.is_tool_entry(),
                         activity,
+                        header: if expanded {
+                            cell.expanded_activity_header()
+                        } else {
+                            cell.activity_header()
+                        },
                         auxiliary: Vec::new(),
                         tool_output_tokens,
                         disclosure,
@@ -290,19 +299,14 @@ impl TranscriptView {
             } else {
                 let lines = crate::history_cell::fullscreen_session_lines(
                     cell.as_ref(),
-                    width,
+                    content_width,
                     detailed,
                     mode,
                 );
-                // Opaque lifecycle entries use the same empty gutter, without inventing
-                // disclosure identities or an expansion button for a clipped heading.
-                let lines = if !detailed && mode == HistoryRenderMode::Rich && cell.is_tool_entry()
-                {
-                    crate::terminal_hyperlinks::prefix_hyperlink_lines(
-                        lines,
-                        "    ".into(),
-                        "    ".into(),
-                    )
+                // Detailed content and markerless cards share the gutter without acquiring
+                // synthetic markers, disclosure identities, or expansion controls.
+                let lines = if mode == HistoryRenderMode::Rich {
+                    crate::transcript_geometry::rich_lines(lines)
                 } else {
                     lines
                 };

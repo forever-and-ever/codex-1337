@@ -10,6 +10,7 @@ use crate::exec_command::strip_bash_lc_and_escape;
 use crate::history_cell::ActivityDisclosure;
 use crate::history_cell::HistoryCell;
 use crate::history_cell::ToolOutputCell;
+use crate::history_cell::activity_parts::ActivityHeader;
 use crate::history_cell::activity_parts::ActivityParts;
 use crate::history_cell::activity_parts::PartControl;
 use crate::history_cell::activity_preview::compact_header;
@@ -91,20 +92,9 @@ impl ExecCell {
     }
 }
 
-pub(crate) fn command_parts(
-    cells: &[&ExecCell],
-    batches: &[&ToolOutputCell],
-    width: u16,
-    header_reserve: usize,
-    expanded: &HashSet<String>,
-    activity_ids: &[String],
-) -> ActivityParts {
-    let calls = cells
-        .iter()
-        .flat_map(|cell| cell.iter_calls())
-        .collect::<Vec<_>>();
+pub(crate) fn command_header(cells: &[&ExecCell]) -> (Line<'static>, ActivityHeader) {
     let active = cells.iter().any(|cell| cell.is_active());
-    let failed = calls.iter().any(|call| {
+    let failed = cells.iter().flat_map(|cell| cell.iter_calls()).any(|call| {
         call.output
             .as_ref()
             .is_some_and(|output| output.exit_code != 0)
@@ -139,9 +129,26 @@ pub(crate) fn command_parts(
         );
     }
     heading.push_span(verb.bold());
+    let header = ActivityHeader::at_end(&heading);
     if failed {
         heading.push_span(" · failed".red());
     }
+    (heading, header)
+}
+
+pub(crate) fn command_parts(
+    cells: &[&ExecCell],
+    batches: &[&ToolOutputCell],
+    width: u16,
+    header_reserve: usize,
+    expanded: &HashSet<String>,
+    activity_ids: &[String],
+) -> ActivityParts {
+    let calls = cells
+        .iter()
+        .flat_map(|cell| cell.iter_calls())
+        .collect::<Vec<_>>();
+    let (heading, header) = command_header(cells);
     let has_batches = !batches.is_empty()
         || cells
             .iter()
@@ -198,7 +205,9 @@ pub(crate) fn command_parts(
                 let id = row_id(call, row);
                 let open = row.summary.is_none() && expanded.contains(&id);
                 let connector = row.segment.connector.map_or("", Connector::suffix);
-                let available = usize::from(width).saturating_sub(4 + connector.len());
+                let available = usize::from(width).saturating_sub(
+                    usize::from(crate::transcript_geometry::CHILD_INDENT) + connector.len(),
+                );
                 let mut source_lines = row
                     .summary
                     .clone()
@@ -218,16 +227,16 @@ pub(crate) fn command_parts(
                     }
                     lines.extend(prefix_hyperlink_lines(
                         plain_hyperlink_lines(source_lines),
-                        "    ".into(),
-                        "    ".into(),
+                        crate::transcript_geometry::CHILD_PREFIX.into(),
+                        crate::transcript_geometry::CHILD_PREFIX.into(),
                     ));
                 } else {
                     let mut preview = compact_header(preview, available);
                     preview.push_span(connector.dim());
                     lines.extend(prefix_hyperlink_lines(
                         vec![preview.into()],
-                        "    ".into(),
-                        "    ".into(),
+                        crate::transcript_geometry::CHILD_PREFIX.into(),
+                        crate::transcript_geometry::CHILD_PREFIX.into(),
                     ));
                 }
             }
@@ -252,8 +261,8 @@ pub(crate) fn command_parts(
                                 .map(|line| codex_ansi_escape::ansi_escape_line(line.as_ref()))
                                 .collect(),
                         ),
-                        "  ".into(),
-                        "  ".into(),
+                        crate::transcript_geometry::CHILD_PREFIX.into(),
+                        crate::transcript_geometry::CHILD_PREFIX.into(),
                     ));
                 }
             }
@@ -261,6 +270,7 @@ pub(crate) fn command_parts(
     }
     ActivityParts {
         lines,
+        header: Some(header),
         output: has_output.then_some(ActivityDisclosure::Generic),
         controls,
     }

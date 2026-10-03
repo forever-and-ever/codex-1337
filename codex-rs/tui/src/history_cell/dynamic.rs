@@ -134,7 +134,7 @@ impl DynamicToolCallData {
         matches!(self.status, DynamicToolCallStatus::InProgress)
     }
 
-    fn header(&self) -> Line<'static> {
+    fn header(&self) -> (Line<'static>, super::activity_parts::ActivityHeader) {
         let (marker, verb) = if self.interrupted {
             ("•".red().bold(), "Interrupted")
         } else {
@@ -144,17 +144,13 @@ impl DynamicToolCallData {
                 DynamicToolCallStatus::Failed => ("•".red().bold(), "Failed"),
             }
         };
-        let mut line = Line::from(vec![
-            marker,
-            " ".into(),
-            verb.bold(),
-            " ".into(),
-            self.name.clone().fg(accent_color()),
-        ]);
+        let mut line = Line::from(vec![marker, " ".into(), verb.bold()]);
+        let header = super::activity_parts::ActivityHeader::at_end(&line);
+        line.extend([" ".into(), self.name.clone().fg(accent_color())]);
         if let Some(duration_ms) = self.duration_ms.filter(|duration| *duration >= 0) {
             line.push_span(format!(" · {duration_ms}ms").dim());
         }
-        line
+        (line, header)
     }
 
     fn argument_lines(&self) -> Vec<Line<'static>> {
@@ -177,6 +173,15 @@ impl DynamicToolCallData {
 }
 
 impl HistoryCell for DynamicToolCallCell {
+    fn activity_header(&self) -> Option<super::activity_parts::ActivityHeader> {
+        Some(
+            self.data
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .header()
+                .1,
+        )
+    }
     fn activity_disclosure(&self, width: u16) -> Option<super::ActivityDisclosure> {
         let has_output = self
             .data
@@ -212,7 +217,7 @@ impl HistoryCell for DynamicToolCallCell {
             .data
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let mut header = data.header();
+        let mut header = data.header().0;
         header.push_span("(");
         header.push_span(
             super::activity_preview::compact_arguments(
@@ -230,7 +235,7 @@ impl HistoryCell for DynamicToolCallCell {
             .data
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let mut lines = vec![data.header().into()];
+        let mut lines = vec![data.header().0.into()];
         let details = data
             .argument_lines()
             .into_iter()
@@ -239,8 +244,8 @@ impl HistoryCell for DynamicToolCallCell {
         lines.extend(adaptive_wrap_hyperlink_lines(
             &plain_hyperlink_lines(details),
             RtOptions::new(usize::from(width).max(/*other*/ 1))
-                .initial_indent("  └ ".dim().into())
-                .subsequent_indent("    ".into()),
+                .initial_indent(crate::transcript_geometry::CHILD_BRANCH.dim().into())
+                .subsequent_indent(crate::transcript_geometry::CHILD_PREFIX.into()),
         ));
         lines
     }
@@ -250,12 +255,12 @@ impl HistoryCell for DynamicToolCallCell {
             .data
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let mut lines = vec![data.header().into()];
+        let mut lines = vec![data.header().0.into()];
         lines.extend(adaptive_wrap_hyperlink_lines(
             &plain_hyperlink_lines(data.argument_lines()),
             RtOptions::new(usize::from(width).max(/*other*/ 1))
-                .initial_indent("  └ ".dim().into())
-                .subsequent_indent("    ".into()),
+                .initial_indent(crate::transcript_geometry::CHILD_BRANCH.dim().into())
+                .subsequent_indent(crate::transcript_geometry::CHILD_PREFIX.into()),
         ));
         lines
     }
@@ -265,7 +270,7 @@ impl HistoryCell for DynamicToolCallCell {
             .data
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let mut lines = vec![data.header()];
+        let mut lines = vec![data.header().0];
         lines.extend(raw_lines_from_source(&format!(
             "Arguments: {}",
             data.arguments

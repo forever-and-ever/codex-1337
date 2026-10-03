@@ -13,6 +13,17 @@ use ratatui::style::Stylize;
 use ratatui::text::Line;
 
 impl ExecCell {
+    pub(crate) fn compact_header_hidden(&self) -> bool {
+        let [call] = self.group.calls.as_slice() else {
+            return false;
+        };
+        call.is_unified_exec_interaction()
+            && !self.is_active()
+            && call.output.as_ref().is_some_and(|output| {
+                output.exit_code == 0 && output.lines().all(|line| line.trim().is_empty())
+            })
+    }
+
     pub(super) fn command_disclosure(&self, width: u16) -> Option<ActivityDisclosure> {
         // Interaction output is intentionally absent from the expanded transcript.
         let has_output = self
@@ -35,28 +46,28 @@ impl ExecCell {
         let [call] = self.group.calls.as_slice() else {
             return Vec::new();
         };
-        if call.is_unified_exec_interaction()
-            && !self.is_active()
-            && call.output.as_ref().is_some_and(|output| {
-                output.exit_code == 0 && output.lines().all(|line| line.trim().is_empty())
-            })
-        {
+        if self.compact_header_hidden() {
             return Vec::new();
         }
         let script = strip_bash_lc_and_escape(&call.command);
         // Highlight before clipping so the compact row keeps the same shell token colors.
         let mut command_lines = highlight_bash_to_lines(&script).into_iter();
         let mut header = command_lines.next().unwrap_or_default();
-        header.spans.splice(0..0, self.command_heading().spans);
+        header.spans.splice(0..0, self.command_heading().0.spans);
         if command_lines.next().is_some() {
             header.push_span(" …");
         }
         vec![clipped_line(header, width)]
     }
 
-    pub(super) fn command_heading(&self) -> Line<'static> {
+    pub(super) fn command_heading(
+        &self,
+    ) -> (
+        Line<'static>,
+        Option<crate::history_cell::activity_parts::ActivityHeader>,
+    ) {
         let [call] = self.group.calls.as_slice() else {
-            return Line::default();
+            return (Line::default(), None);
         };
         let failed = call.output.as_ref().filter(|output| output.exit_code != 0);
         let marker = if failed.is_some() {
@@ -71,14 +82,14 @@ impl ExecCell {
         } else {
             "•".green().bold()
         };
-        let title = if let Some(output) = failed {
-            format!("Failed (exit {})", output.exit_code)
+        let (verb, suffix) = if let Some(output) = failed {
+            ("Failed", format!(" (exit {})", output.exit_code))
         } else if self.is_active() {
-            "Running".to_owned()
+            ("Running", String::new())
         } else if call.is_unified_exec_interaction() {
-            "Background output".to_owned()
+            ("Background", " output".into())
         } else {
-            "Ran".to_owned()
+            ("Ran", String::new())
         };
         let mut heading = vec![marker, " ".into()];
         if !self.is_active() {
@@ -87,7 +98,10 @@ impl ExecCell {
                     .map(crate::history_cell::HistoryTimestamp::span),
             );
         }
-        heading.extend([title.bold(), " ".into()]);
-        heading.into()
+        let mut heading = Line::from(heading);
+        heading.push_span(verb.bold());
+        let header = crate::history_cell::activity_parts::ActivityHeader::at_end(&heading);
+        heading.extend([suffix.bold(), " ".into()]);
+        (heading, Some(header))
     }
 }

@@ -166,13 +166,19 @@ impl HistoryCell for CompositeHistoryCell {
 
     fn compact_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         let mut out = Vec::new();
+        let mut previous = None;
         for part in &self.parts {
             let lines = part.compact_hyperlink_lines(width);
             if !lines.is_empty() {
-                if !out.is_empty() {
+                if crate::transcript_geometry::separated(
+                    previous,
+                    part.is_tool_entry(),
+                    part.is_stream_continuation(),
+                ) {
                     out.push(HyperlinkLine::from(""));
                 }
                 out.extend(lines);
+                previous = Some(part.as_ref());
             }
         }
         out
@@ -180,15 +186,19 @@ impl HistoryCell for CompositeHistoryCell {
 
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         let mut out: Vec<Line<'static>> = Vec::new();
-        let mut first = true;
+        let mut previous = None;
         for part in &self.parts {
             let mut lines = part.display_lines(width);
             if !lines.is_empty() {
-                if !first {
+                if crate::transcript_geometry::separated(
+                    previous,
+                    part.is_tool_entry(),
+                    part.is_stream_continuation(),
+                ) {
                     out.push(Line::from(""));
                 }
                 out.append(&mut lines);
-                first = false;
+                previous = Some(part.as_ref());
             }
         }
         out
@@ -196,15 +206,19 @@ impl HistoryCell for CompositeHistoryCell {
 
     fn display_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         let mut out = Vec::new();
-        let mut first = true;
+        let mut previous = None;
         for part in &self.parts {
             let mut lines = part.display_hyperlink_lines(width);
             if !lines.is_empty() {
-                if !first {
+                if crate::transcript_geometry::separated(
+                    previous,
+                    part.is_tool_entry(),
+                    part.is_stream_continuation(),
+                ) {
                     out.push(HyperlinkLine::from(""));
                 }
                 out.append(&mut lines);
-                first = false;
+                previous = Some(part.as_ref());
             }
         }
         out
@@ -212,15 +226,19 @@ impl HistoryCell for CompositeHistoryCell {
 
     fn transcript_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         let mut out = Vec::new();
-        let mut first = true;
+        let mut previous = None;
         for part in &self.parts {
             let mut lines = part.transcript_hyperlink_lines(width);
             if !lines.is_empty() {
-                if !first {
+                if crate::transcript_geometry::separated(
+                    previous,
+                    part.is_tool_entry(),
+                    part.is_stream_continuation(),
+                ) {
                     out.push(HyperlinkLine::from(""));
                 }
                 out.append(&mut lines);
-                first = false;
+                previous = Some(part.as_ref());
             }
         }
         out

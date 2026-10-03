@@ -88,6 +88,13 @@ struct NodeReplExecOutput {
 }
 
 impl McpToolCallCell {
+    fn header_verb(&self) -> &'static str {
+        if self.result.is_some() {
+            "Called"
+        } else {
+            "Calling"
+        }
+    }
     pub(crate) fn new(
         call_id: String,
         invocation: McpInvocation,
@@ -169,11 +176,7 @@ impl McpToolCallCell {
             )
             .unwrap_or_else(|| "•".dim()),
         };
-        let header_text = if status.is_some() {
-            "Called"
-        } else {
-            "Calling"
-        };
+        let header_text = self.header_verb();
 
         let title = self
             .invocation
@@ -220,15 +223,17 @@ impl McpToolCallCell {
             compact_spans.pop(); // drop trailing space for standalone header
             lines.push(mcp_header_line(Line::from(compact_spans)));
 
-            let opts = RtOptions::new((width as usize).saturating_sub(/*rhs*/ 4))
-                .initial_indent("".into())
-                .subsequent_indent("    ".into());
+            let opts = RtOptions::new(
+                (width as usize)
+                    .saturating_sub(usize::from(crate::transcript_geometry::CHILD_INDENT))
+                    .max(/*other*/ 1),
+            );
             let body_lines =
                 adaptive_wrap_hyperlink_lines(&[HyperlinkLine::new(invocation_line)], opts);
             lines.extend(prefix_hyperlink_lines(
                 body_lines,
-                "  └ ".dim(),
-                "    ".into(),
+                crate::transcript_geometry::CHILD_BRANCH.dim(),
+                crate::transcript_geometry::CHILD_PREFIX.into(),
             ));
         }
 
@@ -239,14 +244,14 @@ impl McpToolCallCell {
         };
         if !detail_lines.is_empty() {
             let initial_prefix = if inline_invocation {
-                "  └ ".dim()
+                crate::transcript_geometry::CHILD_BRANCH.dim()
             } else {
-                "    ".into()
+                crate::transcript_geometry::CHILD_PREFIX.into()
             };
             lines.extend(prefix_hyperlink_lines(
                 detail_lines,
                 initial_prefix,
-                "    ".into(),
+                crate::transcript_geometry::CHILD_PREFIX.into(),
             ));
         }
         lines
@@ -255,9 +260,9 @@ impl McpToolCallCell {
     /// Share one bounded preview across result blocks while retaining full transcript sources.
     fn render_detail_lines(&self, width: u16, mode: McpToolCallRenderMode) -> Vec<HyperlinkLine> {
         let detail_width = usize::from(width)
-            .saturating_sub(/*rhs*/ 4)
+            .saturating_sub(usize::from(crate::transcript_geometry::CHILD_INDENT))
             .max(/*other*/ 1);
-        let options = RtOptions::new(detail_width).subsequent_indent("    ".into());
+        let options = RtOptions::new(detail_width);
         let mut lines = Vec::new();
         let mut preview = ToolOutputPreview::new(detail_width, /*omitted*/ 0);
         match &self.result {
@@ -381,6 +386,16 @@ impl McpToolCallCell {
 }
 
 impl HistoryCell for McpToolCallCell {
+    fn activity_header(&self) -> Option<super::activity_parts::ActivityHeader> {
+        let mut heading = Line::default();
+        if self.result.is_some() {
+            heading.extend(self.completed_at.map(HistoryTimestamp::span));
+        }
+        heading.push_span(self.header_verb());
+        let mut header = super::activity_parts::ActivityHeader::at_end(&heading);
+        header.columns += usize::from(crate::transcript_geometry::MARKER_COLUMNS);
+        Some(header)
+    }
     fn activity_disclosure(&self, width: u16) -> Option<ActivityDisclosure> {
         let has_output = match &self.result {
             Some(Ok(result)) => result.content.iter().any(|block| {

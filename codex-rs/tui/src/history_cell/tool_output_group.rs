@@ -270,6 +270,51 @@ impl ToolOutputGroup {
 }
 
 impl HistoryCell for ToolOutputGroup {
+    fn activity_header(&self) -> Option<super::activity_parts::ActivityHeader> {
+        self.members
+            .iter()
+            .find(|cell| {
+                !cell.as_any().is::<ToolOutputCell>()
+                    && !cell
+                        .as_any()
+                        .downcast_ref::<ReasoningSummaryCell>()
+                        .is_some_and(ReasoningSummaryCell::is_transcript_only)
+                    && !cell
+                        .as_any()
+                        .downcast_ref::<crate::exec_cell::ExecCell>()
+                        .is_some_and(crate::exec_cell::ExecCell::compact_header_hidden)
+            })
+            .or_else(|| {
+                self.members
+                    .iter()
+                    .rev()
+                    .find(|cell| cell.as_any().is::<ToolOutputCell>())
+            })
+            .and_then(|cell| cell.activity_header())
+    }
+    fn expanded_activity_header(&self) -> Option<super::activity_parts::ActivityHeader> {
+        let leading_command_is_hidden = self
+            .members
+            .iter()
+            .find(|cell| {
+                !cell.as_any().is::<ToolOutputCell>()
+                    && !cell
+                        .as_any()
+                        .downcast_ref::<ReasoningSummaryCell>()
+                        .is_some_and(ReasoningSummaryCell::is_transcript_only)
+            })
+            .is_some_and(|cell| {
+                cell.as_any()
+                    .downcast_ref::<crate::exec_cell::ExecCell>()
+                    .is_some_and(crate::exec_cell::ExecCell::compact_header_hidden)
+            });
+        // Expansion reveals bare arguments for this interaction, not the next member's header.
+        if leading_command_is_hidden {
+            None
+        } else {
+            self.activity_header()
+        }
+    }
     fn outer_call_id(&self) -> Option<&str> {
         self.members
             .iter()

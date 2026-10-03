@@ -238,6 +238,7 @@ mod thread_transcript;
 mod token_usage;
 mod tool_output;
 mod tooltips;
+mod transcript_geometry;
 mod transcript_mode;
 mod transcript_reflow;
 mod transcript_view;

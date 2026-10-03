@@ -203,6 +203,11 @@ pub(crate) struct PlanUpdateCell {
 }
 
 impl HistoryCell for PlanUpdateCell {
+    fn activity_header(&self) -> Option<super::activity_parts::ActivityHeader> {
+        Some(super::activity_parts::ActivityHeader::at_end(&Line::from(
+            vec!["• ".into(), "Updated".into()],
+        )))
+    }
     fn activity_ids(&self) -> Vec<String> {
         vec![self.activity_id.clone()]
     }

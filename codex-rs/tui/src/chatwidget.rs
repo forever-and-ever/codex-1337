@@ -816,6 +816,7 @@ pub(crate) struct ActiveCellTranscriptKey {
     /// Whether the active cell continues the prior stream, which affects
     /// spacing between transcript blocks.
     pub(crate) is_stream_continuation: bool,
+    pub(crate) is_tool_entry: bool,
     /// Optional animation tick for time-dependent transcript output.
     ///
     /// When this changes, the overlay recomputes the cached tail even if the revision and width
@@ -1627,7 +1628,13 @@ impl ChatWidget {
             if width == 0 {
                 None
             } else {
-                let width = usize::from(self.history_wrap_width(width));
+                let width = self.history_wrap_width(width);
+                let width = if self.local_settings.transcript_mode.is_owned() {
+                    crate::transcript_geometry::content_width(width, self.history_render_mode())
+                } else {
+                    width
+                };
+                let width = usize::from(width);
                 Some(crate::width::usable_content_width(width, reserved_cols).unwrap_or(1))
             }
         })
@@ -1992,6 +1999,7 @@ impl ChatWidget {
                 )
                 .all(HistoryCell::has_stable_transcript_height),
             revision: self.transcript.active_cell_revision,
+            is_tool_entry: cell.is_some_and(|cell| cell.is_tool_entry()),
             is_stream_continuation: cell
                 .map(|cell| cell.is_stream_continuation())
                 .unwrap_or(/*default*/ false),

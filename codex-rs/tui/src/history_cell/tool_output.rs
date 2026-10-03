@@ -23,6 +23,13 @@ pub(crate) struct ToolOutputCell {
 }
 
 impl ToolOutputCell {
+    fn heading(&self) -> &'static str {
+        if self.wait.is_some() {
+            "Waited"
+        } else {
+            "Returned"
+        }
+    }
     pub(crate) fn id(&self) -> &str {
         &self.id
     }
@@ -75,6 +82,11 @@ impl ToolOutputCell {
 }
 
 impl HistoryCell for ToolOutputCell {
+    fn activity_header(&self) -> Option<super::activity_parts::ActivityHeader> {
+        Some(super::activity_parts::ActivityHeader::at_end(&Line::from(
+            vec!["• ".into(), self.heading().into()],
+        )))
+    }
     fn outer_call_id(&self) -> Option<&str> {
         Some(&self.call_id)
     }
@@ -89,11 +101,7 @@ impl HistoryCell for ToolOutputCell {
 
     fn display_lines(&self, _width: u16) -> Vec<Line<'static>> {
         // A code-only batch has no nested action header, but its retained result must be reachable.
-        let heading = if self.wait.is_some() {
-            "Waited"
-        } else {
-            "Returned"
-        };
+        let heading = self.heading();
         let mut spans = vec!["• ".dim(), heading.bold()];
         let status = match &self.wait {
             Some(WaitOutcome::Running) => Some("still running".into()),
@@ -145,8 +153,8 @@ impl HistoryCell for ToolOutputCell {
         adaptive_wrap_hyperlink_lines(
             &plain_hyperlink_lines(raw_lines_from_source(&self.readable)),
             RtOptions::new(width as usize)
-                .initial_indent("  ".into())
-                .subsequent_indent("  ".into()),
+                .initial_indent(crate::transcript_geometry::CHILD_PREFIX.into())
+                .subsequent_indent(crate::transcript_geometry::CHILD_PREFIX.into()),
         )
     }
 

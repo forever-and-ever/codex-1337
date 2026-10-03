@@ -99,6 +99,7 @@ pub(crate) struct TranscriptView {
     live_separated: Option<Arc<TextLayout>>,
     live_key: Option<(u16, ActiveCellTranscriptKey)>,
     live_continuation: bool,
+    live_tool_entry: bool,
     area: Rect,
     suppressed_prompt_header: Option<prompt_header::SuppressedHeader>,
     visible: Vec<VisibleRow>,
@@ -133,6 +134,7 @@ impl Default for TranscriptView {
             live_separated: None,
             live_key: None,
             live_continuation: false,
+            live_tool_entry: false,
             area: Rect::default(),
             suppressed_prompt_header: None,
             visible: Vec::new(),
@@ -281,8 +283,19 @@ impl TranscriptView {
         key: Option<ActiveCellTranscriptKey>,
         lines: impl FnOnce(u16) -> Option<Vec<HyperlinkLine>>,
     ) -> bool {
+        let mode = self.mode;
         self.sync_live_layout(width, key, |width, _| {
-            lines(width).map(|lines| TextLayout::new(lines, width))
+            lines(crate::transcript_geometry::content_width(width, mode)).map(|lines| {
+                let lines = if mode == HistoryRenderMode::Rich {
+                    crate::transcript_geometry::rich_lines(lines)
+                } else {
+                    lines
+                };
+                (
+                    TextLayout::new(lines, width),
+                    key.is_some_and(|key| key.is_tool_entry),
+                )
+            })
         })
     }
 
@@ -297,9 +310,22 @@ impl TranscriptView {
             .disclosure
             .keymap
             .primary_hint(crate::keymap::KeymapContext::Global, "open_transcript");
+        let mode = self.mode;
         self.sync_live_layout(width, key, |width, expanded_parts| {
-            lines(width, expanded_parts)
-                .map(|lines| layout::activity_layout(lines, width, expanded, shortcut))
+            lines(
+                crate::transcript_geometry::content_width(width, mode),
+                expanded_parts,
+            )
+            .map(|mut lines| {
+                let is_tool_entry = lines.is_tool_entry;
+                let layout = if mode == HistoryRenderMode::Rich {
+                    layout::activity_layout(lines, width, expanded, shortcut)
+                } else {
+                    lines.activity.extend(lines.auxiliary);
+                    TextLayout::new(lines.activity, width)
+                };
+                (layout, is_tool_entry)
+            })
         })
     }
 
@@ -307,7 +333,7 @@ impl TranscriptView {
         &mut self,
         width: u16,
         key: Option<ActiveCellTranscriptKey>,
-        layout: impl FnOnce(u16, &std::collections::HashSet<String>) -> Option<TextLayout>,
+        layout: impl FnOnce(u16, &std::collections::HashSet<String>) -> Option<(TextLayout, bool)>,
     ) -> bool {
         let next = key.map(|key| (width, key));
         if key.is_some_and(|key| key.cacheable) && self.live_key == next {
@@ -318,7 +344,10 @@ impl TranscriptView {
         self.live_key = next;
         self.live_separated = None;
         self.live_continuation = key.is_some_and(|key| key.is_stream_continuation);
-        let live = layout(width, &self.disclosure.expanded).map(Arc::new);
+        let live = layout(width, &self.disclosure.expanded).map(|(layout, tool_entry)| {
+            self.live_tool_entry = tool_entry;
+            Arc::new(layout)
+        });
         if self.live.as_ref().map(|layout| layout.text())
             != live.as_ref().map(|layout| layout.text())
         {

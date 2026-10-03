@@ -236,6 +236,7 @@ fn live(view: &mut TranscriptView, cell: &dyn HistoryCell, revision: u64) {
         revision,
         is_stream_continuation: cell.is_stream_continuation(),
         animation_tick: None,
+        is_tool_entry: cell.is_tool_entry(),
     };
     view.sync_live_tail(/*width*/ 32, Some(key), |width| {
         Some(cell.display_hyperlink_lines(width))

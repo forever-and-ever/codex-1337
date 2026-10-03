@@ -37,6 +37,10 @@ impl HistoryCell for Cell {
 fn tool_output_disclosure_shows_full_estimate_when_it_fits() {
     let layout = activity_layout(
         ActivityTranscriptLines {
+            is_tool_entry: true,
+            header: Some(crate::history_cell::activity_parts::ActivityHeader::at_end(
+                &Line::from("Called"),
+            )),
             controls: Vec::new(),
             activity: vec![HyperlinkLine::from("Called tool")],
             auxiliary: Vec::new(),
@@ -93,11 +97,19 @@ fn tool_heading_decorations_preserve_source_and_hit_targets() {
     ] {
         let layout = activity_layout(
             ActivityTranscriptLines {
+                is_tool_entry: true,
+                header: mcp.activity_header(),
                 controls: Vec::new(),
                 activity: if expanded {
-                    mcp.expanded_hyperlink_lines(width)
+                    mcp.expanded_hyperlink_lines(crate::transcript_geometry::content_width(
+                        width,
+                        HistoryRenderMode::Rich,
+                    ))
                 } else {
-                    mcp.compact_hyperlink_lines(width)
+                    mcp.compact_hyperlink_lines(crate::transcript_geometry::content_width(
+                        width,
+                        HistoryRenderMode::Rich,
+                    ))
                 },
                 auxiliary: Vec::new(),
                 tool_output_tokens: tokens,
@@ -127,6 +139,10 @@ fn tool_heading_decorations_preserve_source_and_hit_targets() {
     // Every selectable character lands back on the same source offset after a mid-header estimate.
     let layout = activity_layout(
         ActivityTranscriptLines {
+            is_tool_entry: true,
+            header: Some(crate::history_cell::activity_parts::ActivityHeader::at_end(
+                &Line::from(vec!["• ".into(), "Ran".into()]),
+            )),
             controls: Vec::new(),
             activity: vec![
                 Line::from(vec!["• ".into(), "Ran".bold(), " echo 界 👩‍💻".into()]).into(),

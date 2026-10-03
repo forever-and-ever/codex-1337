@@ -297,6 +297,16 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
         None
     }
 
+    /// Semantic estimate anchor in the compact presentation's selectable header source.
+    fn activity_header(&self) -> Option<activity_parts::ActivityHeader> {
+        None
+    }
+
+    /// Expanded entries normally retain their compact header, but may begin with bare arguments.
+    fn expanded_activity_header(&self) -> Option<activity_parts::ActivityHeader> {
+        self.activity_header()
+    }
+
     /// Details an activity offers beyond its compact presentation, if any.
     /// Prefer source metadata so collapsed rendering does not materialize hidden content.
     fn activity_disclosure(&self, _width: u16) -> Option<ActivityDisclosure> {

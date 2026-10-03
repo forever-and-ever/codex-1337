@@ -130,16 +130,22 @@ pub(crate) fn fullscreen_session_lines(
 ) -> Vec<HyperlinkLine> {
     if let Some(info) = cell.as_any().downcast_ref::<SessionInfoCell>() {
         let mut lines = Vec::new();
+        let mut previous = None;
         for part in &info.0.parts {
             if part.as_any().is::<TooltipHistoryCell>() {
                 continue;
             }
             let part_lines = fullscreen_session_lines(part.as_ref(), width, detailed, mode);
             if !part_lines.is_empty() {
-                if !lines.is_empty() {
+                if crate::transcript_geometry::separated(
+                    previous,
+                    part.is_tool_entry(),
+                    part.is_stream_continuation(),
+                ) {
                     lines.push(HyperlinkLine::from(""));
                 }
                 lines.extend(part_lines);
+                previous = Some(part.as_ref());
             }
         }
         lines

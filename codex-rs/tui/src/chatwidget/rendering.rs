@@ -334,12 +334,21 @@ impl ChatWidget {
                     .map(|cell| cell as &dyn HistoryCell),
             );
         let mut lines = Vec::new();
+        let mut previous = None;
         for cell in cells {
             let cell_lines = render_cell(cell, width);
-            if !cell_lines.is_empty() && !lines.is_empty() {
+            if cell_lines.is_empty() {
+                continue;
+            }
+            if crate::transcript_geometry::separated(
+                previous,
+                cell.is_tool_entry(),
+                cell.is_stream_continuation(),
+            ) {
                 lines.push(HyperlinkLine::from(""));
             }
             lines.extend(cell_lines);
+            previous = Some(cell);
         }
         (!lines.is_empty()).then_some(lines)
     }

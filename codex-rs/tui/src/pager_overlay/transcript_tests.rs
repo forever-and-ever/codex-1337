@@ -494,6 +494,7 @@ fn transcript_overlay_preserves_live_tail_when_prepending_history() {
             cacheable: true,
             revision: 1,
             is_stream_continuation: false,
+            is_tool_entry: false,
             animation_tick: None,
         }),
         |_| Some(vec![HyperlinkLine::from("live tail")]),
@@ -526,6 +527,7 @@ fn transcript_overlay_absorbs_older_tail_into_live_without_duplicate_cells() {
         cacheable: true,
         revision: 1,
         is_stream_continuation: false,
+        is_tool_entry: false,
         animation_tick: None,
     };
     overlay.sync_live_tail(/*width*/ 40, Some(key), |_| {
@@ -573,6 +575,7 @@ fn transcript_overlay_live_tail_preserves_semantic_web_links() {
             cacheable: true,
             revision: 1,
             is_stream_continuation: false,
+            is_tool_entry: false,
             animation_tick: None,
         }),
         |width| Some(cell.transcript_hyperlink_lines(width)),
@@ -597,6 +600,7 @@ fn transcript_overlay_sync_live_tail_is_noop_for_identical_key() {
         cacheable: true,
         revision: 1,
         is_stream_continuation: false,
+        is_tool_entry: false,
         animation_tick: None,
     };
 
@@ -633,6 +637,7 @@ fn transcript_overlay_history_rebuild_preserves_only_the_live_tail() {
                 cacheable: true,
                 revision: 1,
                 is_stream_continuation: false,
+                is_tool_entry: false,
                 animation_tick: None,
             });
             overlay.sync_live_tail(/*width*/ 40, key, |_| tail.clone());

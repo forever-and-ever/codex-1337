@@ -56,25 +56,37 @@ impl PatchHistoryCell {
         let width = usize::from(width).max(/*other*/ 1);
         let path = truncate_line_with_ellipsis_if_overflow(
             Line::from(path.replace(['\n', '\r', '\t'], " ")),
-            width.saturating_sub(counts.width() + 4),
+            width.saturating_sub(
+                counts.width() + usize::from(crate::transcript_geometry::CHILD_INDENT),
+            ),
         );
-        let mut spans = vec!["  ".into()];
+        let mut spans = Vec::new();
         spans.extend(path.spans);
         spans.extend(counts.spans);
-        // Retain the summary's existing copy source; only its extra nesting is synthetic.
         lines.extend(crate::terminal_hyperlinks::prefix_hyperlink_lines(
             vec![
-                truncate_line_with_ellipsis_if_overflow(Line::from(spans), width.saturating_sub(2))
-                    .into(),
+                truncate_line_with_ellipsis_if_overflow(
+                    Line::from(spans),
+                    width.saturating_sub(usize::from(crate::transcript_geometry::CHILD_INDENT)),
+                )
+                .into(),
             ],
-            "  ".into(),
-            "    ".into(),
+            crate::transcript_geometry::CHILD_PREFIX.into(),
+            crate::transcript_geometry::CHILD_PREFIX.into(),
         ));
         lines
     }
 }
 
 impl HistoryCell for PatchHistoryCell {
+    fn activity_header(&self) -> Option<super::activity_parts::ActivityHeader> {
+        (!self.continuation).then(|| {
+            super::activity_parts::ActivityHeader::at_end(&Line::from(vec![
+                "• ".into(),
+                "Edited".into(),
+            ]))
+        })
+    }
     fn activity_ids(&self) -> Vec<String> {
         vec![self.activity_id.clone()]
     }
@@ -103,10 +115,11 @@ impl HistoryCell for PatchHistoryCell {
             crate::diff_render::file_change_lines(
                 &self.change,
                 &self.path,
-                usize::from(width).saturating_sub(/*rhs*/ 4),
+                usize::from(width)
+                    .saturating_sub(usize::from(crate::transcript_geometry::CHILD_INDENT)),
             ),
-            "    ".into(),
-            "    ".into(),
+            crate::transcript_geometry::CHILD_PREFIX.into(),
+            crate::transcript_geometry::CHILD_PREFIX.into(),
         ));
         lines
     }

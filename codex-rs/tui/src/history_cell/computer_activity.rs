@@ -119,6 +119,14 @@ fn error_preview(call: &McpToolCallCell) -> Option<&str> {
 }
 
 impl HistoryCell for ComputerActivityCell {
+    fn activity_header(&self) -> Option<super::activity_parts::ActivityHeader> {
+        Some(super::activity_parts::ActivityHeader::at_end(&Line::from(
+            vec![
+                "• ".into(),
+                if self.is_active() { "Using" } else { "Used" }.into(),
+            ],
+        )))
+    }
     fn append_reasoning(&mut self, cell: Box<dyn HistoryCell>) -> Result<(), Box<dyn HistoryCell>> {
         if self.group.calls.is_empty() {
             Err(cell)

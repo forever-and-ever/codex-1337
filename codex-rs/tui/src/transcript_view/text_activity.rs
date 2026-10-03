@@ -99,31 +99,6 @@ impl TextLayout {
             })
     }
 
-    pub(in crate::transcript_view) fn with_activity_estimate(self, label: String) -> Self {
-        let Some(header) = self.logical.first() else {
-            return self;
-        };
-        let mut offset = 0;
-        for span in &header.line.line.spans {
-            let action = span.content.split_whitespace().next().unwrap_or_default();
-            if span.style.add_modifier.contains(Modifier::BOLD)
-                && action.chars().any(char::is_alphabetic)
-            {
-                let offset = offset + action.len();
-                return self.with_estimate_at(offset, label);
-            }
-            offset += span.content.len();
-        }
-        // Plain history cells can supply headers without semantic styling.
-        if let Some(action) = self.text.split_whitespace().next()
-            && matches!(action, "Called" | "Ran" | "Explored")
-        {
-            let offset = action.len();
-            return self.with_estimate_at(offset, label);
-        }
-        self
-    }
-
     pub(in crate::transcript_view) fn with_estimate_at(
         mut self,
         offset: usize,

@@ -297,7 +297,9 @@ impl TextLayout {
                 let end = (start + display_width(&control.label)).min(usize::from(self.width));
                 start as u16..end as u16
             }
-            DisclosurePlacement::Leading => 0..3.min(self.width),
+            DisclosurePlacement::Leading => {
+                0..crate::transcript_geometry::DISCLOSURE_COLUMNS.min(self.width)
+            }
         }
     }
 
