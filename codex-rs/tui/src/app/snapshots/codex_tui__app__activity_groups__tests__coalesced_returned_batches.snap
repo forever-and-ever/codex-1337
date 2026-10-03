@@ -1,76 +1,76 @@
 ---
 source: tui/src/app/activity_groups_tests.rs
-assertion_line: 319
+assertion_line: 400
 expression: "snapshots.join(\"\\n\\n\")"
 ---
 Exploration ordinary=false expanded=false
 [+] • Called (Code Mode εμογ) (~ 1,280 tokens)
-      • Explored
-          Read first.rs (whole file)
-      • Explored
-          Read nested.rs (whole file)
+        • Explored
+            Read first.rs (whole file)
+        • Explored
+            Read nested.rs (whole file)
 [+] • Called (Code Mode τνμβ) (~ 20 tokens)
-      • Explored
-          Read second.rs (whole file)
+        • Explored
+            Read second.rs (whole file)
 
 Exploration ordinary=false expanded=true
 [-] • Called (Code Mode εμογ) (~ 1,280 tokens)
-      • Explored
-          Read first.rs (whole file)
-      • Explored
-          Read nested.rs (whole file)
-          Returned a
-          Only model-visible text.
-          Returned b
-          Only model-visible text.
+        • Explored
+            Read first.rs (whole file)
+        • Explored
+            Read nested.rs (whole file)
+            Returned a
+            Only model-visible text.
+            Returned b
+            Only model-visible text.
 [-] • Called (Code Mode τνμβ) (~ 20 tokens)
-      • Explored
-          Read second.rs (whole file)
-          Returned c
-          Only model-visible text.
+        • Explored
+            Read second.rs (whole file)
+            Returned c
+            Only model-visible text.
 
 Computer ordinary=false expanded=false
 [+] • Called (Code Mode εμογ) (~ 1,280 tokens)
-      • Called Inspect first
-      • Called Inspect nested
+        • Called Inspect first
+        • Called Inspect nested
 [+] • Called (Code Mode τνμβ) (~ 20 tokens)
-      • Called Inspect second
+        • Called Inspect second
 
 Computer ordinary=false expanded=true
 [-] • Called (Code Mode εμογ) (~ 1,280 tokens)
-      • Called
-        └ cua_repl.js({"title":"Inspect first"})
-          Result first
-      • Called
-        └ cua_repl.js({"title":"Inspect nested"})
-          Result nested
-          Returned a
-          Only model-visible text.
-          Returned b
-          Only model-visible text.
+        • Called
+          └ cua_repl.js({"title":"Inspect first"})
+            Result first
+        • Called
+          └ cua_repl.js({"title":"Inspect nested"})
+            Result nested
+            Returned a
+            Only model-visible text.
+            Returned b
+            Only model-visible text.
 [-] • Called (Code Mode τνμβ) (~ 20 tokens)
-      • Called
-        └ cua_repl.js({"title":"Inspect second"})
-          Result second
-          Returned c
-          Only model-visible text.
+        • Called
+          └ cua_repl.js({"title":"Inspect second"})
+            Result second
+            Returned c
+            Only model-visible text.
 
 Exploration ordinary=true expanded=false
 [+] • Called (Code Mode εμογ) (~ 1,280 tokens)
-      • Ran cargo check
-      • Ran cargo check
+        • Ran cargo check
+        • Ran cargo check
 [+] • Called (Code Mode τνμβ) (~ 20 tokens)
-      • Ran cargo check
+        • Ran cargo check
 
 Exploration ordinary=true expanded=true
 [-] • Called (Code Mode εμογ) (~ 1,280 tokens)
-      • Ran cargo check
-      • Ran cargo check
-          Returned a
-          Only model-visible text.
-          Returned b
-          Only model-visible text.
+        • Ran cargo check
+        • Ran cargo check
+            Returned a
+            Only model-visible text.
+            Returned b
+            Only model-visible text.
 [-] • Called (Code Mode τνμβ) (~ 20 tokens)
-      • Ran cargo check
-          Returned c
-          Only model-visible text.
+        • Ran cargo check
+            Returned c
+            Only model-visible text.
