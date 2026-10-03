@@ -4,9 +4,108 @@ use codex_protocol::mcp::CallToolResult;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
 use serde_json::json;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 const PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==";
+
+#[test]
+fn mcp_file_receipts_share_native_hunks_and_independent_disclosures() {
+    let snapshot =
+        |uri: &str, hash: char| json!({"uri":uri,"sha256":hash.to_string().repeat(64),"bytes":4});
+    let text = json!({"kind":"text","publication":"applied","operation":"modify",
+        "before":snapshot("file:///workspace/a.rs", '0'),"after":snapshot("file:///workspace/a.rs", '1'),
+        "unifiedDiff":"--- a/a.rs\n+++ b/a.rs\n@@ -1 +1 @@\n-old\n+new\n"});
+    let mut rename = text.clone();
+    rename["operation"] = json!("rename");
+    rename["before"] = snapshot("file://remote/workspace/old%20name.rs", '0');
+    rename["after"] = snapshot("file://remote/workspace/new%20name.rs", '1');
+    let mut preview = text.clone();
+    preview["publication"] = json!("preview");
+    let summary = json!({"kind":"summary","publication":"applied","operation":"modify","before":snapshot("file:///workspace/blob.bin", '0'),"after":snapshot("file:///workspace/blob.bin", '1'),"reason":"binary"});
+    let refused = json!({"kind":"pathOnly","publication":"notApplied","operation":"create","beforeUri":null,"afterUri":"file:///workspace/refused.rs"});
+    let mut hostile_label = text.clone();
+    for endpoint in ["before", "after"] {
+        hostile_label[endpoint]["uri"] = json!("file:///workspace/a%1B%0A%E2%80%AE.rs");
+    }
+    let mut snapshots = Vec::new();
+    for (label, outcome, files, omitted) in [
+        ("text and rename", "applied", vec![text.clone(), rename], 0),
+        ("partial failure", "partial", vec![text, refused], 0),
+        ("metadata only", "applied", vec![hostile_label], 0),
+        ("preview", "preview", vec![preview], 0),
+        ("summary and omissions", "applied", vec![summary], 2),
+        ("unknown", "unknown", Vec::new(), 0),
+    ] {
+        let result = CallToolResult {
+            content: if label == "metadata only" {
+                Vec::new()
+            } else {
+                vec![
+                    json!({"type":"text","text":if label == "partial failure" { "Publication partially failed; do not retry." } else { "ordinary result remains accessible" }}),
+                ]
+            },
+            structured_content: None,
+            is_error: (label == "partial failure").then_some(true),
+            meta: Some(
+                json!({"codex/fileChanges":{"version":1,"outcome":outcome,"files":files,"omittedFiles":omitted}}),
+            ),
+        };
+        // Historical replay takes exactly the same adapter path as a live completion.
+        let replayed: CallToolResult =
+            serde_json::from_str(&serde_json::to_string(&result).unwrap()).unwrap();
+        let mut cell = McpToolCallCell::new(
+            "edit".into(),
+            McpInvocation {
+                server: "semedit".into(),
+                tool: "edit".into(),
+                arguments: None,
+            },
+            /*animations_enabled*/ false,
+        );
+        cell.complete(Duration::ZERO, Ok(replayed));
+        let closed = cell
+            .activity_parts(
+                /*width*/ 100,
+                /*header_reserve*/ 0,
+                &Default::default(),
+            )
+            .unwrap();
+        let opened = cell
+            .activity_parts(
+                /*width*/ 100,
+                /*header_reserve*/ 0,
+                &HashSet::from(["mcp-file:edit:0".into()]),
+            )
+            .unwrap();
+        snapshots.push(format!(
+            "{label}\nCompact\n{}\nFirst file expanded\n{}\nTranscript\n{}",
+            Text::from(visible_lines(closed.lines)),
+            Text::from(visible_lines(opened.lines)),
+            Text::from(cell.transcript_lines(/*width*/ 100))
+        ));
+        if label == "text and rename" {
+            assert_eq!(
+                opened
+                    .controls
+                    .iter()
+                    .map(|control| (control.id.as_str(), control.expanded))
+                    .collect::<Vec<_>>(),
+                vec![("mcp-file:edit:0", true), ("mcp-file:edit:1", false)]
+            );
+            assert_eq!(closed.controls.len(), 2);
+        } else if label == "metadata only" {
+            assert!(closed.output.is_none());
+            assert_eq!(closed.controls.len(), 1);
+            assert!(
+                cell.transcript_lines(/*width*/ 100)
+                    .iter()
+                    .all(|line| !line.to_string().contains(['\u{1b}', '\u{202e}']))
+            );
+        }
+    }
+    insta::assert_snapshot!(snapshots.join("\n\n"));
+}
 
 #[test]
 fn mcp_inventory_connection_states() {

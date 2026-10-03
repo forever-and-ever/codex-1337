@@ -188,6 +188,10 @@ impl FileChangeReceipt {
     }
 
     /// Reuses the existing `_meta` carrier only on the human transcript copy.
+    #[expect(
+        clippy::expect_used,
+        reason = "Receipt fields have infallible JSON scalar/list serialization"
+    )]
     pub fn into_value(self) -> Value {
         serde_json::to_value(self.0).expect("validated receipt is serializable")
     }
@@ -337,9 +341,14 @@ fn valid_diff(
             FileOperation::Modify => false,
         };
     }
-    let mut lines = diff.lines();
-    if !lines.next().is_some_and(|l| l.starts_with("--- "))
-        || !lines.next().is_some_and(|l| l.starts_with("+++ "))
+    if diff
+        .lines()
+        .any(|line| line == "GIT binary patch" || line.starts_with("Binary files "))
+        || diff
+            .lines()
+            .filter(|line| line.starts_with("diff --git "))
+            .count()
+            > 1
     {
         return false;
     }
@@ -367,6 +376,38 @@ fn valid_diff(
     let Ok(patch) = diffy::Patch::from_str(diff) else {
         return false;
     };
+    if patch.original().is_none() || patch.modified().is_none() {
+        return false;
+    }
+    let old_bytes = before.as_ref().map_or(0, |snapshot| snapshot.bytes);
+    let new_bytes = after.as_ref().map_or(0, |snapshot| snapshot.bytes);
+    let mut represented_old = 0;
+    let mut represented_new = 0;
+    for hunk in patch.hunks() {
+        for (range, bytes) in [(hunk.old_range(), old_bytes), (hunk.new_range(), new_bytes)] {
+            let last_line = if range.is_empty() {
+                range.start()
+            } else {
+                range.start().saturating_sub(1) + range.len()
+            };
+            if (range.start() == 0 && !range.is_empty()) || last_line as u64 > bytes {
+                return false;
+            }
+        }
+        for line in hunk.lines() {
+            match line {
+                diffy::Line::Context(text) => {
+                    represented_old += text.len() as u64;
+                    represented_new += text.len() as u64;
+                }
+                diffy::Line::Delete(text) => represented_old += text.len() as u64,
+                diffy::Line::Insert(text) => represented_new += text.len() as u64,
+            }
+        }
+    }
+    if represented_old > old_bytes || represented_new > new_bytes {
+        return false;
+    }
     // The parser checks complete hunk counts, ordering and trailing/multiple-file garbage.
     if patch.hunks().is_empty()
         || !patch

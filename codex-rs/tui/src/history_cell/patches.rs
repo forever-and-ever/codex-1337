@@ -47,12 +47,17 @@ impl PatchHistoryCell {
         }
         let width = usize::from(width).max(/*other*/ 1);
         lines.extend(crate::terminal_hyperlinks::prefix_hyperlink_lines(
-            vec![crate::file_change_view::FileChangeView {
-                label: path,
-                syntax_path: self.path.clone(),
-                change: Some(&self.change),
-                qualifier: None,
-            }.summary(width.saturating_sub(usize::from(crate::transcript_geometry::CHILD_INDENT)))],
+            vec![
+                crate::file_change_view::FileChangeView {
+                    label: path.into(),
+                    syntax_path: &self.path,
+                    change: Some(&self.change),
+                    qualifier: None,
+                }
+                .summary(
+                    width.saturating_sub(usize::from(crate::transcript_geometry::CHILD_INDENT)),
+                ),
+            ],
             crate::transcript_geometry::CHILD_PREFIX.into(),
             crate::transcript_geometry::CHILD_PREFIX.into(),
         ));
@@ -95,11 +100,12 @@ impl HistoryCell for PatchHistoryCell {
         let mut lines = self.summary(width);
         lines.extend(crate::terminal_hyperlinks::prefix_hyperlink_lines(
             crate::file_change_view::FileChangeView {
-                label: String::new(),
-                syntax_path: self.path.clone(),
+                label: "".into(),
+                syntax_path: &self.path,
                 change: Some(&self.change),
                 qualifier: None,
-            }.body(
+            }
+            .body(
                 usize::from(width)
                     .saturating_sub(usize::from(crate::transcript_geometry::CHILD_INDENT)),
             ),

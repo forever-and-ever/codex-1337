@@ -6,6 +6,8 @@
 use crate::text_formatting::format_json_compact;
 use base64::Engine;
 use codex_protocol::mcp::CallToolResult;
+use codex_protocol::mcp_file_changes::FILE_CHANGES_META_KEY;
+use codex_protocol::mcp_file_changes::FileChangeReceipt;
 use image::DynamicImage;
 use image::ImageReader;
 use rmcp::model::ContentBlock;
@@ -26,6 +28,7 @@ pub(super) struct McpToolResult {
     pub(super) content: Vec<McpContentBlock>,
     pub(super) is_error: bool,
     pub(super) has_image: bool,
+    pub(super) file_changes: Option<super::file_changes::ReceiptView>,
 }
 
 #[derive(Clone, Debug)]
@@ -50,6 +53,12 @@ impl McpToolResult {
     /// or unknown blocks. Every block is projected, but image decoding stops at the first fully
     /// valid image.
     pub(super) fn new(result: CallToolResult, kind: McpResultKind) -> Self {
+        let file_changes = result
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.get(FILE_CHANGES_META_KEY))
+            .and_then(FileChangeReceipt::parse)
+            .map(super::file_changes::ReceiptView::new);
         let mut has_image = false;
         let mut content: Vec<McpContentBlock> = result
             .content
@@ -116,6 +125,7 @@ impl McpToolResult {
         }
 
         Self {
+            file_changes,
             content,
             is_error: result.is_error.unwrap_or(false),
             has_image,

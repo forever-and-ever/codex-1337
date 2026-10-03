@@ -36,21 +36,98 @@ fn receipts_admit_contract_examples_and_reject_inconsistent_captured_effects() {
             ),
         ),
         ("before", json!(null)),
+        (
+            "unifiedDiff",
+            json!("--- a/a.txt\n+++ b/a.txt\n@@ -0 +0 @@\n-old\n+new\n"),
+        ),
+        (
+            "unifiedDiff",
+            json!("--- a/a.txt\n+++ b/a.txt\n@@ -99 +99 @@\n-old\n+new\n"),
+        ),
+        (
+            "unifiedDiff",
+            json!("--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-long source\n+new\n"),
+        ),
+        (
+            "unifiedDiff",
+            json!(
+                "diff --git a/b.bin b/b.bin\nGIT binary patch\nliteral 1\nx\ndiff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\n"
+            ),
+        ),
     ] {
         let mut receipt = valid.clone();
         receipt["files"][0][field] = value;
         assert!(FileChangeReceipt::parse(&receipt).is_none(), "{field}");
     }
+    let mut mismatched = valid.clone();
+    mismatched["files"][0]["after"]["uri"] = json!("file:///workspace/b.txt");
+    assert!(FileChangeReceipt::parse(&mismatched).is_none());
     for uri in [
-        "file:///workspace/b.txt",
         "file:///a%zz",
         "file://user@host/a",
         "file:///a?x=1",
         "file:///a\u{1b}",
     ] {
         let mut receipt = valid.clone();
+        receipt["files"][0]["before"]["uri"] = json!(uri);
         receipt["files"][0]["after"]["uri"] = json!(uri);
         assert!(FileChangeReceipt::parse(&receipt).is_none());
+    }
+    let mut encoded = valid.clone();
+    for endpoint in ["before", "after"] {
+        encoded["files"][0][endpoint]["uri"] = json!("file://remote/workspace/a%20b.rs");
+    }
+    assert_eq!(
+        FileChangeReceipt::parse(&encoded).unwrap().into_value(),
+        encoded
+    );
+    // Empty-range anchors and one-byte unterminated lines have different coordinates.
+    for (operation, before_bytes, after_bytes, diff) in [
+        (
+            "modify",
+            Some(4),
+            Some(4),
+            "diff --git a/a.txt b/a.txt\nindex 1234567..7654321 100644\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\n",
+        ),
+        (
+            "modify",
+            Some(1),
+            Some(2),
+            "--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-a\n\\ No newline at end of file\n+b\n",
+        ),
+        (
+            "modify",
+            Some(1),
+            Some(3),
+            "--- a/a.txt\n+++ b/a.txt\n@@ -1,0 +2 @@\n+x\n",
+        ),
+        (
+            "create",
+            None,
+            Some(1),
+            "--- /dev/null\n+++ b/a.txt\n@@ -0,0 +1 @@\n+x\n\\ No newline at end of file\n",
+        ),
+        (
+            "delete",
+            Some(1),
+            None,
+            "--- a/a.txt\n+++ /dev/null\n@@ -1 +0,0 @@\n-x\n\\ No newline at end of file\n",
+        ),
+    ] {
+        let mut receipt = valid.clone();
+        receipt["files"][0]["operation"] = json!(operation);
+        for (endpoint, bytes) in [("before", before_bytes), ("after", after_bytes)] {
+            if let Some(bytes) = bytes {
+                receipt["files"][0][endpoint]["bytes"] = json!(bytes);
+            } else {
+                receipt["files"][0][endpoint] = Value::Null;
+            }
+        }
+        receipt["files"][0]["unifiedDiff"] = json!(diff);
+        assert!(
+            FileChangeReceipt::parse(&receipt).is_some(),
+            "{operation}: {diff}"
+        );
     }
     let mut receipt = valid.clone();
     receipt["files"][0]["after"] = receipt["files"][0]["before"].clone();

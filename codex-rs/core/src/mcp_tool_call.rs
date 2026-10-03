@@ -977,6 +977,10 @@ fn sanitize_mcp_tool_result_for_model(
     })
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "CallToolResult contains only JSON values and serde scalar fields"
+)]
 fn truncate_mcp_tool_result_for_event(
     result: &Result<CallToolResult, String>,
     file_changes: Option<FileChangeReceipt>,

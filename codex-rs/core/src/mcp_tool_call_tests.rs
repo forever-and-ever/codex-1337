@@ -1164,17 +1164,45 @@ fn mcp_receipt_survives_event_bounds_without_entering_model_result() {
                 .contains("private_before")
         );
         // The persisted transcript copy is independent of model input and survives serde replay.
-        let replayed: CallToolResult =
-            serde_json::from_str(&serde_json::to_string(&event_result).unwrap()).unwrap();
+        let item: McpToolCallItem = serde_json::from_value(serde_json::json!({
+            "id":"edit", "server":"remote", "tool":"edit", "arguments":{},
+            "status":"failed", "result":event_result
+        }))
+        .unwrap();
+        let persisted = codex_history::RolloutItem::EventMsg(EventMsg::ItemCompleted(
+            codex_protocol::protocol::ItemCompletedEvent {
+                thread_id: codex_protocol::ThreadId::new(),
+                turn_id: "turn".into(),
+                item: TurnItem::McpToolCall(item),
+                started_at_ms: None,
+                completed_at_ms: 0,
+            },
+        ));
+        let replayed: codex_history::RolloutItem =
+            serde_json::from_str(&serde_json::to_string(&persisted).unwrap()).unwrap();
+        let codex_history::RolloutItem::EventMsg(EventMsg::ItemCompleted(completed)) = replayed
+        else {
+            panic!("expected persisted human item");
+        };
+        let TurnItem::McpToolCall(replayed) = completed.item else {
+            panic!("expected persisted MCP call");
+        };
+        assert_eq!(replayed.result, Some(event_result.clone()));
         assert_eq!(
-            replayed
+            event_result
                 .meta
                 .as_ref()
                 .and_then(|meta| meta.get(FILE_CHANGES_META_KEY)),
             (metadata["version"] == 1).then_some(&receipt)
         );
+        let model_item: codex_protocol::models::ResponseItem =
+            codex_protocol::models::ResponseInputItem::McpToolCallOutput {
+                call_id: "edit".into(),
+                output: model_result,
+            }
+            .into();
         assert!(
-            !serde_json::to_string(&model_result.as_function_call_output_payload())
+            !serde_json::to_string(&model_item)
                 .unwrap()
                 .contains("private_before")
         );
