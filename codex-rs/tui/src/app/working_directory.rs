@@ -437,6 +437,7 @@ impl App {
                     /*before_turn_id*/ None,
                     DeferUntilNextTurn,
                     /*selected_profile*/ None,
+                    /*name*/ None,
                 )
                 .await
         } else {
@@ -491,8 +492,8 @@ impl App {
                 .thread_set_name(transitioned.session.thread_id, name.clone())
                 .await
             {
-                Ok(()) => {
-                    transitioned.session.thread_name = Some(name.clone());
+                Ok(name) => {
+                    transitioned.session.thread_name = Some(name);
                     None
                 }
                 Err(error) => Some(format!("Failed to name the worktree session: {error}")),

@@ -949,10 +949,8 @@ impl App {
                 Ok(true)
             }
             AppCommand::SetThreadName { name } => {
-                let name = name.to_string();
-                app_server.thread_set_name(thread_id, name.clone()).await?;
-                self.chat_widget.expect_manual_thread_name(thread_id, name);
-                self.cancel_thread_title_generation(thread_id);
+                self.rename_thread(app_server, thread_id, name.clone(), Vec::new())
+                    .await;
                 Ok(true)
             }
             AppCommand::Review { target } => {

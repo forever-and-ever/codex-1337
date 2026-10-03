@@ -146,6 +146,7 @@ async fn remote_resume_restores_saved_server_profile_without_permission_override
             /*before_turn_id*/ None,
             ForkGoalContinuation::StartIfIdle,
             Some(&stale_selection),
+            /*name*/ None,
         )
         .await?;
     assert_eq!(

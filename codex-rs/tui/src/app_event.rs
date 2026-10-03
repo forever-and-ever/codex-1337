@@ -314,6 +314,10 @@ pub(crate) enum AppEvent {
         thread_id: ThreadId,
         name: String,
     },
+    ConfirmedThreadName {
+        request: crate::app::thread_name::ThreadNameRequest,
+        conflict_thread_ids: Vec<String>,
+    },
     /// Generate an editable title suggestion for the active rename prompt.
     SuggestThreadName {
         thread_id: ThreadId,

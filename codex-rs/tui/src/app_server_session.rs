@@ -99,6 +99,7 @@ use codex_app_server_protocol::ThreadMemoryModeSetResponse;
 use codex_app_server_protocol::ThreadMetadataGitInfoUpdateParams;
 use codex_app_server_protocol::ThreadMetadataUpdateParams;
 use codex_app_server_protocol::ThreadMetadataUpdateResponse;
+use codex_app_server_protocol::ThreadNameMode;
 use codex_app_server_protocol::ThreadReadParams;
 use codex_app_server_protocol::ThreadReadResponse;
 use codex_app_server_protocol::ThreadResumeParams;
@@ -193,6 +194,12 @@ enum ForkConfigSource {
 pub(crate) enum ThreadHistorySupport {
     Paginated,
     LegacyOnly,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ForkName {
+    pub name: String,
+    pub conflict_thread_ids: Vec<String>,
 }
 
 fn bootstrap_request_error(context: &'static str, err: TypedRequestError) -> color_eyre::Report {
@@ -752,6 +759,7 @@ impl AppServerSession {
             /*selected_profile*/ None,
             permission_mode,
             ForkConfigSource::Local,
+            /*name*/ None,
         )
         .await
     }
@@ -769,6 +777,7 @@ impl AppServerSession {
         before_turn_id: Option<String>,
         goal_continuation: ForkGoalContinuation,
         selected_profile: Option<&PermissionProfileSelection>,
+        name: Option<ForkName>,
     ) -> Result<AppServerStartedThread> {
         self.fork_thread_at_with_presentation(
             local_settings,
@@ -781,6 +790,7 @@ impl AppServerSession {
             selected_profile,
             ForkPermissionMode::InheritSaved,
             ForkConfigSource::Session,
+            name,
         )
         .await
     }
@@ -802,6 +812,7 @@ impl AppServerSession {
             /*selected_profile*/ None,
             ForkPermissionMode::InheritSaved,
             ForkConfigSource::Session,
+            /*name*/ None,
         )
         .await
     }
@@ -822,6 +833,7 @@ impl AppServerSession {
         selected_profile: Option<&PermissionProfileSelection>,
         permission_mode: ForkPermissionMode,
         config_source: ForkConfigSource,
+        name: Option<ForkName>,
     ) -> Result<AppServerStartedThread> {
         let fork_parent = match presentation {
             ForkPresentation::Regular => self
@@ -843,6 +855,8 @@ impl AppServerSession {
             self.session_config_with_effective_service_tier(&config)
         };
         let mut params = ThreadForkParams {
+            name: name.as_ref().map(|name| name.name.clone()),
+            conflict_thread_ids: name.map(|name| name.conflict_thread_ids),
             last_turn_id,
             before_turn_id,
             defer_goal_continuation: goal_continuation == ForkGoalContinuation::DeferUntilNextTurn,
@@ -1339,20 +1353,34 @@ impl AppServerSession {
         &mut self,
         thread_id: ThreadId,
         name: String,
-    ) -> Result<()> {
+    ) -> Result<String> {
+        self.thread_allocate_name(ThreadSetNameParams {
+            thread_id: thread_id.to_string(),
+            name,
+            naming_mode: Some(ThreadNameMode::Explicit),
+            conflict_thread_ids: None,
+        })
+        .await
+    }
+
+    pub(crate) async fn thread_allocate_name(
+        &mut self,
+        params: ThreadSetNameParams,
+    ) -> Result<String> {
+        let generated = params.naming_mode == Some(ThreadNameMode::Generated);
+        let requested_name = params.name.clone();
         let request_id = self.next_request_id();
-        let _: ThreadSetNameResponse = self
+        let response: ThreadSetNameResponse = self
             .client
-            .request_typed(ClientRequest::ThreadSetName {
-                request_id,
-                params: ThreadSetNameParams {
-                    thread_id: thread_id.to_string(),
-                    name,
-                },
-            })
-            .await
-            .wrap_err("thread/name/set failed in TUI")?;
-        Ok(())
+            .request_typed(ClientRequest::ThreadSetName { request_id, params })
+            .await?;
+        match response.thread_name {
+            Some(name) => Ok(name),
+            None if generated => Err(color_eyre::eyre::eyre!(
+                "The connected server does not return allocated names. Upgrade the server to enable automatic titles."
+            )),
+            None => Ok(requested_name),
+        }
     }
 
     pub(crate) async fn thread_memory_mode_set(

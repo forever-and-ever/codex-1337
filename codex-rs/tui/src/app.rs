@@ -273,6 +273,7 @@ mod subagent_panel;
 mod thread_event_buffer;
 mod thread_events;
 mod thread_goal_actions;
+pub(crate) mod thread_name;
 mod thread_routing;
 mod thread_session_state;
 mod thread_settings;

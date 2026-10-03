@@ -190,6 +190,7 @@ impl App {
                 /*before_turn_id*/ Some(turn_id),
                 ForkGoalContinuation::DeferUntilNextTurn,
                 selected_profile.as_ref(),
+                /*name*/ None,
             )
             .await;
         let started = match started {

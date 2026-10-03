@@ -146,6 +146,7 @@ stream_max_retries = 0
             /*before_turn_id*/ None,
             ForkGoalContinuation::StartIfIdle,
             /*selected_profile*/ None,
+            /*name*/ None,
         )
         .await?;
     assert_eq!(forked.session.runtime_workspace_roots, expected_roots);

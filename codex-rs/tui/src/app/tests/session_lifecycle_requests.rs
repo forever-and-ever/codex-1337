@@ -543,6 +543,10 @@ pub(super) async fn start_recording_app_server_with_realtime_speech(
                         ) || matches!(
                             &request,
                             ClientRequest::ThreadFork { params, .. }
+                                if params.name.is_some() && failed_thread_name == params.name.as_deref()
+                        ) || matches!(
+                            &request,
+                            ClientRequest::ThreadFork { params, .. }
                                 if params.cwd.as_deref().is_some_and(|cwd| cwd.ends_with("failure"))
                                     && { reject_detach = true; true }
                         ) || (detach && std::mem::take(&mut reject_detach));
@@ -3341,6 +3345,9 @@ fn session_lifecycle_avoids_redundant_subagent_metadata_reads() -> Result<()> {
                     app.chat_widget.thread_name(),
                     Some("Add User Fork".to_string())
                 );
+                let fork_params = recorded_params(&requests, "thread/fork");
+                assert_eq!(fork_params.last().unwrap()["name"], "Add User Fork");
+                assert!(recorded_params(&requests, "thread/name/set").is_empty());
                 // Forking may read the source metadata once when the response includes its parent
                 // id. It must not scan or backfill loaded threads for the newly created fork.
                 assert!(matches!(take_backfill_counts(&requests), (0, 0) | (0, 1)));
@@ -3360,22 +3367,22 @@ fn session_lifecycle_avoids_redundant_subagent_metadata_reads() -> Result<()> {
                 .await?;
 
                 assert!(matches!(control, AppRunControl::Continue));
-                assert_ne!(app.chat_widget.thread_id(), Some(named_fork_id));
+                assert_eq!(app.chat_widget.thread_id(), Some(named_fork_id));
                 let name_error = std::iter::from_fn(|| app_event_rx.try_recv().ok())
                     .find_map(|event| match event {
                         AppEvent::InsertHistoryCell(cell) => {
                             let rendered =
                                 lines_to_single_string(&cell.display_lines(/*width*/ 80));
                             rendered
-                                .contains("Failed to name the forked session")
+                                .contains("Failed to fork current session")
                                 .then_some(rendered)
                         }
                         _ => None,
                     })
-                    .expect("fork naming error history cell");
+                    .expect("fork rejection history cell");
                 insta::assert_snapshot!(
                     name_error,
-                    @"■ Failed to name the forked session: thread/name/set failed in TUI"
+                    @"■ Failed to fork current session through the app server: thread/fork failed during TUI bootstrap: thread/fork failed: forced thread/name/set failure (code -32603)"
                 );
                 assert!(matches!(take_backfill_counts(&requests), (0, 0) | (0, 1)));
 

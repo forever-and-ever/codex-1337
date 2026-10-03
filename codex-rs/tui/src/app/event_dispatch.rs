@@ -10,7 +10,6 @@ use super::session_lifecycle::ThreadAttachPresentation;
 use super::*;
 use crate::app_event::RecapTrigger;
 use crate::app_event::ThreadTitleDestination;
-use crate::app_server_session::ForkGoalContinuation;
 use crate::app_server_session::UnsupportedLegacyPermissionProfile;
 use crate::app_server_session::turn_permissions_overrides;
 use crate::config_update::format_config_error;
@@ -90,6 +89,10 @@ impl App {
                     | AppEvent::SelectAgentThread(_)
                     | AppEvent::StartSide { .. }
                     | AppEvent::ForkCurrentSession { .. }
+                    | AppEvent::ConfirmedThreadName {
+                        request: super::thread_name::ThreadNameRequest::Fork { .. },
+                        ..
+                    }
                     | AppEvent::StartManagedWorktree {
                         mode: crate::app_event::ManagedWorktreeMode::Fork,
                         ..
@@ -462,125 +465,7 @@ impl App {
                 return self.delete_current_thread(tui, app_server).await;
             }
             AppEvent::ForkCurrentSession { name } => {
-                let from_locked_thread = self.chat_widget.is_external_writer_view();
-                let source = if from_locked_thread {
-                    "locked_thread_shortcut"
-                } else {
-                    "slash_command"
-                };
-                self.session_telemetry.counter(
-                    "codex.thread.fork",
-                    /*inc*/ 1,
-                    &[("source", source)],
-                );
-                self.chat_widget
-                    .add_plain_history_lines(vec!["/fork".magenta().into()]);
-                if let Some(thread_id) = self.chat_widget.thread_id() {
-                    if self.pending_server_profiles.contains_key(&thread_id) {
-                        self.chat_widget.add_error_message(
-                            "Wait for permissions to update before forking.".into(),
-                        );
-                        return Ok(AppRunControl::Continue);
-                    }
-                    self.chat_widget.fork_in_progress = true;
-                    // This handler awaits the fork outside the draw loop. Paint before waiting.
-                    let screen_size = tui.terminal.last_known_screen_size;
-                    self.handle_draw_pre_render(tui, screen_size)?;
-                    self.chat_widget.pre_draw_tick();
-                    self.render_chat_widget_frame(tui, screen_size)?;
-                    self.refresh_in_memory_config_from_disk_best_effort("forking the thread")
-                        .await;
-                    let mut fork_config = self.config.clone();
-                    if app_server.uses_remote_workspace() {
-                        fork_config.workspace_roots.clone_from(
-                            &self.chat_widget.config_ref().workspace_roots,
-                        );
-                    }
-                    fork_config.model_provider_id.clone_from(&self.chat_widget.config_ref().model_provider_id);
-                    fork_config.model = Some(self.chat_widget.current_model().to_string());
-                    fork_config.model_reasoning_effort =
-                        self.chat_widget.current_reasoning_effort();
-                    let selected_profile = self.confirmed_server_profile(thread_id);
-                    match app_server.fork_thread_at(
-                        &self.local_settings,
-                        fork_config,
-                        thread_id,
-                        /*last_turn_id*/ None,
-                        /*before_turn_id*/ None,
-                        ForkGoalContinuation::StartIfIdle,
-                        selected_profile.as_ref(),
-                    ).await {
-                        Ok(mut forked) => {
-                            let retained_input = from_locked_thread
-                                .then(|| self.chat_widget.capture_thread_input_state())
-                                .flatten();
-                            let name_error = if let Some(name) = name {
-                                match app_server
-                                    .thread_set_name(forked.session.thread_id, name.clone())
-                                    .await
-                                {
-                                    Ok(()) => {
-                                        forked.session.thread_name = Some(name);
-                                        None
-                                    }
-                                    Err(err) => {
-                                        Some(format!("Failed to name the forked session: {err}"))
-                                    }
-                                }
-                            } else {
-                                None
-                            };
-                            self.detach_current_thread_for_navigation(app_server, Some(forked.session.thread_id)).await;
-                            match self
-                                .replace_chat_widget_with_app_server_thread(
-                                    tui,
-                                    forked,
-                                    ThreadAttachPresentation::SessionLineage,
-                                    /*initial_user_message*/ None,
-                                )
-                                .await
-                            {
-                                Ok(()) => {
-                                    // Keep local input without replacing the fork's running state.
-                                    self.chat_widget.restore_reconnected_input(retained_input, &[]);
-                                    if let Some(err) = name_error {
-                                        self.chat_widget.add_error_message(err);
-                                    }
-                                    self.chat_widget.add_info_message(
-                                        "Fork created. You can continue here.".to_string(),
-                                        /*hint*/ None,
-                                    );
-                                }
-                                Err(err) => {
-                                    self.chat_widget.add_error_message(format!(
-                                        "Failed to attach to forked app-server thread: {err}"
-                                    ));
-                                }
-                            }
-                        }
-                        Err(err) => {
-                            self.chat_widget.add_error_message(format!(
-                                "Failed to fork current session through the app server: {err}"
-                            ));
-                        }
-                    }
-                    if from_locked_thread
-                        && tui.presentation_mode() != crate::tui::PresentationMode::Frozen
-                    {
-                        // Repeated locked-view shortcuts must not act on the resulting view.
-                        if let Err(err) = tui.discard_pending_input_before_interactive_screen() {
-                            tracing::warn!(%err, "failed to discard input after forking");
-                        }
-                        tui.schedule_screen_size_recheck(Duration::ZERO);
-                    }
-                } else {
-                    self.chat_widget.add_error_message(
-                        "A thread must contain at least one turn before it can be forked."
-                            .to_string(),
-                    );
-                }
-
-                self.chat_widget.fork_in_progress = false;
+                self.fork_current_thread(tui, app_server, name, Vec::new()).await?;
                 self.chat_widget.maybe_send_next_queued_input();
                 tui.frame_requester().schedule_frame();
             }
@@ -2656,18 +2541,20 @@ impl App {
                 }
             }
             AppEvent::RenameAgentsOverviewThread { thread_id, name } => {
-                match app_server.thread_set_name(thread_id, name.clone()).await {
-                    Ok(()) => {
-                        self.chat_widget.expect_manual_thread_name(thread_id, name);
-                        self.cancel_thread_title_generation(thread_id);
+                self.rename_thread(app_server, thread_id, name, Vec::new()).await;
+            }
+            AppEvent::ConfirmedThreadName { request, conflict_thread_ids } => {
+                match request {
+                    super::thread_name::ThreadNameRequest::Rename { thread_id, name } => {
+                        self.rename_thread(app_server, thread_id, name, conflict_thread_ids).await;
                     }
-                    Err(error) => {
-                        if let Ok(mut state) = self.agents_overview.view_state.lock() {
-                            state.input = name;
-                            state.rename_target = Some(thread_id);
+                    super::thread_name::ThreadNameRequest::Fork { thread_id, name } => {
+                        if self.chat_widget.thread_id() != Some(thread_id) {
+                            self.chat_widget.add_error_message("Fork canceled because the source thread changed.".to_string());
+                        } else {
+                            self.fork_current_thread(tui, app_server, Some(name), conflict_thread_ids).await?;
+                            self.chat_widget.maybe_send_next_queued_input();
                         }
-                        self.repaint_agents_overview();
-                        self.add_agents_overview_error(format!("Failed to rename task: {error}"));
                     }
                 }
             }
@@ -2719,8 +2606,13 @@ impl App {
                                 .await
                             && thread.name.is_none()
                         {
-                            match app_server.thread_set_name(thread_id, title.clone()).await {
-                                Ok(()) => self
+                            match app_server.thread_allocate_name(codex_app_server_protocol::ThreadSetNameParams {
+                                thread_id: thread_id.to_string(),
+                                name: title,
+                                naming_mode: Some(codex_app_server_protocol::ThreadNameMode::Generated),
+                                conflict_thread_ids: None,
+                            }).await {
+                                Ok(title) => self
                                     .chat_widget
                                     .on_thread_name_updated(thread_id, Some(title)),
                                 Err(error) => {

@@ -109,6 +109,7 @@ requires_openai_auth = false
             /*before_turn_id*/ None,
             ForkGoalContinuation::StartIfIdle,
             /*selected_profile*/ None,
+            /*name*/ None,
         )
         .await?;
     assert_eq!(forked.session.model_provider_id, "server-provider");

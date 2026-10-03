@@ -1065,7 +1065,7 @@ impl App {
                         .thread_set_name(started.session.thread_id, name.clone())
                         .await
                     {
-                        Ok(()) => {
+                        Ok(name) => {
                             started.session.thread_name = Some(name);
                             None
                         }
