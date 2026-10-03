@@ -31,18 +31,20 @@ pub(crate) struct CodeModeFactCell(pub(crate) CodeModeItem, pub(crate) bool);
 
 fn label(identity: &str) -> String {
     const GREEK: &[char] = &[
-        'α', 'β', 'γ', 'δ', 'ε', 'ζ', 'η', 'θ', 'ι', 'κ', 'λ', 'μ',
-        'ν', 'ξ', 'ο', 'π', 'ρ', 'σ', 'τ', 'υ', 'φ', 'χ', 'ψ', 'ω',
+        'α', 'β', 'γ', 'δ', 'ε', 'ζ', 'η', 'θ', 'ι', 'κ', 'λ', 'μ', 'ν', 'ξ', 'ο', 'π', 'ρ', 'σ',
+        'τ', 'υ', 'φ', 'χ', 'ψ', 'ω',
     ];
     // A fixed full-identity hash keeps labels stable across redraw, replay, and process restarts.
     let mut hash = identity.bytes().fold(0xcbf29ce484222325u64, |hash, byte| {
         (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
     });
-    (0..4).map(|_| {
-        let glyph = GREEK[(hash % GREEK.len() as u64) as usize];
-        hash /= GREEK.len() as u64;
-        glyph
-    }).collect()
+    (0..4)
+        .map(|_| {
+            let glyph = GREEK[(hash % GREEK.len() as u64) as usize];
+            hash /= GREEK.len() as u64;
+            glyph
+        })
+        .collect()
 }
 
 impl HistoryCell for CodeModeFactCell {
@@ -53,8 +55,14 @@ impl HistoryCell for CodeModeFactCell {
             _ => return Vec::new(),
         };
         let mut spans = vec!["• ".dim()];
-        spans.extend(HistoryTimestamp::from_millis(self.0.created_at.saturating_mul(1_000)).map(HistoryTimestamp::span));
-        spans.extend([verb.bold(), format!(" on {}", label(&self.0.exec_call_id)).into()]);
+        spans.extend(
+            HistoryTimestamp::from_millis(self.0.created_at.saturating_mul(1_000))
+                .map(HistoryTimestamp::span),
+        );
+        spans.extend([
+            verb.bold(),
+            format!(" on {}", label(&self.0.exec_call_id)).into(),
+        ]);
         vec![spans.into()]
     }
 
@@ -103,13 +111,15 @@ impl CodeModeCell {
     }
 
     fn calls(&self) -> HashSet<&str> {
-        std::iter::once(self.exec_call_id.as_str()).chain(self.facts.iter().filter_map(|fact| match &fact.event {
-            CodeModeEvent::Started { call_id }
-            | CodeModeEvent::ToolCall { call_id }
-            | CodeModeEvent::WaitStarted { call_id }
-            | CodeModeEvent::WaitCompleted { call_id } => Some(call_id.as_str()),
-            CodeModeEvent::Finished { .. } => None,
-        })).collect()
+        std::iter::once(self.exec_call_id.as_str())
+            .chain(self.facts.iter().filter_map(|fact| match &fact.event {
+                CodeModeEvent::Started { call_id }
+                | CodeModeEvent::ToolCall { call_id }
+                | CodeModeEvent::WaitStarted { call_id }
+                | CodeModeEvent::WaitCompleted { call_id } => Some(call_id.as_str()),
+                CodeModeEvent::Finished { .. } => None,
+            }))
+            .collect()
     }
 
     pub(crate) fn owns(&self, cell: &dyn HistoryCell) -> bool {
@@ -146,45 +156,86 @@ impl CodeModeCell {
     }
 
     fn insert_fact(&mut self, fact: CodeModeItem) {
-        if !self.facts.iter().any(|old| old.id == fact.id) { self.facts.push(fact); }
+        if !self.facts.iter().any(|old| old.id == fact.id) {
+            self.facts.push(fact);
+        }
     }
 
     fn header(&self) -> Option<Line<'static>> {
-        let started = self.facts.iter().find(|fact| matches!(fact.event, CodeModeEvent::Started { .. }));
+        let started = self
+            .facts
+            .iter()
+            .find(|fact| matches!(fact.event, CodeModeEvent::Started { .. }));
         let terminal = self.status();
-        let timestamp = terminal.map(|(_, timestamp)| timestamp).or_else(|| started.map(|fact| fact.created_at))?;
+        let timestamp = terminal
+            .map(|(_, timestamp)| timestamp)
+            .or_else(|| started.map(|fact| fact.created_at))?;
         let (bullet, verb) = match terminal {
             Some((CodeModeStatus::Completed, _)) => ("•".green().bold(), "Called"),
             Some((CodeModeStatus::Failed, _)) => ("•".red().bold(), "Failed"),
             Some((CodeModeStatus::Interrupted, _)) => ("•".red().bold(), "Interrupted"),
             None => (
-                activity_indicator(Some(self.start_time), MotionMode::from_animations_enabled(self.animations_enabled), ReducedMotionIndicator::StaticBullet).unwrap_or_else(|| "•".dim()),
+                activity_indicator(
+                    Some(self.start_time),
+                    MotionMode::from_animations_enabled(self.animations_enabled),
+                    ReducedMotionIndicator::StaticBullet,
+                )
+                .unwrap_or_else(|| "•".dim()),
                 "Calling",
             ),
         };
         let mut spans = vec![bullet, " ".into()];
-        spans.extend(HistoryTimestamp::from_millis(timestamp.saturating_mul(1_000)).map(HistoryTimestamp::span));
-        spans.extend([verb.bold(), format!(" (Code Mode {})", label(&self.exec_call_id)).into()]);
+        spans.extend(
+            HistoryTimestamp::from_millis(timestamp.saturating_mul(1_000))
+                .map(HistoryTimestamp::span),
+        );
+        spans.extend([
+            verb.bold(),
+            format!(" (Code Mode {})", label(&self.exec_call_id)).into(),
+        ]);
         Some(spans.into())
     }
 
-    fn detail_parts(&self, width: u16, expanded: &HashSet<String>) -> super::activity_parts::ActivityParts {
+    fn detail_parts(
+        &self,
+        width: u16,
+        expanded: &HashSet<String>,
+    ) -> super::activity_parts::ActivityParts {
         let mut lines: Vec<_> = self.header().into_iter().map(HyperlinkLine::from).collect();
         let mut controls = Vec::new();
         for member in &self.members {
-            if let Some(mut parts) = member.nested_activity_parts(width.saturating_sub(2), expanded) {
+            if let Some(mut parts) = member.nested_activity_parts(
+                width.saturating_sub(crate::transcript_geometry::CHILD_INDENT),
+                expanded,
+            ) {
                 let offset = lines.len();
-                for control in &mut parts.controls { control.line += offset; }
+                for control in &mut parts.controls {
+                    control.line += offset;
+                }
                 controls.extend(parts.controls);
-                lines.extend(prefix_hyperlink_lines(parts.lines, "  ".into(), "  ".into()));
+                lines.extend(prefix_hyperlink_lines(
+                    parts.lines,
+                    crate::transcript_geometry::CHILD_PREFIX.into(),
+                    crate::transcript_geometry::CHILD_PREFIX.into(),
+                ));
             } else {
-                lines.extend(prefix_hyperlink_lines(member.nested_detail_lines(width.saturating_sub(2)), "  ".into(), "  ".into()));
+                lines.extend(prefix_hyperlink_lines(
+                    member.nested_detail_lines(
+                        width.saturating_sub(crate::transcript_geometry::CHILD_INDENT),
+                    ),
+                    crate::transcript_geometry::CHILD_PREFIX.into(),
+                    crate::transcript_geometry::CHILD_PREFIX.into(),
+                ));
             }
         }
-        super::activity_parts::ActivityParts { lines, header: self.activity_header(), output: self.activity_disclosure(width), controls }
+        super::activity_parts::ActivityParts {
+            lines,
+            header: self.activity_header(),
+            output: self.activity_disclosure(width),
+            controls,
+        }
     }
 }
-
 
 impl HistoryCell for CodeModeCell {
     fn transcript_animation_tick(&self) -> Option<u64> {
@@ -197,7 +248,12 @@ impl HistoryCell for CodeModeCell {
 
     fn activity_ids(&self) -> Vec<String> {
         std::iter::once(format!("code-mode:{}", self.exec_call_id))
-            .chain(self.members.iter().filter(|cell| cell.as_any().is::<ToolOutputCell>()).flat_map(|cell| cell.activity_ids()))
+            .chain(
+                self.members
+                    .iter()
+                    .filter(|cell| cell.as_any().is::<ToolOutputCell>())
+                    .flat_map(|cell| cell.activity_ids()),
+            )
             .collect()
     }
 
@@ -207,23 +263,50 @@ impl HistoryCell for CodeModeCell {
 
     fn compact_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         let mut lines: Vec<_> = self.header().into_iter().map(HyperlinkLine::from).collect();
-        for member in self.members.iter().filter(|member| !member.as_any().is::<ToolOutputCell>()) {
-            lines.extend(prefix_hyperlink_lines(member.nested_summary_lines(width.saturating_sub(2)), "  ".into(), "  ".into()));
+        for member in self
+            .members
+            .iter()
+            .filter(|member| !member.as_any().is::<ToolOutputCell>())
+        {
+            lines.extend(prefix_hyperlink_lines(
+                member.nested_summary_lines(
+                    width.saturating_sub(crate::transcript_geometry::CHILD_INDENT),
+                ),
+                crate::transcript_geometry::CHILD_PREFIX.into(),
+                crate::transcript_geometry::CHILD_PREFIX.into(),
+            ));
         }
         lines
     }
 
     fn expanded_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        self.detail_parts(width, &HashSet::new()).lines
+        let mut lines: Vec<_> = self.header().into_iter().map(HyperlinkLine::from).collect();
+        for member in &self.members {
+            lines.extend(prefix_hyperlink_lines(
+                member.nested_detail_lines(
+                    width.saturating_sub(crate::transcript_geometry::CHILD_INDENT),
+                ),
+                crate::transcript_geometry::CHILD_PREFIX.into(),
+                crate::transcript_geometry::CHILD_PREFIX.into(),
+            ));
+        }
+        lines
     }
 
-    fn activity_parts(&self, width: u16, _header_reserve: usize, expanded: &HashSet<String>) -> Option<super::activity_parts::ActivityParts> {
+    fn activity_parts(
+        &self,
+        width: u16,
+        _header_reserve: usize,
+        expanded: &HashSet<String>,
+    ) -> Option<super::activity_parts::ActivityParts> {
         if expanded.contains(&format!("code-mode:{}", self.exec_call_id)) {
             Some(self.detail_parts(width, expanded))
         } else {
             Some(super::activity_parts::ActivityParts {
-                lines: self.compact_hyperlink_lines(width), header: self.activity_header(),
-                output: self.activity_disclosure(width), controls: Vec::new(),
+                lines: self.compact_hyperlink_lines(width),
+                header: self.activity_header(),
+                output: self.activity_disclosure(width),
+                controls: Vec::new(),
             })
         }
     }
@@ -233,10 +316,20 @@ impl HistoryCell for CodeModeCell {
     }
 
     fn activity_disclosure(&self, width: u16) -> Option<ActivityDisclosure> {
-        self.members.iter().any(|cell| cell.has_nested_details(width)).then_some(ActivityDisclosure::Generic)
+        self.members
+            .iter()
+            .any(|cell| {
+                cell.has_nested_details(
+                    width.saturating_sub(crate::transcript_geometry::CHILD_INDENT),
+                )
+            })
+            .then_some(ActivityDisclosure::Generic)
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
-        self.members.iter().flat_map(|cell| cell.raw_lines()).collect()
+        self.members
+            .iter()
+            .flat_map(|cell| cell.raw_lines())
+            .collect()
     }
 }

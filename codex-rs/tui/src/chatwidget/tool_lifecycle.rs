@@ -47,8 +47,12 @@ impl ChatWidget {
         timestamp: Option<history_cell::HistoryTimestamp>,
     ) {
         self.flush_answer_stream_with_separator();
-        let mut cell =
-            history_cell::new_image_generation_call(call_id.clone(), &status, revised_prompt, saved_path);
+        let mut cell = history_cell::new_image_generation_call(
+            call_id.clone(),
+            &status,
+            revised_prompt,
+            saved_path,
+        );
         cell.timestamp = timestamp;
         self.add_to_history(history_cell::ToolItemCell::new(call_id, cell));
         self.request_redraw();

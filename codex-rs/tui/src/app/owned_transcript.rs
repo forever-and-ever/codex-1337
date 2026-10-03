@@ -340,8 +340,9 @@ impl App {
         if let Some(delay) = blossom_tick {
             tui.frame_requester().schedule_frame_in(delay);
         }
-        let animating =
-            view.is_following() && active_key.is_some_and(|key| key.animation_tick.is_some());
+        let animating = view.is_following()
+            && active_key.is_some_and(|key| key.animation_tick.is_some())
+            || view.has_visible_animation(&self.transcript_cells);
         let loading = view.is_loading_history() && motion == MotionMode::Animated;
         if animating || loading {
             tui.frame_requester()

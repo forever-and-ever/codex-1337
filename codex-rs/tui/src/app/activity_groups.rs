@@ -8,8 +8,13 @@ use crate::thread_transcript::join_computer_groups;
 
 impl App {
     pub(super) fn join_older_activity_group(&mut self, boundary: usize, turns: &[Turn]) {
-        if let Some((range, replacements)) = history_cell::reunite_code_mode(&self.transcript_cells) {
-            self.transcript_view.replace_group_members(&self.transcript_cells, range.clone(), &replacements);
+        if let Some((range, replacements)) = history_cell::reunite_code_mode(&self.transcript_cells)
+        {
+            self.transcript_view.replace_group_members(
+                &self.transcript_cells,
+                range.clone(),
+                &replacements,
+            );
             if let Some(Overlay::Transcript(overlay)) = self.overlay.as_mut() {
                 overlay.regroup_cell_members(range.clone(), &replacements);
             }

@@ -190,7 +190,10 @@ impl McpToolCallCell {
         let status = self.success();
         let node_repl = self.result_kind() == McpResultKind::NodeRepl;
         let compact = node_repl
-            && matches!(mode, McpToolCallRenderMode::Display | McpToolCallRenderMode::Summary);
+            && matches!(
+                mode,
+                McpToolCallRenderMode::Display | McpToolCallRenderMode::Summary
+            );
         let bullet = match status {
             Some(true) => "•".green().bold(),
             Some(false) => "•".red().bold(),
@@ -234,16 +237,19 @@ impl McpToolCallCell {
         let inline_invocation = !matches!(
             mode,
             McpToolCallRenderMode::Arguments | McpToolCallRenderMode::Expanded
-        ) && (mode == McpToolCallRenderMode::Summary || compact
+        ) && (mode == McpToolCallRenderMode::Summary
+            || compact
             || invocation_line.width() <= (width as usize).saturating_sub(reserved));
 
         if inline_invocation {
             compact_header.extend(invocation_line.spans.clone());
-            lines.push(mcp_header_line(if compact || mode == McpToolCallRenderMode::Summary {
-                truncate_line_with_ellipsis_if_overflow(compact_header, width as usize)
-            } else {
-                compact_header
-            }));
+            lines.push(mcp_header_line(
+                if compact || mode == McpToolCallRenderMode::Summary {
+                    truncate_line_with_ellipsis_if_overflow(compact_header, width as usize)
+                } else {
+                    compact_header
+                },
+            ));
         } else {
             compact_spans.pop(); // drop trailing space for standalone header
             lines.push(mcp_header_line(Line::from(compact_spans)));
@@ -262,7 +268,10 @@ impl McpToolCallCell {
             ));
         }
 
-        let detail_lines = if matches!(mode, McpToolCallRenderMode::Arguments | McpToolCallRenderMode::Summary) {
+        let detail_lines = if matches!(
+            mode,
+            McpToolCallRenderMode::Arguments | McpToolCallRenderMode::Summary
+        ) {
             Vec::new()
         } else {
             self.render_detail_lines(width, mode)
@@ -427,7 +436,11 @@ impl HistoryCell for McpToolCallCell {
         nested.expanded_hyperlink_lines(width)
     }
 
-    fn nested_activity_parts(&self, width: u16, expanded: &std::collections::HashSet<String>) -> Option<super::activity_parts::ActivityParts> {
+    fn nested_activity_parts(
+        &self,
+        width: u16,
+        expanded: &std::collections::HashSet<String>,
+    ) -> Option<super::activity_parts::ActivityParts> {
         let mut nested = self.clone();
         nested.completed_at = None;
         let mut expanded = expanded.clone();
@@ -436,7 +449,9 @@ impl HistoryCell for McpToolCallCell {
     }
 
     fn has_nested_details(&self, width: u16) -> bool {
-        self.result.as_ref().is_some_and(|result| matches!(result, Ok(result) if result.file_changes.is_some()))
+        self.result
+            .as_ref()
+            .is_some_and(|result| matches!(result, Ok(result) if result.file_changes.is_some()))
             || self.activity_disclosure(width).is_some()
             || self.activity_arguments_truncated(width)
     }

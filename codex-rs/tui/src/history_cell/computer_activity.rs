@@ -124,11 +124,19 @@ impl HistoryCell for ComputerActivityCell {
     }
 
     fn nested_summary_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        self.group.calls.iter().flat_map(|call| call.nested_summary_lines(width)).collect()
+        self.group
+            .calls
+            .iter()
+            .flat_map(|call| call.nested_summary_lines(width))
+            .collect()
     }
 
     fn nested_detail_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        self.group.calls.iter().flat_map(|call| call.nested_detail_lines(width)).collect()
+        self.group
+            .calls
+            .iter()
+            .flat_map(|call| call.nested_detail_lines(width))
+            .collect()
     }
     fn activity_header(&self) -> Option<super::activity_parts::ActivityHeader> {
         Some(super::activity_parts::ActivityHeader::at_end(&Line::from(

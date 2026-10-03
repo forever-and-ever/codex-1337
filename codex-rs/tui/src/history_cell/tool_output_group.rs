@@ -31,7 +31,7 @@ impl ToolOutputGroup {
             })
             .then_some(&self.members)
     }
-    /// Consume only the contiguous activity suffix. Messages and turn separators are barriers.
+    /// Attach a matching outer return without inferring ownership from activity proximity.
     pub(crate) fn attach(
         cells: &[Arc<dyn HistoryCell>],
         output: Arc<dyn HistoryCell>,
@@ -68,31 +68,16 @@ impl ToolOutputGroup {
                     .collect(),
             ));
         }
-        let mut start = cells.len();
-        let mut has_activity = false;
-        for cell in cells.iter().rev() {
-            // File disclosures must survive arrival of their enclosing batch's output.
-            if cell.as_any().is::<PatchHistoryCell>() {
-                break;
-            }
-            // notify() can return several batches for one call, but the next call is a barrier.
-            if let Some(call_id) = cell.outer_call_id() {
-                if Some(call_id) == output.outer_call_id() {
-                    start -= 1;
-                    has_activity = true;
-                }
-                break;
-            }
-            let ids = cell.activity_ids();
-            if ids.is_empty() {
-                break;
-            }
-            // Legacy rows do not establish parentage. Keep their independent disclosures.
-            break;
-        }
-        if !has_activity || start == cells.len() {
+        // Only a concrete matching invocation owns this return. Legacy activity proximity
+        // cannot establish parentage, and independently disclosed files remain separate.
+        let cell = cells.last()?;
+        if cell.as_any().is::<PatchHistoryCell>()
+            || cell.outer_call_id().is_none()
+            || cell.outer_call_id() != output.outer_call_id()
+        {
             return None;
         }
+        let start = cells.len() - 1;
         Some((
             start..cells.len(),
             vec![Self::from_cells(

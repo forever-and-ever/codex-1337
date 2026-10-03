@@ -278,7 +278,10 @@ impl ChatWidget {
         match item {
             ThreadItem::CodeMode(item) => {
                 self.flush_active_cell();
-                self.add_to_history(history_cell::CodeModeFactCell(item, self.local_settings.tui.animations && self.local_settings.tui.effects.progress));
+                self.add_to_history(history_cell::CodeModeFactCell(
+                    item,
+                    self.local_settings.tui.animations && self.local_settings.tui.effects.progress,
+                ));
             }
             ThreadItem::UserMessage {
                 content, client_id, ..

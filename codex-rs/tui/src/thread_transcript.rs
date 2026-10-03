@@ -57,7 +57,9 @@ fn flush_computer(
 
 fn push_activity_cell(cells: &mut TranscriptCells, cell: Arc<dyn HistoryCell>) {
     if let Some(members) = crate::history_cell::split_code_mode_members(cells, &cell) {
-        for member in members { push_activity_cell(cells, member); }
+        for member in members {
+            push_activity_cell(cells, member);
+        }
         return;
     }
     if let Some((range, replacements)) = crate::history_cell::reconcile_code_mode(cells, &cell) {
@@ -144,7 +146,12 @@ pub(crate) fn thread_items_to_transcript_cells(
     for item in items {
         if matches!(item, ThreadItem::Reasoning { .. })
             && let Some(group) = &mut pending
-            && !cells.iter().filter_map(|cell| cell.as_any().downcast_ref::<crate::history_cell::CodeModeCell>())
+            && !cells
+                .iter()
+                .filter_map(|cell| {
+                    cell.as_any()
+                        .downcast_ref::<crate::history_cell::CodeModeCell>()
+                })
                 .any(|block| block.owns(group))
         {
             let returned = crate::history_cell::ToolOutputCell::is_item(&item);
@@ -163,7 +170,13 @@ pub(crate) fn thread_items_to_transcript_cells(
         }
         if let Some(cell) = tools::historical_tool_fallback(&item) {
             flush_computer(&mut pending, &mut cells);
-            push_activity_cell(&mut cells, Arc::new(crate::history_cell::ToolItemCell::new(item.id().into(), cell)));
+            push_activity_cell(
+                &mut cells,
+                Arc::new(crate::history_cell::ToolItemCell::new(
+                    item.id().into(),
+                    cell,
+                )),
+            );
             continue;
         }
         match item {
@@ -197,8 +210,12 @@ pub(crate) fn thread_items_to_transcript_cells(
                     flush_computer(&mut pending, &mut cells);
                     for cell in projected {
                         if let Some((range, replacements)) =
-                            crate::history_cell::reconcile_code_mode(&cells, &cell)
-                            .or_else(|| crate::history_cell::ToolOutputGroup::attach(&cells, Arc::clone(&cell)))
+                            crate::history_cell::reconcile_code_mode(&cells, &cell).or_else(|| {
+                                crate::history_cell::ToolOutputGroup::attach(
+                                    &cells,
+                                    Arc::clone(&cell),
+                                )
+                            })
                         {
                             cells.splice(range, replacements);
                         } else {

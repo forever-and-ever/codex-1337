@@ -253,11 +253,13 @@ pub(crate) struct ViewImageHistoryCell {
 
 impl HistoryCell for ViewImageHistoryCell {
     fn nested_summary_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        let mut nested = self.clone(); nested.timestamp = None;
+        let mut nested = self.clone();
+        nested.timestamp = None;
         nested.compact_hyperlink_lines(width)
     }
     fn nested_detail_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        let mut nested = self.clone(); nested.timestamp = None;
+        let mut nested = self.clone();
+        nested.timestamp = None;
         nested.transcript_hyperlink_lines(width)
     }
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
