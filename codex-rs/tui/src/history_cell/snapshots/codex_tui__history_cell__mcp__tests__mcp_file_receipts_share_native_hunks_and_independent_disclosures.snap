@@ -1,6 +1,5 @@
 ---
 source: tui/src/history_cell/mcp_tests.rs
-assertion_line: 97
 expression: "snapshots.join(\"\\n\\n\")"
 ---
 text and rename
@@ -26,6 +25,21 @@ Transcript
         //remote/workspace/old name.rs → //remote/workspace/new name.rs (+1, -1)
         1 -old
         1 +new
+
+Direct captured result
+Collapsed
+• Called semedit.edit(target="long-direct-a...
+    Edited
+        /workspace/a.rs (+1, -1)
+        //remote/workspace/old name.rs → //remote/… (+1, -1)
+Expanded with first diff
+• Called semedit.edit(target="long-direct-a...
+    Edited
+        /workspace/a.rs (+1, -1)
+        1 -old
+        1 +new
+        //remote/workspace/old name.rs → //remote/… (+1, -1)
+    chosen model text
 
 partial failure
 Compact

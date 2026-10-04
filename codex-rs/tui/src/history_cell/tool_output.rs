@@ -1,4 +1,4 @@
-//! Code Mode's returned batch, distinct from nested tool execution and raw results.
+//! Captured tool-output text; separate text blocks use LF display framing.
 
 use super::HistoryCell;
 use super::raw_lines_from_source;
@@ -70,6 +70,7 @@ impl ToolOutputCell {
                     | FunctionCallOutputContentItem::InputAudio { .. }
                     | FunctionCallOutputContentItem::EncryptedContent { .. } => None,
                 })
+                // LF frames distinct text blocks in the display, not in the provider payload.
                 .collect::<Vec<_>>()
                 .join("\n"),
         };

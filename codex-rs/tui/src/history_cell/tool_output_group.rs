@@ -296,8 +296,12 @@ impl HistoryCell for ToolOutputGroup {
                 .iter()
                 .skip(1)
                 .all(|cell| cell.as_any().is::<ToolOutputCell>())
-            && let Some(mut parts) = mcp.nested_activity_parts(width, expanded)
         {
+            let mut receipt_expanded = expanded.clone();
+            for id in mcp.activity_ids() {
+                receipt_expanded.remove(&id);
+            }
+            let mut parts = mcp.activity_parts(width, header_reserve, &receipt_expanded)?;
             parts.header = self.activity_header();
             parts.output = self.activity_disclosure(width);
             if self.activity_ids().iter().any(|id| expanded.contains(id)) {

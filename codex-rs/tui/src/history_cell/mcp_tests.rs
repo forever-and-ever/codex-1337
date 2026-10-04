@@ -94,6 +94,60 @@ fn mcp_file_receipts_share_native_hunks_and_independent_disclosures() {
                 vec![("mcp-file:edit:0", true), ("mcp-file:edit:1", false)]
             );
             assert_eq!(closed.controls.len(), 2);
+            let mut direct = cell.clone();
+            direct.invocation.arguments = Some(json!({"target":"long-direct-argument".repeat(12)}));
+            let output = ToolOutputCell::from_output(
+                "direct-output",
+                Some("edit"),
+                "edit",
+                Some("semedit"),
+                &codex_protocol::models::FunctionCallOutputBody::Text("chosen model text".into()),
+            )
+            .unwrap();
+            let group = ToolOutputGroup::from_cells([
+                Arc::new(direct.clone()) as Arc<dyn HistoryCell>,
+                Arc::new(output),
+            ]);
+            let render = |expanded: HashSet<String>| {
+                group
+                    .activity_parts(/*width*/ 60, /*header_reserve*/ 14, &expanded)
+                    .unwrap()
+            };
+            let collapsed = render(HashSet::new());
+            let expected = direct
+                .activity_parts(
+                    /*width*/ 60,
+                    /*header_reserve*/ 14,
+                    &HashSet::new(),
+                )
+                .unwrap();
+            assert_eq!(collapsed.lines, expected.lines);
+            assert!(collapsed.lines[0].width() <= 46);
+            let expanded = render(HashSet::from([
+                "mcp:edit".into(),
+                "output:tool-output-tokens:direct-output".into(),
+                "mcp-file:edit:0".into(),
+            ]));
+            let expanded_text = Text::from(visible_lines(expanded.lines));
+            assert!(expanded_text.to_string().contains("chosen model text"));
+            assert!(
+                !expanded_text
+                    .to_string()
+                    .contains("ordinary result remains accessible")
+            );
+            assert_eq!(
+                expanded
+                    .controls
+                    .iter()
+                    .map(|control| (control.id.as_str(), control.expanded))
+                    .collect::<Vec<_>>(),
+                vec![("mcp-file:edit:0", true), ("mcp-file:edit:1", false)]
+            );
+            snapshots.push(format!(
+                "Direct captured result\nCollapsed\n{}\nExpanded with first diff\n{}",
+                Text::from(visible_lines(collapsed.lines)),
+                expanded_text
+            ));
         } else if label == "metadata only" {
             assert!(closed.output.is_none());
             assert_eq!(closed.controls.len(), 1);
