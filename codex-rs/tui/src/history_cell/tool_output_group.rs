@@ -4,6 +4,7 @@ use super::HistoryCell;
 use super::PatchHistoryCell;
 use super::ReasoningSummaryCell;
 use super::ToolOutputCell;
+use super::output_provenance::OutputMode;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::terminal_hyperlinks::visible_lines;
 use codex_app_server_protocol::ThreadItem;
@@ -226,6 +227,13 @@ impl ToolOutputGroup {
 }
 
 impl HistoryCell for ToolOutputGroup {
+    fn has_formatted_output(&self) -> bool {
+        !Self::is_patch(self)
+            && self
+                .members
+                .iter()
+                .any(|member| member.has_formatted_output())
+    }
     fn tool_call_ids(&self) -> Vec<&str> {
         self.members
             .iter()
@@ -289,6 +297,16 @@ impl HistoryCell for ToolOutputGroup {
         header_reserve: usize,
         expanded: &HashSet<String>,
     ) -> Option<super::activity_parts::ActivityParts> {
+        self.output_parts(width, header_reserve, expanded, OutputMode::Raw)
+    }
+
+    fn output_parts(
+        &self,
+        width: u16,
+        header_reserve: usize,
+        expanded: &HashSet<String>,
+        mode: OutputMode,
+    ) -> Option<super::activity_parts::ActivityParts> {
         if let Some(mcp) = self.members.first()
             && mcp.as_any().is::<super::McpToolCallCell>()
             && self
@@ -301,12 +319,14 @@ impl HistoryCell for ToolOutputGroup {
             for id in mcp.activity_ids() {
                 receipt_expanded.remove(&id);
             }
-            let mut parts = mcp.activity_parts(width, header_reserve, &receipt_expanded)?;
+            let mut parts = mcp.output_parts(width, header_reserve, &receipt_expanded, mode)?;
             parts.header = self.activity_header();
             parts.output = self.activity_disclosure(width);
             if self.activity_ids().iter().any(|id| expanded.contains(id)) {
                 for output in self.members.iter().skip(1) {
-                    parts.lines.extend(output.transcript_hyperlink_lines(width));
+                    if let Some(output) = output.as_any().downcast_ref::<ToolOutputCell>() {
+                        parts.lines.extend(output.output_lines(width, mode));
+                    }
                 }
             }
             return Some(parts);
@@ -333,6 +353,7 @@ impl HistoryCell for ToolOutputGroup {
                 header_reserve,
                 expanded,
                 &self.activity_ids(),
+                mode,
             )
         })
     }
@@ -370,6 +391,10 @@ impl HistoryCell for ToolOutputGroup {
     }
 
     fn expanded_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        self.expanded_output_lines(width, OutputMode::Raw)
+    }
+
+    fn expanded_output_lines(&self, width: u16, mode: OutputMode) -> Vec<HyperlinkLine> {
         if !self
             .activity_ids()
             .iter()
@@ -398,14 +423,14 @@ impl HistoryCell for ToolOutputGroup {
             Vec::new()
         };
         for cell in &self.members {
-            if cell.as_any().is::<ToolOutputCell>() {
+            if let Some(output) = cell.as_any().downcast_ref::<ToolOutputCell>() {
                 if cell.activity_disclosure(width).is_none() {
                     continue;
                 }
                 if !lines.is_empty() {
                     lines.push("".into());
                 }
-                lines.extend(cell.transcript_hyperlink_lines(width));
+                lines.extend(output.output_lines(width, mode));
                 continue;
             }
             // An existing exploration group can already own earlier returned batches.
@@ -417,7 +442,7 @@ impl HistoryCell for ToolOutputGroup {
                 if !lines.is_empty() {
                     lines.push("".into());
                 }
-                lines.extend(cell.expanded_hyperlink_lines(width));
+                lines.extend(cell.expanded_output_lines(width, mode));
             } else {
                 let next = if cell.as_any().is::<super::McpToolCallCell>() {
                     cell.nested_detail_lines(width)

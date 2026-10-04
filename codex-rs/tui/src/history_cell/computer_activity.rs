@@ -296,7 +296,15 @@ impl HistoryCell for ComputerActivityCell {
     }
 
     fn expanded_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        if let Some(output) = self.group.details.output_lines(width) {
+        self.expanded_output_lines(width, OutputMode::Raw)
+    }
+
+    fn has_formatted_output(&self) -> bool {
+        self.group.details.has_formatted_output()
+    }
+
+    fn expanded_output_lines(&self, width: u16, mode: OutputMode) -> Vec<HyperlinkLine> {
+        if let Some(output) = self.group.details.output_lines(width, mode) {
             let mut lines = self
                 .group
                 .calls

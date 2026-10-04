@@ -295,8 +295,17 @@ impl McpToolCallCell {
                     .saturating_sub(usize::from(crate::transcript_geometry::CHILD_INDENT))
                     .max(/*other*/ 1),
             );
-            let body_lines =
-                adaptive_wrap_hyperlink_lines(&[HyperlinkLine::new(invocation_line)], opts);
+            let mut invocation = vec![HyperlinkLine::new(invocation_line)];
+            if matches!(
+                mode,
+                McpToolCallRenderMode::Arguments | McpToolCallRenderMode::Expanded
+            ) {
+                super::output_provenance::mark_lines(
+                    &mut invocation,
+                    super::output_provenance::OutputProvenance::Client,
+                );
+            }
+            let body_lines = adaptive_wrap_hyperlink_lines(&invocation, opts);
             lines.extend(prefix_hyperlink_lines(
                 body_lines,
                 crate::transcript_geometry::CHILD_BRANCH.dim(),
@@ -336,10 +345,9 @@ impl McpToolCallCell {
         let mut lines = Vec::new();
         if self.result.is_some() && mode == McpToolCallRenderMode::Expanded {
             lines.extend(adaptive_wrap_hyperlink_lines(
-                &[
-                    Line::from("Exact model output unavailable; stored tool result follows.".dim())
-                        .into(),
-                ],
+                &[super::output_provenance::client_notice(
+                    "Stored result · exact capture unavailable",
+                )],
                 options.clone(),
             ));
         }
@@ -400,6 +408,10 @@ impl McpToolCallCell {
         if mode == McpToolCallRenderMode::Display {
             preview.finish_hyperlink_lines()
         } else {
+            super::output_provenance::mark_lines(
+                &mut lines,
+                super::output_provenance::OutputProvenance::Client,
+            );
             lines
         }
     }

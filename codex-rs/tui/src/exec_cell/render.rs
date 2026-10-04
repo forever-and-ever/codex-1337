@@ -9,6 +9,10 @@ use crate::exec_command::strip_bash_lc_and_escape;
 use crate::history_cell::ActivityDisclosure;
 use crate::history_cell::HistoryCell;
 use crate::history_cell::HistoryRenderMode;
+use crate::history_cell::output_provenance::OutputMode;
+use crate::history_cell::output_provenance::OutputProvenance;
+use crate::history_cell::output_provenance::client_notice;
+use crate::history_cell::output_provenance::mark_lines;
 use crate::history_cell::plain_lines;
 use crate::motion::MotionMode;
 use crate::motion::ReducedMotionIndicator;
@@ -263,6 +267,20 @@ impl HistoryCell for ExecCell {
         header_reserve: usize,
         expanded: &std::collections::HashSet<String>,
     ) -> Option<crate::history_cell::activity_parts::ActivityParts> {
+        self.output_parts(width, header_reserve, expanded, OutputMode::Raw)
+    }
+
+    fn has_formatted_output(&self) -> bool {
+        self.group.details.has_formatted_output()
+    }
+
+    fn output_parts(
+        &self,
+        width: u16,
+        header_reserve: usize,
+        expanded: &std::collections::HashSet<String>,
+        mode: OutputMode,
+    ) -> Option<crate::history_cell::activity_parts::ActivityParts> {
         self.is_agent_command_group().then(|| {
             super::rows::command_parts(
                 std::slice::from_ref(&self),
@@ -271,6 +289,7 @@ impl HistoryCell for ExecCell {
                 header_reserve,
                 expanded,
                 &self.activity_ids(),
+                mode,
             )
         })
     }
@@ -356,7 +375,11 @@ impl HistoryCell for ExecCell {
     }
 
     fn transcript_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        self.detailed_hyperlink_lines(width, HistoryRenderMode::Rich)
+        self.detailed_hyperlink_lines(
+            width,
+            HistoryRenderMode::Rich,
+            OutputProvenance::Unspecified,
+        )
     }
 
     fn activity_ids(&self) -> Vec<String> {
@@ -367,7 +390,11 @@ impl HistoryCell for ExecCell {
     }
 
     fn expanded_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        if let Some(output) = self.group.details.output_lines(width) {
+        self.expanded_output_lines(width, OutputMode::Raw)
+    }
+
+    fn expanded_output_lines(&self, width: u16, mode: OutputMode) -> Vec<HyperlinkLine> {
+        if let Some(output) = self.group.details.output_lines(width, mode) {
             let mut lines = self.activity_argument_lines(width);
             if !output.is_empty() {
                 lines.push("".into());
@@ -383,13 +410,12 @@ impl HistoryCell for ExecCell {
                 return self.activity_argument_lines(width);
             }
             let mut lines = self.compact_hyperlink_lines(width);
-            lines.push(
-                Line::from(
-                    "  Exact model output unavailable; stored command result follows.".dim(),
-                )
-                .into(),
-            );
-            lines.extend(self.transcript_hyperlink_lines(width));
+            lines.push(client_notice("  Stored result · exact capture unavailable"));
+            lines.extend(self.detailed_hyperlink_lines(
+                width,
+                HistoryRenderMode::Rich,
+                OutputProvenance::Client,
+            ));
             lines
         }
     }
@@ -402,8 +428,10 @@ impl HistoryCell for ExecCell {
             .collect::<Vec<_>>();
         for call in self.iter_calls() {
             let script = strip_bash_lc_and_escape(&call.command);
+            let mut detail = plain_hyperlink_lines(highlight_bash_to_lines(&script));
+            mark_lines(&mut detail, OutputProvenance::Client);
             lines.extend(adaptive_wrap_hyperlink_lines(
-                &plain_hyperlink_lines(highlight_bash_to_lines(&script)),
+                &detail,
                 RtOptions::new(usize::from(width))
                     .initial_indent(Line::from(vec![
                         crate::transcript_geometry::CHILD_PREFIX.into(),
@@ -416,9 +444,11 @@ impl HistoryCell for ExecCell {
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
-        plain_lines(visible_lines(
-            self.detailed_hyperlink_lines(u16::MAX, HistoryRenderMode::Raw),
-        ))
+        plain_lines(visible_lines(self.detailed_hyperlink_lines(
+            u16::MAX,
+            HistoryRenderMode::Raw,
+            OutputProvenance::Unspecified,
+        )))
     }
 }
 

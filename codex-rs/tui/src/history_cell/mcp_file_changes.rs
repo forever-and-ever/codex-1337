@@ -148,7 +148,12 @@ impl ReceiptView {
             }
             let mut file_lines = vec![view.summary(file_width)];
             if is_expanded {
-                file_lines.extend(view.body(file_width));
+                let mut detail = view.body(file_width);
+                super::output_provenance::mark_lines(
+                    &mut detail,
+                    super::output_provenance::OutputProvenance::Client,
+                );
+                file_lines.extend(detail);
             }
             lines.extend(prefix_hyperlink_lines(
                 file_lines,

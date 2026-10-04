@@ -7,6 +7,7 @@
 use super::HistoryCell;
 use super::HistoryRenderMode;
 use super::ToolOutputCell;
+use super::output_provenance::OutputMode;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::terminal_hyperlinks::plain_hyperlink_lines;
 use std::sync::Arc;
@@ -57,10 +58,16 @@ impl ActivityDetails {
     }
 
     /// The batch returned to the model replaces raw nested results in the disclosure, not in raw history.
-    pub(crate) fn output_lines(&self, width: u16) -> Option<Vec<HyperlinkLine>> {
+    pub(crate) fn has_formatted_output(&self) -> bool {
+        self.entries
+            .iter()
+            .any(|(_, cell)| cell.has_formatted_output())
+    }
+
+    pub(crate) fn output_lines(&self, width: u16, mode: OutputMode) -> Option<Vec<HyperlinkLine>> {
         let mut output = None;
         for (_, cell) in &self.entries {
-            if cell.as_any().is::<ToolOutputCell>() {
+            if let Some(cell) = cell.as_any().downcast_ref::<ToolOutputCell>() {
                 let lines: &mut Vec<HyperlinkLine> = output.get_or_insert_default();
                 if cell.activity_disclosure(width).is_none() {
                     continue;
@@ -68,7 +75,7 @@ impl ActivityDetails {
                 if !lines.is_empty() {
                     lines.push("".into());
                 }
-                lines.extend(cell.transcript_hyperlink_lines(width));
+                lines.extend(cell.output_lines(width, mode));
             }
         }
         output

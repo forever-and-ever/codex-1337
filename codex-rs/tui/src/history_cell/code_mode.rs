@@ -5,6 +5,8 @@ use super::HistoryCell;
 use super::HistoryTimestamp;
 use super::ToolOutputCell;
 use super::activity_parts::ActivityHeader;
+use super::output_provenance::OutputMode;
+use super::output_provenance::client_notice;
 use crate::motion::MotionMode;
 use crate::motion::ReducedMotionIndicator;
 use crate::motion::activity_indicator;
@@ -206,6 +208,7 @@ impl CodeModeCell {
         &self,
         width: u16,
         expanded: &HashSet<String>,
+        mode: OutputMode,
     ) -> super::activity_parts::ActivityParts {
         let mut lines: Vec<_> = self.header().into_iter().map(HyperlinkLine::from).collect();
         let mut controls = Vec::new();
@@ -215,7 +218,16 @@ impl CodeModeCell {
             if !block_expanded && member.as_any().is::<ToolOutputCell>() {
                 continue;
             }
-            let parts = if block_expanded {
+            let parts = if block_expanded
+                && let Some(output) = member.as_any().downcast_ref::<ToolOutputCell>()
+            {
+                Some(super::activity_parts::ActivityParts {
+                    lines: output.output_lines(nested_width, mode),
+                    header: None,
+                    output: None,
+                    controls: Vec::new(),
+                })
+            } else if block_expanded {
                 member.nested_activity_parts(nested_width, expanded)
             } else {
                 Some(member.nested_summary_parts(nested_width, expanded))
@@ -248,8 +260,7 @@ impl CodeModeCell {
                 .iter()
                 .any(|member| member.as_any().is::<ToolOutputCell>())
         {
-            lines
-                .push(Line::from("  Exact model output unavailable in this history.".dim()).into());
+            lines.push(client_notice("  Stored result · exact capture unavailable"));
         }
         super::activity_parts::ActivityParts {
             lines,
@@ -261,6 +272,11 @@ impl CodeModeCell {
 }
 
 impl HistoryCell for CodeModeCell {
+    fn has_formatted_output(&self) -> bool {
+        self.members
+            .iter()
+            .any(|member| member.has_formatted_output())
+    }
     fn transcript_animation_tick(&self) -> Option<u64> {
         (self.animations_enabled && self.status().is_none())
             .then(|| (self.start_time.elapsed().as_millis() / 50) as u64)
@@ -319,8 +335,7 @@ impl HistoryCell for CodeModeCell {
                 .iter()
                 .any(|member| member.as_any().is::<ToolOutputCell>())
         {
-            lines
-                .push(Line::from("  Exact model output unavailable in this history.".dim()).into());
+            lines.push(client_notice("  Stored result · exact capture unavailable"));
         }
         lines
     }
@@ -331,7 +346,17 @@ impl HistoryCell for CodeModeCell {
         _header_reserve: usize,
         expanded: &HashSet<String>,
     ) -> Option<super::activity_parts::ActivityParts> {
-        Some(self.parts(width, expanded))
+        Some(self.parts(width, expanded, OutputMode::Raw))
+    }
+
+    fn output_parts(
+        &self,
+        width: u16,
+        _reserve: usize,
+        expanded: &HashSet<String>,
+        mode: OutputMode,
+    ) -> Option<super::activity_parts::ActivityParts> {
+        Some(self.parts(width, expanded, mode))
     }
 
     fn transcript_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {

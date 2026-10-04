@@ -140,7 +140,12 @@ impl HistoryCell for WebSearchCell {
     fn nested_detail_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         let mut nested = self.clone();
         nested.completed_at = None;
-        nested.expanded_hyperlink_lines(width)
+        let mut lines = nested.expanded_hyperlink_lines(width);
+        super::output_provenance::mark_lines(
+            &mut lines,
+            super::output_provenance::OutputProvenance::Client,
+        );
+        lines
     }
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         let bullet = if self.completed {

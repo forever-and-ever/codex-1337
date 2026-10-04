@@ -63,8 +63,13 @@ impl HistoryCell for ToolItemCell {
     }
     fn nested_detail_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         if self.inner.as_any().is::<super::PlainHistoryCell>() {
+            let mut invocation = self.nested_summary_lines(u16::MAX);
+            super::output_provenance::mark_lines(
+                &mut invocation,
+                super::output_provenance::OutputProvenance::Client,
+            );
             return crate::terminal_hyperlinks::adaptive_wrap_hyperlink_lines(
-                &self.nested_summary_lines(u16::MAX),
+                &invocation,
                 crate::wrapping::RtOptions::new(usize::from(width)),
             );
         }
@@ -122,6 +127,50 @@ impl HistoryCell for ToolItemCell {
     }
     fn activity_argument_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         self.inner.activity_argument_lines(width)
+    }
+    fn has_formatted_output(&self) -> bool {
+        self.inner.has_formatted_output()
+    }
+    fn expanded_output_lines(
+        &self,
+        width: u16,
+        mode: super::output_provenance::OutputMode,
+    ) -> Vec<HyperlinkLine> {
+        if let Some(fallback) = self
+            .inner
+            .as_any()
+            .downcast_ref::<super::PlainHistoryCell>()
+        {
+            let mut lines =
+                crate::terminal_hyperlinks::plain_hyperlink_lines(fallback.lines.clone());
+            super::output_provenance::mark_lines(
+                &mut lines,
+                super::output_provenance::OutputProvenance::Client,
+            );
+            if lines.len() > 1 {
+                lines.insert(
+                    1,
+                    super::output_provenance::client_notice(
+                        "Stored result · exact capture unavailable",
+                    ),
+                );
+            }
+            crate::terminal_hyperlinks::adaptive_wrap_hyperlink_lines(
+                &lines,
+                crate::wrapping::RtOptions::new(usize::from(width)),
+            )
+        } else {
+            self.inner.expanded_output_lines(width, mode)
+        }
+    }
+    fn output_parts(
+        &self,
+        width: u16,
+        reserve: usize,
+        expanded: &std::collections::HashSet<String>,
+        mode: super::output_provenance::OutputMode,
+    ) -> Option<ActivityParts> {
+        self.inner.output_parts(width, reserve, expanded, mode)
     }
     fn activity_arguments_truncated(&self, width: u16) -> bool {
         self.inner.activity_arguments_truncated(width)

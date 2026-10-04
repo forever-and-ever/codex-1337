@@ -14,6 +14,10 @@ use crate::history_cell::activity_parts::ActivityHeader;
 use crate::history_cell::activity_parts::ActivityParts;
 use crate::history_cell::activity_parts::PartControl;
 use crate::history_cell::activity_preview::compact_header;
+use crate::history_cell::output_provenance::OutputMode;
+use crate::history_cell::output_provenance::OutputProvenance;
+use crate::history_cell::output_provenance::client_notice;
+use crate::history_cell::output_provenance::mark_lines;
 use crate::motion::MotionMode;
 use crate::motion::ReducedMotionIndicator;
 use crate::motion::activity_indicator;
@@ -143,6 +147,7 @@ pub(crate) fn command_parts(
     header_reserve: usize,
     expanded: &HashSet<String>,
     activity_ids: &[String],
+    mode: OutputMode,
 ) -> ActivityParts {
     let calls = cells
         .iter()
@@ -225,8 +230,10 @@ pub(crate) fn command_parts(
                     if let Some(last) = source_lines.last_mut() {
                         last.push_span(connector.dim());
                     }
+                    let mut detail = plain_hyperlink_lines(source_lines);
+                    mark_lines(&mut detail, OutputProvenance::Client);
                     lines.extend(prefix_hyperlink_lines(
-                        plain_hyperlink_lines(source_lines),
+                        detail,
                         crate::transcript_geometry::CHILD_PREFIX.into(),
                         crate::transcript_geometry::CHILD_PREFIX.into(),
                     ));
@@ -246,21 +253,29 @@ pub(crate) fn command_parts(
         lines.push("".into());
         if has_batches {
             for cell in cells {
-                lines.extend(cell.group.details.output_lines(width).unwrap_or_default());
+                lines.extend(
+                    cell.group
+                        .details
+                        .output_lines(width, mode)
+                        .unwrap_or_default(),
+                );
             }
             for batch in batches {
-                lines.extend(batch.transcript_hyperlink_lines(width));
+                lines.extend(batch.output_lines(width, mode));
             }
         } else {
+            lines.push(client_notice("Stored result · exact capture unavailable"));
             for call in calls {
                 if let Some(output) = &call.output {
+                    let mut detail = plain_hyperlink_lines(
+                        output
+                            .transcript_lines()
+                            .map(|line| codex_ansi_escape::ansi_escape_line(line.as_ref()))
+                            .collect(),
+                    );
+                    mark_lines(&mut detail, OutputProvenance::Client);
                     lines.extend(prefix_hyperlink_lines(
-                        plain_hyperlink_lines(
-                            output
-                                .transcript_lines()
-                                .map(|line| codex_ansi_escape::ansi_escape_line(line.as_ref()))
-                                .collect(),
-                        ),
+                        detail,
                         crate::transcript_geometry::CHILD_PREFIX.into(),
                         crate::transcript_geometry::CHILD_PREFIX.into(),
                     ));

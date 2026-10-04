@@ -137,17 +137,22 @@ impl HistoryCell for PatchHistoryCell {
 
     fn display_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         let mut lines = self.summary(width);
+        let mut detail = crate::file_change_view::FileChangeView {
+            label: "".into(),
+            syntax_path: &self.path,
+            change: Some(&self.change),
+            qualifier: None,
+        }
+        .body(
+            usize::from(width)
+                .saturating_sub(usize::from(crate::transcript_geometry::CHILD_INDENT)),
+        );
+        super::output_provenance::mark_lines(
+            &mut detail,
+            super::output_provenance::OutputProvenance::Client,
+        );
         lines.extend(crate::terminal_hyperlinks::prefix_hyperlink_lines(
-            crate::file_change_view::FileChangeView {
-                label: "".into(),
-                syntax_path: &self.path,
-                change: Some(&self.change),
-                qualifier: None,
-            }
-            .body(
-                usize::from(width)
-                    .saturating_sub(usize::from(crate::transcript_geometry::CHILD_INDENT)),
-            ),
+            detail,
             crate::transcript_geometry::CHILD_PREFIX.into(),
             crate::transcript_geometry::CHILD_PREFIX.into(),
         ));
@@ -234,8 +239,16 @@ impl HistoryCell for PatchFailureCell {
                 span.style = span.style.add_modifier(Modifier::DIM);
             }
         }
+        lines.push(super::output_provenance::client_notice(
+            "Stored result · exact capture unavailable",
+        ));
+        let mut diagnostics = plain_hyperlink_lines(diagnostics);
+        super::output_provenance::mark_lines(
+            &mut diagnostics,
+            super::output_provenance::OutputProvenance::Client,
+        );
         lines.extend(crate::terminal_hyperlinks::adaptive_wrap_hyperlink_lines(
-            &plain_hyperlink_lines(diagnostics),
+            &diagnostics,
             RtOptions::new(usize::from(width).max(/*other*/ 1))
                 .initial_indent("  └ ".dim().into())
                 .subsequent_indent("    ".into()),
@@ -291,7 +304,12 @@ impl HistoryCell for ViewImageHistoryCell {
     fn nested_detail_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         let mut nested = self.clone();
         nested.timestamp = None;
-        nested.transcript_hyperlink_lines(width)
+        let mut lines = nested.transcript_hyperlink_lines(width);
+        super::output_provenance::mark_lines(
+            &mut lines,
+            super::output_provenance::OutputProvenance::Client,
+        );
+        lines
     }
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         let line = vec![

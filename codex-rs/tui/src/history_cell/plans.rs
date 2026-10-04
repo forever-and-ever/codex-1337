@@ -329,6 +329,10 @@ impl HistoryCell for PlanUpdateCell {
                 indented_lines.extend(render_step(status, step));
             }
         }
+        super::output_provenance::mark_lines(
+            &mut indented_lines,
+            super::output_provenance::OutputProvenance::Client,
+        );
         lines.extend(prefix_hyperlink_lines(
             indented_lines,
             "  └ ".dim(),

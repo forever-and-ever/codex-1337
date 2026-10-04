@@ -244,8 +244,18 @@ impl HistoryCell for DynamicToolCallCell {
             .into_iter()
             .chain(data.output_lines())
             .collect();
+        let mut details = plain_hyperlink_lines(details);
+        super::output_provenance::mark_lines(
+            &mut details,
+            super::output_provenance::OutputProvenance::Client,
+        );
+        if !data.is_active() {
+            lines.push(super::output_provenance::client_notice(
+                "Stored result · exact capture unavailable",
+            ));
+        }
         lines.extend(adaptive_wrap_hyperlink_lines(
-            &plain_hyperlink_lines(details),
+            &details,
             RtOptions::new(usize::from(width).max(/*other*/ 1))
                 .initial_indent(crate::transcript_geometry::CHILD_BRANCH.dim().into())
                 .subsequent_indent(crate::transcript_geometry::CHILD_PREFIX.into()),
@@ -259,8 +269,13 @@ impl HistoryCell for DynamicToolCallCell {
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut lines = vec![data.header().0.into()];
+        let mut arguments = plain_hyperlink_lines(data.argument_lines());
+        super::output_provenance::mark_lines(
+            &mut arguments,
+            super::output_provenance::OutputProvenance::Client,
+        );
         lines.extend(adaptive_wrap_hyperlink_lines(
-            &plain_hyperlink_lines(data.argument_lines()),
+            &arguments,
             RtOptions::new(usize::from(width).max(/*other*/ 1))
                 .initial_indent(crate::transcript_geometry::CHILD_BRANCH.dim().into())
                 .subsequent_indent(crate::transcript_geometry::CHILD_PREFIX.into()),
