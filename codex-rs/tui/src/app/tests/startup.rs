@@ -920,6 +920,7 @@ async fn fresh_startup_thread_drains_buffered_approval_before_draft_handoff() ->
                 session: test_thread_session(thread_id, test_path_buf("/tmp/project")),
                 turns: Vec::new(),
                 blocks_direct_input: false,
+                can_accept_text_input: false,
                 task_tools_available: false,
             }),
         },
@@ -1067,6 +1068,7 @@ async fn known_thread_started_preserves_session_without_reading_unmaterialized_r
             cwd: session.cwd.clone(),
             cli_version: "0.0.0".to_string(),
             source: codex_app_server_protocol::SessionSource::Unknown,
+            can_accept_text_input: None,
             can_accept_direct_input: None,
             thread_source: None,
             agent_nickname: Some("Robie".to_string()),
@@ -1135,6 +1137,7 @@ async fn startup_thread_started_submits_queued_startup_input() {
             session: test_thread_session(thread_id, test_path_buf("/tmp/project")),
             turns: Vec::new(),
             blocks_direct_input: false,
+            can_accept_text_input: false,
             task_tools_available: false,
         }),
     )
@@ -1173,6 +1176,7 @@ async fn fresh_startup_notice_follows_session_attachment() {
             session: test_thread_session(ThreadId::new(), test_path_buf("/tmp/project")),
             turns: Vec::new(),
             blocks_direct_input: false,
+            can_accept_text_input: false,
             task_tools_available: false,
         }),
     )
@@ -1338,6 +1342,7 @@ async fn startup_thread_started_discards_another_threads_buffered_events() {
             session: test_thread_session(thread_id, test_path_buf("/tmp/project")),
             turns: Vec::new(),
             blocks_direct_input: false,
+            can_accept_text_input: false,
             task_tools_available: false,
         }),
     )
@@ -1387,6 +1392,7 @@ async fn startup_thread_started_does_not_replay_resolved_approval() -> Result<()
             session: test_thread_session(thread_id, test_path_buf("/tmp/project")),
             turns: Vec::new(),
             blocks_direct_input: false,
+            can_accept_text_input: false,
             task_tools_available: false,
         }),
     )
@@ -1556,6 +1562,7 @@ fn stale_startup_thread_started_removes_local_routing_state() -> Result<()> {
                     session: test_thread_session(stale_thread_id, test_path_buf("/tmp/project")),
                     turns: Vec::new(),
                     blocks_direct_input: false,
+                    can_accept_text_input: false,
                     task_tools_available: false,
                 }),
             )

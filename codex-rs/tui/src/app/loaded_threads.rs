@@ -161,6 +161,7 @@ mod tests {
             cwd: test_path_buf("/tmp").abs(),
             cli_version: "0.0.0".to_string(),
             source,
+            can_accept_text_input: None,
             can_accept_direct_input: None,
             thread_source: None,
             agent_nickname: None,

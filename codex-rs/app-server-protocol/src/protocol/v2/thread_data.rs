@@ -273,6 +273,10 @@ pub struct Thread {
     /// `None` means the capability is unavailable, such as for an unloaded stored thread.
     #[experimental("thread.canAcceptDirectInput")]
     pub can_accept_direct_input: Option<bool>,
+    /// Whether this loaded thread accepts plain human text without changing its settings.
+    /// Null means unavailable; ownership and other mutation rights are unchanged.
+    #[experimental("thread.canAcceptTextInput")]
+    pub can_accept_text_input: Option<bool>,
     /// Optional analytics source classification for this thread.
     pub thread_source: Option<ThreadSource>,
     /// Optional random unique nickname assigned to an AgentControl-spawned sub-agent.
@@ -328,6 +332,7 @@ struct ThreadCompatibility {
     originator: Option<String>,
     source: SessionSource,
     can_accept_direct_input: Option<bool>,
+    can_accept_text_input: Option<bool>,
     thread_source: Option<ThreadSource>,
     agent_nickname: Option<String>,
     agent_role: Option<String>,
@@ -369,6 +374,7 @@ impl<'de> Deserialize<'de> for Thread {
             originator: thread.originator,
             source: thread.source,
             can_accept_direct_input: thread.can_accept_direct_input,
+            can_accept_text_input: thread.can_accept_text_input,
             thread_source: thread.thread_source,
             agent_nickname: thread.agent_nickname,
             agent_role: thread.agent_role,

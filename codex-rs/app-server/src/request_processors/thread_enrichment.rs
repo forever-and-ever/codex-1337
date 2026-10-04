@@ -40,6 +40,7 @@ async fn enrich_loaded_thread(
     statuses: &HashMap<String, ThreadStatus>,
     thread: &mut Thread,
 ) {
+    thread.can_accept_text_input = None;
     let watched_status = statuses.get(&thread.id);
     if let Some(status) = watched_status {
         thread.status = status.clone();
@@ -57,6 +58,7 @@ async fn enrich_loaded_thread(
     };
     let config_snapshot = loaded_thread.config_snapshot().await;
     apply_live_thread_settings(thread, &config_snapshot);
+    thread.can_accept_text_input = Some(true);
     if !matches!(
         &thread.source,
         SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
@@ -80,6 +82,7 @@ async fn enrich_loaded_thread(
         }
         AgentStatus::Shutdown | AgentStatus::NotFound => {
             thread.status = ThreadStatus::NotLoaded;
+            thread.can_accept_text_input = None;
             return;
         }
     }

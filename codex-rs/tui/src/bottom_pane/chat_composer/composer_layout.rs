@@ -42,7 +42,7 @@ impl ChatComposer {
         options: ComposerRenderOptions<'_>,
     ) -> ComposerLayout {
         let footer_hint_height = self.footer_hint_height(area.width, options);
-        let composer_min = if self.blocks_direct_input {
+        let composer_min = if self.blocks_direct_input && !self.child_text_input_enabled {
             super::super::watch_help::lines(area.width).len() as u16
         } else {
             3
@@ -88,7 +88,7 @@ impl ChatComposer {
                 .active
                 .required_height(area.width, footer_hint_height)
         };
-        let voice_rows = if self.blocks_direct_input {
+        let voice_rows = if self.blocks_direct_input && !self.child_text_input_enabled {
             0
         } else {
             self.voice_strip
@@ -176,7 +176,7 @@ impl ChatComposer {
             };
         }
         if !self.draft.input_enabled
-            || self.blocks_direct_input
+            || (self.blocks_direct_input && !self.child_text_input_enabled)
             || self.attachments.selected_remote_image_index.is_some()
         {
             return None;
@@ -213,7 +213,7 @@ impl ChatComposer {
             .try_into()
             .unwrap_or(u16::MAX);
         let remote_images_separator = u16::from(remote_images_height > 0);
-        let composer_height = if self.blocks_direct_input {
+        let composer_height = if self.blocks_direct_input && !self.child_text_input_enabled {
             super::super::watch_help::lines(width).len() as u16
         } else {
             self.draft.textarea.desired_height(inner_width)

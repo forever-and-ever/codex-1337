@@ -278,6 +278,11 @@ pub(crate) struct AgentsOverviewThreadRefresh {
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, IntoStaticStr)]
 pub(crate) enum AppEvent {
+    SubagentTextInput {
+        thread_id: ThreadId,
+        expected_turn_id: Option<String>,
+        input: Vec<codex_app_server_protocol::UserInput>,
+    },
     SecuritySetupLoaded {
         request_id: uuid::Uuid,
         identity: crate::security_setup::Identity,

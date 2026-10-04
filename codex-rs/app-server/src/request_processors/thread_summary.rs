@@ -286,6 +286,7 @@ pub(crate) fn summary_to_thread(
         agent_nickname: source.get_nickname(),
         agent_role: source.get_agent_role(),
         source: source.into(),
+        can_accept_text_input: None,
         can_accept_direct_input: None,
         thread_source: None,
         git_info,

@@ -3064,6 +3064,7 @@ impl ThreadRequestProcessor {
             thread.session_id.clone_from(&fallback_thread.session_id);
             thread.ephemeral = fallback_thread.ephemeral;
             thread.can_accept_direct_input = fallback_thread.can_accept_direct_input;
+            thread.can_accept_text_input = fallback_thread.can_accept_text_input;
             thread
         } else {
             fallback_thread
@@ -4517,6 +4518,7 @@ impl ThreadRequestProcessor {
                 existing_thread.multi_agent_version(),
                 &config_snapshot.session_source,
             ));
+            thread_summary.can_accept_text_input = Some(true);
             let instruction_sources = existing_thread.legacy_instruction_sources().await;
 
             let listener_command_tx = {
@@ -4881,6 +4883,7 @@ impl ThreadRequestProcessor {
         let mut thread = thread?;
         apply_live_thread_settings(&mut thread, &config_snapshot);
         thread.can_accept_direct_input = Some(can_accept_direct_input);
+        thread.can_accept_text_input = Some(true);
         thread.id = thread_id.to_string();
         thread.session_id = session_id;
         thread.path = Some(rollout_path.to_path_buf());
@@ -5484,6 +5487,7 @@ impl ThreadRequestProcessor {
             forked_thread.multi_agent_version(),
             &config_snapshot.session_source,
         ));
+        thread.can_accept_text_input = Some(true);
         thread.session_id = session_configured.session_id.to_string();
         thread.thread_source = config_snapshot.thread_source.clone().map(Into::into);
         apply_live_thread_settings(&mut thread, &config_snapshot);
@@ -6266,6 +6270,7 @@ pub(crate) fn thread_from_stored_thread(
         agent_role: source.get_agent_role(),
         source: source.into(),
         can_accept_direct_input: None,
+        can_accept_text_input: None,
         thread_source: thread.thread_source.map(Into::into),
         git_info,
         name: thread.name,
@@ -6452,6 +6457,7 @@ fn build_thread_from_snapshot(
             multi_agent_version,
             &config_snapshot.session_source,
         )),
+        can_accept_text_input: Some(true),
         thread_source: config_snapshot.thread_source.clone().map(Into::into),
         git_info: None,
         name: None,

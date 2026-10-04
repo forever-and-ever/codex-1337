@@ -368,6 +368,7 @@ pub(crate) struct AppServerStartedThread {
     pub(crate) session: ThreadSessionState,
     pub(crate) turns: Vec<Turn>,
     pub(crate) blocks_direct_input: bool,
+    pub(crate) can_accept_text_input: bool,
     pub(crate) task_tools_available: bool,
 }
 
@@ -1258,6 +1259,24 @@ impl AppServerSession {
             })
             .await
             .wrap_err("turn/start failed in TUI")
+    }
+
+    pub(crate) async fn turn_start_text(
+        &mut self,
+        thread_id: ThreadId,
+        client_user_message_id: String,
+        input: Vec<UserInput>,
+    ) -> Result<TurnStartResponse> {
+        let request_id = self.next_request_id();
+        self.client.request_typed(ClientRequest::TurnStart {
+            request_id,
+            params: TurnStartParams {
+                thread_id: thread_id.to_string(),
+                client_user_message_id: Some(client_user_message_id),
+                input,
+                ..Default::default()
+            },
+        }).await.wrap_err("turn/start failed")
     }
 
     pub(crate) async fn turn_interrupt(
@@ -2184,6 +2203,7 @@ async fn started_thread_from_start_response(
     thread_params_mode: ThreadParamsMode,
 ) -> Result<AppServerStartedThread> {
     let blocks_direct_input = thread_blocks_direct_input(&response.thread);
+    let can_accept_text_input = response.thread.can_accept_text_input == Some(true);
     let session = thread_session_state_from_thread_start_response(
         &response,
         local_settings,
@@ -2196,6 +2216,7 @@ async fn started_thread_from_start_response(
         session,
         turns: response.thread.turns,
         blocks_direct_input,
+        can_accept_text_input,
         task_tools_available: false,
     })
 }
@@ -2207,6 +2228,7 @@ async fn started_thread_from_resume_response(
     thread_params_mode: ThreadParamsMode,
 ) -> Result<AppServerStartedThread> {
     let blocks_direct_input = thread_blocks_direct_input(&response.thread);
+    let can_accept_text_input = response.thread.can_accept_text_input == Some(true);
     let session = thread_session_state_from_thread_resume_response(
         &response,
         local_settings,
@@ -2219,6 +2241,7 @@ async fn started_thread_from_resume_response(
         session,
         turns: response.thread.turns,
         blocks_direct_input,
+        can_accept_text_input,
         task_tools_available: false,
     })
 }
@@ -2230,6 +2253,7 @@ async fn started_thread_from_fork_response(
     thread_params_mode: ThreadParamsMode,
 ) -> Result<AppServerStartedThread> {
     let blocks_direct_input = thread_blocks_direct_input(&response.thread);
+    let can_accept_text_input = response.thread.can_accept_text_input == Some(true);
     let session = thread_session_state_from_thread_fork_response(
         &response,
         local_settings,
@@ -2242,6 +2266,7 @@ async fn started_thread_from_fork_response(
         session,
         turns: response.thread.turns,
         blocks_direct_input,
+        can_accept_text_input,
         task_tools_available: false,
     })
 }
@@ -4019,6 +4044,7 @@ mod tests {
                 cwd: test_path_buf("/tmp/project").abs(),
                 cli_version: "0.0.0".to_string(),
                 source: codex_app_server_protocol::SessionSource::Cli,
+                can_accept_text_input: None,
                 can_accept_direct_input: None,
                 thread_source: None,
                 agent_nickname: None,

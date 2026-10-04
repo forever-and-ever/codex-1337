@@ -15,6 +15,7 @@ fn started(model: &str) -> AppServerStartedThread {
         session,
         turns: Vec::new(),
         blocks_direct_input: false,
+        can_accept_text_input: false,
         task_tools_available: false,
     }
 }

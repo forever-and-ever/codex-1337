@@ -221,7 +221,6 @@ impl App {
         }
         if matches!(key.code, KeyCode::Char(c) if !c.is_control())
             && (key.modifiers - KeyModifiers::SHIFT).is_empty()
-            && !watch_only
         {
             let mut roster = self
                 .agent_navigation
@@ -235,12 +234,6 @@ impl App {
         if !key.modifiers.is_empty() {
             return false;
         }
-        if watch_only
-            && self.chat_widget.composer_is_empty()
-            && matches!(key.code, KeyCode::Char(c) if c != '/')
-        {
-            return true;
-        }
         let target = {
             let mut roster = self
                 .agent_navigation
@@ -248,7 +241,7 @@ impl App {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             if roster.focused.is_none() {
-                if watch_only && key.code == KeyCode::Down {
+                if watch_only && self.chat_widget.composer_is_empty() && key.code == KeyCode::Down {
                     roster.down();
                 } else {
                     return false;

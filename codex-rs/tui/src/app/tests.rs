@@ -630,6 +630,7 @@ async fn enqueue_primary_thread_session_replays_buffered_approval_after_attach()
             session: test_thread_session(ThreadId::new(), app.config.cwd.to_path_buf()),
             turns: Vec::new(),
             blocks_direct_input: false,
+            can_accept_text_input: false,
             task_tools_available: false,
         },
         session_lifecycle::ThreadAttachPresentation::SessionLineage,
@@ -2677,16 +2678,24 @@ fn selected_and_resumed_threads_use_server_capability_for_v1_and_v2_children() -
             .await?;
         while app_event_rx.try_recv().is_ok() {}
         app.chat_widget
-            .restore_user_message_to_composer("v2 stays view-only".into());
-        let draft = app.chat_widget.composer_text_with_pending();
+            .restore_user_message_to_composer("v2 accepts plain text".into());
         app.chat_widget
             .handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
-        assert_eq!(app.chat_widget.composer_text_with_pending(), draft);
-        assert!(
-            !std::iter::from_fn(|| app_event_rx.try_recv().ok())
-                .any(|event| matches!(event, AppEvent::CodexOp(Op::UserTurn { .. })))
-        );
+        assert!(app.chat_widget.composer_text_with_pending().is_empty());
+        assert!(std::iter::from_fn(|| app_event_rx.try_recv().ok())
+            .any(|event| matches!(event, AppEvent::SubagentTextInput { thread_id, .. }
+                if thread_id == child_thread_ids[1])));
+
+        // Even with a root turn present, Ctrl+C in the child view must not target it.
+        let root_store = Arc::clone(&app.ensure_thread_channel(root_thread_id).store);
+        root_store.lock().await.set_active_turn_id("root-turn".to_string());
+        assert!(app.handle_subagent_panel_key(&mut tui, &mut app_server,
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)).await);
+        assert_eq!(root_store.lock().await.pending_interrupt_turn_id, None);
+        Box::pin(app.handle_key_event(&mut tui, &mut app_server,
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))).await;
+        assert_eq!(app.current_displayed_thread_id(), Some(root_thread_id));
 
         let resumed = Box::pin(app_server.resume_thread(
             &app.local_settings,
@@ -2696,6 +2705,7 @@ fn selected_and_resumed_threads_use_server_capability_for_v1_and_v2_children() -
         ))
         .await?;
         assert!(resumed.blocks_direct_input);
+        assert!(resumed.can_accept_text_input);
         app.replace_chat_widget_with_app_server_thread(
             &mut tui,
             resumed,
@@ -2705,16 +2715,14 @@ fn selected_and_resumed_threads_use_server_capability_for_v1_and_v2_children() -
         .await?;
         while app_event_rx.try_recv().is_ok() {}
         app.chat_widget
-            .restore_user_message_to_composer("direct resume stays view-only".into());
-        let draft = app.chat_widget.composer_text_with_pending();
+            .restore_user_message_to_composer("direct resume accepts plain text".into());
         app.chat_widget
             .handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
-        assert_eq!(app.chat_widget.composer_text_with_pending(), draft);
-        assert!(
-            !std::iter::from_fn(|| app_event_rx.try_recv().ok())
-                .any(|event| matches!(event, AppEvent::CodexOp(Op::UserTurn { .. })))
-        );
+        assert!(app.chat_widget.composer_text_with_pending().is_empty());
+        assert!(std::iter::from_fn(|| app_event_rx.try_recv().ok())
+            .any(|event| matches!(event, AppEvent::SubagentTextInput { thread_id, .. }
+                if thread_id == child_thread_ids[1])));
         Ok(())
     }))
 }
@@ -4584,6 +4592,7 @@ async fn inactive_thread_started_notification_initializes_replay_session() -> Re
                 cwd: test_path_buf("/tmp/agent").abs(),
                 cli_version: "0.0.0".to_string(),
                 source: codex_app_server_protocol::SessionSource::Unknown,
+                can_accept_text_input: None,
                 can_accept_direct_input: None,
                 thread_source: None,
                 agent_nickname: Some("Robie".to_string()),
@@ -4689,6 +4698,7 @@ async fn inactive_thread_started_notification_preserves_primary_model_when_path_
                 cwd: test_path_buf("/tmp/agent").abs(),
                 cli_version: "0.0.0".to_string(),
                 source: codex_app_server_protocol::SessionSource::Unknown,
+                can_accept_text_input: None,
                 can_accept_direct_input: None,
                 thread_source: None,
                 agent_nickname: Some("Robie".to_string()),
@@ -4760,6 +4770,7 @@ async fn thread_read_session_state_does_not_reuse_primary_permission_profile() {
         cwd: test_path_buf("/tmp/read").abs(),
         cli_version: "0.0.0".to_string(),
         source: codex_app_server_protocol::SessionSource::Unknown,
+        can_accept_text_input: None,
         can_accept_direct_input: None,
         thread_source: None,
         agent_nickname: None,
@@ -5370,6 +5381,7 @@ async fn primary_thread_ignores_child_mcp_startup_notifications() {
             session: test_thread_session(child_thread_id, test_path_buf("/tmp/child")),
             turns: Vec::new(),
             blocks_direct_input: false,
+            can_accept_text_input: false,
             task_tools_available: false,
         },
         &mut child_snapshot,
@@ -6514,6 +6526,7 @@ async fn app_server_thread_replacement_clears_previous_transcript_before_replay(
                 }],
             )],
             blocks_direct_input: false,
+            can_accept_text_input: false,
             task_tools_available: false,
         },
         session_lifecycle::ThreadAttachPresentation::SessionLineage,
@@ -8879,6 +8892,7 @@ async fn refreshed_snapshot_session_persists_resumed_turns() {
             session: resumed_session.clone(),
             turns: resumed_turns.clone(),
             blocks_direct_input: true,
+            can_accept_text_input: false,
             task_tools_available: false,
         },
         &mut snapshot,

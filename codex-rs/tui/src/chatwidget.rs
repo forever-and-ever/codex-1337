@@ -180,7 +180,7 @@ const PET_SELECTION_LOADING_VIEW_ID: &str = "pet-selection-loading";
 const AMBIENT_PET_WRAP_GAP_COLUMNS: u16 = 2;
 const TUI_STUB_MESSAGE: &str = "Not available in TUI yet.";
 const PARENT_OWNED_INPUT_MESSAGE: &str =
-    "This sub-agent is controlled by its parent. Direct input is disabled.";
+    "This action is unavailable in a parent-controlled sub-agent.";
 
 fn normalize_thread_name(name: &str) -> Option<String> {
     let trimmed = name.trim();

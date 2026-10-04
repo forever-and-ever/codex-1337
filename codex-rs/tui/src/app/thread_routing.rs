@@ -1781,6 +1781,11 @@ impl App {
         started: AppServerStartedThread,
         snapshot: &mut ThreadEventSnapshot,
     ) {
+        if started.can_accept_text_input {
+            self.agent_navigation.text_input_threads.insert(started.session.thread_id);
+        } else {
+            self.agent_navigation.text_input_threads.remove(&started.session.thread_id);
+        }
         if started.blocks_direct_input {
             self.agent_navigation.mark_parent_owned(thread_id);
         }

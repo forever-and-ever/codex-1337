@@ -1,5 +1,6 @@
 use anyhow::Context;
 use anyhow::Result;
+use std::time::Duration;
 use app_test_support::ChatGptAuthFixture;
 use app_test_support::MockResponsesConfig;
 use app_test_support::TestAppServer;
@@ -4318,7 +4319,7 @@ async fn turn_start_emits_spawn_agent_item_with_model_metadata_v2() -> Result<()
 #[test_case(ThreadHistoryMode::Legacy; "legacy")]
 #[test_case(ThreadHistoryMode::Paginated; "paginated")]
 #[tokio::test]
-async fn direct_input_to_multi_agent_v2_subagent_is_rejected(
+async fn multi_agent_v2_subagent_text_input_preserves_ownership(
     history_mode: ThreadHistoryMode,
 ) -> Result<()> {
     const CHILD_PROMPT: &str = "child: do work";
@@ -4329,6 +4330,14 @@ async fn direct_input_to_multi_agent_v2_subagent_is_rejected(
         "direct app-server input is not allowed for multi-agent v2 sub-agents";
 
     let server = responses::start_mock_server().await;
+    let _child_turn = responses::mount_sse_once_match(
+        &server,
+        |req: &wiremock::Request| body_contains(req, CHILD_PROMPT),
+        responses::sse(vec![
+            responses::ev_response_created("resp-child-1"),
+            responses::ev_completed("resp-child-1"),
+        ]),
+    ).await;
     let spawn_args = serde_json::to_string(&json!({
         "message": CHILD_PROMPT,
         "task_name": "worker",
@@ -4457,6 +4466,15 @@ async fn direct_input_to_multi_agent_v2_subagent_is_rejected(
     ));
     assert_eq!(listed_child.history_mode, history_mode);
     assert_eq!(listed_child.can_accept_direct_input, Some(false));
+    assert_eq!(listed_child.can_accept_text_input, Some(true));
+
+    // Completion does not surrender the child's ownership or make it unavailable.
+    loop {
+        let completed: TurnCompletedNotification = mcp.read_notification("turn/completed").await?;
+        if completed.thread_id == child_thread_id {
+            break;
+        }
+    }
 
     let direct_inject_req = mcp
         .send_thread_inject_items_request(ThreadInjectItemsParams {
@@ -4482,6 +4500,7 @@ async fn direct_input_to_multi_agent_v2_subagent_is_rejected(
     let direct_turn_req = mcp
         .send_turn_start_request(TurnStartParams {
             thread_id: child_thread_id.clone(),
+            model: Some("gpt-5.4".to_string()),
             input: vec![V2UserInput::Text {
                 text: "direct app-server turn".to_string(),
                 text_elements: Vec::new(),
@@ -4505,7 +4524,7 @@ async fn direct_input_to_multi_agent_v2_subagent_is_rejected(
                 text: "direct app-server steer".to_string(),
                 text_elements: Vec::new(),
             }],
-            responsesapi_client_metadata: None,
+            responsesapi_client_metadata: Some(Default::default()),
             additional_context: None,
             expected_turn_id: "any-active-turn".to_string(),
         })
@@ -4517,6 +4536,70 @@ async fn direct_input_to_multi_agent_v2_subagent_is_rejected(
     .await??;
     assert_eq!(direct_steer_error.error.code, INVALID_REQUEST_ERROR_CODE);
     assert_eq!(direct_steer_error.error.message, ERROR_MESSAGE);
+
+    // Hold inference open while exercising exact-turn steering; interruption below releases it.
+    Mock::given(method("POST"))
+        .and(path("/responses"))
+        .and(|request: &Request| body_contains(request, "human follow-up"))
+        .respond_with(ResponseTemplate::new(200)
+            .insert_header("content-type", "text/event-stream")
+            .set_body_string(responses::sse(vec![responses::ev_completed("resp-human")]))
+            .set_delay(Duration::from_secs(60)))
+        .mount(&server).await;
+    let text = |text: &str| vec![V2UserInput::Text {
+        text: text.to_string(), text_elements: Vec::new(),
+    }];
+    let started: TurnStartResponse = mcp.request(|request_id| ClientRequest::TurnStart {
+        request_id,
+        params: TurnStartParams {
+            thread_id: child_thread_id.clone(), input: text("human follow-up"),
+            client_user_message_id: Some("human-start".to_string()),
+            ..Default::default()
+        },
+    }).await?;
+    let steered: codex_app_server_protocol::TurnSteerResponse = mcp.request(|request_id| ClientRequest::TurnSteer {
+        request_id,
+        params: TurnSteerParams {
+            thread_id: child_thread_id.clone(), input: text("human steer"),
+            expected_turn_id: started.turn.id.clone(),
+            client_user_message_id: Some("human-steer".to_string()),
+            ..Default::default()
+        },
+    }).await?;
+    assert_eq!(steered.turn_id, started.turn.id);
+    let stale = mcp.send_turn_steer_request(TurnSteerParams {
+        thread_id: child_thread_id.clone(), input: text("stale human steer"),
+        expected_turn_id: "stale-turn".to_string(), ..Default::default()
+    }).await?;
+    let stale: JSONRPCError = mcp.read_stream_until_error_message(RequestId::Integer(stale)).await?;
+    assert_eq!(stale.error.code, INVALID_REQUEST_ERROR_CODE);
+    let raced_start = mcp.send_turn_start_request(TurnStartParams {
+        thread_id: child_thread_id.clone(), input: text("raced human start"),
+        ..Default::default()
+    }).await?;
+    let raced_start: JSONRPCError = mcp.read_stream_until_error_message(RequestId::Integer(raced_start)).await?;
+    assert_eq!(raced_start.error.message, "Agent is already working; send again to steer the turn");
+    let unavailable = mcp.send_turn_start_request(TurnStartParams {
+        thread_id: uuid::Uuid::new_v4().to_string(), input: text("unavailable human start"),
+        ..Default::default()
+    }).await?;
+    let unavailable: JSONRPCError = mcp.read_stream_until_error_message(RequestId::Integer(unavailable)).await?;
+    assert_eq!(unavailable.error.code, INVALID_REQUEST_ERROR_CODE);
+    let current: codex_app_server_protocol::ThreadReadResponse = mcp.request(|request_id| ClientRequest::ThreadRead {
+        request_id,
+        params: codex_app_server_protocol::ThreadReadParams {
+            thread_id: child_thread_id.clone(), include_turns: true,
+        },
+    }).await?;
+    assert_eq!(current.thread.turns.last().map(|turn| &turn.id), Some(&started.turn.id));
+    assert_eq!(current.thread.parent_thread_id, Some(thread.id.clone()));
+    assert_eq!(current.thread.can_accept_direct_input, Some(false));
+    let _: codex_app_server_protocol::TurnInterruptResponse = mcp.request(|request_id| ClientRequest::TurnInterrupt {
+        request_id,
+        params: codex_app_server_protocol::TurnInterruptParams {
+            thread_id: child_thread_id.clone(), turn_id: started.turn.id.clone(),
+        },
+    }).await?;
 
     let direct_guardian_req = mcp
         .send_raw_request(

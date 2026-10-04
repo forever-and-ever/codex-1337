@@ -22,6 +22,10 @@ impl ChatWidget {
         self.bottom_pane.set_parent_owned_thread();
     }
 
+    pub(crate) fn set_child_text_input_enabled(&mut self) {
+        self.bottom_pane.set_child_text_input_enabled();
+    }
+
     pub(super) fn handle_composer_input_result(
         &mut self,
         input_result: InputResult,
@@ -62,6 +66,24 @@ impl ChatWidget {
                 text,
                 text_elements,
             } => {
+                if self.is_parent_owned_thread() {
+                    if self.turn_lifecycle.agent_turn_running && self.turn_lifecycle.last_turn_id.is_none() {
+                        self.add_error_message("Turn is not ready; send again".to_string());
+                        return;
+                    }
+                    if let Some(thread_id) = self.thread_id {
+                        self.app_event_tx.send(AppEvent::SubagentTextInput {
+                            thread_id,
+                            expected_turn_id: self.turn_lifecycle.agent_turn_running
+                                .then(|| self.turn_lifecycle.last_turn_id.clone()).flatten(),
+                            input: vec![codex_app_server_protocol::UserInput::Text {
+                                text,
+                                text_elements: text_elements.into_iter().map(Into::into).collect(),
+                            }],
+                        });
+                    }
+                    return;
+                }
                 let user_message = self.user_message_from_submission(text, text_elements);
                 if user_message.text.is_empty()
                     && user_message.local_images.is_empty()

@@ -646,6 +646,11 @@ impl BottomPane {
         self.request_redraw();
     }
 
+    pub(crate) fn set_child_text_input_enabled(&mut self) {
+        self.composer.set_child_text_input_enabled();
+        self.request_redraw();
+    }
+
     pub(crate) fn set_vim_enabled(&mut self, enabled: bool) {
         self.composer.set_vim_enabled(enabled);
         if let Some(questions) = &mut self.questions {

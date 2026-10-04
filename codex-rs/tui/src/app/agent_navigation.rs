@@ -69,6 +69,7 @@ pub(crate) struct AgentNavigationState {
     retired_threads: HashSet<ThreadId>,
     /// Spawned child threads whose instructions are owned by their parent agent.
     parent_owned_threads: HashSet<ThreadId>,
+    pub(super) text_input_threads: HashSet<ThreadId>,
     /// Coalesces root refreshes while rejecting replies from a previous session.
     pub(super) picker_refresh: Option<(ThreadId, Uuid)>,
     /// A spawn arrived after the in-flight list snapshot may have been taken.
@@ -94,6 +95,11 @@ impl AgentNavigationState {
         };
         if self.retired_threads.contains(&id) {
             return;
+        }
+        if thread.can_accept_text_input == Some(true) {
+            self.text_input_threads.insert(id);
+        } else {
+            self.text_input_threads.remove(&id);
         }
         if let Some(model) = AgentModel::from_thread(thread) {
             self.models.insert(id, model);
@@ -352,6 +358,7 @@ impl AgentNavigationState {
         self.stopped_threads.clear();
         self.retired_threads.clear();
         self.parent_owned_threads.clear();
+        self.text_input_threads.clear();
         self.picker_refresh = None;
         self.picker_refresh_known.clear();
     }
@@ -369,6 +376,7 @@ impl AgentNavigationState {
         self.order.retain(|candidate| *candidate != thread_id);
         self.stopped_threads.remove(&thread_id);
         self.parent_owned_threads.remove(&thread_id);
+        self.text_input_threads.remove(&thread_id);
     }
 
     pub(crate) fn retire(&mut self, thread_id: ThreadId) {

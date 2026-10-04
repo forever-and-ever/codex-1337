@@ -18,7 +18,7 @@ impl ChatComposer {
         source: crate::clipboard_copy::SelectionTarget,
     ) -> bool {
         self.draft.input_enabled
-            && !self.blocks_direct_input
+            && (!self.blocks_direct_input || self.child_text_input_enabled)
             && self.history_search.is_none()
             && self.draft.textarea.vim_query().is_none()
             && (source == crate::clipboard_copy::SelectionTarget::Primary
@@ -75,7 +75,7 @@ impl ChatComposer {
 
     pub(crate) fn prepare_mouse(&mut self, event: MouseEvent) -> bool {
         if !self.draft.input_enabled
-            || self.blocks_direct_input
+            || (self.blocks_direct_input && !self.child_text_input_enabled)
             || self.history_search.is_some()
             || self.draft.textarea.vim_query().is_some()
         {

@@ -1,5 +1,8 @@
 use super::invalid_request;
 use codex_app_server_protocol::JSONRPCErrorError;
+use codex_app_server_protocol::TurnStartParams;
+use codex_app_server_protocol::TurnSteerParams;
+use codex_app_server_protocol::UserInput;
 use codex_core::CodexThread;
 use codex_protocol::protocol::MultiAgentVersion;
 use codex_protocol::protocol::SessionSource;
@@ -34,4 +37,36 @@ pub(super) async fn ensure_direct_input_allowed(
     }
 
     Ok(())
+}
+
+/// Child text admission is separate from ownership: no settings, context or machine input.
+pub(super) fn validate_child_text_start(params: &TurnStartParams) -> Result<(), JSONRPCErrorError> {
+    let allowed = TurnStartParams {
+        thread_id: params.thread_id.clone(),
+        client_user_message_id: params.client_user_message_id.clone(),
+        input: params.input.clone(),
+        ..Default::default()
+    };
+    if params != &allowed || !is_text_input(&params.input) {
+        return Err(invalid_request(DIRECT_INPUT_TO_MULTI_AGENT_V2_SUBAGENT_ERROR));
+    }
+    Ok(())
+}
+
+pub(super) fn validate_child_text_steer(params: &TurnSteerParams) -> Result<(), JSONRPCErrorError> {
+    let allowed = TurnSteerParams {
+        thread_id: params.thread_id.clone(),
+        client_user_message_id: params.client_user_message_id.clone(),
+        input: params.input.clone(),
+        expected_turn_id: params.expected_turn_id.clone(),
+        ..Default::default()
+    };
+    if params != &allowed || !is_text_input(&params.input) {
+        return Err(invalid_request(DIRECT_INPUT_TO_MULTI_AGENT_V2_SUBAGENT_ERROR));
+    }
+    Ok(())
+}
+
+fn is_text_input(input: &[UserInput]) -> bool {
+    !input.is_empty() && input.iter().all(|item| matches!(item, UserInput::Text { .. }))
 }

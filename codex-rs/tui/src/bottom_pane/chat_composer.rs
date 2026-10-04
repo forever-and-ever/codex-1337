@@ -31,6 +31,9 @@
 //!
 //! Plain Left opens agents when the local-daemon composer is empty and available for input.
 //! Explicit editor remaps take precedence.
+//! Parent-owned children retain command restrictions; loaded children may submit plain text
+//! immediately, without prompt-history recall or queued follow-ups.
+//!
 //! Most key handling goes through [`ChatComposer::handle_key_event`], which dispatches to a
 //! popup-specific handler if a popup is visible and otherwise to
 //! [`ChatComposer::handle_key_event_without_popup`]. After every handled key, we call
@@ -630,6 +633,7 @@ pub(crate) struct ChatComposer {
     attachments: AttachmentState,
     placeholder_text: String,
     blocks_direct_input: bool,
+    child_text_input_enabled: bool,
     is_task_running: bool,
     queue_submissions: bool,
     /// Slash-command draft staged for local recall after application-level dispatch.
@@ -806,6 +810,7 @@ impl ChatComposer {
             attachments: AttachmentState::default(),
             placeholder_text,
             blocks_direct_input: false,
+            child_text_input_enabled: false,
             is_task_running: false,
             queue_submissions: false,
             pending_slash_command_history: None,
@@ -1658,6 +1663,10 @@ impl ChatComposer {
         self.blocks_direct_input = true;
     }
 
+    pub(crate) fn set_child_text_input_enabled(&mut self) {
+        self.child_text_input_enabled = true;
+    }
+
     /// Move the cursor to the end of the current text buffer.
     pub(crate) fn move_cursor_to_end(&mut self) {
         self.draft
@@ -1980,11 +1989,11 @@ impl ChatComposer {
             return self.handle_history_search_key(key_event);
         }
 
-        if self.handle_vim_history_key(key_event) {
+        if !self.blocks_direct_input && self.handle_vim_history_key(key_event) {
             return (InputResult::None, true);
         }
 
-        if Self::is_history_search_key(&key_event, &self.history_search_previous_keys) {
+        if !self.blocks_direct_input && Self::is_history_search_key(&key_event, &self.history_search_previous_keys) {
             return self.begin_history_search();
         }
 
@@ -3159,6 +3168,7 @@ impl ChatComposer {
         should_queue: bool,
         now: Instant,
     ) -> (InputResult, bool) {
+        let should_queue = should_queue && !self.blocks_direct_input;
         if !should_queue && self.handle_paste_enter(now) {
             return (InputResult::None, true);
         }
@@ -3311,7 +3321,11 @@ impl ChatComposer {
     }
 
     fn handle_parent_owned_submission(&mut self) -> Option<(InputResult, bool)> {
-        if !self.blocks_direct_input {
+        if !self.blocks_direct_input
+            || (self.child_text_input_enabled
+                && !self.current_text().starts_with(['/', '!'])
+                && self.attachments.local_images.is_empty()
+                && self.attachments.remote_image_urls.is_empty()) {
             return None;
         }
 
@@ -3578,7 +3592,8 @@ impl ChatComposer {
             )
         };
         if history_up_pressed || history_down_pressed {
-            if self.draft.textarea.mouse_selection_range().is_none()
+            if !self.blocks_direct_input
+                && self.draft.textarea.mouse_selection_range().is_none()
                 && self.history.should_handle_navigation(
                     &self.current_text(),
                     self.history_navigation_cursor(),
@@ -4706,7 +4721,7 @@ impl ChatComposer {
         if options.hint_placement == ComposerHintPlacement::BelowComposer {
             self.render_hints(footer_rect, buf, options);
         }
-        if self.blocks_direct_input {
+        if self.blocks_direct_input && !self.child_text_input_enabled {
             Paragraph::new(super::watch_help::lines(composer_rect.width))
                 .render(composer_rect, buf);
             return;
@@ -4901,6 +4916,14 @@ mod tests {
             "parent_owned_thread_placeholder",
             /*enhanced_keys_supported*/ false,
             ChatComposer::set_parent_owned_thread,
+        );
+        snapshot_composer_state(
+            "parent_owned_thread_text_input",
+            /*enhanced_keys_supported*/ false,
+            |composer| {
+                composer.set_parent_owned_thread();
+                composer.set_child_text_input_enabled();
+            },
         );
     }
 

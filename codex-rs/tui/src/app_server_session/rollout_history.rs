@@ -98,6 +98,7 @@ impl AppServerSession {
         .map_err(color_eyre::eyre::Report::msg)?;
         Ok((
             AppServerStartedThread {
+                can_accept_text_input: false,
                 session,
                 turns: thread.turns,
                 blocks_direct_input: false,
