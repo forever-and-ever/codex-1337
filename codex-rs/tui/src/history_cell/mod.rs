@@ -20,6 +20,8 @@ pub(crate) use code_mode::reunite_code_mode;
 pub(crate) use code_mode::split_code_mode_members;
 pub(crate) use tool_item::ToolItemCell;
 pub(crate) mod activity_parts;
+pub(crate) mod output_provenance;
+use output_provenance::OutputMode;
 mod delegation;
 mod returned_output;
 pub(crate) use activity_group::ActivityGroup;
@@ -349,6 +351,24 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
         _expanded: &std::collections::HashSet<String>,
     ) -> Option<activity_parts::ActivityParts> {
         None
+    }
+
+    fn has_formatted_output(&self) -> bool {
+        false
+    }
+
+    fn expanded_output_lines(&self, width: u16, _mode: OutputMode) -> Vec<HyperlinkLine> {
+        self.expanded_hyperlink_lines(width)
+    }
+
+    fn output_parts(
+        &self,
+        width: u16,
+        reserve: usize,
+        expanded: &std::collections::HashSet<String>,
+        _mode: OutputMode,
+    ) -> Option<activity_parts::ActivityParts> {
+        self.activity_parts(width, reserve, expanded)
     }
 
     /// Semantic estimate anchor in the compact presentation's selectable header source.

@@ -74,6 +74,13 @@ pub(crate) fn history_prompt_style() -> Style {
     Style::default().bg(best_color(blend(foreground, background, alpha)))
 }
 
+pub(crate) fn formatted_output_style() -> Style {
+    let preferred = default_fg().map_or(Color::Cyan, |foreground| {
+        rgb_color(blend((90, 165, 180), foreground, 0.25))
+    });
+    Style::default().fg(readable_color_on(preferred, /*background*/ None))
+}
+
 pub fn proposed_plan_style() -> Style {
     proposed_plan_style_for(default_bg())
 }

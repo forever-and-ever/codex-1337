@@ -1,6 +1,10 @@
 //! Captured tool-output text; separate text blocks use LF display framing.
 
 use super::HistoryCell;
+use super::output_provenance::OutputMode;
+use super::output_provenance::OutputProvenance;
+use super::output_provenance::format_json;
+use super::output_provenance::mark_lines;
 use super::raw_lines_from_source;
 use super::returned_output::WaitOutcome;
 use crate::terminal_hyperlinks::HyperlinkLine;
@@ -12,6 +16,7 @@ use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::FunctionCallOutputContentItem;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
+use std::sync::OnceLock;
 
 #[derive(Debug)]
 pub(crate) struct ToolOutputCell {
@@ -20,6 +25,8 @@ pub(crate) struct ToolOutputCell {
     output: FunctionCallOutputBody,
     readable: String,
     wait: Option<WaitOutcome>,
+    code_mode: bool,
+    formatted: OnceLock<Option<Vec<Option<String>>>>,
 }
 
 impl ToolOutputCell {
@@ -85,11 +92,98 @@ impl ToolOutputCell {
             output: output.clone(),
             readable,
             wait,
+            code_mode,
+            formatted: OnceLock::new(),
         })
+    }
+
+    fn blocks(&self) -> Vec<&str> {
+        match &self.output {
+            FunctionCallOutputBody::Text(text) => vec![text],
+            FunctionCallOutputBody::ContentItems(items) => items
+                .iter()
+                .enumerate()
+                .filter_map(|(index, item)| match item {
+                    FunctionCallOutputContentItem::InputText { text }
+                        if !(self.code_mode
+                            && index == 0
+                            && super::returned_output::is_execution_header(text)) =>
+                    {
+                        Some(text.as_str())
+                    }
+                    _ => None,
+                })
+                .collect(),
+        }
+    }
+
+    pub(crate) fn output_lines(&self, width: u16, mode: OutputMode) -> Vec<HyperlinkLine> {
+        if self.readable.is_empty() {
+            return Vec::new();
+        }
+        let Some(formatted) = self.projection() else {
+            return self.transcript_hyperlink_lines(width);
+        };
+        let mut lines = Vec::new();
+        for (source, projection) in self.blocks().into_iter().zip(formatted) {
+            let (text, provenance) = match (mode, projection) {
+                (OutputMode::Fmt, Some(projection)) => {
+                    (projection.as_str(), OutputProvenance::Formatted)
+                }
+                (OutputMode::Raw | OutputMode::Fmt, _) => (source, OutputProvenance::Captured),
+            };
+            let mut block = plain_hyperlink_lines(
+                text.split('\n')
+                    .map(|line| Line::from(line.to_owned()))
+                    .collect(),
+            );
+            mark_lines(&mut block, provenance);
+            lines.extend(block);
+        }
+        adaptive_wrap_hyperlink_lines(
+            &lines,
+            RtOptions::new(width as usize)
+                .initial_indent(crate::transcript_geometry::CHILD_PREFIX.into())
+                .subsequent_indent(crate::transcript_geometry::CHILD_PREFIX.into()),
+        )
+    }
+
+    fn projection(&self) -> Option<&[Option<String>]> {
+        self.formatted
+            .get_or_init(|| {
+                // LF framing bounds the work even when a capture contains many empty blocks.
+                if self.readable.len() > super::output_provenance::INPUT_LIMIT {
+                    return None;
+                }
+                let blocks = self.blocks();
+                let mut size = blocks.len();
+                let mut projection = Vec::with_capacity(blocks.len());
+                for source in blocks {
+                    let formatted = format_json(source).ok()?;
+                    size =
+                        size.saturating_add(formatted.as_ref().map_or(source.len(), String::len));
+                    if size > super::output_provenance::OUTPUT_LIMIT {
+                        return None;
+                    }
+                    projection.push(formatted);
+                }
+                projection.iter().any(Option::is_some).then_some(projection)
+            })
+            .as_deref()
     }
 }
 
 impl HistoryCell for ToolOutputCell {
+    fn has_formatted_output(&self) -> bool {
+        self.projection()
+            .is_some_and(|blocks| blocks.iter().any(Option::is_some))
+    }
+
+    fn expanded_output_lines(&self, width: u16, mode: OutputMode) -> Vec<HyperlinkLine> {
+        let mut lines = self.compact_hyperlink_lines(width);
+        lines.extend(self.output_lines(width, mode));
+        lines
+    }
     fn nested_detail_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         self.transcript_hyperlink_lines(width)
     }
@@ -163,13 +257,15 @@ impl HistoryCell for ToolOutputCell {
         if self.readable.is_empty() {
             return Vec::new();
         }
+        let mut lines = plain_hyperlink_lines(
+            self.readable
+                .split('\n')
+                .map(|line| Line::from(line.to_owned()))
+                .collect(),
+        );
+        mark_lines(&mut lines, OutputProvenance::Captured);
         adaptive_wrap_hyperlink_lines(
-            &plain_hyperlink_lines(
-                self.readable
-                    .split('\n')
-                    .map(|line| Line::from(line.to_owned()))
-                    .collect(),
-            ),
+            &lines,
             RtOptions::new(width as usize)
                 .initial_indent(crate::transcript_geometry::CHILD_PREFIX.into())
                 .subsequent_indent(crate::transcript_geometry::CHILD_PREFIX.into()),
