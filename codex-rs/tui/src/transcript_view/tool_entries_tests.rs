@@ -172,6 +172,77 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
             .any(|line| line.source.as_ref().unwrap().output_provenance
                 == OutputProvenance::Formatted)
     );
+    // Safety must remain a visible, copyable projection even when JSON caps reject the capture.
+    let unsafe_text = "\u{1b}[31munsafe\u{7}\rend\u{7f}\u{85}\nlast\tcolumn";
+    let safe_text = r"\u{1b}[31munsafe\u{7}\rend\u{7f}\u{85}".to_owned() + "\nlast\tcolumn";
+    for (source, safe) in [
+        (unsafe_text.to_owned(), safe_text.clone()),
+        (
+            "{\r\"key\":true}".into(),
+            r"{\r".to_owned() + "\"key\":true}",
+        ),
+        (
+            format!("{unsafe_text}{}", "x".repeat(256 * 1024)),
+            format!("{safe_text}{}", "x".repeat(256 * 1024)),
+        ),
+    ] {
+        let paint = source == unsafe_text;
+        let output = Arc::new(
+            ToolOutputCell::from_output(
+                "unsafe",
+                Some("unsafe"),
+                "tool",
+                /*namespace*/ None,
+                &FunctionCallOutputBody::Text(source),
+            )
+            .unwrap(),
+        );
+        assert!(!output.has_formatted_output());
+        for mode in [OutputMode::Raw, OutputMode::Fmt] {
+            let lines = output.output_lines(u16::MAX, mode);
+            assert_eq!(
+                lines
+                    .first()
+                    .unwrap()
+                    .source
+                    .as_ref()
+                    .unwrap()
+                    .output_provenance,
+                OutputProvenance::Formatted
+            );
+            assert_eq!(
+                lines
+                    .last()
+                    .unwrap()
+                    .source
+                    .as_ref()
+                    .unwrap()
+                    .output_provenance,
+                OutputProvenance::Client
+            );
+            let layout = TextLayout::new(lines, u16::MAX);
+            assert_eq!(layout.text(), format!("{safe}\n"));
+        }
+        if !paint {
+            continue;
+        }
+        let cells: Vec<Arc<dyn HistoryCell>> = vec![output.clone()];
+        let mut view = TranscriptView::default();
+        view.disclosure.expanded.extend(output.activity_ids());
+        tests::render(&mut view, &cells, /*width*/ 32, /*height*/ 12);
+        let layout = view.current_layout(&cells, /*index*/ 0).unwrap();
+        let start = layout.text().find(&safe).unwrap();
+        view.begin_selection(&cells, /*column*/ 4, /*row*/ 1, /*clicks*/ 1);
+        let selection = view.selection.as_mut().unwrap();
+        selection.start.offset = start;
+        selection.end.offset = start + safe.len();
+        tests::render(&mut view, &cells, /*width*/ 24, /*height*/ 16);
+        assert_eq!(view.selected_text(&cells), Some(safe));
+        view.end_selection(&cells);
+        let buffer = tests::render(&mut view, &cells, /*width*/ 32, /*height*/ 12);
+        assert!(tests::text(&buffer).contains("escaped for display"));
+        painted.push(format!("escaped capture\n{buffer:?}"));
+    }
     insta::assert_snapshot!(painted.join("\n"));
 }
 

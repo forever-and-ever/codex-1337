@@ -60,6 +60,10 @@ pub(super) const INPUT_LIMIT: usize = 256 * 1024;
 pub(super) const OUTPUT_LIMIT: usize = 1024 * 1024;
 pub(super) struct ProjectionLimit;
 
+pub(super) fn unsafe_control(ch: char) -> bool {
+    ch.is_control() && !matches!(ch, '\n' | '\t')
+}
+
 /// Validate without a DOM, then edit only framing whitespace and value whitespace escapes.
 /// A limit failure rejects the entire capture projection, not a truncated or partial result.
 #[expect(
@@ -70,6 +74,10 @@ pub(super) fn format_json(source: &str) -> Result<Option<String>, ProjectionLimi
     const DEPTH_LIMIT: usize = 128;
     if source.len() > INPUT_LIMIT {
         return Err(ProjectionLimit);
+    }
+    // Mandatory visible escaping must not be hidden by optional JSON whitespace formatting.
+    if source.chars().any(unsafe_control) {
+        return Ok(None);
     }
     let source = source.trim_matches([' ', '\n', '\r', '\t']);
     if !matches!(source.as_bytes().first(), Some(b'{' | b'[')) {

@@ -3,8 +3,10 @@
 use super::HistoryCell;
 use super::output_provenance::OutputMode;
 use super::output_provenance::OutputProvenance;
+use super::output_provenance::client_notice;
 use super::output_provenance::format_json;
 use super::output_provenance::mark_lines;
+use super::output_provenance::unsafe_control;
 use super::raw_lines_from_source;
 use super::returned_output::WaitOutcome;
 use crate::terminal_hyperlinks::HyperlinkLine;
@@ -27,6 +29,7 @@ pub(crate) struct ToolOutputCell {
     wait: Option<WaitOutcome>,
     code_mode: bool,
     formatted: OnceLock<Option<Vec<Option<String>>>>,
+    escaped: OnceLock<Option<Vec<Option<String>>>>,
 }
 
 impl ToolOutputCell {
@@ -94,6 +97,7 @@ impl ToolOutputCell {
             wait,
             code_mode,
             formatted: OnceLock::new(),
+            escaped: OnceLock::new(),
         })
     }
 
@@ -121,16 +125,39 @@ impl ToolOutputCell {
         if self.readable.is_empty() {
             return Vec::new();
         }
-        let Some(formatted) = self.projection() else {
-            return self.transcript_hyperlink_lines(width);
-        };
+        let formatted = self.projection();
+        // Safety is mandatory even when optional JSON formatting exceeds its caps.
+        // It is linear in retained input, expands by at most 6x, and never truncates.
+        let escaped = self.escaped.get_or_init(|| {
+            self.readable.chars().any(unsafe_control).then(|| {
+                self.blocks()
+                    .into_iter()
+                    .map(|source| {
+                        source.chars().any(unsafe_control).then(|| {
+                            source.chars().fold(String::new(), |mut text, ch| {
+                                if unsafe_control(ch) {
+                                    text.extend(ch.escape_default());
+                                } else {
+                                    text.push(ch);
+                                }
+                                text
+                            })
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            })
+        });
         let mut lines = Vec::new();
-        for (source, projection) in self.blocks().into_iter().zip(formatted) {
-            let (text, provenance) = match (mode, projection) {
-                (OutputMode::Fmt, Some(projection)) => {
-                    (projection.as_str(), OutputProvenance::Formatted)
-                }
-                (OutputMode::Raw | OutputMode::Fmt, _) => (source, OutputProvenance::Captured),
+        for (index, source) in self.blocks().into_iter().enumerate() {
+            let projection = (mode == OutputMode::Fmt)
+                .then(|| formatted.and_then(|blocks| blocks[index].as_deref()))
+                .flatten()
+                .or_else(|| escaped.as_ref().and_then(|blocks| blocks[index].as_deref()));
+            let text = projection.unwrap_or(source);
+            let provenance = if projection.is_some() {
+                OutputProvenance::Formatted
+            } else {
+                OutputProvenance::Captured
             };
             let mut block = plain_hyperlink_lines(
                 text.split('\n')
@@ -140,12 +167,20 @@ impl ToolOutputCell {
             mark_lines(&mut block, provenance);
             lines.extend(block);
         }
-        adaptive_wrap_hyperlink_lines(
+        let mut lines = adaptive_wrap_hyperlink_lines(
             &lines,
             RtOptions::new(width as usize)
                 .initial_indent(crate::transcript_geometry::CHILD_PREFIX.into())
                 .subsequent_indent(crate::transcript_geometry::CHILD_PREFIX.into()),
-        )
+        );
+        if escaped.is_some() {
+            // Let TextLayout wrap this empty-source label; source wrapping would drop its tail.
+            lines.push(client_notice(&format!(
+                "{}Control characters escaped for display",
+                crate::transcript_geometry::CHILD_PREFIX
+            )));
+        }
+        lines
     }
 
     fn projection(&self) -> Option<&[Option<String>]> {
@@ -254,22 +289,7 @@ impl HistoryCell for ToolOutputCell {
     }
 
     fn transcript_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        if self.readable.is_empty() {
-            return Vec::new();
-        }
-        let mut lines = plain_hyperlink_lines(
-            self.readable
-                .split('\n')
-                .map(|line| Line::from(line.to_owned()))
-                .collect(),
-        );
-        mark_lines(&mut lines, OutputProvenance::Captured);
-        adaptive_wrap_hyperlink_lines(
-            &lines,
-            RtOptions::new(width as usize)
-                .initial_indent(crate::transcript_geometry::CHILD_PREFIX.into())
-                .subsequent_indent(crate::transcript_geometry::CHILD_PREFIX.into()),
-        )
+        self.output_lines(width, OutputMode::Raw)
     }
 
     fn is_stream_continuation(&self) -> bool {

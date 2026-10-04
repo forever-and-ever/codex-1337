@@ -26,7 +26,8 @@ estimates remain on their owning file row when its heading is omitted.
 
 # Expanded tool details
 
-- **Raw:** exact captured text, using the terminal's default foreground/background.
+- **Raw:** exact captured text, using the terminal's default foreground/background,
+  except mandatory terminal-safety escaping described below.
 - **Fmt:** a useful, bounded JSON projection, using a readable foreground tint on
   the default background. Keep every field, duplicate key, key order, container,
   and numeric lexeme. Only complete object/array blocks qualify; do not extract
@@ -47,8 +48,14 @@ and keyboard access rather than introducing another toolbar row.
 Bodies remain ordinary selection surfaces. Copy uses the displayed representation
 and excludes gutters, soft wraps, token bills, controls, and client notices.
 Selection/focus must remain distinct from provenance; PRIMARY copy is unchanged.
-Existing terminal-control safety handling still applies; captured source is never
-rewritten to obtain a display projection.
+Captured source is never rewritten to obtain a display projection. Literal control
+characters other than ordinary LF/TAB are visibly escaped before captured text
+reaches the terminal, including when JSON formatting exceeds its limits. Affected
+blocks are tinted even in Raw mode, with one Client notice per capture:
+`Control characters escaped for display`. Keep these blocks in their safety
+projection in both modes; optional JSON layout must not erase literal controls.
+In this safety exception, copy uses the displayed escapes, not silently filtered
+original bytes; global clipboard/security policy and unrelated transcripts are unchanged.
 
 # Headers, primary, and secondary text
 
