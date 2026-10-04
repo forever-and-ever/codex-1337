@@ -109,6 +109,28 @@ async fn metadata_only_receipt_keeps_block_disclosure_and_replay_without_a_token
         edit,
         code_mode(
             "receipt-exec",
+            CodeModeEvent::ToolCall {
+                call_id: "native-edit".into(),
+            },
+        ),
+        ThreadItem::FileChange {
+            id: "native-edit".into(),
+            changes: vec![
+                codex_app_server_protocol::FileUpdateChange {
+                    path: "alpha.rs".into(),
+                    kind: codex_app_server_protocol::PatchChangeKind::Add,
+                    diff: "created body\n".into(),
+                },
+                codex_app_server_protocol::FileUpdateChange {
+                    path: "beta.rs".into(),
+                    kind: codex_app_server_protocol::PatchChangeKind::Delete,
+                    diff: "deleted body\n".into(),
+                },
+            ],
+            status: codex_app_server_protocol::PatchApplyStatus::Completed,
+        },
+        code_mode(
+            "receipt-exec",
             CodeModeEvent::Finished {
                 status: CodeModeStatus::Completed,
             },
@@ -154,7 +176,7 @@ async fn metadata_only_receipt_keeps_block_disclosure_and_replay_without_a_token
             closed.controls.len(),
             opened.controls.len()
         ),
-        (true, 0, 1)
+        (true, 3, 3)
     );
     assert_eq!(
         app.transcript_view
@@ -170,6 +192,37 @@ async fn metadata_only_receipt_keeps_block_disclosure_and_replay_without_a_token
     };
     assert!(text(&diff.lines).contains("new"));
     assert!(!text(&closed.lines).contains("new"));
+    // Human-only diffs remain independently reachable even with the outer output closed.
+    let file_ids: Vec<_> = closed
+        .controls
+        .iter()
+        .map(|control| control.id.clone())
+        .collect();
+    let mut file_snapshots = Vec::new();
+    for (index, id) in file_ids.iter().enumerate() {
+        let file = expected[0]
+            .activity_parts(90, /*header_reserve*/ 0, &HashSet::from([id.clone()]))
+            .unwrap();
+        assert_eq!(
+            file.controls
+                .iter()
+                .map(|control| control.expanded)
+                .collect::<Vec<_>>(),
+            (0..3).map(|file| file == index).collect::<Vec<_>>()
+        );
+        let selected = &file.controls[index];
+        assert!(
+            text(&file.lines[selected.line..])
+                .contains(["new", "created body", "deleted body"][index])
+        );
+        for body in ["created body", "deleted body"] {
+            assert_eq!(
+                text(&file.lines).contains(body),
+                matches!((index, body), (1, "created body") | (2, "deleted body"))
+            );
+        }
+        file_snapshots.push(format!("Independent file {index}\n{}", text(&file.lines)));
+    }
     assert_eq!(
         app.transcript_cells[0].expanded_hyperlink_lines(90),
         expected[0].expanded_hyperlink_lines(90)
@@ -187,15 +240,74 @@ async fn metadata_only_receipt_keeps_block_disclosure_and_replay_without_a_token
             expected[0].expanded_hyperlink_lines(90),
             "split={split}"
         );
+        assert_eq!(
+            app.transcript_cells[0]
+                .activity_parts(90, /*header_reserve*/ 0, &HashSet::new())
+                .unwrap()
+                .controls
+                .into_iter()
+                .map(|control| control.id)
+                .collect::<Vec<_>>(),
+            file_ids,
+            "split={split}"
+        );
     }
+    let mut view = crate::transcript_view::TranscriptView::default();
+    let render = |view: &mut crate::transcript_view::TranscriptView| {
+        let area = ratatui::layout::Rect::new(
+            /*x*/ 0, /*y*/ 0, /*width*/ 90, /*height*/ 30,
+        );
+        let mut buffer = ratatui::buffer::Buffer::empty(area);
+        view.render(area, &mut buffer, &expected);
+        buffer
+            .content()
+            .chunks(90)
+            .map(|row| {
+                row.iter()
+                    .map(ratatui::buffer::Cell::symbol)
+                    .collect::<String>()
+                    .trim_end()
+                    .to_owned()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim_end()
+            .to_owned()
+    };
+    let painted = render(&mut view);
+    assert_eq!(painted.matches("[+]").count(), 4);
+    let row = painted
+        .lines()
+        .position(|line| line.contains("alpha.rs"))
+        .unwrap();
+    assert!(
+        view.handle_mouse(
+            crossterm::event::MouseEvent {
+                kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+                column: 0,
+                row: u16::try_from(row).unwrap(),
+                modifiers: crossterm::event::KeyModifiers::NONE,
+            },
+            &expected
+        )
+        .is_some()
+    );
+    let clicked = render(&mut view);
+    assert_eq!(clicked.matches("[-]").count(), 1);
+    assert!(clicked.contains("created body"));
+    assert!(!clicked.contains("deleted body"));
+    file_snapshots.push(format!(
+        "Painted collapsed\n{painted}\nClicked native file\n{clicked}"
+    ));
     insta::assert_snapshot!(
         "metadata_only_code_mode_receipt",
         format!(
-            "Collapsed\n{}\nBlock expanded\n{}\nFile expanded\n{}\nTranscript\n{}",
+            "Collapsed\n{}\nBlock expanded\n{}\nFile expanded\n{}\nTranscript\n{}\n{}",
             text(&closed.lines),
             text(&opened.lines),
             text(&diff.lines),
-            text(&expected[0].transcript_hyperlink_lines(90))
+            text(&expected[0].transcript_hyperlink_lines(90)),
+            file_snapshots.join("\n")
         )
     );
     // A later model-visible return contributes one bill; receipt bytes and replay never do.

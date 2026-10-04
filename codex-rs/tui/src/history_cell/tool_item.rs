@@ -80,6 +80,17 @@ impl HistoryCell for ToolItemCell {
         }
         self.inner.nested_activity_parts(width, expanded)
     }
+    fn nested_summary_parts(&self, width: u16, expanded: &HashSet<String>) -> ActivityParts {
+        if self.inner.as_any().is::<super::PlainHistoryCell>() {
+            return ActivityParts {
+                lines: self.nested_summary_lines(width),
+                header: self.activity_header(),
+                output: None,
+                controls: Vec::new(),
+            };
+        }
+        self.inner.nested_summary_parts(width, expanded)
+    }
     fn has_nested_details(&self, width: u16) -> bool {
         self.inner.has_nested_details(width)
     }

@@ -93,6 +93,42 @@ struct NodeReplExecOutput {
 }
 
 impl McpToolCallCell {
+    fn nested_receipt_parts(
+        &self,
+        width: u16,
+        expanded: &std::collections::HashSet<String>,
+        lines: Vec<HyperlinkLine>,
+    ) -> super::activity_parts::ActivityParts {
+        let mut parts = super::activity_parts::ActivityParts {
+            lines,
+            header: self.activity_header(),
+            output: None,
+            controls: Vec::new(),
+        };
+        let Some(Ok(result)) = &self.result else {
+            return parts;
+        };
+        let Some(receipt) = result.file_changes.as_ref() else {
+            return parts;
+        };
+        let offset = parts.lines.len();
+        let (file_lines, mut controls) = receipt.lines(
+            width.saturating_sub(crate::transcript_geometry::CHILD_INDENT),
+            FileChangeDetail::Disclosed,
+            &self.call_id,
+            expanded,
+        );
+        for control in &mut controls {
+            control.line += offset;
+        }
+        parts.lines.extend(prefix_hyperlink_lines(
+            file_lines,
+            crate::transcript_geometry::CHILD_PREFIX.into(),
+            crate::transcript_geometry::CHILD_PREFIX.into(),
+        ));
+        parts.controls = controls;
+        parts
+    }
     fn file_change_lines(&self, width: u16, detail: FileChangeDetail) -> Vec<HyperlinkLine> {
         let Some(Ok(result)) = &self.result else {
             return Vec::new();
@@ -450,6 +486,15 @@ impl HistoryCell for McpToolCallCell {
         lines
     }
 
+    fn nested_summary_parts(
+        &self,
+        width: u16,
+        expanded: &std::collections::HashSet<String>,
+    ) -> super::activity_parts::ActivityParts {
+        let lines = self.render_hyperlink_lines(width, McpToolCallRenderMode::Summary);
+        self.nested_receipt_parts(width, expanded, lines)
+    }
+
     fn nested_activity_parts(
         &self,
         width: u16,
@@ -457,32 +502,7 @@ impl HistoryCell for McpToolCallCell {
     ) -> Option<super::activity_parts::ActivityParts> {
         let mut nested = self.clone();
         nested.completed_at = None;
-        let Some(Ok(result)) = &self.result else {
-            return None;
-        };
-        let receipt = result.file_changes.as_ref()?;
-        let mut lines = nested.activity_argument_lines(width);
-        let offset = lines.len();
-        let (file_lines, mut controls) = receipt.lines(
-            width.saturating_sub(crate::transcript_geometry::CHILD_INDENT),
-            FileChangeDetail::Disclosed,
-            &self.call_id,
-            expanded,
-        );
-        for control in &mut controls {
-            control.line += offset;
-        }
-        lines.extend(prefix_hyperlink_lines(
-            file_lines,
-            crate::transcript_geometry::CHILD_PREFIX.into(),
-            crate::transcript_geometry::CHILD_PREFIX.into(),
-        ));
-        Some(super::activity_parts::ActivityParts {
-            lines,
-            header: nested.activity_header(),
-            output: None,
-            controls,
-        })
+        Some(nested.nested_receipt_parts(width, expanded, nested.activity_argument_lines(width)))
     }
 
     fn has_nested_details(&self, width: u16) -> bool {

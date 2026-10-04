@@ -202,18 +202,25 @@ impl CodeModeCell {
         Some(spans.into())
     }
 
-    fn detail_parts(
+    fn parts(
         &self,
         width: u16,
         expanded: &HashSet<String>,
     ) -> super::activity_parts::ActivityParts {
         let mut lines: Vec<_> = self.header().into_iter().map(HyperlinkLine::from).collect();
         let mut controls = Vec::new();
+        let block_expanded = expanded.contains(&format!("code-mode:{}", self.exec_call_id));
         for member in &self.members {
-            if let Some(mut parts) = member.nested_activity_parts(
-                width.saturating_sub(crate::transcript_geometry::CHILD_INDENT),
-                expanded,
-            ) {
+            let nested_width = width.saturating_sub(crate::transcript_geometry::CHILD_INDENT);
+            if !block_expanded && member.as_any().is::<ToolOutputCell>() {
+                continue;
+            }
+            let parts = if block_expanded {
+                member.nested_activity_parts(nested_width, expanded)
+            } else {
+                Some(member.nested_summary_parts(nested_width, expanded))
+            };
+            if let Some(mut parts) = parts {
                 let offset = lines.len();
                 for control in &mut parts.controls {
                     control.line += offset;
@@ -234,7 +241,8 @@ impl CodeModeCell {
                 ));
             }
         }
-        if self.status().is_some()
+        if block_expanded
+            && self.status().is_some()
             && !self
                 .members
                 .iter()
@@ -323,16 +331,7 @@ impl HistoryCell for CodeModeCell {
         _header_reserve: usize,
         expanded: &HashSet<String>,
     ) -> Option<super::activity_parts::ActivityParts> {
-        if expanded.contains(&format!("code-mode:{}", self.exec_call_id)) {
-            Some(self.detail_parts(width, expanded))
-        } else {
-            Some(super::activity_parts::ActivityParts {
-                lines: self.compact_hyperlink_lines(width),
-                header: self.activity_header(),
-                output: self.activity_disclosure(width),
-                controls: Vec::new(),
-            })
-        }
+        Some(self.parts(width, expanded))
     }
 
     fn transcript_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {

@@ -68,6 +68,37 @@ impl PatchHistoryCell {
 }
 
 impl HistoryCell for PatchHistoryCell {
+    fn nested_detail_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        self.display_hyperlink_lines(width)
+    }
+    fn nested_summary_parts(
+        &self,
+        width: u16,
+        expanded: &std::collections::HashSet<String>,
+    ) -> super::activity_parts::ActivityParts {
+        let open = expanded.contains(&self.activity_id);
+        super::activity_parts::ActivityParts {
+            lines: if open {
+                self.display_hyperlink_lines(width)
+            } else {
+                self.summary(width)
+            },
+            header: self.activity_header(),
+            output: None,
+            controls: vec![super::activity_parts::PartControl {
+                id: self.activity_id.clone(),
+                line: usize::from(!self.continuation),
+                expanded: open,
+            }],
+        }
+    }
+    fn nested_activity_parts(
+        &self,
+        width: u16,
+        expanded: &std::collections::HashSet<String>,
+    ) -> Option<super::activity_parts::ActivityParts> {
+        Some(self.nested_summary_parts(width, expanded))
+    }
     fn tool_call_ids(&self) -> Vec<&str> {
         vec![&self.call_id]
     }

@@ -295,6 +295,20 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
         self.activity_argument_lines(width)
     }
 
+    /// Compact nested actions retain independent attachment controls, not child output.
+    fn nested_summary_parts(
+        &self,
+        width: u16,
+        _expanded: &std::collections::HashSet<String>,
+    ) -> activity_parts::ActivityParts {
+        activity_parts::ActivityParts {
+            lines: self.nested_summary_lines(width),
+            header: self.activity_header(),
+            output: None,
+            controls: Vec::new(),
+        }
+    }
+
     fn nested_activity_parts(
         &self,
         width: u16,
