@@ -296,6 +296,240 @@ fn overview_thread(
 }
 
 #[tokio::test]
+async fn agents_navigation_spawn_admission_separates_family_from_mcp_transport() {
+    use codex_app_server_client::AppServerEvent;
+    use codex_app_server_protocol::McpServerStartupState;
+    use codex_app_server_protocol::McpServerStatusUpdatedNotification;
+    use codex_app_server_protocol::ThreadStartedNotification;
+    use codex_protocol::AgentPath;
+
+    let mut app = make_test_app().await;
+    let (tx, mut events) = tokio::sync::mpsc::unbounded_channel();
+    app.app_event_tx = AppEventSender::new(tx);
+    let mut server = crate::start_embedded_app_server_for_picker(&app.config)
+        .await
+        .unwrap();
+    let started = server.start_thread(&app.config).await.unwrap();
+    let root = started.session.thread_id;
+    app.primary_thread_id = Some(root);
+    app.active_thread_id = Some(root);
+    app.primary_session_configured = Some(started.session);
+    let foreign_root = ThreadId::new();
+    let foreign_parent = ThreadId::new();
+    let foreign_child = ThreadId::new();
+    let own_parent = ThreadId::new();
+    let own_child = ThreadId::new();
+    let spawn = |id, parent, path: &str| {
+        let mut thread = overview_thread(id, Some(parent), "worker", ThreadStatus::Idle);
+        thread.model = Some("gpt-6.1-sol".into());
+        thread.reasoning_effort = Some(ReasoningEffortConfig::High);
+        thread.agent_nickname = Some("Helmholtz".into());
+        thread.source = SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+            parent_thread_id: parent,
+            depth: 1,
+            agent_path: Some(AgentPath::try_from(path).unwrap()),
+            agent_nickname: None,
+            agent_role: None,
+        });
+        ServerNotification::ThreadStarted(ThreadStartedNotification { thread })
+    };
+    let mcp = |id: ThreadId| {
+        ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+            thread_id: Some(id.to_string()),
+            name: "eager".into(),
+            status: McpServerStartupState::Ready,
+            error: None,
+            failure_reason: None,
+        })
+    };
+    let status = |id: ThreadId| {
+        ServerNotification::ThreadStatusChanged(
+            codex_app_server_protocol::ThreadStatusChangedNotification {
+                thread_id: id.to_string(),
+                status: ThreadStatus::Active {
+                    active_flags: Vec::new(),
+                },
+            },
+        )
+    };
+    let activity = |id: ThreadId| {
+        ServerNotification::ThreadWorkStatusUpdated(
+            codex_app_server_protocol::ThreadWorkStatusUpdatedNotification {
+                thread_id: id.to_string(),
+                status: codex_protocol::protocol::WorkStatus {
+                    turn_id: "turn".into(),
+                    activity: "Inspect parser".into(),
+                    emitted_at: None,
+                },
+            },
+        )
+    };
+    // MCP startup can arrive globally. A transport manufactured by it must never
+    // turn a rejected foreign parent into ancestry evidence for its later child.
+    for notification in [
+        spawn(foreign_parent, foreign_root, "/root/foreign"),
+        mcp(foreign_parent),
+        spawn(foreign_child, foreign_parent, "/root/foreign/nested"),
+        status(foreign_child),
+        activity(foreign_child),
+        spawn(own_parent, root, "/root/own"),
+        spawn(own_child, own_parent, "/root/own/nested"),
+        mcp(own_child),
+        status(own_child),
+        activity(own_child),
+    ] {
+        app.handle_app_server_event(
+            &server,
+            AppServerEvent::ServerNotification(Box::new(notification)),
+        )
+        .await;
+    }
+    let rows = app
+        .agent_navigation
+        .roster
+        .lock()
+        .unwrap()
+        .rows
+        .iter()
+        .map(|row| {
+            (
+                row.id,
+                row.name.clone(),
+                row.model.clone(),
+                row.activity.clone(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        rows,
+        vec![
+            (
+                own_child,
+                "own/nested".into(),
+                Some(crate::subagent_roster::AgentModel {
+                    model: "gpt-6.1-sol".into(),
+                    effort: Some(ReasoningEffortConfig::High),
+                }),
+                Some("Inspect parser".into())
+            ),
+            (
+                own_parent,
+                "own".into(),
+                Some(crate::subagent_roster::AgentModel {
+                    model: "gpt-6.1-sol".into(),
+                    effort: Some(ReasoningEffortConfig::High),
+                }),
+                None
+            ),
+        ],
+    );
+    assert!(app.agent_navigation.get(&foreign_parent).is_none());
+    assert!(app.agent_navigation.get(&foreign_child).is_none());
+    assert!(!app.thread_event_channels.contains_key(&foreign_parent));
+    assert!(!app.thread_event_channels.contains_key(&foreign_child));
+    {
+        let own_events = &app.thread_event_channels[&own_child]
+            .store
+            .lock()
+            .await
+            .buffer;
+        assert!(own_events.iter().any(|event| matches!(event, ThreadBufferedEvent::Notification(notification) if matches!(notification.as_ref(), ServerNotification::McpServerStatusUpdated(_)))));
+    }
+    assert_eq!(app.active_thread_id, Some(root));
+
+    // A rejected out-of-order grandchild is recovered by the existing root-scoped
+    // list, including metadata and the status broadcast received before discovery.
+    let delayed_parent = ThreadId::new();
+    let delayed_child = ThreadId::new();
+    let delayed = spawn(delayed_child, delayed_parent, "/root/delayed/nested");
+    for notification in [
+        delayed.clone(),
+        status(delayed_child),
+        spawn(delayed_parent, root, "/root/delayed"),
+    ] {
+        app.handle_app_server_event(
+            &server,
+            AppServerEvent::ServerNotification(Box::new(notification)),
+        )
+        .await;
+    }
+    assert!(app.agent_navigation.get(&delayed_child).is_none());
+    let request = app.agent_navigation.picker_refresh.unwrap().1;
+    let ServerNotification::ThreadStarted(delayed) = delayed else {
+        unreachable!()
+    };
+    app.apply_agent_picker_thread_refresh(root, request, Ok(vec![delayed.thread]));
+    assert_eq!(
+        (
+            app.agent_navigation
+                .get(&delayed_child)
+                .unwrap()
+                .agent_path
+                .as_deref(),
+            app.agent_navigation.models.get(&delayed_child),
+            app.agent_navigation.status(delayed_child)
+        ),
+        (
+            Some("/root/delayed/nested"),
+            Some(&crate::subagent_roster::AgentModel {
+                model: "gpt-6.1-sol".into(),
+                effort: Some(ReasoningEffortConfig::High)
+            }),
+            Some(&ThreadStatus::Active {
+                active_flags: Vec::new()
+            })
+        ),
+    );
+    assert!(
+        std::iter::from_fn(|| events.try_recv().ok())
+            .any(|event| matches!(event, AppEvent::RefreshSubagentRoster(id) if id == root))
+    );
+    assert!(!app.thread_event_channels.contains_key(&delayed_child));
+    let recovered_child = ThreadId::new();
+    app.handle_app_server_event(
+        &server,
+        AppServerEvent::ServerNotification(Box::new(spawn(
+            recovered_child,
+            delayed_child,
+            "/root/delayed/nested/child",
+        ))),
+    )
+    .await;
+    assert!(app.agent_navigation.get(&recovered_child).is_some());
+
+    // An old synthetic Live channel is not membership. A stale list may remove that
+    // contamination, but not an explicit attachment or newly proven spawn edge.
+    let poison = ThreadId::new();
+    let attached = ThreadId::new();
+    let side = ThreadId::new();
+    let late = ThreadId::new();
+    for id in [poison, attached, side, late] {
+        app.upsert_agent_picker_thread(
+            id, /*agent_nickname*/ None, /*agent_role*/ None, /*is_closed*/ false,
+        );
+        app.ensure_thread_channel(id);
+    }
+    app.agent_navigation.explicit_attachments.insert(attached);
+    app.side_threads
+        .insert(side, super::super::side::SideThreadState::new(root));
+    let request = app.agent_navigation.begin_picker_refresh(root).unwrap();
+    for notification in [status(poison), spawn(late, own_parent, "/root/own/late")] {
+        app.handle_app_server_event(
+            &server,
+            AppServerEvent::ServerNotification(Box::new(notification)),
+        )
+        .await;
+    }
+    app.apply_agent_picker_thread_refresh(root, request, Ok(Vec::new()));
+    assert!(app.agent_navigation.get(&poison).is_none());
+    for id in [attached, side, late] {
+        assert!(app.agent_navigation.get(&id).is_some());
+    }
+    assert_eq!(app.active_thread_id, Some(root));
+    server.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn agents_navigation_status_notifications_survive_discovery_and_roster_refresh() {
     let mut app = make_test_app().await;
     let root = ThreadId::new();

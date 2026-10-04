@@ -1407,55 +1407,82 @@ async fn owned_subagent_approval_before_thread_started_is_preserved() -> Result<
     app.config.sqlite = codex_state::SqliteConfig::new_for_testing(codex_home.path().abs());
     let mut app_server = Box::pin(crate::start_embedded_app_server_for_picker(&app.config)).await?;
     let parent = app_server.start_thread(&app.config).await?;
-    let parent_thread_id = parent.session.thread_id;
+    let root = parent.session.thread_id;
     app.enqueue_primary_thread_session(parent.session, parent.turns)
         .await?;
-    let child_thread_id = ThreadId::from_string(
-        &create_fake_parented_rollout_with_source(
-            codex_home.path(),
-            "2026-01-01T00-00-01",
-            "2026-01-01T00:00:01Z",
-            "child task",
-            Some(app.config.model_provider_id.as_str()),
-            /*git_info*/ None,
-            RolloutSessionSource::SubAgent(SubAgentSource::ThreadSpawn {
-                parent_thread_id,
-                depth: 1,
-                agent_path: None,
-                agent_nickname: None,
-                agent_role: None,
-            }),
-            parent_thread_id.into(),
+    let foreign_root = app_server
+        .start_thread(&app.config)
+        .await?
+        .session
+        .thread_id;
+    // Simulate a retained transport that an unrelated MCP startup once created.
+    app.ensure_thread_channel(foreign_root);
+    // Requests can beat both the child's and an intermediate parent's startup
+    // notifications. Root-scoped verification must preserve that pending approval.
+    for (case, (ancestor, depth)) in [(root, 1), (root, 2), (foreign_root, 1)]
+        .into_iter()
+        .enumerate()
+    {
+        let mut parent_thread_id = ancestor;
+        for level in 1..=depth {
+            let day = case + 1;
+            let child_thread_id = ThreadId::from_string(
+                &create_fake_parented_rollout_with_source(
+                    codex_home.path(),
+                    &format!("2026-01-0{day}T00-00-0{level}"),
+                    &format!("2026-01-0{day}T00:00:0{level}Z"),
+                    "child task",
+                    Some(app.config.model_provider_id.as_str()),
+                    /*git_info*/ None,
+                    RolloutSessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+                        parent_thread_id,
+                        depth: level,
+                        agent_path: None,
+                        agent_nickname: None,
+                        agent_role: None,
+                    }),
+                    ancestor.into(),
+                    parent_thread_id,
+                )
+                .expect("create child rollout"),
+            )?;
+            app_server
+                .resume_thread(
+                    &app.local_settings,
+                    app.config.clone(),
+                    child_thread_id,
+                    crate::app_server_session::ResumeModelSettings::RestoreFromThread,
+                )
+                .await?;
+            assert!(app.agent_navigation.get(&child_thread_id).is_none());
+            parent_thread_id = child_thread_id;
+        }
+        let mut request = exec_approval_request(
             parent_thread_id,
+            "turn-1",
+            "item-1",
+            /*approval_id*/ None,
+        );
+        let ServerRequest::CommandExecutionRequestApproval { request_id, .. } = &mut request else {
+            unreachable!()
+        };
+        *request_id = AppServerRequestId::String(format!("approval-{case}"));
+        app.handle_app_server_event(
+            &app_server,
+            codex_app_server_client::AppServerEvent::ServerRequest(Box::new(request.clone())),
         )
-        .expect("create child rollout"),
-    )?;
-    app_server
-        .resume_thread(
-            &app.local_settings,
-            app.config.clone(),
-            child_thread_id,
-            crate::app_server_session::ResumeModelSettings::RestoreFromThread,
-        )
-        .await?;
-    let request = exec_approval_request(
-        child_thread_id,
-        "turn-1",
-        "item-1",
-        /*approval_id*/ None,
-    );
-
-    app.handle_app_server_event(
-        &app_server,
-        codex_app_server_client::AppServerEvent::ServerRequest(Box::new(request.clone())),
-    )
-    .await;
-
-    assert!(
-        app.pending_app_server_requests
-            .contains_server_request(&request)
-    );
-    assert!(app.thread_event_channels.contains_key(&child_thread_id));
+        .await;
+        let owned = ancestor == root;
+        assert_eq!(
+            (
+                app.pending_app_server_requests
+                    .contains_server_request(&request),
+                app.thread_event_channels.contains_key(&parent_thread_id),
+                app.is_family_thread(parent_thread_id)
+            ),
+            (owned, owned, owned),
+        );
+    }
     Ok(())
 }
 

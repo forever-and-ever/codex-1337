@@ -47,6 +47,10 @@ const MAX_UNDISCOVERED_STATUSES: usize = 1_000;
 /// temporarily out of sync during teardown races.
 #[derive(Debug, Default)]
 pub(crate) struct AgentNavigationState {
+    /// Root-scoped ancestry evidence, never inferred from transport or picker entries.
+    pub(super) descendant_roots: HashMap<ThreadId, ThreadId>,
+    /// Deliberately selected conversations survive descendant-only reconciliation.
+    pub(super) explicit_attachments: HashSet<ThreadId>,
     pub(super) roster: crate::subagent_roster::SharedRoster,
     pub(super) models: HashMap<ThreadId, AgentModel>,
     /// Server-owned status survives unloading and does not depend on TUI attachment.
@@ -67,6 +71,8 @@ pub(crate) struct AgentNavigationState {
     parent_owned_threads: HashSet<ThreadId>,
     /// Coalesces root refreshes while rejecting replies from a previous session.
     pub(super) picker_refresh: Option<(ThreadId, Uuid)>,
+    /// A spawn arrived after the in-flight list snapshot may have been taken.
+    pub(super) picker_refresh_again: bool,
     pub(super) picker_refresh_known: HashSet<ThreadId>,
     /// Notifications received after a refresh began outrank its older snapshot.
     pub(super) picker_refresh_changed: HashSet<ThreadId>,
@@ -334,6 +340,9 @@ impl AgentNavigationState {
     /// This is used when `App` tears down thread event state and needs the picker cache to return
     /// to a pristine single-session state.
     pub(crate) fn clear(&mut self) {
+        self.descendant_roots.clear();
+        self.explicit_attachments.clear();
+        self.picker_refresh_again = false;
         self.roster = Default::default();
         self.threads.clear();
         self.models.clear();
@@ -351,6 +360,8 @@ impl AgentNavigationState {
     ///
     /// Used after authoritative roster reconciliation or retirement, not runtime unloading.
     pub(crate) fn remove(&mut self, thread_id: ThreadId) {
+        self.descendant_roots.remove(&thread_id);
+        self.explicit_attachments.remove(&thread_id);
         self.threads.remove(&thread_id);
         self.models.remove(&thread_id);
         self.statuses.remove(&thread_id);

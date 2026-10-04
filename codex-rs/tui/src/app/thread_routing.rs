@@ -1247,20 +1247,7 @@ impl App {
         let inferred_session = if let ServerNotification::ThreadStarted(started) = &notification
             && self.primary_session_configured.is_some()
         {
-            self.upsert_agent_picker_thread(
-                thread_id,
-                started.thread.agent_nickname.clone(),
-                started.thread.agent_role.clone(),
-                /*is_closed*/ false,
-            );
-            if started.thread.can_accept_direct_input == Some(false) {
-                self.agent_navigation.mark_parent_owned(thread_id);
-            }
-            if self.agent_navigation.status(thread_id).is_none() {
-                self.agent_navigation
-                    .set_status(thread_id, started.thread.status.clone());
-                self.sync_subagent_roster();
-            }
+            self.hydrate_started_thread(&started.thread);
 
             // Lifecycle responses already contain authoritative session state. Their rollout may
             // not exist until the first turn, so inferring it again can wait through reader retries.

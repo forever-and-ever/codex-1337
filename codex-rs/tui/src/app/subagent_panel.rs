@@ -3,9 +3,7 @@ use super::app_server_event_targets::ServerNotificationThreadTarget;
 use super::app_server_event_targets::server_notification_thread_target;
 use super::*;
 use codex_app_server_protocol::ServerNotification;
-use codex_app_server_protocol::SessionSource;
 use codex_app_server_protocol::ThreadStatus;
-use codex_protocol::protocol::SubAgentSource;
 
 impl App {
     pub(super) fn sync_subagent_roster(&mut self) {
@@ -58,44 +56,7 @@ impl App {
     pub(super) fn track_subagent_panel(&mut self, notification: &ServerNotification) {
         match notification {
             ServerNotification::ThreadStarted(event) => {
-                if let Ok(id) = ThreadId::from_string(&event.thread.id)
-                    && Some(id) == self.primary_thread_id
-                    && self.agent_navigation.status(id).is_none()
-                {
-                    self.agent_navigation
-                        .note_status(id, event.thread.status.clone());
-                    self.refresh_visible_agent_picker();
-                }
-                if let SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
-                    parent_thread_id, ..
-                }) = &event.thread.source
-                    && (Some(*parent_thread_id) == self.primary_thread_id
-                        || self.agent_navigation.get(parent_thread_id).is_some())
-                {
-                    let Ok(id) = ThreadId::from_string(&event.thread.id) else {
-                        return;
-                    };
-                    self.agent_navigation.upsert(
-                        id,
-                        event.thread.agent_nickname.clone(),
-                        event.thread.agent_role.clone(),
-                        matches!(event.thread.status, ThreadStatus::NotLoaded),
-                    );
-                    self.agent_navigation.set_agent_path(
-                        id,
-                        crate::app_server_session::source_agent_path(&event.thread.source),
-                    );
-                    let status = self
-                        .agent_navigation
-                        .status(id)
-                        .cloned()
-                        .unwrap_or_else(|| event.thread.status.clone());
-                    self.agent_navigation.note_status(id, status);
-                    self.agent_navigation.record_model(&event.thread);
-                    self.sync_subagent_roster();
-                    self.refresh_visible_agent_picker();
-                    self.chat_widget.request_redraw();
-                }
+                self.hydrate_started_thread(&event.thread);
                 return;
             }
             ServerNotification::ThreadSettingsUpdated(event) => {

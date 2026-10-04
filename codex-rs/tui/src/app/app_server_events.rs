@@ -226,6 +226,23 @@ impl App {
                 .or_default();
         }
         self.track_subagent_panel(&notification);
+        if let ServerNotification::ThreadStarted(started) = &notification
+            && matches!(
+                started.thread.source,
+                SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
+            )
+            && let Ok(id) = ThreadId::from_string(&started.thread.id)
+            && !self.is_family_thread(id)
+            && let Some(root) = self.primary_thread_id
+        {
+            // A grandchild may arrive before its parent's metadata. The root-scoped list is
+            // authoritative and bounded; do not cache foreign spawn trees to retry admission.
+            if self.agent_navigation.picker_refresh.is_some() {
+                self.agent_navigation.picker_refresh_again = true;
+            } else {
+                self.refresh_agent_picker_threads(app_server_client, root);
+            }
+        }
         if matches!(
             &notification,
             ServerNotification::ThreadClosed(_) | ServerNotification::TurnCompleted(_)
@@ -466,24 +483,8 @@ impl App {
                     return;
                 }
                 if self.primary_thread_id.is_some()
-                    && self.primary_thread_id != Some(thread_id)
-                    && !self.thread_event_channels.contains_key(&thread_id)
-                    && self.agent_navigation.get(&thread_id).is_none()
-                    && !self.side_threads.contains_key(&thread_id)
-                    && !matches!(&notification, ServerNotification::McpServerStatusUpdated(_))
-                    && !matches!(
-                        &notification,
-                        ServerNotification::ThreadStarted(started)
-                            if matches!(
-                                &started.thread.source,
-                                SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
-                                    parent_thread_id,
-                                    ..
-                                }) if self.primary_thread_id == Some(*parent_thread_id)
-                                    || self.thread_event_channels.contains_key(parent_thread_id)
-                                    || self.agent_navigation.get(parent_thread_id).is_some()
-                            )
-                    )
+                    && !self.is_attached_thread(thread_id)
+                    && !background_voice
                 {
                     return;
                 }
@@ -637,10 +638,8 @@ impl App {
         }
         if let Some(thread_id) = thread_id
             && self.primary_thread_id.is_some()
-            && self.primary_thread_id != Some(thread_id)
-            && !self.thread_event_channels.contains_key(&thread_id)
-            && self.agent_navigation.get(&thread_id).is_none()
-            && !self.side_threads.contains_key(&thread_id)
+            && !self.is_attached_thread(thread_id)
+            && !background_voice
             && !unsupported_request
         {
             let thread = app_server_client
@@ -658,27 +657,45 @@ impl App {
             };
             let SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
                 parent_thread_id, ..
-            }) = thread.source
+            }) = &thread.source
             else {
                 return;
             };
-            if self.primary_thread_id != Some(parent_thread_id)
-                && !self.thread_event_channels.contains_key(&parent_thread_id)
-                && self.agent_navigation.get(&parent_thread_id).is_none()
-            {
+            if !self.is_family_thread(*parent_thread_id) {
                 if self
                     .agents_overview
                     .dispatched_requests
-                    .contains_key(&parent_thread_id)
+                    .contains_key(parent_thread_id)
                 {
                     self.agents_overview
                         .dispatched_requests
                         .entry(thread_id)
                         .or_default()
                         .push(request);
+                    return;
                 }
-                return;
+                let Some(root) = self.primary_thread_id else {
+                    return;
+                };
+                let descendants = super::agent_picker::list_agent_picker_threads(
+                    &app_server_client.request_handle(),
+                    root,
+                )
+                .await;
+                match descendants {
+                    Ok(threads) if threads.iter().any(|candidate| candidate.id == thread.id) => {
+                        self.agent_navigation
+                            .descendant_roots
+                            .insert(thread_id, root);
+                    }
+                    Ok(_) => return,
+                    Err(err) => {
+                        tracing::warn!(%err, %thread_id, "could not verify pending request ancestry");
+                        return;
+                    }
+                }
             }
+            self.hydrate_started_thread(&thread);
         }
 
         if let Some(unsupported) = self

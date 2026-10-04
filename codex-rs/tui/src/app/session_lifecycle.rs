@@ -590,6 +590,7 @@ impl App {
             ));
             return Ok(());
         }
+        self.agent_navigation.explicit_attachments.insert(thread_id);
         let mut is_replay_only = self
             .agent_navigation
             .get(&thread_id)
@@ -1280,6 +1281,11 @@ impl App {
                 thread.agent_role,
                 is_closed,
             );
+            if self.agent_navigation.get(&thread.thread_id).is_some() {
+                self.agent_navigation
+                    .descendant_roots
+                    .insert(thread.thread_id, primary_thread_id);
+            }
             self.agent_navigation
                 .set_agent_path(thread.thread_id, agent_path);
             self.agent_navigation

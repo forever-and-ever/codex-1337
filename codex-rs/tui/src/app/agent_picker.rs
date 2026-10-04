@@ -1,6 +1,7 @@
 //! Root-scoped background refresh for the agent picker.
 
 use super::*;
+use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::SortDirection;
 use codex_app_server_protocol::Thread;
@@ -13,6 +14,51 @@ use std::collections::HashSet;
 pub(super) const AGENT_PICKER_VIEW_ID: &str = "agent-picker";
 const AGENT_PICKER_PAGE_SIZE: u32 = 100;
 const AGENT_PICKER_MAX_THREADS: usize = 1_000;
+
+pub(super) async fn list_agent_picker_threads(
+    request_handle: &AppServerRequestHandle,
+    root: ThreadId,
+) -> Result<Vec<Thread>, String> {
+    let mut threads = Vec::new();
+    let mut cursor = None;
+    let mut seen_cursors = HashSet::new();
+    while threads.len() < AGENT_PICKER_MAX_THREADS && seen_cursors.insert(cursor.clone()) {
+        let page = request_handle
+            .request_typed::<ThreadListResponse>(ClientRequest::ThreadList {
+                request_id: RequestId::String(Uuid::new_v4().to_string()),
+                params: ThreadListParams {
+                    originators: None,
+                    cursor,
+                    limit: Some(AGENT_PICKER_PAGE_SIZE),
+                    sort_key: None,
+                    sort_direction: Some(SortDirection::Desc),
+                    model_providers: Some(vec![]),
+                    source_kinds: Some(vec![ThreadSourceKind::SubAgentThreadSpawn]),
+                    archived: None,
+                    section_id: None,
+                    project_id: None,
+                    cwd: None,
+                    use_state_db_only: true,
+                    search_term: None,
+                    parent_thread_id: None,
+                    ancestor_thread_id: Some(root.to_string()),
+                },
+            })
+            .await
+            .map_err(|err| err.to_string())?;
+        threads.extend(
+            page.data
+                .into_iter()
+                .take(AGENT_PICKER_MAX_THREADS - threads.len()),
+        );
+        let Some(next_cursor) = page.next_cursor else {
+            break;
+        };
+        cursor = Some(next_cursor);
+    }
+    threads.reverse();
+    Ok(threads)
+}
 
 impl App {
     pub(super) fn refresh_visible_agent_picker(&mut self) {
@@ -35,53 +81,7 @@ impl App {
         let request_handle = app_server.request_handle();
         let app_event_tx = self.app_event_tx.clone();
         tokio::spawn(async move {
-            let result = async {
-                let mut threads = Vec::new();
-                let mut cursor = None;
-                let mut seen_cursors = HashSet::new();
-                while threads.len() < AGENT_PICKER_MAX_THREADS
-                    && seen_cursors.insert(cursor.clone())
-                {
-                    let page = match request_handle
-                        .request_typed::<ThreadListResponse>(ClientRequest::ThreadList {
-                            request_id: RequestId::String(Uuid::new_v4().to_string()),
-                            params: ThreadListParams {
-                                originators: None,
-                                cursor,
-                                limit: Some(AGENT_PICKER_PAGE_SIZE),
-                                sort_key: None,
-                                sort_direction: Some(SortDirection::Desc),
-                                model_providers: Some(vec![]),
-                                source_kinds: Some(vec![ThreadSourceKind::SubAgentThreadSpawn]),
-                                archived: None,
-                                section_id: None,
-                                project_id: None,
-                                cwd: None,
-                                use_state_db_only: true,
-                                search_term: None,
-                                parent_thread_id: None,
-                                ancestor_thread_id: Some(root.to_string()),
-                            },
-                        })
-                        .await
-                    {
-                        Ok(page) => page,
-                        Err(err) => return Err(err.to_string()),
-                    };
-                    threads.extend(
-                        page.data
-                            .into_iter()
-                            .take(AGENT_PICKER_MAX_THREADS - threads.len()),
-                    );
-                    let Some(next_cursor) = page.next_cursor else {
-                        break;
-                    };
-                    cursor = Some(next_cursor);
-                }
-                threads.reverse();
-                Ok(threads)
-            }
-            .await;
+            let result = list_agent_picker_threads(&request_handle, root).await;
 
             app_event_tx.send(AppEvent::AgentPickerThreadsLoaded {
                 primary_thread_id: root,
@@ -103,6 +103,10 @@ impl App {
             || self.primary_thread_id != Some(root)
         {
             return;
+        }
+        if std::mem::take(&mut self.agent_navigation.picker_refresh_again) {
+            self.app_event_tx
+                .send(AppEvent::RefreshSubagentRoster(root));
         }
         let threads = match result {
             Ok(threads) => threads,
@@ -128,12 +132,17 @@ impl App {
                 .filter_map(|thread| ThreadId::from_string(&thread.id).ok())
                 .collect();
             for id in std::mem::take(&mut self.agent_navigation.picker_refresh_known) {
+                let verified = self.is_family_thread(id);
+                let deliberately_attached = self.side_threads.contains_key(&id)
+                    || self.agent_navigation.explicit_attachments.contains(&id)
+                    || self.current_displayed_thread_id() == Some(id);
+                let live = self
+                    .thread_event_channels
+                    .get(&id)
+                    .is_some_and(|channel| channel.attachment() == ThreadEventAttachment::Live);
                 if !retained.contains(&id)
-                    && !changed.contains(&id)
-                    && (reconciling == Some(id)
-                        || !self.thread_event_channels.get(&id).is_some_and(|channel| {
-                            channel.attachment() == ThreadEventAttachment::Live
-                        }))
+                    && (!changed.contains(&id) || !verified)
+                    && (reconciling == Some(id) || !deliberately_attached && (!verified || !live))
                 {
                     self.agent_navigation.remove(id);
                     if self.active_thread_id == Some(id) {
@@ -168,6 +177,11 @@ impl App {
                 self.agent_navigation.mark_parent_owned(thread_id);
             }
             self.upsert_agent_picker_thread(thread_id, agent_nickname, agent_role, is_closed);
+            if self.agent_navigation.get(&thread_id).is_some() {
+                self.agent_navigation
+                    .descendant_roots
+                    .insert(thread_id, root);
+            }
             self.agent_navigation.set_agent_path(thread_id, agent_path);
             self.agent_navigation.set_status(thread_id, status);
         }
