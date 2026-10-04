@@ -2,13 +2,14 @@ use codex_code_mode_protocol::FunctionCallOutputContentItem;
 use std::sync::Arc;
 
 use super::EXIT_SENTINEL;
+use super::PendingToolCall;
 use super::RuntimeEvent;
 use super::RuntimeState;
 use super::timers;
 use super::value::json_to_v8;
 use super::value::normalize_output_audio;
 use super::value::normalize_output_image;
-use super::value::serialize_output_text;
+use super::native_result::serialize_text;
 use super::value::throw_type_error;
 use super::value::v8_value_to_json;
 
@@ -63,7 +64,9 @@ pub(super) fn tool_callback(
     let id = format!("tool-{}", state.next_tool_call_id);
     state.next_tool_call_id = state.next_tool_call_id.saturating_add(1);
     let event_tx = state.event_tx.clone();
-    state.pending_tool_calls.insert(id.clone(), resolver);
+    let native_execution = tool_name.is_default_namespace()
+        && matches!(tool_name.name.as_str(), "exec_command" | "write_stdin");
+    state.pending_tool_calls.insert(id.clone(), PendingToolCall { resolver, native_execution });
     let _ = event_tx.send(RuntimeEvent::ToolCall {
         id,
         name: tool_name,
@@ -83,8 +86,8 @@ pub(super) fn text_callback(
     } else {
         args.get(0)
     };
-    let text = match serialize_output_text(scope, value) {
-        Ok(text) => text,
+    let text = match serialize_text(scope, value, args.get(1)) {
+        Ok((text, _)) => text,
         Err(error_text) => {
             throw_type_error(scope, &error_text);
             return;
@@ -276,14 +279,14 @@ pub(super) fn notify_callback(
     } else {
         args.get(0)
     };
-    let text = match serialize_output_text(scope, value) {
-        Ok(text) => text,
+    let (text, native_execution) = match serialize_text(scope, value, args.get(1)) {
+        Ok(output) => output,
         Err(error_text) => {
             throw_type_error(scope, &error_text);
             return;
         }
     };
-    if text.trim().is_empty() {
+    if text.trim().is_empty() && !native_execution {
         throw_type_error(scope, "notify expects non-empty text");
         return;
     }

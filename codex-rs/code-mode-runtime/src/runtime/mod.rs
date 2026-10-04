@@ -3,6 +3,7 @@ mod callbacks;
 mod discovery;
 mod globals;
 mod module_loader;
+mod native_result;
 mod timers;
 mod value;
 
@@ -150,7 +151,7 @@ struct RuntimeConfig {
 
 pub(super) struct RuntimeState {
     event_tx: mpsc::UnboundedSender<RuntimeEvent>,
-    pending_tool_calls: HashMap<String, v8::Global<v8::PromiseResolver>>,
+    pending_tool_calls: HashMap<String, PendingToolCall>,
     pending_timeouts: HashMap<u64, timers::ScheduledTimeout>,
     stored_values: HashMap<String, Arc<JsonValue>>,
     stored_value_writes: HashMap<String, Arc<JsonValue>>,
@@ -160,6 +161,11 @@ pub(super) struct RuntimeState {
     tool_call_id: String,
     runtime_command_tx: std_mpsc::Sender<RuntimeCommand>,
     exit_requested: bool,
+}
+
+pub(super) struct PendingToolCall {
+    resolver: v8::Global<v8::PromiseResolver>,
+    native_execution: bool,
 }
 
 pub(super) enum CompletionState {

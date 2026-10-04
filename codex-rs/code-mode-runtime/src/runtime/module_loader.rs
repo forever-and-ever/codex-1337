@@ -68,7 +68,7 @@ pub(super) fn resolve_tool_response(
     id: &str,
     response: Result<JsonValue, String>,
 ) -> Result<(), String> {
-    let resolver = {
+    let pending = {
         let state = scope
             .get_slot_mut::<RuntimeState>()
             .ok_or_else(|| "runtime state unavailable".to_string())?;
@@ -80,11 +80,14 @@ pub(super) fn resolve_tool_response(
     v8::scope!(let scope, scope);
     let tc = std::pin::pin!(v8::TryCatch::new(scope));
     let mut tc = tc.init();
-    let resolver = v8::Local::new(&tc, &resolver);
+    let resolver = v8::Local::new(&tc, &pending.resolver);
     match response {
         Ok(result) => {
             let value = json_to_v8(&mut tc, &result)
                 .ok_or_else(|| "failed to serialize tool response".to_string())?;
+            if pending.native_execution {
+                super::native_result::brand(&mut tc, value)?;
+            }
             resolver.resolve(&tc, value);
         }
         Err(error_text) => {
