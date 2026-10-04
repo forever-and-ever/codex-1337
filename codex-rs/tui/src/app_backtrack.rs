@@ -381,6 +381,7 @@ impl App {
                             /*expanded*/ false,
                             &std::collections::HashSet::new(),
                             /*tool_output_tokens*/ None,
+                            crate::history_cell::output_provenance::OutputMode::Fmt,
                         )
                         .map(|mut lines| {
                             lines.activity.extend(lines.auxiliary);

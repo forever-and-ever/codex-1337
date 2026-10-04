@@ -304,17 +304,23 @@ impl TranscriptView {
         width: u16,
         key: Option<ActiveCellTranscriptKey>,
         expanded: bool,
-        lines: impl FnOnce(u16, &std::collections::HashSet<String>) -> Option<ActivityTranscriptLines>,
+        lines: impl FnOnce(
+            u16,
+            &std::collections::HashSet<String>,
+            crate::history_cell::output_provenance::OutputMode,
+        ) -> Option<ActivityTranscriptLines>,
     ) -> bool {
         let shortcut = self
             .disclosure
             .keymap
             .primary_hint(crate::keymap::KeymapContext::Global, "open_transcript");
         let mode = self.mode;
+        let output_mode = self.disclosure.output_mode(&self.disclosure.live_ids);
         self.sync_live_layout(width, key, |width, expanded_parts| {
             lines(
                 crate::transcript_geometry::content_width(width, mode),
                 expanded_parts,
+                output_mode,
             )
             .map(|mut lines| {
                 let is_tool_entry = lines.is_tool_entry;

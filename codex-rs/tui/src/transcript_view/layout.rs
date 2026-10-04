@@ -6,6 +6,7 @@
 use crate::history_cell::ActivityDisclosure;
 use crate::history_cell::ReasoningSummaryCell;
 use crate::history_cell::ToolOutputGroup;
+use crate::history_cell::output_provenance::OutputMode;
 use crate::key_hint::ShortcutHint;
 use crate::keymap::KeymapContext;
 use std::sync::Weak;
@@ -17,6 +18,7 @@ const MAX_CACHED_TEXT_BYTES: usize = 8 * 1024 * 1024;
 
 /// The selected activity presentation and any live content that follows it.
 pub(crate) struct ActivityTranscriptLines {
+    pub(crate) output_mode: Option<OutputMode>,
     pub(crate) is_tool_entry: bool,
     pub(crate) activity: Vec<HyperlinkLine>,
     pub(crate) header: Option<crate::history_cell::activity_parts::ActivityHeader>,
@@ -43,7 +45,7 @@ pub(super) fn activity_layout(
         _ => 0,
     };
     let heading_width = lines.header.map_or(0, |header| header.columns);
-    let estimate = lines
+    let mut estimate = lines
         .tool_output_tokens
         .map(crate::history_cell::activity_parts::token_label)
         .filter(|label| {
@@ -95,7 +97,9 @@ pub(super) fn activity_layout(
         crate::transcript_geometry::rich_lines(lines.activity),
         width,
     );
-    if let (Some(estimate), Some(header)) = (estimate, lines.header) {
+    if (!expanded || lines.output_mode.is_none())
+        && let (Some(estimate), Some(header)) = (estimate.clone(), lines.header)
+    {
         layout = if matches!(
             lines.disclosure,
             Some(ActivityDisclosure::EditedFile { header: false })
@@ -115,6 +119,10 @@ pub(super) fn activity_layout(
     }
     for part in lines.controls {
         layout = layout.with_part_control(part);
+    }
+    if expanded && let (Some(mode), Some(header)) = (lines.output_mode, lines.header) {
+        // One synthetic decoration owns both controls and the estimate; none is copy source.
+        layout = layout.with_output_controls(header.source_offset, mode, estimate.take());
     }
     layout
 }
@@ -231,6 +239,7 @@ impl TranscriptView {
         let ids = cell.activity_ids();
         let disclosure = !detailed && mode == HistoryRenderMode::Rich && !ids.is_empty();
         let expanded = disclosure && self.disclosure.is_expanded(&ids);
+        let output_mode = self.disclosure.output_mode(&ids);
         let tool_output_tokens = self.activity_output_tokens(&ids);
         let continued_edit = disclosure
             && !cell.is_stream_continuation()
@@ -262,9 +271,13 @@ impl TranscriptView {
                 let reserve = tool_output_tokens
                     .map(crate::history_cell::activity_parts::token_label)
                     .map_or(0, |label| label.len());
-                if let Some(parts) = cell.activity_parts(content_width, reserve, expanded_parts) {
+                if let Some(parts) =
+                    cell.output_parts(content_width, reserve, expanded_parts, output_mode)
+                {
                     return activity_layout(
                         ActivityTranscriptLines {
+                            output_mode: (expanded && cell.has_formatted_output())
+                                .then_some(output_mode),
                             is_tool_entry: cell.is_tool_entry(),
                             activity: parts.lines,
                             header: parts.header,
@@ -279,7 +292,7 @@ impl TranscriptView {
                     );
                 }
                 let mut activity = if expanded {
-                    cell.expanded_hyperlink_lines(content_width)
+                    cell.expanded_output_lines(content_width, output_mode)
                 } else {
                     cell.compact_hyperlink_lines(content_width)
                 };
@@ -291,6 +304,8 @@ impl TranscriptView {
                 };
                 activity_layout(
                     ActivityTranscriptLines {
+                        output_mode: (expanded && cell.has_formatted_output())
+                            .then_some(output_mode),
                         is_tool_entry: cell.is_tool_entry(),
                         activity,
                         header: if expanded {

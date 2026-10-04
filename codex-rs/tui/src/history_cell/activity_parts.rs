@@ -8,12 +8,13 @@ pub(crate) enum FoldTarget {
     #[default]
     Activity,
     Part(String),
+    OutputMode(super::output_provenance::OutputMode),
 }
 
 impl FoldTarget {
     pub(crate) fn ids(&self, activity: &[String]) -> Vec<String> {
         match self {
-            Self::Activity => activity.to_vec(),
+            Self::Activity | Self::OutputMode(_) => activity.to_vec(),
             Self::Part(id) => vec![id.clone()],
         }
     }

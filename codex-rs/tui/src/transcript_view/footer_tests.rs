@@ -466,21 +466,27 @@ fn code_mode_batches_display_their_own_counts_and_replay_without_double_counting
         let ids = tail.activity_ids();
         let tool_output_tokens = view.activity_output_tokens(&ids);
         view.sync_live_activity(committed, ids);
-        view.sync_live_activity_tail(/*width*/ 80, /*key*/ None, expanded, |width, _| {
-            Some(ActivityTranscriptLines {
-                is_tool_entry: tail.is_tool_entry(),
-                header: tail.activity_header(),
-                controls: Vec::new(),
-                activity: if expanded {
-                    tail.expanded_hyperlink_lines(width)
-                } else {
-                    tail.compact_hyperlink_lines(width)
-                },
-                auxiliary: Vec::new(),
-                tool_output_tokens,
-                disclosure: tail.activity_disclosure(width),
-            })
-        });
+        view.sync_live_activity_tail(
+            /*width*/ 80,
+            /*key*/ None,
+            expanded,
+            |width, _, _| {
+                Some(ActivityTranscriptLines {
+                    output_mode: None,
+                    is_tool_entry: tail.is_tool_entry(),
+                    header: tail.activity_header(),
+                    controls: Vec::new(),
+                    activity: if expanded {
+                        tail.expanded_hyperlink_lines(width)
+                    } else {
+                        tail.compact_hyperlink_lines(width)
+                    },
+                    auxiliary: Vec::new(),
+                    tool_output_tokens,
+                    disclosure: tail.activity_disclosure(width),
+                })
+            },
+        );
         let mut live_buffer = Buffer::empty(area);
         view.render(area, &mut live_buffer, committed);
         assert_eq!(live_buffer, buffer);
@@ -672,21 +678,27 @@ fn activity_focus_keeps_controls_without_passive_hints() {
     let render_live = |view: &mut TranscriptView| {
         let expanded = view.sync_live_activity(&cells, cell.activity_ids());
         let tool_output_tokens = view.activity_output_tokens(&cell.activity_ids());
-        view.sync_live_activity_tail(/*width*/ 32, /*key*/ None, expanded, |width, _| {
-            Some(ActivityTranscriptLines {
-                is_tool_entry: cell.is_tool_entry(),
-                header: cell.activity_header(),
-                controls: Vec::new(),
-                activity: if expanded {
-                    cell.expanded_hyperlink_lines(width)
-                } else {
-                    cell.compact_hyperlink_lines(width)
-                },
-                auxiliary: Vec::new(),
-                tool_output_tokens,
-                disclosure: cell.activity_disclosure(width),
-            })
-        });
+        view.sync_live_activity_tail(
+            /*width*/ 32,
+            /*key*/ None,
+            expanded,
+            |width, _, _| {
+                Some(ActivityTranscriptLines {
+                    output_mode: None,
+                    is_tool_entry: cell.is_tool_entry(),
+                    header: cell.activity_header(),
+                    controls: Vec::new(),
+                    activity: if expanded {
+                        cell.expanded_hyperlink_lines(width)
+                    } else {
+                        cell.compact_hyperlink_lines(width)
+                    },
+                    auxiliary: Vec::new(),
+                    tool_output_tokens,
+                    disclosure: cell.activity_disclosure(width),
+                })
+            },
+        );
         render(view, &[])
     };
     let pending = render_live(&mut view);

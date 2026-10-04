@@ -68,12 +68,13 @@ impl App {
                 transcript_width,
                 active_key,
                 expanded,
-                |width, expanded_parts| {
+                |width, expanded_parts, output_mode| {
                     chat_widget.active_cell_owned_transcript_lines(
                         width,
                         expanded,
                         expanded_parts,
                         tool_output_tokens,
+                        output_mode,
                     )
                 },
             )

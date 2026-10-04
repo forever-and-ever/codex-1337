@@ -7,6 +7,8 @@
 //! Selected hard breaks on nonempty rows highlight one trailing cell when space permits.
 
 use crate::history_cell::activity_parts::FoldTarget;
+use crate::history_cell::output_provenance::OutputMode;
+use crate::history_cell::output_provenance::OutputProvenance;
 use std::borrow::Cow;
 use std::ops::Range;
 
@@ -54,6 +56,7 @@ pub(super) struct TextLayout {
     pub(super) disclosure: bool,
     disclosure_controls: Vec<DisclosureControl>,
     activity_estimate: Option<(usize, String)>,
+    output_mode: Option<OutputMode>,
 }
 
 struct DisclosureControl {
@@ -69,6 +72,7 @@ enum DisclosurePlacement {
     Row,
     Inline,
     Leading,
+    Output { start: usize, end: usize },
 }
 
 struct TextRow {
@@ -107,8 +111,21 @@ impl TextLayout {
                         control.source_offset,
                         control.target.clone(),
                     ),
+                    DisclosurePlacement::Output { start, end } => {
+                        if let FoldTarget::OutputMode(mode) = control.target {
+                            layout.with_output_target(
+                                control.label.clone(),
+                                control.source_offset,
+                                mode,
+                                start..end,
+                            )
+                        } else {
+                            layout
+                        }
+                    }
                 };
         }
+        layout.output_mode = self.output_mode;
         if self.separated {
             layout.with_leading_separator()
         } else {
@@ -300,6 +317,11 @@ impl TextLayout {
             DisclosurePlacement::Leading => {
                 0..crate::transcript_geometry::DISCLOSURE_COLUMNS.min(self.width)
             }
+            DisclosurePlacement::Output { start, end } => {
+                let anchor = row.estimate.map_or(0, |(column, _)| column);
+                (anchor + start).min(usize::from(self.width)) as u16
+                    ..(anchor + end).min(usize::from(self.width)) as u16
+            }
         }
     }
 
@@ -315,14 +337,22 @@ impl TextLayout {
             for control in self.disclosure_controls.iter().filter(|control| {
                 matches!(
                     control.placement,
-                    DisclosurePlacement::Inline | DisclosurePlacement::Leading
+                    DisclosurePlacement::Inline
+                        | DisclosurePlacement::Leading
+                        | DisclosurePlacement::Output { .. }
                 ) && control.row == start_row + usize::from(screen_row)
             }) {
                 let columns = self.control_columns(control);
+                let mut label = Line::from(control.label.as_str()).dim();
+                if let FoldTarget::OutputMode(mode) = control.target
+                    && self.output_mode == Some(mode)
+                {
+                    label = label.style(crate::style::accent_style().underlined());
+                }
                 buf.set_line(
                     area.x + columns.start,
                     area.y + screen_row,
-                    &Line::from(control.label.as_str()).dim(),
+                    &label,
                     columns.end - columns.start,
                 );
             }
@@ -502,6 +532,7 @@ impl TextLayout {
             separated: false,
             disclosure: false,
             disclosure_controls: Vec::new(),
+            output_mode: None,
             activity_estimate: None,
         }
     }
@@ -509,6 +540,33 @@ impl TextLayout {
 
 fn layout_line(logical: &LogicalLine, text_start: usize, width: u16) -> Vec<TextRow> {
     let content_width = width.saturating_sub(logical.right_reserve).max(/*other*/ 1);
+    // Client labels are painted text, not selectable source. Wrap the synthetic text itself,
+    // rather than discarding it as an oversized indentation on narrow terminals.
+    if logical.origin.text.is_empty()
+        && logical.origin.output_provenance == OutputProvenance::Client
+        && !logical.initial_indent.spans.is_empty()
+    {
+        return word_wrap_line_with_source(&logical.initial_indent, usize::from(content_width))
+            .into_iter()
+            .map(|wrapped| {
+                let mut line =
+                    HyperlinkLine::new(crate::render::line_utils::line_to_static(&wrapped.line));
+                let mut source = logical.origin.clone();
+                source.prefix_bytes = line.line.spans.iter().map(|span| span.content.len()).sum();
+                line.source = Some(source);
+                TextRow {
+                    line,
+                    source: text_start..text_start,
+                    line_end: None,
+                    content_width,
+                    first_column: 0,
+                    prefix_columns: 0,
+                    tabs: tabs::TabStops::default(),
+                    estimate: None,
+                }
+            })
+            .collect();
+    }
     let mut logical = Cow::Borrowed(logical);
     if line_width(&logical.initial_indent) >= usize::from(content_width)
         || line_width(&logical.subsequent_indent) >= usize::from(content_width)

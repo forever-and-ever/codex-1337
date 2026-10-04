@@ -437,9 +437,13 @@ async fn flush_answer_stream_requests_scrollback_reflow_for_live_table_tail() {
             width,
             chat.active_cell_transcript_key(),
             /*expanded*/ false,
-            |width, expanded| {
+            |width, expanded, output_mode| {
                 chat.active_cell_owned_transcript_lines(
-                    width, /*expanded*/ false, expanded, /*tool_output_tokens*/ None,
+                    width,
+                    /*expanded*/ false,
+                    expanded,
+                    /*tool_output_tokens*/ None,
+                    output_mode,
                 )
             },
         );

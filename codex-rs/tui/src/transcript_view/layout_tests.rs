@@ -37,6 +37,7 @@ impl HistoryCell for Cell {
 fn tool_output_disclosure_shows_full_estimate_when_it_fits() {
     let layout = activity_layout(
         ActivityTranscriptLines {
+            output_mode: None,
             is_tool_entry: true,
             header: Some(crate::history_cell::activity_parts::ActivityHeader::at_end(
                 &Line::from("Called"),
@@ -97,6 +98,7 @@ fn tool_heading_decorations_preserve_source_and_hit_targets() {
     ] {
         let layout = activity_layout(
             ActivityTranscriptLines {
+                output_mode: None,
                 is_tool_entry: true,
                 header: mcp.activity_header(),
                 controls: Vec::new(),
@@ -139,6 +141,7 @@ fn tool_heading_decorations_preserve_source_and_hit_targets() {
     // Every selectable character lands back on the same source offset after a mid-header estimate.
     let layout = activity_layout(
         ActivityTranscriptLines {
+            output_mode: None,
             is_tool_entry: true,
             header: Some(crate::history_cell::activity_parts::ActivityHeader::at_end(
                 &Line::from(vec!["• ".into(), "Ran".into()]),

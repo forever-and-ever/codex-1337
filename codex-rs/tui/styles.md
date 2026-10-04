@@ -10,7 +10,8 @@ Standalone wait/poll results use **Waited** with their known running/exit status
 
 `[+]` means hidden output, a diff, or a truncated invocation. Empty results with
 fully visible invocations have no control. Normal expansion omits execution
-envelopes and serialized result wrappers; each file expands only its own diff.
+display-ritual slots owned by the runtime, not captured serialized wrappers.
+Captured text blocks retain their emission order; each file expands only its own diff.
 
 Shell activity uses source-preserving command rows. Named Read/Search/List labels
 are row summaries, not separate grouping or lifecycle types. The header owns the
@@ -22,6 +23,32 @@ never merge. Nested calls and `notify()` outputs within one Code Mode call share
 Adjacent edits share one **Edited** heading, but each file retains its own
 disclosure. Messages and other tool entries start a new group. Per-call token
 estimates remain on their owning file row when its heading is omitted.
+
+# Expanded tool details
+
+- **Raw:** exact captured text, using the terminal's default foreground/background.
+- **Fmt:** a useful, bounded JSON projection, using a readable foreground tint on
+  the default background. Keep every field, duplicate key, key order, container,
+  and numeric lexeme. Only complete object/array blocks qualify; do not extract
+  fragments or parse JSON hidden inside strings. Escaped value whitespace may
+  become multiline text, so Fmt need not remain valid JSON.
+- **Client detail:** invocation details, private diff receipts, and reconstructed
+  notices use a subtle theme-aware background, or reverse video when the terminal
+  background is unknown. Stored results without exact capture use the same surface
+  and `Stored result · exact capture unavailable`.
+
+One `[Raw] [Fmt]` pair belongs to the expanded output owner's existing header,
+including grouped Code Mode output. Offer it only when a distinct Fmt view exists;
+Fmt is the default. Existing activity navigation focuses the choices; accept
+applies them and left/right selects Raw/Fmt. Preserve independent command/diff
+controls. Very narrow headers may clip the trailing choices; keep the token bill
+and keyboard access rather than introducing another toolbar row.
+
+Bodies remain ordinary selection surfaces. Copy uses the displayed representation
+and excludes gutters, soft wraps, token bills, controls, and client notices.
+Selection/focus must remain distinct from provenance; PRIMARY copy is unchanged.
+Existing terminal-control safety handling still applies; captured source is never
+rewritten to obtain a display projection.
 
 # Headers, primary, and secondary text
 

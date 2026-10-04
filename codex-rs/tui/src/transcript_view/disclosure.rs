@@ -2,7 +2,9 @@
 //! Controls appear only while activity is focused; copied text and full-transcript search remain source based.
 
 use crate::history_cell::activity_parts::FoldTarget;
+use crate::history_cell::output_provenance::OutputMode;
 use crate::style::accent_color;
+use std::collections::HashMap;
 use std::collections::HashSet;
 
 use crate::bottom_pane::TranscriptFooter;
@@ -17,9 +19,18 @@ use super::*;
 
 pub(super) struct Disclosure {
     pub(super) expanded: HashSet<String>,
+    output_modes: HashMap<String, OutputChoice>,
+    output_revision: u64,
     pub(super) focused: Option<ActivityFocus>,
     pub(super) live_ids: Vec<String>,
     pub(super) keymap: RuntimeKeymap,
+}
+
+#[derive(Clone, Copy)]
+struct OutputChoice {
+    // Existing aliases can prepend or regroup. Only explicit mode actions advance this clock.
+    revision: u64,
+    mode: OutputMode,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -32,6 +43,8 @@ impl Default for Disclosure {
     fn default() -> Self {
         Self {
             expanded: HashSet::new(),
+            output_modes: HashMap::new(),
+            output_revision: 0,
             focused: None,
             live_ids: Vec::new(),
             keymap: RuntimeKeymap::defaults(),
@@ -40,6 +53,12 @@ impl Default for Disclosure {
 }
 
 impl Disclosure {
+    pub(super) fn output_mode(&self, ids: &[String]) -> OutputMode {
+        ids.iter()
+            .filter_map(|id| self.output_modes.get(id))
+            .max_by_key(|choice| choice.revision)
+            .map_or(OutputMode::Fmt, |choice| choice.mode)
+    }
     pub(super) fn is_expanded(&self, ids: &[String]) -> bool {
         ids.iter().any(|id| self.expanded.contains(id))
     }
@@ -212,6 +231,15 @@ impl TranscriptView {
             ListAction::Accept => self.toggle_activity(cells, focused, focus.target),
             ListAction::MoveLeft | ListAction::MoveRight => {
                 let target = focus.target;
+                if matches!(target, FoldTarget::OutputMode(_)) {
+                    let mode = if action == ListAction::MoveLeft {
+                        OutputMode::Raw
+                    } else {
+                        OutputMode::Fmt
+                    };
+                    self.toggle_activity(cells, focused, FoldTarget::OutputMode(mode));
+                    return Some(ViewAction::Changed);
+                }
                 let ids = target.ids(&self.activity_ids(cells, focused));
                 if self.disclosure.is_expanded(&ids) != (action == ListAction::MoveRight) {
                     self.toggle_activity(cells, focused, target);
@@ -323,6 +351,10 @@ impl TranscriptView {
         true
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "An overflowing explicit-action sequence violates local mode ordering"
+    )]
     fn toggle_activity(
         &mut self,
         cells: &[Arc<dyn HistoryCell>],
@@ -365,7 +397,20 @@ impl TranscriptView {
                 offset: 0,
                 row_bias: 0,
             });
-        if self.disclosure.is_expanded(&ids) {
+        if let FoldTarget::OutputMode(mode) = target {
+            self.disclosure.output_revision = self
+                .disclosure
+                .output_revision
+                .checked_add(1)
+                .expect("output mode revision exhausted");
+            let choice = OutputChoice {
+                revision: self.disclosure.output_revision,
+                mode,
+            };
+            self.disclosure
+                .output_modes
+                .extend(ids.iter().cloned().map(|id| (id, choice)));
+        } else if self.disclosure.is_expanded(&ids) {
             self.disclosure.expanded.retain(|id| !ids.contains(id));
         } else {
             self.disclosure.expanded.extend(ids.iter().cloned());

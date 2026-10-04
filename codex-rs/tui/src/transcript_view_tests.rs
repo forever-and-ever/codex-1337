@@ -90,8 +90,9 @@ fn terminal_output_disclosure_follows_live_history_and_keymap() {
         /*width*/ 72,
         /*key*/ None,
         /*expanded*/ false,
-        |width, _| {
+        |width, _, _| {
             Some(ActivityTranscriptLines {
+                output_mode: None,
                 is_tool_entry: cell.is_tool_entry(),
                 header: cell.activity_header(),
                 controls: Vec::new(),

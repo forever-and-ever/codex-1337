@@ -19,6 +19,7 @@ impl ChatWidget {
         expanded: bool,
         expanded_parts: &std::collections::HashSet<String>,
         tool_output_tokens: Option<u64>,
+        output_mode: history_cell::output_provenance::OutputMode,
     ) -> Option<ActivityTranscriptLines> {
         let active = self.transcript.active_cell.as_deref();
         let mode = self.history_render_mode();
@@ -34,12 +35,13 @@ impl ChatWidget {
         let has_activity = mode == HistoryRenderMode::Rich
             && active.is_some_and(|cell| !cell.activity_ids().is_empty());
         let parts = active.filter(|_| has_activity).and_then(|cell| {
-            cell.activity_parts(
+            cell.output_parts(
                 width,
                 tool_output_tokens
                     .map(history_cell::activity_parts::token_label)
                     .map_or(0, |label| label.len()),
                 expanded_parts,
+                output_mode,
             )
         });
         let (activity, header, disclosure, controls) = if let Some(parts) = parts {
@@ -47,7 +49,7 @@ impl ChatWidget {
         } else {
             let activity = active.map_or_else(Vec::new, |cell| {
                 if expanded && has_activity {
-                    cell.expanded_hyperlink_lines(width)
+                    cell.expanded_output_lines(width, output_mode)
                 } else {
                     render_compact(cell, width)
                 }
@@ -84,6 +86,8 @@ impl ChatWidget {
             auxiliary.insert(/*index*/ 0, HyperlinkLine::from(""));
         }
         Some(ActivityTranscriptLines {
+            output_mode: (expanded && active.is_some_and(HistoryCell::has_formatted_output))
+                .then_some(output_mode),
             is_tool_entry: active.is_some_and(HistoryCell::is_tool_entry),
             activity,
             header,

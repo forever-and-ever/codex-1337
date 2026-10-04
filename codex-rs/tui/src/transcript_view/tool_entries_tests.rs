@@ -140,8 +140,9 @@ fn mixed_feed_keeps_its_grid_through_live_commit_resize_and_details() {
             width,
             /*key*/ None,
             /*expanded*/ false,
-            |width, _| {
+            |width, _, _| {
                 Some(ActivityTranscriptLines {
+                    output_mode: None,
                     is_tool_entry: false,
                     header: None,
                     activity: Vec::new(),
@@ -347,8 +348,9 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
         /*width*/ 100,
         /*key*/ None,
         /*expanded*/ false,
-        |width, _| {
+        |width, _, _| {
             Some(ActivityTranscriptLines {
+                output_mode: None,
                 is_tool_entry: tail.is_tool_entry(),
                 header: tail.activity_header(),
                 activity: tail.compact_hyperlink_lines(width),

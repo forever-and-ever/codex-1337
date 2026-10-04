@@ -90,11 +90,12 @@ fn shell_rows_share_output_but_have_independent_source_folds() {
         /*width*/ 64,
         /*key*/ None,
         /*expanded*/ false,
-        |width, expanded| {
+        |width, expanded, _| {
             let parts = cells[0]
                 .activity_parts(width, /*header_reserve*/ 17, expanded)
                 .unwrap();
             Some(ActivityTranscriptLines {
+                output_mode: None,
                 is_tool_entry: cells[0].is_tool_entry(),
                 header: parts.header,
                 activity: parts.lines,

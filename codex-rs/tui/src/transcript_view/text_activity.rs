@@ -13,6 +13,48 @@ impl TextRow {
 }
 
 impl TextLayout {
+    pub(in crate::transcript_view) fn with_output_controls(
+        mut self,
+        offset: usize,
+        mode: OutputMode,
+        estimate: Option<String>,
+    ) -> Self {
+        let mut decoration = estimate.unwrap_or_default();
+        let mut controls = Vec::new();
+        for (mode, label) in [(OutputMode::Raw, "[Raw]"), (OutputMode::Fmt, "[Fmt]")] {
+            decoration.push(' ');
+            let start = display_width(&decoration);
+            decoration.push_str(label);
+            controls.push((mode, label, start..display_width(&decoration)));
+        }
+        self = self.with_estimate_at(offset, decoration);
+        for (mode, label, columns) in controls {
+            self = self.with_output_target(label.into(), offset, mode, columns);
+        }
+        self.output_mode = Some(mode);
+        self
+    }
+
+    pub(super) fn with_output_target(
+        mut self,
+        label: String,
+        source_offset: usize,
+        mode: OutputMode,
+        columns: Range<usize>,
+    ) -> Self {
+        let row = self.row_for_offset(source_offset.saturating_sub(1));
+        self.disclosure_controls.push(DisclosureControl {
+            target: FoldTarget::OutputMode(mode),
+            label,
+            source_offset,
+            row,
+            placement: DisclosurePlacement::Output {
+                start: columns.start,
+                end: columns.end,
+            },
+        });
+        self
+    }
     pub(in crate::transcript_view) fn with_leading_disclosure_control(
         self,
         label: String,
@@ -66,8 +108,10 @@ impl TextLayout {
     }
 
     pub(in crate::transcript_view) fn fold_targets(&self) -> Vec<FoldTarget> {
-        self.disclosure_controls
-            .iter()
+        let mut controls: Vec<_> = self.disclosure_controls.iter().collect();
+        controls.sort_by_key(|control| (control.row, self.control_columns(control).start));
+        controls
+            .into_iter()
             .map(|control| control.target.clone())
             .collect()
     }
