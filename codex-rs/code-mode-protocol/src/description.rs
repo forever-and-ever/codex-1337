@@ -26,6 +26,9 @@ Print bounded search results, not the whole catalogue:
 text(search_tools("symbol", { namespace: "mcp__depot", limit: 5 }));
 text(describe_tool("mcp__depot__lsp_symbols"));
 ```"#;
+const EXECUTION_OUTPUT_GUIDANCE: &str = r#"Execution output rules (override description templates):
+- `text(value, options?: {metadata?: boolean})` and `notify(value, options?: {metadata?: boolean})` print compatible directly returned native `exec_command`/`write_stdin` objects as literal output plus necessary execution state. Nonempty dense arrays containing only such objects get ordinal headers; only default mode coalesces consecutive empty successful entries. `{metadata: true}` includes each result's metadata. JavaScript result fields are unchanged.
+- `text(result)` is compact. Strings, including `result.output` and explicit `JSON.stringify(result)`, remain literal. All other values retain generic serialization."#;
 const LEGACY_IMAGE_HELPER_DESCRIPTION: &str = r#"`image(imageUrlOrItem: string | { image_url: string; detail?: "auto" | "low" | "high" | "original" | null } | ImageContent, detail?: "auto" | "low" | "high" | "original" | null)`: Appends an image item. `image_url` should be a base64-encoded `data:` URL. To forward an MCP tool image, pass an individual `ImageContent` block from `result.content`, for example `image(result.content[0])`. MCP image blocks may request detail with `_meta: { "codex/imageDetail": "original" }`. When provided, the second `detail` argument overrides any detail embedded in the first argument."#;
 const UNIFIED_IMAGE_HELPER_DESCRIPTION: &str = r#"`image(imageUrlOrItem: string | { image_url: string } | ImageContent)`: Appends an image item. `image_url` should be a base64-encoded `data:` URL. To forward an MCP tool image, pass an individual `ImageContent` block from `result.content`, for example `image(result.content[0])`."#;
 const EXEC_DESCRIPTION_TEMPLATE: &str = r#"Run JavaScript code to orchestrate/compose tool calls
@@ -42,13 +45,13 @@ const EXEC_DESCRIPTION_TEMPLATE: &str = r#"Run JavaScript code to orchestrate/co
 
 - Global helpers:
 - `exit()`: Immediately ends the current script successfully (like an early return from the top level).
-- `text(value: string | number | boolean | undefined | null)`: Appends a text item. Non-string values are stringified with `JSON.stringify(...)` when possible.
+- `text(value, options?: {metadata?: boolean})`: Appends a text item; see Execution output rules below for native execution results and generic serialization.
 - {{ image_helper }}
 - `audio(audioUrlOrItem: string | { audio_url: string } | AudioContent)`: Appends an audio item. `audio_url` should be a base64-encoded `data:` URL. To forward an MCP tool audio block, pass an individual `AudioContent` block from `result.content`, for example `audio(result.content[0])`.
 - `generatedImage(result: { image_url: string; output_hint?: string })`: Appends an image-generation result and its optional output hint. HTTP(S) URLs are not supported.
 - `store(key: string, value: any)`: stores a serializable value under a string key for later `exec` calls in the same session.
 - `load(key: string)`: returns the stored value for a string key, or `undefined` if it is missing.
-- `notify(value: string | number | boolean | undefined | null)`: immediately injects an extra `custom_tool_call_output` for the current `exec` call. Values are stringified like `text(...)`.
+- `notify(value, options?: {metadata?: boolean})`: immediately injects an extra `custom_tool_call_output` for the current `exec` call. Values are rendered like `text(...)`.
 - `setTimeout(callback: () => void, delayMs?: number)`: schedules a callback to run later and returns a timeout id. Pending timeouts do not keep `exec` alive by themselves; await an explicit promise if you need to wait for one.
 - `clearTimeout(timeoutId?: number)`: cancels a timeout created by `setTimeout`.
 - `yield_control()`: yields the accumulated output to the model immediately while the script keeps running."#;
@@ -305,6 +308,7 @@ pub fn build_exec_tool_description(
         sections.push(description);
     }
     sections.push(TOOL_DISCOVERY_GUIDANCE.to_string());
+    sections.push(EXECUTION_OUTPUT_GUIDANCE.to_string());
     if !deferred_tools.is_empty() {
         let guidance = messages
             .and_then(|messages| messages.deferred_nested_tools_guidance.as_deref())

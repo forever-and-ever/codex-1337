@@ -45,10 +45,10 @@ fn discarded_tool_response_is_collectible_before_cell_ends() {
             .get_slot_mut::<RuntimeState>()
             .expect("runtime state")
             .pending_tool_calls
-            .insert("tool".to_string(), PendingToolCall { resolver, native_execution: false });
+            .insert("tool".to_string(), PendingToolCall { resolver, native_execution: true });
         v8::Global::new(scope, promise)
     };
-    let response = json!({"content": [{"type": "text", "text": "tool result"}]});
+    let response = json!({"wall_time_seconds": 0.001, "exit_code": 0, "output": "tool result"});
     resolve_tool_response(scope, "tool", Ok(response.clone())).expect("resolve tool promise");
     scope.perform_microtask_checkpoint();
     scope.low_memory_notification();
@@ -104,29 +104,53 @@ fn native_result_presentation_follows_each_promise_and_current_values() {
 const first = tools.exec_command({});
 const other = tools.mcp__fake__exec_command({});
 const running = tools.write_stdin({});
+const emptyOne = tools.exec_command({});
+const emptyTwo = tools.exec_command({});
 const result = await first;
 text(result); notify(result);
 text(result, {metadata:true});
 text(JSON.stringify(result));
 text({...result}); text(JSON.parse(JSON.stringify(result)));
-store("saved", result); text(load("saved")); text({result}); text([result]);
+store("saved", result); text(load("saved")); text({result}); text([result,"mixed"]);
 text(await other);
-text(await running);
+const active = await running; text(active);
 result.output = "changed"; text(result);
 result.output = " \n"; notify(result);
 result.extra = "kept"; text(result); delete result.extra;
 result.toJSON = () => ({custom:"own"}); text(result); delete result.toJSON;
 Object.setPrototypeOf(result, {toJSON(){ return {custom:"inherited"}; }}); text(result);
 Object.setPrototypeOf(result, Object.prototype);
+result.exit_code = 1.5; text(result);
 result.exit_code = 1; text(result);
 result.exit_code = null; result.session_id = 23; text(result);
 result.exit_code = 0; text(result);
 for (const options of [null, [], {metadata:1}, {extra:true}]) {
   try { text(result, options); } catch (error) { text(String(error).includes("options must be an object")); }
 }
+delete result.session_id; result.output = ""; text(result);
+delete result.exit_code; text(result);
+result.output = '{"body":true}\n'; text(result);
+const a = await emptyOne, b = await emptyTwo;
+result.exit_code = 0; result.output = "same";
+text([result,a,b,active]); notify([result,a,b,active]);
+result.output = "same \n\n"; text([result,a,b,active]); result.output = "same";
+text([a,b], {metadata:true}); notify([a,b], {metadata:true});
+text([result,result]);
+a.output = " "; text([a,b,b]);
+result.exit_code = 1; text([a,result]);
+result.session_id = 23; text([a,result]);
+text([a,{...b}]); text([]);
+const sparse = [a,b]; delete sparse[0]; text(sparse);
+const custom = [a,b]; custom.toJSON = () => ({batch:"custom"}); text(custom);
+delete custom.toJSON; Object.setPrototypeOf(custom,{toJSON(){return {batch:"inherited"};}}); text(custom);
+const accessor = [a,b]; Object.defineProperty(accessor,0,{get(){return a;}}); text(accessor);
 "#).expect("evaluate script");
     // Responses arrive in reverse order. Origin belongs to the promise, not delivery order.
     let completed = json!({"chunk_id":"abcd12", "wall_time_seconds":0.003421, "exit_code":0, "original_token_count":214, "output":"literal\n"});
+    let empty_one = json!({"wall_time_seconds":0.5,"exit_code":0,"output":""});
+    let empty_two = json!({"wall_time_seconds":0.75,"exit_code":0,"output":""});
+    resolve_tool_response(scope, "tool-5", Ok(empty_two.clone())).unwrap();
+    resolve_tool_response(scope, "tool-4", Ok(empty_one.clone())).unwrap();
     resolve_tool_response(scope, "tool-3", Ok(json!({"wall_time_seconds":0.2, "session_id":42, "output":"partial"}))).unwrap();
     resolve_tool_response(scope, "tool-2", Ok(completed.clone())).unwrap();
     resolve_tool_response(scope, "tool-1", Ok(completed.clone())).unwrap();
@@ -144,14 +168,26 @@ for (const options of [null, [], {metadata:1}, {extra:true}]) {
     let full = completed.to_string();
     let mut modified = completed.clone(); modified["output"] = json!(" \n"); modified["extra"] = json!("kept");
     let mut contradictory = completed.clone(); contradictory["output"] = json!(" \n"); contradictory["session_id"] = json!(23);
-    let text = text.into_iter().map(|text| serde_json::from_str::<serde_json::Value>(&text).map(|value| value.to_string()).unwrap_or(text)).collect::<Vec<_>>();
+    let mut fractional = completed.clone(); fractional["output"] = json!(" \n"); fractional["exit_code"] = json!(1.5);
+    let mut whitespace = empty_one.clone(); whitespace["output"] = json!(" ");
+    let mut failed = completed.clone(); failed.as_object_mut().unwrap().shift_remove("exit_code"); failed["output"] = json!("same"); failed["exit_code"] = json!(1); failed["session_id"] = json!(23);
+    let text = text.into_iter().map(|text| if text.trim() == text { serde_json::from_str::<serde_json::Value>(&text).map(|value| value.to_string()).unwrap_or(text) } else { text }).collect::<Vec<_>>();
     assert_eq!(text, vec![
         "literal\n".to_string(), "exit=0 wall=0.003421s chunk=abcd12 tokens≈214".to_string()+"\nliteral\n",
-        full.clone(), full.clone(), full.clone(), full.clone(), json!({"result":completed}).to_string(), json!([completed]).to_string(), full,
+        full.clone(), full.clone(), full.clone(), full.clone(), json!({"result":completed}).to_string(), json!([completed,"mixed"]).to_string(), full,
         "Running (session 42)\npartial".to_string(), "changed".to_string(), modified.to_string(),
         json!({"custom":"own"}).to_string(), json!({"custom":"inherited"}).to_string(),
+        fractional.to_string(),
         "Exit 1\n \n".to_string(), "Running (session 23)\n \n".to_string(), contradictory.to_string(),
         "true".to_string(), "true".to_string(), "true".to_string(), "true".to_string(),
+        "Completed".to_string(), "Execution status unavailable".to_string(), "{\"body\":true}\n".to_string(),
+        "[1]\nsame\n[2–3] Completed\n[4] Running (session 42)\npartial".to_string(),
+        "[1]\nsame \n\n[2–3] Completed\n[4] Running (session 42)\npartial".to_string(),
+        "[1] exit=0 wall=0.5s\n[2] exit=0 wall=0.75s".to_string(),
+        "[1]\nsame\n[2]\nsame".to_string(), "[1]\n \n[2–3] Completed".to_string(),
+        "[1]\n \n[2] Exit 1\nsame".to_string(), json!([whitespace,failed]).to_string(),
+        json!([whitespace,empty_two]).to_string(), "[]".to_string(), json!([null,empty_two]).to_string(),
+        json!({"batch":"custom"}).to_string(), json!({"batch":"inherited"}).to_string(), json!([whitespace,empty_two]).to_string(),
     ]);
-    assert_eq!(notifications, vec!["literal\n", " \n"]);
+    assert_eq!(notifications, vec!["literal\n", " \n", "[1]\nsame\n[2–3] Completed\n[4] Running (session 42)\npartial", "[1] exit=0 wall=0.5s\n[2] exit=0 wall=0.75s"]);
 }

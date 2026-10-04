@@ -17,7 +17,7 @@ pub(super) fn brand(
 ) -> Result<(), String> {
     if let Ok(object) = v8::Local::<v8::Object>::try_from(value) {
         let key = identity(scope);
-        let marker = v8::Boolean::new(scope, true);
+        let marker = v8::Boolean::new(scope, /*value*/ true);
         if object.set_private(scope, key, marker.into()) != Some(true) {
             return Err("failed to mark native execution result".to_string());
         }
@@ -36,7 +36,45 @@ pub(super) fn serialize_text(
     {
         return Ok((text, true));
     }
+    if let Some(text) = native_batch(scope, value, metadata) {
+        return Ok((text, true));
+    }
     serialize_output_text(scope, value).map(|text| (text, false))
+}
+
+fn native_batch(
+    scope: &mut v8::PinScope<'_, '_>,
+    value: v8::Local<'_, v8::Value>,
+    metadata: ExecutionOutputMetadata,
+) -> Option<String> {
+    let array = v8::Local::<v8::Array>::try_from(value).ok()?;
+    let length = array.length();
+    if length == 0 {
+        return None;
+    }
+    let to_json = v8::String::new(scope, "toJSON")?;
+    if array.has(scope, to_json.into())? {
+        return None;
+    }
+    let keys = array.get_own_property_names(scope, v8::GetPropertyNamesArgs {
+        property_filter: v8::PropertyFilter::ALL_PROPERTIES, ..Default::default()
+    })?;
+    // `length` and every dense index are the only admitted array properties.
+    if u64::from(keys.length()) != u64::from(length) + 1 {
+        return None;
+    }
+    let value_key = v8::String::new(scope, "value")?;
+    NativeExecutionResult::render_batch((0..length).map(|index| {
+        v8::scope!(let scope, scope);
+        let key = v8::String::new(scope, &index.to_string())?;
+        let descriptor = array.get_own_property_descriptor(scope, key.into())?;
+        let descriptor = v8::Local::<v8::Object>::try_from(descriptor).ok()?;
+        if descriptor.has_own_property(scope, value_key.into()) != Some(true) {
+            return None;
+        }
+        let value = descriptor.get(scope, value_key.into())?;
+        native_result(scope, value)
+    }), metadata)
 }
 
 fn output_metadata(

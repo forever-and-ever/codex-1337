@@ -26,6 +26,57 @@ pub enum ExecutionOutputMetadata {
 impl NativeExecutionResult {
     /// Contradictory status must retain its complete structured representation.
     pub fn render(&self, metadata: ExecutionOutputMetadata) -> Option<String> {
+        let header = self.header(metadata)?;
+        Some(match (header.is_empty(), self.output.is_empty()) {
+            (true, _) => self.output.clone(),
+            (false, true) => header,
+            (false, false) => format!("{header}\n{}", self.output),
+        })
+    }
+
+    /// Reject the entire batch on an incompatible item; the caller emits only
+    /// after validation finishes. Items are consumed without retaining bodies.
+    pub fn render_batch(
+        results: impl IntoIterator<Item = Option<Self>>,
+        metadata: ExecutionOutputMetadata,
+    ) -> Option<String> {
+        let mut output = String::new();
+        let mut empty_start = None;
+        let mut empty_end = 0;
+        for (index, result) in results.into_iter().enumerate() {
+            let result = result?;
+            let ordinal = index + 1;
+            if matches!(metadata, ExecutionOutputMetadata::Hidden)
+                && result.exit_code == Some(0) && result.session_id.is_none() && result.output.is_empty()
+            {
+                empty_start.get_or_insert(ordinal);
+                empty_end = ordinal;
+                continue;
+            }
+            if let Some(start) = empty_start.take() {
+                append_empty_span(&mut output, start, empty_end);
+            }
+            let header = result.header(metadata)?;
+            if !output.is_empty() && !output.ends_with('\n') {
+                output.push('\n');
+            }
+            output.push_str(&format!("[{ordinal}]"));
+            if !header.is_empty() {
+                output.push(' ');
+                output.push_str(&header);
+            }
+            if !result.output.is_empty() {
+                output.push('\n');
+                output.push_str(&result.output);
+            }
+        }
+        if let Some(start) = empty_start {
+            append_empty_span(&mut output, start, empty_end);
+        }
+        Some(output)
+    }
+
+    fn header(&self, metadata: ExecutionOutputMetadata) -> Option<String> {
         if self.exit_code.is_some() && self.session_id.is_some() {
             return None;
         }
@@ -57,10 +108,17 @@ impl NativeExecutionResult {
                 fields.join(" ")
             }
         };
-        Some(match (header.is_empty(), self.output.is_empty()) {
-            (true, _) => self.output.clone(),
-            (false, true) => header,
-            (false, false) => format!("{header}\n{}", self.output),
-        })
+        Some(header)
+    }
+}
+
+fn append_empty_span(output: &mut String, start: usize, end: usize) {
+    if !output.is_empty() && !output.ends_with('\n') {
+        output.push('\n');
+    }
+    if start == end {
+        output.push_str(&format!("[{start}] Completed"));
+    } else {
+        output.push_str(&format!("[{start}–{end}] Completed"));
     }
 }

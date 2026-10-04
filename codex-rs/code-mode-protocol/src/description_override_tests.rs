@@ -6,6 +6,7 @@ use super::ImageDetailVisibility;
 use super::LEGACY_IMAGE_HELPER_DESCRIPTION;
 use super::MCP_TYPESCRIPT_PREAMBLE;
 use super::TOOL_DISCOVERY_GUIDANCE;
+use super::EXECUTION_OUTPUT_GUIDANCE;
 use super::ToolDefinition;
 use super::UNIFIED_IMAGE_HELPER_DESCRIPTION;
 use super::build_exec_tool_description;
@@ -47,7 +48,7 @@ fn exec_override_renders_only_known_literal_placeholders() {
         assert_eq!(
             description,
             format!(
-                " \nDefaults to 10000 ms. 4567 ms.\n{image_helper}\n{{{{ unknown }}}} {{{{default_exec_yield_time_ms}}}}\t \n\n{TOOL_DISCOVERY_GUIDANCE}"
+                " \nDefaults to 10000 ms. 4567 ms.\n{image_helper}\n{{{{ unknown }}}} {{{{default_exec_yield_time_ms}}}}\t \n\n{TOOL_DISCOVERY_GUIDANCE}\n\n{EXECUTION_OUTPUT_GUIDANCE}"
             ),
         );
     }
@@ -77,9 +78,9 @@ fn exec_override_preserves_empty_and_whitespace_only_text() {
                 }),
             ),
             if description_override.is_empty() {
-                TOOL_DISCOVERY_GUIDANCE.to_string()
+                format!("{TOOL_DISCOVERY_GUIDANCE}\n\n{EXECUTION_OUTPUT_GUIDANCE}")
             } else {
-                format!("{description_override}\n\n{TOOL_DISCOVERY_GUIDANCE}")
+                format!("{description_override}\n\n{TOOL_DISCOVERY_GUIDANCE}\n\n{EXECUTION_OUTPUT_GUIDANCE}")
             },
         );
     }
@@ -162,7 +163,7 @@ fn exec_override_preserves_runtime_sections() {
                     ..Default::default()
                 }),
             ),
-            format!("{TOOL_DISCOVERY_GUIDANCE}\n\n{expected}"),
+            format!("{TOOL_DISCOVERY_GUIDANCE}\n\n{EXECUTION_OUTPUT_GUIDANCE}\n\n{expected}"),
         );
     }
 }

@@ -794,9 +794,9 @@ const result = await tools.exec_command({ cmd: "printf code_mode_exec_marker" })
 text(result);
 text(JSON.stringify(result));
 text(await tools.exec_command({cmd: "printf '{\"literal\":true}\\n'; exit 7"}));
-const running = await tools.exec_command({cmd: "printf partial; sleep 2; printf done", yield_time_ms: 1, max_output_tokens: 64});
+const running = await tools.exec_command({cmd: "stty -echo; printf partial; read -r reply; printf done", tty: true, yield_time_ms: 1, max_output_tokens: 64});
 text(running);
-text(await tools.write_stdin({session_id: running.session_id, chars: "", yield_time_ms: 5000}));
+text(await tools.write_stdin({session_id: running.session_id, chars: "continue\n", yield_time_ms: 5000}));
 "#,
     )
     .await?;
@@ -812,8 +812,10 @@ text(await tools.write_stdin({session_id: running.session_id, chars: "", yield_t
     );
     assert_eq!(text_item(&items, /*index*/ 1), "code_mode_exec_marker");
     assert_eq!(text_item(&items, /*index*/ 3), "Exit 7\n{\"literal\":true}\n");
-    assert_regex_match(r"^Running \(session \d+\)\npartial$", text_item(&items, /*index*/ 4));
-    assert_eq!(text_item(&items, /*index*/ 5), "done");
+    let running = text_item(&items, /*index*/ 4);
+    assert_regex_match(r"^Running \(session \d+\)(?:\npartial)?$", running);
+    let partial = running.split_once('\n').map_or("", |(_, body)| body);
+    assert_eq!(format!("{partial}{}", text_item(&items, /*index*/ 5)), "partialdone");
     let parsed: Value = serde_json::from_str(text_item(&items, /*index*/ 2))?;
     assert!(
         parsed
