@@ -1,6 +1,5 @@
 ---
 source: tui/src/app/activity_groups_tests.rs
-assertion_line: 300
 expression: "format!(\"Collapsed\\n{}\\nBlock expanded\\n{}\\nFile expanded\\n{}\\nTranscript\\n{}\\n{}\",\ntext(&closed.lines), text(&opened.lines), text(&diff.lines),\ntext(&expected[0].transcript_hyperlink_lines(90)), file_snapshots.join(\"\\n\"))"
 ---
 Collapsed
@@ -20,7 +19,7 @@ Block expanded
     • Edited
         alpha.rs (+1, -0)
         beta.rs (+0, -1)
-  Exact model output unavailable in this history.
+  Stored result · exact capture unavailable
 File expanded
 • Called (Code Mode ωρρλ)
     • Called
@@ -32,7 +31,7 @@ File expanded
     • Edited
         alpha.rs (+1, -0)
         beta.rs (+0, -1)
-  Exact model output unavailable in this history.
+  Stored result · exact capture unavailable
 Transcript
 • Called (Code Mode ωρρλ)
     • Called
@@ -46,7 +45,7 @@ Transcript
         1 +created body
         beta.rs (+0, -1)
         1 -deleted body
-  Exact model output unavailable in this history.
+  Stored result · exact capture unavailable
 Independent file 0
 • Called (Code Mode ωρρλ)
     • Called semedit.edit({})

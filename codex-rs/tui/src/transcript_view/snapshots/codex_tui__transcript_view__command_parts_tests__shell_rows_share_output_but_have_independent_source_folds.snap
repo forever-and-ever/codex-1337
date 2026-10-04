@@ -1,6 +1,5 @@
 ---
 source: tui/src/transcript_view/command_parts_tests.rs
-assertion_line: 109
 expression: "snapshots.join(\"\\n\\n\")"
 ---
 collapsed
@@ -19,6 +18,7 @@ output only
 [+]     git diff --stat --ignore-all-space -- src/very_lon... &&
         echo 'not;a&&boundary'
 
+    Stored result · exact capture unavailable
         combined output
 
 opaque command expanded
@@ -30,6 +30,7 @@ opaque command expanded
         very_long_directory_name &&
         echo 'not;a&&boundary'
 
+    Stored result · exact capture unavailable
         combined output
 
 narrow
@@ -42,6 +43,8 @@ narrow
         very_long_directory_name &&
         echo 'not;a&&boundary'
 
+    Stored result · exact capture
+unavailable
         combined output
 
 wide
@@ -52,6 +55,7 @@ wide
 [-]     git diff --stat --ignore-all-space -- src/very_long_directory_name &&
         echo 'not;a&&boundary'
 
+    Stored result · exact capture unavailable
         combined output
 
 opaque command open, output closed

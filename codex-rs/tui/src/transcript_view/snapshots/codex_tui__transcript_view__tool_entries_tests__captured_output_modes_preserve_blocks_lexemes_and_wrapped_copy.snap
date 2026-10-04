@@ -1,0 +1,122 @@
+---
+source: tui/src/transcript_view/tool_entries_tests.rs
+expression: "painted.join(\"\\n\")"
+---
+Fmt
+Buffer {
+    area: Rect { x: 0, y: 0, width: 80, height: 14 },
+    content: [
+        "[-] • Returned (~ 123 tokens) [Raw] [Fmt]                                       ",
+        "        {                                                                       ",
+        "          "a": 9007199254740993123456789,                                       ",
+        "          "a": 1.2300e+04,                                                      ",
+        "          "text": "first                                                        ",
+        "        second  end",                                                           ",
+        "          "literal": "\\n",                                                     ",
+        "          "key\n": "\u0061"                                                     ",
+        "        }                                                                       ",
+        "        prefix {"embedded":true}                                                ",
+        "        {"truncated":                                                           ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+    ],
+    styles: [
+        x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 3, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 4, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 6, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 14, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 36, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD | UNDERLINED,
+        x: 41, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 1, fg: Cyan, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 9, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+    ]
+}
+Raw
+Buffer {
+    area: Rect { x: 0, y: 0, width: 80, height: 14 },
+    content: [
+        "[-] • Returned (~ 123 tokens) [Raw] [Fmt]                                       ",
+        "        {"a":9007199254740993123456789,"a":1.2300e+04,"text":"first\nsecond\tend",
+        "        ","literal":"\\n","key\n":"\u0061"}                                     ",
+        "        prefix {"embedded":true}                                                ",
+        "        {"truncated":                                                           ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+    ],
+    styles: [
+        x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 3, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 4, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 6, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 14, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 30, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD | UNDERLINED,
+        x: 35, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 41, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+    ]
+}
+Fmt
+Buffer {
+    area: Rect { x: 0, y: 0, width: 80, height: 14 },
+    content: [
+        "[-] • Returned (~ 123 tokens) [Raw] [Fmt]                                       ",
+        "        {                                                                       ",
+        "          "a": 9007199254740993123456789,                                       ",
+        "          "a": 1.2300e+04,                                                      ",
+        "          "text": "first                                                        ",
+        "        second  end",                                                           ",
+        "          "literal": "\\n",                                                     ",
+        "          "key\n": "\u0061"                                                     ",
+        "        }                                                                       ",
+        "        prefix {"embedded":true}                                                ",
+        "        {"truncated":                                                           ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+    ],
+    styles: [
+        x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 3, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 4, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 6, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 14, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 36, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD | UNDERLINED,
+        x: 41, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 1, fg: Cyan, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 9, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+    ]
+}
+provenance surfaces
+Buffer {
+    area: Rect { x: 0, y: 0, width: 80, height: 14 },
+    content: [
+        "    {                                                                           ",
+        "      "a": 9007199254740993123456789,                                           ",
+        "      "a": 1.2300e+04,                                                          ",
+        "      "text": "first                                                            ",
+        "    second      end",                                                           ",
+        "      "literal": "\\n",                                                         ",
+        "      "key\n": "\u0061"                                                         ",
+        "    }                                                                           ",
+        "    prefix {"embedded":true}                                                    ",
+        "    {"truncated":                                                               ",
+        "Stored result · exact capture unavailable                                       ",
+        "                                                                                ",
+        "                                                                                ",
+        "                                                                                ",
+    ],
+    styles: [
+        x: 0, y: 0, fg: Cyan, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 8, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 10, fg: Reset, bg: Reset, underline: Reset, modifier: REVERSED,
+        x: 0, y: 11, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+    ]
+}

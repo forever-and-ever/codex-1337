@@ -1,6 +1,5 @@
 ---
 source: tui/src/transcript_view/tool_entries_tests.rs
-assertion_line: 182
 expression: "snapshots.join(\"\\n\\n\").replace(&clock, \"14:17:54\")"
 ---
 width=64
@@ -37,7 +36,7 @@ expanded width=64
     • 14:17:54 Explored
         $ cat foo.rs
 
-    • 14:17:54 Called
+    • Called
       └ tools.inspect()
 
         combined result
@@ -63,7 +62,7 @@ detailed width=64
     • 14:17:54 Explored
         $ cat foo.rs
 
-    • 14:17:54 Called
+    • Called
       └ tools.inspect()
 
         combined result
@@ -116,7 +115,7 @@ detailed width=32
     • 14:17:54 Explored
         $ cat foo.rs
 
-    • 14:17:54 Called
+    • Called
       └ tools.inspect()
 
         combined result

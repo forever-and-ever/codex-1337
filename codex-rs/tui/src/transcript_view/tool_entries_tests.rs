@@ -10,6 +10,172 @@ use codex_protocol::models::FunctionCallOutputContentItem;
 use pretty_assertions::assert_eq;
 
 #[test]
+fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
+    use crate::history_cell::activity_parts::FoldTarget;
+    use crate::history_cell::output_provenance::OutputMode;
+    use crate::history_cell::output_provenance::OutputProvenance;
+    use crate::history_cell::output_provenance::client_notice;
+    let json = r#"{"a":9007199254740993123456789,"a":1.2300e+04,"text":"first\nsecond\tend","literal":"\\n","key\n":"\u0061"}"#;
+    let plain = "prefix {\"embedded\":true}";
+    let invalid = "{\"truncated\":";
+    let body = FunctionCallOutputBody::ContentItems(
+        [json, plain, invalid]
+            .map(|text| FunctionCallOutputContentItem::InputText { text: text.into() })
+            .into(),
+    );
+    let output = Arc::new(
+        ToolOutputCell::from_output("mode", Some("mode"), "tool", /*namespace*/ None, &body)
+            .unwrap(),
+    );
+    let cells: Vec<Arc<dyn HistoryCell>> = vec![output.clone()];
+    let mut view = TranscriptView::default();
+    view.disclosure.expanded.extend(output.activity_ids());
+    view.record_tool_output_tokens("tool-output-tokens:mode".into(), "mode".into(), Some(123));
+    let mut painted = Vec::new();
+    for mode in [OutputMode::Fmt, OutputMode::Raw, OutputMode::Fmt] {
+        tests::render(&mut view, &cells, /*width*/ 80, /*height*/ 14);
+        let layout = view.current_layout(&cells, /*index*/ 0).unwrap();
+        let target = FoldTarget::OutputMode(mode);
+        let (row, columns, _) = layout.fold_position(&target).unwrap();
+        assert_eq!(layout.fold_at(row, columns.start), Some(target));
+        assert_eq!(layout.fold_at(/*row*/ 1, /*column*/ 10), None);
+        assert!(view.toggle_disclosure_at(&cells, columns.start, row as u16));
+        let buffer = tests::render(&mut view, &cells, /*width*/ 80, /*height*/ 14);
+        let layout = view.current_layout(&cells, /*index*/ 0).unwrap();
+        let content_start = layout.text().find('\n').unwrap() + 1;
+        let text = layout.text()[content_start..].to_owned();
+        assert!(text.ends_with(&format!("\n{plain}\n{invalid}")));
+        if mode == OutputMode::Raw {
+            assert_eq!(text, [json, plain, invalid].join("\n"));
+        } else {
+            assert!(text.contains("9007199254740993123456789"));
+            assert!(text.contains("1.2300e+04"));
+            assert!(text.contains("\"text\": \"first\nsecond\tend\""));
+            assert!(text.contains(r#""literal": "\\n""#));
+            assert!(text.contains(r#""key\n": "\u0061""#));
+            assert_eq!(text.matches("\"a\":").count(), 2);
+        }
+        view.begin_selection(&cells, /*column*/ 4, /*row*/ 1, /*clicks*/ 1);
+        let selection = view.selection.as_mut().unwrap();
+        selection.start.offset = content_start;
+        selection.end.offset = layout.text().len();
+        tests::render(&mut view, &cells, /*width*/ 34, /*height*/ 18);
+        assert_eq!(view.selected_text(&cells), Some(text));
+        view.end_selection(&cells);
+        painted.push(format!("{mode:?}\n{buffer:?}"));
+    }
+    assert!(view.focus_fold(
+        &cells,
+        /*index*/ 0,
+        FoldTarget::OutputMode(OutputMode::Raw)
+    ));
+    for (key, mode) in [
+        (crossterm::event::KeyCode::Left, OutputMode::Raw),
+        (crossterm::event::KeyCode::Right, OutputMode::Fmt),
+    ] {
+        view.handle_key(
+            crossterm::event::KeyEvent::new(key, crossterm::event::KeyModifiers::NONE),
+            &cells,
+        );
+        assert_eq!(view.disclosure.output_mode(&output.activity_ids()), mode);
+        assert!(view.disclosure.is_expanded(&output.activity_ids()));
+    }
+    view.handle_key(
+        crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Left,
+            crossterm::event::KeyModifiers::NONE,
+        ),
+        &cells,
+    );
+    let older: Arc<dyn HistoryCell> = Arc::new(
+        ToolOutputCell::from_output(
+            "older-mode",
+            Some("mode"),
+            "tool",
+            /*namespace*/ None,
+            &FunctionCallOutputBody::Text("older output".into()),
+        )
+        .unwrap(),
+    );
+    let regrouped = vec![crate::history_cell::ToolOutputGroup::from_cells([
+        older,
+        output.clone() as Arc<dyn HistoryCell>,
+    ])];
+    tests::render(&mut view, &regrouped, /*width*/ 80, /*height*/ 20);
+    assert_eq!(
+        view.disclosure.output_mode(&regrouped[0].activity_ids()),
+        OutputMode::Raw
+    );
+    view.handle_key(
+        crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Right,
+            crossterm::event::KeyModifiers::NONE,
+        ),
+        &regrouped,
+    );
+    assert_eq!(
+        view.disclosure.output_mode(&output.activity_ids()),
+        OutputMode::Fmt
+    );
+    view.sync_live_activity(&[], output.activity_ids());
+    let mut live_modes = Vec::new();
+    for key in [
+        crossterm::event::KeyCode::Left,
+        crossterm::event::KeyCode::Right,
+    ] {
+        view.handle_key(
+            crossterm::event::KeyEvent::new(key, crossterm::event::KeyModifiers::NONE),
+            &cells,
+        );
+        view.sync_live_activity_tail(
+            /*width*/ 80,
+            /*key*/ None,
+            /*expanded*/ true,
+            |width, _, mode| {
+                live_modes.push(mode);
+                Some(ActivityTranscriptLines {
+                    output_mode: Some(mode),
+                    is_tool_entry: true,
+                    activity: output.expanded_output_lines(width, mode),
+                    header: output.activity_header(),
+                    auxiliary: Vec::new(),
+                    tool_output_tokens: None,
+                    disclosure: output.activity_disclosure(width),
+                    controls: Vec::new(),
+                })
+            },
+        );
+    }
+    assert_eq!(live_modes, vec![OutputMode::Raw, OutputMode::Fmt]);
+    let mut surfaces = output.output_lines(/*width*/ 80, OutputMode::Fmt);
+    surfaces.push(client_notice("Stored result · exact capture unavailable"));
+    let layout = TextLayout::new(surfaces, /*width*/ 80);
+    assert!(!layout.text().contains("Stored result"));
+    let area = Rect::new(
+        /*x*/ 0, /*y*/ 0, /*width*/ 80, /*height*/ 14,
+    );
+    let mut buffer = Buffer::empty(area);
+    layout.render(area, &mut buffer, /*start_row*/ 0);
+    painted.push(format!("provenance surfaces\n{buffer:?}"));
+    let narrow = layout.rewrap(/*width*/ 24);
+    let area = Rect::new(
+        /*x*/ 0, /*y*/ 0, /*width*/ 24, /*height*/ 24,
+    );
+    let mut buffer = Buffer::empty(area);
+    narrow.render(area, &mut buffer, /*start_row*/ 0);
+    assert!(tests::text(&buffer).contains("Stored result"));
+    assert!(!narrow.text().contains("Stored result"));
+    assert!(
+        output
+            .output_lines(/*width*/ 80, OutputMode::Fmt)
+            .iter()
+            .any(|line| line.source.as_ref().unwrap().output_provenance
+                == OutputProvenance::Formatted)
+    );
+    insta::assert_snapshot!(painted.join("\n"));
+}
+
+#[test]
 fn mixed_feed_keeps_its_grid_through_live_commit_resize_and_details() {
     use crate::diff_model::FileChange;
     use crate::exec_cell::CommandOutput;

@@ -1,6 +1,5 @@
 ---
 source: tui/src/app/activity_groups_tests.rs
-assertion_line: 564
 expression: "expected.iter().enumerate().map(|(index, cell)|\n{\n    let collapsed = text(cell); let expanded =\n    cell.expanded_hyperlink_lines(90).iter().map(|line|\n    line.line.to_string()).collect::<Vec<_>>().join(\"\\n\");\n    format!(\"cell {index} collapsed\\n{collapsed}\\nexpanded\\n{expanded}\")\n}).collect::<Vec<_>>().join(\"\\n\\n\")"
 ---
 cell 0 collapsed
@@ -9,7 +8,7 @@ cell 0 collapsed
 expanded
 • Called
   └ cua_repl.js({"title":"Inspect direct"})
-    Exact model output unavailable; stored tool result follows.
+    Stored result · exact capture unavailable
     Result direct
 
 cell 1 collapsed
@@ -24,7 +23,7 @@ expanded
 • Interrupted (Code Mode δοτζ)
     • Called
       └ cua_repl.js({"title":"Inspect child-b"})
-  Exact model output unavailable in this history.
+  Stored result · exact capture unavailable
 
 cell 3 collapsed
 • Failed (Code Mode ψγζζ)
