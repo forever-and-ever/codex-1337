@@ -17,10 +17,21 @@ pub(crate) fn split_code_mode_members(
     cells: &[Arc<dyn HistoryCell>],
     incoming: &Arc<dyn HistoryCell>,
 ) -> Option<Vec<Arc<dyn HistoryCell>>> {
+    split_members(
+        cells
+            .iter()
+            .filter_map(|cell| cell.as_any().downcast_ref::<CodeModeCell>()),
+        incoming,
+    )
+}
+
+fn split_members<'a>(
+    blocks: impl Iterator<Item = &'a CodeModeCell> + Clone,
+    incoming: &Arc<dyn HistoryCell>,
+) -> Option<Vec<Arc<dyn HistoryCell>>> {
     let ids = incoming.tool_call_ids();
-    if !cells
-        .iter()
-        .filter_map(|cell| cell.as_any().downcast_ref::<CodeModeCell>())
+    if !blocks
+        .clone()
         .any(|block| ids.iter().any(|id| block.calls().contains(id)))
     {
         return None;
@@ -44,11 +55,7 @@ pub(crate) fn split_code_mode_members(
                 .calls
                 .iter()
                 .map(|call| {
-                    if cells
-                        .iter()
-                        .filter_map(|cell| cell.as_any().downcast_ref::<CodeModeCell>())
-                        .any(|block| block.owns(call))
-                    {
+                    if blocks.clone().any(|block| block.owns(call)) {
                         Arc::new(call.clone()) as Arc<dyn HistoryCell>
                     } else {
                         let mut cell = group.clone();
@@ -136,14 +143,18 @@ pub(crate) fn reconcile_code_mode(
     } else {
         block.insert_member(Arc::clone(incoming));
     }
-    let start = if let Some(fact) = fact.filter(|_| reference.is_some()) {
-        cells
-            .iter()
-            .position(|cell| same_wait_reference(cell.as_ref(), fact))
-            .map_or(owner_index, |index| index.min(owner_index))
-    } else {
-        owner_index
-    };
+    // Ownership facts can arrive after their rows. Include earlier members, even when
+    // an exploration group straddles this script and unrelated calls.
+    let calls = block.calls();
+    let start = cells
+        .iter()
+        .position(|cell| {
+            cell.tool_call_ids().iter().any(|id| calls.contains(id))
+                || fact.is_some_and(|fact| {
+                    reference.is_some() && same_wait_reference(cell.as_ref(), fact)
+                })
+        })
+        .map_or(owner_index, |index| index.min(owner_index));
     let mut retained = Vec::new();
     let mut block_position = 0;
     let mut reference_position = None;
@@ -161,13 +172,19 @@ pub(crate) fn reconcile_code_mode(
             for member in &old.members {
                 block.insert_member(Arc::clone(member));
             }
-        } else if block.owns(cell.as_ref()) {
-            block.insert_member(Arc::clone(cell));
         } else if reference.is_some() && same_wait_reference(cell.as_ref(), fact?) {
             // The completed reference replaces its pending row rather than creating a second bill.
             reference_position = Some(retained.len());
         } else {
-            retained.push(Arc::clone(cell));
+            let members = split_members(std::iter::once(&block), cell)
+                .unwrap_or_else(|| vec![Arc::clone(cell)]);
+            for member in members {
+                if block.owns(member.as_ref()) {
+                    block.insert_member(member);
+                } else {
+                    retained.push(member);
+                }
+            }
         }
     }
     let block: Arc<dyn HistoryCell> = Arc::new(block);

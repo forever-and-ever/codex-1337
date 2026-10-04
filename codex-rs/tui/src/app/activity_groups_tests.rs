@@ -495,10 +495,16 @@ async fn interleaved_scripts_keep_exact_ownership_after_terminal_wait_and_replay
             selected_before_completion = app.transcript_view.selected_text(&app.transcript_cells);
             assert!(selected_before_completion.is_some());
         }
-        app.chat_widget.replay_thread_item(
-            item.clone(),
-            current.id.clone(),
-            crate::chatwidget::ReplayKind::ResumeInitialMessages,
+        app.chat_widget.handle_server_notification(
+            codex_app_server_protocol::ServerNotification::ItemCompleted(
+                codex_app_server_protocol::ItemCompletedNotification {
+                    thread_id: ThreadId::default().to_string(),
+                    turn_id: current.id.clone(),
+                    item: item.clone(),
+                    completed_at_ms: 0,
+                },
+            ),
+            /*replay_kind*/ None,
         );
         while let Ok(event) = rx.try_recv() {
             if let AppEvent::InsertHistoryCell(cell) = event {
@@ -554,12 +560,6 @@ async fn interleaved_scripts_keep_exact_ownership_after_terminal_wait_and_replay
             .expanded_hyperlink_lines(90)
             .iter()
             .any(|line| line.line.to_string().contains("visible wait-output-a"))
-    );
-    assert!(
-        expected[3]
-            .expanded_hyperlink_lines(90)
-            .iter()
-            .any(|line| line.line.to_string().contains("A precise diagram"))
     );
     insta::assert_snapshot!(
         "interleaved_code_mode",
@@ -618,7 +618,6 @@ async fn interleaved_scripts_keep_exact_ownership_after_terminal_wait_and_replay
 
 #[tokio::test]
 async fn returned_batches_keep_one_disclosure_and_bill_across_live_replay_and_pages() {
-    use crate::chatwidget::ReplayKind;
     use codex_app_server_protocol::CodeModeEvent;
     use codex_app_server_protocol::CodeModeStatus;
     use codex_protocol::models::FunctionCallOutputBody;
@@ -776,11 +775,50 @@ async fn returned_batches_keep_one_disclosure_and_bill_across_live_replay_and_pa
         }
 
         // Nested calls and notify() outputs share a call; a different call starts a new unit.
-        for item in &current.items {
-            app.chat_widget.replay_thread_item(
-                item.clone(),
-                current.id.clone(),
-                ReplayKind::ResumeInitialMessages,
+        // Reconnect and notification backpressure can deliver ownership after visible rows.
+        // The live path must reach the same projection as a complete replay without a reload.
+        let (ownership, operations): (Vec<_>, Vec<_>) = current.items.iter().partition(|item| {
+            matches!(item, ThreadItem::CodeMode(fact) if matches!(fact.event,
+                CodeModeEvent::Started { .. } | CodeModeEvent::ToolCall { .. }))
+        });
+        for item in operations.into_iter().chain(ownership) {
+            if let ThreadItem::Reasoning { id, summary, .. } = item {
+                app.chat_widget.handle_server_notification(
+                    codex_app_server_protocol::ServerNotification::ItemStarted(
+                        codex_app_server_protocol::ItemStartedNotification {
+                            thread_id: ThreadId::default().to_string(),
+                            turn_id: current.id.clone(),
+                            item: item.clone(),
+                            started_at_ms: 0,
+                        },
+                    ),
+                    /*replay_kind*/ None,
+                );
+                for (index, delta) in summary.iter().enumerate() {
+                    app.chat_widget.handle_server_notification(
+                        codex_app_server_protocol::ServerNotification::ReasoningSummaryTextDelta(
+                            codex_app_server_protocol::ReasoningSummaryTextDeltaNotification {
+                                thread_id: ThreadId::default().to_string(),
+                                turn_id: current.id.clone(),
+                                item_id: id.clone(),
+                                delta: delta.clone(),
+                                summary_index: index as i64,
+                            },
+                        ),
+                        /*replay_kind*/ None,
+                    );
+                }
+            }
+            app.chat_widget.handle_server_notification(
+                codex_app_server_protocol::ServerNotification::ItemCompleted(
+                    codex_app_server_protocol::ItemCompletedNotification {
+                        thread_id: ThreadId::default().to_string(),
+                        turn_id: current.id.clone(),
+                        item: item.clone(),
+                        completed_at_ms: 0,
+                    },
+                ),
+                /*replay_kind*/ None,
             );
             while let Ok(event) = rx.try_recv() {
                 if let AppEvent::InsertHistoryCell(cell) = event {
