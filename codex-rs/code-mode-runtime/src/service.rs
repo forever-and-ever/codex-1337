@@ -334,6 +334,7 @@ fn runtime_request(request: ExecuteRequest) -> runtime::CreateCellRequest {
                     namespace: definition.tool_name.namespace,
                 },
                 description: definition.description,
+                output_schema: definition.output_schema,
                 kind: match definition.kind {
                     CodeModeToolKind::Function => runtime::ToolKind::Function,
                     CodeModeToolKind::Freeform => runtime::ToolKind::Freeform,

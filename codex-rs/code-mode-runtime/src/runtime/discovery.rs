@@ -19,6 +19,21 @@ struct SearchOptions {
     offset: usize,
 }
 
+#[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DescribeOptions {
+    #[serde(default)]
+    detail: DescriptionDetail,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum DescriptionDetail {
+    #[default]
+    Contract,
+    Output,
+}
+
 pub(super) fn describe_tool_callback(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments,
@@ -29,12 +44,29 @@ pub(super) fn describe_tool_callback(
         return;
     }
     let name = args.get(0).to_rust_string_lossy(scope);
+    let options = if args.get(1).is_undefined() {
+        DescribeOptions::default()
+    } else {
+        match v8_value_to_json(scope, args.get(1)).and_then(|value| {
+            serde_json::from_value::<DescribeOptions>(value.unwrap_or_default())
+                .map_err(|error| error.to_string())
+        }) {
+            Ok(options) => options,
+            Err(error) => {
+                throw_type_error(scope, &format!("invalid describe_tool options: {error}"));
+                return;
+            }
+        }
+    };
     let description = scope.get_slot::<RuntimeState>().and_then(|state| {
         state
             .enabled_tools
             .iter()
             .find(|tool| tool.global_name == name)
-            .map(|tool| tool.description.clone())
+            .map(|tool| match options.detail {
+                DescriptionDetail::Contract => tool.description.clone(),
+                DescriptionDetail::Output => tool.describe_output(),
+            })
     });
     let Some(description) = description else {
         throw_type_error(scope, &format!("unknown tool `{name}`"));

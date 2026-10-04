@@ -9,18 +9,21 @@ use serde_json::Value as JsonValue;
 use std::collections::BTreeMap;
 
 use crate::PUBLIC_TOOL_NAME;
+use crate::discovery::COMPACT_OUTPUT_SCHEMA_MAX_BYTES;
+use crate::discovery::compact_tool_summary;
+use crate::discovery::mcp_structured_content_schema;
+use crate::discovery::render_output_type;
 use crate::json_schema_types::DEFAULT_INPUT_SCHEMA_MAX_BYTES;
 use crate::json_schema_types::RenderedJsonSchema;
 use crate::json_schema_types::render_json_schema_to_typescript_with_budget;
 use std::collections::BTreeSet;
 
 const MAX_JS_SAFE_INTEGER: u64 = (1_u64 << 53) - 1;
-const MAX_SUMMARY_CHARACTERS: usize = 160;
 const DEFERRED_NESTED_TOOLS_GUIDANCE: &str = "Some deferred nested tools may be omitted from this description. They are still available on the global `tools` object and listed in `ALL_TOOLS`.";
 const TOOL_DISCOVERY_GUIDANCE: &str = r#"Tool discovery helpers (synchronous):
 - `ALL_TOOLS`: `{ name, description }` catalogue; exact callable names and purpose summaries, not signatures or full instructions.
 - `search_tools(query: string, options?: { namespace?: string, limit?: number, offset?: number })`: returns `{ matches: Array<{ name, description }>, truncated: boolean, next_offset: number | null }`. All case-insensitive literal query words must match a name or summary; an empty query browses. `namespace` restricts the normalized namespace or callable-name prefix (`functions` for plain tools). Limit defaults to 8, capped at 20. Continue with the same query/options and `offset: next_offset`.
-- `describe_tool(name: string)`: returns full instructions and declaration, including namespace guidance. Retrieve this contract when it is missing from context.
+- `describe_tool(name: string, options?: { detail?: "contract" | "output" })`: defaults to full instructions, namespace guidance, input declaration, and a compact return type. Retrieve this contract when missing from context. `{detail: "output"}` returns only the detailed output type; request it when inspecting result fields. MCP contracts use the shared `CallToolResult` envelope. Other return types over 1 KiB are abbreviated; explicit output declarations retain the 16,000-byte schema limit.
 Print bounded search results, not the whole catalogue:
 ```js
 text(search_tools("symbol", { namespace: "mcp__depot", limit: 5 }));
@@ -415,45 +418,6 @@ pub fn augment_tool_definition(mut definition: ToolDefinition) -> ToolDefinition
     definition
 }
 
-pub fn enabled_tool_metadata(definition: &ToolDefinition) -> EnabledToolMetadata {
-    EnabledToolMetadata {
-        tool_name: definition.tool_name.clone(),
-        global_name: normalize_code_mode_identifier(&definition.name),
-        description: definition.description.clone(),
-        summary: compact_tool_summary(&definition.summary),
-        kind: definition.kind,
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct EnabledToolMetadata {
-    pub tool_name: ToolName,
-    pub global_name: String,
-    pub description: String,
-    pub summary: String,
-    pub kind: CodeModeToolKind,
-}
-
-fn compact_tool_summary(purpose: &str) -> String {
-    let mut characters = purpose
-        .split_whitespace()
-        .enumerate()
-        .flat_map(|(index, word)| (index > 0).then_some(' ').into_iter().chain(word.chars()));
-    let mut prefix = characters
-        .by_ref()
-        .take(MAX_SUMMARY_CHARACTERS)
-        .collect::<String>();
-    if characters.next().is_none() {
-        return prefix;
-    }
-    prefix.pop();
-    if let Some(boundary) = prefix.rfind(' ') {
-        prefix.truncate(boundary);
-    }
-    prefix.push('…');
-    prefix
-}
-
 pub fn render_code_mode_sample(
     description: &str,
     tool_name: &str,
@@ -490,31 +454,14 @@ fn render_code_mode_sample_for_definition(definition: &ToolDefinition) -> String
             .unwrap_or_else(|| RenderedJsonSchema::inline("unknown")),
         CodeModeToolKind::Freeform => RenderedJsonSchema::inline("string"),
     };
-    let output_type = if let Some(structured_content_schema) =
-        mcp_structured_content_schema(definition.output_schema.as_ref())
+    let output_type = if mcp_structured_content_schema(definition.output_schema.as_ref()).is_some()
     {
-        let mut structured_content_type = render_json_schema_to_typescript_with_budget(
-            structured_content_schema,
-            DEFAULT_INPUT_SCHEMA_MAX_BYTES,
-            &mut names,
-        );
-        structured_content_type.root_type = if structured_content_type.root_type == "unknown" {
-            "CallToolResult".to_string()
-        } else {
-            format!("CallToolResult<{}>", structured_content_type.root_type)
-        };
-        structured_content_type
+        RenderedJsonSchema::inline("CallToolResult")
     } else {
         definition
             .output_schema
             .as_ref()
-            .map(|schema| {
-                render_json_schema_to_typescript_with_budget(
-                    schema,
-                    DEFAULT_INPUT_SCHEMA_MAX_BYTES,
-                    &mut names,
-                )
-            })
+            .map(|schema| render_output_type(schema, COMPACT_OUTPUT_SCHEMA_MAX_BYTES, &mut names))
             .unwrap_or_else(|| RenderedJsonSchema::inline("unknown"))
     };
     let declaration = render_code_mode_tool_declaration(
@@ -547,47 +494,6 @@ fn render_tool_heading(global_name: &str, raw_name: &str) -> String {
     }
 }
 
-fn mcp_structured_content_schema(output_schema: Option<&JsonValue>) -> Option<&JsonValue> {
-    let output_schema = output_schema?;
-    let properties = output_schema
-        .get("properties")
-        .and_then(JsonValue::as_object)?;
-    let content_schema = properties.get("content").and_then(JsonValue::as_object)?;
-    if content_schema.get("type").and_then(JsonValue::as_str) != Some("array") {
-        return None;
-    }
-
-    if content_schema
-        .get("items")
-        .and_then(JsonValue::as_object)
-        .is_none_or(|items| items.get("type").and_then(JsonValue::as_str) != Some("object"))
-    {
-        return None;
-    }
-
-    if properties
-        .get("isError")
-        .and_then(JsonValue::as_object)
-        .is_none_or(|schema| schema.get("type").and_then(JsonValue::as_str) != Some("boolean"))
-    {
-        return None;
-    }
-
-    if properties
-        .get("_meta")
-        .and_then(JsonValue::as_object)
-        .is_none_or(|schema| schema.get("type").and_then(JsonValue::as_str) != Some("object"))
-    {
-        return None;
-    }
-
-    Some(
-        properties
-            .get("structuredContent")
-            .unwrap_or(&JsonValue::Bool(true)),
-    )
-}
-
 #[cfg(test)]
 #[path = "description_override_tests.rs"]
 mod description_override_tests;
@@ -603,6 +509,7 @@ mod tests {
     use super::build_exec_tool_description;
     use super::normalize_code_mode_identifier;
     use super::parse_exec_source;
+    use crate::enabled_tool_metadata;
     use codex_protocol::ToolName;
     use pretty_assertions::assert_eq;
     use serde_json::Value as JsonValue;
@@ -686,12 +593,26 @@ mod tests {
             })),
         };
 
-        let description = augment_tool_definition(definition).description;
+        let description = augment_tool_definition(definition.clone()).description;
         assert!(description.contains("declare const tools"));
         assert!(
             description.contains(
                 "hidden_dynamic_tool(args: { city: string; }): Promise<{ ok: boolean; }>;"
             )
+        );
+        // A large return type must not consume the input contract's independent budget.
+        let mut large_output = definition;
+        large_output.output_schema.as_mut().unwrap()["properties"]["ok"]["description"] =
+            json!("Output detail. ".repeat(100));
+        let large_output = augment_tool_definition(large_output);
+        assert_eq!(
+            large_output.description,
+            "Test tool\n\nexec tool declaration:\n```ts\ndeclare const tools: { hidden_dynamic_tool(args: { city: string; }): Promise<unknown>; };\n```"
+        );
+        assert!(
+            enabled_tool_metadata(&large_output)
+                .describe_output()
+                .contains("ok: boolean;")
         );
     }
 
@@ -783,10 +704,16 @@ mod tests {
             }))),
         };
 
-        let description = augment_tool_definition(definition).description;
+        let schema = definition.output_schema.clone();
+        let definition = augment_tool_definition(definition);
+        assert_eq!(definition.output_schema, schema);
         assert_eq!(
-            description,
-            "Search\n\nexec tool declaration:\n```ts\ntype T_Result_item_v1 = { id: string; score: number; };\ndeclare const tools: { mcp__sample__search(args: {}): Promise<CallToolResult<{ results: Array<T_Result_item_v1>; }>>; };\n```"
+            definition.description,
+            "Search\n\nexec tool declaration:\n```ts\ndeclare const tools: { mcp__sample__search(args: {}): Promise<CallToolResult>; };\n```"
+        );
+        assert_eq!(
+            enabled_tool_metadata(&definition).describe_output(),
+            "mcp__sample__search output:\n```ts\ntype T_Result_item_v1 = { id: string; score: number; };\ntype ToolOutput = CallToolResult<{ results: Array<T_Result_item_v1>; }>;\n```"
         );
     }
 
@@ -931,10 +858,10 @@ bar"
         assert_eq!(description.matches("## mcp__sample").count(), 1);
         assert!(description.contains("## mcp__sample\nShared namespace guidance."));
         assert!(description.contains(
-            "declare const tools: { mcp__sample__alpha(args: {}): Promise<CallToolResult<{}>>; };"
+            "declare const tools: { mcp__sample__alpha(args: {}): Promise<CallToolResult>; };"
         ));
         assert!(description.contains(
-            "declare const tools: { mcp__sample__beta(args: {}): Promise<CallToolResult<{}>>; };"
+            "declare const tools: { mcp__sample__beta(args: {}): Promise<CallToolResult>; };"
         ));
     }
 
@@ -1152,6 +1079,6 @@ bar"
 
         assert!(description.contains("Some deferred nested tools may be omitted"));
         assert!(description.contains("search_tools(query: string"));
-        assert!(description.contains("describe_tool(name: string)"));
+        assert!(description.contains("describe_tool(name: string, options?:"));
     }
 }

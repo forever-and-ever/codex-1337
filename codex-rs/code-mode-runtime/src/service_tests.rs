@@ -1004,6 +1004,23 @@ async fn global_scope_contains_only_allowed_items() {
                     "Echo requested input. {}",
                     "Detailed purpose λ. ".repeat(20)
                 ),
+                output_schema: Some(serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "content": {"type": "array", "items": {"type": "object"}},
+                        "isError": {"type": "boolean"},
+                        "_meta": {"type": "object"},
+                        "structuredContent": {
+                            "$ref": "#/$defs/Node",
+                            "$defs": {"Node": {
+                                "type": "object",
+                                "properties": {"next": {"$ref": "#/$defs/Node"}},
+                                "required": ["next"],
+                                "additionalProperties": false
+                            }}
+                        }
+                    }
+                })),
                 ..echo_tool()
             });
             tool.description = format!(
@@ -1053,9 +1070,14 @@ text(search_tools("missing"));
 text(search_tools("preserve input"));
 text(ALL_TOOLS.find(tool => tool.name === page.matches[0].name));
 text(describe_tool(page.matches[0].name));
+text(describe_tool(page.matches[0].name, {detail: "output"}));
+text(describe_tool(page.matches[0].name, {detail: "contract"}));
+text(describe_tool("other__echo", {detail: "output"}));
 text(await tools[page.matches[0].name]({message: "same input"}));
 text([() => describe_tool("missing"), () => search_tools("", {limit: 0}),
-      () => search_tools("", {offset: -1})].map(run => {
+      () => search_tools("", {offset: -1}),
+      () => describe_tool(page.matches[0].name, {detail: "typo"}),
+      () => describe_tool(page.matches[0].name, {output: true})].map(run => {
     try {run(); return false;} catch {return true;}
 }));
 "#
@@ -1204,8 +1226,13 @@ text([() => describe_tool("missing"), () => search_tools("", {limit: 0}),
             serde_json::json!({"matches": [], "truncated": false, "next_offset": null}),
             metadata[0].clone(),
             serde_json::json!(full_description),
+            serde_json::json!(
+                "mcp__sample__echo_00 output:\n```ts\ntype T_Node = { next: T_Node; };\ntype ToolOutput = CallToolResult<T_Node>;\n```"
+            ),
+            serde_json::json!(full_description),
+            serde_json::json!("other__echo: no declared output schema"),
             JsonValue::Null,
-            serde_json::json!([true, true, true]),
+            serde_json::json!([true, true, true, true, true]),
         ]
     );
     assert!(delegate.tool_started.load(Ordering::Acquire));
