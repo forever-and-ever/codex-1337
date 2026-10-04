@@ -47,7 +47,9 @@ impl NativeExecutionResult {
             let result = result?;
             let ordinal = index + 1;
             if matches!(metadata, ExecutionOutputMetadata::Hidden)
-                && result.exit_code == Some(0) && result.session_id.is_none() && result.output.is_empty()
+                && result.exit_code == Some(0)
+                && result.session_id.is_none()
+                && result.output.is_empty()
             {
                 empty_start.get_or_insert(ordinal);
                 empty_end = ordinal;
@@ -86,7 +88,9 @@ impl NativeExecutionResult {
                 (Some(0), None) => String::new(),
                 (Some(exit), None) => format!("Exit {exit}"),
                 (None, Some(session)) => format!("Running (session {session})"),
-                (None, None) if self.output.is_empty() => "Execution status unavailable".to_string(),
+                (None, None) if self.output.is_empty() => {
+                    "Execution status unavailable".to_string()
+                }
                 (None, None) => String::new(),
                 (Some(_), Some(_)) => unreachable!(),
             },

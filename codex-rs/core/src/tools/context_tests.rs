@@ -110,7 +110,11 @@ fn mcp_tool_output_response_item_preserves_payload_and_diagnostic_timing() {
         },
     );
 
-    assert!(output.log_output().starts_with("Wall time: 1.2500 seconds\nOutput:\n"));
+    assert!(
+        output
+            .log_output()
+            .starts_with("Wall time: 1.2500 seconds\nOutput:\n")
+    );
 
     assert_eq!(
         response,
@@ -211,21 +215,16 @@ fn mcp_tool_output_response_item_preserves_content_items() {
             assert_eq!(
                 output.content_items(),
                 Some(
-                    vec![
-                        FunctionCallOutputContentItem::InputImage {
-                            image: ImageReference::Inline {
-                                image_url: image_url.to_string()
-                            },
-                            detail: Some(DEFAULT_IMAGE_DETAIL),
+                    vec![FunctionCallOutputContentItem::InputImage {
+                        image: ImageReference::Inline {
+                            image_url: image_url.to_string()
                         },
-                    ]
+                        detail: Some(DEFAULT_IMAGE_DETAIL),
+                    },]
                     .as_slice()
                 )
             );
-            assert_eq!(
-                output.body.to_text().as_deref(),
-                None
-            );
+            assert_eq!(output.body.to_text().as_deref(), None);
         }
         other => panic!("expected FunctionCallOutput, got {other:?}"),
     }
@@ -490,7 +489,11 @@ fn exec_command_tool_output_reserves_status_budget_and_preserves_policy_units() 
 
         command.process_id = Some(23);
         command.exit_code = None;
-        let ResponseInputItem::FunctionCallOutput {output, ..} = command.to_response_item("call-live", &payload) else { panic!("expected FunctionCallOutput") };
+        let ResponseInputItem::FunctionCallOutput { output, .. } =
+            command.to_response_item("call-live", &payload)
+        else {
+            panic!("expected FunctionCallOutput")
+        };
         let text = output.body.to_text().expect("exec output text");
         assert!(text.starts_with("Running (session 23)\n"));
         assert!(text.len() <= (policy * 1.2).byte_budget());
@@ -540,7 +543,10 @@ fn exec_command_tool_output_preserves_omission_metadata_when_truncated() {
         format!("{expected_header}{marker}\nremaining output")
     );
     output.max_output_tokens = None;
-    assert_eq!(output.code_mode_result(&payload)["output"], format!("{marker}\nremaining output"));
+    assert_eq!(
+        output.code_mode_result(&payload)["output"],
+        format!("{marker}\nremaining output")
+    );
 
     let ResponseInputItem::FunctionCallOutput { output, .. } = response else {
         panic!("expected FunctionCallOutput");

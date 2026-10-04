@@ -49,10 +49,11 @@ pub(super) fn is_execution_header(text: &str) -> bool {
             .is_some_and(|(header, body)| {
                 let mut lines = header.lines();
                 lines.next();
-                body.is_empty() && match lines.next() {
-                    None => true,
-                    Some(timing) => timing.starts_with("Wall time ") && lines.next().is_none(),
-                }
+                body.is_empty()
+                    && match lines.next() {
+                        None => true,
+                        Some(timing) => timing.starts_with("Wall time ") && lines.next().is_none(),
+                    }
             })
 }
 

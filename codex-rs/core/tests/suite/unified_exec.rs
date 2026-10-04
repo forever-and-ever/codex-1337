@@ -87,11 +87,20 @@ struct ParsedUnifiedExecOutput {
 
 fn parse_unified_exec_output(raw: &str) -> Result<ParsedUnifiedExecOutput> {
     static OUTPUT_REGEX: OnceLock<Regex> = OnceLock::new();
-    let regex = OUTPUT_REGEX.get_or_init(|| Regex::new(r"original token count: (\d+)").expect("valid token count regex"));
+    let regex = OUTPUT_REGEX.get_or_init(|| {
+        Regex::new(r"original token count: (\d+)").expect("valid token count regex")
+    });
     let (header, remainder) = raw.split_once('\n').unwrap_or((raw, ""));
     let (exit_code, process_id, output) = if let Some(exit) = header.strip_prefix("Exit ") {
-        (Some(exit.parse().context("failed to parse exit code")?), None, remainder)
-    } else if let Some(session) = header.strip_prefix("Running (session ").and_then(|text| text.strip_suffix(')')) {
+        (
+            Some(exit.parse().context("failed to parse exit code")?),
+            None,
+            remainder,
+        )
+    } else if let Some(session) = header
+        .strip_prefix("Running (session ")
+        .and_then(|text| text.strip_suffix(')'))
+    {
         (None, Some(session.to_string()), remainder)
     } else if raw == "Completed" {
         (Some(0), None, "")
@@ -100,7 +109,10 @@ fn parse_unified_exec_output(raw: &str) -> Result<ParsedUnifiedExecOutput> {
     } else {
         (Some(0), None, raw)
     };
-    let original_token_count = regex.captures(output).map(|captures| captures[1].parse::<usize>()).transpose()?;
+    let original_token_count = regex
+        .captures(output)
+        .map(|captures| captures[1].parse::<usize>())
+        .transpose()?;
 
     Ok(ParsedUnifiedExecOutput {
         process_id,
@@ -2242,12 +2254,19 @@ async fn unified_exec_respects_early_exit_notifications() -> Result<()> {
     )
     .await?;
 
-    let ended = wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::ExecCommandEnd(ended) if ended.call_id == call_id)
-    }).await;
-    let EventMsg::ExecCommandEnd(ended) = ended else { unreachable!() };
-    assert!(ended.duration.as_secs_f64() < 0.75,
-        "execution duration should reflect early exit, got {:?}", ended.duration);
+    let ended = wait_for_event(
+        &test.codex,
+        |event| matches!(event, EventMsg::ExecCommandEnd(ended) if ended.call_id == call_id),
+    )
+    .await;
+    let EventMsg::ExecCommandEnd(ended) = ended else {
+        unreachable!()
+    };
+    assert!(
+        ended.duration.as_secs_f64() < 0.75,
+        "execution duration should reflect early exit, got {:?}",
+        ended.duration
+    );
 
     wait_for_event(&test.codex, |event| {
         matches!(event, EventMsg::TurnComplete(_))

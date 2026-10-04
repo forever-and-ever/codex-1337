@@ -321,7 +321,11 @@ fn handle_runtime_response(
         script_status,
         wall_time,
         host_duration,
-        if experimental_show_cell_overhead { codex_protocol::ExecutionOutputMetadata::Included } else { codex_protocol::ExecutionOutputMetadata::Hidden },
+        if experimental_show_cell_overhead {
+            codex_protocol::ExecutionOutputMetadata::Included
+        } else {
+            codex_protocol::ExecutionOutputMetadata::Hidden
+        },
     )
 }
 

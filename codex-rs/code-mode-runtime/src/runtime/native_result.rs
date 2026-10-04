@@ -56,25 +56,32 @@ fn native_batch(
     if array.has(scope, to_json.into())? {
         return None;
     }
-    let keys = array.get_own_property_names(scope, v8::GetPropertyNamesArgs {
-        property_filter: v8::PropertyFilter::ALL_PROPERTIES, ..Default::default()
-    })?;
+    let keys = array.get_own_property_names(
+        scope,
+        v8::GetPropertyNamesArgs {
+            property_filter: v8::PropertyFilter::ALL_PROPERTIES,
+            ..Default::default()
+        },
+    )?;
     // `length` and every dense index are the only admitted array properties.
     if u64::from(keys.length()) != u64::from(length) + 1 {
         return None;
     }
     let value_key = v8::String::new(scope, "value")?;
-    NativeExecutionResult::render_batch((0..length).map(|index| {
-        v8::scope!(let scope, scope);
-        let key = v8::String::new(scope, &index.to_string())?;
-        let descriptor = array.get_own_property_descriptor(scope, key.into())?;
-        let descriptor = v8::Local::<v8::Object>::try_from(descriptor).ok()?;
-        if descriptor.has_own_property(scope, value_key.into()) != Some(true) {
-            return None;
-        }
-        let value = descriptor.get(scope, value_key.into())?;
-        native_result(scope, value)
-    }), metadata)
+    NativeExecutionResult::render_batch(
+        (0..length).map(|index| {
+            v8::scope!(let scope, scope);
+            let key = v8::String::new(scope, &index.to_string())?;
+            let descriptor = array.get_own_property_descriptor(scope, key.into())?;
+            let descriptor = v8::Local::<v8::Object>::try_from(descriptor).ok()?;
+            if descriptor.has_own_property(scope, value_key.into()) != Some(true) {
+                return None;
+            }
+            let value = descriptor.get(scope, value_key.into())?;
+            native_result(scope, value)
+        }),
+        metadata,
+    )
 }
 
 fn output_metadata(
@@ -84,12 +91,21 @@ fn output_metadata(
     if options.is_undefined() {
         return Ok(ExecutionOutputMetadata::Hidden);
     }
-    let invalid = || "text/notify options must be an object with optional boolean metadata".to_string();
+    let invalid =
+        || "text/notify options must be an object with optional boolean metadata".to_string();
     if options.is_array() || options.is_null() || options.is_function() {
         return Err(invalid());
     }
     let object = v8::Local::<v8::Object>::try_from(options).map_err(|_| invalid())?;
-    let keys = object.get_own_property_names(scope, v8::GetPropertyNamesArgs { property_filter: v8::PropertyFilter::ALL_PROPERTIES, ..Default::default() }).ok_or_else(invalid)?;
+    let keys = object
+        .get_own_property_names(
+            scope,
+            v8::GetPropertyNamesArgs {
+                property_filter: v8::PropertyFilter::ALL_PROPERTIES,
+                ..Default::default()
+            },
+        )
+        .ok_or_else(invalid)?;
     for index in 0..keys.length() {
         let key = keys.get_index(scope, index).ok_or_else(invalid)?;
         if !key.is_string() || key.to_rust_string_lossy(scope) != "metadata" {
@@ -126,7 +142,13 @@ fn native_result(
     }
     // Accessors and custom serialization opt out. Inspect data properties once,
     // without retaining another body or invoking getters during presentation.
-    let keys = object.get_own_property_names(scope, v8::GetPropertyNamesArgs { property_filter: v8::PropertyFilter::ALL_PROPERTIES, ..Default::default() })?;
+    let keys = object.get_own_property_names(
+        scope,
+        v8::GetPropertyNamesArgs {
+            property_filter: v8::PropertyFilter::ALL_PROPERTIES,
+            ..Default::default()
+        },
+    )?;
     let value_key = v8::String::new(scope, "value")?;
     let mut fields = Map::new();
     for index in 0..keys.length() {
@@ -135,7 +157,15 @@ fn native_result(
             return None;
         }
         let name = key.to_rust_string_lossy(scope);
-        if !matches!(name.as_str(), "output" | "exit_code" | "session_id" | "chunk_id" | "wall_time_seconds" | "original_token_count") {
+        if !matches!(
+            name.as_str(),
+            "output"
+                | "exit_code"
+                | "session_id"
+                | "chunk_id"
+                | "wall_time_seconds"
+                | "original_token_count"
+        ) {
             return None;
         }
         let key = v8::Local::<v8::Name>::try_from(key).ok()?;
@@ -153,7 +183,11 @@ fn native_result(
             return None;
         }
         let field = decoded;
-        if name == "original_token_count" && field.as_u64().is_some_and(|count| count > 9_007_199_254_740_991) {
+        if name == "original_token_count"
+            && field
+                .as_u64()
+                .is_some_and(|count| count > 9_007_199_254_740_991)
+        {
             return None;
         }
         fields.insert(name, field);

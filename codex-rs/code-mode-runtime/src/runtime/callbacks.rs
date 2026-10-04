@@ -5,11 +5,11 @@ use super::EXIT_SENTINEL;
 use super::PendingToolCall;
 use super::RuntimeEvent;
 use super::RuntimeState;
+use super::native_result::serialize_text;
 use super::timers;
 use super::value::json_to_v8;
 use super::value::normalize_output_audio;
 use super::value::normalize_output_image;
-use super::native_result::serialize_text;
 use super::value::throw_type_error;
 use super::value::v8_value_to_json;
 
@@ -66,7 +66,13 @@ pub(super) fn tool_callback(
     let event_tx = state.event_tx.clone();
     let native_execution = tool_name.is_default_namespace()
         && matches!(tool_name.name.as_str(), "exec_command" | "write_stdin");
-    state.pending_tool_calls.insert(id.clone(), PendingToolCall { resolver, native_execution });
+    state.pending_tool_calls.insert(
+        id.clone(),
+        PendingToolCall {
+            resolver,
+            native_execution,
+        },
+    );
     let _ = event_tx.send(RuntimeEvent::ToolCall {
         id,
         name: tool_name,

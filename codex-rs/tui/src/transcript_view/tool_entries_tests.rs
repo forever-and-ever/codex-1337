@@ -250,8 +250,12 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
         (
             "exec",
             FunctionCallOutputBody::ContentItems(vec![
-                FunctionCallOutputContentItem::InputText {text: "Script completed\nOutput:\n".into()},
-                FunctionCallOutputContentItem::InputText {text: "Script failed\nOutput:\n".into()},
+                FunctionCallOutputContentItem::InputText {
+                    text: "Script completed\nOutput:\n".into(),
+                },
+                FunctionCallOutputContentItem::InputText {
+                    text: "Script failed\nOutput:\n".into(),
+                },
             ]),
             14,
         ),
@@ -282,8 +286,12 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
         let id = format!("poll-{index}");
         let cell =
             ToolOutputCell::from_output(&id, Some(&id), name, /*namespace*/ None, output).unwrap();
-        let header_only = matches!(output, FunctionCallOutputBody::ContentItems(items) if items.len() == 1);
-        assert_eq!(cell.activity_disclosure(/*width*/ 100).is_some(), !header_only);
+        let header_only =
+            matches!(output, FunctionCallOutputBody::ContentItems(items) if items.len() == 1);
+        assert_eq!(
+            cell.activity_disclosure(/*width*/ 100).is_some(),
+            !header_only
+        );
         view.record_tool_output_tokens(format!("tool-output-tokens:{id}"), id, Some(*tokens));
         cells.push(Arc::new(cell));
         if index == 1 {
@@ -362,15 +370,32 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
     // Owned new/legacy first blocks disappear; identical script/notify text remains literal.
     let isolated = [3, 8, 9, 10].map(|index| {
         let id = format!("header-{index}");
-        Arc::new(ToolOutputCell::from_output(&id, Some(&id), cases[index].0, /*namespace*/ None, &cases[index].1).unwrap()) as Arc<dyn HistoryCell>
+        Arc::new(
+            ToolOutputCell::from_output(
+                &id,
+                Some(&id),
+                cases[index].0,
+                /*namespace*/ None,
+                &cases[index].1,
+            )
+            .unwrap(),
+        ) as Arc<dyn HistoryCell>
     });
     let mut expanded_view = TranscriptView::default();
     for cell in &isolated {
         if cell.activity_disclosure(/*width*/ 100).is_some() {
-            expanded_view.disclosure.expanded.extend(cell.activity_ids());
+            expanded_view
+                .disclosure
+                .expanded
+                .extend(cell.activity_ids());
         }
     }
-    let expanded = tests::render(&mut expanded_view, &isolated, /*width*/ 100, /*height*/ 24);
+    let expanded = tests::render(
+        &mut expanded_view,
+        &isolated,
+        /*width*/ 100,
+        /*height*/ 24,
+    );
     let text = tests::text(&expanded).trim_end().to_string();
     assert_eq!(text.matches("Script completed").count(), 1);
     assert_eq!(text.matches("Script failed").count(), 1);

@@ -7,8 +7,8 @@ use pretty_assertions::assert_eq;
 use serde_json::json;
 use tokio::sync::mpsc;
 
-use super::super::RuntimeState;
 use super::super::PendingToolCall;
+use super::super::RuntimeState;
 use super::super::value::v8_value_to_json;
 use super::resolve_tool_response;
 use crate::v8_init::ensure_v8_initialized;
@@ -45,7 +45,13 @@ fn discarded_tool_response_is_collectible_before_cell_ends() {
             .get_slot_mut::<RuntimeState>()
             .expect("runtime state")
             .pending_tool_calls
-            .insert("tool".to_string(), PendingToolCall { resolver, native_execution: true });
+            .insert(
+                "tool".to_string(),
+                PendingToolCall {
+                    resolver,
+                    native_execution: true,
+                },
+            );
         v8::Global::new(scope, promise)
     };
     let response = json!({"wall_time_seconds": 0.001, "exit_code": 0, "output": "tool result"});
@@ -69,11 +75,11 @@ fn discarded_tool_response_is_collectible_before_cell_ends() {
 
 #[test]
 fn native_result_presentation_follows_each_promise_and_current_values() {
+    use super::super::RuntimeEvent;
     use codex_code_mode_protocol::CodeModeToolKind;
     use codex_code_mode_protocol::ToolDefinition;
     use codex_code_mode_protocol::enabled_tool_metadata;
     use codex_protocol::ToolName;
-    use super::super::RuntimeEvent;
 
     ensure_v8_initialized().expect("initialize V8");
     let isolate = &mut v8::Isolate::new(v8::CreateParams::default());
@@ -82,17 +88,32 @@ fn native_result_presentation_follows_each_promise_and_current_values() {
     let scope = &mut v8::ContextScope::new(scope, context);
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let (runtime_command_tx, _runtime_command_rx) = std_mpsc::channel();
-    let tools = [ToolName::namespaced("functions", "exec_command"), ToolName::namespaced("mcp__fake__", "exec_command"), ToolName::plain("write_stdin")];
+    let tools = [
+        ToolName::namespaced("functions", "exec_command"),
+        ToolName::namespaced("mcp__fake__", "exec_command"),
+        ToolName::plain("write_stdin"),
+    ];
     scope.set_slot(RuntimeState {
         event_tx,
         pending_tool_calls: HashMap::new(),
         pending_timeouts: HashMap::new(),
         stored_values: HashMap::new(),
         stored_value_writes: HashMap::new(),
-        enabled_tools: tools.into_iter().map(|tool_name| enabled_tool_metadata(&ToolDefinition {
-            name: tool_name.to_string(), tool_name, summary: String::new(), description: String::new(),
-            kind: CodeModeToolKind::Function, input_schema: None, input_schema_max_bytes: None, output_schema: None,
-        })).collect(),
+        enabled_tools: tools
+            .into_iter()
+            .map(|tool_name| {
+                enabled_tool_metadata(&ToolDefinition {
+                    name: tool_name.to_string(),
+                    tool_name,
+                    summary: String::new(),
+                    description: String::new(),
+                    kind: CodeModeToolKind::Function,
+                    input_schema: None,
+                    input_schema_max_bytes: None,
+                    output_schema: None,
+                })
+            })
+            .collect(),
         next_tool_call_id: 1,
         next_timeout_id: 1,
         tool_call_id: "cell".to_string(),
@@ -151,43 +172,112 @@ const accessor = [a,b]; Object.defineProperty(accessor,0,{get(){return a;}}); te
     let empty_two = json!({"wall_time_seconds":0.75,"exit_code":0,"output":""});
     resolve_tool_response(scope, "tool-5", Ok(empty_two.clone())).unwrap();
     resolve_tool_response(scope, "tool-4", Ok(empty_one.clone())).unwrap();
-    resolve_tool_response(scope, "tool-3", Ok(json!({"wall_time_seconds":0.2, "session_id":42, "output":"partial"}))).unwrap();
+    resolve_tool_response(
+        scope,
+        "tool-3",
+        Ok(json!({"wall_time_seconds":0.2, "session_id":42, "output":"partial"})),
+    )
+    .unwrap();
     resolve_tool_response(scope, "tool-2", Ok(completed.clone())).unwrap();
     resolve_tool_response(scope, "tool-1", Ok(completed.clone())).unwrap();
     scope.perform_microtask_checkpoint();
-    assert!(matches!(super::completion_state(scope, promise.as_ref()), super::CompletionState::Completed {error_text: None, ..}));
+    assert!(matches!(
+        super::completion_state(scope, promise.as_ref()),
+        super::CompletionState::Completed {
+            error_text: None,
+            ..
+        }
+    ));
     let mut text = Vec::new();
     let mut notifications = Vec::new();
     while let Ok(event) = event_rx.try_recv() {
         match event {
-            RuntimeEvent::ContentItem(codex_code_mode_protocol::FunctionCallOutputContentItem::InputText {text: value}) => text.push(value),
-            RuntimeEvent::Notify {text, ..} => notifications.push(text),
+            RuntimeEvent::ContentItem(
+                codex_code_mode_protocol::FunctionCallOutputContentItem::InputText { text: value },
+            ) => text.push(value),
+            RuntimeEvent::Notify { text, .. } => notifications.push(text),
             _ => {}
         }
     }
     let full = completed.to_string();
-    let mut modified = completed.clone(); modified["output"] = json!(" \n"); modified["extra"] = json!("kept");
-    let mut contradictory = completed.clone(); contradictory["output"] = json!(" \n"); contradictory["session_id"] = json!(23);
-    let mut fractional = completed.clone(); fractional["output"] = json!(" \n"); fractional["exit_code"] = json!(1.5);
-    let mut whitespace = empty_one.clone(); whitespace["output"] = json!(" ");
-    let mut failed = completed.clone(); failed.as_object_mut().unwrap().shift_remove("exit_code"); failed["output"] = json!("same"); failed["exit_code"] = json!(1); failed["session_id"] = json!(23);
-    let text = text.into_iter().map(|text| if text.trim() == text { serde_json::from_str::<serde_json::Value>(&text).map(|value| value.to_string()).unwrap_or(text) } else { text }).collect::<Vec<_>>();
-    assert_eq!(text, vec![
-        "literal\n".to_string(), "exit=0 wall=0.003421s chunk=abcd12 tokens≈214".to_string()+"\nliteral\n",
-        full.clone(), full.clone(), full.clone(), full.clone(), json!({"result":completed}).to_string(), json!([completed,"mixed"]).to_string(), full,
-        "Running (session 42)\npartial".to_string(), "changed".to_string(), modified.to_string(),
-        json!({"custom":"own"}).to_string(), json!({"custom":"inherited"}).to_string(),
-        fractional.to_string(),
-        "Exit 1\n \n".to_string(), "Running (session 23)\n \n".to_string(), contradictory.to_string(),
-        "true".to_string(), "true".to_string(), "true".to_string(), "true".to_string(),
-        "Completed".to_string(), "Execution status unavailable".to_string(), "{\"body\":true}\n".to_string(),
-        "[1]\nsame\n[2–3] Completed\n[4] Running (session 42)\npartial".to_string(),
-        "[1]\nsame \n\n[2–3] Completed\n[4] Running (session 42)\npartial".to_string(),
-        "[1] exit=0 wall=0.5s\n[2] exit=0 wall=0.75s".to_string(),
-        "[1]\nsame\n[2]\nsame".to_string(), "[1]\n \n[2–3] Completed".to_string(),
-        "[1]\n \n[2] Exit 1\nsame".to_string(), json!([whitespace,failed]).to_string(),
-        json!([whitespace,empty_two]).to_string(), "[]".to_string(), json!([null,empty_two]).to_string(),
-        json!({"batch":"custom"}).to_string(), json!({"batch":"inherited"}).to_string(), json!([whitespace,empty_two]).to_string(),
-    ]);
-    assert_eq!(notifications, vec!["literal\n", " \n", "[1]\nsame\n[2–3] Completed\n[4] Running (session 42)\npartial", "[1] exit=0 wall=0.5s\n[2] exit=0 wall=0.75s"]);
+    let mut modified = completed.clone();
+    modified["output"] = json!(" \n");
+    modified["extra"] = json!("kept");
+    let mut contradictory = completed.clone();
+    contradictory["output"] = json!(" \n");
+    contradictory["session_id"] = json!(23);
+    let mut fractional = completed.clone();
+    fractional["output"] = json!(" \n");
+    fractional["exit_code"] = json!(1.5);
+    let mut whitespace = empty_one;
+    whitespace["output"] = json!(" ");
+    let mut failed = completed.clone();
+    failed.as_object_mut().unwrap().shift_remove("exit_code");
+    failed["output"] = json!("same");
+    failed["exit_code"] = json!(1);
+    failed["session_id"] = json!(23);
+    let text = text
+        .into_iter()
+        .map(|text| {
+            if text.trim() == text {
+                serde_json::from_str::<serde_json::Value>(&text)
+                    .map(|value| value.to_string())
+                    .unwrap_or(text)
+            } else {
+                text
+            }
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        text,
+        vec![
+            "literal\n".to_string(),
+            "exit=0 wall=0.003421s chunk=abcd12 tokens≈214".to_string() + "\nliteral\n",
+            full.clone(),
+            full.clone(),
+            full.clone(),
+            full.clone(),
+            json!({"result":completed}).to_string(),
+            json!([completed, "mixed"]).to_string(),
+            full,
+            "Running (session 42)\npartial".to_string(),
+            "changed".to_string(),
+            modified.to_string(),
+            json!({"custom":"own"}).to_string(),
+            json!({"custom":"inherited"}).to_string(),
+            fractional.to_string(),
+            "Exit 1\n \n".to_string(),
+            "Running (session 23)\n \n".to_string(),
+            contradictory.to_string(),
+            "true".to_string(),
+            "true".to_string(),
+            "true".to_string(),
+            "true".to_string(),
+            "Completed".to_string(),
+            "Execution status unavailable".to_string(),
+            "{\"body\":true}\n".to_string(),
+            "[1]\nsame\n[2–3] Completed\n[4] Running (session 42)\npartial".to_string(),
+            "[1]\nsame \n\n[2–3] Completed\n[4] Running (session 42)\npartial".to_string(),
+            "[1] exit=0 wall=0.5s\n[2] exit=0 wall=0.75s".to_string(),
+            "[1]\nsame\n[2]\nsame".to_string(),
+            "[1]\n \n[2–3] Completed".to_string(),
+            "[1]\n \n[2] Exit 1\nsame".to_string(),
+            json!([whitespace, failed]).to_string(),
+            json!([whitespace, empty_two]).to_string(),
+            "[]".to_string(),
+            json!([null, empty_two]).to_string(),
+            json!({"batch":"custom"}).to_string(),
+            json!({"batch":"inherited"}).to_string(),
+            json!([whitespace, empty_two]).to_string(),
+        ]
+    );
+    assert_eq!(
+        notifications,
+        vec![
+            "literal\n",
+            " \n",
+            "[1]\nsame\n[2–3] Completed\n[4] Running (session 42)\npartial",
+            "[1] exit=0 wall=0.5s\n[2] exit=0 wall=0.75s"
+        ]
+    );
 }

@@ -5,6 +5,8 @@ use crate::session::turn_context::TurnContext;
 use crate::turn_diff_tracker::TurnDiffTracker;
 use crate::unified_exec::format_output_omission_marker;
 use crate::unified_exec::resolve_max_tokens;
+use codex_protocol::ExecutionOutputMetadata;
+use codex_protocol::NativeExecutionResult;
 use codex_protocol::ResponseItemId;
 use codex_protocol::mcp::CallToolResult;
 use codex_protocol::models::FunctionCallOutputBody;
@@ -22,8 +24,6 @@ use codex_utils_output_truncation::formatted_truncate_text;
 use codex_utils_output_truncation::truncate_function_output_payload;
 use codex_utils_output_truncation::truncate_text;
 use codex_utils_output_truncation::with_serialization_allowance;
-use codex_protocol::ExecutionOutputMetadata;
-use codex_protocol::NativeExecutionResult;
 use serde_json::Value as JsonValue;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
@@ -433,7 +433,9 @@ impl ToolOutput for ExecCommandToolOutput {
     fn code_mode_result(&self, _payload: &ToolPayload) -> JsonValue {
         let result = self.native_result(match self.max_output_tokens {
             Some(max_tokens) => self.truncated_output(max_tokens),
-            None => self.truncated_output_with_policy(TruncationPolicy::Bytes(String::from_utf8_lossy(&self.raw_output).len())),
+            None => self.truncated_output_with_policy(TruncationPolicy::Bytes(
+                String::from_utf8_lossy(&self.raw_output).len(),
+            )),
         });
 
         serde_json::to_value(result).unwrap_or_else(|err| {
@@ -523,7 +525,9 @@ impl ExecCommandToolOutput {
     }
 
     fn response_text(&self) -> String {
-        let header = self.native_result(String::new()).render(ExecutionOutputMetadata::Hidden)
+        let header = self
+            .native_result(String::new())
+            .render(ExecutionOutputMetadata::Hidden)
             .unwrap_or_else(|| self.response_header());
         let output_budget = with_serialization_allowance(self.truncation_policy)
             .byte_budget()
@@ -548,7 +552,12 @@ impl ExecCommandToolOutput {
         }
 
         let result = self.native_result(output);
-        result.render(ExecutionOutputMetadata::Hidden).unwrap_or_else(|| serde_json::to_string(&result).expect("native execution result is serializable"))
+        result
+            .render(ExecutionOutputMetadata::Hidden)
+            .unwrap_or_else(|| {
+                serde_json::to_string(&result)
+                    .unwrap_or_else(|error| format!("failed to serialize exec result: {error}"))
+            })
     }
 }
 

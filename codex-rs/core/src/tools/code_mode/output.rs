@@ -3,11 +3,11 @@
 
 use std::time::Duration;
 
-use codex_protocol::models::FunctionCallOutputContentItem;
+use codex_protocol::ExecutionOutputMetadata;
 use codex_protocol::models::FunctionCallOutputBody;
+use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::ResponseInputItem;
 use codex_protocol::models::function_call_output_content_items_to_text;
-use codex_protocol::ExecutionOutputMetadata;
 
 use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::ToolOutput;
@@ -30,7 +30,8 @@ impl CodeModeToolOutput {
         metadata: ExecutionOutputMetadata,
     ) -> Self {
         let wall_time_seconds = (wall_time.as_secs_f32() * 10.0).round() / 10.0;
-        let timing_header = format!("{status}\nWall time {wall_time_seconds:.1} seconds\nOutput:\n");
+        let timing_header =
+            format!("{status}\nWall time {wall_time_seconds:.1} seconds\nOutput:\n");
         output.body.insert(
             /*index*/ 0,
             FunctionCallOutputContentItem::InputText {
@@ -52,8 +53,11 @@ impl CodeModeToolOutput {
 
 impl ToolOutput for CodeModeToolOutput {
     fn log_output(&self) -> String {
-        format!("{}{}", self.timing_header,
-            function_call_output_content_items_to_text(&self.output.body[1..]).unwrap_or_default())
+        format!(
+            "{}{}",
+            self.timing_header,
+            function_call_output_content_items_to_text(&self.output.body[1..]).unwrap_or_default()
+        )
     }
 
     fn success_for_logging(&self) -> bool {
@@ -72,10 +76,12 @@ impl ToolOutput for CodeModeToolOutput {
         let status = &self.status;
         // The constructor owns this slot; script text and media stay untouched.
         self.timing_header = format!(
-                "{status}\nWall time {total_seconds:.3} seconds (code-mode {host_seconds:.3} seconds; overhead {overhead_seconds:.3} seconds)\nOutput:\n"
-            );
+            "{status}\nWall time {total_seconds:.3} seconds (code-mode {host_seconds:.3} seconds; overhead {overhead_seconds:.3} seconds)\nOutput:\n"
+        );
         if matches!(self.metadata, ExecutionOutputMetadata::Included) {
-            self.output.body[0] = FunctionCallOutputContentItem::InputText { text: self.timing_header.clone() };
+            self.output.body[0] = FunctionCallOutputContentItem::InputText {
+                text: self.timing_header.clone(),
+            };
         }
     }
 
