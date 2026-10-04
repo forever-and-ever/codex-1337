@@ -25,7 +25,8 @@ impl ChatWidget {
         name: Option<String>,
     ) {
         if self.is_parent_owned_thread() && mode == ManagedWorktreeMode::Fork {
-            self.app_event_tx.send(AppEvent::ForkCurrentSession { name });
+            self.app_event_tx
+                .send(AppEvent::ForkCurrentSession { name });
             return;
         }
         if !self.managed_worktree_available() {

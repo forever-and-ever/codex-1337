@@ -30,16 +30,28 @@ fn parent_owned_thread_allows_bare_navigation_commands() {
     composer.set_parent_owned_thread();
     composer.set_child_text_input_enabled();
     composer.set_text_content("follow up".to_string(), Vec::new(), Vec::new());
-    assert_eq!(composer.handle_submission(/*should_queue*/ true).0, InputResult::Submitted {
-        text: "follow up".to_string(), text_elements: Vec::new(),
-    });
+    assert_eq!(
+        composer.handle_submission(/*should_queue*/ true).0,
+        InputResult::Submitted {
+            text: "follow up".to_string(),
+            text_elements: Vec::new(),
+        }
+    );
     composer.set_text_content("!run".to_string(), Vec::new(), Vec::new());
-    assert_eq!(composer.handle_submission(/*should_queue*/ false).0, InputResult::ParentOwnedInputBlocked);
+    assert_eq!(
+        composer.handle_submission(/*should_queue*/ false).0,
+        InputResult::ParentOwnedInputBlocked
+    );
     composer.set_text_content("/model".to_string(), Vec::new(), Vec::new());
-    assert_eq!(composer.handle_submission(/*should_queue*/ false).0, InputResult::ParentOwnedInputBlocked);
+    assert_eq!(
+        composer.handle_submission(/*should_queue*/ false).0,
+        InputResult::ParentOwnedInputBlocked
+    );
     composer.set_text_content("/fork investigation".to_string(), Vec::new(), Vec::new());
-    assert_eq!(composer.handle_submission(/*should_queue*/ false).0,
-        InputResult::CommandWithArgs(SlashCommand::Fork, "investigation".to_string(), Vec::new()));
+    assert_eq!(
+        composer.handle_submission(/*should_queue*/ false).0,
+        InputResult::CommandWithArgs(SlashCommand::Fork, "investigation".to_string(), Vec::new())
+    );
 }
 
 #[test]

@@ -1,6 +1,5 @@
 use anyhow::Context;
 use anyhow::Result;
-use std::time::Duration;
 use app_test_support::ChatGptAuthFixture;
 use app_test_support::MockResponsesConfig;
 use app_test_support::TestAppServer;
@@ -78,7 +77,6 @@ use codex_app_server_protocol::WarningNotification;
 use codex_core::test_support::all_model_presets;
 use codex_exec_server::LOCAL_ENVIRONMENT_ID;
 use codex_features::Feature;
-use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_login::AuthCredentialsStoreMode;
 use codex_models_manager::model_info::BASE_INSTRUCTIONS;
 use codex_models_manager::model_info::model_info_from_slug;
@@ -93,6 +91,7 @@ use codex_protocol::models::ImageDetail;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::MULTI_AGENT_MODE_OPEN_TAG;
 use codex_protocol::user_input::MAX_USER_INPUT_TEXT_CHARS;
+use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_absolute_path::test_support::PathExt;
 use core_test_support::apps_test_server::AppsTestServer;
 use core_test_support::apps_test_server::SEARCH_CALENDAR_LIST_TOOL;
@@ -108,6 +107,7 @@ use serde_json::Value;
 use serde_json::json;
 use std::collections::HashMap;
 use std::path::Path;
+use std::time::Duration;
 use tempfile::TempDir;
 use test_case::test_case;
 use tokio::sync::oneshot;
@@ -4338,7 +4338,8 @@ async fn multi_agent_v2_subagent_text_input_preserves_ownership(
             responses::ev_response_created("resp-child-1"),
             responses::ev_completed("resp-child-1"),
         ]),
-    ).await;
+    )
+    .await;
     let spawn_args = serde_json::to_string(&json!({
         "message": CHILD_PROMPT,
         "task_name": "worker",
@@ -4540,105 +4541,170 @@ async fn multi_agent_v2_subagent_text_input_preserves_ownership(
 
     // Hold inference open while exercising exact-turn steering; interruption below releases it.
     Mock::given(method("POST"))
-        .and(|request: &Request| request.url.path().ends_with("/responses")
-            && body_contains(request, "human follow-up"))
-        .respond_with(ResponseTemplate::new(200)
-            .insert_header("content-type", "text/event-stream")
-            .set_body_string(responses::sse(vec![responses::ev_completed("resp-human")]))
-            .set_delay(Duration::from_secs(60)))
-        .mount(&server).await;
-    let text = |text: &str| vec![V2UserInput::Text {
-        text: text.to_string(), text_elements: Vec::new(),
-    }];
-    let started: TurnStartResponse = mcp.request(|request_id| ClientRequest::TurnStart {
-        request_id,
-        params: TurnStartParams {
-            thread_id: child_thread_id.clone(), input: text("human follow-up"),
-            client_user_message_id: Some("human-start".to_string()),
-            ..Default::default()
-        },
-    }).await?;
-    let steered: codex_app_server_protocol::TurnSteerResponse = mcp.request(|request_id| ClientRequest::TurnSteer {
-        request_id,
-        params: TurnSteerParams {
-            thread_id: child_thread_id.clone(), input: text("human steer"),
-            expected_turn_id: started.turn.id.clone(),
-            client_user_message_id: Some("human-steer".to_string()),
-            ..Default::default()
-        },
-    }).await?;
+        .and(|request: &Request| {
+            request.url.path().ends_with("/responses") && body_contains(request, "human follow-up")
+        })
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(responses::sse(vec![responses::ev_completed("resp-human")]))
+                .set_delay(Duration::from_secs(60)),
+        )
+        .mount(&server)
+        .await;
+    let text = |text: &str| {
+        vec![V2UserInput::Text {
+            text: text.to_string(),
+            text_elements: Vec::new(),
+        }]
+    };
+    let started: TurnStartResponse = mcp
+        .request(|request_id| ClientRequest::TurnStart {
+            request_id,
+            params: TurnStartParams {
+                thread_id: child_thread_id.clone(),
+                input: text("human follow-up"),
+                client_user_message_id: Some("human-start".to_string()),
+                ..Default::default()
+            },
+        })
+        .await?;
+    let steered: codex_app_server_protocol::TurnSteerResponse = mcp
+        .request(|request_id| ClientRequest::TurnSteer {
+            request_id,
+            params: TurnSteerParams {
+                thread_id: child_thread_id.clone(),
+                input: text("human steer"),
+                expected_turn_id: started.turn.id.clone(),
+                client_user_message_id: Some("human-steer".to_string()),
+                ..Default::default()
+            },
+        })
+        .await?;
     assert_eq!(steered.turn_id, started.turn.id);
-    let stale = mcp.send_turn_steer_request(TurnSteerParams {
-        thread_id: child_thread_id.clone(), input: text("stale human steer"),
-        expected_turn_id: "stale-turn".to_string(), ..Default::default()
-    }).await?;
-    let stale: JSONRPCError = mcp.read_stream_until_error_message(RequestId::Integer(stale)).await?;
+    let stale = mcp
+        .send_turn_steer_request(TurnSteerParams {
+            thread_id: child_thread_id.clone(),
+            input: text("stale human steer"),
+            expected_turn_id: "stale-turn".to_string(),
+            ..Default::default()
+        })
+        .await?;
+    let stale: JSONRPCError = mcp
+        .read_stream_until_error_message(RequestId::Integer(stale))
+        .await?;
     assert_eq!(stale.error.code, INVALID_REQUEST_ERROR_CODE);
-    let raced_start = mcp.send_turn_start_request(TurnStartParams {
-        thread_id: child_thread_id.clone(), input: text("raced human start"),
-        ..Default::default()
-    }).await?;
-    let raced_start: JSONRPCError = mcp.read_stream_until_error_message(RequestId::Integer(raced_start)).await?;
-    assert_eq!(raced_start.error.message, "Agent is already working; send again to steer the turn");
-    let unavailable = mcp.send_turn_start_request(TurnStartParams {
-        thread_id: uuid::Uuid::new_v4().to_string(), input: text("unavailable human start"),
-        ..Default::default()
-    }).await?;
-    let unavailable: JSONRPCError = mcp.read_stream_until_error_message(RequestId::Integer(unavailable)).await?;
+    let raced_start = mcp
+        .send_turn_start_request(TurnStartParams {
+            thread_id: child_thread_id.clone(),
+            input: text("raced human start"),
+            ..Default::default()
+        })
+        .await?;
+    let raced_start: JSONRPCError = mcp
+        .read_stream_until_error_message(RequestId::Integer(raced_start))
+        .await?;
+    assert_eq!(
+        raced_start.error.message,
+        "Agent is already working; send again to steer the turn"
+    );
+    let unavailable = mcp
+        .send_turn_start_request(TurnStartParams {
+            thread_id: uuid::Uuid::new_v4().to_string(),
+            input: text("unavailable human start"),
+            ..Default::default()
+        })
+        .await?;
+    let unavailable: JSONRPCError = mcp
+        .read_stream_until_error_message(RequestId::Integer(unavailable))
+        .await?;
     assert_eq!(unavailable.error.code, INVALID_REQUEST_ERROR_CODE);
-    let current: codex_app_server_protocol::ThreadReadResponse = mcp.request(|request_id| ClientRequest::ThreadRead {
-        request_id,
-        params: codex_app_server_protocol::ThreadReadParams {
-            thread_id: child_thread_id.clone(), include_turns: true,
-        },
-    }).await?;
-    assert_eq!(current.thread.turns.last().map(|turn| &turn.id), Some(&started.turn.id));
+    let current: codex_app_server_protocol::ThreadReadResponse = mcp
+        .request(|request_id| ClientRequest::ThreadRead {
+            request_id,
+            params: codex_app_server_protocol::ThreadReadParams {
+                thread_id: child_thread_id.clone(),
+                include_turns: true,
+            },
+        })
+        .await?;
+    assert_eq!(
+        current.thread.turns.last().map(|turn| &turn.id),
+        Some(&started.turn.id)
+    );
     assert_eq!(current.thread.parent_thread_id, Some(thread.id.clone()));
     assert_eq!(current.thread.can_accept_direct_input, Some(false));
     // A snapshot fork is an independent root, not a new child or a takeover of its source.
-    let source_roots = current.thread.environments.as_ref()
+    let source_roots = current
+        .thread
+        .environments
+        .as_ref()
         .and_then(|environments| environments.first())
-        .map(|environment| environment.runtime_workspace_roots.iter()
-            .map(|root| AbsolutePathBuf::from_absolute_path(root.as_str()))
-            .collect::<std::io::Result<Vec<_>>>()).transpose()?;
-    let forked: codex_app_server_protocol::ThreadForkResponse = mcp.request(|request_id| ClientRequest::ThreadFork {
-        request_id,
-        params: codex_app_server_protocol::ThreadForkParams {
-            thread_id: child_thread_id.clone(),
-            name: Some("independent investigation".to_string()),
-            model: current.thread.model.clone(),
-            model_provider: Some(current.thread.model_provider.clone()),
-            cwd: Some(current.thread.cwd.to_string_lossy().into_owned()),
-            runtime_workspace_roots: source_roots,
-            service_tier: Some(None),
-            ..Default::default()
-        },
-    }).await?;
+        .map(|environment| {
+            environment
+                .runtime_workspace_roots
+                .iter()
+                .map(|root| AbsolutePathBuf::from_absolute_path(root.as_str()))
+                .collect::<std::io::Result<Vec<_>>>()
+        })
+        .transpose()?;
+    let forked: codex_app_server_protocol::ThreadForkResponse = mcp
+        .request(|request_id| ClientRequest::ThreadFork {
+            request_id,
+            params: codex_app_server_protocol::ThreadForkParams {
+                thread_id: child_thread_id.clone(),
+                name: Some("independent investigation".to_string()),
+                model: current.thread.model.clone(),
+                model_provider: Some(current.thread.model_provider.clone()),
+                cwd: Some(current.thread.cwd.to_string_lossy().into_owned()),
+                runtime_workspace_roots: source_roots,
+                service_tier: Some(None),
+                ..Default::default()
+            },
+        })
+        .await?;
     assert_ne!(forked.thread.id, child_thread_id);
     assert_eq!(forked.thread.forked_from_id, Some(child_thread_id.clone()));
     assert_eq!(forked.thread.parent_thread_id, None);
     assert_eq!(forked.thread.can_accept_direct_input, Some(true));
     assert_eq!(forked.thread.cwd, current.thread.cwd);
     assert_eq!(forked.service_tier, Some("default".to_string()));
-    assert_eq!((forked.thread.model, forked.thread.model_provider),
-        (current.thread.model, current.thread.model_provider));
-    assert!(!matches!(forked.thread.source, codex_app_server_protocol::SessionSource::SubAgent(_)));
-    let source: codex_app_server_protocol::ThreadReadResponse = mcp.request(|request_id| ClientRequest::ThreadRead {
-        request_id,
-        params: codex_app_server_protocol::ThreadReadParams {
-            thread_id: child_thread_id.clone(), include_turns: true,
-        },
-    }).await?;
+    assert_eq!(
+        (forked.thread.model, forked.thread.model_provider),
+        (current.thread.model, current.thread.model_provider)
+    );
+    assert!(!matches!(
+        forked.thread.source,
+        codex_app_server_protocol::SessionSource::SubAgent(_)
+    ));
+    let source: codex_app_server_protocol::ThreadReadResponse = mcp
+        .request(|request_id| ClientRequest::ThreadRead {
+            request_id,
+            params: codex_app_server_protocol::ThreadReadParams {
+                thread_id: child_thread_id.clone(),
+                include_turns: true,
+            },
+        })
+        .await?;
     assert_eq!(source.thread.parent_thread_id, Some(thread.id.clone()));
     assert_eq!(source.thread.can_accept_direct_input, Some(false));
-    assert_eq!(source.thread.turns.last().map(|turn| (&turn.id, turn.status.clone())),
-        Some((&started.turn.id, TurnStatus::InProgress)));
-    let _: codex_app_server_protocol::TurnInterruptResponse = mcp.request(|request_id| ClientRequest::TurnInterrupt {
-        request_id,
-        params: codex_app_server_protocol::TurnInterruptParams {
-            thread_id: child_thread_id.clone(), turn_id: started.turn.id.clone(),
-        },
-    }).await?;
+    assert_eq!(
+        source
+            .thread
+            .turns
+            .last()
+            .map(|turn| (&turn.id, turn.status.clone())),
+        Some((&started.turn.id, TurnStatus::InProgress))
+    );
+    let _: codex_app_server_protocol::TurnInterruptResponse = mcp
+        .request(|request_id| ClientRequest::TurnInterrupt {
+            request_id,
+            params: codex_app_server_protocol::TurnInterruptParams {
+                thread_id: child_thread_id.clone(),
+                turn_id: started.turn.id.clone(),
+            },
+        })
+        .await?;
 
     let direct_guardian_req = mcp
         .send_raw_request(

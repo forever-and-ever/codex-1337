@@ -67,15 +67,20 @@ impl ChatWidget {
                 text_elements,
             } => {
                 if self.is_parent_owned_thread() {
-                    if self.turn_lifecycle.agent_turn_running && self.turn_lifecycle.last_turn_id.is_none() {
+                    if self.turn_lifecycle.agent_turn_running
+                        && self.turn_lifecycle.last_turn_id.is_none()
+                    {
                         self.add_error_message("Turn is not ready; send again".to_string());
                         return;
                     }
                     if let Some(thread_id) = self.thread_id {
                         self.app_event_tx.send(AppEvent::SubagentTextInput {
                             thread_id,
-                            expected_turn_id: self.turn_lifecycle.agent_turn_running
-                                .then(|| self.turn_lifecycle.last_turn_id.clone()).flatten(),
+                            expected_turn_id: self
+                                .turn_lifecycle
+                                .agent_turn_running
+                                .then(|| self.turn_lifecycle.last_turn_id.clone())
+                                .flatten(),
                             input: vec![codex_app_server_protocol::UserInput::Text {
                                 text,
                                 text_elements: text_elements.into_iter().map(Into::into).collect(),

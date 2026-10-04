@@ -1993,7 +1993,9 @@ impl ChatComposer {
             return (InputResult::None, true);
         }
 
-        if !self.blocks_direct_input && Self::is_history_search_key(&key_event, &self.history_search_previous_keys) {
+        if !self.blocks_direct_input
+            && Self::is_history_search_key(&key_event, &self.history_search_previous_keys)
+        {
             return self.begin_history_search();
         }
 
@@ -3325,7 +3327,8 @@ impl ChatComposer {
             || (self.child_text_input_enabled
                 && !self.current_text().starts_with(['/', '!'])
                 && self.attachments.local_images.is_empty()
-                && self.attachments.remote_image_urls.is_empty()) {
+                && self.attachments.remote_image_urls.is_empty())
+        {
             return None;
         }
 

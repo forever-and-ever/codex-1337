@@ -1276,15 +1276,18 @@ impl AppServerSession {
         input: Vec<UserInput>,
     ) -> Result<TurnStartResponse> {
         let request_id = self.next_request_id();
-        self.client.request_typed(ClientRequest::TurnStart {
-            request_id,
-            params: TurnStartParams {
-                thread_id: thread_id.to_string(),
-                client_user_message_id: Some(client_user_message_id),
-                input,
-                ..Default::default()
-            },
-        }).await.wrap_err("turn/start failed")
+        self.client
+            .request_typed(ClientRequest::TurnStart {
+                request_id,
+                params: TurnStartParams {
+                    thread_id: thread_id.to_string(),
+                    client_user_message_id: Some(client_user_message_id),
+                    input,
+                    ..Default::default()
+                },
+            })
+            .await
+            .wrap_err("turn/start failed")
     }
 
     pub(crate) async fn turn_interrupt(

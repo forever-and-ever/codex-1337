@@ -1,9 +1,9 @@
-use super::thread_input::ensure_direct_input_allowed;
 use super::thread_input::can_accept_direct_input;
+use super::thread_input::ensure_direct_input_allowed;
 use super::thread_input::validate_child_text_start;
 use super::thread_input::validate_child_text_steer;
-use codex_core::StartIfIdleSubmission;
 use super::*;
+use codex_core::StartIfIdleSubmission;
 
 #[path = "thread_accounts.rs"]
 mod accounts;
@@ -604,7 +604,8 @@ impl TurnRequestProcessor {
                     self.track_error_response(&request_id, error, /*error_type*/ None);
                 })?;
         let snapshot = thread.config_snapshot().await;
-        let child_text = !can_accept_direct_input(thread.multi_agent_version(), &snapshot.session_source);
+        let child_text =
+            !can_accept_direct_input(thread.multi_agent_version(), &snapshot.session_source);
         if child_text {
             validate_child_text_start(&params).inspect_err(|error| {
                 self.track_error_response(&request_id, error, /*error_type*/ None);
@@ -715,30 +716,37 @@ impl TurnRequestProcessor {
             .await?;
 
         let request = TurnInputRequest::new(input)
-                    .with_thread_settings(thread_settings)
-                    .on_start(TurnStartOptions {
-                        turn_trigger: params.turn_trigger,
-                        final_output_json_schema: params.output_schema,
-                        service_tier: params.service_tier_for_turn,
-                        cyber_access_program: params.cyber_access_program.map(Into::into),
-                        ..Default::default()
-                    })
-                    .with_additional_context(additional_context)
-                    .with_responses_metadata(params.responsesapi_client_metadata)
-                    .with_trace(self.request_trace_context(&request_id).await);
-        let submission = if child_text {
-            thread.start_turn_if_idle(request).await.map(|submission| match submission {
-                StartIfIdleSubmission::Started { turn_id } => TurnInputSubmission::Started { turn_id },
-                StartIfIdleSubmission::NotSubmitted { reason } => TurnInputSubmission::NotSubmitted { reason },
+            .with_thread_settings(thread_settings)
+            .on_start(TurnStartOptions {
+                turn_trigger: params.turn_trigger,
+                final_output_json_schema: params.output_schema,
+                service_tier: params.service_tier_for_turn,
+                cyber_access_program: params.cyber_access_program.map(Into::into),
+                ..Default::default()
             })
+            .with_additional_context(additional_context)
+            .with_responses_metadata(params.responsesapi_client_metadata)
+            .with_trace(self.request_trace_context(&request_id).await);
+        let submission = if child_text {
+            thread
+                .start_turn_if_idle(request)
+                .await
+                .map(|submission| match submission {
+                    StartIfIdleSubmission::Started { turn_id } => {
+                        TurnInputSubmission::Started { turn_id }
+                    }
+                    StartIfIdleSubmission::NotSubmitted { reason } => {
+                        TurnInputSubmission::NotSubmitted { reason }
+                    }
+                })
         } else {
             thread.start_or_steer_turn(request).await
         }
-            .map_err(|err| {
-                let error = internal_error(format!("failed to submit turn input: {err}"));
-                self.track_error_response(&request_id, &error, /*error_type*/ None);
-                error
-            })?;
+        .map_err(|err| {
+            let error = internal_error(format!("failed to submit turn input: {err}"));
+            self.track_error_response(&request_id, &error, /*error_type*/ None);
+            error
+        })?;
         let (turn_id, started) = match submission {
             TurnInputSubmission::Started { turn_id } => (turn_id, true),
             TurnInputSubmission::Steered { turn_id } => (turn_id, false),
@@ -995,7 +1003,8 @@ impl TurnRequestProcessor {
         params: ThreadSettingsUpdateParams,
     ) -> Result<ThreadSettingsUpdateResponse, JSONRPCErrorError> {
         let (_, thread) = self.load_thread(&params.thread_id).await?;
-        self.ensure_direct_input_allowed(request_id, thread.as_ref()).await?;
+        self.ensure_direct_input_allowed(request_id, thread.as_ref())
+            .await?;
         let cwd = resolve_request_cwd(params.cwd)?;
         let environment_override = self
             .build_environment_override(

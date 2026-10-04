@@ -279,7 +279,11 @@ impl App {
     pub(super) fn mark_primary_thread_parent_owned(&mut self, thread_id: ThreadId) {
         self.agent_navigation.mark_parent_owned(thread_id);
         self.chat_widget.set_parent_owned_thread();
-        if self.agent_navigation.text_input_threads.contains(&thread_id) {
+        if self
+            .agent_navigation
+            .text_input_threads
+            .contains(&thread_id)
+        {
             self.chat_widget.set_child_text_input_enabled();
         }
     }
@@ -406,9 +410,13 @@ impl App {
                     );
                 }
                 if started.can_accept_text_input {
-                    self.agent_navigation.text_input_threads.insert(started.session.thread_id);
+                    self.agent_navigation
+                        .text_input_threads
+                        .insert(started.session.thread_id);
                 } else {
-                    self.agent_navigation.text_input_threads.remove(&started.session.thread_id);
+                    self.agent_navigation
+                        .text_input_threads
+                        .remove(&started.session.thread_id);
                 }
                 if started.blocks_direct_input {
                     self.agent_navigation.mark_parent_owned(thread_id);
@@ -765,7 +773,11 @@ impl App {
         }
         if self.agent_navigation.is_parent_owned(thread_id) {
             self.chat_widget.set_parent_owned_thread();
-            if self.agent_navigation.text_input_threads.contains(&thread_id) {
+            if self
+                .agent_navigation
+                .text_input_threads
+                .contains(&thread_id)
+            {
                 self.chat_widget.set_child_text_input_enabled();
             }
         }
@@ -915,9 +927,13 @@ impl App {
                     }
                 }
                 if started.can_accept_text_input {
-                    self.agent_navigation.text_input_threads.insert(started.session.thread_id);
+                    self.agent_navigation
+                        .text_input_threads
+                        .insert(started.session.thread_id);
                 } else {
-                    self.agent_navigation.text_input_threads.remove(&started.session.thread_id);
+                    self.agent_navigation
+                        .text_input_threads
+                        .remove(&started.session.thread_id);
                 }
                 if started.blocks_direct_input {
                     self.mark_primary_thread_parent_owned(thread_id);
@@ -1208,9 +1224,13 @@ impl App {
         self.chat_widget
             .note_rendered_width(tui.terminal.last_known_screen_size.width);
         if started.can_accept_text_input {
-            self.agent_navigation.text_input_threads.insert(started.session.thread_id);
+            self.agent_navigation
+                .text_input_threads
+                .insert(started.session.thread_id);
         } else {
-            self.agent_navigation.text_input_threads.remove(&started.session.thread_id);
+            self.agent_navigation
+                .text_input_threads
+                .remove(&started.session.thread_id);
         }
         if started.blocks_direct_input {
             self.mark_primary_thread_parent_owned(started.session.thread_id);

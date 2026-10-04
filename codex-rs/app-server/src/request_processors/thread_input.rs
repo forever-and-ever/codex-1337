@@ -48,7 +48,9 @@ pub(super) fn validate_child_text_start(params: &TurnStartParams) -> Result<(), 
         ..Default::default()
     };
     if params != &allowed || !is_text_input(&params.input) {
-        return Err(invalid_request(DIRECT_INPUT_TO_MULTI_AGENT_V2_SUBAGENT_ERROR));
+        return Err(invalid_request(
+            DIRECT_INPUT_TO_MULTI_AGENT_V2_SUBAGENT_ERROR,
+        ));
     }
     Ok(())
 }
@@ -62,11 +64,16 @@ pub(super) fn validate_child_text_steer(params: &TurnSteerParams) -> Result<(), 
         ..Default::default()
     };
     if params != &allowed || !is_text_input(&params.input) {
-        return Err(invalid_request(DIRECT_INPUT_TO_MULTI_AGENT_V2_SUBAGENT_ERROR));
+        return Err(invalid_request(
+            DIRECT_INPUT_TO_MULTI_AGENT_V2_SUBAGENT_ERROR,
+        ));
     }
     Ok(())
 }
 
 fn is_text_input(input: &[UserInput]) -> bool {
-    !input.is_empty() && input.iter().all(|item| matches!(item, UserInput::Text { .. }))
+    !input.is_empty()
+        && input
+            .iter()
+            .all(|item| matches!(item, UserInput::Text { .. }))
 }
