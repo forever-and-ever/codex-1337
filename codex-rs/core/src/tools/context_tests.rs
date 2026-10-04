@@ -85,7 +85,7 @@ fn mcp_code_mode_result_omits_private_metadata() {
 }
 
 #[test]
-fn mcp_tool_output_response_item_includes_wall_time() {
+fn mcp_tool_output_response_item_preserves_payload_and_diagnostic_timing() {
     let output = McpToolOutput {
         result: CallToolResult {
             content: vec![serde_json::json!({
@@ -110,15 +110,14 @@ fn mcp_tool_output_response_item_includes_wall_time() {
         },
     );
 
+    assert!(output.log_output().starts_with("Wall time: 1.2500 seconds\nOutput:\n"));
+
     assert_eq!(
         response,
         ResponseInputItem::FunctionCallOutput {
             call_id: "mcp-call-1".to_string(),
             output: FunctionCallOutputPayload {
                 body: FunctionCallOutputBody::ContentItems(vec![
-                    FunctionCallOutputContentItem::InputText {
-                        text: "Wall time: 1.2500 seconds\nOutput:".to_string(),
-                    },
                     FunctionCallOutputContentItem::InputText {
                         text: "done".to_string(),
                     },
@@ -172,7 +171,6 @@ fn mcp_tool_output_response_item_truncates_large_structured_content() {
                 .body
                 .to_text()
                 .expect("MCP output should serialize as text");
-            assert!(text.starts_with("Wall time: 1.2500 seconds\nOutput:\n"));
             assert!(text.contains("chars truncated"));
             assert!(!text.contains("ignored when structured content is present"));
         }
@@ -214,9 +212,6 @@ fn mcp_tool_output_response_item_preserves_content_items() {
                 output.content_items(),
                 Some(
                     vec![
-                        FunctionCallOutputContentItem::InputText {
-                            text: "Wall time: 0.5000 seconds\nOutput:".to_string(),
-                        },
                         FunctionCallOutputContentItem::InputImage {
                             image: ImageReference::Inline {
                                 image_url: image_url.to_string()
@@ -229,7 +224,7 @@ fn mcp_tool_output_response_item_preserves_content_items() {
             );
             assert_eq!(
                 output.body.to_text().as_deref(),
-                Some("Wall time: 0.5000 seconds\nOutput:")
+                None
             );
         }
         other => panic!("expected FunctionCallOutput, got {other:?}"),
@@ -441,12 +436,7 @@ fn exec_command_tool_output_formats_truncated_response() {
                 .expect("exec output should serialize as text");
             assert_regex_match(
                 r#"(?sx)
-                    ^Chunk\ ID:\ abc123
-                    \nWall\ time:\ \d+\.\d{4}\ seconds
-                    \nProcess\ exited\ with\ code\ 0
-                    \nOriginal\ token\ count:\ 10
-                    \nOutput:
-                    \n.*tokens\ truncated.*
+                    ^.*tokens\ truncated.*
                     $"#,
                 &text,
             );
@@ -456,7 +446,7 @@ fn exec_command_tool_output_formats_truncated_response() {
 }
 
 #[test]
-fn exec_command_tool_output_reserves_metadata_budget_and_preserves_policy_units() {
+fn exec_command_tool_output_reserves_status_budget_and_preserves_policy_units() {
     let payload = ToolPayload::Function {
         arguments: "{}".to_string(),
     };
@@ -469,7 +459,7 @@ fn exec_command_tool_output_reserves_metadata_budget_and_preserves_policy_units(
         (TruncationPolicy::Bytes(200), "chars truncated"),
         (TruncationPolicy::Tokens(50), "tokens truncated"),
     ] {
-        let response = ExecCommandToolOutput {
+        let mut command = ExecCommandToolOutput {
             event_call_id: "call-42".to_string(),
             chunk_id: "abc123".to_string(),
             wall_time: std::time::Duration::from_millis(/*millis*/ 1250),
@@ -481,8 +471,8 @@ fn exec_command_tool_output_reserves_metadata_budget_and_preserves_policy_units(
             original_token_count: Some(123),
             output_omitted_bytes: None,
             hook_command: None,
-        }
-        .to_response_item("call-42", &payload);
+        };
+        let response = command.to_response_item("call-42", &payload);
 
         let ResponseInputItem::FunctionCallOutput { output, .. } = response else {
             panic!("expected FunctionCallOutput");
@@ -494,10 +484,17 @@ fn exec_command_tool_output_reserves_metadata_budget_and_preserves_policy_units(
 
         assert!(text.len() <= (policy * 1.2).byte_budget());
         assert_eq!(text.matches(marker).count(), 1);
-        assert!(text.contains("Original token count: 123"));
         assert!(text.contains("Total output lines: 150"));
         assert!(text.contains("\n1\n2\n3\n"));
         assert!(text.ends_with("149\n150\n"));
+
+        command.process_id = Some(23);
+        command.exit_code = None;
+        let ResponseInputItem::FunctionCallOutput {output, ..} = command.to_response_item("call-live", &payload) else { panic!("expected FunctionCallOutput") };
+        let text = output.body.to_text().expect("exec output text");
+        assert!(text.starts_with("Running (session 23)\n"));
+        assert!(text.len() <= (policy * 1.2).byte_budget());
+        assert_eq!(text.matches(marker).count(), 1);
     }
 }
 
@@ -542,6 +539,8 @@ fn exec_command_tool_output_preserves_omission_metadata_when_truncated() {
         output.log_output(),
         format!("{expected_header}{marker}\nremaining output")
     );
+    output.max_output_tokens = None;
+    assert_eq!(output.code_mode_result(&payload)["output"], format!("{marker}\nremaining output"));
 
     let ResponseInputItem::FunctionCallOutput { output, .. } = response else {
         panic!("expected FunctionCallOutput");
@@ -550,7 +549,6 @@ fn exec_command_tool_output_preserves_omission_metadata_when_truncated() {
         .body
         .to_text()
         .expect("exec output should serialize as text");
-    assert!(text.contains("Original token count: 42000"));
     assert!(text.contains("Warning: truncated output (original token count: 42000)"));
     assert_eq!(text.matches(&marker).count(), 1);
 }

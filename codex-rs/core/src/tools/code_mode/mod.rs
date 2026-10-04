@@ -296,9 +296,7 @@ fn handle_runtime_response(
 ) -> CodeModeToolOutput {
     let script_status = format_script_status(&response);
     let supports_original = can_request_original_image_detail(model_info);
-    let host_duration = response
-        .code_mode_host_duration()
-        .filter(|_| experimental_show_cell_overhead);
+    let host_duration = response.code_mode_host_duration();
 
     let (content_items, error_text) = match response {
         RuntimeResponse::Yielded { content_items, .. }
@@ -323,6 +321,7 @@ fn handle_runtime_response(
         script_status,
         wall_time,
         host_duration,
+        if experimental_show_cell_overhead { codex_protocol::ExecutionOutputMetadata::Included } else { codex_protocol::ExecutionOutputMetadata::Hidden },
     )
 }
 

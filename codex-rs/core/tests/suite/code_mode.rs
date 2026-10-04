@@ -790,21 +790,31 @@ async fn code_mode_can_return_exec_command_output() -> Result<()> {
         &server,
         "use exec to run exec_command",
         r#"
-text(JSON.stringify(await tools.exec_command({ cmd: "printf code_mode_exec_marker" })));
+const result = await tools.exec_command({ cmd: "printf code_mode_exec_marker" });
+text(result);
+text(JSON.stringify(result));
+text(await tools.exec_command({cmd: "printf '{\"literal\":true}\\n'; exit 7"}));
+const running = await tools.exec_command({cmd: "printf partial; sleep 2; printf done", yield_time_ms: 1, max_output_tokens: 64});
+text(running);
+text(await tools.write_stdin({session_id: running.session_id, chars: "", yield_time_ms: 5000}));
 "#,
     )
     .await?;
 
     let items = custom_tool_output_items(&second_mock.single_request(), "call-1");
-    assert_eq!(items.len(), 2);
+    assert_eq!(items.len(), 6);
     assert_regex_match(
         concat!(
             r"(?s)\A",
-            r"Script completed\nWall time \d+\.\d seconds\nOutput:\n\z"
+            r"Script completed\nOutput:\n\z"
         ),
         text_item(&items, /*index*/ 0),
     );
-    let parsed: Value = serde_json::from_str(text_item(&items, /*index*/ 1))?;
+    assert_eq!(text_item(&items, /*index*/ 1), "code_mode_exec_marker");
+    assert_eq!(text_item(&items, /*index*/ 3), "Exit 7\n{\"literal\":true}\n");
+    assert_regex_match(r"^Running \(session \d+\)\npartial$", text_item(&items, /*index*/ 4));
+    assert_eq!(text_item(&items, /*index*/ 5), "done");
+    let parsed: Value = serde_json::from_str(text_item(&items, /*index*/ 2))?;
     assert!(
         parsed
             .get("chunk_id")
@@ -1856,7 +1866,7 @@ async fn code_mode_wait_id_stays_known_after_compaction(
     let final_items = function_tool_output_items(&final_request, terminal_call_id);
     assert_eq!(final_items.len(), 1);
     assert_regex_match(
-        r"^Script terminated\nWall time \d+\.\d seconds\nOutput:\n\z",
+        r"^Script terminated\nOutput:\n\z",
         text_item(&final_items, /*index*/ 0),
     );
     let output = final_request.function_call_output(terminal_call_id);
@@ -4432,7 +4442,7 @@ async fn code_mode_exec_outer_limit_truncates_emitted_output() -> Result<()> {
 const result = await tools.exec_command({
   cmd: "printf '0123456789012345678901234567890123456789'"
 });
-text(result.output);
+text(result);
 "#,
     )
     .await?;
@@ -4535,7 +4545,7 @@ throw new Error("boom");
     assert_regex_match(
         concat!(
             r"(?s)\A",
-            r"Script failed\nWall time \d+\.\d seconds\nOutput:\n\z"
+            r"Script failed\nOutput:\n\z"
         ),
         text_item(&items, /*index*/ 0),
     );
@@ -4822,7 +4832,7 @@ text((await tools.exec_command({{cmd: "printf 'phase 3'"}})).output);
     assert_regex_match(
         concat!(
             r"(?s)\A",
-            r"Script running with cell ID \d+\nWall time \d+\.\d seconds\nOutput:\n\z"
+            r"Script running with cell ID \d+\nOutput:\n\z"
         ),
         text_item(&first_items, /*index*/ 0),
     );
@@ -4867,7 +4877,7 @@ text((await tools.exec_command({{cmd: "printf 'phase 3'"}})).output);
     assert_regex_match(
         concat!(
             r"(?s)\A",
-            r"Script running with cell ID \d+\nWall time \d+\.\d seconds\nOutput:\n\z"
+            r"Script running with cell ID \d+\nOutput:\n\z"
         ),
         text_item(&second_items, /*index*/ 0),
     );
@@ -4915,7 +4925,7 @@ text((await tools.exec_command({{cmd: "printf 'phase 3'"}})).output);
     assert_regex_match(
         concat!(
             r"(?s)\A",
-            r"Script completed\nWall time \d+\.\d seconds\nOutput:\n\z"
+            r"Script completed\nOutput:\n\z"
         ),
         text_item(&third_items, /*index*/ 0),
     );
@@ -4944,7 +4954,10 @@ text((await tools.exec_command({{cmd: "printf 'phase 3'"}})).output);
             _ => None,
         })
         .collect::<Vec<_>>();
-    for (call_id, request) in [("call-2", &second_request), ("call-3", &third_request)] {
+    for (call_id, request, namespace) in [
+        ("call-2", &second_request, Some(codex_protocol::DEFAULT_FUNCTION_NAMESPACE)),
+        ("call-3", &third_request, Some("")),
+    ] {
         let delivered =
             serde_json::from_value(request.function_call_output(call_id)["output"].clone())?;
         let measured = measurements
@@ -4964,7 +4977,7 @@ text((await tools.exec_command({{cmd: "printf 'phase 3'"}})).output);
                     &batch.output
                 ))
                 .collect::<Vec<_>>(),
-            vec![("wait", None, &delivered)]
+            vec![("wait", namespace, &delivered)]
         );
         assert_eq!(
             measured.tokens,
@@ -5059,7 +5072,7 @@ for (let index = 0; index < 256; index++) {{
     assert_regex_match(
         concat!(
             r"(?s)\A",
-            r"Script running with cell ID \d+\nWall time \d+\.\d seconds\nOutput:\n\z"
+            r"Script running with cell ID \d+\nOutput:\n\z"
         ),
         text_item(&first_items, /*index*/ 0),
     );
@@ -5098,7 +5111,7 @@ for (let index = 0; index < 256; index++) {{
     assert_regex_match(
         concat!(
             r"(?s)\A",
-            r"Script terminated\nWall time \d+\.\d seconds\nOutput:\n\z"
+            r"Script terminated\nOutput:\n\z"
         ),
         text_item(&second_items, /*index*/ 0),
     );
@@ -5228,7 +5241,7 @@ text("session b done");
     assert_regex_match(
         concat!(
             r"(?s)\A",
-            r"Script completed\nWall time \d+\.\d seconds\nOutput:\n\z"
+            r"Script completed\nOutput:\n\z"
         ),
         text_item(&third_items, /*index*/ 0),
     );
@@ -5268,7 +5281,7 @@ text("session b done");
     assert_regex_match(
         concat!(
             r"(?s)\A",
-            r"Script completed\nWall time \d+\.\d seconds\nOutput:\n\z"
+            r"Script completed\nOutput:\n\z"
         ),
         text_item(&fourth_items, /*index*/ 0),
     );
@@ -5549,7 +5562,7 @@ text("phase 2");
     assert_regex_match(
         concat!(
             r"(?s)\A",
-            r"Script terminated\nWall time \d+\.\d seconds\nOutput:\n\z"
+            r"Script terminated\nOutput:\n\z"
         ),
         text_item(&second_items, /*index*/ 0),
     );
@@ -5586,7 +5599,7 @@ text("after terminate");
     assert_regex_match(
         concat!(
             r"(?s)\A",
-            r"Script completed\nWall time \d+\.\d seconds\nOutput:\n\z"
+            r"Script completed\nOutput:\n\z"
         ),
         text_item(&third_items, /*index*/ 0),
     );
@@ -5643,7 +5656,7 @@ async fn code_mode_wait_returns_error_for_unknown_session() -> Result<()> {
     assert_regex_match(
         concat!(
             r"(?s)\A",
-            r"Script failed\nWall time \d+\.\d seconds\nOutput:\n\z"
+            r"Script failed\nOutput:\n\z"
         ),
         text_item(&items, /*index*/ 0),
     );
@@ -5779,7 +5792,7 @@ text("session b done");
     assert_regex_match(
         concat!(
             r"(?s)\A",
-            r"Script running with cell ID \d+\nWall time \d+\.\d seconds\nOutput:\n\z"
+            r"Script running with cell ID \d+\nOutput:\n\z"
         ),
         text_item(&third_items, /*index*/ 0),
     );
@@ -5830,7 +5843,7 @@ text("session b done");
             assert_regex_match(
                 concat!(
                     r"(?s)\A",
-                    r"Script terminated\nWall time \d+\.\d seconds\nOutput:\n\z"
+                    r"Script terminated\nOutput:\n\z"
                 ),
                 text_item(&fourth_items, /*index*/ 0),
             );
@@ -5839,7 +5852,7 @@ text("session b done");
             assert_regex_match(
                 concat!(
                     r"(?s)\A",
-                    r"Script (?:completed|terminated)\nWall time \d+\.\d seconds\nOutput:\n\z"
+                    r"Script (?:completed|terminated)\nOutput:\n\z"
                 ),
                 text_item(&fourth_items, /*index*/ 0),
             );
@@ -5901,7 +5914,7 @@ text("after yield");
     assert_regex_match(
         concat!(
             r"(?s)\A",
-            r"Script running with cell ID \d+\nWall time \d+\.\d seconds\nOutput:\n\z"
+            r"Script running with cell ID \d+\nOutput:\n\z"
         ),
         text_item(&first_items, /*index*/ 0),
     );
@@ -6225,7 +6238,7 @@ text("token one token two token three token four token five token six token seve
     assert_regex_match(
         concat!(
             r"(?s)\A",
-            r"Script completed\nWall time \d+\.\d seconds\nOutput:\n\z"
+            r"Script completed\nOutput:\n\z"
         ),
         text_item(&second_items, /*index*/ 0),
     );
@@ -6427,7 +6440,7 @@ text("after");
     assert_regex_match(
         concat!(
             r"(?s)\A",
-            r"Script completed\nWall time \d+\.\d seconds\nOutput:\n\z"
+            r"Script completed\nOutput:\n\z"
         ),
         text_item(&items, /*index*/ 0),
     );
@@ -6851,7 +6864,7 @@ image(out);
     assert_regex_match(
         concat!(
             r"(?s)\A",
-            r"Script completed\nWall time \d+\.\d seconds\nOutput:\n\z"
+            r"Script completed\nOutput:\n\z"
         ),
         text_item(&items, /*index*/ 0),
     );
@@ -6922,7 +6935,7 @@ image(imageItem);
     assert_regex_match(
         concat!(
             r"(?s)\A",
-            r"Script completed\nWall time \d+\.\d seconds\nOutput:\n\z"
+            r"Script completed\nOutput:\n\z"
         ),
         text_item(&items, /*index*/ 0),
     );
@@ -6973,7 +6986,7 @@ async fn code_mode_can_apply_patch_via_nested_tool() -> Result<()> {
     assert_regex_match(
         concat!(
             r"(?s)\A",
-            r"Script completed\nWall time \d+\.\d seconds\nOutput:\n\z"
+            r"Script completed\nOutput:\n\z"
         ),
         text_item(&items, /*index*/ 0),
     );

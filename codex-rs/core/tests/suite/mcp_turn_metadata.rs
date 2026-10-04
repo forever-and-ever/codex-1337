@@ -366,8 +366,7 @@ async fn auto_session_approval_is_scoped_to_tool_link_id() -> Result<()> {
         let output = request
             .function_call_output_text(&call_id)
             .expect("MCP tool output");
-        let (_, result) = output.split_once("\nOutput:\n").expect("MCP output header");
-        let result: Value = serde_json::from_str(result)?;
+        let result: Value = serde_json::from_str(&output)?;
         let mut expected_result = json!({
             "_codex_apps": {
                 "call_id": call_id,

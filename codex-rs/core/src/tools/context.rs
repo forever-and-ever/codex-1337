@@ -22,7 +22,8 @@ use codex_utils_output_truncation::formatted_truncate_text;
 use codex_utils_output_truncation::truncate_function_output_payload;
 use codex_utils_output_truncation::truncate_text;
 use codex_utils_output_truncation::with_serialization_allowance;
-use serde::Serialize;
+use codex_protocol::ExecutionOutputMetadata;
+use codex_protocol::NativeExecutionResult;
 use serde_json::Value as JsonValue;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
@@ -186,22 +187,6 @@ impl McpToolOutput {
         let mut payload = self.result.as_function_call_output_payload();
         if let Some(items) = payload.content_items_mut() {
             sanitize_original_image_detail(self.original_image_detail_supported, items);
-        }
-
-        let wall_time_seconds = self.wall_time.as_secs_f64();
-        let header = format!("Wall time: {wall_time_seconds:.4} seconds\nOutput:");
-
-        match &mut payload.body {
-            FunctionCallOutputBody::Text(text) => {
-                if text.is_empty() {
-                    *text = header;
-                } else {
-                    *text = format!("{header}\n{text}");
-                }
-            }
-            FunctionCallOutputBody::ContentItems(items) => {
-                items.insert(0, FunctionCallOutputContentItem::InputText { text: header });
-            }
         }
 
         // History receives this budget in tokens. Code Mode keeps the raw result.
@@ -446,31 +431,10 @@ impl ToolOutput for ExecCommandToolOutput {
     }
 
     fn code_mode_result(&self, _payload: &ToolPayload) -> JsonValue {
-        #[derive(Serialize)]
-        struct UnifiedExecCodeModeResult {
-            #[serde(skip_serializing_if = "Option::is_none")]
-            chunk_id: Option<String>,
-            wall_time_seconds: f64,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            exit_code: Option<i32>,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            session_id: Option<i32>,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            original_token_count: Option<usize>,
-            output: String,
-        }
-
-        let result = UnifiedExecCodeModeResult {
-            chunk_id: (!self.chunk_id.is_empty()).then(|| self.chunk_id.clone()),
-            wall_time_seconds: self.wall_time.as_secs_f64(),
-            exit_code: self.exit_code,
-            session_id: self.process_id,
-            original_token_count: self.original_token_count,
-            output: match self.max_output_tokens {
-                Some(max_tokens) => self.truncated_output(max_tokens),
-                None => String::from_utf8_lossy(&self.raw_output).to_string(),
-            },
-        };
+        let result = self.native_result(match self.max_output_tokens {
+            Some(max_tokens) => self.truncated_output(max_tokens),
+            None => self.truncated_output_with_policy(TruncationPolicy::Bytes(String::from_utf8_lossy(&self.raw_output).len())),
+        });
 
         serde_json::to_value(result).unwrap_or_else(|err| {
             JsonValue::String(format!("failed to serialize exec result: {err}"))
@@ -479,6 +443,17 @@ impl ToolOutput for ExecCommandToolOutput {
 }
 
 impl ExecCommandToolOutput {
+    fn native_result(&self, output: String) -> NativeExecutionResult {
+        NativeExecutionResult {
+            chunk_id: (!self.chunk_id.is_empty()).then(|| self.chunk_id.clone()),
+            wall_time_seconds: self.wall_time.as_secs_f64(),
+            exit_code: self.exit_code,
+            session_id: self.process_id,
+            original_token_count: self.original_token_count,
+            output,
+        }
+    }
+
     fn model_output_policy(&self) -> TruncationPolicy {
         let requested_policy = TruncationPolicy::Tokens(resolve_max_tokens(self.max_output_tokens));
         if requested_policy.byte_budget() < self.truncation_policy.byte_budget() {
@@ -548,7 +523,8 @@ impl ExecCommandToolOutput {
     }
 
     fn response_text(&self) -> String {
-        let header = self.response_header();
+        let header = self.native_result(String::new()).render(ExecutionOutputMetadata::Hidden)
+            .unwrap_or_else(|| self.response_header());
         let output_budget = with_serialization_allowance(self.truncation_policy)
             .byte_budget()
             .saturating_sub(header.len().saturating_add(/*rhs*/ 1));
@@ -556,7 +532,7 @@ impl ExecCommandToolOutput {
         let mut output = self.truncated_output_with_policy(policy);
 
         // History applies this same serialization budget to the complete response.
-        // Reserve room for metadata, warning headers, and the truncation marker so
+        // Reserve room for status, warning headers, and the truncation marker so
         // it does not truncate an already-truncated output a second time.
         while output.len() > output_budget && policy.byte_budget() > 0 {
             let excess_bytes = output.len() - output_budget;
@@ -571,7 +547,8 @@ impl ExecCommandToolOutput {
             output = self.truncated_output_with_policy(policy);
         }
 
-        format!("{header}\n{output}")
+        let result = self.native_result(output);
+        result.render(ExecutionOutputMetadata::Hidden).unwrap_or_else(|| serde_json::to_string(&result).expect("native execution result is serializable"))
     }
 }
 

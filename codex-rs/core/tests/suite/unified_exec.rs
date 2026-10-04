@@ -79,8 +79,6 @@ fn extract_output_text(item: &Value) -> Option<&str> {
 
 #[derive(Debug)]
 struct ParsedUnifiedExecOutput {
-    chunk_id: Option<String>,
-    wall_time_seconds: f64,
     process_id: Option<String>,
     exit_code: Option<i32>,
     original_token_count: Option<usize>,
@@ -89,72 +87,26 @@ struct ParsedUnifiedExecOutput {
 
 fn parse_unified_exec_output(raw: &str) -> Result<ParsedUnifiedExecOutput> {
     static OUTPUT_REGEX: OnceLock<Regex> = OnceLock::new();
-    let regex = OUTPUT_REGEX.get_or_init(|| {
-        Regex::new(concat!(
-            r#"(?s)^(?:Warning: truncated output \(original token count: \d+\)\n)?(?:Total output lines: \d+\n\n)?"#,
-            r#"(?:Chunk ID: (?P<chunk_id>[^\n]+)\n)?"#,
-            r#"Wall time: (?P<wall_time>-?\d+(?:\.\d+)?) seconds\n"#,
-            r#"(?:Process exited with code (?P<exit_code>-?\d+)\n)?"#,
-            r#"(?:Process running with session ID (?P<process_id>-?\d+)\n)?"#,
-            r#"(?:Original token count: (?P<original_token_count>\d+)\n)?"#,
-            r#"Output:\n?(?P<output>.*)$"#,
-        ))
-        .expect("valid unified exec output regex")
-    });
-
-    let cleaned = raw.trim_matches('\r');
-    let captures = regex
-        .captures(cleaned)
-        .ok_or_else(|| anyhow::anyhow!("missing Output section in unified exec output {raw}"))?;
-
-    let chunk_id = captures
-        .name("chunk_id")
-        .map(|value| value.as_str().to_string());
-
-    let wall_time_seconds = captures
-        .name("wall_time")
-        .expect("wall_time group present")
-        .as_str()
-        .parse::<f64>()
-        .context("failed to parse wall time seconds")?;
-
-    let exit_code = captures
-        .name("exit_code")
-        .map(|value| {
-            value
-                .as_str()
-                .parse::<i32>()
-                .context("failed to parse exit code from unified exec output")
-        })
-        .transpose()?;
-
-    let process_id = captures
-        .name("process_id")
-        .map(|value| value.as_str().to_string());
-
-    let original_token_count = captures
-        .name("original_token_count")
-        .map(|value| {
-            value
-                .as_str()
-                .parse::<usize>()
-                .context("failed to parse original token count from unified exec output")
-        })
-        .transpose()?;
-
-    let output = captures
-        .name("output")
-        .expect("output group present")
-        .as_str()
-        .to_string();
+    let regex = OUTPUT_REGEX.get_or_init(|| Regex::new(r"original token count: (\d+)").expect("valid token count regex"));
+    let (header, remainder) = raw.split_once('\n').unwrap_or((raw, ""));
+    let (exit_code, process_id, output) = if let Some(exit) = header.strip_prefix("Exit ") {
+        (Some(exit.parse().context("failed to parse exit code")?), None, remainder)
+    } else if let Some(session) = header.strip_prefix("Running (session ").and_then(|text| text.strip_suffix(')')) {
+        (None, Some(session.to_string()), remainder)
+    } else if raw == "Completed" {
+        (Some(0), None, "")
+    } else if raw == "Execution status unavailable" {
+        (None, None, "")
+    } else {
+        (Some(0), None, raw)
+    };
+    let original_token_count = regex.captures(output).map(|captures| captures[1].parse::<usize>()).transpose()?;
 
     Ok(ParsedUnifiedExecOutput {
-        chunk_id,
-        wall_time_seconds,
         process_id,
         exit_code,
         original_token_count,
-        output,
+        output: output.to_string(),
     })
 }
 
@@ -1875,7 +1827,7 @@ async fn unified_exec_emits_one_begin_and_one_end_event() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn exec_command_reports_chunk_and_exit_metadata() -> Result<()> {
+async fn exec_command_preserves_exit_and_truncation_evidence() -> Result<()> {
     // TODO(anp): Remove after unified-exec fixtures use target-native commands.
     skip_if_target_windows!(Ok(()), "uses a POSIX-only command fixture");
     skip_if_no_network!(Ok(()));
@@ -1924,19 +1876,6 @@ async fn exec_command_reports_chunk_and_exit_metadata() -> Result<()> {
     let metadata = outputs
         .get(call_id)
         .expect("missing exec_command metadata output");
-
-    let chunk_id = metadata.chunk_id.as_ref().expect("missing chunk_id");
-    assert_eq!(chunk_id.len(), 6, "chunk id should be 6 hex characters");
-    assert!(
-        chunk_id.chars().all(|c| c.is_ascii_hexdigit()),
-        "chunk id should be hexadecimal: {chunk_id}"
-    );
-
-    let wall_time = metadata.wall_time_seconds;
-    assert!(
-        wall_time >= 0.0,
-        "wall_time_seconds should be non-negative, got {wall_time}"
-    );
 
     assert!(
         metadata.process_id.is_none(),
@@ -2303,6 +2242,13 @@ async fn unified_exec_respects_early_exit_notifications() -> Result<()> {
     )
     .await?;
 
+    let ended = wait_for_event(&test.codex, |event| {
+        matches!(event, EventMsg::ExecCommandEnd(ended) if ended.call_id == call_id)
+    }).await;
+    let EventMsg::ExecCommandEnd(ended) = ended else { unreachable!() };
+    assert!(ended.duration.as_secs_f64() < 0.75,
+        "execution duration should reflect early exit, got {:?}", ended.duration);
+
     wait_for_event(&test.codex, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
@@ -2330,11 +2276,6 @@ async fn unified_exec_respects_early_exit_notifications() -> Result<()> {
         "short-lived process should exit successfully"
     );
 
-    let wall_time = output.wall_time_seconds;
-    assert!(
-        wall_time < 0.75,
-        "wall_time should reflect early exit rather than the full yield time; got {wall_time}"
-    );
     assert!(
         output.output.is_empty(),
         "sleep command should not emit output, got {:?}",
@@ -2506,15 +2447,6 @@ async fn write_stdin_returns_exit_metadata_and_clears_session() -> Result<()> {
         .exit_code
         .expect("expected exit_code after sending EOF");
     assert_eq!(exit_code, 0, "cat should exit cleanly after EOF");
-
-    let exit_chunk = exit_output
-        .chunk_id
-        .as_ref()
-        .expect("missing chunk id for exit output");
-    assert!(
-        exit_chunk.chars().all(|c| c.is_ascii_hexdigit()),
-        "chunk id should be hexadecimal: {exit_chunk}"
-    );
 
     Ok(())
 }
