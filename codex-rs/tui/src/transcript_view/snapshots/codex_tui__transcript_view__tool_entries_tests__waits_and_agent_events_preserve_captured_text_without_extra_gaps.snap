@@ -15,6 +15,9 @@ expression: rendered
 [+] • Waited (~ 13 tokens)
 [+] • Waited (~ 13 tokens)
 [+] • Returned (~ 4 tokens)
+    • Waited (~ 7 tokens) · finished
+[+] • Returned (~ 14 tokens)
+[+] • Returned (~ 7 tokens)
     • Completed `/root/worker`
 [+] • Waited
 

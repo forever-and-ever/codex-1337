@@ -46,7 +46,14 @@ pub(super) fn is_execution_header(text: &str) -> bool {
         || text.starts_with("Script terminated\n"))
         && text
             .split_once("\nOutput:\n")
-            .is_some_and(|(header, body)| header.contains("\nWall time") && body.is_empty())
+            .is_some_and(|(header, body)| {
+                let mut lines = header.lines();
+                lines.next();
+                body.is_empty() && match lines.next() {
+                    None => true,
+                    Some(timing) => timing.starts_with("Wall time ") && lines.next().is_none(),
+                }
+            })
 }
 
 /// Render the domain payload, not the MCP envelope. Some servers also serialize the
