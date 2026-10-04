@@ -2646,7 +2646,7 @@ fn selected_and_resumed_threads_use_server_capability_for_v1_and_v2_children() -
         assert!(backfill.completed);
         assert_eq!(
             backfill.refreshed_thread_ids,
-            [child_thread_ids[1]].into_iter().collect()
+            child_thread_ids.iter().copied().collect()
         );
         assert_eq!(
             app.agent_navigation.get(&child_thread_ids[0]),
@@ -2654,7 +2654,7 @@ fn selected_and_resumed_threads_use_server_capability_for_v1_and_v2_children() -
                 agent_nickname: Some("child-0".to_string()),
                 agent_role: Some("worker".to_string()),
                 agent_path: Some("/root/child-0".to_string()),
-                is_running: true,
+                is_running: false,
                 is_closed: false,
             })
         );
@@ -2723,6 +2723,35 @@ fn selected_and_resumed_threads_use_server_capability_for_v1_and_v2_children() -
         assert!(std::iter::from_fn(|| app_event_rx.try_recv().ok())
             .any(|event| matches!(event, AppEvent::SubagentTextInput { thread_id, .. }
                 if thread_id == child_thread_ids[1])));
+        assert_eq!(app.chat_widget.thread_id(), Some(child_thread_ids[1]));
+        app.chat_widget.restore_user_message_to_composer("/fork investigation".into());
+        app.chat_widget.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(std::iter::from_fn(|| app_event_rx.try_recv().ok()).any(|event|
+            matches!(event, AppEvent::ForkCurrentSession { name: Some(name) } if name == "investigation")));
+        let child_cwd = app.chat_widget.config_ref().cwd.clone();
+        let child_roots = app.chat_widget.config_ref().workspace_roots.clone();
+        let child_tier = app.chat_widget.current_service_tier().map(str::to_string);
+        let child_model = app.chat_widget.current_model().to_string();
+        app.config.cwd = app.config.codex_home.abs();
+        app.config.service_tier = Some("fast".to_string());
+        Box::pin(app.handle_event(&mut tui, &mut app_server,
+            AppEvent::ForkCurrentSession { name: Some("investigation".to_string()) })).await?;
+        let fork_id = app.chat_widget.thread_id().expect("fork thread");
+        assert_ne!(fork_id, child_thread_ids[1]);
+        assert_eq!(app.primary_thread_id, Some(fork_id));
+        assert!(!app.chat_widget.is_parent_owned_thread());
+        assert_eq!((app.chat_widget.config_ref().cwd.clone(),
+            app.chat_widget.config_ref().workspace_roots.clone(),
+            app.chat_widget.current_service_tier().map(str::to_string),
+            app.chat_widget.current_model().to_string()),
+            (child_cwd, child_roots, child_tier.or(Some("default".to_string())), child_model));
+        assert!(!app.agent_navigation.is_parent_owned(child_thread_ids[1]));
+        let source = app_server.thread_read(child_thread_ids[1], /*include_turns*/ false).await?;
+        assert_eq!(source.parent_thread_id, Some(root_thread_id.to_string()));
+        assert_eq!(source.can_accept_direct_input, Some(false));
+        Box::pin(app.handle_key_event(&mut tui, &mut app_server,
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))).await;
+        assert_eq!(app.current_displayed_thread_id(), Some(fork_id));
         Ok(())
     }))
 }

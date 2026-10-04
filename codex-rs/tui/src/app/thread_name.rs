@@ -219,7 +219,13 @@ impl App {
         self.render_chat_widget_frame(tui, screen_size)?;
         self.refresh_in_memory_config_from_disk_best_effort("forking the thread")
             .await;
-        let mut config = self.config.clone();
+        let mut config = if self.chat_widget.is_parent_owned_thread() {
+            let mut config = self.chat_widget.config_ref().clone();
+            config.service_tier = self.chat_widget.current_service_tier().map(str::to_string);
+            config
+        } else {
+            self.config.clone()
+        };
         if app_server.uses_remote_workspace() {
             config
                 .workspace_roots

@@ -849,7 +849,9 @@ impl AppServerSession {
                 .is_some_and(|thread| thread.history_mode == ThreadHistoryMode::Paginated)
                 || presentation == ForkPresentation::SideConversation);
         let request_id = self.next_request_id();
-        let session_config = if config.model.is_none() {
+        let child_fork = config_source == ForkConfigSource::Session
+            && fork_parent.as_ref().is_some_and(thread_blocks_direct_input);
+        let session_config = if child_fork || config.model.is_none() {
             // Avoid inferring a tier from the stale client default model.
             config.clone()
         } else {
@@ -878,7 +880,13 @@ impl AppServerSession {
             // not restore saved roots when omitted, so preserve this explicit selection.
             params.runtime_workspace_roots = Some(config.workspace_roots.clone());
         }
-        if self.thread_params_mode() == ThreadParamsMode::Remote
+        if child_fork {
+            params.cwd = Some(config.cwd.to_string_lossy().into_owned());
+            params.service_tier = Some(config.service_tier.clone());
+            params.base_instructions = None;
+            params.developer_instructions = None;
+        }
+        if (child_fork || self.thread_params_mode() == ThreadParamsMode::Remote)
             && permission_mode == ForkPermissionMode::InheritSaved
         {
             params.approval_policy = None;

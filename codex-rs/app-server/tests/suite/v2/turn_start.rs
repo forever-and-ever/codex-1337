@@ -78,6 +78,7 @@ use codex_app_server_protocol::WarningNotification;
 use codex_core::test_support::all_model_presets;
 use codex_exec_server::LOCAL_ENVIRONMENT_ID;
 use codex_features::Feature;
+use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_login::AuthCredentialsStoreMode;
 use codex_models_manager::model_info::BASE_INSTRUCTIONS;
 use codex_models_manager::model_info::model_info_from_slug;
@@ -4539,8 +4540,8 @@ async fn multi_agent_v2_subagent_text_input_preserves_ownership(
 
     // Hold inference open while exercising exact-turn steering; interruption below releases it.
     Mock::given(method("POST"))
-        .and(path("/responses"))
-        .and(|request: &Request| body_contains(request, "human follow-up"))
+        .and(|request: &Request| request.url.path().ends_with("/responses")
+            && body_contains(request, "human follow-up"))
         .respond_with(ResponseTemplate::new(200)
             .insert_header("content-type", "text/event-stream")
             .set_body_string(responses::sse(vec![responses::ev_completed("resp-human")]))
@@ -4594,6 +4595,44 @@ async fn multi_agent_v2_subagent_text_input_preserves_ownership(
     assert_eq!(current.thread.turns.last().map(|turn| &turn.id), Some(&started.turn.id));
     assert_eq!(current.thread.parent_thread_id, Some(thread.id.clone()));
     assert_eq!(current.thread.can_accept_direct_input, Some(false));
+    // A snapshot fork is an independent root, not a new child or a takeover of its source.
+    let source_roots = current.thread.environments.as_ref()
+        .and_then(|environments| environments.first())
+        .map(|environment| environment.runtime_workspace_roots.iter()
+            .map(|root| AbsolutePathBuf::from_absolute_path(root.as_str()))
+            .collect::<std::io::Result<Vec<_>>>()).transpose()?;
+    let forked: codex_app_server_protocol::ThreadForkResponse = mcp.request(|request_id| ClientRequest::ThreadFork {
+        request_id,
+        params: codex_app_server_protocol::ThreadForkParams {
+            thread_id: child_thread_id.clone(),
+            name: Some("independent investigation".to_string()),
+            model: current.thread.model.clone(),
+            model_provider: Some(current.thread.model_provider.clone()),
+            cwd: Some(current.thread.cwd.to_string_lossy().into_owned()),
+            runtime_workspace_roots: source_roots,
+            service_tier: Some(None),
+            ..Default::default()
+        },
+    }).await?;
+    assert_ne!(forked.thread.id, child_thread_id);
+    assert_eq!(forked.thread.forked_from_id, Some(child_thread_id.clone()));
+    assert_eq!(forked.thread.parent_thread_id, None);
+    assert_eq!(forked.thread.can_accept_direct_input, Some(true));
+    assert_eq!(forked.thread.cwd, current.thread.cwd);
+    assert_eq!(forked.service_tier, Some("default".to_string()));
+    assert_eq!((forked.thread.model, forked.thread.model_provider),
+        (current.thread.model, current.thread.model_provider));
+    assert!(!matches!(forked.thread.source, codex_app_server_protocol::SessionSource::SubAgent(_)));
+    let source: codex_app_server_protocol::ThreadReadResponse = mcp.request(|request_id| ClientRequest::ThreadRead {
+        request_id,
+        params: codex_app_server_protocol::ThreadReadParams {
+            thread_id: child_thread_id.clone(), include_turns: true,
+        },
+    }).await?;
+    assert_eq!(source.thread.parent_thread_id, Some(thread.id.clone()));
+    assert_eq!(source.thread.can_accept_direct_input, Some(false));
+    assert_eq!(source.thread.turns.last().map(|turn| (&turn.id, turn.status.clone())),
+        Some((&started.turn.id, TurnStatus::InProgress)));
     let _: codex_app_server_protocol::TurnInterruptResponse = mcp.request(|request_id| ClientRequest::TurnInterrupt {
         request_id,
         params: codex_app_server_protocol::TurnInterruptParams {

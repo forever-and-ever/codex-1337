@@ -15,6 +15,7 @@ fn parent_owned_thread_allows_bare_navigation_commands() {
         ("/diff ", SlashCommand::Diff),
         ("/daemon", SlashCommand::Daemon),
         ("/warnings", SlashCommand::Warnings),
+        ("/fork", SlashCommand::Fork),
     ] {
         let (mut composer, _rx) = new_test_composer();
         composer.set_parent_owned_thread();
@@ -36,6 +37,9 @@ fn parent_owned_thread_allows_bare_navigation_commands() {
     assert_eq!(composer.handle_submission(/*should_queue*/ false).0, InputResult::ParentOwnedInputBlocked);
     composer.set_text_content("/model".to_string(), Vec::new(), Vec::new());
     assert_eq!(composer.handle_submission(/*should_queue*/ false).0, InputResult::ParentOwnedInputBlocked);
+    composer.set_text_content("/fork investigation".to_string(), Vec::new(), Vec::new());
+    assert_eq!(composer.handle_submission(/*should_queue*/ false).0,
+        InputResult::CommandWithArgs(SlashCommand::Fork, "investigation".to_string(), Vec::new()));
 }
 
 #[test]
