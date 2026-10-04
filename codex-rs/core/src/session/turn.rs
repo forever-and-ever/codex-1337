@@ -2110,6 +2110,7 @@ pub(super) enum RealtimeEventText {
 
 pub(super) fn realtime_text_for_event(msg: &EventMsg) -> Option<RealtimeEventText> {
     match msg {
+        EventMsg::CodeModeOwned(owned) => realtime_text_for_event(owned.payload()),
         EventMsg::ElicitationRequest(request)
             if matches!(
                 &request.request,

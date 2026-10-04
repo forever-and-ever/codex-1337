@@ -66,7 +66,7 @@ impl EventProcessorWithHumanOutput {
     }
 
     fn render_item_started(&self, item: &ThreadItem) {
-        match item {
+        match item.native_item() {
             ThreadItem::CommandExecution { command, cwd, .. } => {
                 eprintln!(
                     "{}\n{} in {cwd}",
@@ -96,7 +96,7 @@ impl EventProcessorWithHumanOutput {
     }
 
     fn render_item_completed(&mut self, item: ThreadItem) {
-        match item {
+        match item.into_native_item() {
             ThreadItem::AgentMessage { text, .. } => {
                 eprintln!(
                     "{}\n{}",
@@ -225,6 +225,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
     }
 
     fn process_server_notification(&mut self, notification: ServerNotification) -> CodexStatus {
+        let notification = notification.into_native_notification();
         match notification {
             ServerNotification::ConfigWarning(notification) => {
                 let details = notification

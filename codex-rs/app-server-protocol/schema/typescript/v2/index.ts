@@ -70,6 +70,8 @@ export type { ClaudeSubscriptionAccount } from "./ClaudeSubscriptionAccount";
 export type { CliAuthCredentialsStoreMode } from "./CliAuthCredentialsStoreMode";
 export type { CodeModeEvent } from "./CodeModeEvent";
 export type { CodeModeItem } from "./CodeModeItem";
+export type { CodeModeOwned } from "./CodeModeOwned";
+export type { CodeModeOwner } from "./CodeModeOwner";
 export type { CodeModeStatus } from "./CodeModeStatus";
 export type { CodexErrorInfo } from "./CodexErrorInfo";
 export type { CollabAgentState } from "./CollabAgentState";

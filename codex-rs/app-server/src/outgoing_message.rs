@@ -144,6 +144,7 @@ pub(crate) struct ThreadScopedOutgoingMessageSender {
     outgoing: Arc<OutgoingMessageSender>,
     connection_ids: Arc<Vec<ConnectionId>>,
     thread_id: ThreadId,
+    code_mode_owner: Option<codex_app_server_protocol::CodeModeOwner>,
 }
 
 struct PendingCallbackEntry {
@@ -166,6 +167,7 @@ impl ThreadScopedOutgoingMessageSender {
             outgoing,
             connection_ids: Arc::new(connection_ids),
             thread_id,
+            code_mode_owner: None,
         }
     }
 
@@ -203,9 +205,22 @@ impl ThreadScopedOutgoingMessageSender {
         if self.connection_ids.is_empty() {
             return;
         }
+        let notification = match &self.code_mode_owner {
+            Some(owner) => notification.with_code_mode_owner(owner),
+            None => notification,
+        };
         self.outgoing
             .send_server_notification_to_connections(self.connection_ids.as_slice(), notification)
             .await;
+    }
+
+    pub(crate) fn with_code_mode_owner(
+        mut self,
+        owner: codex_app_server_protocol::CodeModeOwner,
+    ) -> Self {
+        assert_eq!(owner.thread_id, self.thread_id, "misrouted Code Mode scope");
+        self.code_mode_owner = Some(owner);
+        self
     }
 
     pub(crate) async fn send_global_server_notification(&self, notification: ServerNotification) {

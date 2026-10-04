@@ -303,6 +303,7 @@ fn invalid_cursor(cursor: &str) -> ThreadStoreError {
 
 fn searchable_text(item: &ThreadItem) -> Option<Cow<'_, str>> {
     match item {
+        ThreadItem::CodeModeOwned(owned) => searchable_text(owned.payload()),
         ThreadItem::UserMessage { content, .. } => {
             let mut text_parts = content
                 .iter()

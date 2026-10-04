@@ -9,6 +9,13 @@ use codex_protocol::models::ResponseItem;
 
 pub(crate) fn without_notification_media(notification: ServerNotification) -> ServerNotification {
     match notification {
+        ServerNotification::CodeModeOwned(owned) => {
+            let (owner, native) = owned.into_parts();
+            ServerNotification::CodeModeOwned(codex_app_server_protocol::CodeModeOwned::new(
+                owner,
+                Box::new(without_notification_media(*native)),
+            ))
+        }
         ServerNotification::ItemStarted(mut notification) => {
             notification.item = without_thread_item_media(notification.item);
             ServerNotification::ItemStarted(notification)
@@ -142,7 +149,15 @@ pub(crate) fn without_notification_media(notification: ServerNotification) -> Se
 }
 
 fn without_thread_item_media(mut item: ThreadItem) -> ThreadItem {
+    if let ThreadItem::CodeModeOwned(owned) = item {
+        let (owner, native) = owned.into_parts();
+        return ThreadItem::CodeModeOwned(codex_app_server_protocol::CodeModeOwned::new(
+            owner,
+            Box::new(without_thread_item_media(*native)),
+        ));
+    }
     match &mut item {
+        ThreadItem::CodeModeOwned(_) => unreachable!("ownership was unwrapped above"),
         ThreadItem::UserMessage { content, .. } => {
             content.retain(|item| match item {
                 UserInput::Image { .. } | UserInput::Audio { .. } => false,

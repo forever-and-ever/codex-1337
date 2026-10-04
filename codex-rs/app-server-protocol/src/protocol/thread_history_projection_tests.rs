@@ -23,6 +23,64 @@ use crate::protocol::v2::ThreadItem;
 use crate::protocol::v2::TurnError;
 
 #[test]
+fn owned_capture_survives_live_history_and_independent_page_projection() {
+    use crate::CodeModeOwned;
+    use crate::CodeModeOwner;
+    use crate::ThreadHistoryBuilder;
+    use codex_protocol::items::FunctionCallOutputItem;
+    use codex_protocol::models::FunctionCallOutputBody;
+
+    // A suffix page has no preceding ownership hint; the capture must carry its owner.
+    let thread_id = ThreadId::default();
+    let owner = CodeModeOwner {
+        thread_id,
+        exec_call_id: "exec-1".into(),
+        cell_id: "generation-1:cell-1".into(),
+        started_at_ms: 1_000,
+    };
+    let native = match item_completed(
+        thread_id,
+        "turn-1",
+        TurnItem::FunctionCallOutput(FunctionCallOutputItem {
+            id: "output-1".into(),
+            call_id: Some("exec-1".into()),
+            name: "exec".into(),
+            namespace: Some("functions".into()),
+            output: FunctionCallOutputBody::Text("only what JS returned".into()),
+        }),
+    ) {
+        RolloutItem::EventMsg(native) => native,
+        _ => unreachable!(),
+    };
+    let event = EventMsg::CodeModeOwned(CodeModeOwned::new(owner.clone(), Box::new(native)));
+    let projected = project(RolloutItem::EventMsg(event.clone()));
+    let mut builder = ThreadHistoryBuilder::new();
+    builder.handle_event(&EventMsg::TurnStarted(TurnStartedEvent {
+        turn_id: "turn-1".into(),
+        root_turn_id: None,
+        trace_id: None,
+        started_at: Some(1),
+        model_context_window: None,
+        collaboration_mode_kind: Default::default(),
+    }));
+    builder.handle_event(&event);
+    builder.handle_event(&event);
+    let history = builder.finish();
+    assert_eq!(
+        history[0].items,
+        vec![projected.changed_items[0].item.clone()]
+    );
+    assert_eq!(history[0].items[0].id(), "output-1");
+    let ThreadItem::CodeModeOwned(owned) = &history[0].items[0] else {
+        panic!("capture lost its ownership");
+    };
+    assert_eq!(owned.owner, owner);
+    let mut nested = serde_json::to_value(&event).unwrap();
+    nested["payload"] = nested.clone();
+    assert!(serde_json::from_value::<EventMsg>(nested).is_err());
+}
+
+#[test]
 fn projects_turn_lifecycle_without_prior_builder_state() {
     let started = project(RolloutItem::EventMsg(EventMsg::TurnStarted(
         TurnStartedEvent {

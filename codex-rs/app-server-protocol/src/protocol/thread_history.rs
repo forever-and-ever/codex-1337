@@ -250,6 +250,7 @@ pub struct ThreadHistoryBuilder {
     current_rollout_index: usize,
     next_rollout_index: usize,
     active_change_set: Option<ThreadHistoryChangeSet>,
+    code_mode_owner: Option<crate::CodeModeOwner>,
 }
 
 impl Default for ThreadHistoryBuilder {
@@ -267,6 +268,7 @@ impl ThreadHistoryBuilder {
             current_rollout_index: 0,
             next_rollout_index: 0,
             active_change_set: None,
+            code_mode_owner: None,
         }
     }
 
@@ -358,6 +360,16 @@ impl ThreadHistoryBuilder {
     /// This function should handle all EventMsg variants that can be persisted in a rollout file.
     /// See `should_persist_event_msg` in `codex-rs/core/rollout/policy.rs`.
     pub fn handle_event(&mut self, event: &EventMsg) {
+        if let EventMsg::CodeModeOwned(owned) = event {
+            let previous = self.code_mode_owner.replace(owned.owner.clone());
+            assert!(
+                previous.is_none(),
+                "nested Code Mode ownership is forbidden"
+            );
+            self.handle_event(owned.payload());
+            self.code_mode_owner = previous;
+            return;
+        }
         match event {
             EventMsg::UserMessage(payload) => self.handle_user_message(payload),
             EventMsg::AgentMessage(payload) => self.handle_agent_message(payload),
@@ -1444,6 +1456,7 @@ impl ThreadHistoryBuilder {
     }
 
     fn push_item_in_current_turn(&mut self, item: ThreadItem) {
+        let item = self.owned_item(item);
         let tracking_changes = self.is_tracking_changes();
         let changed_item = {
             let turn = self.ensure_turn();
@@ -1457,6 +1470,7 @@ impl ThreadHistoryBuilder {
     }
 
     fn upsert_item_in_turn_id(&mut self, turn_id: &str, item: ThreadItem) {
+        let item = self.owned_item(item);
         let tracking_changes = self.is_tracking_changes();
         if let Some(turn) = self.current_turn.as_mut()
             && turn.id == turn_id
@@ -1489,6 +1503,7 @@ impl ThreadHistoryBuilder {
     }
 
     fn upsert_item_in_current_turn(&mut self, item: ThreadItem) {
+        let item = self.owned_item(item);
         let tracking_changes = self.is_tracking_changes();
         let changed_item = {
             let turn = self.ensure_turn();
@@ -1497,6 +1512,15 @@ impl ThreadHistoryBuilder {
         };
         if let Some((turn_id, item)) = changed_item {
             self.record_changed_item(turn_id, item);
+        }
+    }
+
+    fn owned_item(&self, item: ThreadItem) -> ThreadItem {
+        match &self.code_mode_owner {
+            Some(owner) => {
+                ThreadItem::CodeModeOwned(crate::CodeModeOwned::new(owner.clone(), Box::new(item)))
+            }
+            None => item,
         }
     }
 

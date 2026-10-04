@@ -12,6 +12,7 @@ import type { JsonValue } from "../serde_json/JsonValue";
 import type { AgentMessageDelivery } from "./AgentMessageDelivery";
 import type { AsyncUserInputQuestion } from "./AsyncUserInputQuestion";
 import type { CodeModeItem } from "./CodeModeItem";
+import type { CodeModeOwned } from "./CodeModeOwned";
 import type { CollabAgentState } from "./CollabAgentState";
 import type { CollabAgentTool } from "./CollabAgentTool";
 import type { CollabAgentToolCallStatus } from "./CollabAgentToolCallStatus";
@@ -32,7 +33,7 @@ import type { PatchApplyStatus } from "./PatchApplyStatus";
 import type { SubAgentActivityKind } from "./SubAgentActivityKind";
 import type { UserInput } from "./UserInput";
 
-export type ThreadItem = { "type": "codeMode" } & CodeModeItem | { "type": "userMessage", id: string, clientId: string | null, content: Array<UserInput>, } | { "type": "hookPrompt", id: string, fragments: Array<HookPromptFragment>, } | { "type": "agentMessage", id: string, text: string, phase: MessagePhase | null, memoryCitation: MemoryCitation | null, delivery: AgentMessageDelivery | null, questions: Array<AsyncUserInputQuestion> | null, } | { "type": "functionCallOutput", id: string,
+export type ThreadItem = { "type": "codeModeOwned" } & CodeModeOwned<ThreadItem> | { "type": "codeMode" } & CodeModeItem | { "type": "userMessage", id: string, clientId: string | null, content: Array<UserInput>, } | { "type": "hookPrompt", id: string, fragments: Array<HookPromptFragment>, } | { "type": "agentMessage", id: string, text: string, phase: MessagePhase | null, memoryCitation: MemoryCitation | null, delivery: AgentMessageDelivery | null, questions: Array<AsyncUserInputQuestion> | null, } | { "type": "functionCallOutput", id: string,
 /**
  * Enclosing invocation; absent in older persisted history.
  */

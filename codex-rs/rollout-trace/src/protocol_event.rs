@@ -300,6 +300,7 @@ impl<'a> From<&'a ExecCommandEndEvent> for ExecCommandEndTracePayload<'a> {
 
 pub(crate) fn tool_runtime_trace_event(event: &EventMsg) -> Option<ToolRuntimeTraceEvent<'_>> {
     match event {
+        EventMsg::CodeModeOwned(owned) => tool_runtime_trace_event(owned.payload()),
         EventMsg::ExecCommandBegin(event) if event.source != ExecCommandSource::UserShell => {
             Some(ToolRuntimeTraceEvent::Started {
                 tool_call_id: &event.call_id,
@@ -461,6 +462,7 @@ pub(crate) fn tool_runtime_trace_event(event: &EventMsg) -> Option<ToolRuntimeTr
 
 pub(crate) fn wrapped_protocol_event_type(event: &EventMsg) -> Option<&'static str> {
     match event {
+        EventMsg::CodeModeOwned(owned) => wrapped_protocol_event_type(owned.payload()),
         EventMsg::SessionConfigured(_) => Some("session_configured"),
         EventMsg::TurnStarted(_) => Some("turn_started"),
         EventMsg::TurnComplete(_) => Some("turn_complete"),

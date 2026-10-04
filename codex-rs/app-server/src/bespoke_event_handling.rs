@@ -151,6 +151,13 @@ pub(crate) async fn apply_bespoke_event_handling(
         id: event_turn_id,
         msg,
     } = event;
+    let (msg, outgoing) = match msg {
+        EventMsg::CodeModeOwned(owned) => {
+            let (owner, native) = owned.into_parts();
+            (*native, outgoing.with_code_mode_owner(owner))
+        }
+        native => (native, outgoing),
+    };
     match msg {
         EventMsg::TurnStarted(payload) => {
             // While not technically necessary as it was already done on TurnComplete, be extra cautios and abort any pending server requests.

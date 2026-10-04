@@ -11,6 +11,7 @@ use crate::TS;
 use crate::export::GeneratedSchema;
 #[cfg(test)]
 use crate::export::write_json_schema;
+use crate::protocol::code_mode::CodeModeOwnedNotification;
 use crate::protocol::v1;
 use crate::protocol::v2;
 use codex_experimental_api_macros::ExperimentalApi;
@@ -1940,6 +1941,7 @@ pub struct FuzzyFileSearchSessionCompletedNotification {
 }
 
 server_notification_definitions! {
+    CodeModeOwned => "codeMode/owned" (CodeModeOwnedNotification),
     /// NEW NOTIFICATIONS
     Error => "error" (v2::ErrorNotification),
     ThreadStarted => "thread/started" (v2::ThreadStartedNotification),

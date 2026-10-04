@@ -35,6 +35,11 @@ pub fn item_event_to_server_notification(
     let thread_id = thread_id.to_string();
     let turn_id = turn_id.to_string();
     match msg {
+        EventMsg::CodeModeOwned(owned) => {
+            let (owner, native) = owned.into_parts();
+            item_event_to_server_notification(*native, &thread_id, &turn_id)
+                .with_code_mode_owner(&owner)
+        }
         EventMsg::DynamicToolCallResponse(response) => {
             let status = if response.success {
                 DynamicToolCallStatus::Completed

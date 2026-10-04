@@ -671,7 +671,7 @@ impl HasLegacyEvent for ReasoningRawContentDeltaEvent {
 
 impl HasLegacyEvent for EventMsg {
     fn as_legacy_events(&self, show_raw_agent_reasoning: bool) -> Vec<EventMsg> {
-        match self {
+        match self.native_event() {
             EventMsg::ItemStarted(event) => event.as_legacy_events(show_raw_agent_reasoning),
             EventMsg::ItemCompleted(event) => event.as_legacy_events(show_raw_agent_reasoning),
             EventMsg::AgentMessageContentDelta(event) => {

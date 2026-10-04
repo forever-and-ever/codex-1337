@@ -2917,6 +2917,40 @@
       ],
       "title": "ClientRequest"
     },
+    "CodeModeOwnedNotification": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "description": "One ownership layer around an unchanged human-transcript payload.",
+      "properties": {
+        "owner": {
+          "$ref": "#/definitions/v2/CodeModeOwner"
+        },
+        "payload": {
+          "$ref": "#/definitions/ServerNotification"
+        }
+      },
+      "required": [
+        "owner",
+        "payload"
+      ],
+      "title": "CodeModeOwned_for_ServerNotification",
+      "type": "object"
+    },
+    "CodeModeOwned_for_ServerNotification": {
+      "description": "One ownership layer around an unchanged human-transcript payload.",
+      "properties": {
+        "owner": {
+          "$ref": "#/definitions/v2/CodeModeOwner"
+        },
+        "payload": {
+          "$ref": "#/definitions/ServerNotification"
+        }
+      },
+      "required": [
+        "owner",
+        "payload"
+      ],
+      "type": "object"
+    },
     "CommandExecutionApprovalDecision": {
       "oneOf": [
         {
@@ -4811,6 +4845,26 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "description": "Notification sent from the server to the client.",
       "oneOf": [
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "codeMode/owned"
+              ],
+              "title": "CodeMode/ownedNotificationMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/CodeModeOwned_for_ServerNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "title": "CodeMode/ownedNotification",
+          "type": "object"
+        },
         {
           "description": "NEW NOTIFICATIONS",
           "properties": {
@@ -8825,6 +8879,31 @@
             "type": "object"
           }
         ]
+      },
+      "CodeModeOwner": {
+        "description": "Durable transcript identity, independent of the runtime and attached clients.",
+        "properties": {
+          "cellId": {
+            "type": "string"
+          },
+          "execCallId": {
+            "type": "string"
+          },
+          "startedAtMs": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "threadId": {
+            "$ref": "#/definitions/v2/ThreadId"
+          }
+        },
+        "required": [
+          "cellId",
+          "execCallId",
+          "startedAtMs",
+          "threadId"
+        ],
+        "type": "object"
       },
       "CodeModeStatus": {
         "enum": [
@@ -22524,6 +22603,31 @@
       },
       "ThreadItem": {
         "oneOf": [
+          {
+            "description": "One ownership layer around an unchanged human-transcript payload.",
+            "properties": {
+              "owner": {
+                "$ref": "#/definitions/v2/CodeModeOwner"
+              },
+              "payload": {
+                "$ref": "#/definitions/v2/ThreadItem"
+              },
+              "type": {
+                "enum": [
+                  "codeModeOwned"
+                ],
+                "title": "CodeModeOwnedThreadItemType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "owner",
+              "payload",
+              "type"
+            ],
+            "title": "CodeModeOwnedThreadItem",
+            "type": "object"
+          },
           {
             "properties": {
               "cellId": {

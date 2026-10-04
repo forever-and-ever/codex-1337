@@ -195,10 +195,11 @@ impl ThreadState {
     }
 
     pub(crate) fn track_current_turn_event(&mut self, event_turn_id: &str, event: &EventMsg) {
+        let native = event.native_event();
         if let EventMsg::TurnStarted(payload) = event {
             self.turn_summary.started_at = payload.started_at;
         }
-        if let EventMsg::ItemCompleted(payload) = event
+        if let EventMsg::ItemCompleted(payload) = native
             && let CoreTurnItem::AgentMessage(item) = &payload.item
             && matches!(item.phase, Some(MessagePhase::FinalAnswer) | None)
             && item.content.iter().any(|content| {

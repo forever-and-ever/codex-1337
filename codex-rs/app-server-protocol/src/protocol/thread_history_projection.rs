@@ -19,6 +19,18 @@ use crate::protocol::v2::TurnStatus;
 /// Callers that replay a JSONL suffix should invoke it once per line, in ordinal order, so storage
 /// can preserve the first and latest timestamps for repeated item snapshots independently.
 pub fn project_rollout_line(line: &RolloutLine) -> ThreadHistoryChangeSet {
+    if let RolloutItem::EventMsg(EventMsg::CodeModeOwned(owned)) = &line.item {
+        let mut native = line.clone();
+        native.item = RolloutItem::EventMsg(owned.payload().as_ref().clone());
+        let mut changes = project_rollout_line(&native);
+        for change in &mut changes.changed_items {
+            change.item = ThreadItem::CodeModeOwned(crate::CodeModeOwned::new(
+                owned.owner.clone(),
+                Box::new(change.item.clone()),
+            ));
+        }
+        return changes;
+    }
     match &line.item {
         RolloutItem::EventMsg(EventMsg::TurnStarted(event)) => ThreadHistoryChangeSet {
             changed_turns: vec![ThreadHistoryTurnMetadata {

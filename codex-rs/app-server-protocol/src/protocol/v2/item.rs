@@ -237,6 +237,7 @@ impl CommandAction {
 #[ts(tag = "type")]
 #[ts(export_to = "v2/")]
 pub enum ThreadItem {
+    CodeModeOwned(codex_protocol::code_mode::CodeModeOwned<Box<ThreadItem>>),
     CodeMode(CodeModeItem),
     #[serde(rename_all = "camelCase")]
     #[ts(rename_all = "camelCase")]
@@ -470,6 +471,7 @@ pub struct HookPromptFragment {
 impl ThreadItem {
     pub fn id(&self) -> &str {
         match self {
+            ThreadItem::CodeModeOwned(owned) => owned.payload().id(),
             ThreadItem::CodeMode(item) => &item.id,
             ThreadItem::UserMessage { id, .. }
             | ThreadItem::HookPrompt { id, .. }

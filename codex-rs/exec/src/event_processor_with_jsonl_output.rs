@@ -144,7 +144,7 @@ impl EventProcessorWithJsonOutput {
         item: ThreadItem,
         make_id: impl FnOnce() -> String,
     ) -> Option<ExecThreadItem> {
-        match item {
+        match item.into_native_item() {
             ThreadItem::AgentMessage { text, .. } => Some(ExecThreadItem {
                 id: make_id(),
                 details: ThreadItemDetails::AgentMessage(AgentMessageItem { text }),
@@ -423,7 +423,7 @@ impl EventProcessorWithJsonOutput {
         notification: ServerNotification,
     ) -> CollectedThreadEvents {
         let mut events = Vec::new();
-        let status = match notification {
+        let status = match notification.into_native_notification() {
             ServerNotification::ConfigWarning(notification) => {
                 let message = match notification.details {
                     Some(details) if !details.is_empty() => {

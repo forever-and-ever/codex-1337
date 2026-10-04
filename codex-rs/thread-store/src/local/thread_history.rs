@@ -479,7 +479,8 @@ ON CONFLICT(thread_id, turn_id, item_id) DO UPDATE SET
 
         // Keep summary item IDs on the turn row so reads do not need to scan every item in the
         // turn.
-        match item.item {
+        match item.item.native_item() {
+            ThreadItem::CodeModeOwned(_) => unreachable!("ownership ingress rejects nesting"),
             ThreadItem::UserMessage { .. } => {
                 sqlx::query(
                     r#"

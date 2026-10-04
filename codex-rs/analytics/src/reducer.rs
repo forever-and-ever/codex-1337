@@ -489,6 +489,7 @@ struct TurnToolCounts {
 impl TurnToolCounts {
     fn record(&mut self, item: &ThreadItem) {
         match item {
+            ThreadItem::CodeModeOwned(owned) => self.record(owned.payload()),
             ThreadItem::CommandExecution { .. } => self.shell_command += 1,
             ThreadItem::FileChange { .. } => self.file_change += 1,
             ThreadItem::McpToolCall { .. } => self.mcp_tool_call += 1,
@@ -1942,7 +1943,7 @@ impl AnalyticsReducer {
         notification: ServerNotification,
         out: &mut Vec<TrackEventRequest>,
     ) {
-        match notification {
+        match notification.into_native_notification() {
             ServerNotification::ThreadArchived(notification) => {
                 out.push(TrackEventRequest::ThreadArchive(ThreadArchiveEvent {
                     event_type: "codex_thread_archive_event",
@@ -2658,6 +2659,7 @@ fn warn_missing_analytics_context(
 
 pub(crate) fn tracked_tool_item_id(item: &ThreadItem) -> Option<&str> {
     match item {
+        ThreadItem::CodeModeOwned(owned) => tracked_tool_item_id(owned.payload()),
         ThreadItem::CommandExecution { id, .. }
         | ThreadItem::FileChange { id, .. }
         | ThreadItem::McpToolCall { id, .. }
