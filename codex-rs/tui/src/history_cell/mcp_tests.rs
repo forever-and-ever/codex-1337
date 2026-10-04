@@ -554,9 +554,25 @@ fn structured_content_remains_disclosable_in_direct_and_code_mode_results() {
             &body,
         )
         .unwrap();
+        let captured = ToolOutputCell::from_output(
+            "captured-definition",
+            Some("definition"),
+            "definition",
+            Some("lsp"),
+            &body,
+        )
+        .unwrap();
+        let cells: Vec<Arc<dyn HistoryCell>> = vec![
+            Arc::new(direct.clone()),
+            Arc::new(PlainHistoryCell::new(vec!["Unrelated activity".into()])),
+        ];
+        let (range, projected) = ToolOutputGroup::attach(&cells, Arc::new(captured)).unwrap();
+        assert_eq!(range, 0..2);
+        assert!(Arc::ptr_eq(&projected[1], &cells[1]));
         for (path, cell) in [
             ("direct", &direct as &dyn HistoryCell),
             ("code mode", &batch as &dyn HistoryCell),
+            ("captured direct", projected[0].as_ref()),
         ] {
             assert!(cell.activity_disclosure(/*width*/ 100).is_some());
             let text = visible_lines(cell.expanded_hyperlink_lines(/*width*/ 100))
@@ -564,7 +580,14 @@ fn structured_content_remains_disclosable_in_direct_and_code_mode_results() {
                 .map(ToString::to_string)
                 .collect::<Vec<_>>()
                 .join("\n");
-            assert_eq!(text.matches("src/widget.rs").count(), 1);
+            assert_eq!(
+                text.matches("src/widget.rs").count(),
+                if path != "direct" && label == "legacy duplicate" {
+                    2
+                } else {
+                    1
+                }
+            );
             snapshots.push(format!("{label}, {path}\n{text}"));
         }
     }

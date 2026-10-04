@@ -27,6 +27,12 @@ pub(crate) fn split_code_mode_members(
     }
     if let Some(group) = incoming
         .as_any()
+        .downcast_ref::<crate::history_cell::ToolOutputGroup>()
+    {
+        return Some(group.members.clone());
+    }
+    if let Some(group) = incoming
+        .as_any()
         .downcast_ref::<crate::history_cell::ComputerActivityCell>()
     {
         if group.group.calls.len() == 1 && group.group.details.entries.is_empty() {

@@ -292,15 +292,20 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
     }
 
     fn nested_detail_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        self.transcript_hyperlink_lines(width)
+        self.activity_argument_lines(width)
     }
 
     fn nested_activity_parts(
         &self,
         width: u16,
-        expanded: &std::collections::HashSet<String>,
+        _expanded: &std::collections::HashSet<String>,
     ) -> Option<activity_parts::ActivityParts> {
-        self.activity_parts(width, /*header_reserve*/ 0, expanded)
+        Some(activity_parts::ActivityParts {
+            lines: self.nested_detail_lines(width),
+            header: self.activity_header(),
+            output: None,
+            controls: Vec::new(),
+        })
     }
 
     /// Whether the enclosing block has meaningful child detail, including human-only attachments.

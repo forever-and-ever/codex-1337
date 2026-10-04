@@ -35,7 +35,10 @@ impl ToolOutputCell {
     }
 
     pub(crate) fn is_item(item: &codex_app_server_protocol::ThreadItem) -> bool {
-        matches!(item, codex_app_server_protocol::ThreadItem::FunctionCallOutput { name, namespace: None, .. } if matches!(name.as_str(), "exec" | "wait"))
+        matches!(
+            item,
+            codex_app_server_protocol::ThreadItem::FunctionCallOutput { .. }
+        )
     }
 
     pub(crate) fn from_output(
@@ -45,35 +48,39 @@ impl ToolOutputCell {
         namespace: Option<&str>,
         output: &FunctionCallOutputBody,
     ) -> Option<Self> {
-        if namespace.is_some() || !matches!(name, "exec" | "wait") {
-            return None;
-        }
+        let call_id = call_id?;
+        let code_mode = codex_protocol::ToolName::new(namespace.map(str::to_owned), name)
+            .is_default_namespace()
+            && matches!(name, "exec" | "wait");
         let readable = match output {
-            FunctionCallOutputBody::Text(text) => {
-                super::returned_output::readable_output(text).into_owned()
-            }
+            FunctionCallOutputBody::Text(text) => text.clone(),
             FunctionCallOutputBody::ContentItems(items) => items
                 .iter()
-                .map(|item| match item {
-                    FunctionCallOutputContentItem::InputText { text } => {
-                        super::returned_output::readable_output(text).into_owned()
-                    }
-                    FunctionCallOutputContentItem::InputImage { .. } => "<image>".into(),
-                    FunctionCallOutputContentItem::InputAudio { .. } => "<audio>".into(),
-                    FunctionCallOutputContentItem::EncryptedContent { .. } => String::new(),
+                .enumerate()
+                // The constructor owns this separate slot; notify() strings have no slot.
+                .filter(|(index, item)| {
+                    !(code_mode
+                        && *index == 0
+                        && matches!(item, FunctionCallOutputContentItem::InputText { text }
+                            if super::returned_output::is_execution_header(text)))
                 })
-                .filter(|text| !text.trim().is_empty())
+                .filter_map(|(_, item)| match item {
+                    FunctionCallOutputContentItem::InputText { text } => Some(text.as_str()),
+                    FunctionCallOutputContentItem::InputImage { .. }
+                    | FunctionCallOutputContentItem::InputAudio { .. }
+                    | FunctionCallOutputContentItem::EncryptedContent { .. } => None,
+                })
                 .collect::<Vec<_>>()
                 .join("\n"),
         };
-        let wait = if readable.trim().is_empty() {
+        let wait = if code_mode && readable.is_empty() {
             super::returned_output::empty_wait_outcome(name, output)
         } else {
-            (name == "wait").then_some(WaitOutcome::Unknown)
+            (code_mode && name == "wait").then_some(WaitOutcome::Unknown)
         };
         Some(Self {
             id: id.to_owned(),
-            call_id: call_id.unwrap_or(id).to_owned(),
+            call_id: call_id.to_owned(),
             output: output.clone(),
             readable,
             wait,
@@ -82,6 +89,9 @@ impl ToolOutputCell {
 }
 
 impl HistoryCell for ToolOutputCell {
+    fn nested_detail_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        self.transcript_hyperlink_lines(width)
+    }
     fn activity_header(&self) -> Option<super::activity_parts::ActivityHeader> {
         Some(super::activity_parts::ActivityHeader::at_end(&Line::from(
             vec!["• ".into(), self.heading().into()],
@@ -92,7 +102,7 @@ impl HistoryCell for ToolOutputCell {
     }
 
     fn activity_disclosure(&self, _width: u16) -> Option<super::ActivityDisclosure> {
-        (!self.readable.trim().is_empty()).then_some(super::ActivityDisclosure::Generic)
+        (!self.readable.is_empty()).then_some(super::ActivityDisclosure::Generic)
     }
 
     fn activity_ids(&self) -> Vec<String> {
@@ -104,11 +114,10 @@ impl HistoryCell for ToolOutputCell {
         let heading = self.heading();
         let mut spans = vec!["• ".dim(), heading.bold()];
         let status = match &self.wait {
-            Some(WaitOutcome::Running) => Some("still running".into()),
-            Some(WaitOutcome::Completed) => Some("finished".into()),
-            Some(WaitOutcome::Exited(code)) => Some(format!("finished, exit {code}")),
-            Some(WaitOutcome::Failed) => Some("failed".into()),
-            Some(WaitOutcome::Terminated) => Some("terminated".into()),
+            Some(WaitOutcome::Running) => Some("still running"),
+            Some(WaitOutcome::Completed) => Some("finished"),
+            Some(WaitOutcome::Failed) => Some("failed"),
+            Some(WaitOutcome::Terminated) => Some("terminated"),
             Some(WaitOutcome::Unknown) | None => None,
         };
         if let Some(status) = status {
@@ -150,8 +159,16 @@ impl HistoryCell for ToolOutputCell {
     }
 
     fn transcript_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        if self.readable.is_empty() {
+            return Vec::new();
+        }
         adaptive_wrap_hyperlink_lines(
-            &plain_hyperlink_lines(raw_lines_from_source(&self.readable)),
+            &plain_hyperlink_lines(
+                self.readable
+                    .split('\n')
+                    .map(|line| Line::from(line.to_owned()))
+                    .collect(),
+            ),
             RtOptions::new(width as usize)
                 .initial_indent(crate::transcript_geometry::CHILD_PREFIX.into())
                 .subsequent_indent(crate::transcript_geometry::CHILD_PREFIX.into()),

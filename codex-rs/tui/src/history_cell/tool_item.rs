@@ -50,9 +50,24 @@ impl HistoryCell for ToolItemCell {
         self.inner.transcript_hyperlink_lines(width)
     }
     fn nested_summary_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        if self.inner.as_any().is::<super::PlainHistoryCell>() {
+            // historical_tool_fallback puts invocation first, raw execution receipt after it.
+            return self
+                .inner
+                .compact_hyperlink_lines(width)
+                .into_iter()
+                .take(1)
+                .collect();
+        }
         self.inner.nested_summary_lines(width)
     }
     fn nested_detail_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        if self.inner.as_any().is::<super::PlainHistoryCell>() {
+            return crate::terminal_hyperlinks::adaptive_wrap_hyperlink_lines(
+                &self.nested_summary_lines(u16::MAX),
+                crate::wrapping::RtOptions::new(usize::from(width)),
+            );
+        }
         self.inner.nested_detail_lines(width)
     }
     fn nested_activity_parts(
@@ -60,6 +75,9 @@ impl HistoryCell for ToolItemCell {
         width: u16,
         expanded: &HashSet<String>,
     ) -> Option<ActivityParts> {
+        if self.inner.as_any().is::<super::PlainHistoryCell>() {
+            return None;
+        }
         self.inner.nested_activity_parts(width, expanded)
     }
     fn has_nested_details(&self, width: u16) -> bool {

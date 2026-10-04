@@ -19,7 +19,7 @@ pub(super) struct CapturedOutput {
     id: String,
     call_id: String,
     body: FunctionCallOutputBody,
-    batch_tool: Option<String>,
+    tool: Option<ToolName>,
 }
 
 pub(super) fn capture(history: &ContextManager, previous_len: usize) -> Vec<CapturedOutput> {
@@ -46,22 +46,20 @@ pub(super) fn capture(history: &ContextManager, previous_len: usize) -> Vec<Capt
                 _ => return None,
             };
             // notify() retains its tool name even if compaction removed the original exec.
-            let batch_tool = name.cloned().or_else(|| {
+            let tool = name.map(ToolName::plain).or_else(|| {
                 history.raw_items().rev().find_map(|call| match call {
                     ResponseItem::CustomToolCall {
-                        call_id: id, name, ..
-                    } if id == call_id && name == "exec" => Some(name.clone()),
+                        call_id: id,
+                        name,
+                        namespace,
+                        ..
+                    } if id == call_id => Some(ToolName::new(namespace.clone(), name)),
                     ResponseItem::FunctionCall {
                         call_id: id,
                         name,
                         namespace,
                         ..
-                    } if id == call_id
-                        && name == "wait"
-                        && ToolName::new(namespace.clone(), name).is_default_namespace() =>
-                    {
-                        Some(name.clone())
-                    }
+                    } if id == call_id => Some(ToolName::new(namespace.clone(), name)),
                     _ => None,
                 })
             });
@@ -69,7 +67,7 @@ pub(super) fn capture(history: &ContextManager, previous_len: usize) -> Vec<Capt
                 id: item.id()?.to_string(),
                 call_id: call_id.clone(),
                 body: body.clone(),
-                batch_tool,
+                tool,
             })
         })
         .collect()
@@ -90,14 +88,25 @@ impl Session {
         // Publish that returned batch before asynchronous counting so its footer has
         // a stable transcript position even when counting finishes after the turn.
         for output in &outputs {
-            if let Some(name) = &output.batch_tool
-                && match &output.body {
-                    FunctionCallOutputBody::Text(_) => true,
-                    FunctionCallOutputBody::ContentItems(items) => items.iter().all(|item| {
-                        matches!(item, FunctionCallOutputContentItem::InputText { .. })
-                    }),
-                }
-            {
+            if let Some(tool) = &output.tool {
+                // The audit surface observes text, not duplicate multi-megabyte media.
+                // Preserve captured text blocks and their IDs without reserializing results.
+                let text = match &output.body {
+                    FunctionCallOutputBody::Text(text) => {
+                        FunctionCallOutputBody::Text(text.clone())
+                    }
+                    FunctionCallOutputBody::ContentItems(items) => {
+                        FunctionCallOutputBody::ContentItems(
+                            items
+                                .iter()
+                                .filter(|item| {
+                                    matches!(item, FunctionCallOutputContentItem::InputText { .. })
+                                })
+                                .cloned()
+                                .collect(),
+                        )
+                    }
+                };
                 self.send_event(
                     turn,
                     EventMsg::ItemCompleted(ItemCompletedEvent {
@@ -106,9 +115,9 @@ impl Session {
                         item: TurnItem::FunctionCallOutput(FunctionCallOutputItem {
                             id: output.id.clone(),
                             call_id: Some(output.call_id.clone()),
-                            name: name.clone(),
-                            namespace: None,
-                            output: output.body.clone(),
+                            name: tool.name.clone(),
+                            namespace: tool.namespace.clone(),
+                            output: text,
                         }),
                         started_at_ms: None,
                         completed_at_ms: super::now_unix_timestamp_ms(),

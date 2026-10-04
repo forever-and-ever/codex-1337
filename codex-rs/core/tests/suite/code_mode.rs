@@ -6323,6 +6323,37 @@ text("done");
     expected.sort();
     assert_eq!(actual, expected);
 
+    test.codex.flush_rollout().await?;
+    let (items, _, _) = codex_rollout::RolloutRecorder::load_rollout_items(
+        test.session_configured
+            .rollout_path
+            .as_ref()
+            .expect("persisted rollout"),
+    )
+    .await?;
+    let captured = items
+        .into_iter()
+        .filter_map(|item| match item {
+            codex_rollout::RolloutItem::EventMsg(EventMsg::ItemCompleted(event)) => {
+                match event.item {
+                    codex_protocol::items::TurnItem::FunctionCallOutput(item)
+                        if item.call_id.as_deref() == Some("call-1") =>
+                    {
+                        Some(item.output)
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let delivered = req
+        .inputs_of_type("custom_tool_call_output")
+        .into_iter()
+        .map(|item| serde_json::from_value(item["output"].clone()))
+        .collect::<Result<Vec<codex_protocol::models::FunctionCallOutputBody>, _>>()?;
+    assert_eq!(captured, delivered);
+
     Ok(())
 }
 

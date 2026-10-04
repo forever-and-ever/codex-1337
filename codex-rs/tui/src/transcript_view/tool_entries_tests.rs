@@ -191,7 +191,7 @@ fn mixed_feed_keeps_its_grid_through_live_commit_resize_and_details() {
 }
 
 #[test]
-fn waits_and_agent_events_keep_status_without_empty_disclosures_or_extra_gaps() {
+fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
     let process = |state: Option<i64>| {
         serde_json::json!({
             "chunk_id": "sample", "wall_time_seconds": 5.0, "output": "",
@@ -262,10 +262,7 @@ fn waits_and_agent_events_keep_status_without_empty_disclosures_or_extra_gaps() 
         let id = format!("poll-{index}");
         let cell =
             ToolOutputCell::from_output(&id, Some(&id), name, /*namespace*/ None, output).unwrap();
-        assert_eq!(
-            cell.activity_disclosure(/*width*/ 100).is_some(),
-            index == cases.len() - 1
-        );
+        assert_eq!(cell.activity_disclosure(/*width*/ 100).is_some(), true);
         view.record_tool_output_tokens(format!("tool-output-tokens:{id}"), id, Some(*tokens));
         cells.push(Arc::new(cell));
         if index == 1 {
@@ -291,9 +288,9 @@ fn waits_and_agent_events_keep_status_without_empty_disclosures_or_extra_gaps() 
     assert!(
         polling.display_lines(/*width*/ 100)[0]
             .to_string()
-            .ends_with("finished, exit 0")
+            .ends_with("Waited")
     );
-    assert!(polling.activity_disclosure(/*width*/ 100).is_none());
+    assert!(polling.activity_disclosure(/*width*/ 100).is_some());
     cells.push(polling);
     let area = Rect::new(
         /*x*/ 0, /*y*/ 0, /*width*/ 100, /*height*/ 22,

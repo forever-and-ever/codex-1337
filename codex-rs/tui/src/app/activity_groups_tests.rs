@@ -510,13 +510,27 @@ async fn returned_batches_keep_one_disclosure_and_bill_across_live_replay_and_pa
     use codex_app_server_protocol::CodeModeEvent;
     use codex_app_server_protocol::CodeModeStatus;
     use codex_protocol::models::FunctionCallOutputBody;
+    use codex_protocol::models::FunctionCallOutputContentItem;
 
+    let emitted = "  chosen porcelain:  exact\n{\"content\":[{\"type\":\"text\",\"text\":\"repeat\"}],\"structuredContent\":\"repeat\"}\n{\"content\":[{\"type\":\"text\",\"text\":\"repeat\"}],\"structuredContent\":\"repeat\"}\n";
     let output = |id: &str| ThreadItem::FunctionCallOutput {
         id: id.to_owned(),
         call_id: Some(if id == "b" { "a" } else { id }.to_owned()),
         name: "exec".into(),
         namespace: None,
-        output: FunctionCallOutputBody::Text(format!("Returned {id}\nOnly model-visible text.")),
+        output: if id == "a" {
+            FunctionCallOutputBody::ContentItems(vec![
+                FunctionCallOutputContentItem::InputText {
+                    text: "Script running with cell ID reused-runtime-cell\nWall time 0.1 seconds\nOutput:\n".into(),
+                },
+                FunctionCallOutputContentItem::InputText { text: emitted.into() },
+            ])
+        } else {
+            // A notify string resembling an execution envelope is still script output.
+            FunctionCallOutputBody::Text(format!(
+                "Returned {id}\nScript completed\nWall time 0.0 seconds\nOutput:\nOnly model-visible text."
+            ))
+        },
     };
     let rendered = |cells: &[Arc<dyn HistoryCell>]| {
         cells
@@ -606,6 +620,48 @@ async fn returned_batches_keep_one_disclosure_and_bill_across_live_replay_and_pa
         ]);
         let expected = project(&app, &current.items);
         assert_eq!(expected.len(), 3);
+        // A discarded child may contain anything; only returned batches are output authority.
+        let detail = expected[1].expanded_hyperlink_lines(/*width*/ 240);
+        let text = detail
+            .iter()
+            .map(|line| line.line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(!text.contains("Result first"));
+        assert!(!text.contains("Result nested"));
+        assert!(text.contains("chosen porcelain:  exact"));
+        assert_eq!(text.matches("structuredContent").count(), 2);
+        assert!(text.contains("Script completed\n"));
+        assert!(
+            detail
+                .iter()
+                .filter_map(|line| line.source.as_ref())
+                .any(|source| source.text.as_ref() == "  chosen porcelain:  exact")
+        );
+        if let ThreadItem::FunctionCallOutput {
+            id,
+            call_id,
+            name,
+            namespace,
+            output,
+        } = output("a")
+        {
+            let batch = history_cell::ToolOutputCell::from_output(
+                &id,
+                call_id.as_deref(),
+                &name,
+                namespace.as_deref(),
+                &output,
+            )
+            .unwrap();
+            let rows = batch.transcript_hyperlink_lines(/*width*/ 240);
+            let copied = rows
+                .iter()
+                .map(|line| line.source.as_ref().unwrap().text.as_ref())
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert_eq!(copied, emitted);
+        }
 
         // Nested calls and notify() outputs share a call; a different call starts a new unit.
         for item in &current.items {

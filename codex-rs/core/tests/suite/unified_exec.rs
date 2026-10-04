@@ -2016,14 +2016,20 @@ async fn exec_command_clamps_model_requested_max_output_tokens_to_policy() -> Re
 
     // Measurement runs off-thread and may arrive after turn completion.
     let mut measured = None;
+    let mut captured = None;
     let mut completed = false;
-    while measured.is_none() || !completed {
+    while measured.is_none() || captured.is_none() || !completed {
         match wait_for_event(&test.codex, |_| true).await {
             EventMsg::ItemCompleted(event) => {
                 if let codex_protocol::items::TurnItem::ToolOutputTokens(item) = &event.item
                     && item.call_id == call_id
                 {
                     measured = Some(item.tokens);
+                }
+                if let codex_protocol::items::TurnItem::FunctionCallOutput(item) = &event.item
+                    && item.call_id.as_deref() == Some(call_id)
+                {
+                    captured = Some(item.output.clone());
                 }
             }
             EventMsg::TurnComplete(_) => completed = true,
@@ -2036,11 +2042,11 @@ async fn exec_command_clamps_model_requested_max_output_tokens_to_policy() -> Re
     let delivered = response_mock.requests()[1]
         .function_call_output_text(call_id)
         .expect("tool output in next request");
+    let delivered = codex_protocol::models::FunctionCallOutputBody::Text(delivered);
+    assert_eq!(captured, Some(delivered.clone()));
     assert_eq!(
         measured,
-        codex_utils_output_truncation::count_o200k_text_tokens(
-            &codex_protocol::models::FunctionCallOutputBody::Text(delivered)
-        ),
+        codex_utils_output_truncation::count_o200k_text_tokens(&delivered),
     );
 
     Ok(())

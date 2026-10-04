@@ -128,6 +128,12 @@ impl CodeModeCell {
     }
 
     fn insert_member(&mut self, incoming: Arc<dyn HistoryCell>) {
+        if let Some(group) = incoming.as_any().downcast_ref::<super::ToolOutputGroup>() {
+            for member in &group.members {
+                self.insert_member(Arc::clone(member));
+            }
+            return;
+        }
         let revisions = super::reconcile_tool_calls(&self.members, &incoming);
         for (index, replacement) in revisions.replacements {
             self.members[index] = replacement;
@@ -228,6 +234,15 @@ impl CodeModeCell {
                 ));
             }
         }
+        if self.status().is_some()
+            && !self
+                .members
+                .iter()
+                .any(|member| member.as_any().is::<ToolOutputCell>())
+        {
+            lines
+                .push(Line::from("  Exact model output unavailable in this history.".dim()).into());
+        }
         super::activity_parts::ActivityParts {
             lines,
             header: self.activity_header(),
@@ -289,6 +304,15 @@ impl HistoryCell for CodeModeCell {
                 crate::transcript_geometry::CHILD_PREFIX.into(),
                 crate::transcript_geometry::CHILD_PREFIX.into(),
             ));
+        }
+        if self.status().is_some()
+            && !self
+                .members
+                .iter()
+                .any(|member| member.as_any().is::<ToolOutputCell>())
+        {
+            lines
+                .push(Line::from("  Exact model output unavailable in this history.".dim()).into());
         }
         lines
     }

@@ -70,19 +70,15 @@ impl ToolOutputGroup {
         }
         // Only a concrete matching invocation owns this return. Legacy activity proximity
         // cannot establish parentage, and independently disclosed files remain separate.
-        let cell = cells.last()?;
-        if cell.as_any().is::<PatchHistoryCell>()
-            || cell.outer_call_id().is_none()
-            || cell.outer_call_id() != output.outer_call_id()
-        {
-            return None;
-        }
-        let start = cells.len() - 1;
+        let call_id = output.outer_call_id()?;
+        let start = cells.iter().rposition(|cell| {
+            !cell.as_any().is::<PatchHistoryCell>() && cell.tool_call_ids().contains(&call_id)
+        })?;
         Some((
             start..cells.len(),
-            vec![Self::from_cells(
-                cells[start..].iter().cloned().chain([output]),
-            )],
+            std::iter::once(Self::from_cells([Arc::clone(&cells[start]), output]))
+                .chain(cells[start + 1..].iter().cloned())
+                .collect(),
         ))
     }
 
@@ -230,6 +226,12 @@ impl ToolOutputGroup {
 }
 
 impl HistoryCell for ToolOutputGroup {
+    fn tool_call_ids(&self) -> Vec<&str> {
+        self.members
+            .iter()
+            .flat_map(|cell| cell.tool_call_ids())
+            .collect()
+    }
     fn activity_header(&self) -> Option<super::activity_parts::ActivityHeader> {
         self.members
             .iter()
@@ -287,6 +289,24 @@ impl HistoryCell for ToolOutputGroup {
         header_reserve: usize,
         expanded: &HashSet<String>,
     ) -> Option<super::activity_parts::ActivityParts> {
+        if let Some(mcp) = self.members.first()
+            && mcp.as_any().is::<super::McpToolCallCell>()
+            && self
+                .members
+                .iter()
+                .skip(1)
+                .all(|cell| cell.as_any().is::<ToolOutputCell>())
+            && let Some(mut parts) = mcp.nested_activity_parts(width, expanded)
+        {
+            parts.header = self.activity_header();
+            parts.output = self.activity_disclosure(width);
+            if self.activity_ids().iter().any(|id| expanded.contains(id)) {
+                for output in self.members.iter().skip(1) {
+                    parts.lines.extend(output.transcript_hyperlink_lines(width));
+                }
+            }
+            return Some(parts);
+        }
         let mut commands = Vec::new();
         let mut batches = Vec::new();
         for member in &self.members {
@@ -395,7 +415,9 @@ impl HistoryCell for ToolOutputGroup {
                 }
                 lines.extend(cell.expanded_hyperlink_lines(width));
             } else {
-                let next = if cell.as_any().is::<PatchHistoryCell>() {
+                let next = if cell.as_any().is::<super::McpToolCallCell>() {
+                    cell.nested_detail_lines(width)
+                } else if cell.as_any().is::<PatchHistoryCell>() {
                     cell.expanded_hyperlink_lines(width)
                 } else {
                     cell.activity_argument_lines(width)

@@ -24,6 +24,14 @@ impl ChatWidget {
         let Some(active) = self.transcript.active_cell.as_mut() else {
             return Err(cell);
         };
+        if returned
+            && !active
+                .tool_call_ids()
+                .iter()
+                .any(|id| Some(*id) == cell.outer_call_id())
+        {
+            return Err(cell);
+        }
         if let Some(computer) = active
             .as_any_mut()
             .downcast_mut::<history_cell::ComputerActivityCell>()

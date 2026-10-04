@@ -227,7 +227,7 @@ impl HistoryCell for ExecCell {
     fn nested_detail_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         let mut nested = self.clone();
         nested.completed_at = None;
-        nested.expanded_hyperlink_lines(width)
+        nested.activity_argument_lines(width)
     }
 
     fn nested_activity_parts(
@@ -237,7 +237,12 @@ impl HistoryCell for ExecCell {
     ) -> Option<crate::history_cell::activity_parts::ActivityParts> {
         let mut nested = self.clone();
         nested.completed_at = None;
-        nested.activity_parts(width, /*header_reserve*/ 0, expanded)
+        // Per-command controls reveal arguments, never a discarded child result.
+        let mut expanded = expanded.clone();
+        for id in nested.activity_ids() {
+            expanded.remove(&id);
+        }
+        nested.activity_parts(width, /*header_reserve*/ 0, &expanded)
     }
     fn activity_header(&self) -> Option<crate::history_cell::activity_parts::ActivityHeader> {
         if self.compact_header_hidden()
@@ -378,6 +383,12 @@ impl HistoryCell for ExecCell {
                 return self.activity_argument_lines(width);
             }
             let mut lines = self.compact_hyperlink_lines(width);
+            lines.push(
+                Line::from(
+                    "  Exact model output unavailable; stored command result follows.".dim(),
+                )
+                .into(),
+            );
             lines.extend(self.transcript_hyperlink_lines(width));
             lines
         }

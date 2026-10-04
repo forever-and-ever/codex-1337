@@ -267,6 +267,25 @@ fn mixed_plain_output_remains_literal_in_html() {
         payload(&output, 0..output.text().len()),
         (literal.into(), CopyFormat::PlainText)
     );
+    // Tool output is literal source, even when its JSON/Markdown or terminal controls
+    // resemble display instructions. Gutters and soft wraps must never enter its copy.
+    let emitted = "  *literal* <tag>  exact spacing\n{\"output\":\"same\",\"wall_time_seconds\":1}\n{\"output\":\"same\",\"wall_time_seconds\":1}\n\u{1b}[31mcontrol\u{1b}[0m\n";
+    let batch = crate::history_cell::ToolOutputCell::from_output(
+        "copy-output",
+        Some("copy-call"),
+        "exec",
+        /*namespace*/ None,
+        &codex_protocol::models::FunctionCallOutputBody::Text(emitted.into()),
+    )
+    .unwrap();
+    for width in [80, 18] {
+        let output = TextLayout::new(batch.transcript_hyperlink_lines(width), width);
+        assert_eq!(output.text(), emitted);
+        assert_eq!(
+            payload(&output, 0..output.text().len()),
+            (emitted.into(), CopyFormat::PlainText)
+        );
+    }
 }
 
 #[test]
