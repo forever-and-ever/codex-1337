@@ -6,6 +6,15 @@ For prompts prefixed `feature:`, delegate implementation to the default executor
 in a new `.worktrees/` worktree unless explicitly directed otherwise. The primary
 agent specifies the work, reviews it, and integrates the result.
 
+## Supported terminal UI
+
+Codex-1337 supports only the fullscreen (owned-screen) TUI. Do not implement or
+maintain feature parity for the legacy inline renderer. Retain upstream legacy
+code where that minimizes merge friction; neither repair nor purge it merely for
+consistency. Legacy-only presentation tests are not release gates. Shared
+rendering contracts, headless `codex exec`, server behavior, and model-visible
+output remain supported and must stay correct.
+
 # Rust/codex-rs
 
 In the codex-rs folder where the rust code lives:
