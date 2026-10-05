@@ -1,21 +1,45 @@
 //! Server-backed issue browser. Drafts live here, never in disposable storage;
 //! reload is refused while this surface is open. Reading is never model input.
 
-use crate::bottom_pane::{TextArea, TextAreaState};
-use codex_app_server_protocol::{JiraCategory, JiraIssue, JiraKey, JiraRevision};
+use crate::bottom_pane::TextArea;
+use crate::bottom_pane::TextAreaState;
+use codex_app_server_protocol::JiraCategory;
+use codex_app_server_protocol::JiraIssue;
+use codex_app_server_protocol::JiraKey;
+use codex_app_server_protocol::JiraRevision;
 use codex_protocol::ThreadId;
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use ratatui::{buffer::Buffer, layout::Rect, style::Stylize, text::Line, widgets::{Clear, Paragraph, StatefulWidgetRef, Widget}};
+use crossterm::event::KeyCode;
+use crossterm::event::KeyEvent;
+use crossterm::event::KeyEventKind;
+use crossterm::event::KeyModifiers;
+use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
+use ratatui::style::Stylize;
+use ratatui::text::Line;
+use ratatui::widgets::Clear;
+use ratatui::widgets::Paragraph;
+use ratatui::widgets::StatefulWidgetRef;
+use ratatui::widgets::Widget;
 
 pub(super) enum JiraIntent {
     List,
-    Read { key: JiraKey, purpose: ReadPurpose, expected: Option<JiraRevision> },
+    Read {
+        key: JiraKey,
+        purpose: ReadPurpose,
+        expected: Option<JiraRevision>,
+    },
     Save,
     Delete,
 }
 
 #[derive(Clone, Copy)]
-pub(super) enum ReadPurpose { Expand, Edit, Delete, Farm, Triage }
+pub(super) enum ReadPurpose {
+    Expand,
+    Edit,
+    Delete,
+    Farm,
+    Triage,
+}
 
 pub(super) struct JiraBrowser {
     pub(super) thread_id: ThreadId,
@@ -29,10 +53,9 @@ pub(super) struct JiraBrowser {
     pub(super) pending: Option<(uuid::Uuid, JiraIntent)>,
     pub(super) error: Option<String>,
     pub(super) loading: bool,
-    pub(super) next_cursor: Option<String>,
-    filter: TextArea,
+    pub(super) filter: TextArea,
     scroll: usize,
-    reveal_selection: bool,
+    pub(super) reveal_selection: bool,
     markdown: Option<(JiraRevision, u16, Vec<Line<'static>>)>,
 }
 
@@ -50,27 +73,48 @@ impl JiraForm {
     pub(super) fn new(previous: Option<JiraIssue>) -> Self {
         let mut slug = TextArea::new();
         let mut body = TextArea::new();
-        let category = previous.as_ref().map_or(JiraCategory::Bug, |issue| issue.revision.key.category.clone());
+        let category = previous.as_ref().map_or(JiraCategory::Bug, |issue| {
+            issue.revision.key.category.clone()
+        });
         if let Some(issue) = &previous {
             slug.set_text_clearing_elements(&issue.revision.key.slug);
             body.set_text_clearing_elements(&issue.body);
         }
-        Self { previous, category, slug, body, field: 1, discard: false, body_state: TextAreaState::default() }
+        Self {
+            previous,
+            category,
+            slug,
+            body,
+            field: 1,
+            discard: false,
+            body_state: TextAreaState::default(),
+        }
     }
 
-    pub(super) fn key(&self) -> JiraKey { JiraKey { category: self.category.clone(), slug: self.slug.text().to_owned() } }
+    pub(super) fn key(&self) -> JiraKey {
+        JiraKey {
+            category: self.category.clone(),
+            slug: self.slug.text().to_owned(),
+        }
+    }
 
     fn dirty(&self) -> bool {
         match &self.previous {
             Some(issue) => self.key() != issue.revision.key || self.body.text() != issue.body,
-            None => self.category != JiraCategory::Bug || !self.slug.is_empty() || !self.body.is_empty(),
+            None => {
+                self.category != JiraCategory::Bug || !self.slug.is_empty() || !self.body.is_empty()
+            }
         }
     }
 
     // Returns true only when the form may be discarded. Save is handled by the owner.
     pub(super) fn input(&mut self, key: KeyEvent) -> bool {
         if self.discard {
-            match key.code { KeyCode::Enter => return true, KeyCode::Esc => self.discard = false, _ => {} }
+            match key.code {
+                KeyCode::Enter => return true,
+                KeyCode::Esc => self.discard = false,
+                _ => {}
+            }
             return false;
         }
         match key.code {
@@ -79,13 +123,16 @@ impl JiraForm {
             KeyCode::Tab => self.field = (self.field + 1) % 3,
             KeyCode::BackTab => self.field = (self.field + 2) % 3,
             KeyCode::Left | KeyCode::Right | KeyCode::Char(' ') if self.field == 0 => {
-                self.category = match self.category { JiraCategory::Bug => JiraCategory::Feature, JiraCategory::Feature => JiraCategory::Bug };
+                self.category = match self.category {
+                    JiraCategory::Bug => JiraCategory::Feature,
+                    JiraCategory::Feature => JiraCategory::Bug,
+                };
             }
             KeyCode::Enter if self.field == 2 => self.body.insert_str("\n"),
             KeyCode::Enter => self.field = (self.field + 1) % 3,
             _ if self.field == 1 => self.slug.input(key),
             _ if self.field == 2 => self.body.input(key),
-            _ => {},
+            _ => {}
         }
         false
     }
@@ -94,7 +141,7 @@ impl JiraForm {
         match self.field {
             1 if !text.contains(['\n', '\r']) => self.slug.insert_str(text),
             2 => self.body.insert_str(text),
-            _ => {},
+            _ => {}
         }
     }
 
@@ -103,33 +150,91 @@ impl JiraForm {
             Paragraph::new("Enlarge the terminal to edit this issue.").render(area, buf);
             return None;
         }
-        let category = format!("{}Category: {}", if self.field == 0 { "› " } else { "  " }, self.category.as_str());
+        let category = format!(
+            "{}Category: {}",
+            if self.field == 0 { "› " } else { "  " },
+            self.category.as_str()
+        );
         Paragraph::new(category).render(Rect { height: 1, ..area }, buf);
         let slug_label = format!("{}Slug: ", if self.field == 1 { "› " } else { "  " });
-        Paragraph::new(slug_label).render(Rect { y: area.y + 2, height: 1, ..area }, buf);
+        Paragraph::new(slug_label).render(
+            Rect {
+                y: area.y + 2,
+                height: 1,
+                ..area
+            },
+            buf,
+        );
         let slug_area = Rect::new(area.x + 8, area.y + 2, area.width.saturating_sub(8), 1);
         ratatui::widgets::WidgetRef::render_ref(&(&self.slug), slug_area, buf);
-        Paragraph::new(if self.field == 2 { "› Body" } else { "  Body" }).render(Rect { y: area.y + 4, height: 1, ..area }, buf);
-        let body_area = Rect::new(area.x + 2, area.y + 5, area.width.saturating_sub(2), area.height.saturating_sub(5));
+        Paragraph::new(if self.field == 2 {
+            "› Body"
+        } else {
+            "  Body"
+        })
+        .render(
+            Rect {
+                y: area.y + 4,
+                height: 1,
+                ..area
+            },
+            buf,
+        );
+        let body_area = Rect::new(
+            area.x + 2,
+            area.y + 5,
+            area.width.saturating_sub(2),
+            area.height.saturating_sub(5),
+        );
         StatefulWidgetRef::render_ref(&(&self.body), body_area, buf, &mut self.body_state);
-        match self.field { 1 => self.slug.cursor_pos(slug_area), 2 => self.body.cursor_pos_with_state(body_area, self.body_state), _ => None }
+        match self.field {
+            1 => self.slug.cursor_pos(slug_area),
+            2 => self.body.cursor_pos_with_state(body_area, self.body_state),
+            _ => None,
+        }
     }
 }
 
 impl JiraBrowser {
     pub(super) fn new(thread_id: ThreadId) -> Self {
-        Self { thread_id, project: String::new(), scope: None, keys: vec![], selected: None, expanded: None, observed: None, form: None, pending: None, error: None, loading: true, next_cursor: None, filter: TextArea::new(), scroll: 0, reveal_selection: true, markdown: None }
+        Self {
+            thread_id,
+            project: String::new(),
+            scope: None,
+            keys: vec![],
+            selected: None,
+            expanded: None,
+            observed: None,
+            form: None,
+            pending: None,
+            error: None,
+            loading: true,
+            filter: TextArea::new(),
+            scroll: 0,
+            reveal_selection: true,
+            markdown: None,
+        }
     }
 
     pub(super) fn filtered(&self) -> Vec<JiraKey> {
         let filter = self.filter.text().to_lowercase();
-        self.keys.iter().filter(|key| format!("{}/{}", key.category.as_str(), key.slug).contains(&filter)).cloned().collect()
+        self.keys
+            .iter()
+            .filter(|key| format!("{}/{}", key.category.as_str(), key.slug).contains(&filter))
+            .cloned()
+            .collect()
     }
 
     pub(super) fn select_neighbor(&mut self, delta: isize) {
         let keys = self.filtered();
-        if keys.is_empty() { self.selected = None; return; }
-        let old = keys.iter().position(|key| Some(key) == self.selected.as_ref()).unwrap_or(0);
+        if keys.is_empty() {
+            self.selected = None;
+            return;
+        }
+        let old = keys
+            .iter()
+            .position(|key| Some(key) == self.selected.as_ref())
+            .unwrap_or(0);
         let index = old.saturating_add_signed(delta).min(keys.len() - 1);
         self.selected = Some(keys[index].clone());
         self.expanded = None;
@@ -137,16 +242,30 @@ impl JiraBrowser {
     }
 
     pub(super) fn filter_key(&mut self, key: KeyEvent) {
-        if matches!(key.code, KeyCode::Char(_) | KeyCode::Backspace | KeyCode::Delete | KeyCode::Home | KeyCode::End | KeyCode::Left | KeyCode::Right) {
+        if matches!(
+            key.code,
+            KeyCode::Char(_)
+                | KeyCode::Backspace
+                | KeyCode::Delete
+                | KeyCode::Home
+                | KeyCode::End
+                | KeyCode::Left
+                | KeyCode::Right
+        ) {
             self.filter.input(key);
             let keys = self.filtered();
-            if !keys.iter().any(|key| Some(key) == self.selected.as_ref()) { self.selected = keys.first().cloned(); self.expanded = None; }
+            if !keys.iter().any(|key| Some(key) == self.selected.as_ref()) {
+                self.selected = keys.first().cloned();
+                self.expanded = None;
+            }
             self.scroll = 0;
             self.reveal_selection = true;
         }
     }
 
-    pub(super) fn scroll_body(&mut self, delta: isize) { self.scroll = self.scroll.saturating_add_signed(delta); }
+    pub(super) fn scroll_body(&mut self, delta: isize) {
+        self.scroll = self.scroll.saturating_add_signed(delta);
+    }
 
     pub(super) fn render(&mut self, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
         Clear.render(area, buf);
@@ -154,67 +273,184 @@ impl JiraBrowser {
             Paragraph::new("Enlarge the terminal to browse issues.").render(area, buf);
             return None;
         }
-        let inner = Rect::new(area.x + 1, area.y + 1, area.width.saturating_sub(2), area.height.saturating_sub(2));
-        let title = if self.form.is_some() { "Jira · issue" } else { "Jira" };
-        Paragraph::new(vec![Line::from(title.bold()), Line::from(self.project.clone()).dim()]).render(Rect { height: 2, ..inner }, buf);
+        let inner = Rect::new(
+            area.x + 1,
+            area.y + 1,
+            area.width.saturating_sub(2),
+            area.height.saturating_sub(2),
+        );
+        let title = if self.form.is_some() {
+            "Jira · issue"
+        } else {
+            "Jira"
+        };
+        Paragraph::new(vec![
+            Line::from(title.bold()),
+            Line::from(self.project.clone()).dim(),
+        ])
+        .render(Rect { height: 2, ..inner }, buf);
         let status = if self.form.as_ref().is_some_and(|form| form.discard) {
             "Discard changes? Enter discard · Esc keep editing".to_owned()
-        } else if let Some(error) = &self.error { error.clone() }
-        else if let Some((_, intent)) = &self.pending {
-            match intent { JiraIntent::Save => "Saving…", JiraIntent::Delete => "Deleting…", JiraIntent::List => "Loading issues…", JiraIntent::Read { .. } => "Reading issue…" }.to_owned()
-        } else { String::new() };
-        let hints = if self.form.is_some() { "Tab field · Ctrl+S save · Esc back" } else { "↑↓ select · Enter body · PgUp/PgDn scroll · Alt+F farm · Alt+T triage · Ctrl+N new · Ctrl+E edit · Del delete · Esc close" };
-        let hint_lines: Vec<Line<'static>> = textwrap::wrap(hints, inner.width as usize).into_iter().map(|line| Line::from(line.into_owned()).dim()).collect();
+        } else if let Some(error) = &self.error {
+            error.clone()
+        } else if let Some((_, intent)) = &self.pending {
+            match intent {
+                JiraIntent::Save => "Saving…",
+                JiraIntent::Delete => "Deleting…",
+                JiraIntent::List => "Loading issues…",
+                JiraIntent::Read { .. } => "Reading issue…",
+            }
+            .to_owned()
+        } else {
+            String::new()
+        };
+        let hints = if self.form.is_some() {
+            "Tab field · Ctrl+S save · Esc back"
+        } else {
+            "↑↓ select · Enter body · PgUp/PgDn scroll · Alt+F farm · Alt+T triage · Ctrl+N new · Ctrl+E edit · Del delete · Esc close"
+        };
+        let hint_lines: Vec<Line<'static>> = textwrap::wrap(hints, inner.width as usize)
+            .into_iter()
+            .map(|line| Line::from(line.into_owned()).dim())
+            .collect();
         let hint_height = (hint_lines.len() as u16).min(inner.height.saturating_sub(3));
         let footer_height = hint_height + 2;
         let footer_y = inner.y + inner.height.saturating_sub(footer_height);
-        Paragraph::new(status).render(Rect::new(inner.x, footer_y, inner.width, 2), buf);
-        Paragraph::new(hint_lines).render(Rect::new(inner.x, footer_y + 2, inner.width, hint_height), buf);
-        let content = Rect::new(inner.x, inner.y + 3, inner.width, inner.height.saturating_sub(3 + footer_height));
-        if let Some(form) = &mut self.form { return form.render(content, buf); }
-        Paragraph::new(format!("Filter: {}", self.filter.text())).render(Rect { height: 1, ..content }, buf);
-        let list = Rect::new(content.x, content.y + 2, content.width, content.height.saturating_sub(2));
+        let status_lines = textwrap::wrap(&status, inner.width as usize)
+            .into_iter()
+            .map(|line| Line::from(line.into_owned()))
+            .collect::<Vec<_>>();
+        Paragraph::new(status_lines).render(Rect::new(inner.x, footer_y, inner.width, 2), buf);
+        Paragraph::new(hint_lines).render(
+            Rect::new(inner.x, footer_y + 2, inner.width, hint_height),
+            buf,
+        );
+        let content = Rect::new(
+            inner.x,
+            inner.y + 3,
+            inner.width,
+            inner.height.saturating_sub(3 + footer_height),
+        );
+        if let Some(form) = &mut self.form {
+            return form.render(content, buf);
+        }
+        Paragraph::new(format!("Filter: {}", self.filter.text())).render(
+            Rect {
+                height: 1,
+                ..content
+            },
+            buf,
+        );
+        let list = Rect::new(
+            content.x,
+            content.y + 2,
+            content.width,
+            content.height.saturating_sub(2),
+        );
         if let Some(issue) = &self.expanded
-            && !self.markdown.as_ref().is_some_and(|(revision, width, _)| revision == &issue.revision && *width == list.width) {
+            && !self.markdown.as_ref().is_some_and(|(revision, width, _)| {
+                revision == &issue.revision && *width == list.width
+            })
+        {
             let mut body = Vec::new();
-            crate::markdown::append_markdown(&issue.body, Some(list.width.saturating_sub(2) as usize), /*cwd*/ None, &mut body);
+            crate::markdown::append_markdown(
+                &issue.body,
+                Some(list.width.saturating_sub(2) as usize),
+                /*cwd*/ None,
+                &mut body,
+            );
             self.markdown = Some((issue.revision.clone(), list.width, body));
         }
         let keys = self.filtered();
-        let expanded_body = self.markdown.as_ref().filter(|(revision, _, _)| self.expanded.as_ref().is_some_and(|issue| issue.revision == *revision)).map(|(_, _, body)| body);
+        let expanded_body = self
+            .markdown
+            .as_ref()
+            .filter(|(revision, _, _)| {
+                self.expanded
+                    .as_ref()
+                    .is_some_and(|issue| issue.revision == *revision)
+            })
+            .map(|(_, _, body)| body);
         let mut total_lines = 0;
         let mut selected_line = None;
         for key in &keys {
             let selected = self.selected.as_ref() == Some(key);
-            if selected { selected_line = Some(total_lines); }
+            if selected {
+                selected_line = Some(total_lines);
+            }
             total_lines += 1;
-            if self.expanded.as_ref().is_some_and(|issue| &issue.revision.key == key) {
+            if self
+                .expanded
+                .as_ref()
+                .is_some_and(|issue| &issue.revision.key == key)
+            {
                 total_lines += expanded_body.map_or(0, Vec::len) + 1;
             }
         }
         if keys.is_empty() && !self.loading && self.error.is_none() {
-            Paragraph::new(if self.keys.is_empty() { "No issues. Ctrl+N creates one." } else { "No matching issues." }).render(list, buf);
+            Paragraph::new(if self.keys.is_empty() {
+                "No issues. Ctrl+N creates one."
+            } else {
+                "No matching issues."
+            })
+            .render(list, buf);
         }
-        if self.reveal_selection && let Some(selected) = selected_line {
-            if selected < self.scroll { self.scroll = selected; }
-            else if selected >= self.scroll + list.height as usize { self.scroll = selected.saturating_sub(list.height.saturating_sub(1) as usize); }
+        if self.reveal_selection
+            && let Some(selected) = selected_line
+        {
+            if selected < self.scroll {
+                self.scroll = selected;
+            } else if selected >= self.scroll + list.height as usize {
+                self.scroll = selected.saturating_sub(list.height.saturating_sub(1) as usize);
+            }
             self.reveal_selection = false;
         }
-        self.scroll = self.scroll.min(total_lines.saturating_sub(list.height as usize));
+        self.scroll = self
+            .scroll
+            .min(total_lines.saturating_sub(list.height as usize));
         let end = self.scroll + list.height as usize;
         let mut index = 0;
         for key in &keys {
             let selected = self.selected.as_ref() == Some(key);
             if index >= self.scroll && index < end {
-                let line = format!("{} {}/{}", if selected { "›" } else { " " }, key.category.as_str(), key.slug);
-                let line = if selected { Line::from(line.bold()) } else { line.into() };
-                Paragraph::new(line).render(Rect::new(list.x, list.y + (index - self.scroll) as u16, list.width, 1), buf);
+                let line = format!(
+                    "{} {}/{}",
+                    if selected { "›" } else { " " },
+                    key.category.as_str(),
+                    key.slug
+                );
+                let line = if selected {
+                    Line::from(line.bold())
+                } else {
+                    line.into()
+                };
+                Paragraph::new(line).render(
+                    Rect::new(list.x, list.y + (index - self.scroll) as u16, list.width, 1),
+                    buf,
+                );
             }
             index += 1;
-            if self.expanded.as_ref().is_some_and(|issue| &issue.revision.key == key) {
+            if self
+                .expanded
+                .as_ref()
+                .is_some_and(|issue| &issue.revision.key == key)
+            {
                 if let Some(body) = expanded_body {
-                    for (offset, line) in body.iter().enumerate().skip(self.scroll.saturating_sub(index)).take(end.saturating_sub(index.max(self.scroll))) {
-                        Paragraph::new(line.clone()).render(Rect::new(list.x, list.y + (index + offset - self.scroll) as u16, list.width, 1), buf);
+                    for (offset, line) in body
+                        .iter()
+                        .enumerate()
+                        .skip(self.scroll.saturating_sub(index))
+                        .take(end.saturating_sub(index.max(self.scroll)))
+                    {
+                        Paragraph::new(line.clone()).render(
+                            Rect::new(
+                                list.x,
+                                list.y + (index + offset - self.scroll) as u16,
+                                list.width,
+                                1,
+                            ),
+                            buf,
+                        );
                     }
                     index += body.len();
                 }
@@ -226,7 +462,9 @@ impl JiraBrowser {
 }
 
 pub(super) fn is_action_key(key: KeyEvent) -> bool {
-    key.kind == KeyEventKind::Press && key.modifiers == KeyModifiers::CONTROL && key.code == KeyCode::Char('s')
+    key.kind == KeyEventKind::Press
+        && key.modifiers == KeyModifiers::CONTROL
+        && key.code == KeyCode::Char('s')
 }
 
 #[cfg(test)]
