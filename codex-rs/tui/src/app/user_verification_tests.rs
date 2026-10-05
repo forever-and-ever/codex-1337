@@ -1,6 +1,8 @@
 //! Covers the controller's RPC boundary, cancellation generations, and proof redaction.
 
 use super::*;
+use crate::app::thread_delivery::LocalThreadCompletion;
+use crate::app_event::AppEvent;
 use codex_app_server_protocol::McpServerElicitationRequest;
 use codex_app_server_protocol::McpServerElicitationRequestParams;
 use codex_app_server_protocol::ServerRequest;
@@ -185,21 +187,6 @@ async fn run_verification_rpc_scenario(scenario: RpcScenario) -> color_eyre::Res
         }
     };
     app.handle_event(&mut tui, &mut session, approval).await?;
-    if scenario == RpcScenario::RemoteWorkspace {
-        assert!(
-            !crate::chatwidget::tests::helpers::render_bottom_popup(
-                &app.chat_widget,
-                /*width*/ 80
-            )
-            .contains("Waiting for verification")
-        );
-        let AppEvent::SubmitThreadOp { thread_id, op } =
-            event_rx.recv().await.expect("cancel request")
-        else {
-            panic!("expected cancel response");
-        };
-        app.submit_thread_op(&mut session, thread_id, op).await?;
-    }
     if scenario == RpcScenario::CancelWhilePending {
         tokio::time::timeout(
             std::time::Duration::from_secs(/*secs*/ 5),
@@ -217,16 +204,22 @@ async fn run_verification_rpc_scenario(scenario: RpcScenario) -> color_eyre::Res
         )
         .await?;
     }
-    if matches!(scenario, RpcScenario::Success | RpcScenario::MethodNotFound) {
-        let completion =
-            tokio::time::timeout(std::time::Duration::from_secs(/*secs*/ 5), event_rx.recv())
-                .await?
-                .expect("controller result");
+    if matches!(
+        scenario,
+        RpcScenario::Success | RpcScenario::MethodNotFound | RpcScenario::RemoteWorkspace
+    ) {
+        let completion = tokio::time::timeout(
+            std::time::Duration::from_secs(/*secs*/ 5),
+            app.thread_delivery.completion_rx.recv(),
+        )
+        .await?
+        .expect("controller result");
         assert!(matches!(
             &completion,
-            AppEvent::UserVerificationFinished { .. }
+            LocalThreadCompletion::VerificationFinished { .. }
         ));
-        app.handle_event(&mut tui, &mut session, completion).await?;
+        app.handle_local_thread_completion(&mut session, completion)
+            .await?;
     }
     if scenario == RpcScenario::CancelWhilePending {
         // Flush the client command queue after processing the late proof. The mock rejects any
@@ -241,7 +234,7 @@ async fn run_verification_rpc_scenario(scenario: RpcScenario) -> color_eyre::Res
             )
             .await?;
         assert!(
-            event_rx.try_recv().is_err(),
+            app.thread_delivery.completion_rx.try_recv().is_err(),
             "cancelled verification must drop its RPC future"
         );
     }

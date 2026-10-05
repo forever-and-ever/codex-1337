@@ -496,14 +496,6 @@ pub(crate) enum AppEvent {
         server_name: String,
         request_id: AppServerRequestId,
     },
-    /// Return a controller-owned verification result, never a native provider handle.
-    UserVerificationFinished {
-        thread_id: ThreadId,
-        server_name: String,
-        request_id: AppServerRequestId,
-        attempt_id: Uuid,
-        result: Result<codex_app_server_protocol::UserVerificationProof, String>,
-    },
 
     /// Interrupt, fork, and retry a safety-buffered turn with the server-selected model.
     RetrySafetyBufferedTurn {
@@ -512,12 +504,6 @@ pub(crate) enum AppEvent {
         model: String,
         turn: AppCommand,
         prompt: UserMessage,
-    },
-
-    /// Deliver a synthetic history lookup response to a specific thread channel.
-    ThreadHistoryEntryResponse {
-        thread_id: ThreadId,
-        event: HistoryLookupResponse,
     },
 
     /// Refill terminal scrollback from older paginated history after its rows reflow.
@@ -1579,14 +1565,6 @@ pub(crate) enum AppEvent {
         reason: Option<String>,
         turn_id: Option<String>,
         include_logs: bool,
-    },
-
-    /// Result of a feedback upload request initiated by the TUI.
-    FeedbackSubmitted {
-        origin_thread_id: Option<ThreadId>,
-        category: FeedbackCategory,
-        include_logs: bool,
-        result: Result<String, String>,
     },
 
     /// Launch the external editor after a normal draw has completed.

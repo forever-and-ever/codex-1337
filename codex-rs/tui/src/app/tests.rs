@@ -885,7 +885,7 @@ async fn reset_thread_event_state_aborts_listener_tasks() {
 
 #[tokio::test]
 async fn history_lookup_response_is_routed_to_requesting_thread() -> Result<()> {
-    let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
+    let (mut app, _app_event_rx, _op_rx) = make_test_app_with_channels().await;
     let thread_id = ThreadId::new();
 
     let local_home = tempfile::tempdir()?;
@@ -900,15 +900,18 @@ async fn history_lookup_response_is_routed_to_requesting_thread() -> Result<()> 
     app.lookup_message_history_entry(thread_id, /*offset*/ 0, log_id)
         .await?;
 
-    let app_event = tokio::time::timeout(Duration::from_secs(1), app_event_rx.recv())
-        .await
-        .expect("history lookup should emit an app event")
-        .expect("app event channel should stay open");
+    let completion = tokio::time::timeout(
+        Duration::from_secs(1),
+        app.thread_delivery.completion_rx.recv(),
+    )
+    .await
+    .expect("history lookup should emit a completion")
+    .expect("completion ingress should stay open");
 
-    let AppEvent::ThreadHistoryEntryResponse {
+    let super::thread_delivery::LocalThreadCompletion::HistoryLookup {
         thread_id: routed_thread_id,
         event,
-    } = app_event
+    } = completion
     else {
         panic!("expected thread-routed history response");
     };
@@ -925,14 +928,17 @@ async fn history_lookup_response_is_routed_to_requesting_thread() -> Result<()> 
     let cursor = codex_message_history::HistoryBatchCursor::new(/*end_offset*/ 1);
     app.lookup_message_history_batch(thread_id, cursor, log_id)
         .await?;
-    let app_event = tokio::time::timeout(Duration::from_secs(1), app_event_rx.recv())
-        .await
-        .expect("history batch lookup should emit an app event")
-        .expect("app event channel should stay open");
-    let AppEvent::ThreadHistoryEntryResponse {
+    let completion = tokio::time::timeout(
+        Duration::from_secs(1),
+        app.thread_delivery.completion_rx.recv(),
+    )
+    .await
+    .expect("history batch lookup should emit a completion")
+    .expect("completion ingress should stay open");
+    let super::thread_delivery::LocalThreadCompletion::HistoryLookup {
         thread_id: routed_thread_id,
         event,
-    } = app_event
+    } = completion
     else {
         panic!("expected thread-routed history batch response");
     };
@@ -984,6 +990,7 @@ async fn enqueue_thread_event_does_not_block_when_channel_full() -> Result<()> {
         .await
         .expect("timed out waiting for first event")
         .expect("channel closed unexpectedly");
+    app.retry_pending_thread_delivery().await;
     time::timeout(Duration::from_millis(50), rx.recv())
         .await
         .expect("timed out waiting for second event")
@@ -6106,6 +6113,7 @@ async fn make_test_app() -> Box<App> {
         pending_shutdown_exit_thread_id: None,
         windows_sandbox: WindowsSandboxState::default(),
         thread_event_channels: HashMap::new(),
+        thread_delivery: super::thread_delivery::ThreadDelivery::new(),
         pending_realtime_speech_replay: HashMap::new(),
         pending_realtime_transcript_replay: HashMap::new(),
         realtime_replay_order: VecDeque::new(),
@@ -6223,6 +6231,7 @@ pub(super) async fn make_test_app_with_channels() -> (
             pending_shutdown_exit_thread_id: None,
             windows_sandbox: WindowsSandboxState::default(),
             thread_event_channels: HashMap::new(),
+            thread_delivery: super::thread_delivery::ThreadDelivery::new(),
             pending_realtime_speech_replay: HashMap::new(),
             pending_realtime_transcript_replay: HashMap::new(),
             realtime_replay_order: VecDeque::new(),

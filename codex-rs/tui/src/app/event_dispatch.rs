@@ -131,10 +131,6 @@ impl App {
             AppEvent::UserVerificationApproved { thread_id, server_name, request_id } => {
                 Box::pin(self.start_user_verification(app_server, thread_id, server_name, request_id)).await?;
             }
-            AppEvent::UserVerificationFinished { thread_id, server_name, request_id, attempt_id, result } => {
-                // Keep this RPC future out of the event loop's stack frame.
-                Box::pin(self.finish_user_verification(app_server, thread_id, server_name, request_id, attempt_id, result)).await?;
-            }
             AppEvent::ReviewMisalignment(review) => {
                 self.open_misalignment_review(tui, review);
             }
@@ -1077,10 +1073,6 @@ impl App {
             }
             AppEvent::SubmitThreadOp { thread_id, op } => {
                 self.submit_thread_op(app_server, thread_id, op).await?;
-            }
-            AppEvent::ThreadHistoryEntryResponse { thread_id, event } => {
-                self.enqueue_thread_history_entry_response(thread_id, event)
-                    .await?;
             }
             AppEvent::DiffResult(cwd, text) => {
                 if cwds_differ(&cwd, self.chat_widget.config_ref().cwd.as_path()) {
@@ -2067,15 +2059,6 @@ impl App {
                 include_logs,
             } => {
                 self.submit_feedback(app_server, category, reason, turn_id, include_logs);
-            }
-            AppEvent::FeedbackSubmitted {
-                origin_thread_id,
-                category,
-                include_logs,
-                result,
-            } => {
-                self.handle_feedback_submitted(origin_thread_id, category, include_logs, result)
-                    .await;
             }
             AppEvent::LaunchExternalEditor => {
                 if self.chat_widget.external_editor_state() == ExternalEditorState::Active {

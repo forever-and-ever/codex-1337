@@ -4,7 +4,10 @@ use super::*;
 
 impl App {
     pub(super) fn ready_for_idle_restart(&self) -> bool {
-        if self.farm.pending.is_some() || self.farm.saved.is_some() {
+        if self.farm.pending.is_some()
+            || self.farm.saved.is_some()
+            || self.thread_delivery.has_pending_work()
+        {
             return false;
         }
         #[cfg(target_os = "linux")]
