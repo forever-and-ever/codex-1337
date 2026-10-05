@@ -101,6 +101,7 @@ pub(super) struct ExecutionScope {
     turn: Arc<TurnContext>,
     registry: Weak<TranscriptRegistry>,
     admission: tokio::sync::Mutex<()>,
+    shutdown: CancellationToken,
     terminal: Mutex<Option<TerminalRequest>>,
     changed: Notify,
     opened: watch::Sender<bool>,
@@ -238,6 +239,7 @@ impl TranscriptRegistry {
             turn,
             registry: Arc::downgrade(self),
             admission: tokio::sync::Mutex::new(()),
+            shutdown: draining_shutdown.clone(),
             terminal: Mutex::new(None),
             changed: Notify::new(),
             opened: watch::channel(false).0,
@@ -276,18 +278,25 @@ impl TranscriptRegistry {
                     .subscribe()
                     .wait_for(|allocated| *allocated)
                     .await;
-                let TerminalRequest { status, at, .. } = loop {
+                loop {
                     let changed = draining.changed.notified();
                     let terminal = *draining
                         .terminal
                         .lock()
                         .unwrap_or_else(PoisonError::into_inner);
-                    if let Some(terminal) = terminal {
-                        break terminal;
+                    if terminal.is_some() {
+                        break;
                     }
                     changed.await;
                 };
                 let _admission = draining.admission.lock().await;
+                // An explicit outcome may supersede abandonment while admission
+                // is blocked. Choose the outcome at its ordered admission point.
+                let TerminalRequest { status, at, .. } = draining
+                    .terminal
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .expect("terminal requested before admission");
                 let owner = draining.owner();
                 if let Some(session) = draining.session.upgrade() {
                     super::transcript::record(
@@ -622,10 +631,18 @@ impl ExecutionScope {
         reason = "the admission gate preserves scope event order across persistence/delivery"
     )]
     pub(super) async fn record(self: &Arc<Self>, turn: &TurnContext, event: CodeModeEvent) {
-        let _admission = self.admission.lock().await;
-        let owner = self.owner();
-        if let Some(session) = self.session.upgrade() {
-            super::transcript::record(&session, turn, owner, event, now_unix_timestamp_ms()).await;
+        let admission = async {
+            let _admission = self.admission.lock().await;
+            let owner = self.owner();
+            if let Some(session) = self.session.upgrade() {
+                super::transcript::record(&session, turn, owner, event, now_unix_timestamp_ms())
+                    .await;
+            }
+        };
+        tokio::select! {
+            biased;
+            _ = self.shutdown.cancelled() => {},
+            _ = admission => {},
         }
     }
 }

@@ -200,7 +200,19 @@ async fn service_teardown_cancels_blocked_transcript_admission() {
     // Admission/persistence/delivery all run inside the same cancellable drain.
     // Teardown must not join while waiting for an unavailable admission gate.
     drop(starting);
-    tokio::time::timeout(std::time::Duration::from_secs(1), service.shutdown())
+    let teardown = async {
+        let (shutdown, ()) = tokio::join!(
+            service.shutdown(),
+            scope.record(
+                &scope.turn,
+                CodeModeEvent::ToolCall {
+                    call_id: "blocked-child".into()
+                }
+            )
+        );
+        shutdown
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(1), teardown)
         .await
         .unwrap()
         .unwrap();
