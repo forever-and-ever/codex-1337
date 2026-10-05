@@ -224,6 +224,8 @@ mod event_dispatch;
 mod exit_summary;
 mod experimental_features;
 mod farm;
+mod jira;
+mod jira_view;
 pub(crate) use farm::FarmFailure;
 mod feedback_upload;
 mod file_change_approvals;
@@ -540,6 +542,7 @@ struct InitialHistoryReplayBuffer {
 pub(crate) struct App {
     pub(super) reload_requested: bool,
     farm: farm::FarmUi,
+    jira: Option<jira_view::JiraBrowser>,
     feature_write_lock: Arc<tokio::sync::Mutex<()>>,
     model_catalog: Arc<ModelCatalog>,
     pub(crate) session_telemetry: SessionTelemetry,
@@ -848,6 +851,9 @@ impl App {
         app_server: &mut AppServerSession,
         event: TuiEvent,
     ) -> Result<AppRunControl> {
+        if self.handle_jira_input(tui, app_server, &event).await? {
+            return Ok(AppRunControl::Continue);
+        }
         if matches!(
             &event,
             TuiEvent::Key(_) | TuiEvent::Mouse(_) | TuiEvent::Paste(_)

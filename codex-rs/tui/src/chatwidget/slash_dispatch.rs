@@ -206,6 +206,7 @@ impl ChatWidget {
                 self.request_redraw();
             }
             SlashCommand::Farm | SlashCommand::FarmFresh => unreachable!("handled above"),
+            SlashCommand::Jira => self.app_event_tx.send(AppEvent::OpenJira),
             SlashCommand::New => {
                 self.show_session_checkout_picker(ManagedWorktreeMode::New, /*name*/ None);
             }
@@ -1248,6 +1249,7 @@ impl ChatWidget {
             | SlashCommand::Status
             | SlashCommand::Daemon
             | SlashCommand::Reload
+            | SlashCommand::Jira
             | SlashCommand::Pwd
             | SlashCommand::Usage
             | SlashCommand::DebugConfig

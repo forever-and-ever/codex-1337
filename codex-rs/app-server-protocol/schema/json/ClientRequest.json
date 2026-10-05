@@ -1759,6 +1759,159 @@
       },
       "type": "object"
     },
+    "JiraAction": {
+      "oneOf": [
+        {
+          "properties": {
+            "cursor": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "limit": {
+              "format": "uint32",
+              "minimum": 0.0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "type": {
+              "enum": [
+                "list"
+              ],
+              "title": "ListJiraActionType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "ListJiraAction",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "key": {
+              "$ref": "#/definitions/JiraKey"
+            },
+            "type": {
+              "enum": [
+                "read"
+              ],
+              "title": "ReadJiraActionType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "key",
+            "type"
+          ],
+          "title": "ReadJiraAction",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "body": {
+              "type": "string"
+            },
+            "key": {
+              "$ref": "#/definitions/JiraKey"
+            },
+            "previous": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/JiraRevision"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Omitted for creation. For edits, includes the fetched version and immutable epic."
+            },
+            "type": {
+              "enum": [
+                "save"
+              ],
+              "title": "SaveJiraActionType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "body",
+            "key",
+            "type"
+          ],
+          "title": "SaveJiraAction",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "revision": {
+              "$ref": "#/definitions/JiraRevision"
+            },
+            "type": {
+              "enum": [
+                "delete"
+              ],
+              "title": "DeleteJiraActionType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "revision",
+            "type"
+          ],
+          "title": "DeleteJiraAction",
+          "type": "object"
+        }
+      ]
+    },
+    "JiraCategory": {
+      "enum": [
+        "bug",
+        "feature"
+      ],
+      "type": "string"
+    },
+    "JiraKey": {
+      "properties": {
+        "category": {
+          "$ref": "#/definitions/JiraCategory"
+        },
+        "slug": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "category",
+        "slug"
+      ],
+      "type": "object"
+    },
+    "JiraRevision": {
+      "properties": {
+        "epic": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "key": {
+          "$ref": "#/definitions/JiraKey"
+        },
+        "version": {
+          "description": "SHA-256 of the exact stored UTF-8 bytes; optimistic external-edit guard.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "version"
+      ],
+      "type": "object"
+    },
     "LegacyAppPathString": {
       "type": "string"
     },
@@ -4438,6 +4591,13 @@
           "description": "UUID identifying this submission across reconnects. Reuse only with identical input/mode.",
           "type": "string"
         },
+        "taskName": {
+          "description": "Optional literal child-name stem. Numeric suffixes disambiguate occupied names.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "threadId": {
           "type": "string"
         }
@@ -4751,6 +4911,29 @@
         }
       },
       "required": [
+        "threadId"
+      ],
+      "type": "object"
+    },
+    "ThreadJiraParams": {
+      "description": "Server-local issue storage scoped by the persisted conversation cwd.",
+      "properties": {
+        "action": {
+          "$ref": "#/definitions/JiraAction"
+        },
+        "expectedScope": {
+          "description": "Scope returned by the initial list. Required for all reads and mutations.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
         "threadId"
       ],
       "type": "object"
@@ -6418,6 +6601,30 @@
         "params"
       ],
       "title": "Thread/unsubscribeRequest",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "enum": [
+            "thread/jira"
+          ],
+          "title": "Thread/jiraRequestMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ThreadJiraParams"
+        }
+      },
+      "required": [
+        "id",
+        "method",
+        "params"
+      ],
+      "title": "Thread/jiraRequest",
       "type": "object"
     },
     {

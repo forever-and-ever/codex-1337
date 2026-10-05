@@ -11,4 +11,8 @@ export type ThreadFarmParams = { threadId: string,
 /**
  * UUID identifying this submission across reconnects. Reuse only with identical input/mode.
  */
-requestId: string, mode: ThreadFarmMode, input: Array<UserInput>, };
+requestId: string, mode: ThreadFarmMode, input: Array<UserInput>,
+/**
+ * Optional literal child-name stem. Numeric suffixes disambiguate occupied names.
+ */
+taskName?: string | null, };

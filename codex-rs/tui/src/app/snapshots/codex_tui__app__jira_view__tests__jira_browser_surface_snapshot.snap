@@ -1,0 +1,100 @@
+---
+source: tui/src/app/jira_view_tests.rs
+expression: "states.join(\"\\n\\n---\\n\\n\")"
+---
+
+ Jira
+ /workspace/project
+
+ Filter:
+
+ › bug/slow-input
+   feature/new-panel
+
+
+
+
+
+
+
+
+
+
+
+ ↑↓ select · Enter body · PgUp/PgDn scroll · Alt+F farm · Alt+T triage · Ctrl+N new · Ctrl+E edit · Del
+ delete · Esc close
+
+
+---
+
+
+ Jira
+ /workspace/project
+
+ Filter:
+
+ › bug/slow-input
+ Typing stalls when the worker is busy.
+
+ • Keep steering responsive.
+ • Preserve unrelated work.
+
+   feature/new-panel
+
+
+
+
+
+
+ ↑↓ select · Enter body · PgUp/PgDn scroll · Alt+F farm · Alt+T triage · Ctrl+N new · Ctrl+E edit · Del
+ delete · Esc close
+
+
+---
+
+
+ Jira · issue
+ /workspace/project
+
+   Category: bug
+
+ › Slug: slow-input
+
+   Body
+   Typing stalls when the worker is busy.
+
+   - Keep **steering** responsive.
+   - Preserve unrelated work.
+
+
+
+
+
+
+
+ Tab field · Ctrl+S save · Esc back
+
+
+---
+
+
+ Jira · issue
+ /workspace/project
+
+   Category: bug
+
+ › Slug: slow-input
+
+   Body
+   Typing stalls when the worker is busy.
+
+   - Keep **steering** responsive.
+   - Preserve unrelated work.
+
+
+
+
+
+ Issue bug/slow-input already exists; choose another slug
+
+ Tab field · Ctrl+S save · Esc back

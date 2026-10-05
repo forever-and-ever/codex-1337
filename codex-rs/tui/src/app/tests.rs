@@ -6056,6 +6056,7 @@ async fn make_test_app() -> Box<App> {
     Box::new(App {
         reload_requested: false,
         farm: Default::default(),
+        jira: None,
         feature_write_lock: Arc::default(),
         model_catalog: chat_widget.model_catalog(),
         session_telemetry,
@@ -6175,6 +6176,7 @@ pub(super) async fn make_test_app_with_channels() -> (
         Box::new(App {
             reload_requested: false,
             farm: Default::default(),
+            jira: None,
             feature_write_lock: Arc::default(),
             model_catalog: chat_widget.model_catalog(),
             session_telemetry,

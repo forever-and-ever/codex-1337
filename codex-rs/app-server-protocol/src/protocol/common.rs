@@ -592,6 +592,11 @@ client_request_definitions! {
         serialization: thread_id(params.thread_id),
         response: v2::ThreadDecrementElicitationResponse,
     },
+    ThreadJira => "thread/jira" {
+        params: v2::ThreadJiraParams,
+        serialization: thread_id(params.thread_id),
+        response: v2::ThreadJiraResponse,
+    },
     ThreadFarm => "thread/farm" {
         params: v2::ThreadFarmParams,
         serialization: None,

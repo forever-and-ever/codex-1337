@@ -449,6 +449,11 @@ pub(crate) enum AppEvent {
         parent_thread_id: ThreadId,
         user_message: Option<UserMessage>,
     },
+    OpenJira,
+    JiraFinished {
+        token: uuid::Uuid,
+        result: Result<codex_app_server_protocol::ThreadJiraResponse, String>,
+    },
     Farm {
         thread_id: ThreadId,
         mode: codex_app_server_protocol::ThreadFarmMode,

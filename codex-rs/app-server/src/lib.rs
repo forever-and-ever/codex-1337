@@ -124,6 +124,7 @@ mod fuzzy_file_search;
 mod gateway_oauth_notifications;
 mod image_url;
 pub mod in_process;
+mod jira_store;
 mod log_write_warning;
 mod mcp_refresh;
 mod message_processor;

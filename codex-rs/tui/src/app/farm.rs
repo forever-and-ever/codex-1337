@@ -102,6 +102,7 @@ impl App {
             request_id: request_id.clone(),
             mode: pending.mode,
             input: pending.submission.input.clone(),
+            task_name: pending.submission.task_name.clone(),
         };
         self.set_farm_receipt(tui, origin, &request_id, "Farming task…".into())
             .await;

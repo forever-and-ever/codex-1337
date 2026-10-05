@@ -279,6 +279,13 @@
       "description": "UUID identifying this submission across reconnects. Reuse only with identical input/mode.",
       "type": "string"
     },
+    "taskName": {
+      "description": "Optional literal child-name stem. Numeric suffixes disambiguate occupied names.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "threadId": {
       "type": "string"
     }
