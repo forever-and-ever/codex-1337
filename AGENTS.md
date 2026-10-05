@@ -115,6 +115,11 @@ Before finalizing a large change to `codex-rs`, run `just fix -p <project>` (in 
 
 ## Local TUI releases
 
+`/tmp` and Cargo targets are disposable, even while Codex is running. Never keep
+live IPC, coordination locks, drafts, or the only copy of user attachments there.
+Use the `codex-uds` runtime-directory helpers for Linux process-lifetime state;
+use Codex home or XDG state/data storage for anything that must survive restart.
+
 Install through `scripts/install-local`. Each new installed binary receives the next
 `tui-N`, starting at zero; builds and tests do not increment it. Reinstalling identical
 binary bytes reuses the number. The allocator is durable XDG state at

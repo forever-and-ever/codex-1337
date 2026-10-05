@@ -3,6 +3,7 @@ use pretty_assertions::assert_eq;
 use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixListener;
 use std::os::unix::net::UnixStream;
+use std::path::Path;
 use std::path::PathBuf;
 
 #[tokio::test]
@@ -66,6 +67,17 @@ fn private_tmp_fixture() {
     if !mount.status.success() {
         std::process::exit(/*code*/ 77);
     }
+    // This fixture is namespace root, not the login user. Give it a private
+    // runtime tree too; never create or wipe another user's live IPC directory.
+    let mount = std::process::Command::new("mount")
+        .args(["-t", "tmpfs", "tmpfs", "/run"])
+        .output()
+        .unwrap();
+    assert!(mount.status.success(), "{mount:?}");
+    let runtime = PathBuf::from("/run/user/0");
+    std::fs::create_dir_all(&runtime).unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&runtime, std::fs::Permissions::from_mode(0o700)).unwrap();
     // Namespace mounts have non-path roots such as `net:[inode]`. An unrelated
     // one must not stop startup or disable the socket-isolation checks below.
     let namespace = "/tmp/network-namespace";
@@ -75,7 +87,10 @@ fn private_tmp_fixture() {
         .output()
         .unwrap();
     assert!(mount.status.success(), "{mount:?}");
-    let root = codex_uds::prepare_shared_daemon_socket_directory().unwrap();
+    // Keep exercising aliases of the legacy /tmp namespace, alongside the
+    // independently mounted new runtime namespace.
+    let [_runtime, root] = codex_uds::prepare_shared_daemon_socket_mask_directories().unwrap();
+    let relative_root = PathBuf::from(root.file_name().unwrap());
     let endpoint = root.join("rpc.sock");
     let _daemon = UnixListener::bind(&endpoint).unwrap();
     let _other = UnixListener::bind("/tmp/other.sock").unwrap();
@@ -118,7 +133,7 @@ fn private_tmp_fixture() {
         .unwrap();
     assert!(mount.status.success(), "{mount:?}");
     let alias_endpoint = PathBuf::from("/tmp/build")
-        .join(root.file_name().unwrap())
+        .join(&relative_root)
         .join("rpc.sock");
     UnixStream::connect(&alias_endpoint).expect("host can reach ancestor alias");
     command
@@ -130,10 +145,9 @@ fn private_tmp_fixture() {
 
     // Rebinding the synthetic-mount registry must preserve masks for aliases
     // beneath it, even when the surrounding /tmp is writable.
-    let registry_alias = PathBuf::from(format!(
-        "/tmp/codex-bwrap-synthetic-mount-targets-{}/view",
-        unsafe { libc::geteuid() }
-    ));
+    let registry_alias = codex_uds::prepare_user_runtime_directory()
+        .unwrap()
+        .join("sandbox-mounts/view");
     std::fs::create_dir_all(&registry_alias).unwrap();
     let mount = std::process::Command::new("mount")
         .args(["--bind", "/tmp"])
@@ -141,9 +155,7 @@ fn private_tmp_fixture() {
         .output()
         .unwrap();
     assert!(mount.status.success(), "{mount:?}");
-    let alias_endpoint = registry_alias
-        .join(root.file_name().unwrap())
-        .join("rpc.sock");
+    let alias_endpoint = registry_alias.join(&relative_root).join("rpc.sock");
     UnixStream::connect(&alias_endpoint).expect("host can reach registry alias");
     command
         .env("CODEX_TEST_DAEMON_ALIAS_SOCKET", &alias_endpoint)
@@ -169,6 +181,31 @@ fn private_tmp_fixture() {
     assert!(!output.status.success(), "{output:?}");
     assert!(String::from_utf8_lossy(&output.stderr).contains("unsupported host mount"));
     assert!(!String::from_utf8_lossy(&output.stdout).contains("private-tmp-client-started"));
+
+    // Move the registry-symlink witness here: a process-lifetime registry must
+    // only be replaced inside this fixture's private runtime/mount namespace.
+    for mount in [Path::new("/tmp/alias"), registry_alias.as_path()] {
+        assert!(
+            std::process::Command::new("umount")
+                .arg(mount)
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+    let registry = registry_alias.parent().unwrap();
+    std::fs::remove_dir_all(registry).unwrap();
+    let redirected = Path::new("/tmp/registry-bypass");
+    std::fs::create_dir(redirected).unwrap();
+    std::os::unix::fs::symlink(redirected, registry).unwrap();
+    let output = command.output().unwrap();
+    assert!(!output.status.success(), "{output:?}");
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("synthetic mount registry must not be a symlink")
+    );
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("private-tmp-client-started"));
+    assert_eq!(std::fs::read_dir(redirected).unwrap().count(), 0);
     println!("private-tmp-validated");
 }
 
@@ -258,8 +295,12 @@ async fn daemon_sockets_are_hidden_with_network_and_tmp_write_grants() {
     if should_skip_bwrap_tests().await {
         return;
     }
-    let root = codex_uds::prepare_shared_daemon_socket_directory().unwrap();
+    let [root, legacy_root] = codex_uds::prepare_shared_daemon_socket_mask_directories().unwrap();
     let private = tempfile::tempdir_in(&root).unwrap();
+    let legacy_private = tempfile::tempdir_in(legacy_root).unwrap();
+    let legacy_socket = legacy_private.path().join("rpc.sock");
+    let _legacy_daemon = UnixListener::bind(&legacy_socket).unwrap();
+    UnixStream::connect(&legacy_socket).expect("host can reach legacy daemon");
     let workspace = tempfile::tempdir().unwrap();
     let socket = private.path().join("rpc.sock");
     let alias = workspace.path().join("alias.sock");
@@ -271,7 +312,7 @@ async fn daemon_sockets_are_hidden_with_network_and_tmp_write_grants() {
     UnixStream::connect(&alias).expect("host can reach daemon");
     let script = r#"
 import os, socket, sys
-for path in [sys.argv[1], sys.argv[2], '/proc/' + sys.argv[5] + '/root' + sys.argv[1]]:
+for path in [sys.argv[1], sys.argv[2], '/proc/' + sys.argv[5] + '/root' + sys.argv[1], sys.argv[8]]:
     try:
         socket.socket(socket.AF_UNIX).connect(path)
     except OSError:
@@ -307,7 +348,10 @@ if sys.argv[6] == 'host-proc' and not os.path.isdir('/run/WSL'):
             raise AssertionError('host process link accessible: ' + name)
 "#;
     let profile = PermissionProfile::workspace_write_with(
-        &[AbsolutePathBuf::from_absolute_path("/tmp").unwrap()],
+        &[
+            AbsolutePathBuf::from_absolute_path("/tmp").unwrap(),
+            AbsolutePathBuf::from_absolute_path(root.parent().unwrap()).unwrap(),
+        ],
         NetworkSandboxPolicy::Enabled,
         /*exclude_tmpdir_env_var*/ true,
         /*exclude_slash_tmp*/ false,
@@ -345,6 +389,7 @@ if sys.argv[6] == 'host-proc' and not os.path.isdir('/run/WSL'):
                 &std::process::id().to_string(),
                 proc_mode,
                 &directory_fd.as_raw_fd().to_string(),
+                legacy_socket.to_str().unwrap(),
             ])
             .kill_on_drop(true)
             .output()

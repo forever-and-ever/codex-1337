@@ -11,7 +11,7 @@ pub(super) enum PendingCopy {
 
 impl ChatWidget {
     pub(crate) fn paste_image(&mut self) {
-        match paste_image_to_temp_png() {
+        match paste_image_to_png(&self.config.codex_home) {
             Ok((path, info)) => {
                 tracing::debug!(
                     "pasted image size={}x{} format={}",

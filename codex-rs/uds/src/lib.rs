@@ -4,6 +4,10 @@
 mod daemon_directory;
 #[cfg(unix)]
 pub use daemon_directory::prepare_shared_daemon_socket_directory;
+#[cfg(target_os = "linux")]
+pub use daemon_directory::prepare_shared_daemon_socket_mask_directories;
+#[cfg(target_os = "linux")]
+pub use daemon_directory::prepare_user_runtime_directory;
 #[cfg(unix)]
 pub use daemon_directory::shared_daemon_socket_directory;
 

@@ -120,30 +120,18 @@ pub fn paste_image_as_png() -> Result<(Vec<u8>, PastedImageInfo), PasteImageErro
     ))
 }
 
-/// Convenience: write to a temp file and return its path + info.
+/// Retain clipboard attachments with user data: drafts and resumed history keep these paths.
 #[cfg(not(target_os = "android"))]
-pub fn paste_image_to_temp_png() -> Result<(PathBuf, PastedImageInfo), PasteImageError> {
+pub fn paste_image_to_png(
+    codex_home: &Path,
+) -> Result<(PathBuf, PastedImageInfo), PasteImageError> {
     // First attempt: read image from system clipboard via arboard (native paths or image data).
     match paste_image_as_png() {
-        Ok((png, info)) => {
-            // Create a unique temporary file with a .png suffix to avoid collisions.
-            let tmp = Builder::new()
-                .prefix("codex-clipboard-")
-                .suffix(".png")
-                .tempfile()
-                .map_err(|e| PasteImageError::IoError(e.to_string()))?;
-            std::fs::write(tmp.path(), &png)
-                .map_err(|e| PasteImageError::IoError(e.to_string()))?;
-            // Persist the file (so it remains after the handle is dropped) and return its PathBuf.
-            let (_file, path) = tmp
-                .keep()
-                .map_err(|e| PasteImageError::IoError(e.error.to_string()))?;
-            Ok((path, info))
-        }
+        Ok((png, info)) => Ok((persist_clipboard_png(codex_home, &png)?, info)),
         Err(e) => {
             #[cfg(target_os = "linux")]
             {
-                try_wsl_clipboard_fallback(&e).or(Err(e))
+                try_wsl_clipboard_fallback(codex_home, &e)
             }
             #[cfg(not(target_os = "linux"))]
             {
@@ -153,14 +141,33 @@ pub fn paste_image_to_temp_png() -> Result<(PathBuf, PastedImageInfo), PasteImag
     }
 }
 
+#[cfg(not(target_os = "android"))]
+fn persist_clipboard_png(codex_home: &Path, png: &[u8]) -> Result<PathBuf, PasteImageError> {
+    use std::io::Write;
+
+    let directory = codex_home.join("clipboard");
+    std::fs::create_dir_all(&directory).map_err(|e| PasteImageError::IoError(e.to_string()))?;
+    let mut file = Builder::new()
+        .prefix("codex-clipboard-")
+        .suffix(".png")
+        .tempfile_in(directory)
+        .map_err(|e| PasteImageError::IoError(e.to_string()))?;
+    file.write_all(png)
+        .map_err(|e| PasteImageError::IoError(e.to_string()))?;
+    let (_file, path) = file
+        .keep()
+        .map_err(|e| PasteImageError::IoError(e.error.to_string()))?;
+    Ok(path)
+}
+
 /// Attempt WSL fallback for clipboard image paste.
 ///
 /// If clipboard is unavailable (common under WSL because arboard cannot access
 /// the Windows clipboard), attempt a WSL fallback that calls PowerShell on the
-/// Windows side to write the clipboard image to a temporary file, then return
-/// the corresponding WSL path.
+/// Windows side to export the image, then retain it in local Codex home.
 #[cfg(target_os = "linux")]
 fn try_wsl_clipboard_fallback(
+    codex_home: &Path,
     error: &PasteImageError,
 ) -> Result<(PathBuf, PastedImageInfo), PasteImageError> {
     use PasteImageError::ClipboardUnavailable;
@@ -184,10 +191,12 @@ fn try_wsl_clipboard_fallback(
         return Err(error.clone());
     };
 
-    // Return the mapped path directly without copying.
-    // The file will be read and base64-encoded during serialization.
+    let png = std::fs::read(&mapped_path).map_err(|e| PasteImageError::IoError(e.to_string()))?;
+    let path = persist_clipboard_png(codex_home, &png)?;
+    // This file was created by our clipboard-export command, not supplied by the user.
+    let _ = std::fs::remove_file(mapped_path);
     Ok((
-        mapped_path,
+        path,
         PastedImageInfo {
             width: w,
             height: h,
@@ -233,7 +242,9 @@ fn try_dump_windows_clipboard_image() -> Option<String> {
 }
 
 #[cfg(target_os = "android")]
-pub fn paste_image_to_temp_png() -> Result<(PathBuf, PastedImageInfo), PasteImageError> {
+pub fn paste_image_to_png(
+    _codex_home: &Path,
+) -> Result<(PathBuf, PastedImageInfo), PasteImageError> {
     // Keep error consistent with paste_image_as_png.
     Err(PasteImageError::ClipboardUnavailable(
         "clipboard image paste is unsupported on Android".into(),

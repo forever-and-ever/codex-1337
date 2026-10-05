@@ -1037,61 +1037,6 @@ async fn sandbox_reports_codex_symlink_build_failure_without_panicking() {
 }
 
 #[tokio::test]
-async fn sandbox_rejects_symlinked_synthetic_mount_registry() {
-    if should_skip_bwrap_tests().await {
-        eprintln!("skipping bwrap test: bwrap sandbox prerequisites are unavailable");
-        return;
-    }
-
-    let temp = tempfile::tempdir().expect("tempdir");
-    let workspace = temp.path().join("workspace");
-    let registry_target = workspace.join("registry");
-    std::fs::create_dir_all(&registry_target).expect("create registry target");
-    let effective_uid = unsafe { libc::geteuid() };
-    let registry = temp.path().join(format!(
-        "codex-bwrap-synthetic-mount-targets-{effective_uid}"
-    ));
-    std::os::unix::fs::symlink(&registry_target, &registry).expect("symlink registry");
-
-    let cwd = AbsolutePathBuf::try_from(workspace).expect("absolute workspace");
-    let permission_profile = PermissionProfile::workspace_write_with(
-        std::slice::from_ref(&cwd),
-        NetworkSandboxPolicy::Enabled,
-        /*exclude_tmpdir_env_var*/ true,
-        /*exclude_slash_tmp*/ true,
-    );
-    let mut env = create_env_from_core_vars();
-    env.insert("TMPDIR".to_string(), temp.path().display().to_string());
-    let output = expect_denied(
-        run_cmd_result_with_permission_profile_for_cwd(
-            &["sh", "-c", "touch registry/forged-marker"],
-            cwd,
-            permission_profile,
-            env,
-            LONG_TIMEOUT_MS,
-            /*use_legacy_landlock*/ false,
-        )
-        .await,
-        "a symlinked registry must not expose writable bookkeeping",
-    );
-    assert!(
-        output
-            .stderr
-            .text
-            .contains("synthetic mount registry must not be a symlink"),
-        "stderr: {}",
-        output.stderr.text
-    );
-    assert_eq!(
-        std::fs::read_dir(registry_target)
-            .expect("read registry target")
-            .count(),
-        0,
-        "the registry symlink must be rejected before registration or command execution"
-    );
-}
-
-#[tokio::test]
 async fn sandbox_keeps_parent_repo_discovery_while_blocking_child_metadata() {
     if should_skip_bwrap_tests().await {
         eprintln!("skipping bwrap test: bwrap sandbox prerequisites are unavailable");
@@ -1134,20 +1079,18 @@ async fn sandbox_keeps_parent_repo_discovery_while_blocking_child_metadata() {
 
     let repo = repo.to_string_lossy();
     let redirected_tmp = redirected_tmp.to_string_lossy();
+    let registry = codex_uds::prepare_user_runtime_directory()
+        .unwrap()
+        .join("sandbox-mounts");
+    let registry = registry.display();
     let script = format!(
         r#"set -e
 test "$(git rev-parse --show-toplevel)" = '{repo}'
 touch "$TMPDIR/writable-sibling"
-registry="${{TMPDIR:-/tmp}}/codex-bwrap-synthetic-mount-targets-$(id -u)"
+registry='{registry}'
 if touch "$registry/forged-marker" 2>/dev/null; then
   exit 22
 fi
-redirected_registry='{redirected_tmp}'/codex-bwrap-synthetic-mount-targets-$(id -u)
-for marker_dir in "$registry"/*; do
-  [ -d "$marker_dir" ] || continue
-  mkdir -p "$redirected_registry/${{marker_dir##*/}}"
-  touch "$redirected_registry/${{marker_dir##*/}}/1"
-done
 ln -sfn '{redirected_tmp}' "$TMPDIR"
 git status --short > status.before
 if grep -E '(^|[[:space:]])\.(git|codex|agents)(/|$)' status.before; then
@@ -1373,8 +1316,6 @@ async fn sandbox_starts_with_denied_tmp_without_exposing_registry() {
 cat AGENTS.md
 test ! -r "$DENIED_SECRET"
 if printf modified > "$DENIED_SECRET" 2>/dev/null; then exit 1; fi
-registry="$TMPDIR/codex-bwrap-synthetic-mount-targets-$(id -u)"
-test ! -e "$registry"
 "#,
                 ],
                 cwd.clone(),

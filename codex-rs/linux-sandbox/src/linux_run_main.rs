@@ -1354,19 +1354,11 @@ pub(crate) fn synthetic_mount_registry_root() -> PathBuf {
 
     REGISTRY_ROOT
         .get_or_init(|| {
-            let effective_uid = unsafe { libc::geteuid() };
-            let temp_dir = std::env::temp_dir();
-            let temp_dir = temp_dir.canonicalize().unwrap_or_else(|err| {
-                panic!(
-                    "failed to resolve synthetic mount registry temp directory {}: {err}",
-                    temp_dir.display()
-                )
-            });
-            let registry_root = temp_dir.join(format!(
-                "codex-bwrap-synthetic-mount-targets-{effective_uid}"
-            ));
+            let runtime = codex_uds::prepare_user_runtime_directory()
+                .unwrap_or_else(|err| panic!("failed to prepare synthetic mount runtime: {err}"));
+            let registry_root = runtime.join("sandbox-mounts");
             // A registry symlink can redirect bookkeeping into a writable root
-            // that does not overlap TMPDIR, bypassing its read-only mount.
+            // that does not overlap the runtime directory, bypassing its read-only mount.
             assert!(
                 !registry_root.is_symlink(),
                 "synthetic mount registry must not be a symlink: {}",

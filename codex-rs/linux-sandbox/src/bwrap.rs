@@ -427,13 +427,15 @@ fn create_filesystem_args(
     cwd: &Path,
     options: BwrapOptions,
 ) -> Result<BwrapArgs> {
-    let daemon_directory = codex_uds::prepare_shared_daemon_socket_directory()?;
-    let daemon_directories = crate::daemon_mounts::daemon_socket_mask_paths(
-        &daemon_directory,
-        options
-            .mask_wslg_distro
-            .then_some(Path::new(WSLG_DISTRO_ROOT)),
-    )?;
+    let mut daemon_directories = BTreeSet::new();
+    for directory in codex_uds::prepare_shared_daemon_socket_mask_directories()? {
+        daemon_directories.extend(crate::daemon_mounts::daemon_socket_mask_paths(
+            &directory,
+            options
+                .mask_wslg_distro
+                .then_some(Path::new(WSLG_DISTRO_ROOT)),
+        )?);
+    }
     let unreadable_globs = file_system_sandbox_policy.get_unreadable_globs_with_cwd(cwd);
     // Bubblewrap requires bind mount targets to exist. Skip missing writable
     // roots so mixed-platform configs can keep harmless paths for other
@@ -2395,8 +2397,9 @@ mod tests {
             .windows(3)
             .position(|window| window == ["--ro-bind", "/tmp", "/tmp"])
             .expect("read-only tmp bind");
-        let daemon_directory =
-            path_to_string(&codex_uds::shared_daemon_socket_directory().unwrap());
+        let [_runtime, legacy] =
+            codex_uds::prepare_shared_daemon_socket_mask_directories().unwrap();
+        let daemon_directory = path_to_string(&legacy);
         assert_eq!(
             &args.args[tmp_bind + 3..tmp_bind + 9],
             [
