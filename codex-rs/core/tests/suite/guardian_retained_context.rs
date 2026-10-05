@@ -474,6 +474,7 @@ async fn farm_authorization_survives_handoff_checkpoint_and_cold_reload() -> Res
             request_id: request_id.clone(),
             mode: FarmMode::Fresh,
             input: input.clone(),
+            task_name: None,
         })
         .await
         .map_err(|error| anyhow::anyhow!("{error:?}"))?;
@@ -562,7 +563,8 @@ async fn farm_authorization_survives_handoff_checkpoint_and_cold_reload() -> Res
         root.farm(FarmRequest {
             request_id,
             mode: FarmMode::Fresh,
-            input
+            input,
+            task_name: None,
         })
         .await
         .map_err(|error| anyhow::anyhow!("{error:?}"))?,

@@ -49,6 +49,7 @@ pub struct FarmRequest {
     pub request_id: String,
     pub mode: FarmMode,
     pub input: Vec<UserInput>,
+    pub task_name: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -130,7 +131,11 @@ impl CodexThread {
         let request_uuid = Uuid::parse_str(&request.request_id)
             .map_err(|_| CodexErr::InvalidRequest("farm requestId must be a UUID".to_owned()))?;
         let request_id = request_uuid.to_string();
-        let payload = serde_json::to_vec(&(request.mode, &request.input)).map_err(|error| {
+        // Keep ordinary farm hashes compatible with receipts created before named farms.
+        let payload = match &request.task_name {
+            Some(name) => serde_json::to_vec(&(request.mode, &request.input, name)),
+            None => serde_json::to_vec(&(request.mode, &request.input)),
+        }.map_err(|error| {
             CodexErr::InvalidRequest(format!("could not encode farm submission: {error}"))
         })?;
         let payload_sha256 = format!("{:x}", Sha256::digest(payload));
@@ -254,15 +259,31 @@ impl CodexThread {
             )
             .into());
         }
-        let agent_path = turn
+        let parent_path = turn
             .session_source
             .get_agent_path()
-            .unwrap_or_else(AgentPath::root)
-            .join(&format!(
-                "farm_{}",
-                &request_uuid.simple().to_string()[..12]
-            ))
-            .map_err(CodexErr::InvalidRequest)?;
+            .unwrap_or_else(AgentPath::root);
+        let agent_path = if let Some(name) = &request.task_name {
+            parent_path.join(name).map_err(CodexErr::InvalidRequest)?;
+            let agents = self.session.services.agent_control.child_agent_paths(self.session.thread_id).await;
+            let mut chosen = None;
+            for suffix in 0..10_000 {
+                let tail = if suffix == 0 { String::new() } else { format!("_{suffix}") };
+                let capacity = MAX_DELEGATION_RECEIPT_PATH_BYTES.saturating_sub(parent_path.as_str().len() + 1 + tail.len());
+                if capacity == 0 { break; }
+                let stem = &name[..name.len().min(capacity)];
+                let candidate = parent_path.join(&format!("{stem}{tail}")).map_err(CodexErr::InvalidRequest)?;
+                if agents.contains(&candidate) { continue; }
+                if db.farm_request_id_for_path(self.session.thread_id, candidate.as_str()).await
+                    .map_err(|error| CodexErr::Fatal(format!("could not validate farm child path: {error}")))?.is_none() {
+                    chosen = Some(candidate);
+                    break;
+                }
+            }
+            chosen.ok_or_else(|| CodexErr::InvalidRequest("No available named farm child path".into()))?
+        } else {
+            parent_path.join(&format!("farm_{}", &request_uuid.simple().to_string()[..12])).map_err(CodexErr::InvalidRequest)?
+        };
         if agent_path.as_str().len() > MAX_DELEGATION_RECEIPT_PATH_BYTES {
             return Err(CodexErr::InvalidRequest(
                 "farm child path exceeds the bounded receipt limit".to_owned(),

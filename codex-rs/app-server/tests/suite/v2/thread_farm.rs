@@ -134,6 +134,8 @@ async fn farm_spawns_and_replays_without_steering_parent(
         thread_id: parent.id.clone(),
         request_id: uuid::Uuid::new_v4().to_string(),
         mode,
+        task_name: (mode == ThreadFarmMode::FullHistory && matches!(parent_state, ParentState::Idle))
+            .then(|| "farm_impl_staging".to_owned()),
         input: vec![UserInput::Text {
             text: TASK.to_owned(),
             text_elements: Vec::new(),
@@ -154,6 +156,9 @@ async fn farm_spawns_and_replays_without_steering_parent(
         })
         .await?;
     assert_eq!(replay, receipt);
+    if params.task_name.is_some() {
+        assert_eq!(receipt.agent_path, "/root/farm_impl_staging");
+    }
     let child: ThreadReadResponse = timeout(Duration::from_secs(/*secs*/ 10), async {
         loop {
             let read: ThreadReadResponse = app
@@ -248,6 +253,14 @@ async fn farm_spawns_and_replays_without_steering_parent(
             })
             .await?;
     }
+    if params.task_name.is_some() {
+        let mut next = params.clone();
+        next.request_id = uuid::Uuid::new_v4().to_string();
+        let second: ThreadFarmResponse = app.request(|request_id| ClientRequest::ThreadFarm {
+            request_id, params: next,
+        }).await?;
+        assert_eq!(second.agent_path, "/root/farm_impl_staging_1");
+    }
     let retired: ThreadRetireResponse = app
         .request(|request_id| ClientRequest::ThreadRetire {
             request_id,
@@ -284,10 +297,14 @@ async fn farm_spawns_and_replays_without_steering_parent(
         "retirement/restart cannot erase an accepted receipt"
     );
     let mut mismatch = params;
-    mismatch.input = vec![UserInput::Text {
+    if mismatch.task_name.is_some() {
+        mismatch.task_name = Some("farm_impl_other".into());
+    } else {
+        mismatch.input = vec![UserInput::Text {
         text: "A different task".to_owned(),
         text_elements: Vec::new(),
-    }];
+        }];
+    }
     let id = app
         .send_request("thread/farm", Some(serde_json::to_value(&mismatch)?))
         .await?;
@@ -335,6 +352,7 @@ async fn farm_provider_lock_rejects_before_claiming_request() -> Result<()> {
         thread_id: parent.id.clone(),
         request_id: uuid::Uuid::new_v4().to_string(),
         mode: ThreadFarmMode::FullHistory,
+        task_name: None,
         input: vec![UserInput::Text {
             text: "Inspect staging".to_owned(),
             text_elements: Vec::new(),

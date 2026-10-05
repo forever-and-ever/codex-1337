@@ -22,6 +22,9 @@ pub struct ThreadFarmParams {
     pub request_id: String,
     pub mode: ThreadFarmMode,
     pub input: Vec<UserInput>,
+    /// Optional literal child-name stem. Numeric suffixes disambiguate occupied names.
+    #[ts(optional = nullable)]
+    pub task_name: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
