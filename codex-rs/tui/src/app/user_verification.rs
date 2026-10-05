@@ -14,10 +14,10 @@ use uuid::Uuid;
 
 use super::App;
 use super::app_server_requests::ResolvedAppServerRequest;
+use super::thread_delivery::LocalThreadCompletion;
 use super::user_verification_errors::verification_error_message;
 use crate::app_command::AppCommand;
 use crate::app_command::UserVerificationResponse;
-use crate::app_event::AppEvent;
 use crate::app_server_session::AppServerSession;
 
 impl App {
@@ -28,29 +28,6 @@ impl App {
         server_name: String,
         request_id: RequestId,
     ) -> color_eyre::Result<()> {
-        if app_server.uses_remote_workspace() {
-            self.chat_widget.dismiss_app_server_request(
-                &ResolvedAppServerRequest::McpElicitation {
-                    server_name: server_name.clone(),
-                    request_id: request_id.clone(),
-                },
-            );
-            self.enqueue_thread_notification(
-                thread_id,
-                ServerNotification::Warning(WarningNotification {
-                    thread_id: Some(thread_id.to_string()),
-                    message: "User verification is unavailable for remote workspaces.".to_string(),
-                }),
-            )
-            .await?;
-            self.app_event_tx.resolve_user_verification(
-                thread_id,
-                server_name,
-                request_id,
-                UserVerificationResponse::Cancel,
-            );
-            return Ok(());
-        }
         let Some(attempt) = self
             .pending_app_server_requests
             .user_verification
@@ -59,29 +36,45 @@ impl App {
             return Ok(());
         };
         let handle = app_server.request_handle();
-        let app_event_tx = self.app_event_tx.clone();
+        let completion_tx = self.thread_delivery.completion_tx.clone();
+        let remote_workspace = app_server.uses_remote_workspace();
         tokio::spawn(async move {
             let attempt_id = attempt.id;
-            let verification = handle.request_typed::<UserVerificationVerifyResponse>(
-                ClientRequest::UserVerificationVerify {
-                    request_id: RequestId::String(format!("user-verification-{attempt_id}")),
-                    params: attempt.params,
-                },
-            );
+            let verification = async {
+                if remote_workspace {
+                    return Err(
+                        "User verification is unavailable for remote workspaces.".to_string()
+                    );
+                }
+                handle
+                    .request_typed::<UserVerificationVerifyResponse>(
+                        ClientRequest::UserVerificationVerify {
+                            request_id: RequestId::String(format!(
+                                "user-verification-{attempt_id}"
+                            )),
+                            params: attempt.params,
+                        },
+                    )
+                    .await
+                    .map(|response| response.proof)
+                    .map_err(|error| verification_error_message(&error).to_string())
+            };
             let result = tokio::select! {
                 biased;
                 _ = attempt.cancelled.cancelled() => return,
                 result = verification => result,
-            }
-            .map(|response| response.proof)
-            .map_err(|error| verification_error_message(&error).to_string());
-            app_event_tx.send(AppEvent::UserVerificationFinished {
+            };
+            tokio::select! {
+                biased;
+                _ = attempt.cancelled.cancelled() => {},
+                _ = completion_tx.send(LocalThreadCompletion::VerificationFinished {
                 thread_id,
                 server_name,
                 request_id,
                 attempt_id,
                 result,
-            });
+                }) => {},
+            }
         });
         Ok(())
     }

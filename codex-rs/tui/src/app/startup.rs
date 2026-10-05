@@ -829,6 +829,7 @@ See the Codex keymap documentation for supported actions and examples."
                 ..Default::default()
             },
             thread_event_channels: HashMap::new(),
+            thread_delivery: super::thread_delivery::ThreadDelivery::new(),
             pending_realtime_speech_replay: HashMap::new(),
             pending_realtime_transcript_replay: HashMap::new(),
             realtime_replay_order: VecDeque::new(),
@@ -1073,6 +1074,7 @@ See the Codex keymap documentation for supported actions and examples."
             Ok(exit_reason)
         } else {
             loop {
+                app.retry_pending_thread_delivery().await;
                 // Reconnect can dismiss an overlay from the server-event path.
                 if app.overlay.is_none() {
                     if !tui.is_owned_screen() && tui.is_alt_screen_active() {
@@ -1133,6 +1135,25 @@ See the Codex keymap documentation for supported actions and examples."
                 // Replay queues history and operations. A buffered closure must not switch
                 // widgets before those app events have been applied.
                 let has_pending_app_events = !app_event_rx.is_empty();
+                if !has_pending_app_events
+                    && !app.reconnect.offline
+                    && !app.thread_delivery.is_blocked()
+                    && let Some(replay_thread) = app.thread_delivery.primary_replay_thread
+                {
+                    if !app.pending_primary_events.is_empty() {
+                        app.admit_next_primary_event().await?;
+                        continue;
+                    } else if app.chat_widget.thread_id() != Some(replay_thread) {
+                        app.thread_delivery.primary_replay_thread = None;
+                    } else if app
+                        .active_thread_rx
+                        .as_ref()
+                        .is_none_or(mpsc::Receiver::is_empty)
+                    {
+                        app.finish_primary_event_replay();
+                        continue;
+                    }
+                }
                 if !has_pending_app_events {
                     if std::mem::take(&mut app.reload_requested) {
                         if pending_startup_draft.is_some() {
@@ -1244,6 +1265,7 @@ See the Codex keymap documentation for supported actions and examples."
                         AppRunControl::Continue
                     }
                     event = tui_events.next(), if app.pending_thread_switch_resets == 0
+                        && (app.reconnect.offline || app.thread_delivery.primary_replay_thread.is_none())
                         && (app.reconnect.offline || !block_terminal_input_for_pending_startup_events) => {
                         if let Some(event) = event {
                             if !matches!(event, TuiEvent::Draw | TuiEvent::FocusLost) {
@@ -1279,7 +1301,22 @@ See the Codex keymap documentation for supported actions and examples."
                             app.handle_exit_mode(&mut app_server, ExitMode::ShutdownFirst).await
                         }
                     }
+                    completion = app.thread_delivery.completion_rx.recv(), if !app.thread_delivery.is_blocked()
+                        && app.thread_delivery.primary_replay_thread.is_none() => {
+                        if let Some(completion) = completion {
+                            match app.handle_local_thread_completion(&mut app_server, completion).await {
+                                Ok(()) => {},
+                                Err(err) if app.recover_transport_error(&err) => {},
+                                Err(err) => break Err(err),
+                            }
+                        }
+                        AppRunControl::Continue
+                    }
                     app_server_event = app_server.next_event(), if listen_for_app_server_events && !app.reconnect.offline
+                        && !app.thread_delivery.is_blocked()
+                        && app.thread_delivery.primary_replay_thread.is_none()
+                        && (app.primary_thread_id.is_none() && app.pending_primary_events.len() < THREAD_EVENT_CHANNEL_CAPACITY
+                            || app.primary_thread_id.is_some() && app.pending_primary_events.is_empty())
                         && (matches!(app.app_server_target, AppServerTarget::Embedded) || !has_pending_app_events) => {
                         match app_server_event {
                             Some(event) => app.handle_app_server_event(&app_server, event).await,

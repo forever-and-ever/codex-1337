@@ -1,11 +1,12 @@
 //! Background app-server requests launched by the TUI app.
 //!
 //! This module owns fire-and-forget fetch/write helpers for MCP inventory, skills, plugins, rate
-//! limits, add-credit nudges, and feedback uploads. Results are routed back through `AppEvent` so
-//! the main event loop remains single-threaded.
+//! limits, add-credit nudges, and feedback uploads. UI effects return through `AppEvent`; feedback
+//! completions use bounded thread delivery. The main event loop remains single-threaded.
 
 use super::feedback_upload::fetch_feedback_upload;
 use super::plugin_mentions::fetch_plugin_mentions;
+use super::thread_delivery::LocalThreadCompletion;
 use super::*;
 use crate::app_event::ConnectorsSnapshot;
 use crate::app_info::app_info_from_api;
@@ -590,7 +591,7 @@ impl App {
         include_logs: bool,
     ) {
         let request_handle = app_server.request_handle();
-        let app_event_tx = self.app_event_tx.clone();
+        let completion_tx = self.thread_delivery.completion_tx.clone();
         let origin_thread_id = self.chat_widget.thread_id();
         let rollout_path = if include_logs {
             self.chat_widget.rollout_path()
@@ -612,12 +613,14 @@ impl App {
                 .await
                 .map(|response| response.thread_id)
                 .map_err(|err| err.to_string());
-            app_event_tx.send(AppEvent::FeedbackSubmitted {
-                origin_thread_id,
-                category,
-                include_logs,
-                result,
-            });
+            let _ = completion_tx
+                .send(LocalThreadCompletion::FeedbackSubmitted {
+                    origin_thread_id,
+                    category,
+                    include_logs,
+                    result,
+                })
+                .await;
         });
     }
 
@@ -645,9 +648,9 @@ impl App {
         thread_id: ThreadId,
         event: FeedbackThreadEvent,
     ) {
-        let (sender, store) = {
+        let store = {
             let channel = self.ensure_thread_channel(thread_id);
-            (channel.sender.clone(), Arc::clone(&channel.store))
+            Arc::clone(&channel.store)
         };
 
         let should_send = {
@@ -657,19 +660,8 @@ impl App {
         };
 
         if should_send {
-            match sender.try_send(ThreadBufferedEvent::FeedbackSubmission(event)) {
-                Ok(()) => {}
-                Err(TrySendError::Full(event)) => {
-                    tokio::spawn(async move {
-                        if let Err(err) = sender.send(event).await {
-                            tracing::warn!("thread {thread_id} event channel closed: {err}");
-                        }
-                    });
-                }
-                Err(TrySendError::Closed(_)) => {
-                    tracing::warn!("thread {thread_id} event channel closed");
-                }
-            }
+            self.admit_thread_event(thread_id, ThreadBufferedEvent::FeedbackSubmission(event))
+                .await;
         }
     }
 

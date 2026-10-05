@@ -5,13 +5,13 @@
 //! when the visible thread changes.
 
 use super::session_lifecycle::ThreadAttachPresentation;
+use super::thread_delivery::LocalThreadCompletion;
 use super::*;
 use crate::app_event::ThreadTitleDestination;
 use crate::chatwidget::ThreadInputStateRestoreMode;
 use codex_app_server_protocol::ThreadStartedNotification;
 use codex_app_server_protocol::TurnInterruptParams;
 use codex_app_server_protocol::TurnInterruptResponse;
-use codex_app_server_protocol::WarningNotification;
 
 // Leave time for side-thread cleanup and unsubscribe inside the two-second exit budget.
 const REALTIME_STOP_TIMEOUT: Duration = Duration::from_secs(/*secs*/ 1);
@@ -584,7 +584,7 @@ impl App {
             self.local_settings.codex_home.clone(),
             &self.local_settings.history,
         );
-        let app_event_tx = self.app_event_tx.clone();
+        let completion_tx = self.thread_delivery.completion_tx.clone();
         tokio::spawn(async move {
             let entry_opt = tokio::task::spawn_blocking(move || {
                 codex_message_history::lookup(log_id, offset, &history_config)
@@ -595,14 +595,16 @@ impl App {
                 None
             });
 
-            app_event_tx.send(AppEvent::ThreadHistoryEntryResponse {
-                thread_id,
-                event: HistoryLookupResponse::Entry {
-                    offset,
-                    log_id,
-                    entry: entry_opt.map(|entry| entry.text),
-                },
-            });
+            let _ = completion_tx
+                .send(LocalThreadCompletion::HistoryLookup {
+                    thread_id,
+                    event: HistoryLookupResponse::Entry {
+                        offset,
+                        log_id,
+                        entry: entry_opt.map(|entry| entry.text),
+                    },
+                })
+                .await;
         });
         Ok(())
     }
@@ -618,7 +620,7 @@ impl App {
             self.local_settings.codex_home.clone(),
             &self.local_settings.history,
         );
-        let app_event_tx = self.app_event_tx.clone();
+        let completion_tx = self.thread_delivery.completion_tx.clone();
         tokio::spawn(async move {
             let event = match tokio::task::spawn_blocking(move || {
                 codex_message_history::lookup_batch(log_id, cursor, &history_config)
@@ -651,7 +653,9 @@ impl App {
                 }
             };
 
-            app_event_tx.send(AppEvent::ThreadHistoryEntryResponse { thread_id, event });
+            let _ = completion_tx
+                .send(LocalThreadCompletion::HistoryLookup { thread_id, event })
+                .await;
         });
         Ok(())
     }
@@ -668,10 +672,11 @@ impl App {
                     .active_turn_id_for_thread(thread_id)
                     .await
                     .unwrap_or_default();
-                let (thread_event_tx, thread_event_store) = {
+                let thread_event_store = {
                     let channel = self.ensure_thread_channel(thread_id);
-                    (channel.sender.clone(), Arc::clone(&channel.store))
+                    Arc::clone(&channel.store)
                 };
+                let completion_tx = self.thread_delivery.completion_tx.clone();
                 self.reset_backtrack_state();
                 if !turn_id.is_empty() {
                     let mut store = thread_event_store.lock().await;
@@ -707,25 +712,13 @@ impl App {
                                     continue;
                                 }
                                 tracing::warn!(error = %error, "turn/interrupt failed in TUI");
-                                let notification =
-                                    ServerNotification::Warning(WarningNotification {
-                                        thread_id: Some(thread_id.to_string()),
+                                let _ = completion_tx
+                                    .send(LocalThreadCompletion::InterruptFailed {
+                                        thread_id,
+                                        store: thread_event_store,
                                         message: format!("Failed to interrupt turn: {error}"),
-                                    });
-                                let should_send = {
-                                    let mut store = thread_event_store.lock().await;
-                                    store.push_notification_ref(&notification);
-                                    store.active
-                                };
-                                if should_send
-                                    && let Err(error) = thread_event_tx
-                                        .send(ThreadBufferedEvent::Notification(Box::new(
-                                            notification,
-                                        )))
-                                        .await
-                                {
-                                    tracing::warn!(error = %error, "thread event channel closed");
-                                }
+                                    })
+                                    .await;
                                 break;
                             }
                         }
@@ -1268,9 +1261,9 @@ impl App {
         let is_turn_started = matches!(notification, ServerNotification::TurnStarted(_));
         let is_thread_closed = matches!(notification, ServerNotification::ThreadClosed(_));
         let notification_status_change = SideParentStatusChange::for_notification(&notification);
-        let (sender, store) = {
+        let store = {
             let channel = self.ensure_thread_channel(thread_id);
-            (channel.sender.clone(), Arc::clone(&channel.store))
+            Arc::clone(&channel.store)
         };
         let (mut notification, previous_pending_status, pending_status, turn_stopped) = {
             let mut guard = store.lock().await;
@@ -1364,19 +1357,11 @@ impl App {
         }
 
         if let Some(notification) = notification {
-            match sender.try_send(ThreadBufferedEvent::Notification(Box::new(notification))) {
-                Ok(()) => {}
-                Err(TrySendError::Full(event)) => {
-                    tokio::spawn(async move {
-                        if let Err(err) = sender.send(event).await {
-                            tracing::warn!("thread {thread_id} event channel closed: {err}");
-                        }
-                    });
-                }
-                Err(TrySendError::Closed(_)) => {
-                    tracing::warn!("thread {thread_id} event channel closed");
-                }
-            }
+            self.admit_thread_event(
+                thread_id,
+                ThreadBufferedEvent::Notification(Box::new(notification)),
+            )
+            .await;
         }
         if let Some(status) = pending_status {
             self.set_side_parent_status(thread_id, Some(status));
@@ -1473,9 +1458,9 @@ impl App {
         } else {
             None
         };
-        let (sender, store) = {
+        let store = {
             let channel = self.ensure_thread_channel(thread_id);
-            (channel.sender.clone(), Arc::clone(&channel.store))
+            Arc::clone(&channel.store)
         };
 
         let (should_send, pending_status) = {
@@ -1486,19 +1471,8 @@ impl App {
         let request_status = SideParentStatus::for_request(&request);
 
         if should_send {
-            match sender.try_send(ThreadBufferedEvent::Request(Box::new(request))) {
-                Ok(()) => {}
-                Err(TrySendError::Full(event)) => {
-                    tokio::spawn(async move {
-                        if let Err(err) = sender.send(event).await {
-                            tracing::warn!("thread {thread_id} event channel closed: {err}");
-                        }
-                    });
-                }
-                Err(TrySendError::Closed(_)) => {
-                    tracing::warn!("thread {thread_id} event channel closed");
-                }
-            }
+            self.admit_thread_event(thread_id, ThreadBufferedEvent::Request(Box::new(request)))
+                .await;
         } else if self.active_side_parent_thread_id().is_none()
             && let Some(request) = inactive_interactive_request
         {
@@ -1516,9 +1490,9 @@ impl App {
         thread_id: ThreadId,
         event: HistoryLookupResponse,
     ) -> Result<()> {
-        let (sender, store) = {
+        let store = {
             let channel = self.ensure_thread_channel(thread_id);
-            (channel.sender.clone(), Arc::clone(&channel.store))
+            Arc::clone(&channel.store)
         };
 
         let should_send = {
@@ -1534,19 +1508,8 @@ impl App {
         };
 
         if should_send {
-            match sender.try_send(ThreadBufferedEvent::HistoryEntryResponse(event)) {
-                Ok(()) => {}
-                Err(TrySendError::Full(event)) => {
-                    tokio::spawn(async move {
-                        if let Err(err) = sender.send(event).await {
-                            tracing::warn!("thread {thread_id} event channel closed: {err}");
-                        }
-                    });
-                }
-                Err(TrySendError::Closed(_)) => {
-                    tracing::warn!("thread {thread_id} event channel closed");
-                }
-            }
+            self.admit_thread_event(thread_id, ThreadBufferedEvent::HistoryEntryResponse(event))
+                .await;
         }
         Ok(())
     }
@@ -1660,38 +1623,14 @@ impl App {
             retained_assistant_captions,
         );
         self.restore_voice_owner_after_replay();
-        let pending = std::mem::take(&mut self.pending_primary_events);
-        for pending_event in pending {
-            match pending_event {
-                ThreadBufferedEvent::Notification(notification) => {
-                    self.enqueue_thread_notification(thread_id, *notification)
-                        .await?;
-                }
-                ThreadBufferedEvent::Request(request) => {
-                    self.enqueue_thread_request(thread_id, *request).await?;
-                }
-                ThreadBufferedEvent::HistoryEntryResponse(event) => {
-                    self.enqueue_thread_history_entry_response(thread_id, event)
-                        .await?;
-                }
-                ThreadBufferedEvent::FeedbackSubmission(event) => {
-                    self.enqueue_thread_feedback_event(thread_id, event).await;
-                }
-                ThreadBufferedEvent::FarmReceipt {
-                    thread_id,
-                    request_id,
-                } => {
-                    self.app_event_tx.send(AppEvent::RestoreFarmReceipt {
-                        thread_id,
-                        request_id,
-                    });
-                }
+        if self.pending_primary_events.is_empty() {
+            self.finish_primary_event_replay();
+        } else {
+            self.thread_delivery.primary_replay_thread = Some(thread_id);
+            if !self.thread_delivery.is_blocked() {
+                self.admit_next_primary_event().await?;
             }
         }
-        self.chat_widget
-            .set_initial_user_message_submit_suppressed(/*suppressed*/ false);
-        self.chat_widget.submit_initial_user_message_if_pending();
-        self.queue_farm_receipt_replay();
         Ok(())
     }
 

@@ -274,6 +274,7 @@ mod startup_prompts;
 mod startup_warnings;
 mod subagent_panel;
 mod thread_admission;
+mod thread_delivery;
 mod thread_event_buffer;
 mod thread_events;
 mod thread_goal_actions;
@@ -622,6 +623,7 @@ pub(crate) struct App {
     windows_sandbox: WindowsSandboxState,
 
     thread_event_channels: HashMap<ThreadId, ThreadEventChannel>,
+    thread_delivery: thread_delivery::ThreadDelivery,
     pending_realtime_speech_replay: HashMap<ThreadId, Vec<(String, ThreadItem)>>,
     pending_realtime_transcript_replay:
         HashMap<ThreadId, VecDeque<crate::chatwidget::RealtimeTranscriptRecord>>,
