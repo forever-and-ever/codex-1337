@@ -37,11 +37,12 @@ fn mutations_preserve_epic_and_bytes_block_collisions_and_stale_revisions() -> R
     let fixture = tempfile::tempdir().map_err(|error| error.to_string())?;
     let store = Store {
         root: fixture.path().join("issues"),
-        scope: "fixture".into(),
+        project: None,
     };
     let epic = store.root.join("bug/latency");
     fs::create_dir_all(&epic).map_err(|error| error.to_string())?;
     let key = JiraKey {
+        project: None,
         category: JiraCategory::Bug,
         slug: "slow-input".into(),
     };
@@ -63,6 +64,7 @@ fn mutations_preserve_epic_and_bytes_block_collisions_and_stale_revisions() -> R
             .contains("already exists")
     );
     let renamed = JiraKey {
+        project: None,
         category: JiraCategory::Feature,
         slug: "fast-input".into(),
     };
@@ -111,6 +113,7 @@ fn mutations_preserve_epic_and_bytes_block_collisions_and_stale_revisions() -> R
         body: body.into(),
     })?;
     let other = JiraKey {
+        project: None,
         category: JiraCategory::Feature,
         slug: key.slug,
     };
@@ -123,8 +126,8 @@ fn mutations_preserve_epic_and_bytes_block_collisions_and_stale_revisions() -> R
     assert!(store.catalog().unwrap_err().contains("Ambiguous duplicate"));
     let other_project = fixture.path().join("other-project");
     fs::create_dir(&other_project).map_err(|error| error.to_string())?;
-    let first = Store::open(fixture.path(), fixture.path(), /*expected_scope*/ None)?;
-    let changed = Store::open(&other_project, fixture.path(), Some(&first.scope));
+    let first = scope::Scope::open(fixture.path(), fixture.path(), /*expected*/ None)?;
+    let changed = scope::Scope::open(&other_project, fixture.path(), Some(&first.token));
     assert!(
         changed
             .err()
@@ -135,13 +138,112 @@ fn mutations_preserve_epic_and_bytes_block_collisions_and_stale_revisions() -> R
     Ok(())
 }
 
+#[test]
+fn recursive_namespaces_keep_paged_keys_and_mutations_in_their_project() -> Result<(), String> {
+    // Source checkouts need not exist. A scope scans only the Jira namespace tree,
+    // and identical issue slugs in different projects must never alias on mutation.
+    let fixture = tempfile::tempdir().map_err(|error| error.to_string())?;
+    let cwd = fixture.path().join("workspace");
+    fs::create_dir_all(cwd.join(".git")).map_err(|error| error.to_string())?;
+    let state = fixture.path().join("state");
+    let scope = scope::Scope::open(&cwd, &state, /*expected*/ None)?;
+    let default = scope.store(/*project*/ None)?;
+    let child = LegacyAppPathString::from_string(cwd.join("child").display().to_string());
+    let nested = LegacyAppPathString::from_string(cwd.join("child/nested").display().to_string());
+    let keys: Vec<_> = [None, Some(child.clone()), Some(nested)]
+        .into_iter()
+        .map(|project| JiraKey {
+            project,
+            category: JiraCategory::Bug,
+            slug: "same-slug".into(),
+        })
+        .collect();
+    for key in &keys {
+        scope
+            .store(key.project.as_ref())?
+            .execute(JiraAction::Save {
+                previous: None,
+                key: key.clone(),
+                body: "original".into(),
+            })?;
+    }
+    assert!(!cwd.join("child").exists());
+    // A textual prefix would include workspace-other; a component prefix must not.
+    let sibling = fixture.path().join("workspace-other");
+    fs::create_dir_all(sibling.join(".git")).map_err(|error| error.to_string())?;
+    let sibling_scope = scope::Scope::open(&sibling, &state, /*expected*/ None)?;
+    let sibling_store = sibling_scope.store(/*project*/ None)?;
+    sibling_store.execute(JiraAction::Save {
+        previous: None,
+        key: keys[0].clone(),
+        body: "unrelated".into(),
+    })?;
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(
+        sibling_store.root.parent().unwrap(),
+        default.root.parent().unwrap().join("alias"),
+    )
+    .map_err(|error| error.to_string())?;
+    assert_eq!(
+        scope.list(
+            /*cursor*/ None, /*limit*/ None, /*recursive*/ false
+        )?,
+        JiraResult::List {
+            data: vec![keys[0].clone()],
+            next_cursor: None,
+        }
+    );
+    let mut found = Vec::new();
+    let mut cursor = None;
+    loop {
+        let JiraResult::List { data, next_cursor } =
+            scope.list(cursor, Some(2), /*recursive*/ true)?
+        else {
+            unreachable!()
+        };
+        found.extend(data);
+        if next_cursor.is_none() {
+            break;
+        }
+        cursor = next_cursor;
+    }
+    assert_eq!(found, keys);
+    let child_store = scope.store(Some(&child))?;
+    let old = child_store.read(&keys[1])?;
+    assert!(
+        child_store
+            .execute(JiraAction::Save {
+                previous: Some(old.revision.clone()),
+                key: keys[0].clone(),
+                body: "wrong project".into()
+            })
+            .is_err()
+    );
+    child_store.execute(JiraAction::Delete {
+        revision: old.revision,
+    })?;
+    assert_eq!(default.read(&keys[0])?.body, "original");
+    assert_eq!(sibling_store.read(&keys[0])?.body, "unrelated");
+    assert!(
+        scope
+            .store(Some(&LegacyAppPathString::from_string(
+                sibling.display().to_string()
+            )))
+            .is_err()
+    );
+    let escape =
+        LegacyAppPathString::from_string(format!("{}/child/../../workspace-other", cwd.display()));
+    assert!(scope.store(Some(&escape)).is_err());
+    Ok(())
+}
+
 #[cfg(unix)]
 #[test]
 fn issue_symlinks_are_refused_without_touching_the_target() -> Result<(), String> {
     let fixture = tempfile::tempdir().map_err(|error| error.to_string())?;
     let store = Store {
         root: fixture.path().join("issues"),
-        scope: "fixture".into(),
+        project: None,
     };
     let dir = store.root.join("bug");
     fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
@@ -150,6 +252,7 @@ fn issue_symlinks_are_refused_without_touching_the_target() -> Result<(), String
     std::os::unix::fs::symlink(&target, dir.join("escape.md"))
         .map_err(|error| error.to_string())?;
     let key = JiraKey {
+        project: None,
         category: JiraCategory::Bug,
         slug: "escape".into(),
     };

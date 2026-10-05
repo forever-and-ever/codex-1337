@@ -14516,6 +14516,10 @@
                   "null"
                 ]
               },
+              "recursive": {
+                "description": "Include stored descendant projects. Older clients retain exact-project lists.",
+                "type": "boolean"
+              },
               "type": {
                 "enum": [
                   "list"
@@ -14633,6 +14637,17 @@
         "properties": {
           "category": {
             "$ref": "#/definitions/v2/JiraCategory"
+          },
+          "project": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/LegacyAppPathString"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Absolute stored project namespace; null selects the browsing cwd's default project."
           },
           "slug": {
             "type": "string"

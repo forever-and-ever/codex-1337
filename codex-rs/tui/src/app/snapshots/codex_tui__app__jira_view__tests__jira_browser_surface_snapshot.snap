@@ -9,7 +9,7 @@ expression: "states.join(\"\\n\\n---\\n\\n\")"
  Filter:
 
  › bug/slow-input
-   feature/new-panel
+   child · feature/new-panel
 
 
 
@@ -39,7 +39,7 @@ expression: "states.join(\"\\n\\n---\\n\\n\")"
  • Keep steering responsive.
  • Preserve unrelated work.
 
-   feature/new-panel
+   child · feature/new-panel
 
 
 
@@ -96,5 +96,30 @@ expression: "states.join(\"\\n\\n---\\n\\n\")"
 
 
  Issue bug/slow-input already exists; choose another slug
+
+ Tab field · Ctrl+S save · Esc back
+
+
+---
+
+
+ Jira · issue
+ /workspace/project/child
+
+   Category: feature
+
+ › Slug: new-panel
+
+   Body
+   Typing stalls when the worker is busy.
+
+   - Keep **steering** responsive.
+   - Preserve unrelated work.
+
+
+
+
+
+
 
  Tab field · Ctrl+S save · Esc back

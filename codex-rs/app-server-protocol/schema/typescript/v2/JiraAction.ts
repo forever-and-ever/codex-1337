@@ -4,7 +4,11 @@
 import type { JiraKey } from "./JiraKey";
 import type { JiraRevision } from "./JiraRevision";
 
-export type JiraAction = { "type": "list", cursor?: string | null, limit?: number | null, } | { "type": "read", key: JiraKey, } | { "type": "save",
+export type JiraAction = { "type": "list",
+/**
+ * Include stored descendant projects. Older clients retain exact-project lists.
+ */
+recursive?: boolean, cursor?: string | null, limit?: number | null, } | { "type": "read", key: JiraKey, } | { "type": "save",
 /**
  * Omitted for creation. For edits, includes the fetched version and immutable epic.
  */

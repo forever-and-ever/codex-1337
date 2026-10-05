@@ -93,6 +93,10 @@ impl JiraForm {
 
     pub(super) fn key(&self) -> JiraKey {
         JiraKey {
+            project: self
+                .previous
+                .as_ref()
+                .and_then(|issue| issue.revision.key.project.clone()),
             category: self.category.clone(),
             slug: self.slug.text().to_owned(),
         }
@@ -225,9 +229,25 @@ impl JiraBrowser {
         let filter = self.filter.text().to_lowercase();
         self.keys
             .iter()
-            .filter(|key| format!("{}/{}", key.category.as_str(), key.slug).contains(&filter))
+            .filter(|key| self.issue_label(key).to_lowercase().contains(&filter))
             .cloned()
             .collect()
+    }
+
+    fn issue_label(&self, key: &JiraKey) -> String {
+        let issue = format!("{}/{}", key.category.as_str(), key.slug);
+        match &key.project {
+            Some(project) => {
+                let path = std::path::Path::new(project.as_str());
+                let label = path
+                    .strip_prefix(&self.project)
+                    .unwrap_or(path)
+                    .display()
+                    .to_string();
+                format!("{} · {issue}", if label.is_empty() { "." } else { &label })
+            }
+            None => issue,
+        }
     }
 
     pub(super) fn select_neighbor(&mut self, delta: isize) {
@@ -289,11 +309,14 @@ impl JiraBrowser {
         } else {
             "Jira"
         };
-        Paragraph::new(vec![
-            Line::from(title.bold()),
-            Line::from(self.project.clone()).dim(),
-        ])
-        .render(Rect { height: 2, ..inner }, buf);
+        let project = self
+            .form
+            .as_ref()
+            .and_then(|form| form.previous.as_ref())
+            .and_then(|issue| issue.revision.key.project.as_ref())
+            .map_or(self.project.as_str(), |project| project.as_str());
+        Paragraph::new(vec![Line::from(title.bold()), Line::from(project).dim()])
+            .render(Rect { height: 2, ..inner }, buf);
         let status = if self.form.as_ref().is_some_and(|form| form.discard) {
             "Discard changes? Enter discard · Esc keep editing".to_owned()
         } else if let Some(error) = &self.error {
@@ -421,10 +444,9 @@ impl JiraBrowser {
             let selected = self.selected.as_ref() == Some(key);
             if index >= self.scroll && index < end {
                 let line = format!(
-                    "{} {}/{}",
+                    "{} {}",
                     if selected { "›" } else { " " },
-                    key.category.as_str(),
-                    key.slug
+                    self.issue_label(key)
                 );
                 let line = if selected {
                     Line::from(line.bold())

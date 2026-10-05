@@ -19,6 +19,10 @@
                 "null"
               ]
             },
+            "recursive": {
+              "description": "Include stored descendant projects. Older clients retain exact-project lists.",
+              "type": "boolean"
+            },
             "type": {
               "enum": [
                 "list"
@@ -122,6 +126,17 @@
         "category": {
           "$ref": "#/definitions/JiraCategory"
         },
+        "project": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LegacyAppPathString"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Absolute stored project namespace; null selects the browsing cwd's default project."
+        },
         "slug": {
           "type": "string"
         }
@@ -153,6 +168,9 @@
         "version"
       ],
       "type": "object"
+    },
+    "LegacyAppPathString": {
+      "type": "string"
     }
   },
   "description": "Server-local issue storage scoped by the persisted conversation cwd.",

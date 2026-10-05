@@ -28,6 +28,17 @@
         "category": {
           "$ref": "#/definitions/JiraCategory"
         },
+        "project": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LegacyAppPathString"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Absolute stored project namespace; null selects the browsing cwd's default project."
+        },
         "slug": {
           "type": "string"
         }

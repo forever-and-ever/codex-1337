@@ -2292,6 +2292,12 @@ class ListJiraAction(BaseModel):
     )
     cursor: str | None = None
     limit: Annotated[int | None, Field(ge=0)] = None
+    recursive: Annotated[
+        bool | None,
+        Field(
+            description="Include stored descendant projects. Older clients retain exact-project lists."
+        ),
+    ] = None
     type: Annotated[Literal["list"], Field(title="ListJiraActionType")]
 
 
@@ -2300,42 +2306,11 @@ class JiraCategory(Enum):
     feature = "feature"
 
 
-class JiraKey(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    category: JiraCategory
-    slug: str
-
-
-class ListJiraResult(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    data: list[JiraKey]
-    next_cursor: str | None = None
-    type: Annotated[Literal["list"], Field(title="ListJiraResultType")]
-
-
 class DeletedJiraResult(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
     type: Annotated[Literal["deleted"], Field(title="DeletedJiraResultType")]
-
-
-class JiraRevision(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    epic: str | None = None
-    key: JiraKey
-    version: Annotated[
-        str,
-        Field(
-            description="SHA-256 of the exact stored UTF-8 bytes; optimistic external-edit guard."
-        ),
-    ]
 
 
 class LegacyAppPathString(RootModel[str]):
@@ -8970,65 +8945,41 @@ class HooksListResponse(BaseModel):
     data: list[HooksListEntry]
 
 
-class ReadJiraAction(BaseModel):
+class JiraKey(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    key: JiraKey
-    type: Annotated[Literal["read"], Field(title="ReadJiraActionType")]
-
-
-class SaveJiraAction(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    body: str
-    key: JiraKey
-    previous: Annotated[
-        JiraRevision | None,
+    category: JiraCategory
+    project: Annotated[
+        LegacyAppPathString | None,
         Field(
-            description="Omitted for creation. For edits, includes the fetched version and immutable epic."
+            description="Absolute stored project namespace; null selects the browsing cwd's default project."
         ),
     ] = None
-    type: Annotated[Literal["save"], Field(title="SaveJiraActionType")]
+    slug: str
 
 
-class DeleteJiraAction(BaseModel):
+class ListJiraResult(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    revision: JiraRevision
-    type: Annotated[Literal["delete"], Field(title="DeleteJiraActionType")]
+    data: list[JiraKey]
+    next_cursor: str | None = None
+    type: Annotated[Literal["list"], Field(title="ListJiraResultType")]
 
 
-class JiraAction(RootModel[ListJiraAction | ReadJiraAction | SaveJiraAction | DeleteJiraAction]):
+class JiraRevision(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    root: ListJiraAction | ReadJiraAction | SaveJiraAction | DeleteJiraAction
-
-
-class JiraIssue(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    body: str
-    revision: JiraRevision
-
-
-class IssueJiraResult(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    issue: JiraIssue
-    type: Annotated[Literal["issue"], Field(title="IssueJiraResultType")]
-
-
-class JiraResult(RootModel[ListJiraResult | IssueJiraResult | DeletedJiraResult]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    root: ListJiraResult | IssueJiraResult | DeletedJiraResult
+    epic: str | None = None
+    key: JiraKey
+    version: Annotated[
+        str,
+        Field(
+            description="SHA-256 of the exact stored UTF-8 bytes; optimistic external-edit guard."
+        ),
+    ]
 
 
 class ListMcpServerStatusParams(BaseModel):
@@ -10572,37 +10523,6 @@ class WebSearchThreadItem(BaseModel):
     type: Annotated[Literal["webSearch"], Field(title="WebSearchThreadItemType")]
 
 
-class ThreadJiraParams(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    action: JiraAction
-    expected_scope: Annotated[
-        str | None,
-        Field(
-            alias="expectedScope",
-            description="Scope returned by the initial list. Required for all reads and mutations.",
-        ),
-    ] = None
-    thread_id: Annotated[str, Field(alias="threadId")]
-
-
-class ThreadJiraResponse(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    project: Annotated[
-        LegacyAppPathString,
-        Field(
-            description="The server's current conversation cwd, not the Git administrative/store identity."
-        ),
-    ]
-    result: JiraResult
-    scope: Annotated[
-        str, Field(description="Opaque binding to both current cwd and the issue-store identity.")
-    ]
-
-
 class ThreadListParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -11170,15 +11090,6 @@ class ThreadForkRequest(BaseModel):
     params: ThreadForkParams
 
 
-class ThreadJiraRequest(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    id: RequestId
-    method: Annotated[Literal["thread/jira"], Field(title="Thread/jiraRequestMethod")]
-    params: ThreadJiraParams
-
-
 class ThreadFarmRequest(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -11600,6 +11511,67 @@ class HookCompletedNotification(BaseModel):
     run: HookRunSummary
     thread_id: Annotated[str, Field(alias="threadId")]
     turn_id: Annotated[str | None, Field(alias="turnId")] = None
+
+
+class ReadJiraAction(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    key: JiraKey
+    type: Annotated[Literal["read"], Field(title="ReadJiraActionType")]
+
+
+class SaveJiraAction(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    body: str
+    key: JiraKey
+    previous: Annotated[
+        JiraRevision | None,
+        Field(
+            description="Omitted for creation. For edits, includes the fetched version and immutable epic."
+        ),
+    ] = None
+    type: Annotated[Literal["save"], Field(title="SaveJiraActionType")]
+
+
+class DeleteJiraAction(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    revision: JiraRevision
+    type: Annotated[Literal["delete"], Field(title="DeleteJiraActionType")]
+
+
+class JiraAction(RootModel[ListJiraAction | ReadJiraAction | SaveJiraAction | DeleteJiraAction]):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: ListJiraAction | ReadJiraAction | SaveJiraAction | DeleteJiraAction
+
+
+class JiraIssue(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    body: str
+    revision: JiraRevision
+
+
+class IssueJiraResult(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    issue: JiraIssue
+    type: Annotated[Literal["issue"], Field(title="IssueJiraResultType")]
+
+
+class JiraResult(RootModel[ListJiraResult | IssueJiraResult | DeletedJiraResult]):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: ListJiraResult | IssueJiraResult | DeletedJiraResult
 
 
 class ListMcpServerStatusResponse(BaseModel):
@@ -12093,6 +12065,37 @@ class FunctionCallOutputThreadItem(BaseModel):
     type: Annotated[Literal["functionCallOutput"], Field(title="FunctionCallOutputThreadItemType")]
 
 
+class ThreadJiraParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    action: JiraAction
+    expected_scope: Annotated[
+        str | None,
+        Field(
+            alias="expectedScope",
+            description="Scope returned by the initial list. Required for all reads and mutations.",
+        ),
+    ] = None
+    thread_id: Annotated[str, Field(alias="threadId")]
+
+
+class ThreadJiraResponse(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    project: Annotated[
+        LegacyAppPathString,
+        Field(
+            description="The server's current conversation cwd, not the Git administrative/store identity."
+        ),
+    ]
+    result: JiraResult
+    scope: Annotated[
+        str, Field(description="Opaque binding to both current cwd and the issue-store identity.")
+    ]
+
+
 class TurnCompletedThreadTimelineEntry(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -12130,6 +12133,15 @@ class AdditionalFileSystemPermissions(BaseModel):
         list[LegacyAppPathString] | None,
         Field(description="This will be removed in favor of `entries`."),
     ] = None
+
+
+class ThreadJiraRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[Literal["thread/jira"], Field(title="Thread/jiraRequestMethod")]
+    params: ThreadJiraParams
 
 
 class PluginShareSaveRequest(BaseModel):

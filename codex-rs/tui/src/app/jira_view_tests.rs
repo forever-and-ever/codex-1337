@@ -9,12 +9,16 @@ fn jira_browser_surface_snapshot() {
     browser.project = "/workspace/project".into();
     browser.loading = false;
     let key = JiraKey {
+        project: None,
         category: JiraCategory::Bug,
         slug: "slow-input".into(),
     };
     browser.keys = vec![
         key.clone(),
         JiraKey {
+            project: Some(codex_utils_path_uri::LegacyAppPathString::from_string(
+                "/workspace/project/child",
+            )),
             category: JiraCategory::Feature,
             slug: "new-panel".into(),
         },
@@ -23,13 +27,19 @@ fn jira_browser_surface_snapshot() {
     let mut terminal = Terminal::new(TestBackend::new(/*width*/ 110, /*height*/ 22)).unwrap();
     let mut states = Vec::new();
     let issue = JiraIssue { revision: JiraRevision { key, epic: Some("latency".into()), version: "version".into() }, body: "Typing stalls when the worker is busy.\n\n- Keep **steering** responsive.\n- Preserve unrelated work.".into() };
-    for state in 0..4 {
+    for state in 0..5 {
         match state {
             1 => browser.expanded = Some(issue.clone()),
             2 => browser.form = Some(JiraForm::new(Some(issue.clone()))),
             3 => {
                 browser.error =
                     Some("Issue bug/slow-input already exists; choose another slug".into())
+            }
+            4 => {
+                let mut child = issue.clone();
+                child.revision.key = browser.keys[1].clone();
+                browser.form = Some(JiraForm::new(Some(child)));
+                browser.error = None;
             }
             _ => {}
         }

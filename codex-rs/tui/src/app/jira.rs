@@ -37,6 +37,7 @@ impl App {
             server,
             JiraIntent::List,
             JiraAction::List {
+                recursive: true,
                 cursor: None,
                 limit: Some(100),
             },
@@ -265,6 +266,7 @@ impl App {
                         server,
                         JiraIntent::List,
                         JiraAction::List {
+                            recursive: true,
                             cursor: Some(cursor),
                             limit: Some(100),
                         },
@@ -362,9 +364,14 @@ impl App {
                 if !browser.keys.contains(&issue.revision.key) {
                     browser.keys.push(issue.revision.key.clone());
                 }
-                browser
-                    .keys
-                    .sort_by_key(|key| format!("{}/{}", key.category.as_str(), key.slug));
+                browser.keys.sort_by_key(|key| {
+                    (
+                        key.project
+                            .as_ref()
+                            .map(|project| project.as_str().to_owned()),
+                        format!("{}/{}", key.category.as_str(), key.slug),
+                    )
+                });
                 if !browser.filtered().contains(&issue.revision.key) {
                     browser.filter.set_text_clearing_elements("");
                 }
@@ -409,6 +416,12 @@ fn issue_work_order(
     issue: &JiraIssue,
     purpose: ReadPurpose,
 ) -> Result<String, String> {
+    let project = issue
+        .revision
+        .key
+        .project
+        .as_ref()
+        .map_or(project, |path| path.as_str());
     // A bounded user work order, not a contextual/system fragment. Refuse oversized
     // notes explicitly instead of truncating or embedding unbounded model input.
     let instruction = match purpose {

@@ -25,6 +25,8 @@ impl JiraCategory {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct JiraKey {
+    /// Absolute stored project namespace; null selects the browsing cwd's default project.
+    pub project: Option<LegacyAppPathString>,
     pub category: JiraCategory,
     pub slug: String,
 }
@@ -61,6 +63,9 @@ pub struct JiraRevision {
 )]
 pub enum JiraAction {
     List {
+        /// Include stored descendant projects. Older clients retain exact-project lists.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        recursive: bool,
         #[ts(optional = nullable)]
         cursor: Option<String>,
         #[ts(optional = nullable)]

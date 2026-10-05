@@ -17,13 +17,14 @@ use std::ffi::OsStr;
 use std::fs;
 use std::io::Read;
 use std::io::Write;
-use std::path::Component;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
 const MAX_BODY_BYTES: usize = 1024 * 1024;
 static MUTATIONS: Mutex<()> = Mutex::new(());
+
+mod scope;
 
 pub(crate) fn execute(
     cwd: &Path,
@@ -35,11 +36,25 @@ pub(crate) fn execute(
     if expected_scope.is_none() && !matches!(action, JiraAction::List { cursor: None, .. }) {
         return Err("Open the issue list before reading or changing issues".into());
     }
-    let store = Store::open(cwd, &state, expected_scope.as_deref())?;
-    let result = store.execute(action)?;
+    let scope = scope::Scope::open(cwd, &state, expected_scope.as_deref())?;
+    let result = match action {
+        JiraAction::List {
+            cursor,
+            limit,
+            recursive,
+        } => scope.list(cursor, limit, recursive)?,
+        action => {
+            let project = match &action {
+                JiraAction::Read { key } | JiraAction::Save { key, .. } => key.project.as_ref(),
+                JiraAction::Delete { revision } => revision.key.project.as_ref(),
+                JiraAction::List { .. } => unreachable!("lists are handled by the browsing scope"),
+            };
+            scope.store(project)?.execute(action)?
+        }
+    };
     Ok(ThreadJiraResponse {
-        project: LegacyAppPathString::from_string(cwd.display().to_string()),
-        scope: store.scope,
+        project: LegacyAppPathString::from_string(scope.cwd.display().to_string()),
+        scope: scope.token,
         result,
     })
 }
@@ -146,7 +161,7 @@ fn checked(path: &Path) -> Result<(), String> {
 
 struct Store {
     root: PathBuf,
-    scope: String,
+    project: Option<LegacyAppPathString>,
 }
 
 #[derive(Debug)]
@@ -157,32 +172,6 @@ struct IssueLocation {
 }
 
 impl Store {
-    fn open(cwd: &Path, state: &Path, expected_scope: Option<&str>) -> Result<Self, String> {
-        let identity = project_identity(cwd).map_err(|error| error.to_string())?;
-        let canonical_cwd = cwd.canonicalize().map_err(|error| error.to_string())?;
-        let mut hash = Sha256::new();
-        hash.update(canonical_cwd.as_os_str().as_encoded_bytes());
-        hash.update([0]);
-        hash.update(identity.as_os_str().as_encoded_bytes());
-        let scope = format!("{:x}", hash.finalize());
-        if expected_scope.is_some_and(|expected| expected != scope) {
-            return Err(
-                "Conversation project changed; nothing read or saved. Close and reopen /jira."
-                    .into(),
-            );
-        }
-        let mut root = state.join("jira_at_home/projects");
-        for component in identity.components() {
-            match component {
-                Component::Normal(part) => root.push(part),
-                Component::Prefix(prefix) => root.push(prefix.as_os_str()),
-                Component::RootDir | Component::CurDir | Component::ParentDir => {}
-            }
-        }
-        root.push("issues");
-        Ok(Self { root, scope })
-    }
-
     fn catalog(&self) -> Result<BTreeMap<String, IssueLocation>, String> {
         checked(&self.root)?;
         let mut issues = BTreeMap::new();
@@ -210,7 +199,7 @@ impl Store {
                     segment(&epic)?;
                     for child in fs::read_dir(&path).map_err(|error| error.to_string())? {
                         let child = child.map_err(|error| error.to_string())?;
-                        Self::catalog_file(
+                        self.catalog_file(
                             &mut issues,
                             &category,
                             child.path(),
@@ -218,7 +207,7 @@ impl Store {
                         )?;
                     }
                 } else {
-                    Self::catalog_file(&mut issues, &category, path, /*epic*/ None)?;
+                    self.catalog_file(&mut issues, &category, path, /*epic*/ None)?;
                 }
             }
         }
@@ -226,6 +215,7 @@ impl Store {
     }
 
     fn catalog_file(
+        &self,
         issues: &mut BTreeMap<String, IssueLocation>,
         category: &JiraCategory,
         path: PathBuf,
@@ -248,6 +238,7 @@ impl Store {
             .to_owned();
         segment(&slug)?;
         let key = JiraKey {
+            project: self.project.clone(),
             category: category.clone(),
             slug,
         };
@@ -264,6 +255,9 @@ impl Store {
     }
 
     fn read(&self, key: &JiraKey) -> Result<JiraIssue, String> {
+        if key.project != self.project {
+            return Err("Issue project cannot be changed by an edit".into());
+        }
         segment(&key.slug)?;
         let name = format!("{}/{}", key.category.as_str(), key.slug);
         let location = self
@@ -299,6 +293,9 @@ impl Store {
     }
 
     fn path(&self, key: &JiraKey, epic: Option<&str>) -> Result<PathBuf, String> {
+        if key.project != self.project {
+            return Err("Issue project cannot be changed by an edit".into());
+        }
         segment(&key.slug)?;
         let mut dir = self.root.join(key.category.as_str());
         if let Some(epic) = epic {
@@ -312,25 +309,7 @@ impl Store {
 
     fn execute(&self, action: JiraAction) -> Result<JiraResult, String> {
         match action {
-            JiraAction::List { cursor, limit } => {
-                let limit = limit
-                    .unwrap_or(/*default*/ 100)
-                    .clamp(/*min*/ 1, /*max*/ 100) as usize;
-                let all = self.catalog()?;
-                let mut remaining = all
-                    .into_iter()
-                    .filter(|(name, _)| cursor.as_ref().is_none_or(|cursor| name > cursor));
-                let page: Vec<_> = remaining.by_ref().take(limit).collect();
-                let next_cursor = if remaining.next().is_some() {
-                    page.last().map(|(name, _)| name.clone())
-                } else {
-                    None
-                };
-                Ok(JiraResult::List {
-                    data: page.into_iter().map(|(_, location)| location.key).collect(),
-                    next_cursor,
-                })
-            }
+            JiraAction::List { .. } => unreachable!("lists are handled by the browsing scope"),
             JiraAction::Read { key } => Ok(JiraResult::Issue {
                 issue: self.read(&key)?,
             }),
