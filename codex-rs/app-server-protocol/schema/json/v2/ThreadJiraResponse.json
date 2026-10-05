@@ -1,0 +1,155 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JiraCategory": {
+      "enum": [
+        "bug",
+        "feature"
+      ],
+      "type": "string"
+    },
+    "JiraIssue": {
+      "properties": {
+        "body": {
+          "type": "string"
+        },
+        "revision": {
+          "$ref": "#/definitions/JiraRevision"
+        }
+      },
+      "required": [
+        "body",
+        "revision"
+      ],
+      "type": "object"
+    },
+    "JiraKey": {
+      "properties": {
+        "category": {
+          "$ref": "#/definitions/JiraCategory"
+        },
+        "slug": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "category",
+        "slug"
+      ],
+      "type": "object"
+    },
+    "JiraResult": {
+      "oneOf": [
+        {
+          "properties": {
+            "data": {
+              "items": {
+                "$ref": "#/definitions/JiraKey"
+              },
+              "type": "array"
+            },
+            "next_cursor": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "enum": [
+                "list"
+              ],
+              "title": "ListJiraResultType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "data",
+            "type"
+          ],
+          "title": "ListJiraResult",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "issue": {
+              "$ref": "#/definitions/JiraIssue"
+            },
+            "type": {
+              "enum": [
+                "issue"
+              ],
+              "title": "IssueJiraResultType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "issue",
+            "type"
+          ],
+          "title": "IssueJiraResult",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "deleted"
+              ],
+              "title": "DeletedJiraResultType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "DeletedJiraResult",
+          "type": "object"
+        }
+      ]
+    },
+    "JiraRevision": {
+      "properties": {
+        "epic": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "key": {
+          "$ref": "#/definitions/JiraKey"
+        },
+        "version": {
+          "description": "SHA-256 of the exact stored UTF-8 bytes; optimistic external-edit guard.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "version"
+      ],
+      "type": "object"
+    },
+    "LegacyAppPathString": {
+      "type": "string"
+    }
+  },
+  "properties": {
+    "project": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/LegacyAppPathString"
+        }
+      ],
+      "description": "The server's current conversation cwd, not the Git administrative/store identity."
+    },
+    "result": {
+      "$ref": "#/definitions/JiraResult"
+    }
+  },
+  "required": [
+    "project",
+    "result"
+  ],
+  "title": "ThreadJiraResponse",
+  "type": "object"
+}

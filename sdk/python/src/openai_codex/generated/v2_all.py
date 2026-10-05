@@ -2286,6 +2286,58 @@ class InternalChatMessageMetadataPassthrough(BaseModel):
     turn_id: str | None = None
 
 
+class ListJiraAction(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    cursor: str | None = None
+    limit: Annotated[int | None, Field(ge=0)] = None
+    type: Annotated[Literal["list"], Field(title="ListJiraActionType")]
+
+
+class JiraCategory(Enum):
+    bug = "bug"
+    feature = "feature"
+
+
+class JiraKey(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    category: JiraCategory
+    slug: str
+
+
+class ListJiraResult(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    data: list[JiraKey]
+    next_cursor: str | None = None
+    type: Annotated[Literal["list"], Field(title="ListJiraResultType")]
+
+
+class DeletedJiraResult(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Annotated[Literal["deleted"], Field(title="DeletedJiraResultType")]
+
+
+class JiraRevision(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    epic: str | None = None
+    key: JiraKey
+    version: Annotated[
+        str,
+        Field(
+            description="SHA-256 of the exact stored UTF-8 bytes; optimistic external-edit guard."
+        ),
+    ]
+
+
 class LegacyAppPathString(RootModel[str]):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -8900,6 +8952,67 @@ class HooksListResponse(BaseModel):
     data: list[HooksListEntry]
 
 
+class ReadJiraAction(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    key: JiraKey
+    type: Annotated[Literal["read"], Field(title="ReadJiraActionType")]
+
+
+class SaveJiraAction(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    body: str
+    key: JiraKey
+    previous: Annotated[
+        JiraRevision | None,
+        Field(
+            description="Omitted for creation. For edits, includes the fetched version and immutable epic."
+        ),
+    ] = None
+    type: Annotated[Literal["save"], Field(title="SaveJiraActionType")]
+
+
+class DeleteJiraAction(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    revision: JiraRevision
+    type: Annotated[Literal["delete"], Field(title="DeleteJiraActionType")]
+
+
+class JiraAction(RootModel[ListJiraAction | ReadJiraAction | SaveJiraAction | DeleteJiraAction]):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: ListJiraAction | ReadJiraAction | SaveJiraAction | DeleteJiraAction
+
+
+class JiraIssue(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    body: str
+    revision: JiraRevision
+
+
+class IssueJiraResult(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    issue: JiraIssue
+    type: Annotated[Literal["issue"], Field(title="IssueJiraResultType")]
+
+
+class JiraResult(RootModel[ListJiraResult | IssueJiraResult | DeletedJiraResult]):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: ListJiraResult | IssueJiraResult | DeletedJiraResult
+
+
 class ListMcpServerStatusParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -10148,6 +10261,13 @@ class ThreadFarmParams(BaseModel):
             description="UUID identifying this submission across reconnects. Reuse only with identical input/mode.",
         ),
     ]
+    task_name: Annotated[
+        str | None,
+        Field(
+            alias="taskName",
+            description="Optional literal child-name stem. Numeric suffixes disambiguate occupied names.",
+        ),
+    ] = None
     thread_id: Annotated[str, Field(alias="threadId")]
 
 
@@ -10432,6 +10552,27 @@ class WebSearchThreadItem(BaseModel):
         ),
     ] = None
     type: Annotated[Literal["webSearch"], Field(title="WebSearchThreadItemType")]
+
+
+class ThreadJiraParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    action: JiraAction
+    thread_id: Annotated[str, Field(alias="threadId")]
+
+
+class ThreadJiraResponse(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    project: Annotated[
+        LegacyAppPathString,
+        Field(
+            description="The server's current conversation cwd, not the Git administrative/store identity."
+        ),
+    ]
+    result: JiraResult
 
 
 class ThreadListParams(BaseModel):
@@ -10999,6 +11140,15 @@ class ThreadForkRequest(BaseModel):
     id: RequestId
     method: Annotated[Literal["thread/fork"], Field(title="Thread/forkRequestMethod")]
     params: ThreadForkParams
+
+
+class ThreadJiraRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[Literal["thread/jira"], Field(title="Thread/jiraRequestMethod")]
+    params: ThreadJiraParams
 
 
 class ThreadFarmRequest(BaseModel):
@@ -12358,6 +12508,7 @@ class ClientRequest(
         | ThreadRetireRequest
         | ThreadDeleteRequest
         | ThreadUnsubscribeRequest
+        | ThreadJiraRequest
         | ThreadFarmRequest
         | ThreadNameSetRequest
         | ThreadGoalSetRequest
@@ -12476,6 +12627,7 @@ class ClientRequest(
         | ThreadRetireRequest
         | ThreadDeleteRequest
         | ThreadUnsubscribeRequest
+        | ThreadJiraRequest
         | ThreadFarmRequest
         | ThreadNameSetRequest
         | ThreadGoalSetRequest
