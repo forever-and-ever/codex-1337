@@ -4165,6 +4165,9 @@ class ResponseUsageMetadata(BaseModel):
     )
     amount: str | None = None
     metadata: Any | None = None
+    reported_reasoning_tokens: Annotated[
+        int | None, Field(alias="reportedReasoningTokens", ge=0)
+    ] = None
 
 
 class SearchResponsesApiWebSearchAction(BaseModel):
@@ -5555,6 +5558,21 @@ class ReasoningThreadItem(BaseModel):
     id: str
     summary: list[str] | None = []
     type: Annotated[Literal["reasoning"], Field(title="ReasoningThreadItemType")]
+
+
+class ThoughtThreadItem(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    completed_at_ms: Annotated[int, Field(alias="completedAtMs")]
+    content: list[str]
+    id: str
+    reported_reasoning_tokens: Annotated[
+        int | None, Field(alias="reportedReasoningTokens", ge=0)
+    ] = None
+    response_id: Annotated[str, Field(alias="responseId")]
+    summary: list[str]
+    type: Annotated[Literal["thought"], Field(title="ThoughtThreadItemType")]
 
 
 class McpToolCallThreadItem(BaseModel):
@@ -11906,6 +11924,7 @@ class ThreadItem(
         | ToolOutputTokensThreadItem
         | PlanThreadItem
         | ReasoningThreadItem
+        | ThoughtThreadItem
         | CommandExecutionThreadItem
         | FileChangeThreadItem
         | McpToolCallThreadItem
@@ -11933,6 +11952,7 @@ class ThreadItem(
         | ToolOutputTokensThreadItem
         | PlanThreadItem
         | ReasoningThreadItem
+        | ThoughtThreadItem
         | CommandExecutionThreadItem
         | FileChangeThreadItem
         | McpToolCallThreadItem

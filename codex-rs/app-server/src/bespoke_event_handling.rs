@@ -1176,6 +1176,24 @@ pub(crate) async fn apply_bespoke_event_handling(
             outgoing.send_server_notification(notification).await;
         }
         EventMsg::RawResponseCompleted(raw_response_completed_event) => {
+            if let Some(item) = codex_app_server_protocol::ThreadItem::from_response_thought(
+                &raw_response_completed_event,
+            ) && let Some(thought) = &raw_response_completed_event.thought
+            {
+                outgoing
+                    .send_server_notification(ServerNotification::ItemCompleted(
+                        codex_app_server_protocol::ItemCompletedNotification {
+                            item,
+                            thread_id: conversation_id.to_string(),
+                            turn_id: event_turn_id.clone(),
+                            completed_at_ms: thought.completed_at_ms,
+                        },
+                    ))
+                    .await;
+            }
+            if !thread_state.lock().await.experimental_raw_events {
+                return;
+            }
             let notification = RawResponseCompletedNotification {
                 thread_id: conversation_id.to_string(),
                 turn_id: event_turn_id,

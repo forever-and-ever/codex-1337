@@ -19,8 +19,61 @@ use pretty_assertions::assert_eq;
 use std::collections::BTreeMap;
 
 use super::*;
+use crate::ThreadHistoryBuilder;
 use crate::protocol::v2::ThreadItem;
 use crate::protocol::v2::TurnError;
+
+#[test]
+fn thought_completion_is_self_contained_and_response_scoped() {
+    let event =
+        EventMsg::RawResponseCompleted(codex_protocol::protocol::RawResponseCompletedEvent {
+            response_id: "response-1".into(),
+            token_usage: None,
+            usage_metadata: Some(codex_protocol::ResponseUsageMetadata {
+                reported_reasoning_tokens: Some(1300),
+                ..Default::default()
+            }),
+            thought: Some(codex_protocol::ResponseThought {
+                turn_id: "turn-1".into(),
+                completed_at_ms: 12345,
+                summary: vec!["First block".into(), "Second block".into()],
+                content: Vec::new(),
+            }),
+        });
+    // An independent page needs no preceding reasoning item or turn-start event.
+    let mut builder = ThreadHistoryBuilder::new();
+    builder.handle_event(&event);
+    builder.handle_event(&event);
+    let mut next = event.clone();
+    if let EventMsg::RawResponseCompleted(completed) = &mut next {
+        completed.response_id = "response-2".into();
+        completed.usage_metadata = None;
+        completed.thought.as_mut().unwrap().summary.clear();
+    }
+    builder.handle_event(&next);
+    let turns = builder.finish();
+    assert_eq!(
+        turns[0].items,
+        vec![
+            ThreadItem::Thought {
+                id: "thought:turn-1:response-1".into(),
+                response_id: "response-1".into(),
+                completed_at_ms: 12345,
+                summary: vec!["First block".into(), "Second block".into()],
+                content: Vec::new(),
+                reported_reasoning_tokens: Some(1300),
+            },
+            ThreadItem::Thought {
+                id: "thought:turn-1:response-2".into(),
+                response_id: "response-2".into(),
+                completed_at_ms: 12345,
+                summary: Vec::new(),
+                content: Vec::new(),
+                reported_reasoning_tokens: None,
+            },
+        ]
+    );
+}
 
 #[test]
 fn projects_turn_lifecycle_without_prior_builder_state() {

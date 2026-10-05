@@ -100,7 +100,7 @@ fn shell_rows_share_output_but_have_independent_source_folds() {
                 header: parts.header,
                 activity: parts.lines,
                 auxiliary: Vec::new(),
-                tool_output_tokens: Some(2352),
+                header_tokens: Some(2352),
                 disclosure: parts.output,
                 controls: parts.controls,
             })

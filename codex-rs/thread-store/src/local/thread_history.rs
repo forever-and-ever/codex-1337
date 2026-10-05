@@ -529,6 +529,7 @@ WHERE thread_id = ?
             | ThreadItem::CodeMode(_)
             | ThreadItem::Plan { .. }
             | ThreadItem::Reasoning { .. }
+            | ThreadItem::Thought { .. }
             | ThreadItem::CommandExecution { .. }
             | ThreadItem::FileChange { .. }
             | ThreadItem::McpToolCall { .. }

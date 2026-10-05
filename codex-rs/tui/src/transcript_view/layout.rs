@@ -23,7 +23,7 @@ pub(crate) struct ActivityTranscriptLines {
     pub(crate) activity: Vec<HyperlinkLine>,
     pub(crate) header: Option<crate::history_cell::activity_parts::ActivityHeader>,
     pub(crate) auxiliary: Vec<HyperlinkLine>,
-    pub(crate) tool_output_tokens: Option<u64>,
+    pub(crate) header_tokens: Option<u64>,
     pub(crate) disclosure: Option<ActivityDisclosure>,
     pub(crate) controls: Vec<crate::history_cell::activity_parts::PartControl>,
 }
@@ -46,7 +46,7 @@ pub(super) fn activity_layout(
     };
     let heading_width = lines.header.map_or(0, |header| header.columns);
     let mut estimate = lines
-        .tool_output_tokens
+        .header_tokens
         .map(crate::history_cell::activity_parts::token_label)
         .filter(|label| {
             lines.header.is_some()
@@ -72,7 +72,12 @@ pub(super) fn activity_layout(
                 usize::from(crate::transcript_geometry::GUTTER_COLUMNS) + estimate_width,
             );
             if header.width() > available {
-                lines.disclosure.get_or_insert(ActivityDisclosure::Generic);
+                if lines
+                    .header
+                    .is_none_or(|header| header.expand_on_truncation)
+                {
+                    lines.disclosure.get_or_insert(ActivityDisclosure::Generic);
+                }
                 let prefix_bytes = header
                     .source
                     .as_ref()
@@ -240,7 +245,9 @@ impl TranscriptView {
         let disclosure = !detailed && mode == HistoryRenderMode::Rich && !ids.is_empty();
         let expanded = disclosure && self.disclosure.is_expanded(&ids);
         let output_mode = self.disclosure.output_mode(&ids);
-        let tool_output_tokens = self.activity_output_tokens(&ids);
+        let header_tokens = cell
+            .activity_header_tokens()
+            .or_else(|| self.activity_output_tokens(&ids));
         let continued_edit = disclosure
             && !cell.is_stream_continuation()
             && ToolOutputGroup::is_patch(cell.as_ref())
@@ -268,7 +275,7 @@ impl TranscriptView {
         Some(self.cache.get(cell, width, presentation, || {
             let content_width = crate::transcript_geometry::content_width(width, mode);
             if disclosure {
-                let reserve = tool_output_tokens
+                let reserve = header_tokens
                     .map(crate::history_cell::activity_parts::token_label)
                     .map_or(0, |label| label.len());
                 if let Some(parts) =
@@ -282,7 +289,7 @@ impl TranscriptView {
                             activity: parts.lines,
                             header: parts.header,
                             auxiliary: Vec::new(),
-                            tool_output_tokens,
+                            header_tokens,
                             disclosure: parts.output,
                             controls: parts.controls,
                         },
@@ -314,7 +321,7 @@ impl TranscriptView {
                             cell.activity_header()
                         },
                         auxiliary: Vec::new(),
-                        tool_output_tokens,
+                        header_tokens,
                         disclosure,
                         controls: Vec::new(),
                     },

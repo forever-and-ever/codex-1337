@@ -2,6 +2,55 @@ use super::*;
 use pretty_assertions::assert_eq;
 
 #[test]
+fn optional_thinking_breakdown_does_not_corrupt_completion_accounting() {
+    // Missing/invalid observability must neither become a fabricated zero nor
+    // make a successful response unusable. Iterations do not define this field.
+    for (details, reported) in [
+        (json!(null), None),
+        (json!({}), None),
+        (json!({"thinking_tokens": "8"}), None),
+        (json!({"thinking_tokens": -1}), None),
+        (json!({"thinking_tokens": 11}), None),
+        (json!({"thinking_tokens": 0}), Some(0)),
+        (json!({"thinking_tokens": 8}), Some(8)),
+    ] {
+        let mut decoder = Decoder::new(&[]);
+        let mut final_usage = json!({"output_tokens":10});
+        if !details.is_null() {
+            final_usage["output_tokens_details"] = details;
+        }
+        for frame in [
+            json!({"type":"message_start","message":{"id":"msg","usage":{"input_tokens":2,"output_tokens":0,"output_tokens_details":{"thinking_tokens":0}}}}),
+            json!({"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":final_usage}),
+        ] {
+            decoder.decode(&frame.to_string()).unwrap();
+        }
+        let events = decoder
+            .decode(&json!({"type":"message_stop"}).to_string())
+            .unwrap();
+        let [
+            ResponseEvent::Completed {
+                token_usage: Some(usage),
+                usage_metadata: Some(metadata),
+                ..
+            },
+        ] = events.as_slice()
+        else {
+            panic!("expected completed response")
+        };
+        assert_eq!(
+            (
+                usage.input_tokens,
+                usage.output_tokens,
+                usage.total_tokens,
+                metadata.reported_reasoning_tokens
+            ),
+            (2, 10, 12, reported)
+        );
+    }
+}
+
+#[test]
 fn interleaved_tools_signed_blocks_and_cumulative_usage() {
     // Tool fragments interleave, signatures append, and iterative usage replaces
     // summary counts. Losing any of these corrupts the next request's history.
@@ -45,7 +94,7 @@ fn interleaved_tools_signed_blocks_and_cumulative_usage() {
         json!({"type":"content_block_start","index":3,"content_block":{"type":"compaction","content":"Exact checkpoint. ","signature":""}}),
         json!({"type":"content_block_delta","index":3,"delta":{"type":"signature_delta","signature":"signed/=="}}),
         json!({"type":"content_block_stop","index":3}),
-        json!({"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"input_tokens":0,"output_tokens":0,"iterations":[{"input_tokens":42,"output_tokens":19,"cache_creation_input_tokens":7,"cache_read_input_tokens":11},{"input_tokens":3,"output_tokens":2,"cache_creation_input_tokens":5,"cache_read_input_tokens":13}]}}),
+        json!({"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"input_tokens":42,"output_tokens":19,"output_tokens_details":{"thinking_tokens":13},"iterations":[{"input_tokens":42,"output_tokens":19,"cache_creation_input_tokens":7,"cache_read_input_tokens":11},{"input_tokens":3,"output_tokens":2,"cache_creation_input_tokens":5,"cache_read_input_tokens":13}]}}),
         json!({"type":"message_stop"}),
     ];
     let mut decoder = Decoder::new(&tools);
@@ -64,9 +113,11 @@ fn interleaved_tools_signed_blocks_and_cumulative_usage() {
                 ResponseEvent::Completed {
                     token_usage,
                     end_turn,
+                    usage_metadata,
                     ..
                 } => {
                     assert_eq!(end_turn, Some(false));
+                    assert_eq!(usage_metadata.unwrap().reported_reasoning_tokens, Some(13));
                     usage = token_usage;
                 }
                 _ => {}
@@ -96,7 +147,7 @@ fn interleaved_tools_signed_blocks_and_cumulative_usage() {
             cached_input_tokens: 24,
             cache_write_input_tokens: 12,
             output_tokens: 21,
-            reasoning_output_tokens: 0,
+            reasoning_output_tokens: 13,
             total_tokens: 102,
             codex_rollout_budget_units: None,
         }

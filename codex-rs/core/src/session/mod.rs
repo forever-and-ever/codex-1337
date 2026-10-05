@@ -1,3 +1,4 @@
+mod response_thought;
 pub(crate) mod startup;
 
 use std::borrow::Cow;
@@ -4790,6 +4791,7 @@ impl Session {
         response_id: &str,
         usage: Option<&TokenUsage>,
         usage_metadata: Option<&ResponseUsageMetadata>,
+        thought: Option<codex_protocol::ResponseThought>,
     ) {
         self.send_event(
             turn_context,
@@ -4797,6 +4799,7 @@ impl Session {
                 response_id: response_id.to_string(),
                 token_usage: usage.cloned(),
                 usage_metadata: usage_metadata.cloned(),
+                thought,
             }),
         )
         .await;

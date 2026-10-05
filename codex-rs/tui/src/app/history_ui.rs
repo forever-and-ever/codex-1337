@@ -27,6 +27,15 @@ impl App {
     }
 
     fn insert_retained_history_cell(&mut self, tui: &mut tui::Tui, cell: Arc<dyn HistoryCell>) {
+        if let Some(thought) = cell.as_any().downcast_ref::<history_cell::ThoughtCell>()
+            && self.transcript_cells.iter().any(|cell| {
+                cell.as_any()
+                    .downcast_ref::<history_cell::ThoughtCell>()
+                    .is_some_and(|existing| existing.id == thought.id)
+            })
+        {
+            return;
+        }
         if let Some(members) = history_cell::split_code_mode_members(&self.transcript_cells, &cell)
         {
             for member in members {

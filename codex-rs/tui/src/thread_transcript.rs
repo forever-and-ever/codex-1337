@@ -141,6 +141,16 @@ pub(crate) fn thread_items_to_transcript_cells(
     let inline_visualization_context = config.and_then(|config| {
         thread_id.and_then(|thread_id| InlineVisualizationContext::from_config(config, thread_id))
     });
+    let thought_visibility = if config.is_some_and(|config| config.hide_agent_reasoning) {
+        crate::history_cell::ThoughtTextVisibility::Hidden
+    } else {
+        match raw_reasoning_visibility {
+            RawReasoningVisibility::Hidden => crate::history_cell::ThoughtTextVisibility::Summary,
+            RawReasoningVisibility::Visible => {
+                crate::history_cell::ThoughtTextVisibility::SummaryAndContent
+            }
+        }
+    };
     let mut cells: TranscriptCells = Vec::new();
     let mut pending: Option<crate::history_cell::ComputerActivityCell> = None;
     for item in items {
@@ -160,6 +170,7 @@ pub(crate) fn thread_items_to_transcript_cells(
                 cwd,
                 raw_reasoning_visibility,
                 inline_visualization_context.clone(),
+                thought_visibility,
             ) {
                 group.group.push_detail(cell);
             }
@@ -205,10 +216,22 @@ pub(crate) fn thread_items_to_transcript_cells(
                     cwd,
                     raw_reasoning_visibility,
                     inline_visualization_context.clone(),
+                    thought_visibility,
                 );
                 if !projected.is_empty() {
                     flush_computer(&mut pending, &mut cells);
                     for cell in projected {
+                        if let Some(thought) = cell
+                            .as_any()
+                            .downcast_ref::<crate::history_cell::ThoughtCell>()
+                            && cells.iter().any(|cell| {
+                                cell.as_any()
+                                    .downcast_ref::<crate::history_cell::ThoughtCell>()
+                                    .is_some_and(|existing| existing.id == thought.id)
+                            })
+                        {
+                            continue;
+                        }
                         if let Some((range, replacements)) =
                             crate::history_cell::reconcile_code_mode(&cells, &cell).or_else(|| {
                                 crate::history_cell::ToolOutputGroup::attach(
@@ -236,9 +259,13 @@ fn item_to_cells(
     cwd: &AbsolutePathBuf,
     raw_reasoning_visibility: RawReasoningVisibility,
     inline_visualization_context: Option<InlineVisualizationContext>,
+    thought_visibility: crate::history_cell::ThoughtTextVisibility,
 ) -> TranscriptCells {
     let mut cells: TranscriptCells = Vec::new();
     match item {
+        item @ ThreadItem::Thought { .. } => cells.push(Arc::new(
+            crate::history_cell::ThoughtCell::from_item(item, cwd.as_path(), thought_visibility),
+        )),
         ThreadItem::UserMessage {
             id,
             client_id,

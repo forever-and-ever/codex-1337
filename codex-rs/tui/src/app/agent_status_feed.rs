@@ -138,7 +138,7 @@ impl AgentStatusThreadPreview {
 
 fn activity_summary(item: &ThreadItem) -> Option<String> {
     let summary = match item {
-        ThreadItem::CodeMode(_) => return None,
+        ThreadItem::CodeMode(_) | ThreadItem::Thought { .. } => return None,
         ThreadItem::AgentMessage { text, .. } | ThreadItem::Plan { text, .. } => text,
         ThreadItem::Reasoning { summary, .. } => summary.last()?,
         ThreadItem::CommandExecution { command, .. } => {

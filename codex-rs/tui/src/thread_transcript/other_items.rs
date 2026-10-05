@@ -152,6 +152,7 @@ pub(super) fn cells(item: ThreadItem, cwd: &AbsolutePathBuf) -> TranscriptCells 
         | ThreadItem::ToolOutputTokens { .. }
         | ThreadItem::Plan { .. }
         | ThreadItem::Reasoning { .. }
+        | ThreadItem::Thought { .. }
         | ThreadItem::CommandExecution { .. }
         | ThreadItem::McpToolCall { .. }
         | ThreadItem::Sleep(_) => {}

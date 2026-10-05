@@ -1929,14 +1929,18 @@ pub struct RawResponseItemEvent {
     pub item: ResponseItem,
 }
 
-/// Exact usage and metadata reported by one upstream Responses API completion.
+/// Usage and metadata reported by one upstream model response completion.
 ///
-/// Unlike TokenCountEvent, this is not accumulated, estimated, or replayed.
+/// Unlike TokenCountEvent, this is not accumulated or estimated. Reasoning-bearing
+/// completions retain their human-transcript descriptor for replay.
 #[derive(Debug, Clone, Deserialize, Serialize, TS, JsonSchema)]
 pub struct RawResponseCompletedEvent {
     pub response_id: String,
     pub token_usage: Option<TokenUsage>,
     pub usage_metadata: Option<crate::ResponseUsageMetadata>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub thought: Option<crate::response_usage::ResponseThought>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, TS, JsonSchema)]

@@ -323,6 +323,7 @@ pub(super) async fn wait(
                                 | ThreadItem::AgentMessage { .. }
                                 | ThreadItem::Plan { .. }
                                 | ThreadItem::Reasoning { .. }
+                                | ThreadItem::Thought { .. }
                                 | ThreadItem::SubAgentActivity { .. }
                                 | ThreadItem::ImageView { .. }
                                 | ThreadItem::EnteredReviewMode { .. }

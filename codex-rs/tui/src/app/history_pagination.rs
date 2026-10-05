@@ -259,6 +259,16 @@ impl App {
                 cells.push(Arc::new(completion));
             }
         }
+        cells.retain(|cell| {
+            let Some(thought) = cell.as_any().downcast_ref::<history_cell::ThoughtCell>() else {
+                return true;
+            };
+            !self.transcript_cells.iter().any(|cell| {
+                cell.as_any()
+                    .downcast_ref::<history_cell::ThoughtCell>()
+                    .is_some_and(|existing| existing.id == thought.id)
+            })
+        });
         cells
     }
 

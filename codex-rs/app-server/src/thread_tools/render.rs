@@ -34,7 +34,7 @@ pub(super) fn turn_summary(turn: &Turn, include_outputs: bool, output_chars: usi
         .iter()
         .rev()
         .filter_map(|item| Some(match item {
-            ThreadItem::ToolOutputTokens { .. } | ThreadItem::CodeMode(_) => return None,
+            ThreadItem::ToolOutputTokens { .. } | ThreadItem::CodeMode(_) | ThreadItem::Thought { .. } => return None,
             ThreadItem::UserMessage { id, content, .. } => json!({
                 "type": "userMessage",
                 "id": id,

@@ -350,6 +350,7 @@ async fn thread_compact_start_triggers_compaction_and_returns_empty_response() -
             turn_id: started.turn_id,
             response_id: "r1".to_string(),
             usage_metadata: Some(ResponseUsageMetadata {
+                reported_reasoning_tokens: None,
                 amount: Some("0.125".to_string()),
                 metadata: Some(expected_metadata),
             }),
