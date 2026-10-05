@@ -37,6 +37,7 @@ impl App {
             && !matches!(
                 &event,
                 AppEvent::OpenDaemonMenu
+                    | AppEvent::JiraFinished { .. }
                     | AppEvent::FarmFinished { .. }
                     | AppEvent::RestoreFarmReceipt { .. }
                     | AppEvent::OpenWarnings
@@ -2702,6 +2703,8 @@ impl App {
             AppEvent::Farm { thread_id, mode, submission } => {
                 self.start_farm(tui, app_server, thread_id, mode, submission).await;
             }
+            AppEvent::OpenJira => self.open_jira(tui, app_server).await,
+            AppEvent::JiraFinished { token, result } => self.finish_jira(tui, app_server, token, result).await,
             AppEvent::FarmFinished { request_id, result } => {
                 self.finish_farm(tui, request_id, result).await;
             }

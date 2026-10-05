@@ -46,6 +46,7 @@ impl App {
             && self.farm.saved.is_none()
             && self.queued_messages.mutations.is_empty()
             && self.overlay.is_none()
+            && self.jira.is_none()
             && self.temporary_structured_requests.is_empty()
             && self.pending_server_profiles.is_empty()
             && self.account_ui.selection_request.is_none()

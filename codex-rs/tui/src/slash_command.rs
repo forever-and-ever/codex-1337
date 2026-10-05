@@ -35,6 +35,7 @@ pub enum SlashCommand {
     Resume,
     Fork,
     Farm,
+    Jira,
     #[strum(serialize = "farm_fresh")]
     FarmFresh,
     Worktree,
@@ -106,6 +107,7 @@ impl SlashCommand {
             SlashCommand::Clear => "clear the terminal and start a new chat",
             SlashCommand::Fork => "fork the current chat",
             SlashCommand::Farm => "delegate a task with the current conversation",
+            SlashCommand::Jira => "browse this project's issues",
             SlashCommand::FarmFresh => "delegate a task without conversation history",
             SlashCommand::Worktree => "start or continue a conversation in a new worktree",
             SlashCommand::App => "continue this session in the Desktop app",
@@ -311,7 +313,7 @@ impl SlashCommand {
             | SlashCommand::Exit
             | SlashCommand::Side
             | SlashCommand::Btw => true,
-            SlashCommand::Farm | SlashCommand::FarmFresh => true,
+            SlashCommand::Farm | SlashCommand::FarmFresh | SlashCommand::Jira => true,
             SlashCommand::Rollout => true,
             SlashCommand::TestApproval => true,
             SlashCommand::Agents | SlashCommand::MultiAgents => true,

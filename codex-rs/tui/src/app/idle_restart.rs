@@ -20,6 +20,7 @@ impl App {
             && self.current_displayed_thread_id() == self.primary_thread_id
             && self.overlay.is_none()
             && self.chat_widget.ready_for_idle_restart()
+            && self.jira.is_none()
             && self.pending_primary_events.is_empty()
             && self.pending_app_server_requests.is_empty()
             && self.temporary_structured_requests.is_empty()
