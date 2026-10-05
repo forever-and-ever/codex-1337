@@ -1,4 +1,5 @@
 mod anthropic_auth;
+mod anthropic_quota;
 mod auth;
 mod bearer_auth_provider;
 mod claude_catalog;
@@ -17,6 +18,9 @@ pub use workspace_routing::WorkspaceRoutingContext;
 
 pub use anthropic_auth::AnthropicAuthContext;
 pub use anthropic_auth::AnthropicRequestAuth;
+pub use anthropic_quota::AnthropicQuota;
+pub use anthropic_quota::AnthropicQuotaError;
+pub use anthropic_quota::read_anthropic_quota;
 pub use auth::AgentIdentitySessionFallback;
 pub use auth::ProviderAuthScope;
 pub use auth::ResolvedProviderAuth;

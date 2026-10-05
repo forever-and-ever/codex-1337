@@ -14,6 +14,7 @@ use codex_http_client::ClientRouteClass;
 use codex_http_client::HttpClientFactory;
 use codex_http_client::OutboundProxyPolicy;
 use codex_http_client::RequestBuilder;
+use codex_http_client::RetryAfter;
 use codex_http_client::RouteAwareClientPool;
 use codex_http_client::RouteAwareRequestError;
 use codex_login::CodexAuth;
@@ -60,6 +61,7 @@ pub enum RequestError {
         status: StatusCode,
         content_type: String,
         body: String,
+        retry_after: Option<RetryAfter>,
     },
     Other(anyhow::Error),
 }
@@ -87,6 +89,7 @@ impl fmt::Display for RequestError {
                 status,
                 content_type,
                 body,
+                ..
             } => write!(
                 f,
                 "{method} {url} failed: {status}; content-type={content_type}; body={body}"
@@ -321,6 +324,7 @@ impl Client {
     ) -> std::result::Result<(String, String), RequestError> {
         let res = req.send().await?;
         let status = res.status();
+        let retry_after = RetryAfter::from_headers(res.headers());
         let content_type = res
             .headers()
             .get(CONTENT_TYPE)
@@ -335,6 +339,7 @@ impl Client {
                 status,
                 content_type,
                 body,
+                retry_after,
             });
         }
         Ok((body, content_type))
