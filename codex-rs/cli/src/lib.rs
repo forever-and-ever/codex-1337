@@ -26,6 +26,7 @@ pub use login::run_login_with_chatgpt;
 pub use login::run_login_with_device_code;
 pub use login::run_login_with_device_code_fallback_to_browser;
 pub use login::run_logout;
+pub use quota::QuotaCommand;
 pub use quota::read_account_quotas;
 
 #[derive(Debug, Default, Args)]
