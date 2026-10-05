@@ -449,6 +449,9 @@ impl AgentMessageCell {
 }
 
 impl HistoryCell for AgentMessageCell {
+    fn transcript_timestamp(&self) -> Option<HistoryTimestamp> {
+        self.is_first_line.then_some(self.timestamp).flatten()
+    }
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         visible_lines(self.display_hyperlink_lines(width))
     }
@@ -456,10 +459,8 @@ impl HistoryCell for AgentMessageCell {
     fn display_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         let mut wrapped = Vec::new();
         for (index, line) in self.lines.iter().enumerate() {
-            let initial_indent =
-                agent_prefix(self.timestamp, index == 0 && self.is_first_line).into();
-            let mut subsequent_indent =
-                Line::from(agent_prefix(self.timestamp, /*first*/ false));
+            let initial_indent = agent_prefix(index == 0 && self.is_first_line).into();
+            let mut subsequent_indent = Line::from(agent_prefix(/*first*/ false));
             subsequent_indent
                 .spans
                 .extend(crate::insert_history::leading_whitespace_prefix(&line.line).spans);
@@ -582,8 +583,8 @@ impl AgentMarkdownCell {
         list_spacing: crate::markdown_render::ListSpacing,
     ) -> Vec<HyperlinkLine> {
         let render = || {
-            let initial_prefix = agent_prefix(self.timestamp, /*first*/ true);
-            let subsequent_prefix = agent_prefix(self.timestamp, /*first*/ false);
+            let initial_prefix = agent_prefix(/*first*/ true);
+            let subsequent_prefix = agent_prefix(/*first*/ false);
             let Some(wrap_width) =
                 crate::width::usable_content_width_u16(width, initial_prefix.width() as u16)
             else {
@@ -594,7 +595,7 @@ impl AgentMarkdownCell {
                 );
             };
 
-            // Reserve room for the first-line clock without splitting table rows.
+            // Reserve the marker; transcript geometry has already excluded the clock gutter.
             let lines = crate::markdown::render_markdown_agent_with_list_spacing(
                 &self.markdown_source,
                 Some(wrap_width),
@@ -625,6 +626,9 @@ impl AgentMarkdownCell {
 }
 
 impl HistoryCell for AgentMarkdownCell {
+    fn transcript_timestamp(&self) -> Option<HistoryTimestamp> {
+        self.timestamp
+    }
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         visible_lines(self.display_hyperlink_lines(width))
     }
@@ -684,6 +688,9 @@ impl StreamingAgentTailCell {
 }
 
 impl HistoryCell for StreamingAgentTailCell {
+    fn transcript_timestamp(&self) -> Option<HistoryTimestamp> {
+        self.is_first_line.then_some(self.timestamp).flatten()
+    }
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         visible_lines(self.display_hyperlink_lines(width))
     }
@@ -693,8 +700,8 @@ impl HistoryCell for StreamingAgentTailCell {
         // Re-wrapping them here can split table borders and produce malformed in-flight rows.
         normalize_whitespace_only_hyperlink_lines(prefix_hyperlink_lines(
             self.lines.clone(),
-            agent_prefix(self.timestamp, self.is_first_line),
-            agent_prefix(self.timestamp, /*first*/ false),
+            agent_prefix(self.is_first_line),
+            agent_prefix(/*first*/ false),
         ))
     }
 

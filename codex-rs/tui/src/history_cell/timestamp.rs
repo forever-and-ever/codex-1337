@@ -19,17 +19,14 @@ impl HistoryTimestamp {
     }
 
     pub(crate) fn span(self) -> Span<'static> {
-        format!("{} ", self.0.format("%H:%M:%S")).reset().dim()
+        format!("{} ", self.0.format("%H:%M")).reset().dim()
     }
 }
 
-pub(crate) fn agent_prefix(timestamp: Option<HistoryTimestamp>, first: bool) -> Span<'static> {
-    match (timestamp, first) {
-        (Some(timestamp), true) => format!("• {} ", timestamp.0.format("%H:%M:%S"))
-            .reset()
-            .dim(),
-        (None, true) => "• ".dim(),
-        (_, false) => "  ".into(),
+pub(crate) fn agent_prefix(first: bool) -> Span<'static> {
+    match first {
+        true => "• ".dim(),
+        false => "  ".into(),
     }
 }
 

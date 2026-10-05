@@ -46,7 +46,11 @@ fn shell_rows_share_output_but_have_independent_source_folds() {
         .fold_targets();
     assert_eq!(targets.len(), 2);
     assert_eq!(targets[0], FoldTarget::Activity);
-    assert!(view.toggle_disclosure_at(&cells, /*column*/ 0, /*row*/ 0));
+    assert!(view.toggle_disclosure_at(
+        &cells,
+        crate::transcript_geometry::DISCLOSURE_COLUMN,
+        /*row*/ 0
+    ));
     render(&mut view, "output only", 64);
     let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
     for code in [KeyCode::Down, KeyCode::Enter] {

@@ -1454,10 +1454,7 @@ async fn deferred_mcp_lifecycle_events_keep_fifo_after_stream_finishes() {
         .map(|lines| lines_to_single_string(&lines))
         .collect::<String>();
     assert!(rendered.contains("deferred result"), "{rendered}");
-    assert!(
-        rendered.contains(&format!("• {}Called", timestamp.span().content)),
-        "{rendered}"
-    );
+    assert!(rendered.contains("• Called"), "{rendered}");
 }
 
 #[tokio::test]

@@ -227,6 +227,12 @@ impl ToolOutputGroup {
 }
 
 impl HistoryCell for ToolOutputGroup {
+    fn transcript_timestamp(&self) -> Option<super::HistoryTimestamp> {
+        self.members
+            .iter()
+            .rev()
+            .find_map(|cell| cell.transcript_timestamp())
+    }
     fn has_formatted_output(&self) -> bool {
         !Self::is_patch(self)
             && self

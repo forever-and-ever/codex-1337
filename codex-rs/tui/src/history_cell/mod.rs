@@ -224,6 +224,11 @@ pub(crate) fn plain_lines(lines: impl IntoIterator<Item = Line<'static>>) -> Vec
 /// heights when they apply additional layout logic beyond what
 /// `Paragraph::line_count` captures.
 pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
+    /// Display-only first-row clock, captured from the existing item lifecycle.
+    fn transcript_timestamp(&self) -> Option<HistoryTimestamp> {
+        None
+    }
+
     /// Retain reasoning inside an activity group, or return it for normal insertion.
     /// Call positions stay fixed as in-flight calls complete; other history cells decline it.
     fn append_reasoning(&mut self, cell: Box<dyn HistoryCell>) -> Result<(), Box<dyn HistoryCell>> {

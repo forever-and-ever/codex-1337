@@ -43,6 +43,9 @@ impl CodeModeWaitCell {
 }
 
 impl HistoryCell for CodeModeWaitCell {
+    fn transcript_timestamp(&self) -> Option<HistoryTimestamp> {
+        self.0.transcript_timestamp()
+    }
     fn display_lines(&self, _width: u16) -> Vec<Line<'static>> {
         self.0.lines(owner_label(&self.1))
     }
@@ -96,16 +99,15 @@ impl CodeModeFactCell {
             _ => return Vec::new(),
         };
         let mut spans = vec!["• ".dim()];
-        spans.extend(
-            HistoryTimestamp::from_millis(self.0.created_at.saturating_mul(1_000))
-                .map(HistoryTimestamp::span),
-        );
         spans.extend([verb.bold(), format!(" on {label}").into()]);
         vec![spans.into()]
     }
 }
 
 impl HistoryCell for CodeModeFactCell {
+    fn transcript_timestamp(&self) -> Option<HistoryTimestamp> {
+        HistoryTimestamp::from_millis(self.0.created_at.saturating_mul(1_000))
+    }
     fn display_lines(&self, _width: u16) -> Vec<Line<'static>> {
         self.lines(label(&self.0.exec_call_id))
     }
@@ -300,16 +302,20 @@ impl CodeModeCell {
         }
     }
 
-    fn header(&self) -> Option<Line<'static>> {
+    fn event_time(&self) -> Option<i64> {
         let started = self
             .facts
             .iter()
             .find(|fact| matches!(fact.event, CodeModeEvent::Started { .. }));
-        let terminal = self.status();
-        let timestamp = terminal
+        self.status()
             .map(|(_, timestamp)| timestamp)
             .or_else(|| started.map(|fact| fact.created_at))
-            .or_else(|| self.owner.as_ref().map(|owner| owner.started_at_ms / 1_000))?;
+            .or_else(|| self.owner.as_ref().map(|owner| owner.started_at_ms / 1_000))
+    }
+
+    fn header(&self) -> Option<Line<'static>> {
+        self.event_time()?;
+        let terminal = self.status();
         let (bullet, verb) = match terminal {
             Some((CodeModeStatus::Completed, _)) => ("•".green().bold(), "Called"),
             Some((CodeModeStatus::Failed, _)) => ("•".red().bold(), "Failed"),
@@ -326,10 +332,6 @@ impl CodeModeCell {
             None => ("•".dim(), "Execution"),
         };
         let mut spans = vec![bullet, " ".into()];
-        spans.extend(
-            HistoryTimestamp::from_millis(timestamp.saturating_mul(1_000))
-                .map(HistoryTimestamp::span),
-        );
         spans.extend([
             verb.bold(),
             format!(
@@ -411,6 +413,9 @@ impl CodeModeCell {
 }
 
 impl HistoryCell for CodeModeCell {
+    fn transcript_timestamp(&self) -> Option<HistoryTimestamp> {
+        HistoryTimestamp::from_millis(self.event_time()?.saturating_mul(1_000))
+    }
     fn has_formatted_output(&self) -> bool {
         self.members
             .iter()

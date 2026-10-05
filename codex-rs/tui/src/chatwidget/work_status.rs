@@ -35,11 +35,13 @@ impl ChatWidget {
             .emitted_at
             .unwrap_or_else(|| chrono::Utc::now().timestamp());
         let timestamp = HistoryTimestamp::from_millis(emitted_at.saturating_mul(1000));
-        self.add_to_history(PrefixedWrappedHistoryCell::new(
+        let mut cell = PrefixedWrappedHistoryCell::new(
             Line::from(vec!["Activity ".bold(), status.activity.clone().into()]),
-            Line::from(agent_prefix(timestamp, /*first*/ true)),
-            Line::from(agent_prefix(timestamp, /*first*/ false)),
-        ));
+            Line::from(agent_prefix(/*first*/ true)),
+            Line::from(agent_prefix(/*first*/ false)),
+        );
+        cell.timestamp = timestamp;
+        self.add_to_history(cell);
         self.current_work_status = Some(status);
         self.request_redraw();
     }

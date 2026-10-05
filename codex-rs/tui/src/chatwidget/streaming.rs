@@ -572,9 +572,7 @@ impl ChatWidget {
             });
             let timestamp = self.transcript.agent_timestamp;
             let mut controller = StreamController::new_with_inline_visualizations(
-                self.current_stream_width(
-                    history_cell::agent_prefix(timestamp, /*first*/ true).width(),
-                ),
+                self.current_stream_width(history_cell::agent_prefix(/*first*/ true).width()),
                 &self.config.cwd,
                 self.history_render_mode(),
                 inline_visualization_context,

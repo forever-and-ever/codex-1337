@@ -127,6 +127,9 @@ impl WebSearchCell {
 }
 
 impl HistoryCell for WebSearchCell {
+    fn transcript_timestamp(&self) -> Option<HistoryTimestamp> {
+        self.completed.then_some(self.completed_at).flatten()
+    }
     fn tool_call_ids(&self) -> Vec<&str> {
         vec![self.call_id()]
     }
@@ -163,9 +166,6 @@ impl HistoryCell for WebSearchCell {
             span.content = span.content.replace(['\n', '\r', '\t'], " ").into();
         }
         let mut line = Line::from(vec![bullet, " ".into()]);
-        if self.completed {
-            line.extend(self.completed_at.map(HistoryTimestamp::span));
-        }
         line.extend(text);
         vec![truncate_line_with_ellipsis_if_overflow(line, width.into())]
     }

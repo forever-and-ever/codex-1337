@@ -333,6 +333,7 @@ fn write_history_line<W: Write>(
         })
         .collect();
     let merged_line = HyperlinkLine {
+        clock: line.clock,
         source: None,
         line: Line::from(merged_spans),
         hyperlinks: line.hyperlinks.clone(),

@@ -124,7 +124,7 @@ fn tool_heading_decorations_preserve_source_and_hit_targets() {
         let area = Rect::new(/*x*/ 0, /*y*/ 0, width, /*height*/ 8);
         let mut buffer = Buffer::empty(area);
         layout.render(area, &mut buffer, /*start_row*/ 0);
-        assert_eq!(layout.disclosure_columns(), 0..3);
+        assert_eq!(layout.disclosure_columns(), 6..9);
         assert!(!layout.text().contains("tokens)"));
         assert!(layout.text().starts_with("Called"));
         if tokens.is_some() {

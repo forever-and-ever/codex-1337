@@ -411,7 +411,7 @@ async fn flush_answer_stream_requests_scrollback_reflow_for_live_table_tail() {
     chat.on_terminal_resize(/*width*/ 80);
 
     let mut controller = crate::streaming::controller::StreamController::new(
-        chat.current_stream_width(history_cell::agent_prefix(timestamp, /*first*/ true).width()),
+        chat.current_stream_width(history_cell::agent_prefix(/*first*/ true).width()),
         cwd.as_path(),
         HistoryRenderMode::Rich,
     );
@@ -475,7 +475,7 @@ async fn flush_answer_stream_requests_scrollback_reflow_for_live_table_tail() {
     let clock = timestamp.unwrap().span().content.trim().to_owned();
     insta::assert_snapshot!(
         "owned_live_table_resize",
-        snapshots.join("\n\n").replace(&clock, "14:17:54")
+        snapshots.join("\n\n").replace(&clock, "14:17")
     );
 
     while rx.try_recv().is_ok() {}

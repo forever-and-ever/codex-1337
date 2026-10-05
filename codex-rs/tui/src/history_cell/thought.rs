@@ -41,7 +41,6 @@ pub(crate) struct ThoughtCell {
 impl ThoughtCell {
     fn heading(&self) -> Line<'static> {
         let mut heading = Line::default();
-        heading.extend(self.timestamp.map(HistoryTimestamp::span));
         heading.push_span("Thought".bold());
         heading
     }
@@ -88,6 +87,9 @@ impl ThoughtCell {
 }
 
 impl HistoryCell for ThoughtCell {
+    fn transcript_timestamp(&self) -> Option<HistoryTimestamp> {
+        self.timestamp
+    }
     fn activity_ids(&self) -> Vec<String> {
         vec![self.id.clone()]
     }
@@ -114,7 +116,7 @@ impl HistoryCell for ThoughtCell {
     fn display_hyperlink_lines(&self, _width: u16) -> Vec<HyperlinkLine> {
         crate::terminal_hyperlinks::prefix_hyperlink_lines(
             vec![self.heading().into()],
-            super::agent_prefix(/*timestamp*/ None, /*first*/ true),
+            super::agent_prefix(/*first*/ true),
             "  ".into(),
         )
     }

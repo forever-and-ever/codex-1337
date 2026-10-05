@@ -92,6 +92,7 @@ impl ToolOutputPreview {
         // Hard-wrap even URL tokens here so the preview cannot exceed its row budget, while
         // remapping each visible fragment to the original hyperlink destination and source.
         let bounded = HyperlinkLine {
+            clock: None,
             line: bounded,
             hyperlinks,
             source,

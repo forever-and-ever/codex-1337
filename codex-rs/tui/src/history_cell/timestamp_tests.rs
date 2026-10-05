@@ -5,7 +5,6 @@ use crate::history_cell::AgentMarkdownCell;
 use crate::history_cell::HistoryCell;
 use crate::history_cell::HistoryRenderMode;
 use crate::streaming::controller::StreamController;
-use crate::terminal_hyperlinks::plain_hyperlink_lines;
 use codex_app_server_protocol::CommandExecutionSource;
 use codex_protocol::parse_command::ParsedCommand;
 use pretty_assertions::assert_eq;
@@ -21,7 +20,7 @@ fn timestamp_gutter_survives_stream_finalization_and_reflow() {
     // First-line clocks and normal continuation indents must agree across stream finalization.
     let timestamp = HistoryTimestamp(NaiveTime::from_hms_opt(13, 4, 5).unwrap());
     let source = "A **reply** with a table and enough prose to wrap.\n\n| Name | Value |\n| --- | --- |\n| alpha | 42 |\n";
-    let mut stream = StreamController::new(Some(49), Path::new("/tmp"), HistoryRenderMode::Rich);
+    let mut stream = StreamController::new(Some(48), Path::new("/tmp"), HistoryRenderMode::Rich);
     stream.timestamp = Some(timestamp);
     stream.push(source);
     let (streamed, _) = stream.finalize();
@@ -35,7 +34,13 @@ fn timestamp_gutter_survives_stream_finalization_and_reflow() {
     let render = |cell: &dyn HistoryCell| {
         let area = Rect::new(0, 0, 60, 12);
         let mut buffer = Buffer::empty(area);
-        Paragraph::new(cell.display_lines(area.width)).render(area, &mut buffer);
+        let width = crate::transcript_geometry::content_width(area.width, HistoryRenderMode::Rich);
+        let lines =
+            crate::transcript_geometry::rich_lines(crate::transcript_geometry::clock_lines(
+                cell.display_hyperlink_lines(width),
+                cell.transcript_timestamp(),
+            ));
+        Paragraph::new(crate::terminal_hyperlinks::visible_lines(lines)).render(area, &mut buffer);
         buffer
     };
     assert_eq!(render(streamed.as_ref()), render(&completed));
@@ -53,11 +58,7 @@ fn timestamp_gutter_survives_stream_finalization_and_reflow() {
         /*animations_enabled*/ false,
     );
     command.completed_at = Some(timestamp);
-    assert!(
-        !command.display_lines(60)[0]
-            .to_string()
-            .contains("13:04:05")
-    );
+    assert_eq!(command.transcript_timestamp(), None);
     command.complete_call(
         "call",
         CommandOutput::new(0, "hello".into()),
@@ -82,13 +83,25 @@ fn timestamp_gutter_survives_stream_finalization_and_reflow() {
     let mut snapshot = String::new();
     for width in [60, 32, 60] {
         snapshot.push_str(&format!("width {width}\n"));
-        for line in plain_hyperlink_lines(command.display_lines(width))
-            .into_iter()
-            .chain(plain_hyperlink_lines(exploration.display_lines(width)))
-            .chain(completed.display_hyperlink_lines(width))
-        {
+        let content_width =
+            crate::transcript_geometry::content_width(width, HistoryRenderMode::Rich);
+        let lines = crate::transcript_geometry::clock_lines(
+            command.display_hyperlink_lines(content_width),
+            command.transcript_timestamp(),
+        )
+        .into_iter()
+        .chain(crate::transcript_geometry::clock_lines(
+            exploration.display_hyperlink_lines(content_width),
+            exploration.transcript_timestamp(),
+        ))
+        .chain(crate::transcript_geometry::clock_lines(
+            completed.display_hyperlink_lines(content_width),
+            completed.transcript_timestamp(),
+        ))
+        .collect();
+        for line in crate::transcript_geometry::rich_lines(lines) {
             assert!(line.line.width() <= usize::from(width));
-            snapshot.push_str(&line.line.to_string());
+            snapshot.push_str(line.line.to_string().trim_end());
             snapshot.push('\n');
         }
     }

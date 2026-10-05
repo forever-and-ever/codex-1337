@@ -296,6 +296,9 @@ pub(crate) struct ViewImageHistoryCell {
 }
 
 impl HistoryCell for ViewImageHistoryCell {
+    fn transcript_timestamp(&self) -> Option<HistoryTimestamp> {
+        self.timestamp
+    }
     fn nested_summary_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         let mut nested = self.clone();
         nested.timestamp = None;
@@ -313,7 +316,7 @@ impl HistoryCell for ViewImageHistoryCell {
     }
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         let line = vec![
-            agent_prefix(self.timestamp, /*first*/ true),
+            agent_prefix(/*first*/ true),
             "Viewed image ".bold(),
             self.filename.replace(['\n', '\r', '\t'], " ").dim(),
         ]
@@ -327,7 +330,7 @@ impl HistoryCell for ViewImageHistoryCell {
     fn transcript_lines(&self, width: u16) -> Vec<Line<'static>> {
         PrefixedWrappedHistoryCell::new(
             Line::from(vec!["Viewed image ".bold(), self.path_label.clone().dim()]),
-            vec![agent_prefix(self.timestamp, /*first*/ true)],
+            vec![agent_prefix(/*first*/ true)],
             "  ",
         )
         .display_lines(width)

@@ -91,7 +91,9 @@ pub(super) fn activity_layout(
                     source.styled_range(prefix_bytes.min(source.range.end)..source.range.end);
                 let mut source = crate::terminal_hyperlinks::LogicalLineSource::from_line(&body);
                 source.prefix_bytes = prefix_bytes.min(line.to_string().len());
+                let clock = header.clock;
                 *header = line.into();
+                header.clock = clock;
                 header.source = Some(source);
             }
         }
@@ -286,7 +288,10 @@ impl TranscriptView {
                             output_mode: (expanded && cell.has_formatted_output())
                                 .then_some(output_mode),
                             is_tool_entry: cell.is_tool_entry(),
-                            activity: parts.lines,
+                            activity: crate::transcript_geometry::clock_lines(
+                                parts.lines,
+                                cell.transcript_timestamp(),
+                            ),
                             header: parts.header,
                             auxiliary: Vec::new(),
                             header_tokens,
@@ -314,7 +319,10 @@ impl TranscriptView {
                         output_mode: (expanded && cell.has_formatted_output())
                             .then_some(output_mode),
                         is_tool_entry: cell.is_tool_entry(),
-                        activity,
+                        activity: crate::transcript_geometry::clock_lines(
+                            activity,
+                            cell.transcript_timestamp(),
+                        ),
                         header: if expanded {
                             cell.expanded_activity_header()
                         } else {
@@ -339,7 +347,10 @@ impl TranscriptView {
                 // Detailed content and markerless cards share the gutter without acquiring
                 // synthetic markers, disclosure identities, or expansion controls.
                 let lines = if mode == HistoryRenderMode::Rich {
-                    crate::transcript_geometry::rich_lines(lines)
+                    crate::transcript_geometry::rich_lines(crate::transcript_geometry::clock_lines(
+                        lines,
+                        cell.transcript_timestamp(),
+                    ))
                 } else {
                     lines
                 };

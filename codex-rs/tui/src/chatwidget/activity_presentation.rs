@@ -24,13 +24,14 @@ impl ChatWidget {
         let active = self.transcript.active_cell.as_deref();
         let mode = self.history_render_mode();
         let render_compact = |cell: &dyn HistoryCell, width| {
-            if cell.as_any().is::<history_cell::SessionInfoCell>() {
+            let lines = if cell.as_any().is::<history_cell::SessionInfoCell>() {
                 history_cell::fullscreen_session_lines(cell, width, /*detailed*/ false, mode)
             } else if mode == HistoryRenderMode::Raw {
                 cell.display_hyperlink_lines_for_mode(width, mode)
             } else {
                 cell.compact_hyperlink_lines(width)
-            }
+            };
+            crate::transcript_geometry::clock_lines(lines, cell.transcript_timestamp())
         };
         let has_activity = mode == HistoryRenderMode::Rich
             && active.is_some_and(|cell| !cell.activity_ids().is_empty());
@@ -89,7 +90,10 @@ impl ChatWidget {
             output_mode: (expanded && active.is_some_and(HistoryCell::has_formatted_output))
                 .then_some(output_mode),
             is_tool_entry: active.is_some_and(HistoryCell::is_tool_entry),
-            activity,
+            activity: crate::transcript_geometry::clock_lines(
+                activity,
+                active.and_then(HistoryCell::transcript_timestamp),
+            ),
             header,
             auxiliary,
             header_tokens: tool_output_tokens,

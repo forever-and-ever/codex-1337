@@ -315,7 +315,10 @@ impl TextLayout {
                 start as u16..end as u16
             }
             DisclosurePlacement::Leading => {
-                0..crate::transcript_geometry::DISCLOSURE_COLUMNS.min(self.width)
+                crate::transcript_geometry::DISCLOSURE_COLUMN.min(self.width)
+                    ..(crate::transcript_geometry::DISCLOSURE_COLUMN
+                        + crate::transcript_geometry::DISCLOSURE_COLUMNS)
+                        .min(self.width)
             }
             DisclosurePlacement::Output { start, end } => {
                 let anchor = row.estimate.map_or(0, |(column, _)| column);

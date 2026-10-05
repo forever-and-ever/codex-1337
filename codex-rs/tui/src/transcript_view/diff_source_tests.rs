@@ -22,7 +22,7 @@ fn file_disclosures_are_independent_and_not_copied() {
     // The returned batch used to regroup all files into one disclosure, despite unique IDs.
     let returned = ThreadItem::FunctionCallOutput {
         id: "batch".into(),
-        call_id: Some("batch".into()),
+        call_id: Some("patch-call".into()),
         name: "exec".into(),
         namespace: None,
         output: FunctionCallOutputBody::Text(
@@ -133,7 +133,11 @@ fn file_disclosures_are_independent_and_not_copied() {
         ("first file collapsed", true),
     ] {
         if collapse_first {
-            assert!(view.toggle_disclosure_at(&cells, /*column*/ 0, /*row*/ 1));
+            assert!(view.toggle_disclosure_at(
+                &cells,
+                crate::transcript_geometry::DISCLOSURE_COLUMN,
+                /*row*/ 1
+            ));
         }
         view.clear_activity_focus();
         view.jump_to_latest();
@@ -182,7 +186,7 @@ fn file_disclosures_are_independent_and_not_copied() {
             },
             ThreadItem::FunctionCallOutput {
                 id: "next-batch".into(),
-                call_id: Some("next-batch".into()),
+                call_id: Some("next-patch".into()),
                 name: "exec".into(),
                 namespace: None,
                 output: FunctionCallOutputBody::Text("Next patch applied".into()),

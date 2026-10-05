@@ -263,9 +263,6 @@ impl McpToolCallCell {
             line_to_static(&format_mcp_invocation(&self.invocation))
         };
         let mut compact_spans = vec![bullet.clone(), " ".into()];
-        if status.is_some() && mode != McpToolCallRenderMode::Summary {
-            compact_spans.extend(self.completed_at.map(HistoryTimestamp::span));
-        }
         compact_spans.extend([header_text.bold(), " ".into()]);
         let mut compact_header = Line::from(compact_spans.clone());
         let reserved = compact_header.width();
@@ -477,6 +474,9 @@ impl McpToolCallCell {
 }
 
 impl HistoryCell for McpToolCallCell {
+    fn transcript_timestamp(&self) -> Option<HistoryTimestamp> {
+        self.result.as_ref().and(self.completed_at)
+    }
     fn outer_call_id(&self) -> Option<&str> {
         Some(&self.call_id)
     }
@@ -567,9 +567,6 @@ impl HistoryCell for McpToolCallCell {
     }
     fn activity_header(&self) -> Option<super::activity_parts::ActivityHeader> {
         let mut heading = Line::default();
-        if self.result.is_some() {
-            heading.extend(self.completed_at.map(HistoryTimestamp::span));
-        }
         heading.push_span(self.header_verb());
         let mut header = super::activity_parts::ActivityHeader::at_end(&heading);
         header.columns += usize::from(crate::transcript_geometry::MARKER_COLUMNS);

@@ -214,6 +214,9 @@ fn activity_marker(start_time: Option<Instant>, animations_enabled: bool) -> Spa
 }
 
 impl HistoryCell for ExecCell {
+    fn transcript_timestamp(&self) -> Option<crate::history_cell::HistoryTimestamp> {
+        (!self.is_active()).then_some(self.completed_at).flatten()
+    }
     fn tool_call_ids(&self) -> Vec<&str> {
         self.group
             .calls
@@ -491,12 +494,6 @@ impl ExecCell {
         };
 
         let mut prefix = vec![bullet.clone(), " ".into()];
-        if !self.is_active() {
-            prefix.extend(
-                self.completed_at
-                    .map(crate::history_cell::HistoryTimestamp::span),
-            );
-        }
         if !is_interaction {
             prefix.extend([title.bold(), " ".into()]);
         }

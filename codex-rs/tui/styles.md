@@ -1,5 +1,12 @@
 # Transcript entries
 
+Rich transcript rows reserve six columns for a local `HH:MM` clock, four for
+`[+]`/`[-]` disclosure, and two for the entry marker. Content starts at column
+13; nested rows retain their extra indentation. Missing clocks and controls
+leave their columns empty. A captured clock appears only on an entry's first
+content row, never continuation rows or copied source. Composer and status
+geometry are independent.
+
 **Tool entries** are the action/result records headed by Ran, Explored, Called,
 Edited, etc. Consecutive tool entries are contiguous, including the live tail;
 ordinary messages retain their surrounding separation. Expanded bodies retain

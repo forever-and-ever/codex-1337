@@ -123,15 +123,6 @@ pub(crate) fn command_header(cells: &[&ExecCell]) -> (Line<'static>, ActivityHea
         (false, false) => "Ran",
     };
     let mut heading = Line::from(vec![marker, " ".into()]);
-    if !active {
-        heading.extend(
-            cells
-                .iter()
-                .rev()
-                .find_map(|cell| cell.completed_at)
-                .map(crate::history_cell::HistoryTimestamp::span),
-        );
-    }
     heading.push_span(verb.bold());
     let header = ActivityHeader::at_end(&heading);
     if failed {

@@ -29,9 +29,6 @@ impl McpToolCallCell {
             ),
         };
         let mut spans = vec![marker, " ".into()];
-        if status.is_some() {
-            spans.extend(self.completed_at.map(super::HistoryTimestamp::span));
-        }
         spans.extend([
             verb.bold(),
             " ".into(),

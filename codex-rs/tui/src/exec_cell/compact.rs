@@ -91,13 +91,7 @@ impl ExecCell {
         } else {
             ("Ran", String::new())
         };
-        let mut heading = vec![marker, " ".into()];
-        if !self.is_active() {
-            heading.extend(
-                self.completed_at
-                    .map(crate::history_cell::HistoryTimestamp::span),
-            );
-        }
+        let heading = vec![marker, " ".into()];
         let mut heading = Line::from(heading);
         heading.push_span(verb.bold());
         let header = crate::history_cell::activity_parts::ActivityHeader::at_end(&heading);

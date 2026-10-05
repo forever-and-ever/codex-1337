@@ -140,6 +140,8 @@ impl TerminalHyperlink {
 
 #[derive(Clone, Default)]
 pub(crate) struct HyperlinkLine {
+    /// Display-only clock consumed by the shared transcript gutter, never logical source.
+    pub(crate) clock: Option<crate::history_cell::HistoryTimestamp>,
     pub(crate) line: Line<'static>,
     pub(crate) hyperlinks: Vec<TerminalHyperlink>,
     pub(crate) source: Option<LogicalLineSource>,
@@ -159,7 +161,7 @@ impl std::fmt::Debug for HyperlinkLine {
 
 impl PartialEq for HyperlinkLine {
     fn eq(&self, other: &Self) -> bool {
-        self.line == other.line && self.hyperlinks == other.hyperlinks
+        self.line == other.line && self.hyperlinks == other.hyperlinks && self.clock == other.clock
     }
 }
 
@@ -180,6 +182,7 @@ impl HyperlinkLine {
             line,
             hyperlinks: Vec::new(),
             source: None,
+            clock: None,
         }
     }
 
@@ -383,7 +386,8 @@ pub(crate) fn remap_source_wrapped_line(
     let mut source_column = 0;
     wrapped
         .into_iter()
-        .map(|wrapped| {
+        .enumerate()
+        .map(|(index, wrapped)| {
             let line = line_to_static(&wrapped.line);
             let displayed = line_text(&line);
             let prefix_columns = display_width(&displayed[..wrapped.prefix_bytes]);
@@ -406,6 +410,7 @@ pub(crate) fn remap_source_wrapped_line(
                 })
                 .collect();
             HyperlinkLine {
+                clock: (index == 0).then_some(source.clock).flatten(),
                 line,
                 hyperlinks,
                 source: Some(logical.wrapped(wrapped.range, wrapped.prefix_bytes)),
@@ -934,6 +939,7 @@ mod tests {
     fn decorates_a_contiguous_web_link_with_one_osc8_pair() {
         let destination = "https://example.com/a/very/long/path";
         let line = HyperlinkLine {
+            clock: None,
             source: None,
             line: Line::from(destination),
             hyperlinks: vec![TerminalHyperlink::web(
@@ -1000,6 +1006,7 @@ mod tests {
             wrapped,
             vec![
                 HyperlinkLine {
+                    clock: None,
                     source: None,
                     line: Line::from("  alpha 😀here"),
                     hyperlinks: vec![TerminalHyperlink::web(
@@ -1008,6 +1015,7 @@ mod tests {
                     )],
                 },
                 HyperlinkLine {
+                    clock: None,
                     source: None,
                     line: Line::from("    middle there end"),
                     hyperlinks: vec![TerminalHyperlink::web(
@@ -1270,6 +1278,7 @@ mod tests {
         );
         link.retarget_to_trusted_file(&file_url);
         let line = HyperlinkLine {
+            clock: None,
             source: None,
             line: Line::from("view"),
             hyperlinks: vec![link],

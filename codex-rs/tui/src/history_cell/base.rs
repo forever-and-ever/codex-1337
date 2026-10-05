@@ -21,6 +21,9 @@ impl PlainHistoryCell {
 }
 
 impl HistoryCell for PlainHistoryCell {
+    fn transcript_timestamp(&self) -> Option<HistoryTimestamp> {
+        self.timestamp
+    }
     fn nested_summary_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         plain_hyperlink_lines(
             self.lines
@@ -50,16 +53,7 @@ impl HistoryCell for PlainHistoryCell {
     }
 
     fn display_lines(&self, _width: u16) -> Vec<Line<'static>> {
-        let mut lines = self.lines.clone();
-        if let Some(timestamp) = self.timestamp
-            && let Some(header) = lines.first_mut()
-        {
-            // Timestamped plain cells have a single leading result-marker span ("• ").
-            header
-                .spans
-                .insert(1.min(header.spans.len()), timestamp.span());
-        }
-        lines
+        self.lines.clone()
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
@@ -106,6 +100,7 @@ pub(crate) struct PrefixedWrappedHistoryCell {
     text: Text<'static>,
     initial_prefix: Line<'static>,
     subsequent_prefix: Line<'static>,
+    pub(crate) timestamp: Option<HistoryTimestamp>,
 }
 
 impl PrefixedWrappedHistoryCell {
@@ -118,11 +113,15 @@ impl PrefixedWrappedHistoryCell {
             text: text.into(),
             initial_prefix: initial_prefix.into(),
             subsequent_prefix: subsequent_prefix.into(),
+            timestamp: None,
         }
     }
 }
 
 impl HistoryCell for PrefixedWrappedHistoryCell {
+    fn transcript_timestamp(&self) -> Option<HistoryTimestamp> {
+        self.timestamp
+    }
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         visible_lines(self.display_hyperlink_lines(width))
     }
@@ -192,7 +191,10 @@ impl HistoryCell for CompositeHistoryCell {
         let mut out = Vec::new();
         let mut previous = None;
         for part in &self.parts {
-            let lines = part.compact_hyperlink_lines(width);
+            let lines = crate::transcript_geometry::clock_lines(
+                part.compact_hyperlink_lines(width),
+                part.transcript_timestamp(),
+            );
             if !lines.is_empty() {
                 if crate::transcript_geometry::separated(
                     previous,
@@ -232,7 +234,10 @@ impl HistoryCell for CompositeHistoryCell {
         let mut out = Vec::new();
         let mut previous = None;
         for part in &self.parts {
-            let mut lines = part.display_hyperlink_lines(width);
+            let mut lines = crate::transcript_geometry::clock_lines(
+                part.display_hyperlink_lines(width),
+                part.transcript_timestamp(),
+            );
             if !lines.is_empty() {
                 if crate::transcript_geometry::separated(
                     previous,
@@ -252,7 +257,10 @@ impl HistoryCell for CompositeHistoryCell {
         let mut out = Vec::new();
         let mut previous = None;
         for part in &self.parts {
-            let mut lines = part.transcript_hyperlink_lines(width);
+            let mut lines = crate::transcript_geometry::clock_lines(
+                part.transcript_hyperlink_lines(width),
+                part.transcript_timestamp(),
+            );
             if !lines.is_empty() {
                 if crate::transcript_geometry::separated(
                     previous,

@@ -3,6 +3,7 @@
 use super::*;
 use crate::history_cell::PlainHistoryCell;
 use crate::history_cell::ToolOutputCell;
+use crate::history_cell::activity_parts::FoldTarget;
 use codex_app_server_protocol::SubAgentActivityKind;
 use codex_app_server_protocol::ThreadItem;
 use codex_protocol::models::FunctionCallOutputBody;
@@ -59,7 +60,7 @@ fn completed_thought_discloses_only_readable_reasoning() {
             let buffer = tests::render(&mut view, &cells, /*width*/ 64, /*height*/ 6);
             snapshots.push(format!(
                 "{label} expanded={expanded}\n{}",
-                tests::text(&buffer).replace(&clock, "HH:MM:SS")
+                tests::text(&buffer).replace(&clock, "HH:MM")
             ));
             let length = view
                 .current_layout(&cells, /*index*/ 0)
@@ -416,11 +417,15 @@ fn mixed_feed_keeps_its_grid_through_live_commit_resize_and_details() {
             Vec::new(),
             Vec::new(),
         )),
-        Arc::new(PrefixedWrappedHistoryCell::new(
-            "Activity Reviewing layout\n\nMore text",
-            crate::history_cell::agent_prefix(timestamp, /*first*/ true),
-            crate::history_cell::agent_prefix(timestamp, /*first*/ false),
-        )),
+        Arc::new({
+            let mut cell = PrefixedWrappedHistoryCell::new(
+                "Activity Reviewing layout\n\nMore text",
+                crate::history_cell::agent_prefix(/*first*/ true),
+                crate::history_cell::agent_prefix(/*first*/ false),
+            );
+            cell.timestamp = timestamp;
+            cell
+        }),
         group,
     ];
     // Distinct calls coalesce only their Edited heading, never their file controls or bills.
@@ -459,7 +464,10 @@ fn mixed_feed_keeps_its_grid_through_live_commit_resize_and_details() {
                     is_tool_entry: false,
                     header: None,
                     activity: Vec::new(),
-                    auxiliary: tail.compact_hyperlink_lines(width),
+                    auxiliary: crate::transcript_geometry::clock_lines(
+                        tail.compact_hyperlink_lines(width),
+                        tail.transcript_timestamp(),
+                    ),
                     header_tokens: None,
                     disclosure: None,
                     controls: Vec::new(),
@@ -477,6 +485,15 @@ fn mixed_feed_keeps_its_grid_through_live_commit_resize_and_details() {
         let layout = view.current_layout(&cells, cells.len() - 1).unwrap();
         assert!(layout.text().contains("  source_indent();"));
         assert!(!layout.text().starts_with(' '));
+        // Clocks and disclosure hit targets occupy distinct synthetic columns, while source
+        // offsets remain unchanged through live finalization, wrapping, and expansion.
+        let clock = timestamp.unwrap().span().content.trim().to_owned();
+        assert!(!layout.text().contains(&clock));
+        let tool_layout = view.current_layout(&cells, 2).unwrap();
+        let (row, columns, _) = tool_layout.fold_position(&FoldTarget::Activity).unwrap();
+        assert_eq!(columns, 6..9);
+        assert!(tool_layout.fold_at(row, 0).is_none());
+        assert_eq!(tool_layout.fold_at(row, 6), Some(FoldTarget::Activity));
         snapshots.push(format!("width={width}\n{}", text.trim_end()));
         if width == 64 {
             view.disclosure.expanded.extend(cells[2].activity_ids());
@@ -497,7 +514,7 @@ fn mixed_feed_keeps_its_grid_through_live_commit_resize_and_details() {
         cells.pop();
     }
     let clock = timestamp.unwrap().span().content.trim().to_owned();
-    insta::assert_snapshot!(snapshots.join("\n\n").replace(&clock, "14:17:54"));
+    insta::assert_snapshot!(snapshots.join("\n\n").replace(&clock, "14:17"));
     view.set_presentation(/*detailed*/ false, HistoryRenderMode::Raw);
     view.jump_to_latest();
     let raw = tests::render(&mut view, &cells, /*width*/ 64, /*height*/ 50);
