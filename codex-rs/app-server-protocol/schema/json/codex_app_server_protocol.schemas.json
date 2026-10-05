@@ -8800,6 +8800,22 @@
           },
           {
             "properties": {
+              "type": {
+                "enum": [
+                  "allocated"
+                ],
+                "title": "AllocatedCodeModeEventType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "title": "AllocatedCodeModeEvent",
+            "type": "object"
+          },
+          {
+            "properties": {
               "call_id": {
                 "type": "string"
               },
@@ -8884,7 +8900,10 @@
         "description": "Durable transcript identity, independent of the runtime and attached clients.",
         "properties": {
           "cellId": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "execCallId": {
             "type": "string"
@@ -8898,7 +8917,6 @@
           }
         },
         "required": [
-          "cellId",
           "execCallId",
           "startedAtMs",
           "threadId"
@@ -22632,7 +22650,10 @@
             "properties": {
               "cellId": {
                 "description": "Full runtime identity, including its session generation.",
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "createdAt": {
                 "format": "int64",
@@ -22657,7 +22678,6 @@
               }
             },
             "required": [
-              "cellId",
               "createdAt",
               "event",
               "execCallId",

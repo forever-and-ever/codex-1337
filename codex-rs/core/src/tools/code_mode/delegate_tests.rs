@@ -34,6 +34,26 @@ use crate::tools::router::ToolRouter;
 use crate::turn_diff_tracker::TurnDiffTracker;
 use tokio::sync::oneshot;
 
+async fn execution_scope(
+    session: &Arc<crate::session::session::Session>,
+    turn: &Arc<crate::session::turn_context::TurnContext>,
+    cell: &CellId,
+) -> Arc<super::super::lifecycle::ExecutionScope> {
+    let service = &session.services.code_mode_service;
+    let starting = service
+        .transcript
+        .open(
+            Arc::downgrade(session),
+            Arc::clone(turn),
+            "original-exec".into(),
+            service.shutdown_token.clone(),
+        )
+        .await;
+    let scope = starting.scope();
+    starting.allocated(cell).await;
+    scope
+}
+
 #[derive(Default)]
 struct DispatchFields(BTreeMap<String, String>);
 
@@ -106,6 +126,7 @@ impl CoreToolRuntime for TestHandler {}
 #[tokio::test(flavor = "current_thread")]
 async fn detached_code_mode_callback_keeps_thread_id_on_dispatch_span() -> anyhow::Result<()> {
     let (session, turn) = make_session_and_context().await;
+    let session = Arc::new(session);
     let thread_id = session.thread_id.to_string();
     let turn = Arc::new(turn);
     let registry = ToolRegistry::with_handler_for_test(Arc::new(TestHandler));
@@ -128,14 +149,12 @@ async fn detached_code_mode_callback_keeps_thread_id_on_dispatch_span() -> anyho
     let _untraced = tracing::Dispatch::new(tracing::subscriber::NoSubscriber::default());
     let _subscriber = tracing::subscriber::set_default(subscriber);
     let delegate = CodeModeCellDelegate {
-        session: std::sync::Weak::new(),
-        terminal_reported: std::sync::atomic::AtomicBool::new(false),
-        exec_call_id: "original-exec".into(),
+        scope: execution_scope(&session, &turn, &cell_id).await,
         broker: Arc::clone(&broker),
         step_context: Arc::clone(&step),
     };
     let _worker = broker.start_turn_worker(
-        Arc::new(session),
+        Arc::clone(&session),
         step,
         Arc::new(tokio::sync::Mutex::new(TurnDiffTracker::new())),
     );
@@ -157,23 +176,35 @@ async fn detached_code_mode_callback_keeps_thread_id_on_dispatch_span() -> anyho
     .await?
     .map_err(anyhow::Error::msg)?;
     assert_eq!(result, serde_json::json!("audit-probe-ok"));
-    let records = records.lock().unwrap();
-    let [(fields, has_turn_ancestor)] = records.as_slice() else {
-        panic!("expected one nested dispatch span, got {records:?}");
-    };
-    assert!(!has_turn_ancestor);
-    assert_eq!(fields.get("thread.id"), Some(&thread_id));
-    assert_eq!(
-        fields.get("tool_name"),
-        Some(&TestHandler.tool_name().to_string())
-    );
-    let call_id = fields
-        .get("call_id")
-        .expect("dispatch must identify the tool call");
-    let uuid = call_id
-        .strip_prefix("exec-")
-        .expect("nested call ID must belong to code mode");
-    uuid::Uuid::parse_str(uuid)?;
+    {
+        let records = records.lock().unwrap();
+        let [(fields, has_turn_ancestor)] = records.as_slice() else {
+            panic!("expected one nested dispatch span, got {records:?}");
+        };
+        assert!(!has_turn_ancestor);
+        assert_eq!(fields.get("thread.id"), Some(&thread_id));
+        assert_eq!(
+            fields.get("tool_name"),
+            Some(&TestHandler.tool_name().to_string())
+        );
+        let call_id = fields
+            .get("call_id")
+            .expect("dispatch must identify the tool call");
+        let uuid = call_id
+            .strip_prefix("exec-")
+            .expect("nested call ID must belong to code mode");
+        uuid::Uuid::parse_str(uuid)?;
+        assert_eq!(
+            session.services.code_mode_service.transcript_owner(call_id),
+            None
+        );
+    }
+    session
+        .services
+        .code_mode_service
+        .shutdown()
+        .await
+        .map_err(anyhow::Error::msg)?;
     Ok(())
 }
 
@@ -187,9 +218,7 @@ async fn dropped_tool_callbacks_release_the_origin_before_dispatch() {
         /*executed_tool_calls*/ Default::default(),
     ));
     let delegate = CodeModeCellDelegate {
-        session: std::sync::Weak::new(),
-        terminal_reported: std::sync::atomic::AtomicBool::new(false),
-        exec_call_id: "original-exec".into(),
+        scope: execution_scope(&session, &turn, &CellId::new("queued-cell".to_string())).await,
         broker: Arc::clone(&broker),
         step_context: StepContext::for_test(Arc::clone(&turn)),
     };
@@ -238,4 +267,5 @@ async fn dropped_tool_callbacks_release_the_origin_before_dispatch() {
         response.unwrap(),
         Err("code mode nested tool call cancelled".to_string()),
     );
+    session.services.code_mode_service.shutdown().await.unwrap();
 }

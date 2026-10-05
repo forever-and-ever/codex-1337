@@ -35,7 +35,7 @@ fn owned_capture_survives_live_history_and_independent_page_projection() {
     let owner = CodeModeOwner {
         thread_id,
         exec_call_id: "exec-1".into(),
-        cell_id: "generation-1:cell-1".into(),
+        cell_id: Some("generation-1:cell-1".into()),
         started_at_ms: 1_000,
     };
     let native = match item_completed(

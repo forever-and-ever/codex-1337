@@ -253,10 +253,12 @@ fn rollout_item_type(item: &RolloutItem) -> String {
                 "realtime.session_closed".to_string()
             }
         },
-        RolloutItem::EventMsg(EventMsg::ItemCompleted(event)) => {
-            format!("event.item_completed.{}", turn_item_type(&event.item))
-        }
-        RolloutItem::EventMsg(event) => format!("event.{event}"),
+        RolloutItem::EventMsg(event) => match event.native_event() {
+            EventMsg::ItemCompleted(event) => {
+                format!("event.item_completed.{}", turn_item_type(&event.item))
+            }
+            event => format!("event.{event}"),
+        },
     }
 }
 

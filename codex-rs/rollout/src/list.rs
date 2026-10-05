@@ -1227,7 +1227,7 @@ async fn read_head_summary(path: &Path, head_limit: usize) -> io::Result<HeadTai
                 if let Some(preview) = event_msg_preview(&ev) {
                     // Legacy rollouts persist UserMessage while paginated rollouts persist
                     // ItemCompleted(UserMessage), so summaries must recognize both formats.
-                    let is_user_message = match &ev {
+                    let is_user_message = match ev.native_event() {
                         EventMsg::UserMessage(_) => true,
                         EventMsg::ItemCompleted(event) => {
                             matches!(event.item, TurnItem::UserMessage(_))
@@ -1303,7 +1303,7 @@ pub async fn read_head_for_summary(path: &Path) -> io::Result<Vec<serde_json::Va
 }
 
 fn event_msg_preview(event: &EventMsg) -> Option<String> {
-    match event {
+    match event.native_event() {
         EventMsg::UserMessage(user) => user_message_preview(user),
         EventMsg::ItemCompleted(event) => match &event.item {
             TurnItem::UserMessage(user) => {

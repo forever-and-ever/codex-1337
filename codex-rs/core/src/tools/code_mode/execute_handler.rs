@@ -82,8 +82,7 @@ impl CodeModeExecuteHandler {
         .map_err(|error| FunctionCallError::Fatal(error.to_string()))?
         .apply_code_mode(&mut enabled_tools);
         let started_at = std::time::Instant::now();
-        let started_at_ms = crate::turn_timing::now_unix_timestamp_ms();
-        let started_cell = exec
+        let (started_cell, scope) = exec
             .session
             .services
             .code_mode_service
@@ -101,17 +100,6 @@ impl CodeModeExecuteHandler {
             .await
             .map_err(FunctionCallError::RespondToModel)?;
         let cell_id = started_cell.cell_id.clone();
-        super::transcript::record(
-            &exec.session,
-            &exec.turn,
-            cell_id.as_str(),
-            &call_id,
-            codex_protocol::code_mode::CodeModeEvent::Started {
-                call_id: call_id.clone(),
-            },
-            started_at_ms,
-        )
-        .await;
         tracing::Span::current().record("cell.id", trace_id(cell_id.as_str()));
         telemetry.cell_id = Some(cell_id.to_string());
         exec.session
@@ -143,10 +131,7 @@ impl CodeModeExecuteHandler {
             .code_mode_service
             .mark_cell_ready_for_dispatch(&cell_id, originating_call);
         let response = started_cell.initial_response().await.map_err(|error| {
-            exec.session
-                .services
-                .code_mode_service
-                .finish_transcript_output(&cell_id);
+            scope.finish(codex_protocol::code_mode::CodeModeStatus::Interrupted);
             FunctionCallError::RespondToModel(error)
         })?;
         if let Some(code_mode_host_duration) = response.code_mode_host_duration() {
@@ -159,10 +144,7 @@ impl CodeModeExecuteHandler {
         // Yielded cells keep running, so terminal lifecycle is only emitted
         // here when the first response also ended the runtime.
         if !matches!(response, codex_code_mode::RuntimeResponse::Yielded { .. }) {
-            exec.session
-                .services
-                .code_mode_service
-                .finish_transcript_output(&cell_id);
+            scope.terminal_admitted().await;
             code_cell_trace.record_ended(&response);
             exec.session
                 .services

@@ -5653,8 +5653,9 @@ async fn code_mode_wait_terminate_returns_completed_session_if_it_finished_after
     let server = responses::start_mock_server().await;
     let mut builder = test_codex().with_config(move |config| {
         let _ = config.features.enable(Feature::CodeMode);
+        let _ = config.features.enable(Feature::CodeModeHost);
     });
-    let test = builder.build(&server).await?;
+    let test = builder.build_with_auto_env(&server).await?;
     let session_a_gate = test.workspace_path("code-mode-session-a-finished.ready");
     let session_b_gate = test.workspace_path("code-mode-session-b-blocked.ready");
     let session_a_done_marker = test.workspace_path("code-mode-session-a-done.txt");
@@ -5782,6 +5783,27 @@ text("session b done");
     }
     assert!(session_a_done_marker.exists());
 
+    // Wait only after the first runtime completed and its terminal driver retired.
+    // No fixture owns its scope: buffered result ownership must survive in the runtime.
+    let buffered_owner = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            test.codex.flush_rollout().await?;
+            let (items, _, _) = codex_rollout::RolloutRecorder::load_rollout_items(
+                test.session_configured.rollout_path.as_ref().unwrap(),
+            ).await?;
+            for item in items {
+                if let codex_rollout::RolloutItem::EventMsg(EventMsg::CodeModeOwned(owned)) = item
+                    && owned.owner.exec_call_id == "call-1"
+                    && matches!(owned.payload().native_event(), EventMsg::ItemCompleted(event)
+                        if matches!(&event.item, codex_protocol::items::TurnItem::CodeMode(fact)
+                            if matches!(fact.event, codex_protocol::code_mode::CodeModeEvent::Finished { .. }))) {
+                    return Ok::<_, anyhow::Error>(owned.owner);
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }).await??;
+
     responses::mount_sse_once(
         &server,
         sse(vec![
@@ -5827,6 +5849,28 @@ text("session b done");
         }
         other => panic!("unexpected number of content items: {other}"),
     }
+
+    test.codex.flush_rollout().await?;
+    let (items, _, _) = codex_rollout::RolloutRecorder::load_rollout_items(
+        test.session_configured.rollout_path.as_ref().unwrap(),
+    )
+    .await?;
+    let owners = items
+        .iter()
+        .filter_map(|item| {
+            let codex_rollout::RolloutItem::EventMsg(EventMsg::CodeModeOwned(owned)) = item else {
+                return None;
+            };
+            let EventMsg::ItemCompleted(event) = owned.payload().native_event() else {
+                return None;
+            };
+            let codex_protocol::items::TurnItem::FunctionCallOutput(output) = &event.item else {
+                return None;
+            };
+            (output.call_id.as_deref() == Some("call-4")).then_some(owned.owner.clone())
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(owners, vec![buffered_owner]);
 
     Ok(())
 }
@@ -6248,7 +6292,7 @@ async fn code_mode_notify_injects_additional_exec_tool_output_into_active_contex
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
-    let (test, second_mock) = run_code_mode_turn(
+    let (test, second_mock) = run_code_mode_turn_with_config(
         &server,
         "use exec notify helper",
         r#"
@@ -6256,6 +6300,9 @@ notify("code_mode_notify_marker");
 notify("second marker");
 text("done");
 "#,
+        |config| {
+            let _ = config.features.enable(Feature::CodeModeHost);
+        },
     )
     .await?;
 
@@ -6306,19 +6353,24 @@ text("done");
     )
     .await?;
     let captured = items
-        .into_iter()
-        .filter_map(|item| match item {
-            codex_rollout::RolloutItem::EventMsg(EventMsg::ItemCompleted(event)) => {
-                match event.item {
-                    codex_protocol::items::TurnItem::FunctionCallOutput(item)
-                        if item.call_id.as_deref() == Some("call-1") =>
-                    {
-                        Some(item.output)
-                    }
-                    _ => None,
-                }
+        .iter()
+        .filter_map(|item| {
+            let codex_rollout::RolloutItem::EventMsg(msg) = item else {
+                return None;
+            };
+            let EventMsg::ItemCompleted(event) = msg.native_event() else {
+                return None;
+            };
+            let codex_protocol::items::TurnItem::FunctionCallOutput(output) = &event.item else {
+                return None;
+            };
+            if output.call_id.as_deref() != Some("call-1") {
+                return None;
             }
-            _ => None,
+            let EventMsg::CodeModeOwned(owned) = msg else {
+                panic!("capture must retain its descriptor: {:?}", output.output)
+            };
+            Some((owned.owner.exec_call_id.clone(), output.output.clone()))
         })
         .collect::<Vec<_>>();
     let delivered = req
@@ -6326,7 +6378,13 @@ text("done");
         .into_iter()
         .map(|item| serde_json::from_value(item["output"].clone()))
         .collect::<Result<Vec<codex_protocol::models::FunctionCallOutputBody>, _>>()?;
-    assert_eq!(captured, delivered);
+    assert_eq!(
+        captured,
+        delivered
+            .into_iter()
+            .map(|body| ("call-1".into(), body))
+            .collect::<Vec<_>>()
+    );
 
     Ok(())
 }
@@ -6346,21 +6404,22 @@ async fn tool_output_measurements(
     )
     .await?;
     let mut measured = items
-        .into_iter()
-        .filter_map(|item| match item {
-            codex_rollout::RolloutItem::EventMsg(EventMsg::ItemCompleted(event)) => {
-                match event.item {
-                    codex_protocol::items::TurnItem::ToolOutputTokens(item) => {
-                        Some((item.id.clone(), item))
-                    }
-                    _ => None,
-                }
-            }
-            _ => None,
+        .iter()
+        .filter_map(|item| {
+            let codex_rollout::RolloutItem::EventMsg(event) = item else {
+                return None;
+            };
+            let EventMsg::ItemCompleted(event) = event.native_event() else {
+                return None;
+            };
+            let codex_protocol::items::TurnItem::ToolOutputTokens(item) = &event.item else {
+                return None;
+            };
+            Some((item.id.clone(), item.clone()))
         })
         .collect::<HashMap<_, _>>();
     while measured.len() < count {
-        let item = wait_for_event_match(&test.codex, |event| match event {
+        let item = wait_for_event_match(&test.codex, |event| match event.native_event() {
             EventMsg::ItemCompleted(event) => match &event.item {
                 codex_protocol::items::TurnItem::ToolOutputTokens(item) => Some(item.clone()),
                 _ => None,

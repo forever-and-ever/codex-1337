@@ -6,4 +6,4 @@ import type { ThreadId } from "../ThreadId";
 /**
  * Durable transcript identity, independent of the runtime and attached clients.
  */
-export type CodeModeOwner = { threadId: ThreadId, execCallId: string, cellId: string, startedAtMs: number, };
+export type CodeModeOwner = { threadId: ThreadId, execCallId: string, cellId: string | null, startedAtMs: number, };

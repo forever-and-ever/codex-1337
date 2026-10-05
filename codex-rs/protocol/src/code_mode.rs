@@ -12,7 +12,7 @@ use ts_rs::TS;
 pub struct CodeModeOwner {
     pub thread_id: crate::ThreadId,
     pub exec_call_id: String,
-    pub cell_id: String,
+    pub cell_id: Option<String>,
     #[ts(type = "number")]
     pub started_at_ms: i64,
 }
@@ -81,6 +81,26 @@ impl CodeModePayload for crate::protocol::EventMsg {
 }
 
 impl crate::protocol::EventMsg {
+    /// Completed children release attribution; a yielded PTY still owns later updates.
+    pub fn code_mode_completed_child(&self) -> Option<std::borrow::Cow<'_, str>> {
+        use crate::items::CommandExecutionStatus;
+        use crate::items::TurnItem;
+        match self.native_event() {
+            Self::ItemCompleted(event) => match &event.item {
+                TurnItem::CommandExecution(item)
+                    if item.status == CommandExecutionStatus::InProgress =>
+                {
+                    None
+                }
+                _ => self.code_mode_call_id(),
+            },
+            Self::ExecCommandEnd(_) | Self::McpToolCallEnd(_) | Self::PatchApplyEnd(_) => {
+                self.code_mode_call_id()
+            }
+            _ => None,
+        }
+    }
+
     /// Observers outside human-transcript projection retain native event semantics.
     pub fn native_event(&self) -> &Self {
         match self {
@@ -139,7 +159,7 @@ impl crate::protocol::EventMsg {
 pub struct CodeModeItem {
     pub id: String,
     /// Full runtime identity, including its session generation.
-    pub cell_id: String,
+    pub cell_id: Option<String>,
     /// Original exec invocation: durable within the thread even if a runtime restarts.
     pub exec_call_id: String,
     #[ts(type = "number")]
@@ -161,6 +181,7 @@ pub struct CodeModeItem {
 #[ts(export_to = "v2/")]
 pub enum CodeModeEvent {
     Started { call_id: String },
+    Allocated,
     ToolCall { call_id: String },
     WaitStarted { call_id: String },
     WaitCompleted { call_id: String },

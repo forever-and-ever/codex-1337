@@ -1844,6 +1844,58 @@ mod tests {
     use std::time::Duration;
     use uuid::Uuid;
 
+    fn assert_owned_prefixes_preserve_native_history(items: &[RolloutItem]) {
+        let owner = crate::CodeModeOwner {
+            thread_id: ThreadId::new(),
+            exec_call_id: "outer-exec".into(),
+            cell_id: Some("generation:cell".into()),
+            started_at_ms: 0,
+        };
+        let mut native = Vec::new();
+        for item in items {
+            native.push(item.clone());
+            if let RolloutItem::EventMsg(EventMsg::ExecCommandBegin(begin)) = item {
+                native.push(RolloutItem::EventMsg(EventMsg::ExecCommandOutputDelta(
+                    codex_protocol::protocol::ExecCommandOutputDeltaEvent {
+                        call_id: begin.call_id.clone(),
+                        stream: codex_protocol::protocol::ExecOutputStream::Stdout,
+                        chunk: b"partial output".to_vec(),
+                    },
+                )));
+            }
+        }
+        let owned = native
+            .iter()
+            .cloned()
+            .map(|item| match item {
+                RolloutItem::EventMsg(event) if event.code_mode_call_id().is_some() => {
+                    RolloutItem::EventMsg(EventMsg::CodeModeOwned(crate::CodeModeOwned::new(
+                        owner.clone(),
+                        Box::new(event),
+                    )))
+                }
+                item => item,
+            })
+            .collect::<Vec<_>>();
+        // Legacy begin/end, canonical replacement and streamed output must behave
+        // identically at every prefix, not merely when the last completion wins.
+        for end in 1..=native.len() {
+            let mut actual = build_turns_from_rollout_items(&owned[..end]);
+            for turn in &mut actual {
+                turn.items = std::mem::take(&mut turn.items)
+                    .into_iter()
+                    .map(|item| {
+                        if let ThreadItem::CodeModeOwned(owned) = &item {
+                            assert_eq!(owned.owner, owner);
+                        }
+                        item.into_native_item()
+                    })
+                    .collect();
+            }
+            assert_eq!(actual, build_turns_from_rollout_items(&native[..end]));
+        }
+    }
+
     fn indexed_sleep_item(id: &str, duration_ms: u64) -> ThreadItem {
         ThreadItem::Sleep(CoreSleepItem {
             id: id.to_string(),
@@ -2506,6 +2558,8 @@ mod tests {
             .into_iter()
             .map(RolloutItem::EventMsg)
             .collect::<Vec<_>>();
+
+        assert_owned_prefixes_preserve_native_history(&items);
 
         assert_eq!(
             build_turns_from_rollout_items(&items[..2])[0].items,
@@ -3269,7 +3323,7 @@ mod tests {
 
     #[test]
     fn reconstructs_mcp_tool_result_meta_from_persisted_completion_events() {
-        let events = vec![
+        let mut events = vec![
             EventMsg::TurnStarted(TurnStartedEvent {
                 turn_id: "turn-1".into(),
                 root_turn_id: None,
@@ -3309,10 +3363,16 @@ mod tests {
             }),
         ];
 
+        let EventMsg::McpToolCallEnd(completed) = &events[1] else {
+            unreachable!()
+        };
+        let begin = serde_json::from_value(serde_json::to_value(completed).unwrap()).unwrap();
+        events.insert(1, EventMsg::McpToolCallBegin(begin));
         let items = events
             .into_iter()
             .map(RolloutItem::EventMsg)
             .collect::<Vec<_>>();
+        assert_owned_prefixes_preserve_native_history(&items);
         let turns = build_turns_from_rollout_items(&items);
         assert_eq!(turns.len(), 1);
         assert_eq!(

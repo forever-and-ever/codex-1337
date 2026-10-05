@@ -567,6 +567,13 @@ class StartedCodeModeEvent(BaseModel):
     type: Annotated[Literal["started"], Field(title="StartedCodeModeEventType")]
 
 
+class AllocatedCodeModeEvent(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Annotated[Literal["allocated"], Field(title="AllocatedCodeModeEventType")]
+
+
 class ToolCallCodeModeEvent(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -8004,6 +8011,7 @@ class FinishedCodeModeEvent(BaseModel):
 class CodeModeEvent(
     RootModel[
         StartedCodeModeEvent
+        | AllocatedCodeModeEvent
         | ToolCallCodeModeEvent
         | WaitStartedCodeModeEvent
         | WaitCompletedCodeModeEvent
@@ -8015,6 +8023,7 @@ class CodeModeEvent(
     )
     root: (
         StartedCodeModeEvent
+        | AllocatedCodeModeEvent
         | ToolCallCodeModeEvent
         | WaitStartedCodeModeEvent
         | WaitCompletedCodeModeEvent
@@ -8026,7 +8035,7 @@ class CodeModeOwner(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    cell_id: Annotated[str, Field(alias="cellId")]
+    cell_id: Annotated[str | None, Field(alias="cellId")] = None
     exec_call_id: Annotated[str, Field(alias="execCallId")]
     started_at_ms: Annotated[int, Field(alias="startedAtMs")]
     thread_id: Annotated[ThreadId, Field(alias="threadId")]
@@ -10254,11 +10263,11 @@ class CodeModeThreadItem(BaseModel):
         populate_by_name=True,
     )
     cell_id: Annotated[
-        str,
+        str | None,
         Field(
             alias="cellId", description="Full runtime identity, including its session generation."
         ),
-    ]
+    ] = None
     created_at: Annotated[int, Field(alias="createdAt")]
     event: CodeModeEvent
     exec_call_id: Annotated[

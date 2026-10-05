@@ -1,4 +1,7 @@
 mod delegate;
+mod lifecycle;
+pub(crate) use lifecycle::CaptureOrigin;
+pub(crate) use lifecycle::NotificationLease;
 mod execute_handler;
 pub(crate) mod execute_spec;
 mod output;
@@ -73,7 +76,7 @@ pub(crate) struct ExecContext {
 }
 
 pub(crate) struct CodeModeService {
-    transcript_calls: std::sync::Mutex<std::collections::HashMap<CellId, String>>,
+    transcript: Arc<lifecycle::TranscriptRegistry>,
     session: OnceCell<Arc<dyn CodeModeSession>>,
     session_provider: Arc<dyn CodeModeSessionProvider>,
     availability: Result<(), String>,
@@ -93,7 +96,7 @@ impl CodeModeService {
         let dispatch_broker = Arc::new(CodeModeDispatchBroker::new(thread_id, executed_tool_calls));
         let availability = session_provider.availability();
         Self {
-            transcript_calls: std::sync::Mutex::default(),
+            transcript: Arc::default(),
             session: OnceCell::new(),
             session_provider,
             availability,
@@ -128,49 +131,86 @@ impl CodeModeService {
         Arc::clone(&self.session_provider)
     }
 
-    pub(crate) async fn execute(
+    async fn execute(
         &self,
         mut request: codex_code_mode::ExecuteRequest,
         step_context: Arc<StepContext>,
         session: std::sync::Weak<Session>,
-    ) -> Result<codex_code_mode::StartedCell, String> {
+    ) -> Result<(codex_code_mode::StartedCell, Arc<lifecycle::ExecutionScope>), String> {
         request
             .yield_time_ms
             .get_or_insert(self.default_exec_yield_time_ms);
         let preempt = step_context.preempt.clone();
         let exec_call_id = request.tool_call_id.clone();
+        let starting = self
+            .transcript
+            .open(
+                session.clone(),
+                Arc::clone(&step_context.turn),
+                exec_call_id,
+                self.shutdown_token.clone(),
+            )
+            .await;
         let delegate = Arc::new(CodeModeCellDelegate {
             broker: Arc::clone(&self.dispatch_broker),
             step_context,
-            session,
-            terminal_reported: AtomicBool::new(false),
-            exec_call_id: exec_call_id.clone(),
+            scope: starting.scope(),
         });
-        let started = self
-            .session()
-            .await?
-            .execute(request, delegate, preempt)
-            .await?;
-        self.transcript_calls
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(started.cell_id.clone(), exec_call_id);
-        Ok(started)
+        let result = match self.session().await {
+            Ok(runtime) => runtime.execute(request, delegate, preempt).await,
+            Err(error) => Err(error),
+        };
+        match result {
+            Ok(started) => {
+                let scope = starting.scope();
+                starting.allocated(&started.cell_id).await;
+                Ok((started, scope))
+            }
+            Err(error) => {
+                starting.failed().await;
+                Err(error)
+            }
+        }
     }
 
-    pub(super) fn transcript_exec_call(&self, cell_id: &CellId) -> Option<String> {
-        self.transcript_calls
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get(cell_id)
-            .cloned()
+    fn transcript_scope(&self, cell_id: &CellId) -> Option<Arc<lifecycle::ExecutionScope>> {
+        self.transcript.scope(cell_id)
     }
 
-    pub(super) fn finish_transcript_output(&self, cell_id: &CellId) {
-        self.transcript_calls
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .remove(cell_id);
+    pub(crate) fn transcript_owner(
+        &self,
+        call: &str,
+    ) -> Option<codex_protocol::code_mode::CodeModeOwner> {
+        self.transcript.owner(call)
+    }
+
+    pub(crate) fn wrap_transcript_event(
+        &self,
+        event: codex_protocol::protocol::EventMsg,
+        owner: Option<codex_protocol::code_mode::CodeModeOwner>,
+    ) -> codex_protocol::protocol::EventMsg {
+        self.transcript.wrap(event, owner)
+    }
+
+    pub(crate) fn release_transcript_child(&self, call: &str) {
+        self.transcript.release_child(call);
+    }
+
+    pub(crate) fn observe_transcript_child(&self, event: &codex_protocol::protocol::EventMsg) {
+        self.transcript.observe_child(event);
+    }
+
+    pub(crate) fn release_transcript_capture(&self, call: &str, origin: CaptureOrigin) {
+        self.transcript.release_capture(call, origin);
+    }
+
+    pub(crate) fn begin_notification_capture(
+        &self,
+        owner: codex_protocol::code_mode::CodeModeOwner,
+        call: String,
+        queue: std::sync::Weak<tokio::sync::Mutex<crate::state::TurnState>>,
+    ) -> NotificationLease {
+        self.transcript.notification(owner, call, queue)
     }
 
     pub(crate) async fn wait(
@@ -208,7 +248,7 @@ impl CodeModeService {
     pub(crate) async fn shutdown(&self) -> Result<(), String> {
         self.shutdown_token.cancel();
         // Join any initialization already in progress without initializing an unused service.
-        match self
+        let result = match self
             .session
             .get_or_try_init(|| async {
                 Err::<Arc<dyn CodeModeSession>, String>(
@@ -219,7 +259,9 @@ impl CodeModeService {
         {
             Ok(session) => session.shutdown().await,
             Err(_) => Ok(()),
-        }
+        };
+        self.transcript.shutdown().await;
+        result
     }
 
     pub(crate) fn mark_cell_ready_for_dispatch(

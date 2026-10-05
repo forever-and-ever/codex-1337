@@ -45,9 +45,7 @@ pub(super) struct CodeModeDispatchBroker {
 pub(super) struct CodeModeCellDelegate {
     pub(super) broker: Arc<CodeModeDispatchBroker>,
     pub(super) step_context: Arc<StepContext>,
-    pub(super) session: Weak<Session>,
-    pub(super) terminal_reported: std::sync::atomic::AtomicBool,
-    pub(super) exec_call_id: String,
+    pub(super) scope: Arc<super::lifecycle::ExecutionScope>,
 }
 
 struct CellDispatchGate {
@@ -149,6 +147,7 @@ impl CodeModeDispatchBroker {
                         output_token_limit,
                         cancellation_token,
                         response_tx,
+                        scope,
                     } => {
                         let response = if wait_until_cell_ready_for_dispatch(
                             &dispatch_gates,
@@ -157,7 +156,7 @@ impl CodeModeDispatchBroker {
                         )
                         .await
                         {
-                            host.notify(call_id, cell_id, text, output_token_limit)
+                            host.notify(scope.owner(), call_id, cell_id, text, output_token_limit)
                                 .await
                         } else {
                             remove_dispatch_gate(&dispatch_gates, &cell_id);
@@ -171,6 +170,7 @@ impl CodeModeDispatchBroker {
                         mut dispatch_trace,
                         cancellation_token,
                         response_tx,
+                        scope,
                     } => {
                         let cell_id = invocation.cell_id.clone();
                         if !wait_until_cell_ready_for_dispatch(
@@ -200,27 +200,13 @@ impl CodeModeDispatchBroker {
                         let track_completeness =
                             ExecutedToolCalls::is_enabled(&step_context.turn.config.features);
                         let host = Arc::clone(&host);
-                        if let Some(exec_call_id) = host
-                            .session
-                            .services
-                            .code_mode_service
-                            .transcript_exec_call(&cell_id)
-                        {
-                            super::transcript::record(
-                                &host.session,
-                                &step_context.turn,
-                                cell_id.as_str(),
-                                &exec_call_id,
-                                codex_protocol::code_mode::CodeModeEvent::ToolCall {
-                                    call_id: dispatch_trace.call_id.clone(),
-                                },
-                                crate::turn_timing::now_unix_timestamp_ms(),
-                            )
+                        let child = scope
+                            .member(dispatch_trace.call_id.clone(), &step_context.turn)
                             .await;
-                        }
                         let dispatch_gates = Arc::clone(&dispatch_gates);
                         let span = dispatch_trace.span.clone();
                         tokio::spawn(async move {
+                            let _child = child;
                             let invocation = {
                                 let dispatch_gate = track_completeness.then(|| {
                                     dispatch_gates
@@ -367,6 +353,7 @@ impl CodeModeSessionDelegate for CodeModeCellDelegate {
                     dispatch_trace,
                     cancellation_token: cancellation_token.clone(),
                     response_tx,
+                    scope: Arc::clone(&self.scope),
                 })
                 .await
                 .map_err(|_| "code mode nested tool dispatcher is unavailable".to_string())?;
@@ -408,6 +395,7 @@ impl CodeModeSessionDelegate for CodeModeCellDelegate {
                     .token_budget(),
                     cancellation_token: cancellation_token.clone(),
                     response_tx,
+                    scope: Arc::clone(&self.scope),
                 })
                 .await
                 .map_err(|_| "code mode notification dispatcher is unavailable".to_string())?;
@@ -422,16 +410,9 @@ impl CodeModeSessionDelegate for CodeModeCellDelegate {
     }
 
     fn cell_closed(&self, cell_id: &CellId) {
-        self.record_terminal(
-            cell_id,
-            codex_protocol::code_mode::CodeModeStatus::Interrupted,
-        );
-        if let Some(session) = self.session.upgrade() {
-            session
-                .services
-                .code_mode_service
-                .finish_transcript_output(cell_id);
-        }
+        self.scope.allocate(cell_id);
+        self.scope
+            .finish(codex_protocol::code_mode::CodeModeStatus::Interrupted);
         self.broker.close_cell(cell_id);
     }
 
@@ -447,41 +428,20 @@ impl CodeModeSessionDelegate for CodeModeCellDelegate {
                 codex_protocol::code_mode::CodeModeStatus::Interrupted
             }
         };
-        self.record_terminal(cell_id, status);
+        self.scope.allocate(cell_id);
+        self.scope.finish(status);
     }
 }
 
-impl CodeModeCellDelegate {
-    fn record_terminal(&self, cell_id: &CellId, status: codex_protocol::code_mode::CodeModeStatus) {
-        if self
-            .terminal_reported
-            .swap(true, std::sync::atomic::Ordering::AcqRel)
-        {
-            return;
-        }
-        let Some(session) = self.session.upgrade() else {
-            return;
-        };
-        let turn = Arc::clone(&self.step_context.turn);
-        let cell_id = cell_id.to_string();
-        let exec_call_id = self.exec_call_id.clone();
-        let timestamp_ms = crate::turn_timing::now_unix_timestamp_ms();
-        tokio::spawn(async move {
-            super::transcript::record(
-                &session,
-                &turn,
-                &cell_id,
-                &exec_call_id,
-                codex_protocol::code_mode::CodeModeEvent::Finished { status },
-                timestamp_ms,
-            )
-            .await;
-        });
+impl Drop for CodeModeCellDelegate {
+    fn drop(&mut self) {
+        self.scope.abandon();
     }
 }
 
 enum DispatchMessage {
     InvokeTool {
+        scope: Arc<super::lifecycle::ExecutionScope>,
         invocation: CodeModeNestedToolCall,
         // The delegate owns the step while the callback is live; stale queued work must not.
         step_context: Weak<StepContext>,
@@ -490,6 +450,7 @@ enum DispatchMessage {
         response_tx: oneshot::Sender<Result<JsonValue, String>>,
     },
     Notify {
+        scope: Arc<super::lifecycle::ExecutionScope>,
         call_id: String,
         cell_id: CellId,
         text: String,
@@ -538,6 +499,7 @@ impl CoreTurnHost {
 
     async fn notify(
         &self,
+        owner: codex_protocol::code_mode::CodeModeOwner,
         call_id: String,
         cell_id: CellId,
         text: String,
@@ -547,19 +509,22 @@ impl CoreTurnHost {
             return Ok(());
         }
         self.session
-            .inject_if_running(vec![ResponseItemEnvelope {
-                item: ResponseItem::CustomToolCallOutput {
-                    id: None,
-                    call_id,
-                    name: Some(PUBLIC_TOOL_NAME.to_string()),
-                    output: FunctionCallOutputPayload::from_text(text),
-                    internal_chat_message_metadata_passthrough: None,
+            .inject_code_mode_notification(
+                owner,
+                ResponseItemEnvelope {
+                    item: ResponseItem::CustomToolCallOutput {
+                        id: None,
+                        call_id,
+                        name: Some(PUBLIC_TOOL_NAME.to_string()),
+                        output: FunctionCallOutputPayload::from_text(text),
+                        internal_chat_message_metadata_passthrough: None,
+                    },
+                    metadata: Some(CodexHarnessMetadata {
+                        history_truncation_token_limit: Some(output_token_limit),
+                        ..Default::default()
+                    }),
                 },
-                metadata: Some(CodexHarnessMetadata {
-                    history_truncation_token_limit: Some(output_token_limit),
-                    ..Default::default()
-                }),
-            }])
+            )
             .await
             .map_err(|_| {
                 format!("failed to inject exec notify message for cell {cell_id}: no active turn")

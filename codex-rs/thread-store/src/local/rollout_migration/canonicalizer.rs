@@ -237,6 +237,26 @@ impl LegacyRolloutCanonicalizer {
                 )
                 .await?;
             }
+            RolloutItem::EventMsg(EventMsg::CodeModeOwned(owned)) => {
+                // Ownership is already a modern transcript record, not a legacy
+                // tool union to synthesize again. Preserve its single payload.
+                let (mut owner, mut native) = owned.into_parts();
+                owner.thread_id = self.thread_id;
+                match native.as_mut() {
+                    EventMsg::ItemCompleted(event) => {
+                        event.thread_id = self.thread_id;
+                        self.reasoning = None;
+                    }
+                    EventMsg::ItemStarted(event) => event.thread_id = self.thread_id,
+                    _ => {}
+                }
+                let item = RolloutItem::EventMsg(EventMsg::CodeModeOwned(
+                    codex_protocol::code_mode::CodeModeOwned::new(owner, native),
+                ));
+                if codex_rollout::is_persisted_rollout_item(&item, ThreadHistoryMode::Paginated) {
+                    self.write_item(writer, &timestamp, item).await?;
+                }
+            }
             RolloutItem::EventMsg(event) => {
                 if let Some((item, turn_id)) =
                     legacy_event::completed_item(&event, &mut || self.next_item_id())?

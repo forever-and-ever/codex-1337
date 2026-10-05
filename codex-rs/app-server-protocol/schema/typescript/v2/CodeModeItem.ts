@@ -7,7 +7,7 @@ export type CodeModeItem = { id: string,
 /**
  * Full runtime identity, including its session generation.
  */
-cellId: string,
+cellId: string | null,
 /**
  * Original exec invocation: durable within the thread even if a runtime restarts.
  */

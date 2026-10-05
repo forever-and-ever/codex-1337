@@ -124,25 +124,22 @@ impl CodeModeWaitHandler {
                 let started_at = std::time::Instant::now();
                 telemetry.cell_id = Some(args.cell_id.clone());
                 let cell_id = codex_code_mode::CellId::new(args.cell_id);
-                let exec_call_id = exec
+                let scope = exec
                     .session
                     .services
                     .code_mode_service
-                    .transcript_exec_call(&cell_id);
-                if let Some(exec_call_id) = &exec_call_id {
-                    super::transcript::record(
-                        &exec.session,
-                        &exec.turn,
-                        cell_id.as_str(),
-                        exec_call_id,
-                        codex_protocol::code_mode::CodeModeEvent::WaitStarted {
-                            call_id: call_id.clone(),
-                        },
-                        crate::turn_timing::now_unix_timestamp_ms(),
-                    )
-                    .await;
+                    .transcript_scope(&cell_id);
+                if let Some(scope) = &scope {
+                    scope.capture_alias(call_id.clone(), &exec.turn);
+                    scope
+                        .record(
+                            &exec.turn,
+                            codex_protocol::code_mode::CodeModeEvent::WaitStarted {
+                                call_id: call_id.clone(),
+                            },
+                        )
+                        .await;
                 }
-                let transcript_cell_id = cell_id.to_string();
                 let wait_response = if args.terminate {
                     exec.session
                         .services
@@ -162,18 +159,15 @@ impl CodeModeWaitHandler {
                         )
                         .await
                 };
-                if let Some(exec_call_id) = &exec_call_id {
-                    super::transcript::record(
-                        &exec.session,
-                        &exec.turn,
-                        &transcript_cell_id,
-                        exec_call_id,
-                        codex_protocol::code_mode::CodeModeEvent::WaitCompleted {
-                            call_id: call_id.clone(),
-                        },
-                        crate::turn_timing::now_unix_timestamp_ms(),
-                    )
-                    .await;
+                if let Some(scope) = &scope {
+                    scope
+                        .record(
+                            &exec.turn,
+                            codex_protocol::code_mode::CodeModeEvent::WaitCompleted {
+                                call_id: call_id.clone(),
+                            },
+                        )
+                        .await;
                 }
                 let wait_response = wait_response.map_err(|error| {
                     telemetry.finish(/*success*/ false);
@@ -192,10 +186,9 @@ impl CodeModeWaitHandler {
                         .executed_tool_calls
                         .register_cell(runtime_cell_id, &call_id);
                     if !matches!(response, codex_code_mode::RuntimeResponse::Yielded { .. }) {
-                        exec.session
-                            .services
-                            .code_mode_service
-                            .finish_transcript_output(runtime_cell_id);
+                        if let Some(scope) = &scope {
+                            scope.terminal_admitted().await;
+                        }
                         exec.session
                             .services
                             .rollout_thread_trace

@@ -119,7 +119,7 @@ impl CodeModeCell {
                 | CodeModeEvent::ToolCall { call_id }
                 | CodeModeEvent::WaitStarted { call_id }
                 | CodeModeEvent::WaitCompleted { call_id } => Some(call_id.as_str()),
-                CodeModeEvent::Finished { .. } => None,
+                CodeModeEvent::Allocated | CodeModeEvent::Finished { .. } => None,
             }))
             .collect()
     }

@@ -552,7 +552,9 @@ impl RollbackPlanner {
 }
 
 fn explicit_event_turn_id(event: &EventMsg) -> Option<&str> {
-    match event {
+    match event.native_event() {
+        EventMsg::ItemStarted(event) => Some(event.turn_id.as_str()),
+        EventMsg::ItemCompleted(event) => Some(event.turn_id.as_str()),
         EventMsg::ExecCommandEnd(event) => Some(event.turn_id.as_str()),
         EventMsg::PatchApplyEnd(event) => Some(event.turn_id.as_str()),
         EventMsg::DynamicToolCallResponse(event) => Some(event.turn_id.as_str()),

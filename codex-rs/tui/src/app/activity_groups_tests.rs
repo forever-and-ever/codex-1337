@@ -58,7 +58,7 @@ fn turn(items: Vec<ThreadItem>) -> Turn {
 fn code_mode(exec: &str, event: codex_app_server_protocol::CodeModeEvent) -> ThreadItem {
     ThreadItem::CodeMode(codex_app_server_protocol::CodeModeItem {
         id: format!("fact:{exec}:{event:?}"),
-        cell_id: "reused-runtime-cell".into(),
+        cell_id: Some("reused-runtime-cell".into()),
         exec_call_id: exec.into(),
         created_at: 0,
         event,

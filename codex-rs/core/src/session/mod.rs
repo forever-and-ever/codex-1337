@@ -229,6 +229,7 @@ use codex_protocol::error::Result as CodexResult;
 use codex_protocol::exec_output::StreamOutput;
 
 mod account;
+mod code_mode_notifications;
 mod code_mode_warning;
 pub(crate) mod context_window;
 mod daemon_recovery;
@@ -2339,6 +2340,18 @@ impl Session {
 
     /// Persist the event to rollout and send it to clients.
     pub(crate) async fn send_event(&self, turn_context: &TurnContext, msg: EventMsg) {
+        let owner = msg
+            .code_mode_call_id()
+            .and_then(|call| self.services.code_mode_service.transcript_owner(&call));
+        self.send_event_with_owner(turn_context, msg, owner).await;
+    }
+
+    pub(crate) async fn send_event_with_owner(
+        &self,
+        turn_context: &TurnContext,
+        msg: EventMsg,
+        owner: Option<codex_protocol::code_mode::CodeModeOwner>,
+    ) {
         let legacy_source = msg.clone();
         if let EventMsg::Error(error) = &legacy_source
             && error
@@ -2380,7 +2393,8 @@ impl Session {
                 .analytics_events_client
                 .track_guardian_session_event(self.thread_id, &event);
         }
-        self.send_event_raw(event).await;
+        self.send_event_raw_with_persistence(event, /*persist*/ true, owner.clone())
+            .await;
         self.maybe_notify_parent_of_terminal_turn(turn_context, &legacy_source)
             .await;
         self.maybe_mirror_event_text_to_realtime(&legacy_source)
@@ -2397,7 +2411,12 @@ impl Session {
                 id: turn_context.sub_id.clone(),
                 msg: legacy,
             };
-            self.send_event_raw(legacy_event).await;
+            self.send_event_raw_with_persistence(
+                legacy_event,
+                /*persist*/ true,
+                owner.clone(),
+            )
+            .await;
         }
     }
 
@@ -2520,7 +2539,7 @@ impl Session {
     }
 
     pub(crate) async fn send_event_raw(&self, event: Event) {
-        self.send_event_raw_with_persistence(event, /*persist*/ true)
+        self.send_event_raw_with_persistence(event, /*persist*/ true, /*owner*/ None)
             .await;
     }
 
@@ -2534,10 +2553,16 @@ impl Session {
                 true
             }
         };
-        self.send_event_raw_with_persistence(event, persist).await;
+        self.send_event_raw_with_persistence(event, persist, /*owner*/ None)
+            .await;
     }
 
-    async fn send_event_raw_with_persistence(&self, event: Event, persist: bool) {
+    async fn send_event_raw_with_persistence(
+        &self,
+        mut event: Event,
+        persist: bool,
+        owner: Option<codex_protocol::code_mode::CodeModeOwner>,
+    ) {
         let flush_guardian_completion = persist
             && matches!(event.msg, EventMsg::TurnComplete(_))
             && self.is_private_guardian_reviewer().await;
@@ -2568,13 +2593,24 @@ impl Session {
             warn!("failed to persist realtime history: {error}");
         }
         // Persist the event into rollout storage; the store applies its persistence policy.
+        self.services
+            .code_mode_service
+            .observe_transcript_child(&event.msg);
+        let completed_child = event
+            .msg
+            .code_mode_completed_child()
+            .map(std::borrow::Cow::into_owned);
+        event.msg = self
+            .services
+            .code_mode_service
+            .wrap_transcript_event(event.msg, owner);
         if persist {
             let rollout_items = vec![RolloutItem::EventMsg(event.msg.clone())];
             self.persist_rollout_items(&rollout_items).await;
         }
         self.services
             .rollout_thread_trace
-            .record_protocol_event(&event.msg);
+            .record_protocol_event(event.msg.native_event());
         if let Some(effects) = after_event
             && let Err(error) = self.send_realtime_history_effects(&event.id, effects).await
         {
@@ -2586,11 +2622,16 @@ impl Session {
             warn!("failed to flush completed Guardian review: {err}");
         }
         self.deliver_event_raw(event).await;
+        if let Some(call) = completed_child {
+            self.services
+                .code_mode_service
+                .release_transcript_child(&call);
+        }
     }
 
     async fn deliver_event_raw(&self, event: Event) {
         // Record the last known agent status.
-        if let Some(status) = agent_status_from_event(&event.msg) {
+        if let Some(status) = agent_status_from_event(event.msg.native_event()) {
             self.agent_status.send_replace(status);
         }
         if let Err(e) = self.tx_event.send(event).await {

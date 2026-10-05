@@ -17,7 +17,12 @@ impl ExperimentalApi for CodeModeOwnedNotification {
 
 impl CodeModePayload for ServerNotification {
     fn is_code_mode_owned(&self) -> bool {
-        matches!(self, Self::CodeModeOwned(_))
+        match self {
+            Self::CodeModeOwned(_) => true,
+            Self::ItemStarted(item) => item.item.is_code_mode_owned(),
+            Self::ItemCompleted(item) => item.item.is_code_mode_owned(),
+            _ => false,
+        }
     }
 }
 
