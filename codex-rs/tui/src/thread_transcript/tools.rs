@@ -4,6 +4,7 @@
 //! changes composer state, or leaves an animation running; pending items retain their last known
 //! status. Callers own chronological grouping.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::exec_cell::CommandOutput;
@@ -115,6 +116,57 @@ pub(crate) fn historical_tool_fallback(item: &ThreadItem) -> Option<PlainHistory
 fn replay_command_args(command: &str) -> Option<Vec<String>> {
     let args = shlex::split(command)?;
     (shlex::try_join(args.iter().map(String::as_str)).as_deref() == Ok(command)).then_some(args)
+}
+
+/// Share the native active row builders with the scoped transcript reducer.
+pub(crate) fn live_tool_cell(
+    item: &ThreadItem,
+) -> Option<Arc<dyn crate::history_cell::HistoryCell>> {
+    match item {
+        ThreadItem::CommandExecution {
+            id,
+            command,
+            source,
+            command_actions,
+            status: CommandExecutionStatus::InProgress,
+            aggregated_output,
+            ..
+        } => {
+            let mut cell = new_active_exec_command(
+                id.clone(),
+                replay_command_args(command)?,
+                command_actions
+                    .iter()
+                    .cloned()
+                    .map(codex_app_server_protocol::CommandAction::into_core)
+                    .collect(),
+                *source,
+                /*interaction_input*/ None,
+                /*animations_enabled*/ false,
+            );
+            if let Some(output) = aggregated_output {
+                cell.append_output(id, output);
+            }
+            Some(Arc::new(cell))
+        }
+        ThreadItem::McpToolCall {
+            id,
+            server,
+            tool,
+            arguments,
+            status: McpToolCallStatus::InProgress,
+            ..
+        } => Some(Arc::new(new_active_mcp_tool_call(
+            id.clone(),
+            McpInvocation {
+                server: server.clone(),
+                tool: tool.clone(),
+                arguments: Some(arguments.clone()),
+            },
+            /*animations_enabled*/ false,
+        ))),
+        _ => None,
+    }
 }
 
 pub(crate) struct CommandHistory {

@@ -207,6 +207,7 @@ pub(crate) mod agents_overview_discovery;
 mod agents_overview_threads;
 mod agents_overview_usage;
 mod agents_overview_view;
+mod code_mode;
 pub(crate) use agents_overview::AGENTS_OVERVIEW_VIEW_ID;
 mod accounts;
 mod app_server_event_targets;
@@ -564,6 +565,7 @@ pub(crate) struct App {
     pub(crate) file_search: FileSearchManager,
 
     pub(crate) transcript_cells: Vec<Arc<dyn HistoryCell>>,
+    code_mode_transcript: crate::code_mode_transcript::Reducers,
     native_history: native_history::NativeHistory,
     turn_tips: turn_tips::TurnTips,
     pub(crate) transcript_view: crate::transcript_view::TranscriptView,

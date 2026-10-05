@@ -6,6 +6,9 @@ impl ChatWidget {
         notification: ServerNotification,
         replay_kind: Option<ReplayKind>,
     ) {
+        if self.admit_code_mode_notification(&notification, replay_kind) {
+            return;
+        }
         // Reject misrouted child updates before shared notification handling mutates parent state.
         if let ServerNotification::McpServerStatusUpdated(notification) = &notification
             && let (Some(notification_thread_id), Some(thread_id)) =
@@ -44,6 +47,9 @@ impl ChatWidget {
             self.restore_retry_status_header_if_present();
         }
         match notification {
+            ServerNotification::CodeModeOwned(_) => {
+                tracing::warn!("scoped notification escaped scoped admission");
+            }
             ServerNotification::ThreadTokenUsageUpdated(notification) => {
                 self.set_token_info(Some(notification.token_usage.into()));
             }

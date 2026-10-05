@@ -107,6 +107,7 @@ impl App {
         let width = tui.terminal.last_known_screen_size.width;
         self.remove_hidden_review_cells(tui, &turns, &hidden_item_ids, thread_id, &cwd, visibility);
         let cells = self.project_older_history_cells(
+            tui,
             items,
             &turns,
             &hidden_item_ids,
@@ -206,6 +207,7 @@ impl App {
         for index in indices {
             self.transcript_cells.remove(index);
         }
+        self.code_mode_transcript.retain(&self.transcript_cells);
         self.native_history.retain(&self.transcript_cells);
         self.transcript_view.restart_search();
         self.transcript_view
@@ -218,6 +220,7 @@ impl App {
     /// Project successful turn completion metadata after the corresponding page's final item.
     fn project_older_history_cells(
         &mut self,
+        tui: &mut tui::Tui,
         items: Vec<ThreadItem>,
         turns: &[Turn],
         hidden_item_ids: &HashSet<&str>,
@@ -230,7 +233,7 @@ impl App {
                 id,
                 call_id,
                 tokens,
-            } = item
+            } = item.native_item()
             {
                 self.transcript_view.record_tool_output_tokens(
                     id.clone(),
@@ -243,13 +246,25 @@ impl App {
         for (items, completed_turn) in completion::group_completed_turn_items(items, turns) {
             // Internal prompts stay invisible, but still separate adjacent tool groups.
             for visible in items.split(|item| hidden_item_ids.contains(item.id())) {
-                cells.extend(thread_items_to_transcript_cells(
+                let projected = thread_items_to_transcript_cells(
                     Some(thread_id),
                     cwd,
                     visible.iter().cloned(),
                     visibility,
                     Some(&self.config),
-                ));
+                );
+                for cell in projected {
+                    if cell.as_any().is::<history_cell::CodeModeWaitCell>()
+                        || cell
+                            .as_any()
+                            .downcast_ref::<history_cell::CodeModeCell>()
+                            .is_some_and(|block| block.owner.is_some())
+                    {
+                        self.admit_code_mode_page_cell(tui, cell, &mut cells);
+                    } else {
+                        cells.push(cell);
+                    }
+                }
             }
             if let Some(turn) = completed_turn
                 && let Some(completion) = self

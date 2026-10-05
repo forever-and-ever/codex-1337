@@ -20,7 +20,8 @@ pub(crate) fn split_code_mode_members(
     split_members(
         cells
             .iter()
-            .filter_map(|cell| cell.as_any().downcast_ref::<CodeModeCell>()),
+            .filter_map(|cell| cell.as_any().downcast_ref::<CodeModeCell>())
+            .filter(|block| block.owner.is_none()),
         incoming,
     )
 }
@@ -112,6 +113,9 @@ pub(crate) fn reconcile_code_mode(
     let fact = incoming.as_any().downcast_ref::<CodeModeFactCell>();
     let owner = cells.iter().enumerate().find_map(|(index, cell)| {
         let block = cell.as_any().downcast_ref::<CodeModeCell>()?;
+        if block.owner.is_some() {
+            return None;
+        }
         if fact.map_or_else(
             || block.owns(incoming.as_ref()),
             |fact| fact.0.exec_call_id == block.exec_call_id,
@@ -251,6 +255,9 @@ pub(crate) fn reunite_code_mode(cells: &[Arc<dyn HistoryCell>]) -> Option<Projec
         let Some(block) = cell.as_any().downcast_ref::<CodeModeCell>() else {
             continue;
         };
+        if block.owner.is_some() {
+            continue;
+        }
         if let Some((anchor, retained)) = blocks.get_mut(&block.exec_call_id) {
             changed = true;
             if block.status().is_some()
@@ -273,6 +280,9 @@ pub(crate) fn reunite_code_mode(cells: &[Arc<dyn HistoryCell>]) -> Option<Projec
     let mut absorbed = HashSet::new();
     for (index, cell) in cells.iter().enumerate() {
         if let Some(block) = cell.as_any().downcast_ref::<CodeModeCell>() {
+            if block.owner.is_some() {
+                continue;
+            }
             let (_, retained) = blocks.get_mut(&block.exec_call_id)?;
             for member in &block.members {
                 retained.insert_member(Arc::clone(member));
@@ -301,6 +311,10 @@ pub(crate) fn reunite_code_mode(cells: &[Arc<dyn HistoryCell>]) -> Option<Projec
                 replacements.push(Arc::clone(reference));
             }
         } else if let Some(block) = cell.as_any().downcast_ref::<CodeModeCell>() {
+            if block.owner.is_some() {
+                replacements.push(Arc::clone(cell));
+                continue;
+            }
             let (anchor, merged) = &blocks[&block.exec_call_id];
             if *anchor == index {
                 replacements.push(Arc::new(merged.clone()) as Arc<dyn HistoryCell>);

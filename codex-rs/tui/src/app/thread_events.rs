@@ -186,7 +186,7 @@ impl ThreadEventStore {
     }
 
     fn push_notification_inner(&mut self, notification: Cow<'_, ServerNotification>) {
-        let user_item = match notification.as_ref() {
+        let user_item = match notification.as_ref().native_notification() {
             ServerNotification::ItemStarted(n) => Some((&n.turn_id, &n.item)),
             ServerNotification::ItemCompleted(n) => Some((&n.turn_id, &n.item)),
             _ => None,
@@ -199,8 +199,8 @@ impl ThreadEventStore {
             self.delegated_turns.push_back(turn_id.clone());
         }
         self.pending_interactive_replay
-            .note_server_notification(notification.as_ref());
-        match notification.as_ref() {
+            .note_server_notification(notification.as_ref().native_notification());
+        match notification.as_ref().native_notification() {
             ServerNotification::TurnStarted(turn) => {
                 self.set_active_turn_id(turn.turn.id.clone());
                 if self
@@ -283,7 +283,7 @@ impl ThreadEventStore {
         // replay. In particular, raw response items and realtime audio can carry large payloads,
         // so cloning them into every thread's replay buffer only retains data the TUI cannot use.
         if matches!(
-            notification.as_ref(),
+            notification.as_ref().native_notification(),
             ServerNotification::RawResponseItemCompleted(_)
                 | ServerNotification::FileChangePatchUpdated(_)
                 | ServerNotification::ServerRequestResolved(_)

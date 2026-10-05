@@ -1,0 +1,252 @@
+//! Apply canonical scoped blocks through the existing retained-history/reading snapshot boundary.
+use super::*;
+use crate::code_mode_transcript::Admission;
+use crate::code_mode_transcript::Projection;
+use crate::code_mode_transcript::Source;
+
+impl App {
+    pub(super) fn prepare_live_code_mode(&mut self, notification: &ServerNotification) -> bool {
+        let admission = match Admission::notification(notification, Source::Live) {
+            Ok(None) => return false,
+            Ok(Some(admission)) => admission,
+            Err(error) => {
+                tracing::warn!(error, "rejecting invalid owned notification");
+                return true;
+            }
+        };
+        let Some(display) = self.chat_widget.thread_id() else {
+            return true;
+        };
+        if display != admission.owner.thread_id {
+            tracing::warn!("rejecting misrouted live owned notification");
+            return true;
+        }
+        let animations =
+            self.local_settings.tui.animations && self.local_settings.tui.effects.progress;
+        let projection = match self.code_mode_transcript.admit_with_agents(
+            display,
+            admission,
+            &self.chat_widget.config_ref().cwd,
+            animations,
+            &|thread| self.chat_widget.collab_agent_metadata(thread),
+        ) {
+            Ok(projection) => projection,
+            Err(error) => {
+                tracing::warn!(error, "rejecting conflicting live owned notification");
+                return true;
+            }
+        };
+        if projection.opens_live {
+            self.chat_widget.seal_code_mode_stream();
+        }
+        self.chat_widget
+            .observe_code_mode_notification(notification.native_notification());
+        // The seal's ordinary history events precede the newly opened block.
+        self.app_event_tx.send(AppEvent::CodeModeProjection {
+            thread_id: display,
+            projection,
+        });
+        true
+    }
+
+    pub(super) fn apply_code_mode_admission(
+        &mut self,
+        tui: &mut tui::Tui,
+        display: ThreadId,
+        admission: Admission,
+    ) {
+        if self.chat_widget.thread_id() != Some(display) {
+            return;
+        }
+        let animations =
+            self.local_settings.tui.animations && self.local_settings.tui.effects.progress;
+        let projection = match self.code_mode_transcript.admit_with_agents(
+            display,
+            admission,
+            &self.chat_widget.config_ref().cwd,
+            animations,
+            &|thread| self.chat_widget.collab_agent_metadata(thread),
+        ) {
+            Ok(projection) => projection,
+            Err(error) => {
+                tracing::warn!(error, "rejecting conflicting Code Mode update");
+                return;
+            }
+        };
+        self.apply_code_mode_projection(tui, projection);
+    }
+
+    pub(super) fn apply_code_mode_projection(
+        &mut self,
+        tui: &mut tui::Tui,
+        projection: Projection,
+    ) {
+        if let Some((id, call, tokens)) = projection.tokens {
+            self.transcript_view
+                .record_tool_output_tokens(id, call, tokens);
+        }
+        self.set_code_mode_cell(tui, projection.block, projection.terminal_transition);
+        if let Some(wait) = projection.wait {
+            self.set_code_mode_cell(tui, wait, /*terminal_transition*/ false);
+        }
+        tui.frame_requester().schedule_frame();
+        self.chat_widget.request_pending_usage_output_insertion();
+    }
+
+    pub(super) fn insert_code_mode_cell(
+        &mut self,
+        tui: &mut tui::Tui,
+        incoming: Arc<dyn HistoryCell>,
+    ) {
+        let Some(block) = incoming
+            .as_any()
+            .downcast_ref::<history_cell::CodeModeCell>()
+        else {
+            return;
+        };
+        let display = self
+            .chat_widget
+            .thread_id()
+            .or_else(|| block.owner.as_ref().map(|owner| owner.thread_id));
+        let Some(display) = display else {
+            return;
+        };
+        match self.code_mode_transcript.hydrate(display, block) {
+            Ok(cell) => self.set_code_mode_cell(tui, cell, /*terminal_transition*/ false),
+            Err(error) => tracing::warn!(error, "rejecting conflicting Code Mode hydration"),
+        }
+    }
+
+    pub(super) fn admit_code_mode_page_cell(
+        &mut self,
+        tui: &mut tui::Tui,
+        incoming: Arc<dyn HistoryCell>,
+        page: &mut Vec<Arc<dyn HistoryCell>>,
+    ) {
+        if incoming.as_any().is::<history_cell::CodeModeWaitCell>() {
+            if self
+                .transcript_cells
+                .iter()
+                .any(|cell| cell.activity_ids() == incoming.activity_ids())
+            {
+                self.set_code_mode_cell(tui, incoming, /*terminal_transition*/ false);
+                return;
+            }
+            if let Some(index) = page
+                .iter()
+                .position(|cell| cell.activity_ids() == incoming.activity_ids())
+            {
+                if !page[index]
+                    .as_any()
+                    .downcast_ref::<history_cell::CodeModeWaitCell>()
+                    .is_some_and(history_cell::CodeModeWaitCell::completed)
+                {
+                    page[index] = incoming;
+                }
+            } else {
+                page.push(incoming);
+            }
+            return;
+        }
+        let Some(block) = incoming
+            .as_any()
+            .downcast_ref::<history_cell::CodeModeCell>()
+        else {
+            return;
+        };
+        let Some(display) = self.chat_widget.thread_id() else {
+            return;
+        };
+        let canonical = match self.code_mode_transcript.hydrate(display, block) {
+            Ok(cell) => cell,
+            Err(error) => {
+                tracing::warn!(error, "rejecting conflicting owned history page");
+                return;
+            }
+        };
+        if let Some(index) = self.transcript_cells.iter().position(|cell| {
+            cell.as_any()
+                .downcast_ref::<history_cell::CodeModeCell>()
+                .is_some_and(|old| old.identity() == block.identity())
+        }) {
+            let terminal_before = self.transcript_cells[index]
+                .as_any()
+                .downcast_ref::<history_cell::CodeModeCell>()
+                .is_some_and(history_cell::CodeModeCell::terminal);
+            if terminal_before || !block.terminal() {
+                self.set_code_mode_cell(tui, canonical, /*terminal_transition*/ false);
+                return;
+            }
+            // Hydration found the original terminal position of a suffix-only block.
+            // Existing reading/selection snapshots retain the old source revision.
+            self.transcript_view.replace_group_members(
+                &self.transcript_cells,
+                index..index + 1,
+                &[],
+            );
+            if let Some(Overlay::Transcript(overlay)) = self.overlay.as_mut() {
+                overlay.regroup_cell_members(index..index + 1, &[]);
+            }
+            self.transcript_cells.remove(index);
+        }
+        if let Some(index) = page.iter().position(|cell| {
+            cell.as_any()
+                .downcast_ref::<history_cell::CodeModeCell>()
+                .is_some_and(|old| old.identity() == block.identity())
+        }) {
+            page[index] = canonical;
+        } else {
+            page.push(canonical);
+        }
+    }
+
+    fn set_code_mode_cell(
+        &mut self,
+        tui: &mut tui::Tui,
+        incoming: Arc<dyn HistoryCell>,
+        terminal_transition: bool,
+    ) {
+        let Some(identity) = incoming.activity_ids().first().cloned() else {
+            return;
+        };
+        let existing = self
+            .transcript_cells
+            .iter()
+            .position(|cell| cell.activity_ids().first() == Some(&identity));
+        if let Some(index) = existing {
+            if self.transcript_cells[index]
+                .as_any()
+                .downcast_ref::<history_cell::CodeModeWaitCell>()
+                .is_some_and(history_cell::CodeModeWaitCell::completed)
+            {
+                return;
+            }
+            let range = if terminal_transition {
+                index..self.transcript_cells.len()
+            } else {
+                index..index + 1
+            };
+            let mut replacements = if terminal_transition {
+                self.transcript_cells[index + 1..].to_vec()
+            } else {
+                Vec::new()
+            };
+            replacements.push(incoming.clone());
+            self.native_history
+                .consolidate(&self.transcript_cells[index..=index], &incoming);
+            self.transcript_view.replace_group_members(
+                &self.transcript_cells,
+                range.clone(),
+                &replacements,
+            );
+            if let Some(Overlay::Transcript(overlay)) = self.overlay.as_mut() {
+                overlay.regroup_cell_members(range.clone(), &replacements);
+            }
+            self.transcript_cells.splice(range, replacements);
+        } else {
+            self.transcript_cells.push(incoming);
+        }
+        self.native_history.retain(&self.transcript_cells);
+        tui.frame_requester().schedule_frame();
+    }
+}

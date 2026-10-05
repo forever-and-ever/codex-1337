@@ -26,6 +26,15 @@ pub(super) fn cells(item: ThreadItem, cwd: &AbsolutePathBuf) -> TranscriptCells 
     .then(|| item.id().to_owned());
     let mut cells: TranscriptCells = Vec::new();
     match item {
+        item @ ThreadItem::CodeModeOwned(_) => {
+            cells.extend(super::thread_items_to_transcript_cells(
+                None,
+                cwd,
+                [item],
+                super::RawReasoningVisibility::Hidden,
+                None,
+            ))
+        }
         ThreadItem::CodeMode(item) => cells.push(Arc::new(history_cell::CodeModeFactCell(
             item, /*animations_enabled*/ false,
         ))),

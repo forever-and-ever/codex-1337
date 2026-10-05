@@ -1399,6 +1399,7 @@ impl App {
         &mut self,
         notification: &ServerNotification,
     ) {
+        let notification = notification.native_notification();
         if let Some(activity) =
             sub_agent_activity_item(notification).and_then(sub_agent_activity_display)
         {
@@ -2121,6 +2122,9 @@ impl App {
         match event {
             ThreadBufferedEvent::Notification(notification) => {
                 self.cache_collab_receiver_threads_for_notification(notification.as_ref());
+                if self.prepare_live_code_mode(notification.as_ref()) {
+                    return;
+                }
                 let tip_ready = self.turn_tips.observe(&notification, Instant::now());
                 self.chat_widget
                     .handle_server_notification(*notification, /*replay_kind*/ None);

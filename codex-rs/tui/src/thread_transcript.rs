@@ -110,19 +110,19 @@ pub(crate) fn thread_to_transcript_cells(
 ) -> TranscriptCells {
     let cwd = thread.cwd;
     let thread_id = ThreadId::from_string(&thread.id).ok();
-    let mut cells = thread
-        .turns
-        .into_iter()
-        .flat_map(|turn| {
-            thread_items_to_transcript_cells(
-                thread_id,
-                &cwd,
-                turn.items,
-                raw_reasoning_visibility,
-                config,
-            )
-        })
-        .collect::<TranscriptCells>();
+    let mut cells = Vec::new();
+    let mut owned = crate::code_mode_transcript::Reducers::default();
+    for turn in thread.turns {
+        append_thread_items(
+            &mut cells,
+            &mut owned,
+            thread_id,
+            &cwd,
+            turn.items,
+            raw_reasoning_visibility,
+            config,
+        );
+    }
     if cells.is_empty() {
         cells.push(Arc::new(PlainHistoryCell::new(vec![
             "No transcript content available".italic().dim().into(),
@@ -138,12 +138,87 @@ pub(crate) fn thread_items_to_transcript_cells(
     raw_reasoning_visibility: RawReasoningVisibility,
     config: Option<&Config>,
 ) -> TranscriptCells {
+    let mut cells = Vec::new();
+    let mut owned = crate::code_mode_transcript::Reducers::default();
+    append_thread_items(
+        &mut cells,
+        &mut owned,
+        thread_id,
+        cwd,
+        items,
+        raw_reasoning_visibility,
+        config,
+    );
+    cells
+}
+
+fn append_thread_items(
+    mut cells: &mut TranscriptCells,
+    owned: &mut crate::code_mode_transcript::Reducers,
+    thread_id: Option<ThreadId>,
+    cwd: &AbsolutePathBuf,
+    items: impl IntoIterator<Item = ThreadItem>,
+    raw_reasoning_visibility: RawReasoningVisibility,
+    config: Option<&Config>,
+) {
     let inline_visualization_context = config.and_then(|config| {
         thread_id.and_then(|thread_id| InlineVisualizationContext::from_config(config, thread_id))
     });
-    let mut cells: TranscriptCells = Vec::new();
     let mut pending: Option<crate::history_cell::ComputerActivityCell> = None;
     for item in items {
+        if let ThreadItem::CodeModeOwned(scope) = item {
+            flush_computer(&mut pending, cells);
+            let display = thread_id.unwrap_or(scope.owner.thread_id);
+            match owned.admit(
+                display,
+                crate::code_mode_transcript::Admission::item(scope, String::new()),
+                cwd,
+                /*animations*/ false,
+            ) {
+                Ok(projection) => {
+                    let incoming = projection
+                        .block
+                        .as_any()
+                        .downcast_ref::<crate::history_cell::CodeModeCell>();
+                    if let Some(index) = cells.iter().position(|cell| {
+                        cell.as_any()
+                            .downcast_ref::<crate::history_cell::CodeModeCell>()
+                            .is_some_and(|block| {
+                                incoming.is_some_and(|incoming| {
+                                    block.identity() == incoming.identity() && block.owner.is_some()
+                                })
+                            })
+                    }) {
+                        if projection.terminal_transition {
+                            cells.remove(index);
+                            cells.push(projection.block);
+                        } else {
+                            cells[index] = projection.block;
+                        }
+                    } else {
+                        cells.push(projection.block);
+                    }
+                    if let Some(wait) = projection.wait {
+                        if let Some(index) = cells
+                            .iter()
+                            .position(|cell| cell.activity_ids() == wait.activity_ids())
+                        {
+                            if !cells[index]
+                                .as_any()
+                                .downcast_ref::<crate::history_cell::CodeModeWaitCell>()
+                                .is_some_and(crate::history_cell::CodeModeWaitCell::completed)
+                            {
+                                cells[index] = wait;
+                            }
+                        } else {
+                            cells.push(wait);
+                        }
+                    }
+                }
+                Err(error) => tracing::warn!(error, "rejecting conflicting owned history item"),
+            }
+            continue;
+        }
         if matches!(item, ThreadItem::Reasoning { .. })
             && let Some(group) = &mut pending
             && !cells
@@ -227,7 +302,6 @@ pub(crate) fn thread_items_to_transcript_cells(
         }
     }
     flush_computer(&mut pending, &mut cells);
-    cells
 }
 
 /// Project one item without changing the active widget or its turn lifecycle.
@@ -352,4 +426,52 @@ fn item_to_cells(
         other => cells.extend(other_items::cells(other, cwd)),
     }
     cells
+}
+
+/// Project a scoped child without entering the widget's ordinary active-cell lifecycle.
+pub(crate) fn scoped_item_cells(
+    item: ThreadItem,
+    cwd: &AbsolutePathBuf,
+    source: crate::code_mode_transcript::Source,
+    metadata: &dyn Fn(ThreadId) -> crate::multi_agents::AgentMetadata,
+) -> TranscriptCells {
+    if let ThreadItem::CollabAgentToolCall { .. } = &item {
+        return crate::multi_agents::tool_call_history_cell(
+            &item, /*cached_spawn_request*/ None, metadata,
+        )
+        .into_iter()
+        .map(|cell| Arc::new(cell) as Arc<dyn HistoryCell>)
+        .collect();
+    }
+    if source == crate::code_mode_transcript::Source::Live
+        && let ThreadItem::FileChange {
+            id,
+            changes,
+            status: codex_app_server_protocol::PatchApplyStatus::InProgress,
+        } = &item
+        && !changes.is_empty()
+    {
+        return crate::history_cell::new_patch_events(
+            crate::app_server_approval_conversions::file_update_changes_to_display(changes.clone()),
+            cwd.as_path(),
+        )
+        .into_iter()
+        .map(|cell| Arc::new(cell.with_activity_id(id.clone())) as Arc<dyn HistoryCell>)
+        .collect();
+    }
+    if source == crate::code_mode_transcript::Source::Live
+        && let Some(cell) = tools::live_tool_cell(&item)
+    {
+        return vec![cell];
+    }
+    if let Some(cell) = tools::historical_tool_fallback(&item) {
+        return vec![Arc::new(crate::history_cell::ToolItemCell::new(
+            item.id().into(),
+            cell,
+        ))];
+    }
+    if let Some(call) = tools::McpHistory::from_item(item.clone()) {
+        return vec![Arc::new(call.into_cell())];
+    }
+    item_to_cells(item, cwd, RawReasoningVisibility::Hidden, None)
 }

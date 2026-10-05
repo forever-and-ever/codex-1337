@@ -1184,6 +1184,14 @@ pub(crate) enum AppEvent {
     FollowTranscript,
 
     InsertHistoryCell(Box<dyn HistoryCell>),
+    CodeModeTranscript {
+        thread_id: ThreadId,
+        admission: crate::code_mode_transcript::Admission,
+    },
+    CodeModeProjection {
+        thread_id: ThreadId,
+        projection: crate::code_mode_transcript::Projection,
+    },
     RecordToolOutputTokens {
         thread_id: ThreadId,
         id: String,

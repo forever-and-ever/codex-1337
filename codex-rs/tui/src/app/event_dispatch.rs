@@ -45,6 +45,8 @@ impl App {
                     | AppEvent::UpdateWarnings { .. }
                     | AppEvent::CopySelection { .. }
                     | AppEvent::InsertHistoryCell(_)
+                    | AppEvent::CodeModeTranscript { .. }
+                    | AppEvent::CodeModeProjection { .. }
                     | AppEvent::RecordToolOutputTokens { .. }
                     | AppEvent::CommitRealtimeTranscriptHistory
                     | AppEvent::ResetTranscriptForThreadSwitch
@@ -647,6 +649,7 @@ impl App {
                 if self.chat_widget.thread_id() == Some(thread_id) {
                     if let Some(index) = crate::app_backtrack::nth_user_position(&self.transcript_cells, nth_user_message) {
                         self.transcript_cells.truncate(index);
+                        self.code_mode_transcript.retain(&self.transcript_cells);
                 self.native_history.retain(&self.transcript_cells);
                     }
                     self.transcript_view = Default::default();
@@ -700,6 +703,12 @@ impl App {
             }
             AppEvent::InsertHistoryCell(cell) => {
                 self.insert_history_cell(tui, cell);
+            }
+            AppEvent::CodeModeTranscript { thread_id, admission } => {
+                self.apply_code_mode_admission(tui, thread_id, admission);
+            }
+            AppEvent::CodeModeProjection { thread_id, projection } => {
+                if self.chat_widget.thread_id() == Some(thread_id) { self.apply_code_mode_projection(tui, projection); }
             }
             AppEvent::RecordToolOutputTokens { thread_id, id, call_id, tokens } => {
                 if self.chat_widget.thread_id() == Some(thread_id) {

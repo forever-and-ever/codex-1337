@@ -246,6 +246,9 @@ impl ChatWidget {
         replay_kind: ReplayKind,
     ) {
         match item {
+            ThreadItem::CodeModeOwned(owned) => {
+                self.admit_code_mode_snapshot(owned, turn_id);
+            }
             // Snapshots contain the completed item without the live start that renders its diff.
             ThreadItem::FileChange {
                 id,
@@ -273,9 +276,14 @@ impl ChatWidget {
         render_source: ThreadItemRenderSource,
         timestamp: Option<history_cell::HistoryTimestamp>,
     ) {
+        if let ThreadItem::CodeModeOwned(owned) = item {
+            self.admit_code_mode_snapshot(owned, turn_id);
+            return;
+        }
         let from_replay = render_source.is_replay();
         let replay_kind = render_source.replay_kind();
         match item {
+            ThreadItem::CodeModeOwned(_) => unreachable!("owned items enter the scoped reducer"),
             ThreadItem::CodeMode(item) => {
                 self.flush_active_cell();
                 self.add_to_history(history_cell::CodeModeFactCell(

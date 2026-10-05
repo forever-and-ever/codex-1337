@@ -65,6 +65,503 @@ fn code_mode(exec: &str, event: codex_app_server_protocol::CodeModeEvent) -> Thr
     })
 }
 
+#[tokio::test]
+async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
+    use crate::code_mode_transcript::Admission;
+    use crate::code_mode_transcript::Reducers;
+    use crate::code_mode_transcript::Source;
+    use codex_app_server_protocol::CodeModeEvent;
+    use codex_app_server_protocol::CodeModeOwned;
+    use codex_app_server_protocol::CodeModeOwner;
+    use codex_app_server_protocol::CodeModeStatus;
+    use codex_app_server_protocol::ItemCompletedNotification;
+    use codex_app_server_protocol::ItemStartedNotification;
+    let thread = ThreadId::from_string("11111111-1111-4111-8111-111111111111").unwrap();
+    let fork = ThreadId::from_string("22222222-2222-4222-8222-222222222222").unwrap();
+    let sibling = ThreadId::from_string("33333333-3333-4333-8333-333333333333").unwrap();
+    let owner = |exec: &str| CodeModeOwner {
+        thread_id: thread,
+        exec_call_id: exec.into(),
+        cell_id: None,
+        started_at_ms: 0,
+    };
+    let owned_item = |owner: &CodeModeOwner, mut item: ThreadItem| {
+        if let ThreadItem::CodeMode(fact) = &mut item {
+            fact.cell_id = owner.cell_id.clone();
+        }
+        ThreadItem::CodeModeOwned(CodeModeOwned::new(owner.clone(), Box::new(item)))
+    };
+    let notification = |owner: &CodeModeOwner, item: ThreadItem| {
+        let ThreadItem::CodeModeOwned(owned) = owned_item(owner, item) else {
+            unreachable!()
+        };
+        ServerNotification::ItemCompleted(ItemCompletedNotification {
+            thread_id: thread.to_string(),
+            turn_id: "turn".into(),
+            item: *owned.into_parts().1,
+            completed_at_ms: 0,
+        })
+        .with_code_mode_owner(owner)
+    };
+    let output = |id: &str, call: &str, text: &str| ThreadItem::FunctionCallOutput {
+        id: id.into(),
+        call_id: Some(call.into()),
+        name: "exec".into(),
+        namespace: None,
+        output: codex_protocol::models::FunctionCallOutputBody::Text(text.into()),
+    };
+    let (mut app, mut rx, _) = crate::app::tests::make_test_app_with_channels().await;
+    app.local_settings.tui.animations = false;
+    app.chat_widget
+        .handle_thread_session(crate::app::tests::test_thread_session(
+            thread,
+            app.config.cwd.to_path_buf(),
+        ));
+    while rx.try_recv().is_ok() {}
+    let mut tui = crate::tui::test_support::make_test_tui().unwrap();
+    tui.set_owned_screen(/*owned*/ true).unwrap();
+    let drain = |app: &mut App,
+                 rx: &mut tokio::sync::mpsc::UnboundedReceiver<AppEvent>,
+                 tui: &mut crate::tui::Tui| {
+        let mut order = Vec::new();
+        while let Ok(event) = rx.try_recv() {
+            match event {
+                AppEvent::InsertHistoryCell(cell) => app.insert_history_cell(tui, cell),
+                AppEvent::ConsolidateAgentMessage {
+                    deferred_history_cell,
+                    ..
+                } => {
+                    order.push("preceding stream");
+                    if let Some(cell) = deferred_history_cell {
+                        app.insert_history_cell(tui, cell);
+                    }
+                }
+                AppEvent::CodeModeProjection { projection, .. } => {
+                    order.push("owned projection");
+                    app.apply_code_mode_projection(tui, projection);
+                }
+                AppEvent::CodeModeTranscript {
+                    thread_id,
+                    admission,
+                } => app.apply_code_mode_admission(tui, thread_id, admission),
+                _ => {}
+            }
+        }
+        order
+    };
+    app.handle_thread_event_now(ThreadBufferedEvent::Notification(Box::new(
+        ServerNotification::AgentMessageDelta(
+            codex_app_server_protocol::AgentMessageDeltaNotification {
+                thread_id: thread.to_string(),
+                turn_id: "turn".into(),
+                item_id: "before".into(),
+                delta: "Before script".into(),
+            },
+        ),
+    )));
+    let a = owner("exec-a");
+    let b = owner("exec-b");
+    app.handle_thread_event_now(ThreadBufferedEvent::Notification(Box::new(notification(
+        &a,
+        code_mode(
+            "exec-a",
+            CodeModeEvent::Started {
+                call_id: "exec-a".into(),
+            },
+        ),
+    ))));
+    let order = drain(&mut app, &mut rx, &mut tui);
+    assert!(
+        order
+            .iter()
+            .position(|event| *event == "preceding stream")
+            .unwrap()
+            < order
+                .iter()
+                .position(|event| *event == "owned projection")
+                .unwrap()
+    );
+    for (owner, item) in [
+        (
+            &b,
+            code_mode(
+                "exec-b",
+                CodeModeEvent::Started {
+                    call_id: "exec-b".into(),
+                },
+            ),
+        ),
+        (&a, call("child-a", ActivityKind::Exploration, "inProgress")),
+        (&b, call("child-b", ActivityKind::Computer, "inProgress")),
+    ] {
+        app.handle_thread_event_now(ThreadBufferedEvent::Notification(Box::new(notification(
+            owner, item,
+        ))));
+        drain(&mut app, &mut rx, &mut tui);
+        assert_eq!(
+            app.transcript_cells
+                .iter()
+                .filter(|cell| cell.as_any().is::<history_cell::CodeModeCell>())
+                .count(),
+            2
+        );
+    }
+    let render = |view: &mut crate::transcript_view::TranscriptView,
+                  cells: &[Arc<dyn HistoryCell>]| {
+        let area = ratatui::layout::Rect::new(
+            /*x*/ 0, /*y*/ 0, /*width*/ 90, /*height*/ 12,
+        );
+        let mut buffer = ratatui::buffer::Buffer::empty(area);
+        view.render(area, &mut buffer, cells);
+        buffer
+            .content()
+            .chunks(90)
+            .map(|row| {
+                row.iter()
+                    .map(ratatui::buffer::Cell::symbol)
+                    .collect::<String>()
+                    .trim_end()
+                    .to_owned()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim_end()
+            .to_owned()
+    };
+    render(&mut app.transcript_view, &app.transcript_cells);
+    let a_index = app
+        .transcript_cells
+        .iter()
+        .position(|cell| {
+            cell.as_any()
+                .downcast_ref::<history_cell::CodeModeCell>()
+                .is_some_and(|block| block.exec_call_id == "exec-a")
+        })
+        .unwrap();
+    app.transcript_view
+        .jump_to_entry(&app.transcript_cells, a_index);
+    let held = render(&mut app.transcript_view, &app.transcript_cells);
+    for item in [
+        call("child-a", ActivityKind::Exploration, "completed"),
+        code_mode(
+            "exec-a",
+            CodeModeEvent::Finished {
+                status: CodeModeStatus::Completed,
+            },
+        ),
+        code_mode(
+            "exec-a",
+            CodeModeEvent::WaitStarted {
+                call_id: "wait-a".into(),
+            },
+        ),
+        code_mode(
+            "exec-a",
+            CodeModeEvent::WaitCompleted {
+                call_id: "wait-a".into(),
+            },
+        ),
+        output("notify-a", "exec-a", "{\"answer\":42}"),
+        output("returned-a", "exec-a", "Exact accepted return"),
+        ThreadItem::ToolOutputTokens {
+            id: "tool-output-tokens:returned-a".into(),
+            call_id: "exec-a".into(),
+            tokens: Some(7),
+        },
+        ThreadItem::ToolOutputTokens {
+            id: "tool-output-tokens:returned-a".into(),
+            call_id: "exec-a".into(),
+            tokens: Some(7),
+        },
+    ] {
+        app.handle_thread_event_now(ThreadBufferedEvent::Notification(Box::new(notification(
+            &a, item,
+        ))));
+        drain(&mut app, &mut rx, &mut tui);
+    }
+    assert_eq!(
+        render(&mut app.transcript_view, &app.transcript_cells),
+        held
+    );
+    app.transcript_view.jump_to_latest();
+    let current = render(&mut app.transcript_view, &app.transcript_cells);
+    assert!(current.contains("Called"));
+    assert_eq!(
+        app.transcript_cells
+            .iter()
+            .filter(|cell| cell.as_any().is::<history_cell::CodeModeWaitCell>())
+            .count(),
+        1
+    );
+    let terminal = app
+        .transcript_cells
+        .iter()
+        .find_map(|cell| {
+            cell.as_any()
+                .downcast_ref::<history_cell::CodeModeCell>()
+                .filter(|block| block.exec_call_id == "exec-a")
+        })
+        .unwrap()
+        .clone();
+    let before_child = terminal.children.clone();
+    assert_eq!(
+        app.transcript_view
+            .activity_output_tokens(&terminal.activity_ids()),
+        Some(7)
+    );
+    // An older page's pending child cannot overwrite an already admitted completion.
+    app.apply_code_mode_admission(
+        &mut tui,
+        thread,
+        Admission::item(
+            CodeModeOwned::new(
+                a.clone(),
+                Box::new(call("child-a", ActivityKind::Exploration, "inProgress")),
+            ),
+            "older".into(),
+        ),
+    );
+    let after = app
+        .transcript_cells
+        .iter()
+        .find_map(|cell| {
+            cell.as_any()
+                .downcast_ref::<history_cell::CodeModeCell>()
+                .filter(|block| block.exec_call_id == "exec-a")
+        })
+        .unwrap();
+    assert_eq!(
+        after.child_versions.get("child-a"),
+        Some(&(Source::Live, true))
+    );
+    assert!(
+        before_child
+            .iter()
+            .zip(&after.children)
+            .all(|((old_id, old), (new_id, new))| old_id == new_id
+                && old.iter().zip(new).all(|(old, new)| Arc::ptr_eq(old, new)))
+    );
+
+    // Shared fork lineage preserves the origin descriptor, but banks belong to the receiving view.
+    // A suffix capture without Finished must remain non-live in each isolated fork.
+    let mut banks = Reducers::default();
+    let suffix = || {
+        Admission::item(
+            CodeModeOwned::new(
+                a.clone(),
+                Box::new(output("suffix", "wait-a", "Late wait capture")),
+            ),
+            "later-turn".into(),
+        )
+    };
+    let partial_fork = banks
+        .admit(fork, suffix(), &app.config.cwd, /*animations*/ false)
+        .unwrap();
+    let partial_sibling = banks
+        .admit(
+            sibling,
+            suffix(),
+            &app.config.cwd,
+            /*animations*/ false,
+        )
+        .unwrap();
+    assert!(
+        !partial_fork
+            .block
+            .as_any()
+            .downcast_ref::<history_cell::CodeModeCell>()
+            .unwrap()
+            .is_active()
+    );
+    let hydrated_fork = banks.hydrate(fork, &terminal).unwrap();
+    let unchanged_sibling = banks
+        .admit(
+            sibling,
+            suffix(),
+            &app.config.cwd,
+            /*animations*/ false,
+        )
+        .unwrap();
+    assert!(
+        !unchanged_sibling
+            .block
+            .as_any()
+            .downcast_ref::<history_cell::CodeModeCell>()
+            .unwrap()
+            .terminal()
+    );
+    assert!(
+        hydrated_fork
+            .as_any()
+            .downcast_ref::<history_cell::CodeModeCell>()
+            .unwrap()
+            .terminal()
+    );
+    let conflicted = CodeModeOwner {
+        cell_id: Some("allocated-a".into()),
+        ..a.clone()
+    };
+    banks
+        .admit(
+            fork,
+            Admission::item(
+                CodeModeOwned::new(
+                    conflicted.clone(),
+                    Box::new(output("allocated", "exec-a", "Allocated")),
+                ),
+                "turn".into(),
+            ),
+            &app.config.cwd,
+            /*animations*/ false,
+        )
+        .unwrap();
+    let conflicting = CodeModeOwner {
+        cell_id: Some("different-runtime".into()),
+        ..conflicted
+    };
+    assert!(
+        banks
+            .admit(
+                fork,
+                Admission::item(
+                    CodeModeOwned::new(conflicting, Box::new(output("bad", "exec-a", "Rejected"))),
+                    "turn".into()
+                ),
+                &app.config.cwd,
+                /*animations*/ false
+            )
+            .is_err()
+    );
+    let mut examples = vec![format!("Held reading\n{held}\n\nReturn to live\n{current}")];
+    for (heading, cell) in [
+        ("Exact captures", Arc::new(terminal) as Arc<dyn HistoryCell>),
+        ("Historical suffix", partial_fork.block),
+        ("Hydrated fork", hydrated_fork),
+        ("Isolated sibling", partial_sibling.block),
+    ] {
+        let expanded = std::collections::HashSet::from([cell.activity_ids()[0].clone()]);
+        let lines = cell
+            .activity_parts(90, /*header_reserve*/ 0, &expanded)
+            .unwrap()
+            .lines
+            .into_iter()
+            .map(|line| line.line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        examples.push(format!("{heading}\n{lines}"));
+    }
+    insta::assert_snapshot!("scoped_code_mode_admission", examples.join("\n\n"));
+
+    // Snapshot-native scopes normalize once; a live scope cannot borrow another routed thread.
+    let started = ServerNotification::ItemStarted(ItemStartedNotification {
+        thread_id: thread.to_string(),
+        turn_id: "turn".into(),
+        item: owned_item(&a, output("snapshot", "exec-a", "Snapshot")),
+        started_at_ms: 0,
+    });
+    assert!(
+        Admission::notification(&started, Source::Historical)
+            .unwrap()
+            .is_some()
+    );
+    let misrouted = ServerNotification::ItemCompleted(ItemCompletedNotification {
+        thread_id: fork.to_string(),
+        turn_id: "turn".into(),
+        item: owned_item(&a, output("misrouted", "exec-a", "Rejected")),
+        completed_at_ms: 0,
+    });
+    assert!(Admission::notification(&misrouted, Source::Live).is_err());
+
+    let history = vec![
+        owned_item(
+            &a,
+            code_mode(
+                "exec-a",
+                CodeModeEvent::Started {
+                    call_id: "exec-a".into(),
+                },
+            ),
+        ),
+        owned_item(&a, call("child-a", ActivityKind::Exploration, "inProgress")),
+        owned_item(&a, call("child-a", ActivityKind::Exploration, "completed")),
+        owned_item(
+            &a,
+            code_mode(
+                "exec-a",
+                CodeModeEvent::Finished {
+                    status: CodeModeStatus::Completed,
+                },
+            ),
+        ),
+        owned_item(
+            &a,
+            code_mode(
+                "exec-a",
+                CodeModeEvent::WaitStarted {
+                    call_id: "wait-a".into(),
+                },
+            ),
+        ),
+        owned_item(
+            &a,
+            code_mode(
+                "exec-a",
+                CodeModeEvent::WaitCompleted {
+                    call_id: "wait-a".into(),
+                },
+            ),
+        ),
+        owned_item(&a, output("returned-a", "wait-a", "Exact accepted return")),
+    ];
+    let describe = |cells: &[Arc<dyn HistoryCell>]| {
+        cells
+            .iter()
+            .map(|cell| {
+                cell.transcript_hyperlink_lines(90)
+                    .into_iter()
+                    .map(|line| line.line.to_string())
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
+            .collect::<Vec<_>>()
+    };
+    let expected = describe(&thread_items_to_transcript_cells(
+        Some(thread),
+        &app.config.cwd,
+        history.clone(),
+        RawReasoningVisibility::Hidden,
+        None,
+    ));
+    for split in 1..history.len() {
+        app.reset_transcript_state_after_clear();
+        app.transcript_cells = thread_items_to_transcript_cells(
+            Some(thread),
+            &app.config.cwd,
+            history[split..].iter().cloned(),
+            RawReasoningVisibility::Hidden,
+            None,
+        );
+        for cell in app.transcript_cells.clone() {
+            if cell.as_any().is::<history_cell::CodeModeCell>() {
+                app.insert_code_mode_cell(&mut tui, cell);
+            }
+        }
+        let older = thread_items_to_transcript_cells(
+            Some(thread),
+            &app.config.cwd,
+            history[..split].iter().cloned(),
+            RawReasoningVisibility::Hidden,
+            None,
+        );
+        let mut page = Vec::new();
+        for cell in older {
+            app.admit_code_mode_page_cell(&mut tui, cell, &mut page);
+        }
+        app.transcript_cells.splice(0..0, page);
+        assert_eq!(describe(&app.transcript_cells), expected, "split={split}");
+    }
+}
+
 fn project(app: &App, items: &[ThreadItem]) -> Vec<Arc<dyn HistoryCell>> {
     thread_items_to_transcript_cells(
         /*thread_id*/ None,

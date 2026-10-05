@@ -26,7 +26,19 @@ impl App {
         self.insert_retained_history_cell(tui, cell.into());
     }
 
-    fn insert_retained_history_cell(&mut self, tui: &mut tui::Tui, cell: Arc<dyn HistoryCell>) {
+    pub(super) fn insert_retained_history_cell(
+        &mut self,
+        tui: &mut tui::Tui,
+        cell: Arc<dyn HistoryCell>,
+    ) {
+        if cell
+            .as_any()
+            .downcast_ref::<history_cell::CodeModeCell>()
+            .is_some_and(|block| block.owner.is_some())
+        {
+            self.insert_code_mode_cell(tui, cell);
+            return;
+        }
         if let Some(members) = history_cell::split_code_mode_members(&self.transcript_cells, &cell)
         {
             for member in members {
@@ -512,6 +524,7 @@ impl App {
     pub(super) fn reset_transcript_state_after_clear(&mut self) {
         self.overlay = None;
         self.transcript_cells.clear();
+        self.code_mode_transcript = Default::default();
         self.turn_tips.dismiss();
         self.chat_widget.warning_display_state.dismissed.clear();
         self.chat_widget.warning_display_state.transcript = Arc::default();

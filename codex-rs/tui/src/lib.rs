@@ -175,6 +175,7 @@ mod agent_status;
 mod idle_restart;
 mod reload;
 pub use reload::PROTOCOL as UI_RELOAD_PROTOCOL;
+mod code_mode_transcript;
 mod local_chatgpt_auth;
 mod managed_new_thread_defaults;
 mod markdown;

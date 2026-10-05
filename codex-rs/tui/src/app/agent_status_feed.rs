@@ -86,11 +86,13 @@ impl AgentStatusThreadPreview {
         let mut activity = Vec::new();
         for event in events {
             let item = match event {
-                ThreadBufferedEvent::Notification(notification) => match notification.as_ref() {
-                    ServerNotification::ItemCompleted(event) => &event.item,
-                    ServerNotification::ItemStarted(event) => &event.item,
-                    _ => continue,
-                },
+                ThreadBufferedEvent::Notification(notification) => {
+                    match notification.native_notification() {
+                        ServerNotification::ItemCompleted(event) => &event.item,
+                        ServerNotification::ItemStarted(event) => &event.item,
+                        _ => continue,
+                    }
+                }
                 ThreadBufferedEvent::Request(_)
                 | ThreadBufferedEvent::HistoryEntryResponse(_)
                 | ThreadBufferedEvent::FeedbackSubmission(_)
@@ -138,6 +140,7 @@ impl AgentStatusThreadPreview {
 
 fn activity_summary(item: &ThreadItem) -> Option<String> {
     let summary = match item {
+        ThreadItem::CodeModeOwned(owned) => return activity_summary(owned.payload()),
         ThreadItem::CodeMode(_) => return None,
         ThreadItem::AgentMessage { text, .. } | ThreadItem::Plan { text, .. } => text,
         ThreadItem::Reasoning { summary, .. } => summary.last()?,
