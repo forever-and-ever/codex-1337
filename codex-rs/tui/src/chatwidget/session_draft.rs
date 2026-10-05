@@ -1,0 +1,117 @@
+//! A fresh launch is a composer, not a server conversation, until it receives work.
+
+use super::*;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SessionDraft {
+    Editing,
+    Starting,
+}
+
+impl ChatWidget {
+    pub(super) fn defer_draft_command(
+        &mut self,
+        command: SlashCommand,
+        args: &str,
+        elements: &[TextElement],
+    ) -> bool {
+        if self.session_draft.is_none()
+            || command.available_when_thread_unavailable()
+            || matches!(command, SlashCommand::Model | SlashCommand::Reload)
+        {
+            return false;
+        }
+        // Validation-sensitive commands leave their full draft in the composer. Others have
+        // already extracted arguments and attachments; restore them before confirming startup.
+        if !command.requires_dispatch_validation() {
+            let prefix = format!(
+                "/{}{}",
+                command.command(),
+                if args.is_empty() { "" } else { " " }
+            );
+            let elements = elements
+                .iter()
+                .map(|element| {
+                    element.map_range(|range| ByteRange {
+                        start: range.start + prefix.len(),
+                        end: range.end + prefix.len(),
+                    })
+                })
+                .collect();
+            let message = self.user_message_from_submission(format!("{prefix}{args}"), elements);
+            self.restore_user_message_to_composer(message);
+        }
+        self.input_queue.startup_submission = Some(self.bottom_pane.composer_draft_snapshot());
+        self.request_draft_session();
+        true
+    }
+
+    pub(super) fn request_draft_session(&mut self) {
+        if self.session_draft == Some(SessionDraft::Editing) {
+            self.session_draft = Some(SessionDraft::Starting);
+            self.app_event_tx.send(AppEvent::StartDraftSession);
+            self.request_redraw();
+        }
+    }
+
+    pub(crate) fn restore_session_draft(&mut self) {
+        self.session_draft = Some(SessionDraft::Editing);
+        self.cancel_startup_submission();
+        if let Some(composer) = self.drain_pending_messages_for_restore() {
+            self.restore_composer_state(composer);
+        }
+        self.input_queue.recovered_queue = false;
+        self.set_queue_submissions_until_session_configured(/*queue*/ false);
+        self.refresh_pending_input_preview();
+    }
+
+    pub(crate) fn select_draft_provider(
+        &mut self,
+        choice: &crate::app::ProviderModelChoice,
+    ) -> Result<(), String> {
+        let provider = self
+            .config
+            .model_providers
+            .get(&choice.provider.id)
+            .cloned()
+            .ok_or_else(|| {
+                format!(
+                    "Provider {} is not configured in this client.",
+                    choice.provider.name
+                )
+            })?;
+        self.config.model_provider_id = choice.provider.id.clone();
+        self.config.model_provider = provider;
+        self.config.model = Some(choice.model.model.clone());
+        self.config.model_reasoning_effort = Some(choice.effort.clone());
+        self.config.service_tier = Some("default".into());
+        self.requires_openai_auth = self.config.model_provider.requires_openai_auth;
+        self.status_account_display = None;
+        self.active_account_label = None;
+        self.rate_limit_snapshots_by_limit_id.clear();
+        Arc::make_mut(&mut self.model_catalog).models = vec![choice.model.clone()];
+        self.set_model(&choice.model.model);
+        self.set_reasoning_effort(Some(choice.effort.clone()));
+        // Invalidate any request for the previous provider before refreshing this catalog.
+        let request_id = uuid::Uuid::new_v4();
+        self.model_popup_request_id = Some(request_id);
+        self.app_event_tx.send(AppEvent::FetchModels { request_id });
+        Ok(())
+    }
+
+    pub(super) fn draft_provider_hint(&self) -> RenderableItem<'static> {
+        let text = match self.session_draft {
+            Some(SessionDraft::Editing) => vec![
+                self.config.model_provider.name.clone().bold(),
+                " · ".dim(),
+                "/model".into(),
+                " change provider or model".dim(),
+            ],
+            Some(SessionDraft::Starting) => vec!["Starting conversation…".dim()],
+            None => return RenderableItem::Owned(Box::new(())),
+        };
+        RenderableItem::Owned(Box::new(Line::from(text))).inset(Insets::tlbr(
+            /*top*/ 0, /*left*/ 2, /*bottom*/ 0, /*right*/ 2,
+        ))
+    }
+}

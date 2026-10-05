@@ -56,10 +56,14 @@ impl App {
             && !self.pending_startup_thread_start
             && !self.pending_managed_worktree_creation
             && self.agents_overview.new_session_draft.is_none()
+            && self.agents_overview.parked_draft.is_none()
     }
 
     #[cfg(target_os = "linux")]
     async fn capture_reload_input(&mut self) -> Result<crate::reload::RetainedInput, String> {
+        if self.agents_overview.parked_draft.is_some() {
+            return Err("Use /new to return to your unsent draft before reloading.".into());
+        }
         if self.farm.pending.is_some() || self.farm.saved.is_some() {
             return Err("Resolve/discard farm request before reload.".into());
         }
@@ -84,6 +88,18 @@ impl App {
         {
             threads.insert(selected, input);
         }
+        let unstarted = if self.chat_widget.session_draft.is_some() {
+            draft
+                .take()
+                .map(|input| crate::reload::RetainedSessionDraft {
+                    provider: self.chat_widget.config_ref().model_provider_id.clone(),
+                    model: self.chat_widget.current_model().to_owned(),
+                    cwd: self.chat_widget.config_ref().cwd.clone(),
+                    input,
+                })
+        } else {
+            None
+        };
         let overview = self
             .chat_widget
             .selected_index_for_active_view(agents_overview::AGENTS_OVERVIEW_VIEW_ID)
@@ -105,6 +121,7 @@ impl App {
             primary,
             overview,
             draft,
+            unstarted,
             kill_buffer,
             cwd,
             threads,
@@ -114,13 +131,30 @@ impl App {
     }
 
     #[cfg(target_os = "linux")]
-    pub(super) async fn restore_reload_input(&mut self, thread: Option<ThreadId>) {
+    pub(super) async fn restore_reload_input(&mut self, thread: Option<ThreadId>) -> Result<()> {
         let Some(retained) = crate::reload::worker::take_input() else {
-            return;
+            return Ok(());
         };
         self.chat_widget
             .restore_kill_buffer_snapshot(retained.kill_buffer);
         self.agents_overview.input_states = retained.detached;
+        if let Some(draft) = retained.unstarted {
+            if retained.primary.is_some()
+                || self.config.model_provider_id != draft.provider
+                || self.config.cwd != draft.cwd
+            {
+                color_eyre::eyre::bail!(
+                    "Cannot restore the unsent draft in a different provider or directory"
+                );
+            }
+            self.chat_widget.restore_thread_input_state(
+                Some(draft.input),
+                crate::chatwidget::ThreadInputStateRestoreMode {
+                    preserve_in_flight_turn: false,
+                },
+            );
+            self.chat_widget.restore_session_draft();
+        }
         if let Some(input) = retained.draft {
             self.chat_widget.restore_thread_input_state(
                 Some(input),
@@ -146,5 +180,6 @@ impl App {
                     .input_state = Some(input);
             }
         }
+        Ok(())
     }
 }

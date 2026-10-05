@@ -173,6 +173,7 @@ impl ChatWidget {
             if model_prompt {
                 self.bottom_pane.clear_pending_questions();
             }
+            self.request_draft_session();
             return (true, None);
         }
         if !self.is_session_configured() {
@@ -193,6 +194,7 @@ impl ChatWidget {
             if model_prompt {
                 self.bottom_pane.clear_pending_questions();
             }
+            self.request_draft_session();
             return (true, None);
         }
         if user_message.text.is_empty()

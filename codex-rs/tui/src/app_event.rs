@@ -621,6 +621,9 @@ pub(crate) enum AppEvent {
         requested_cwd: PathBuf,
     },
 
+    /// The first submission on a threadless composer requests its server conversation.
+    StartDraftSession,
+
     /// Result of the fresh startup thread that is attached after the input UI is live.
     StartupThreadStarted {
         result: color_eyre::Result<AppServerStartedThread>,

@@ -510,6 +510,21 @@ impl App {
     /// This helper copies every known nickname/role from `AgentNavigationState` into the
     /// replacement widget so that replayed collab items render agent names immediately.
     pub(super) fn replace_chat_widget(&mut self, mut chat_widget: ChatWidget) {
+        if self.chat_widget.session_draft.is_some()
+            && !self.reconnect.offline
+            && let Some(input) = self.chat_widget.capture_thread_input_state()
+            && input.has_unsent_input()
+        {
+            let mut config = self.chat_widget.config_ref().clone();
+            config.model = Some(self.chat_widget.current_model().to_owned());
+            config.model_reasoning_effort = self.chat_widget.current_reasoning_effort();
+            self.agents_overview.parked_draft =
+                Some(Box::new(super::session_draft::ParkedSessionDraft {
+                    config,
+                    catalog: self.chat_widget.model_catalog(),
+                    input,
+                }));
+        }
         self.pending_mouse_paste = None;
         if !self.chat_widget.realtime_conversation_is_running() {
             self.retain_realtime_replay_state_before_replace();
@@ -968,6 +983,13 @@ impl App {
                 }
                 self.chat_widget.maybe_send_next_queued_input();
             }
+            Err(err) if self.chat_widget.session_draft.is_some() => {
+                self.chat_widget.restore_session_draft();
+                self.chat_widget.add_error_message(format!(
+                    "Could not start the conversation: {err}. Your input was not sent."
+                ));
+                self.recover_transport_error(&err);
+            }
             Err(err) if self.recover_transport_error(&err) => {}
             Err(err) => {
                 let warnings = self
@@ -1021,6 +1043,17 @@ impl App {
                 self.chat_widget.restore_user_message_to_composer(message);
             }
             return;
+        }
+        if provider.is_none() && initial_user_message.is_none() && new_thread_name.is_none() {
+            match self.restore_parked_session_draft(tui, app_server).await {
+                Ok(true) => return,
+                Ok(false) => {}
+                Err(error) => {
+                    self.chat_widget
+                        .add_error_message(format!("Could not reopen the unsent draft: {error}"));
+                    return;
+                }
+            }
         }
         // Start a fresh in-memory session while preserving resumability via persisted rollout
         // history. If an initial message is provided, `enqueue_primary_thread_session` suppresses it

@@ -259,6 +259,7 @@ impl ChatWidget {
             if should_run_now {
                 self.maybe_send_next_queued_input();
             }
+            self.request_draft_session();
             true
         } else {
             self.submit_user_message_with_history_and_shell_escape_policy(

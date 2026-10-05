@@ -11,6 +11,7 @@ async fn run_startup_for_test(
     config: Config,
     bootstrap: AppServerBootstrap,
     selection: SessionSelection,
+    initial_prompt: Option<String>,
 ) -> Result<AppExitInfo> {
     App::run(
         tui,
@@ -21,7 +22,7 @@ async fn run_startup_for_test(
         ConfigOverrides::default(),
         LoaderOverrides::default(),
         CloudConfigBundleLoader::default(),
-        /*initial_prompt*/ None,
+        initial_prompt,
         Vec::new(),
         selection,
         codex_feedback::CodexFeedback::new(),
@@ -38,6 +39,44 @@ async fn run_startup_for_test(
         /*managed_worktree*/ None,
     )
     .await
+}
+
+#[tokio::test]
+async fn bare_startup_has_no_server_thread() -> Result<()> {
+    let app = make_test_app().await;
+    let (mut server, requests, proxy) = start_recording_remote_app_server(&app.config).await?;
+    let bootstrap = server.bootstrap(&app.config).await?;
+    let mut tui = crate::tui::test_support::make_test_tui()?;
+    tui.pause_events();
+    let mut run = Box::pin(run_startup_for_test(
+        &mut tui,
+        server,
+        app.config.clone(),
+        bootstrap,
+        SessionSelection::StartFresh,
+        /*initial_prompt*/ None,
+    ));
+    tokio::time::timeout(Duration::from_secs(/*secs*/ 15), async {
+        loop {
+            // Skills refresh runs after the composer is live, past the old eager thread/start.
+            if !recorded_params(&requests, "skills/list").is_empty() {
+                break Ok::<(), color_eyre::eyre::Report>(());
+            }
+            tokio::select! {
+                result = &mut run => {
+                    result?;
+                    break Err(color_eyre::eyre::eyre!("startup exited before the initial frame"));
+                }
+                () = tokio::time::sleep(Duration::from_millis(/*millis*/ 20)) => {}
+            }
+        }
+    })
+    .await??;
+    assert!(recorded_params(&requests, "thread/start").is_empty());
+    drop(run);
+    proxy.abort();
+    let _ = proxy.await;
+    Ok(())
 }
 
 #[tokio::test]
@@ -112,6 +151,7 @@ async fn cli_fork_omits_implicit_model_and_effort() -> Result<()> {
             cwd: None,
             history_mode: None,
         }),
+        /*initial_prompt*/ None,
     ));
     tokio::time::timeout(Duration::from_secs(/*secs*/ 15), async {
         loop {
@@ -153,6 +193,7 @@ async fn run_until_thread_start(
         config,
         bootstrap,
         SessionSelection::StartFresh,
+        Some("Initial prompt".into()),
     ));
     tokio::time::timeout(Duration::from_secs(/*secs*/ 15), async {
         loop {
@@ -558,6 +599,7 @@ async fn startup_read_failure_exits_before_thread_creation() -> Result<()> {
         config,
         bootstrap,
         SessionSelection::StartFresh,
+        /*initial_prompt*/ None,
     )
     .await;
     insta::assert_snapshot!(result.expect_err("startup read must fail").to_string(), @"config/read failed in TUI");

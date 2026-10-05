@@ -263,6 +263,7 @@ impl ChatWidget {
                 },
                 Some(RenderableItem::Owned(Box::new(
                     crate::render::ruled_sections::RuledSections(vec![
+                        self.draft_provider_hint(),
                         RenderableItem::Owned(Box::new(super::work_status::WorkStatusView {
                             goal: self
                                 .current_goal_status

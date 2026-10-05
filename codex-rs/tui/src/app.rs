@@ -269,6 +269,7 @@ mod resize_reflow;
 mod resume_config;
 mod safety_buffering;
 mod server_version_notice;
+mod session_draft;
 mod session_lifecycle;
 mod session_picker;
 mod side;

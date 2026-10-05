@@ -295,7 +295,9 @@ mod input_restore;
 mod input_submission;
 mod interrupts;
 mod questions;
+mod session_draft;
 mod startup_submission;
+pub(crate) use session_draft::SessionDraft;
 mod ui_reload;
 pub(crate) use self::interrupts::CompletedItem;
 use self::interrupts::InterruptManager;
@@ -676,6 +678,7 @@ pub(crate) struct ChatWidget {
     #[cfg(test)]
     pet_image_support_override: Option<crate::pets::PetImageSupport>,
     thread_id: Option<ThreadId>,
+    pub(crate) session_draft: Option<SessionDraft>,
     thread_name: Option<String>,
     thread_rename_block_message: Option<String>,
     active_side_conversation: bool,

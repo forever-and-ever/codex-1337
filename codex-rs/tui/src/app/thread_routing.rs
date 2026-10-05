@@ -1598,7 +1598,7 @@ impl App {
         }
         let should_buffer_initial_replay = !turns.is_empty();
         #[cfg(target_os = "linux")]
-        self.restore_reload_input(Some(thread_id)).await;
+        self.restore_reload_input(Some(thread_id)).await?;
         let replayed_final_items = realtime_delivery::completed_agent_items_from_turns(&turns);
         let replayed_voice_texts = realtime_delivery::replayed_voice_texts_from_turns(&turns);
         let retained_assistant_captions =

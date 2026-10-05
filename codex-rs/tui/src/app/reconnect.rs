@@ -10,6 +10,7 @@ pub(super) enum ReconnectPresentation {
     #[default]
     Conversation,
     Overview,
+    Draft,
 }
 
 #[derive(Default)]
@@ -52,6 +53,9 @@ pub(super) async fn reconnect(
             let client = crate::app_server_connection::connect(&target).await?;
             let mut session =
                 AppServerSession::new(client, mode).with_remote_cwd_override(remote_cwd.clone());
+            if presentation == ReconnectPresentation::Draft {
+                session.model_provider_override = Some(config.model_provider_id.clone());
+            }
             let bootstrap = session.bootstrap(&config).await?;
             let thread = if let Some(thread_id) = thread_id {
                 match session
@@ -172,6 +176,11 @@ impl App {
             return false;
         }
         if !self.reconnect.offline {
+            if self.chat_widget.session_draft.is_some() {
+                self.config = self.chat_widget.config_ref().clone();
+                self.config.model = Some(self.chat_widget.current_model().to_owned());
+                self.config.model_reasoning_effort = self.chat_widget.current_reasoning_effort();
+            }
             #[cfg(target_os = "windows")]
             if self.windows_sandbox_setup_is_local()
                 && let Some(message) = self.chat_widget.initial_user_message.take()
@@ -223,7 +232,11 @@ impl App {
                     KeyEvent::new(KeyCode::Null, KeyModifiers::NONE),
                     RestrictedInputMode::Disconnected,
                 );
-                ReconnectPresentation::Conversation
+                if self.chat_widget.session_draft.is_some() {
+                    ReconnectPresentation::Draft
+                } else {
+                    ReconnectPresentation::Conversation
+                }
             };
             self.chat_widget.pause_for_disconnect();
             self.startup_pending_protected_request = false;
@@ -251,6 +264,7 @@ impl App {
             .selected_index_for_present_view(agents_overview::AGENTS_OVERVIEW_VIEW_ID)
             .and_then(|index| self.agents_overview.visible_thread_ids.get(index).copied());
         let displayed = self.current_displayed_thread_id();
+        let restoring_draft = self.chat_widget.session_draft.is_some();
         let mut input = self.chat_widget.capture_thread_input_state();
         if let Some(input) = input.as_mut() {
             input.reconnect_pending = true;
@@ -443,6 +457,9 @@ impl App {
             );
             self.replace_chat_widget(ChatWidget::new_with_app_event(init));
             self.chat_widget.restore_reconnected_input(input, &[]);
+            if restoring_draft {
+                self.chat_widget.restore_session_draft();
+            }
         }
         // Discover tasks whose notifications were missed, without clearing retained rows.
         // A hidden overview performs this discovery when it is next opened.

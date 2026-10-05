@@ -11,6 +11,7 @@ mod deadline;
 mod retained;
 pub use retained::PROTOCOL;
 pub(crate) use retained::RetainedInput;
+pub(crate) use retained::RetainedSessionDraft;
 #[cfg(target_os = "linux")]
 mod broker;
 #[cfg(target_os = "linux")]

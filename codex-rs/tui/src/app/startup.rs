@@ -13,17 +13,17 @@ use crate::session_start::cancel_session_start;
 use crate::session_start::complete_session_start;
 use crate::unarchive_prompt::run_unarchive_prompt;
 
-fn spawn_startup_thread_start(
+pub(super) fn spawn_startup_thread_start(
     app_server: &AppServerSession,
     local_settings: crate::local_settings::LocalSettings,
     config: Config,
     app_event_tx: AppEventSender,
     worktree: Option<crate::ManagedTuiWorktree>,
+    model_provider_override: Option<String>,
 ) {
     let request_handle = app_server.request_handle();
     let thread_params_mode = app_server.thread_params_mode();
     let remote_cwd_override = app_server.remote_cwd_override().map(Path::to_path_buf);
-    let model_provider_override = app_server.explicit_model_provider(&config);
     tokio::spawn(async move {
         let result = crate::app_server_session::start_thread_with_request_handle(
             request_handle,
@@ -380,8 +380,22 @@ impl App {
             AppServerWorkspaceCommandRunner::new(app_server.request_handle()),
         );
         let enhanced_keys_supported = tui.enhanced_keys_supported();
+        let draft_session = matches!(&session_selection, SessionSelection::StartFresh)
+            && initial_prompt.is_none()
+            && initial_images.is_empty()
+            && managed_worktree.is_none()
+            && harness_overrides.model.is_none()
+            && harness_overrides.model_provider.is_none()
+            && !super::new_session::has_launch_setting(&config, &cli_kv_overrides, "model")
+            && !super::new_session::has_launch_setting(
+                &config,
+                &cli_kv_overrides,
+                "model_provider",
+            );
+        #[cfg(target_os = "linux")]
+        let draft_session = draft_session || crate::reload::worker::has_session_draft();
         let wait_for_initial_session_configured =
-            Self::should_wait_for_initial_session(&session_selection);
+            !draft_session && Self::should_wait_for_initial_session(&session_selection);
         let should_prompt_for_paused_goal_after_startup_resume =
             Self::should_prompt_for_paused_goal_after_startup_resume(
                 &session_selection,
@@ -389,10 +403,11 @@ impl App {
                 &initial_images,
             );
         let thread_and_widget_started_at = Instant::now();
-        let pending_startup_thread_start = matches!(
-            &session_selection,
-            SessionSelection::StartFresh | SessionSelection::Exit
-        );
+        let pending_startup_thread_start = !draft_session
+            && matches!(
+                &session_selection,
+                SessionSelection::StartFresh | SessionSelection::Exit
+            );
         let mut start_in_agents_overview =
             matches!(&session_selection, SessionSelection::AgentsOverview);
         let mut read_only_thread = false;
@@ -401,13 +416,14 @@ impl App {
             SessionSelection::StartFresh
             | SessionSelection::Exit
             | SessionSelection::AgentsOverview => {
-                if !start_in_agents_overview {
+                if pending_startup_thread_start {
                     spawn_startup_thread_start(
                         &app_server,
                         local_settings.clone(),
                         config.clone(),
                         app_event_tx.clone(),
                         managed_worktree.clone(),
+                        app_server.explicit_model_provider(&config),
                     );
                 }
                 // Count a startup tooltip once the initial chat widget can render it.
@@ -458,8 +474,12 @@ impl App {
                     session_telemetry: session_telemetry.clone(),
                 };
                 let mut chat_widget = ChatWidget::new_with_app_event(init);
+                if draft_session {
+                    chat_widget.session_draft = Some(crate::chatwidget::SessionDraft::Editing);
+                    chat_widget.set_reasoning_effort(config.model_reasoning_effort.clone());
+                }
                 chat_widget.set_queue_submissions_until_session_configured(
-                    /*queue*/ !start_in_agents_overview,
+                    /*queue*/ pending_startup_thread_start,
                 );
                 (chat_widget, None)
             }
@@ -710,6 +730,7 @@ impl App {
             }
         };
         let startup_session_cancelled = initial_started_thread.is_none()
+            && !draft_session
             && !pending_startup_thread_start
             && !start_in_agents_overview;
         if startup_session_cancelled {
@@ -900,7 +921,7 @@ See the Codex keymap documentation for supported actions and examples."
         let initial_session_started_at = Instant::now();
         #[cfg(target_os = "linux")]
         if crate::reload::worker::has_unattached_input() {
-            app.restore_reload_input(None).await;
+            app.restore_reload_input(None).await?;
         }
         if let Some(started) = initial_started_thread {
             let thread_id = started.session.thread_id;

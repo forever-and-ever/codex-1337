@@ -45,6 +45,9 @@ impl App {
         if self.reconnect.offline || self.windows_sandbox_blocks_thread_switch() {
             return Ok(AppRunControl::Continue);
         }
+        if cwd.is_none() && self.restore_parked_session_draft(tui, app_server).await? {
+            return Ok(AppRunControl::Continue);
+        }
         let previous_thread = self.current_displayed_thread_id();
         let mut draft = self
             .agents_overview

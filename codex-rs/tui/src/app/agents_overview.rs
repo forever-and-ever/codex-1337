@@ -63,6 +63,7 @@ pub(super) struct AgentsOverviewState {
     pub(super) blank_sessions: HashMap<ThreadId, crate::app_server_session::AppServerStartedThread>,
     pub(super) input_states: HashMap<ThreadId, ThreadInputState>,
     pub(super) new_session_draft: Option<Box<StartupDraftPump>>,
+    pub(super) parked_draft: Option<Box<super::session_draft::ParkedSessionDraft>>,
     pub(super) dispatched_requests: HashMap<ThreadId, Vec<ServerRequest>>,
 }
 

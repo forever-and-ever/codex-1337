@@ -40,6 +40,12 @@ impl ChatWidget {
                 ("esc".into(), "cancel".into()),
             ]));
         }
+        if pending_draft.is_none()
+            && self.input_queue.startup_submission.is_some()
+            && !self.startup_submission_has_protected_input()
+        {
+            self.request_draft_session();
+        }
         if pending_draft.is_some()
             || !self.is_session_configured()
             || self

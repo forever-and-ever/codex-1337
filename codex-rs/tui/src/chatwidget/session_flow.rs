@@ -71,6 +71,7 @@ impl ChatWidget {
         let connector_scope_changed = previous_thread_id != Some(session.thread_id)
             || self.config.cwd.as_path() != session.cwd.as_path();
         self.thread_id = Some(session.thread_id);
+        self.session_draft = None;
         self.input_queue.server_messages.clear();
         self.input_queue.server_queue_busy = false;
         self.app_event_tx

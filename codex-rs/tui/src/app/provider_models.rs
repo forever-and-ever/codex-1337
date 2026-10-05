@@ -88,6 +88,10 @@ impl App {
                     .show_provider_models(request_id, provider, result);
             }
             ProviderModelEvent::Start(choice) => {
+                if self.chat_widget.session_draft.is_some() {
+                    self.select_draft_provider(server, *choice).await;
+                    return;
+                }
                 self.start_fresh_session_with_provider(
                     tui,
                     server,

@@ -265,6 +265,7 @@ impl App {
                     }
                 }
             }
+            AppEvent::StartDraftSession => self.start_draft_session(app_server),
             AppEvent::StartupThreadStarted { result } => {
                 self.handle_startup_thread_started(app_server, result)
                     .await?;

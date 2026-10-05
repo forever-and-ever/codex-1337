@@ -84,19 +84,7 @@ pub async fn initialize(cli: &mut Cli) -> io::Result<()> {
         if let Some(terminal) = state.terminal {
             let _ = TERMINAL.set(terminal);
         }
-        cli.prompt = None;
-        cli.images.clear();
-        cli.worktree = false;
-        if let Some(cwd) = &state.cwd {
-            cli.cwd = Some(cwd.to_path_buf());
-        }
-        cli.agents_overview = state.overview;
-        cli.resume_picker = false;
-        cli.resume_last = false;
-        cli.resume_session_id = state.primary.map(|thread| thread.to_string());
-        cli.fork_picker = false;
-        cli.fork_last = false;
-        cli.fork_session_id = None;
+        state.prepare_cli(cli);
     }
     let primary = retained.as_ref().and_then(|state| state.primary);
     let activating = AtomicBool::new(retained.is_some());
@@ -148,6 +136,18 @@ pub(crate) fn has_unattached_input() -> bool {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .is_some()
+    })
+}
+
+pub(crate) fn has_session_draft() -> bool {
+    WORKER.get().is_some_and(|worker| {
+        worker.primary.is_none()
+            && worker
+                .retained
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_ref()
+                .is_some_and(|state| state.unstarted.is_some())
     })
 }
 

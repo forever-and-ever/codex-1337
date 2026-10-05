@@ -228,6 +228,7 @@ impl ChatWidget {
             #[cfg(test)]
             pet_image_support_override: None,
             thread_id: None,
+            session_draft: None,
             thread_name: None,
             thread_rename_block_message: None,
             active_side_conversation: false,

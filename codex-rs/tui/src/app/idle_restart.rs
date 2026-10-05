@@ -7,6 +7,7 @@ impl App {
         if self.farm.pending.is_some()
             || self.farm.saved.is_some()
             || self.thread_delivery.has_pending_work()
+            || self.agents_overview.parked_draft.is_some()
         {
             return false;
         }
