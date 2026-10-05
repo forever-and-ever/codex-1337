@@ -1341,6 +1341,9 @@ impl MessageProcessor {
             ClientRequest::ThreadFarm { params, .. } => {
                 self.turn_processor.thread_farm(&request_id, params).await
             }
+            ClientRequest::ThreadJira { params, .. } => {
+                self.thread_processor.thread_jira(params).await
+            }
             ClientRequest::ThreadArchive { params, .. } => {
                 self.thread_processor
                     .thread_archive(request_id.clone(), params)
