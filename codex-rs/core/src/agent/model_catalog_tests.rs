@@ -278,6 +278,9 @@ async fn claude_parent_secondary_catalog_rebinds_chatgpt_accounts_and_recovers()
     session.provider_id = "claude".into();
     session.services.auth_manager = root.for_account(&alice).await.unwrap();
     let mut config = (*turn.config).clone();
+    config.codex_home =
+        codex_utils_absolute_path::AbsolutePathBuf::from_absolute_path_checked(home.path())
+            .unwrap();
     config.model_provider_id = "openai".into();
     config.model_provider = ModelProviderInfo {
         name: "OpenAI".into(),
@@ -287,11 +290,63 @@ async fn claude_parent_secondary_catalog_rebinds_chatgpt_accounts_and_recovers()
         ..Default::default()
     };
     config.wrangler.default_account = Some(alice.clone());
-    session
-        .services
-        .local_agent_runtime
-        .account_selection
-        .select("openai", ProviderAccountSelection::Chatgpt { id: bob });
+    // A Claude root retains an incidental ChatGPT manager and a startup config, neither
+    // of which may override a newer /account choice for fresh OpenAI children.
+    tokio::fs::write(
+        config.codex_home.join("config.toml"),
+        format!("[wrangler]\ndefault_account = {bob:?}\n"),
+    )
+    .await
+    .unwrap();
+    let child_auth = account_auth_for_provider(
+        &config,
+        &session.services.local_agent_runtime.account_selection,
+        &session.services.auth_manager,
+        /*persisted*/ None,
+        &AccountInheritance::OtherProvider,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(child_auth.selected_account_id(), Some(bob.clone()));
+    let inherited_auth = account_auth_for_provider(
+        &config,
+        &session.services.local_agent_runtime.account_selection,
+        &session.services.auth_manager,
+        /*persisted*/ None,
+        &AccountInheritance::SameProvider(session.services.auth_manager.clone()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(inherited_auth.selected_account_id(), Some(alice.clone()));
+    let new_root_auth = account_auth_for_provider(
+        &config,
+        &session.services.local_agent_runtime.account_selection,
+        &session.services.auth_manager,
+        /*persisted*/ None,
+        &AccountInheritance::None,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let resumed_auth = account_auth_for_provider(
+        &config,
+        &session.services.local_agent_runtime.account_selection,
+        &session.services.auth_manager,
+        Some(alice.clone()),
+        &AccountInheritance::OtherProvider,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        (
+            new_root_auth.selected_account_id(),
+            resumed_auth.selected_account_id()
+        ),
+        (Some(alice.clone()), Some(alice.clone()))
+    );
     let first = session.agent_models_manager(&config).await.unwrap();
     first
         .list_models(
@@ -301,11 +356,12 @@ async fn claude_parent_secondary_catalog_rebinds_chatgpt_accounts_and_recovers()
         .await;
     let retained = session.agent_models_manager(&config).await.unwrap();
     assert!(std::sync::Arc::ptr_eq(&first, &retained));
-    session
-        .services
-        .local_agent_runtime
-        .account_selection
-        .select("openai", ProviderAccountSelection::Chatgpt { id: alice });
+    tokio::fs::write(
+        config.codex_home.join("config.toml"),
+        format!("[wrangler]\ndefault_account = {alice:?}\n"),
+    )
+    .await
+    .unwrap();
     let rebound = session.agent_models_manager(&config).await.unwrap();
     rebound
         .list_models(
@@ -314,6 +370,19 @@ async fn claude_parent_secondary_catalog_rebinds_chatgpt_accounts_and_recovers()
         )
         .await;
     assert!(!std::sync::Arc::ptr_eq(&first, &rebound));
+    session
+        .services
+        .local_agent_runtime
+        .account_selection
+        .select("openai", ProviderAccountSelection::Chatgpt { id: alice });
+    tokio::fs::write(
+        config.codex_home.join("config.toml"),
+        format!("[wrangler]\ndefault_account = {bob:?}\n"),
+    )
+    .await
+    .unwrap();
+    let bound = session.agent_models_manager(&config).await.unwrap();
+    assert!(std::sync::Arc::ptr_eq(&rebound, &bound));
     // The failed Bob discovery did not run again during metadata lookup; /account selected Alice's actual
     // bearer and account header instead of reusing Bob or the ambient/default login.
     assert_eq!(server.received_requests().await.unwrap().len(), 2);

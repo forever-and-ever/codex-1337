@@ -5,6 +5,7 @@ use crate::agent::child_config::model_supports_multi_agent_backend;
 use crate::agent::control::ProviderAccountSelection;
 use crate::config::Config;
 use crate::session::session::Session;
+use crate::thread_manager::accounts::AccountInheritance;
 use crate::thread_manager::accounts::account_auth_for_provider;
 use crate::thread_manager::build_models_manager;
 use crate::thread_manager::build_models_manager_with_anthropic_account;
@@ -60,11 +61,28 @@ impl Session {
             &self.services.local_agent_runtime.account_selection,
             &self.services.auth_manager,
             /*persisted*/ None,
-            Some(&self.services.auth_manager),
+            // This branch is exclusively cross-provider: there is no parent binding to inherit.
+            &AccountInheritance::OtherProvider,
         )
         .await
         .map_err(|error| error.to_string())?
         .unwrap_or_else(|| self.services.auth_manager.clone());
+        let mut account = self
+            .services
+            .local_agent_runtime
+            .account_selection
+            .get(&config.model_provider_id)
+            .map(|selection| selection.as_ref().clone());
+        if account.is_none()
+            && config.model_provider.adapter == ModelProviderAdapter::ClaudeSubscription
+        {
+            account = codex_config::read_account_preferences(config.codex_home.as_path())
+                .await
+                .map_err(|error| error.to_string())?
+                .unwrap_or_else(|| config.wrangler.clone())
+                .default_claude_account
+                .map(|id| ProviderAccountSelection::ClaudeSubscription { id });
+        }
         let key = AgentModelsKey {
             provider: config.model_provider.clone(),
             catalog: config.model_catalog.clone(),
@@ -72,13 +90,7 @@ impl Session {
                 .features
                 .enabled(codex_features::Feature::ApiKeyModelDiscovery),
             account: (!config.model_provider.requires_openai_auth)
-                .then(|| {
-                    self.services
-                        .local_agent_runtime
-                        .account_selection
-                        .get(&config.model_provider_id)
-                        .map(|selection| selection.as_ref().clone())
-                })
+                .then_some(account)
                 .flatten(),
             auth_account: config
                 .model_provider
@@ -100,7 +112,7 @@ impl Session {
                         "Configured Anthropic provider has a foreign account binding".into(),
                     );
                 }
-                None => config.wrangler.default_claude_account.clone(),
+                None => None,
             };
             build_models_manager_with_anthropic_account(config, auth, account)
         } else {

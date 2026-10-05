@@ -3,6 +3,12 @@ use crate::agent::control::ProviderAccountSelection;
 use crate::agent::control::ProviderAccountSelections;
 use codex_model_provider_info::ModelProviderAdapter;
 
+pub(crate) enum AccountInheritance {
+    None,
+    SameProvider(Arc<AuthManager>),
+    OtherProvider,
+}
+
 impl ThreadManagerState {
     pub(super) async fn account_for_spawn(
         &self,
@@ -38,9 +44,19 @@ impl ThreadManagerState {
                 .read()
                 .await
                 .get(&parent)
-                .map(|thread| thread.session.services.auth_manager.clone())
+                .map(|thread| {
+                    if thread.session.provider_id == config.model_provider_id {
+                        AccountInheritance::SameProvider(
+                            thread.session.services.auth_manager.clone(),
+                        )
+                    } else {
+                        // Incidental credentials carried by another provider are not a binding.
+                        AccountInheritance::OtherProvider
+                    }
+                })
+                .unwrap_or(AccountInheritance::None)
         } else {
-            None
+            AccountInheritance::None
         };
         if config.model_provider.adapter == ModelProviderAdapter::ClaudeSubscription
             && config.model_provider.requires_openai_auth
@@ -61,14 +77,23 @@ impl ThreadManagerState {
                             ProviderAccountSelection::ClaudeSubscription { .. }
                         )
                     });
-                if selected.is_none()
-                    && let Some(id) =
-                        persisted.or_else(|| config.wrangler.default_claude_account.clone())
-                {
-                    agent_control.runtime().account_selection.select(
-                        &config.model_provider_id,
-                        ProviderAccountSelection::ClaudeSubscription { id },
-                    );
+                if selected.is_none() {
+                    let id = match persisted {
+                        Some(id) => Some(id),
+                        None if matches!(inherited, AccountInheritance::OtherProvider) => {
+                            codex_config::read_account_preferences(config.codex_home.as_path())
+                                .await?
+                                .unwrap_or_else(|| config.wrangler.clone())
+                                .default_claude_account
+                        }
+                        None => config.wrangler.default_claude_account.clone(),
+                    };
+                    if let Some(id) = id {
+                        agent_control.runtime().account_selection.select(
+                            &config.model_provider_id,
+                            ProviderAccountSelection::ClaudeSubscription { id },
+                        );
+                    }
                 }
             }
             // Never scope a provider-backed thread to an ambient ChatGPT login.
@@ -79,7 +104,7 @@ impl ThreadManagerState {
             &agent_control.runtime().account_selection,
             auth,
             persisted,
-            inherited.as_ref(),
+            &inherited,
         )
         .await
     }
@@ -90,11 +115,15 @@ pub(crate) async fn account_auth_for_provider(
     selections: &ProviderAccountSelections,
     auth: &Arc<AuthManager>,
     persisted: Option<String>,
-    inherited: Option<&Arc<AuthManager>>,
+    inheritance: &AccountInheritance,
 ) -> CodexResult<Option<Arc<AuthManager>>> {
     if !config.model_provider.requires_openai_auth {
         return Ok(None);
     }
+    let inherited = match inheritance {
+        AccountInheritance::SameProvider(auth) => Some(auth),
+        AccountInheritance::None | AccountInheritance::OtherProvider => None,
+    };
     let source = inherited.unwrap_or(auth);
     if persisted.is_none()
         && (source.has_external_auth()
@@ -104,16 +133,29 @@ pub(crate) async fn account_auth_for_provider(
     {
         return Ok(None);
     }
-    let id = selections
+    let binding = selections
         .get(&config.model_provider_id)
         .and_then(|selection| match selection.as_ref() {
             ProviderAccountSelection::Chatgpt { id } => Some(id.clone()),
             ProviderAccountSelection::ClaudeSubscription { .. } => None,
         })
         .or(persisted)
-        .or_else(|| inherited.and_then(|auth| auth.selected_account_id()))
-        .or_else(|| config.wrangler.default_account.clone())
-        .or_else(|| source.selected_account_id());
+        .or_else(|| inherited.and_then(|auth| auth.selected_account_id()));
+    let id = match binding {
+        Some(id) => Some(id),
+        None if matches!(inheritance, AccountInheritance::OtherProvider) => {
+            codex_config::read_account_preferences(config.codex_home.as_path())
+                .await?
+                .unwrap_or_else(|| config.wrangler.clone())
+                .default_account
+                .or_else(|| source.selected_account_id())
+        }
+        None => config
+            .wrangler
+            .default_account
+            .clone()
+            .or_else(|| source.selected_account_id()),
+    };
     match id {
         Some(id) => source.for_account(&id).await.map(Some).map_err(|error| {
             CodexErr::InvalidRequest(format!("Cannot load conversation account: {error}"))
