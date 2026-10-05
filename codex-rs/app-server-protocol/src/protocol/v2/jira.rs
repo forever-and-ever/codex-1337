@@ -1,8 +1,8 @@
 use crate::JsonSchema;
 use crate::TS;
+use codex_utils_path_uri::LegacyAppPathString;
 use serde::Deserialize;
 use serde::Serialize;
-use codex_utils_path_uri::LegacyAppPathString;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
@@ -48,8 +48,17 @@ pub struct JiraRevision {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
-#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
-#[ts(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase", export_to = "v2/")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+#[ts(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    export_to = "v2/"
+)]
 pub enum JiraAction {
     List {
         #[ts(optional = nullable)]
@@ -57,7 +66,9 @@ pub enum JiraAction {
         #[ts(optional = nullable)]
         limit: Option<u32>,
     },
-    Read { key: JiraKey },
+    Read {
+        key: JiraKey,
+    },
     Save {
         /// Omitted for creation. For edits, includes the fetched version and immutable epic.
         #[ts(optional = nullable)]
@@ -65,7 +76,9 @@ pub enum JiraAction {
         key: JiraKey,
         body: String,
     },
-    Delete { revision: JiraRevision },
+    Delete {
+        revision: JiraRevision,
+    },
 }
 
 /// Server-local issue storage scoped by the persisted conversation cwd.
@@ -81,11 +94,25 @@ pub struct ThreadJiraParams {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
-#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
-#[ts(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase", export_to = "v2/")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+#[ts(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    export_to = "v2/"
+)]
 pub enum JiraResult {
-    List { data: Vec<JiraKey>, next_cursor: Option<String> },
-    Issue { issue: JiraIssue },
+    List {
+        data: Vec<JiraKey>,
+        next_cursor: Option<String>,
+    },
+    Issue {
+        issue: JiraIssue,
+    },
     Deleted,
 }
 
