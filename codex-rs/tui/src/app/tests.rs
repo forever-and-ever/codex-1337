@@ -1,5 +1,8 @@
 //! App-level orchestration tests for the TUI.
 
+#[path = "tests/thread_delivery_tests.rs"]
+mod thread_delivery_tests;
+
 #[path = "tests/daybreak_tests.rs"]
 mod daybreak_tests;
 #[path = "tests/math_interruption_tests.rs"]
