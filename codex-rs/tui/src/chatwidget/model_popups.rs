@@ -183,7 +183,7 @@ impl ChatWidget {
             });
         }
 
-        self.append_provider_choices(&mut items, &mut model_ids);
+        self.prepend_provider_choices(&mut items, &mut model_ids);
         let header = self.model_menu_header(
             "Select Model",
             "Pick a quick auto mode or browse all models.",
@@ -285,7 +285,7 @@ impl ChatWidget {
             });
         }
 
-        self.append_provider_choices(&mut items, &mut model_ids);
+        self.prepend_provider_choices(&mut items, &mut model_ids);
         let header = self.model_menu_header("Select Model and Effort", "");
         self.show_model_selection_view(
             model_ids,

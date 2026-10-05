@@ -9,28 +9,34 @@ use codex_app_server_protocol::ModelProviderOption;
 pub(super) const PROVIDER_MODELS_VIEW: &str = "provider-models";
 
 impl ChatWidget {
-    pub(super) fn append_provider_choices(
+    pub(super) fn prepend_provider_choices(
         &self,
         items: &mut Vec<SelectionItem>,
         model_ids: &mut Vec<String>,
     ) {
-        for provider in &self.model_catalog.providers {
-            if provider.id == self.config.model_provider_id {
-                continue;
-            }
-            model_ids.push(format!("provider:{}", provider.id));
+        for (index, provider) in self
+            .model_catalog
+            .providers
+            .iter()
+            .filter(|provider| provider.id != self.config.model_provider_id)
+            .enumerate()
+        {
+            model_ids.insert(index, format!("provider:{}", provider.id));
             let provider = provider.clone();
-            items.push(SelectionItem {
-                name: format!("New {} conversation…", provider.name),
-                description: Some("Keep this conversation; choose another provider.".into()),
-                actions: vec![Box::new(move |tx| {
-                    tx.send(AppEvent::ProviderModel(ProviderModelEvent::Open(
-                        provider.clone(),
-                    )));
-                })],
-                dismiss_on_select: true,
-                ..Default::default()
-            });
+            items.insert(
+                index,
+                SelectionItem {
+                    name: format!("{}…", provider.name),
+                    description: Some("Choose a model for a new conversation.".into()),
+                    actions: vec![Box::new(move |tx| {
+                        tx.send(AppEvent::ProviderModel(ProviderModelEvent::Open(
+                            provider.clone(),
+                        )));
+                    })],
+                    dismiss_on_select: true,
+                    ..Default::default()
+                },
+            );
         }
     }
 

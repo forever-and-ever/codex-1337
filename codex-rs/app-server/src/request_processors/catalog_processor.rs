@@ -342,8 +342,11 @@ impl CatalogRequestProcessor {
             .model_providers
             .iter()
             .filter(|(id, _)| {
-                id.as_str() == codex_model_provider_info::OPENAI_PROVIDER_ID
-                    || id.as_str() == config.model_provider_id
+                matches!(
+                    id.as_str(),
+                    codex_model_provider_info::OPENAI_PROVIDER_ID
+                        | codex_model_provider_info::CLAUDE_SUBSCRIPTION_PROVIDER_ID
+                ) || id.as_str() == config.model_provider_id
                     || config.config_layer_stack.layers_high_to_low().any(|layer| {
                         layer
                             .config

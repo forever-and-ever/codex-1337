@@ -3380,8 +3380,18 @@ async fn memories_reset_confirmation_sends_event_on_confirm() {
 
 #[tokio::test]
 async fn model_selection_popup_snapshot() {
-    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.5")).await;
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-6-astra")).await;
     chat.thread_id = Some(ThreadId::new());
+    Arc::make_mut(&mut chat.model_catalog).providers = vec![
+        codex_app_server_protocol::ModelProviderOption {
+            id: "openai".into(),
+            name: "OpenAI".into(),
+        },
+        codex_app_server_protocol::ModelProviderOption {
+            id: "claude_subscription".into(),
+            name: "Claude subscription".into(),
+        },
+    ];
     chat.open_model_popup();
 
     let popup = render_bottom_popup(&chat, /*width*/ 80);

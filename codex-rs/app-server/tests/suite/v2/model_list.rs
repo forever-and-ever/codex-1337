@@ -222,6 +222,12 @@ requires_openai_auth = true
                     id: "catalog-test".into(),
                     name: "OpenAI".into()
                 },
+                // Native Claude is built in, even without an explicit provider
+                // table or credentials. Listing it must not contact Anthropic.
+                codex_app_server_protocol::ModelProviderOption {
+                    id: "claude_subscription".into(),
+                    name: "Claude subscription".into()
+                },
                 codex_app_server_protocol::ModelProviderOption {
                     id: "openai".into(),
                     name: "OpenAI".into()
