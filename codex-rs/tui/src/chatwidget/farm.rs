@@ -12,7 +12,10 @@ pub(crate) struct FarmDraft {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-enum FarmDraftOrigin { Composer, WorkOrder }
+enum FarmDraftOrigin {
+    Composer,
+    WorkOrder,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct FarmSubmission {
@@ -24,8 +27,18 @@ pub(crate) struct FarmSubmission {
 impl FarmSubmission {
     pub(crate) fn work_order(text: String, task_name: String) -> Self {
         Self {
-            draft: FarmDraft { composer: ThreadComposerState { text: text.clone(), ..Default::default() }, cursor: text.len(), origin: FarmDraftOrigin::WorkOrder },
-            input: vec![UserInput::Text { text, text_elements: vec![] }],
+            draft: FarmDraft {
+                composer: ThreadComposerState {
+                    text: text.clone(),
+                    ..Default::default()
+                },
+                cursor: text.len(),
+                origin: FarmDraftOrigin::WorkOrder,
+            },
+            input: vec![UserInput::Text {
+                text,
+                text_elements: vec![],
+            }],
             task_name: Some(task_name),
         }
     }
@@ -38,7 +51,9 @@ pub(crate) enum FarmRecovery {
 
 impl ThreadInputState {
     pub(crate) fn clear_farm_draft(&mut self, draft: &FarmDraft) {
-        if draft.origin == FarmDraftOrigin::Composer && self.composer.as_ref() == Some(&draft.composer) {
+        if draft.origin == FarmDraftOrigin::Composer
+            && self.composer.as_ref() == Some(&draft.composer)
+        {
             self.composer = None;
         }
     }
@@ -46,13 +61,20 @@ impl ThreadInputState {
 
 impl ChatWidget {
     pub(crate) fn submit_jira_triage(&mut self, text: String) -> bool {
-        if !self.is_session_configured() || self.input_queue.rate_limit_recovery_pending
-            || self.pending_image_submission.is_some() || self.active_side_conversation {
+        if !self.is_session_configured()
+            || self.input_queue.rate_limit_recovery_pending
+            || self.pending_image_submission.is_some()
+            || self.active_side_conversation
+        {
             return false;
         }
         self.submit_user_message_with_history_and_shell_escape_policy(
-            text.into(), UserMessageHistoryRecord::UserMessageText, ShellEscapePolicy::Disallow, UserMessageSource::Prompt,
-        ).0
+            text.into(),
+            UserMessageHistoryRecord::UserMessageText,
+            ShellEscapePolicy::Disallow,
+            UserMessageSource::Prompt,
+        )
+        .0
     }
 
     fn farm_draft(&self) -> FarmDraft {
@@ -72,7 +94,8 @@ impl ChatWidget {
     }
 
     pub(crate) fn clear_farm_draft(&mut self, draft: &FarmDraft) {
-        if draft.origin == FarmDraftOrigin::Composer && self.farm_draft().composer == draft.composer {
+        if draft.origin == FarmDraftOrigin::Composer && self.farm_draft().composer == draft.composer
+        {
             self.restore_composer_state(ThreadComposerState::default());
         }
         self.request_redraw();
@@ -184,7 +207,11 @@ impl ChatWidget {
                 SlashCommand::FarmFresh => ThreadFarmMode::Fresh,
                 _ => unreachable!("farm dispatch only"),
             },
-            submission: FarmSubmission { draft, input, task_name: None },
+            submission: FarmSubmission {
+                draft,
+                input,
+                task_name: None,
+            },
         });
     }
 

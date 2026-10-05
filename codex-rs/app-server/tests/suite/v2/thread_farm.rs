@@ -134,8 +134,9 @@ async fn farm_spawns_and_replays_without_steering_parent(
         thread_id: parent.id.clone(),
         request_id: uuid::Uuid::new_v4().to_string(),
         mode,
-        task_name: (mode == ThreadFarmMode::FullHistory && matches!(parent_state, ParentState::Idle))
-            .then(|| "farm_impl_staging".to_owned()),
+        task_name: (mode == ThreadFarmMode::FullHistory
+            && matches!(parent_state, ParentState::Idle))
+        .then(|| "farm_impl_staging".to_owned()),
         input: vec![UserInput::Text {
             text: TASK.to_owned(),
             text_elements: Vec::new(),
@@ -256,9 +257,12 @@ async fn farm_spawns_and_replays_without_steering_parent(
     if params.task_name.is_some() {
         let mut next = params.clone();
         next.request_id = uuid::Uuid::new_v4().to_string();
-        let second: ThreadFarmResponse = app.request(|request_id| ClientRequest::ThreadFarm {
-            request_id, params: next,
-        }).await?;
+        let second: ThreadFarmResponse = app
+            .request(|request_id| ClientRequest::ThreadFarm {
+                request_id,
+                params: next,
+            })
+            .await?;
         assert_eq!(second.agent_path, "/root/farm_impl_staging_1");
     }
     let retired: ThreadRetireResponse = app
@@ -301,8 +305,8 @@ async fn farm_spawns_and_replays_without_steering_parent(
         mismatch.task_name = Some("farm_impl_other".into());
     } else {
         mismatch.input = vec![UserInput::Text {
-        text: "A different task".to_owned(),
-        text_elements: Vec::new(),
+            text: "A different task".to_owned(),
+            text_elements: Vec::new(),
         }];
     }
     let id = app
