@@ -94,9 +94,19 @@ fn positional_instruction_updates_do_not_rewrite_earlier_prefixes() {
         {"type":"message","role":"user","content":[{"type":"input_text","text":"Question"}]},
         {"type":"message","role":"assistant","content":[{"type":"output_text","text":"Answer"}]},
         {"type":"message","role":"developer","content":[{"type":"input_text","text":"Update.\n "}]},
-        {"type":"agent_message","author":"worker\nspoof","recipient":"root","content":[{"type":"input_text","text":"Exact α\n "}]}
+        {"type":"agent_message","author":"worker\nspoof","recipient":"root","content":[{"type":"input_text","text":"Exact α\n "}]},
+        {"type":"function_call_output","name":"send_message_to_thread","namespace":"codex_tui","output":"<codex_delegation>Exact IPC α\n </codex_delegation>"},
+        {"type":"function_call_output","name":"notify","output":[{"type":"input_text","text":"Caption.\n "},{"type":"input_image","image_url":"data:image/png;base64,YQ=="}]}
     ])).unwrap();
-    let history = encode_history(&input, "Prefix", &[], &[InputModality::Text]).unwrap();
+    // Unsolicited named tool output is a turn input, not an unpaired tool result.
+    // IPC admission intentionally omits call_id; replay must retain that distinction.
+    let history = encode_history(
+        &input,
+        "Prefix",
+        &[],
+        &[InputModality::Text, InputModality::Image],
+    )
+    .unwrap();
     let agent = json!({"type":"text","text":"[Agent message from \"worker\\nspoof\" to \"root\"]\nExact α\n "});
     assert_eq!(
         json!({"system":history.system,"messages":history.messages}),
@@ -105,7 +115,12 @@ fn positional_instruction_updates_do_not_rewrite_earlier_prefixes() {
             "messages":[
                 {"role":"user","content":[{"type":"text","text":"Question"}]},
                 {"role":"assistant","content":[{"type":"text","text":"Answer"}]},
-                {"role":"user","content":[{"type":"text","text":"<system-reminder>\nUpdate.\n \n</system-reminder>"},agent]}
+                {"role":"user","content":[{"type":"text","text":"<system-reminder>\nUpdate.\n \n</system-reminder>"},agent,
+                    {"type":"text","text":"[Tool notification from \"codex_tui.send_message_to_thread\"]"},
+                    {"type":"text","text":"<codex_delegation>Exact IPC α\n </codex_delegation>"},
+                    {"type":"text","text":"[Tool notification from \"notify\"]"},
+                    {"type":"text","text":"Caption.\n "},
+                    {"type":"image","source":{"type":"base64","media_type":"image/png","data":"YQ=="}}]}
             ]
         })
     );

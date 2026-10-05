@@ -187,6 +187,36 @@ pub(super) fn encode_history(
                 )
             }
             ResponseItem::FunctionCallOutput {
+                call_id: None,
+                name: Some(name),
+                namespace,
+                output,
+                ..
+            } => {
+                // Host-delivered notifications have no originating tool call. Preserve
+                // them as attributed input, not an invented tool_use/tool_result pair.
+                if name.is_empty()
+                    || name.len() > 512
+                    || namespace.as_ref().is_some_and(|value| value.len() > 512)
+                {
+                    return Err(invalid("Anthropic tool notification has an invalid name"));
+                }
+                let source = match namespace.as_deref().filter(|value| !value.is_empty()) {
+                    Some(namespace) => format!("{namespace}.{name}"),
+                    None => name.clone(),
+                };
+                let label = if output.success == Some(false) {
+                    "Failed tool notification"
+                } else {
+                    "Tool notification"
+                };
+                let mut content = vec![
+                    json!({"type":"text", "text":format!("[{label} from {}]", json!(source))}),
+                ];
+                content.extend(encode_result_blocks(output, modalities)?);
+                ("user", content)
+            }
+            ResponseItem::FunctionCallOutput {
                 call_id, output, ..
             } => {
                 let call_id = call_id
@@ -388,27 +418,37 @@ fn encode_result(
 ) -> Result<Value, ApiError> {
     let content = match &output.body {
         FunctionCallOutputBody::Text(text) => Value::String(text.clone()),
-        FunctionCallOutputBody::ContentItems(items) => Value::Array(
-            items
-                .iter()
-                .map(|part| match part {
-                    FunctionCallOutputContentItem::InputText { text } => {
-                        Ok(json!({"type":"text", "text":text}))
-                    }
-                    FunctionCallOutputContentItem::InputImage { image, .. } => {
-                        encode_image(image, modalities)
-                    }
-                    FunctionCallOutputContentItem::InputAudio { .. } => {
-                        Err(invalid("Anthropic audio tool results are unsupported"))
-                    }
-                    FunctionCallOutputContentItem::EncryptedContent { .. } => {
-                        Err(invalid("Anthropic cannot replay encrypted tool results"))
-                    }
-                })
-                .collect::<Result<Vec<_>, _>>()?,
-        ),
+        FunctionCallOutputBody::ContentItems(_) => {
+            Value::Array(encode_result_blocks(output, modalities)?)
+        }
     };
     Ok(
         json!({"type":"tool_result", "tool_use_id":call_id, "content":content, "is_error":output.success == Some(false)}),
     )
+}
+
+fn encode_result_blocks(
+    output: &FunctionCallOutputPayload,
+    modalities: &[InputModality],
+) -> Result<Vec<Value>, ApiError> {
+    match &output.body {
+        FunctionCallOutputBody::Text(text) => Ok(vec![json!({"type":"text", "text":text})]),
+        FunctionCallOutputBody::ContentItems(items) => items
+            .iter()
+            .map(|part| match part {
+                FunctionCallOutputContentItem::InputText { text } => {
+                    Ok(json!({"type":"text", "text":text}))
+                }
+                FunctionCallOutputContentItem::InputImage { image, .. } => {
+                    encode_image(image, modalities)
+                }
+                FunctionCallOutputContentItem::InputAudio { .. } => {
+                    Err(invalid("Anthropic audio tool results are unsupported"))
+                }
+                FunctionCallOutputContentItem::EncryptedContent { .. } => {
+                    Err(invalid("Anthropic cannot replay encrypted tool results"))
+                }
+            })
+            .collect(),
+    }
 }
