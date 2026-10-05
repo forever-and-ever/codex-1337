@@ -18923,7 +18923,7 @@
       },
       "RawResponseCompletedNotification": {
         "$schema": "http://json-schema.org/draft-07/schema#",
-        "description": "Internal-only notification containing the exact usage from one upstream Responses API completion.",
+        "description": "Internal-only notification containing provider-reported usage from one upstream model response completion.",
         "properties": {
           "responseId": {
             "type": "string"
@@ -20292,7 +20292,16 @@
               "null"
             ]
           },
-          "metadata": true
+          "metadata": true,
+          "reportedReasoningTokens": {
+            "default": null,
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
         },
         "type": "object"
       },
@@ -23218,6 +23227,58 @@
             "type": "object"
           },
           {
+            "description": "Human-only aggregate for one completed model response, not additional usage.",
+            "properties": {
+              "completedAtMs": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "content": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "id": {
+                "type": "string"
+              },
+              "reportedReasoningTokens": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "responseId": {
+                "type": "string"
+              },
+              "summary": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "type": {
+                "enum": [
+                  "thought"
+                ],
+                "title": "ThoughtThreadItemType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "completedAtMs",
+              "content",
+              "id",
+              "responseId",
+              "summary",
+              "type"
+            ],
+            "title": "ThoughtThreadItem",
+            "type": "object"
+          },
+          {
             "properties": {
               "aggregatedOutput": {
                 "description": "The command's output, aggregated from stdout and stderr.",
@@ -24016,6 +24077,13 @@
           "action": {
             "$ref": "#/definitions/v2/JiraAction"
           },
+          "expectedScope": {
+            "description": "Scope returned by the initial list. Required for all reads and mutations.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "threadId": {
             "type": "string"
           }
@@ -24040,11 +24108,16 @@
           },
           "result": {
             "$ref": "#/definitions/v2/JiraResult"
+          },
+          "scope": {
+            "description": "Opaque binding to both current cwd and the issue-store identity.",
+            "type": "string"
           }
         },
         "required": [
           "project",
-          "result"
+          "result",
+          "scope"
         ],
         "title": "ThreadJiraResponse",
         "type": "object"

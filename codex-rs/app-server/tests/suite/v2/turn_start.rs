@@ -1212,6 +1212,7 @@ async fn turn_start_emits_raw_response_completed_with_upstream_usage(
     let expected_metadata = json!({
         "amount": expected_amount,
         "metadata": completed["response"]["usage"],
+        "reportedReasoningTokens": 3,
     });
     let body = responses::sse(vec![
         responses::ev_response_created("resp-1"),

@@ -10,6 +10,82 @@ use codex_protocol::models::FunctionCallOutputContentItem;
 use pretty_assertions::assert_eq;
 
 #[test]
+fn completed_thought_discloses_only_readable_reasoning() {
+    let cwd = std::path::Path::new("/tmp");
+    let mut snapshots = Vec::new();
+    for (label, tokens, summary, hidden) in [
+        (
+            "counted",
+            Some(1300),
+            vec!["First block", "Second block"],
+            false,
+        ),
+        ("unknown", None, vec!["Readable summary"], false),
+        ("encrypted-only", Some(1300), Vec::new(), false),
+        ("opaque-unknown", None, Vec::new(), false),
+        ("hidden", Some(1300), vec!["Private summary"], true),
+    ] {
+        let cell = Arc::new(crate::history_cell::ThoughtCell::from_item(
+            ThreadItem::Thought {
+                id: format!("thought:{label}"),
+                response_id: label.into(),
+                completed_at_ms: 1_700_000_000_000,
+                summary: summary.into_iter().map(str::to_owned).collect(),
+                content: Vec::new(),
+                reported_reasoning_tokens: tokens,
+            },
+            cwd,
+            if hidden {
+                crate::history_cell::ThoughtTextVisibility::Hidden
+            } else {
+                crate::history_cell::ThoughtTextVisibility::Summary
+            },
+        ));
+        let cells: Vec<Arc<dyn HistoryCell>> = vec![cell.clone()];
+        let mut view = TranscriptView::default();
+        let clock = crate::history_cell::HistoryTimestamp::from_millis(1_700_000_000_000)
+            .unwrap()
+            .span()
+            .content
+            .trim()
+            .to_owned();
+        for expanded in [false, true] {
+            if expanded && cell.activity_disclosure(80).is_none() {
+                continue;
+            }
+            if expanded {
+                view.disclosure.expanded.extend(cell.activity_ids());
+            }
+            let buffer = tests::render(&mut view, &cells, /*width*/ 64, /*height*/ 6);
+            snapshots.push(format!(
+                "{label} expanded={expanded}\n{}",
+                tests::text(&buffer).replace(&clock, "HH:MM:SS")
+            ));
+            let length = view
+                .current_layout(&cells, /*index*/ 0)
+                .unwrap()
+                .text()
+                .len();
+            view.begin_selection(&cells, /*column*/ 6, /*row*/ 0, /*clicks*/ 1);
+            let selection = view.selection.as_mut().unwrap();
+            selection.start.offset = 0;
+            selection.end.offset = length;
+            let copied = view.selected_text(&cells).unwrap();
+            assert!(copied.contains("Thought") && !copied.contains("tokens"));
+            view.end_selection(&cells);
+        }
+        if cell.activity_disclosure(20).is_none() {
+            let buffer = tests::render(&mut view, &cells, /*width*/ 20, /*height*/ 1);
+            snapshots.push(format!(
+                "{label} narrow\n{}",
+                tests::text(&buffer).replace(&clock, "HH:MM:SS")
+            ));
+        }
+    }
+    insta::assert_snapshot!(snapshots.join("\n"));
+}
+
+#[test]
 fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
     use crate::history_cell::activity_parts::FoldTarget;
     use crate::history_cell::output_provenance::OutputMode;
@@ -139,7 +215,7 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
                     activity: output.expanded_output_lines(width, mode),
                     header: output.activity_header(),
                     auxiliary: Vec::new(),
-                    tool_output_tokens: None,
+                    header_tokens: None,
                     disclosure: output.activity_disclosure(width),
                     controls: Vec::new(),
                 })
@@ -384,7 +460,7 @@ fn mixed_feed_keeps_its_grid_through_live_commit_resize_and_details() {
                     header: None,
                     activity: Vec::new(),
                     auxiliary: tail.compact_hyperlink_lines(width),
-                    tool_output_tokens: None,
+                    header_tokens: None,
                     disclosure: None,
                     controls: Vec::new(),
                 })
@@ -592,7 +668,7 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
                 header: tail.activity_header(),
                 activity: tail.compact_hyperlink_lines(width),
                 auxiliary: Vec::new(),
-                tool_output_tokens: None,
+                header_tokens: None,
                 disclosure: tail.activity_disclosure(width),
                 controls: Vec::new(),
             })

@@ -464,7 +464,7 @@ fn code_mode_batches_display_their_own_counts_and_replay_without_double_counting
         let committed = &cells[..1];
         let tail = &cells[1];
         let ids = tail.activity_ids();
-        let tool_output_tokens = view.activity_output_tokens(&ids);
+        let header_tokens = view.activity_output_tokens(&ids);
         view.sync_live_activity(committed, ids);
         view.sync_live_activity_tail(
             /*width*/ 80,
@@ -482,7 +482,7 @@ fn code_mode_batches_display_their_own_counts_and_replay_without_double_counting
                         tail.compact_hyperlink_lines(width)
                     },
                     auxiliary: Vec::new(),
-                    tool_output_tokens,
+                    header_tokens,
                     disclosure: tail.activity_disclosure(width),
                 })
             },
@@ -677,7 +677,7 @@ fn activity_focus_keeps_controls_without_passive_hints() {
     let mut view = TranscriptView::default();
     let render_live = |view: &mut TranscriptView| {
         let expanded = view.sync_live_activity(&cells, cell.activity_ids());
-        let tool_output_tokens = view.activity_output_tokens(&cell.activity_ids());
+        let header_tokens = view.activity_output_tokens(&cell.activity_ids());
         view.sync_live_activity_tail(
             /*width*/ 32,
             /*key*/ None,
@@ -694,7 +694,7 @@ fn activity_focus_keeps_controls_without_passive_hints() {
                         cell.compact_hyperlink_lines(width)
                     },
                     auxiliary: Vec::new(),
-                    tool_output_tokens,
+                    header_tokens,
                     disclosure: cell.activity_disclosure(width),
                 })
             },

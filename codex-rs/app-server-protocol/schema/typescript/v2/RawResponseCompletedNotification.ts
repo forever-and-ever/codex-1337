@@ -5,7 +5,7 @@ import type { ResponseUsageMetadata } from "./ResponseUsageMetadata";
 import type { TokenUsageBreakdown } from "./TokenUsageBreakdown";
 
 /**
- * Internal-only notification containing the exact usage from one upstream
- * Responses API completion.
+ * Internal-only notification containing provider-reported usage from one
+ * upstream model response completion.
  */
 export type RawResponseCompletedNotification = { threadId: string, turnId: string, responseId: string, usage: TokenUsageBreakdown | null, usageMetadata: ResponseUsageMetadata | null, };

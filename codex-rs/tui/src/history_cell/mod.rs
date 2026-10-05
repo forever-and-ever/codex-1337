@@ -135,6 +135,7 @@ mod separators;
 mod session;
 mod spoken_artifacts;
 mod startup_warnings;
+mod thought;
 mod timestamp;
 mod tool_output;
 mod tool_output_group;
@@ -161,6 +162,8 @@ pub(crate) use search::*;
 pub(crate) use separators::*;
 pub(crate) use session::*;
 pub(crate) use startup_warnings::StartupWarningsCell;
+pub(crate) use thought::ThoughtCell;
+pub(crate) use thought::ThoughtTextVisibility;
 pub(crate) use timestamp::HistoryTimestamp;
 pub(crate) use timestamp::agent_prefix;
 pub(crate) use tool_output::ToolOutputCell;
@@ -374,6 +377,11 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
 
     /// Semantic estimate anchor in the compact presentation's selectable header source.
     fn activity_header(&self) -> Option<activity_parts::ActivityHeader> {
+        None
+    }
+
+    /// Token attribution carried by the entry rather than a tool-output receipt.
+    fn activity_header_tokens(&self) -> Option<u64> {
         None
     }
 

@@ -212,6 +212,7 @@ fn without_thread_item_media(mut item: ThreadItem) -> ThreadItem {
         | ThreadItem::AgentMessage { .. }
         | ThreadItem::Plan { .. }
         | ThreadItem::Reasoning { .. }
+        | ThreadItem::Thought { .. }
         | ThreadItem::FunctionCallOutput {
             output: FunctionCallOutputBody::Text(_),
             ..

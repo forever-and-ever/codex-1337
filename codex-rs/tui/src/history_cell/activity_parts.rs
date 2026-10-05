@@ -40,6 +40,8 @@ pub(crate) struct ActivityHeader {
     pub(crate) source_offset: usize,
     /// Visible columns before the estimate, excluding the outer disclosure gutter.
     pub(crate) columns: usize,
+    /// Clipping an invocation can reveal more arguments; a fixed label cannot.
+    pub(crate) expand_on_truncation: bool,
 }
 
 impl ActivityHeader {
@@ -47,6 +49,7 @@ impl ActivityHeader {
         Self {
             source_offset: line.spans.iter().map(|span| span.content.len()).sum(),
             columns: line.width(),
+            expand_on_truncation: true,
         }
     }
 }

@@ -8,4 +8,8 @@ export type ThreadJiraResponse = {
 /**
  * The server's current conversation cwd, not the Git administrative/store identity.
  */
-project: LegacyAppPathString, result: JiraResult, };
+project: LegacyAppPathString,
+/**
+ * Opaque binding to both current cwd and the issue-store identity.
+ */
+scope: string, result: JiraResult, };

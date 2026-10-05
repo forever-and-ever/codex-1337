@@ -119,7 +119,7 @@ struct ResponseCompletedUsage {
     input_tokens: i64,
     input_tokens_details: Option<ResponseCompletedInputTokensDetails>,
     output_tokens: i64,
-    output_tokens_details: Option<ResponseCompletedOutputTokensDetails>,
+    output_tokens_details: Option<Value>,
     total_tokens: i64,
     #[serde(default)]
     codex_rollout_budget_units: Option<serde_json::Number>,
@@ -135,7 +135,10 @@ impl From<ResponseCompletedUsage> for TokenUsage {
             output_tokens: val.output_tokens,
             reasoning_output_tokens: val
                 .output_tokens_details
-                .map(|d| d.reasoning_tokens)
+                .as_ref()
+                .and_then(|details| details.get("reasoning_tokens"))
+                .and_then(Value::as_i64)
+                .filter(|count| *count >= 0 && *count <= val.output_tokens)
                 .unwrap_or(0),
             total_tokens: val.total_tokens,
             codex_rollout_budget_units: val.codex_rollout_budget_units,
@@ -148,11 +151,6 @@ struct ResponseCompletedInputTokensDetails {
     cached_tokens: i64,
     #[serde(default)]
     cache_write_tokens: i64,
-}
-
-#[derive(Debug, Deserialize)]
-struct ResponseCompletedOutputTokensDetails {
-    reasoning_tokens: i64,
 }
 
 #[derive(Deserialize, Debug)]
@@ -440,8 +438,24 @@ pub fn process_responses_event(
                     .cloned();
                 match serde_json::from_value::<ResponseCompleted>(resp_val) {
                     Ok(mut resp) => {
+                        let reported = resp.usage.as_ref().and_then(|usage| {
+                            usage
+                                .output_tokens_details
+                                .as_ref()?
+                                .get("reasoning_tokens")?
+                                .as_u64()
+                                .filter(|count| {
+                                    u64::try_from(usage.output_tokens)
+                                        .is_ok_and(|output| *count <= output)
+                                })
+                        });
                         if let Some(metadata) = metadata {
                             resp.usage_metadata.get_or_insert_default().metadata = Some(metadata);
+                        }
+                        if reported.is_some() || resp.usage_metadata.is_some() {
+                            resp.usage_metadata
+                                .get_or_insert_default()
+                                .reported_reasoning_tokens = reported;
                         }
                         return Ok(Some(ResponseEvent::Completed {
                             response_id: resp.id,

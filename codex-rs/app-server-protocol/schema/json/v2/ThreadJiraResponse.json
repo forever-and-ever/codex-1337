@@ -144,11 +144,16 @@
     },
     "result": {
       "$ref": "#/definitions/JiraResult"
+    },
+    "scope": {
+      "description": "Opaque binding to both current cwd and the issue-store identity.",
+      "type": "string"
     }
   },
   "required": [
     "project",
-    "result"
+    "result",
+    "scope"
   ],
   "title": "ThreadJiraResponse",
   "type": "object"

@@ -1,0 +1,60 @@
+---
+source: tui/src/transcript_view/tool_entries_tests.rs
+assertion_line: 51
+expression: "snapshots.join(\"\\n\")"
+---
+counted expanded=false
+[+] • HH:MM:SS Thought (~ 1,300 tokens)
+
+
+
+
+
+counted expanded=true
+[-] • HH:MM:SS Thought (~ 1,300 tokens)
+      First block
+
+      Second block
+
+
+unknown expanded=false
+[+] • HH:MM:SS Thought
+
+
+
+
+
+unknown expanded=true
+[-] • HH:MM:SS Thought
+      Readable summary
+
+
+
+
+encrypted-only expanded=false
+    • HH:MM:SS Thought (~ 1,300 tokens)
+
+
+
+
+
+encrypted-only narrow
+    • HH:MM:SS Th...
+opaque-unknown expanded=false
+    • HH:MM:SS Thought
+
+
+
+
+
+opaque-unknown narrow
+    • HH:MM:SS Th...
+hidden expanded=false
+    • HH:MM:SS Thought (~ 1,300 tokens)
+
+
+
+
+
+hidden narrow
+    • HH:MM:SS Th...

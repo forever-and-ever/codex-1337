@@ -160,6 +160,13 @@
     "action": {
       "$ref": "#/definitions/JiraAction"
     },
+    "expectedScope": {
+      "description": "Scope returned by the initial list. Required for all reads and mutations.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "threadId": {
       "type": "string"
     }

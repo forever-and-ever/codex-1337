@@ -304,6 +304,19 @@ pub enum ThreadItem {
         #[serde(default)]
         content: Vec<String>,
     },
+    /// Human-only aggregate for one completed model response, not additional usage.
+    #[serde(rename_all = "camelCase")]
+    #[ts(rename_all = "camelCase")]
+    Thought {
+        id: String,
+        response_id: String,
+        #[ts(type = "number")]
+        completed_at_ms: i64,
+        summary: Vec<String>,
+        content: Vec<String>,
+        #[ts(type = "number | null")]
+        reported_reasoning_tokens: Option<u64>,
+    },
     #[serde(rename_all = "camelCase")]
     #[ts(rename_all = "camelCase")]
     CommandExecution {
@@ -480,6 +493,7 @@ impl ThreadItem {
             | ThreadItem::ToolOutputTokens { id, .. }
             | ThreadItem::Plan { id, .. }
             | ThreadItem::Reasoning { id, .. }
+            | ThreadItem::Thought { id, .. }
             | ThreadItem::CommandExecution { id, .. }
             | ThreadItem::FileChange { id, .. }
             | ThreadItem::McpToolCall { id, .. }

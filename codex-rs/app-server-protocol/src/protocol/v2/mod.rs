@@ -31,6 +31,7 @@ mod realtime;
 mod remote_control;
 mod review;
 mod rollout;
+mod thought;
 mod thread;
 mod thread_attachment;
 mod thread_data;

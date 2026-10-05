@@ -11,6 +11,7 @@ async fn native_classification_requires_complete_structured_output() {
     let complete = json!({"provider":"anthropic","stop_reason":"end_turn"});
     let metadata = |raw| {
         Some(ResponseUsageMetadata {
+            reported_reasoning_tokens: None,
             amount: None,
             metadata: Some(raw),
         })

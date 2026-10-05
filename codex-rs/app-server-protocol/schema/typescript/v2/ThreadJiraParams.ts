@@ -6,4 +6,8 @@ import type { JiraAction } from "./JiraAction";
 /**
  * Server-local issue storage scoped by the persisted conversation cwd.
  */
-export type ThreadJiraParams = { threadId: string, action: JiraAction, };
+export type ThreadJiraParams = { threadId: string,
+/**
+ * Scope returned by the initial list. Required for all reads and mutations.
+ */
+expectedScope?: string | null, action: JiraAction, };
