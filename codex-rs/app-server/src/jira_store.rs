@@ -218,7 +218,7 @@ impl Store {
                         )?;
                     }
                 } else {
-                    Self::catalog_file(&mut issues, &category, path, None)?;
+                    Self::catalog_file(&mut issues, &category, path, /*epic*/ None)?;
                 }
             }
         }
@@ -313,7 +313,9 @@ impl Store {
     fn execute(&self, action: JiraAction) -> Result<JiraResult, String> {
         match action {
             JiraAction::List { cursor, limit } => {
-                let limit = limit.unwrap_or(100).clamp(1, 100) as usize;
+                let limit = limit
+                    .unwrap_or(/*default*/ 100)
+                    .clamp(/*min*/ 1, /*max*/ 100) as usize;
                 let all = self.catalog()?;
                 let mut remaining = all
                     .into_iter()

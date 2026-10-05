@@ -165,7 +165,12 @@ impl JiraForm {
             },
             buf,
         );
-        let slug_area = Rect::new(area.x + 8, area.y + 2, area.width.saturating_sub(8), 1);
+        let slug_area = Rect::new(
+            area.x + 8,
+            area.y + 2,
+            area.width.saturating_sub(/*rhs*/ 8),
+            /*height*/ 1,
+        );
         ratatui::widgets::WidgetRef::render_ref(&(&self.slug), slug_area, buf);
         Paragraph::new(if self.field == 2 {
             "› Body"
@@ -183,8 +188,8 @@ impl JiraForm {
         let body_area = Rect::new(
             area.x + 2,
             area.y + 5,
-            area.width.saturating_sub(2),
-            area.height.saturating_sub(5),
+            area.width.saturating_sub(/*rhs*/ 2),
+            area.height.saturating_sub(/*rhs*/ 5),
         );
         StatefulWidgetRef::render_ref(&(&self.body), body_area, buf, &mut self.body_state);
         match self.field {
@@ -234,7 +239,7 @@ impl JiraBrowser {
         let old = keys
             .iter()
             .position(|key| Some(key) == self.selected.as_ref())
-            .unwrap_or(0);
+            .unwrap_or(/*default*/ 0);
         let index = old.saturating_add_signed(delta).min(keys.len() - 1);
         self.selected = Some(keys[index].clone());
         self.expanded = None;
@@ -276,8 +281,8 @@ impl JiraBrowser {
         let inner = Rect::new(
             area.x + 1,
             area.y + 1,
-            area.width.saturating_sub(2),
-            area.height.saturating_sub(2),
+            area.width.saturating_sub(/*rhs*/ 2),
+            area.height.saturating_sub(/*rhs*/ 2),
         );
         let title = if self.form.is_some() {
             "Jira · issue"
@@ -313,14 +318,15 @@ impl JiraBrowser {
             .into_iter()
             .map(|line| Line::from(line.into_owned()).dim())
             .collect();
-        let hint_height = (hint_lines.len() as u16).min(inner.height.saturating_sub(3));
+        let hint_height = (hint_lines.len() as u16).min(inner.height.saturating_sub(/*rhs*/ 3));
         let footer_height = hint_height + 2;
         let footer_y = inner.y + inner.height.saturating_sub(footer_height);
         let status_lines = textwrap::wrap(&status, inner.width as usize)
             .into_iter()
             .map(|line| Line::from(line.into_owned()))
             .collect::<Vec<_>>();
-        Paragraph::new(status_lines).render(Rect::new(inner.x, footer_y, inner.width, 2), buf);
+        Paragraph::new(status_lines)
+            .render(Rect::new(inner.x, footer_y, inner.width, /*height*/ 2), buf);
         Paragraph::new(hint_lines).render(
             Rect::new(inner.x, footer_y + 2, inner.width, hint_height),
             buf,
@@ -345,7 +351,7 @@ impl JiraBrowser {
             content.x,
             content.y + 2,
             content.width,
-            content.height.saturating_sub(2),
+            content.height.saturating_sub(/*rhs*/ 2),
         );
         if let Some(issue) = &self.expanded
             && !self.markdown.as_ref().is_some_and(|(revision, width, _)| {
@@ -355,7 +361,7 @@ impl JiraBrowser {
             let mut body = Vec::new();
             crate::markdown::append_markdown(
                 &issue.body,
-                Some(list.width.saturating_sub(2) as usize),
+                Some(list.width.saturating_sub(/*rhs*/ 2) as usize),
                 /*cwd*/ None,
                 &mut body,
             );
@@ -384,7 +390,7 @@ impl JiraBrowser {
                 .as_ref()
                 .is_some_and(|issue| &issue.revision.key == key)
             {
-                total_lines += expanded_body.map_or(0, Vec::len) + 1;
+                total_lines += expanded_body.map_or(/*default*/ 0, Vec::len) + 1;
             }
         }
         if keys.is_empty() && !self.loading && self.error.is_none() {
@@ -401,7 +407,8 @@ impl JiraBrowser {
             if selected < self.scroll {
                 self.scroll = selected;
             } else if selected >= self.scroll + list.height as usize {
-                self.scroll = selected.saturating_sub(list.height.saturating_sub(1) as usize);
+                self.scroll =
+                    selected.saturating_sub(list.height.saturating_sub(/*rhs*/ 1) as usize);
             }
             self.reveal_selection = false;
         }
@@ -425,7 +432,12 @@ impl JiraBrowser {
                     line.into()
                 };
                 Paragraph::new(line).render(
-                    Rect::new(list.x, list.y + (index - self.scroll) as u16, list.width, 1),
+                    Rect::new(
+                        list.x,
+                        list.y + (index - self.scroll) as u16,
+                        list.width,
+                        /*height*/ 1,
+                    ),
                     buf,
                 );
             }
@@ -447,7 +459,7 @@ impl JiraBrowser {
                                 list.x,
                                 list.y + (index + offset - self.scroll) as u16,
                                 list.width,
-                                1,
+                                /*height*/ 1,
                             ),
                             buf,
                         );

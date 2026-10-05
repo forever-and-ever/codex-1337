@@ -154,12 +154,20 @@ impl App {
                             browser.expanded = None
                         }
                         (KeyModifiers::NONE, KeyCode::Esc) => self.jira = None,
-                        (KeyModifiers::NONE, KeyCode::Up) => browser.select_neighbor(-1),
-                        (KeyModifiers::NONE, KeyCode::Down) => browser.select_neighbor(1),
-                        (KeyModifiers::NONE, KeyCode::PageUp) => browser.scroll_body(-10),
-                        (KeyModifiers::NONE, KeyCode::PageDown) => browser.scroll_body(10),
+                        (KeyModifiers::NONE, KeyCode::Up) => {
+                            browser.select_neighbor(/*delta*/ -1)
+                        }
+                        (KeyModifiers::NONE, KeyCode::Down) => {
+                            browser.select_neighbor(/*delta*/ 1)
+                        }
+                        (KeyModifiers::NONE, KeyCode::PageUp) => {
+                            browser.scroll_body(/*delta*/ -10)
+                        }
+                        (KeyModifiers::NONE, KeyCode::PageDown) => {
+                            browser.scroll_body(/*delta*/ 10)
+                        }
                         (KeyModifiers::CONTROL, KeyCode::Char('n')) => {
-                            browser.form = Some(JiraForm::new(None));
+                            browser.form = Some(JiraForm::new(/*previous*/ None));
                             browser.error = None;
                         }
                         (KeyModifiers::NONE, KeyCode::Enter) if browser.expanded.is_some() => {
@@ -376,17 +384,17 @@ impl App {
                             .iter()
                             .position(|candidate| candidate == key)
                     })
-                    .unwrap_or(0);
+                    .unwrap_or(/*default*/ 0);
                 browser
                     .keys
                     .retain(|key| Some(key) != browser.selected.as_ref());
                 let filtered = browser.filtered();
                 browser.selected = filtered
-                    .get(old.min(filtered.len().saturating_sub(1)))
+                    .get(old.min(filtered.len().saturating_sub(/*rhs*/ 1)))
                     .cloned();
                 browser.expanded = None;
                 browser.observed = None;
-                browser.select_neighbor(0);
+                browser.select_neighbor(/*delta*/ 0);
             }
             _ => {
                 browser.error = Some("Unexpected Jira response; nothing further dispatched.".into())

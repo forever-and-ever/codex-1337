@@ -20,7 +20,7 @@ fn jira_browser_surface_snapshot() {
         },
     ];
     browser.selected = Some(key.clone());
-    let mut terminal = Terminal::new(TestBackend::new(110, 22)).unwrap();
+    let mut terminal = Terminal::new(TestBackend::new(/*width*/ 110, /*height*/ 22)).unwrap();
     let mut states = Vec::new();
     let issue = JiraIssue { revision: JiraRevision { key, epic: Some("latency".into()), version: "version".into() }, body: "Typing stalls when the worker is busy.\n\n- Keep **steering** responsive.\n- Preserve unrelated work.".into() };
     for state in 0..4 {
@@ -55,7 +55,7 @@ fn jira_browser_surface_snapshot() {
     // A modal remains open across terminal resizes; cramped form geometry must
     // never index outside the buffer, even before the next full-size frame.
     for height in 0..18 {
-        let area = Rect::new(0, 0, 80, height);
+        let area = Rect::new(/*x*/ 0, /*y*/ 0, /*width*/ 80, height);
         browser.render(area, &mut Buffer::empty(area));
     }
 }
