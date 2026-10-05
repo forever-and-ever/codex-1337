@@ -154,6 +154,126 @@
       "title": "AccountNicknameSetResponse",
       "type": "object"
     },
+    "AccountQuota": {
+      "properties": {
+        "capturedAt": {
+          "description": "Unix seconds of the last successful upstream read, including when stale data is retained.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "email": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "error": {
+          "description": "May accompany retained windows. Null does not imply that more usage is permitted.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fiveHour": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AccountQuotaWindow"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "nickname": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "retryAfterSec": {
+          "description": "Minimum seconds before another poll, including the healthy cache TTL and failure cooldown.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "sevenDay": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AccountQuotaWindow"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "retryAfterSec"
+      ],
+      "type": "object"
+    },
+    "AccountQuotaReadParams": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "account": {
+          "description": "Saved account ID, nickname or email. Omit to read every saved account of this provider.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provider": {
+          "$ref": "#/definitions/SubscriptionAccountProvider"
+        }
+      },
+      "required": [
+        "provider"
+      ],
+      "title": "AccountQuotaReadParams",
+      "type": "object"
+    },
+    "AccountQuotaReadResponse": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "accounts": {
+          "items": {
+            "$ref": "#/definitions/AccountQuota"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "accounts"
+      ],
+      "title": "AccountQuotaReadResponse",
+      "type": "object"
+    },
+    "AccountQuotaWindow": {
+      "properties": {
+        "remainingPercent": {
+          "format": "double",
+          "type": "number"
+        },
+        "resetsAt": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "remainingPercent"
+      ],
+      "type": "object"
+    },
     "AccountRateLimitsUpdatedNotification": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "description": "Sparse rolling rate-limit update.\n\nClients should merge available values into the most recent `account/rateLimits/read` response or refetch that snapshot. Nullable account metadata may be unavailable in a rolling update and does not clear a previously observed value.",
@@ -4070,6 +4190,30 @@
             "method"
           ],
           "title": "Account/reloadRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "enum": [
+                "account/quota/read"
+              ],
+              "title": "Account/quota/readRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/AccountQuotaReadParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Account/quota/readRequest",
           "type": "object"
         },
         {

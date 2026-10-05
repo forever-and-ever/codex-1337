@@ -1,0 +1,102 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AccountQuota": {
+      "properties": {
+        "capturedAt": {
+          "description": "Unix seconds of the last successful upstream read, including when stale data is retained.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "email": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "error": {
+          "description": "May accompany retained windows. Null does not imply that more usage is permitted.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fiveHour": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AccountQuotaWindow"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "nickname": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "retryAfterSec": {
+          "description": "Minimum seconds before another poll, including the healthy cache TTL and failure cooldown.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "sevenDay": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AccountQuotaWindow"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "retryAfterSec"
+      ],
+      "type": "object"
+    },
+    "AccountQuotaWindow": {
+      "properties": {
+        "remainingPercent": {
+          "format": "double",
+          "type": "number"
+        },
+        "resetsAt": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "remainingPercent"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "accounts": {
+      "items": {
+        "$ref": "#/definitions/AccountQuota"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "accounts"
+  ],
+  "title": "AccountQuotaReadResponse",
+  "type": "object"
+}

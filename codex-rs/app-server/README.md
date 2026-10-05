@@ -1,3 +1,26 @@
+# Saved-account quota reads
+
+`account/quota/read` accepts `provider` (`openai` or `claudeSubscription`) and an
+optional `account` (saved ID, nickname or email). Omit `account` to read every
+saved account of that provider. Ambiguous selectors fail rather than choosing.
+The response is `{accounts: [...]}` with `id`, `email`, `nickname`, nullable
+`fiveHour` and `sevenDay` windows (`remainingPercent`, nullable Unix `resetsAt`),
+nullable Unix `capturedAt`, `retryAfterSec`, and nullable `error`.
+
+Reads never select an account. The shared server owns credentials, a 60-second
+healthy cache, coalesced refreshes and per-account failure cooldowns. Poll no
+sooner than `retryAfterSec`. An error can accompany retained windows;
+`capturedAt` remains the time of their last successful upstream read. Percentages
+are display data, not inference-admission permission. OpenAI background status
+reads share this cache; explicit status refreshes bypass the healthy TTL, not a
+failure cooldown. Luna Reserve exposure remains restricted to capable clients.
+
+The local CLI projects the same contract as `codex quota --provider
+openai|anthropic [--account NAME]`. Bare `codex quota` preserves the old weekly-only
+OpenAI JSON shape. The CLI uses the daemon's configuration, rejects `-c` overrides,
+and has a five-second deadline; it never starts an embedded server or falls back
+to reading credentials itself.
+
 # Guardian circuit-breaker errors
 
 Set `auto_review.circuit_break_action = "strict"` to include `TooManyDenials` in

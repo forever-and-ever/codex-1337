@@ -2445,6 +2445,30 @@
             },
             "method": {
               "enum": [
+                "account/quota/read"
+              ],
+              "title": "Account/quota/readRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/AccountQuotaReadParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Account/quota/readRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/v2/RequestId"
+            },
+            "method": {
+              "enum": [
                 "account/rateLimits/read"
               ],
               "title": "Account/rateLimits/readRequestMethod",
@@ -7140,6 +7164,126 @@
           "provider"
         ],
         "title": "AccountNicknameSetResponse",
+        "type": "object"
+      },
+      "AccountQuota": {
+        "properties": {
+          "capturedAt": {
+            "description": "Unix seconds of the last successful upstream read, including when stale data is retained.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "error": {
+            "description": "May accompany retained windows. Null does not imply that more usage is permitted.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "fiveHour": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/AccountQuotaWindow"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "nickname": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "retryAfterSec": {
+            "description": "Minimum seconds before another poll, including the healthy cache TTL and failure cooldown.",
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "sevenDay": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/AccountQuotaWindow"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "retryAfterSec"
+        ],
+        "type": "object"
+      },
+      "AccountQuotaReadParams": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "account": {
+            "description": "Saved account ID, nickname or email. Omit to read every saved account of this provider.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider": {
+            "$ref": "#/definitions/v2/SubscriptionAccountProvider"
+          }
+        },
+        "required": [
+          "provider"
+        ],
+        "title": "AccountQuotaReadParams",
+        "type": "object"
+      },
+      "AccountQuotaReadResponse": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "accounts": {
+            "items": {
+              "$ref": "#/definitions/v2/AccountQuota"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "accounts"
+        ],
+        "title": "AccountQuotaReadResponse",
+        "type": "object"
+      },
+      "AccountQuotaWindow": {
+        "properties": {
+          "remainingPercent": {
+            "format": "double",
+            "type": "number"
+          },
+          "resetsAt": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "remainingPercent"
+        ],
         "type": "object"
       },
       "AccountRateLimitsUpdatedNotification": {

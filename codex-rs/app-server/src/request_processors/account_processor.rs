@@ -9,6 +9,8 @@ use codex_login::LoginOnboardingEntrypoint;
 
 mod claude_login;
 mod gateway_oauth;
+mod quota;
+mod quota_cache;
 mod rate_limit_resets;
 mod workspace_routing;
 
@@ -86,6 +88,7 @@ pub(crate) struct AccountRequestProcessor {
     scoped_provider_account_id: Option<String>,
     config_manager: ConfigManager,
     active_login: Arc<Mutex<Option<ActiveLogin>>>,
+    quota_cache: Arc<quota_cache::QuotaCache>,
     workspace_routing: Arc<Mutex<Option<workspace_routing::CachedWorkspaceRouting>>>,
     workspace_routing_fetches: Arc<Mutex<workspace_routing::WorkspaceRoutingFetches>>,
     workspace_routing_shutdown: CancellationToken,
@@ -139,6 +142,7 @@ impl AccountRequestProcessor {
             scoped_provider_account_id: None,
             config_manager,
             active_login: Arc::new(Mutex::new(None)),
+            quota_cache: Arc::default(),
             gateway_login: Arc::new(std::sync::Mutex::new(/*t*/ None)),
             gateway_client: Arc::new(std::sync::Mutex::new(/*t*/ None)),
             workspace_routing: Arc::new(Mutex::new(None)),
@@ -1062,6 +1066,30 @@ impl AccountRequestProcessor {
         );
 
         let usage_request = async {
+            if let Some(id) = self.auth_manager.selected_account_id() {
+                let capability = if params.supports_luna_reserve {
+                    quota::QuotaCapability::LunaReserve
+                } else {
+                    quota::QuotaCapability::Passive
+                };
+                let freshness = if params.exclude_reset_credit_details {
+                    quota_cache::QuotaFreshness::Cached
+                } else {
+                    quota_cache::QuotaFreshness::Refresh
+                };
+                let read = self.read_openai_quota(id, capability, freshness).await?;
+                // This older response has no stale/error envelope. Never turn a retained
+                // window into fresh account readiness or admission permission.
+                if let Some(error) = read.error {
+                    anyhow::bail!(error);
+                }
+                return match read.usage {
+                    Some(quota_cache::QuotaUsage::Openai(usage)) => Ok(usage),
+                    Some(quota_cache::QuotaUsage::Anthropic(_)) | None => {
+                        anyhow::bail!("OpenAI quota snapshot unavailable")
+                    }
+                };
+            }
             if params.supports_luna_reserve
                 && auth.auth_mode() == codex_protocol::auth::AuthMode::Chatgpt
                 && !auth.is_fedramp_account()
@@ -1512,6 +1540,7 @@ mod tests {
                 status,
                 content_type: "application/json".to_string(),
                 body: "{}".to_string(),
+                retry_after: None,
             };
             assert_eq!(workspace_messages_feature_disabled(&err), expected);
         }

@@ -310,6 +310,48 @@ pub type NullableGetAccountRateLimitsParams = Option<GetAccountRateLimitsParams>
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
+pub struct AccountQuotaReadParams {
+    pub provider: SubscriptionAccountProvider,
+    /// Saved account ID, nickname or email. Omit to read every saved account of this provider.
+    #[ts(optional = nullable)]
+    pub account: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct AccountQuotaReadResponse {
+    pub accounts: Vec<AccountQuota>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct AccountQuota {
+    pub id: String,
+    pub email: Option<String>,
+    pub nickname: Option<String>,
+    pub five_hour: Option<AccountQuotaWindow>,
+    pub seven_day: Option<AccountQuotaWindow>,
+    /// Unix seconds of the last successful upstream read, including when stale data is retained.
+    pub captured_at: Option<i64>,
+    /// Minimum seconds before another poll, including the healthy cache TTL and failure cooldown.
+    pub retry_after_sec: u64,
+    /// May accompany retained windows. Null does not imply that more usage is permitted.
+    pub error: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct AccountQuotaWindow {
+    pub remaining_percent: f64,
+    pub resets_at: Option<i64>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
 pub struct GetAccountRateLimitsResponse {
     /// Backend permission for ordinary included usage, validated against the active account.
     /// Null means unavailable; clients must not infer recovery from percentages or reset times.
@@ -613,7 +655,9 @@ pub struct SavedAccount {
     pub plan: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq, JsonSchema, TS)]
+#[derive(
+    Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq, Hash, JsonSchema, TS,
+)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]

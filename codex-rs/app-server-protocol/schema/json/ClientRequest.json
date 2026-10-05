@@ -25,6 +25,24 @@
       ],
       "type": "object"
     },
+    "AccountQuotaReadParams": {
+      "properties": {
+        "account": {
+          "description": "Saved account ID, nickname or email. Omit to read every saved account of this provider.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provider": {
+          "$ref": "#/definitions/SubscriptionAccountProvider"
+        }
+      },
+      "required": [
+        "provider"
+      ],
+      "type": "object"
+    },
     "AccountScopeParams": {
       "properties": {
         "threadId": {
@@ -8658,6 +8676,30 @@
         "method"
       ],
       "title": "Account/reloadRequest",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "enum": [
+            "account/quota/read"
+          ],
+          "title": "Account/quota/readRequestMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/AccountQuotaReadParams"
+        }
+      },
+      "required": [
+        "id",
+        "method",
+        "params"
+      ],
+      "title": "Account/quota/readRequest",
       "type": "object"
     },
     {

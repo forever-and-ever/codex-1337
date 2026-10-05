@@ -1845,6 +1845,9 @@ impl MessageProcessor {
             ClientRequest::GetAuthStatus { params, .. } => {
                 self.account_processor.get_auth_status(params).await
             }
+            ClientRequest::AccountQuotaRead { params, .. } => {
+                self.account_processor.read_account_quota(params).await
+            }
             ClientRequest::GetAccountRateLimits { params, .. } => {
                 self.account_processor
                     .for_thread(

@@ -41,6 +41,14 @@ class ClaudeSubscriptionAccount(BaseModel):
     type: Annotated[Literal["claudeSubscription"], Field(title="ClaudeSubscriptionAccountType")]
 
 
+class AccountQuotaWindow(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    remaining_percent: Annotated[float, Field(alias="remainingPercent")]
+    resets_at: Annotated[int | None, Field(alias="resetsAt")] = None
+
+
 class AccountRoutingOverride(Enum):
     no_constraint = "NO_CONSTRAINT"
     us = "us"
@@ -6998,6 +7006,58 @@ class AccountNicknameSetResponse(BaseModel):
     provider: SubscriptionAccountProvider
 
 
+class AccountQuota(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    captured_at: Annotated[
+        int | None,
+        Field(
+            alias="capturedAt",
+            description="Unix seconds of the last successful upstream read, including when stale data is retained.",
+        ),
+    ] = None
+    email: str | None = None
+    error: Annotated[
+        str | None,
+        Field(
+            description="May accompany retained windows. Null does not imply that more usage is permitted."
+        ),
+    ] = None
+    five_hour: Annotated[AccountQuotaWindow | None, Field(alias="fiveHour")] = None
+    id: str
+    nickname: str | None = None
+    retry_after_sec: Annotated[
+        int,
+        Field(
+            alias="retryAfterSec",
+            description="Minimum seconds before another poll, including the healthy cache TTL and failure cooldown.",
+            ge=0,
+        ),
+    ]
+    seven_day: Annotated[AccountQuotaWindow | None, Field(alias="sevenDay")] = None
+
+
+class AccountQuotaReadParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    account: Annotated[
+        str | None,
+        Field(
+            description="Saved account ID, nickname or email. Omit to read every saved account of this provider."
+        ),
+    ] = None
+    provider: SubscriptionAccountProvider
+
+
+class AccountQuotaReadResponse(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    accounts: list[AccountQuota]
+
+
 class AccountUpdatedNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -7896,6 +7956,15 @@ class AccountReloadRequest(BaseModel):
     id: RequestId
     method: Annotated[Literal["account/reload"], Field(title="Account/reloadRequestMethod")]
     params: None = None
+
+
+class AccountQuotaReadRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[Literal["account/quota/read"], Field(title="Account/quota/readRequestMethod")]
+    params: AccountQuotaReadParams
 
 
 class AccountRateLimitsReadRequest(BaseModel):
@@ -12633,6 +12702,7 @@ class ClientRequest(
         | AccountLoginCancelRequest
         | AccountLogoutRequest
         | AccountReloadRequest
+        | AccountQuotaReadRequest
         | AccountRateLimitsReadRequest
         | AccountRateLimitResetCreditConsumeRequest
         | AccountUsageReadRequest
@@ -12752,6 +12822,7 @@ class ClientRequest(
         | AccountLoginCancelRequest
         | AccountLogoutRequest
         | AccountReloadRequest
+        | AccountQuotaReadRequest
         | AccountRateLimitsReadRequest
         | AccountRateLimitResetCreditConsumeRequest
         | AccountUsageReadRequest
