@@ -49,7 +49,7 @@ impl App {
         let Some(browser) = &mut self.jira else {
             return;
         };
-        if browser.pending.is_some() {
+        if browser.busy() {
             return;
         }
         let token = Uuid::new_v4();
@@ -93,6 +93,24 @@ impl App {
         });
     }
 
+    fn request_jira_preview(&mut self, server: &mut AppServerSession) {
+        let Some(browser) = &self.jira else {
+            return;
+        };
+        if browser.pending.is_none()
+            && browser.form.is_none()
+            && browser.scope.is_some()
+            && browser.preview.result.is_none()
+            && let Some(key) = browser.selected.clone()
+        {
+            self.send_jira(
+                server,
+                JiraIntent::Preview { key: key.clone() },
+                JiraAction::Read { key },
+            );
+        }
+    }
+
     pub(super) async fn handle_jira_input(
         &mut self,
         tui: &mut tui::Tui,
@@ -110,14 +128,16 @@ impl App {
                     }
                 })?;
             }
-            TuiEvent::Paste(text) if browser.pending.is_none() => {
+            TuiEvent::Paste(text) if !browser.busy() => {
                 if let Some(form) = &mut browser.form {
                     form.paste(text);
                 }
                 tui.frame_requester().schedule_frame();
             }
             TuiEvent::Key(key) if key.kind == KeyEventKind::Press => {
-                if browser.pending.is_some() {
+                // Preview reads never hold the action lease: navigation can pass
+                // them, and an explicit action supersedes their response token.
+                if browser.busy() {
                     if key.code == KeyCode::Esc
                         && browser.form.is_none()
                         && matches!(
@@ -126,7 +146,7 @@ impl App {
                                 _,
                                 JiraIntent::List
                                     | JiraIntent::Read {
-                                        purpose: ReadPurpose::Expand | ReadPurpose::Edit,
+                                        purpose: ReadPurpose::Edit,
                                         ..
                                     }
                             ))
@@ -151,8 +171,9 @@ impl App {
                     }
                 } else {
                     match (key.modifiers, key.code) {
-                        (KeyModifiers::NONE, KeyCode::Esc) if browser.expanded.is_some() => {
-                            browser.expanded = None
+                        (KeyModifiers::NONE, KeyCode::Esc) if browser.full_body => {
+                            browser.full_body = false;
+                            browser.reveal_selection = true;
                         }
                         (KeyModifiers::NONE, KeyCode::Esc) => self.jira = None,
                         (KeyModifiers::NONE, KeyCode::Up) => {
@@ -171,12 +192,15 @@ impl App {
                             browser.form = Some(JiraForm::new(/*previous*/ None));
                             browser.error = None;
                         }
-                        (KeyModifiers::NONE, KeyCode::Enter) if browser.expanded.is_some() => {
-                            browser.expanded = None
+                        (KeyModifiers::NONE, KeyCode::Enter) if browser.selected.is_some() => {
+                            browser.full_body = !browser.full_body;
+                            browser.reveal_selection = true;
+                            if matches!(browser.preview.result, Some(Err(_))) {
+                                browser.preview.result = None;
+                            }
                         }
                         (_, code) => {
                             let purpose = match (key.modifiers, code) {
-                                (KeyModifiers::NONE, KeyCode::Enter) => Some(ReadPurpose::Expand),
                                 (KeyModifiers::CONTROL, KeyCode::Char('e')) => {
                                     Some(ReadPurpose::Edit)
                                 }
@@ -190,11 +214,8 @@ impl App {
                             if let Some(purpose) = purpose
                                 && let Some(key) = browser.selected.clone()
                             {
-                                let expected = browser
-                                    .observed
-                                    .as_ref()
-                                    .filter(|revision| revision.key == key)
-                                    .cloned();
+                                let expected =
+                                    browser.preview.issue().map(|issue| issue.revision.clone());
                                 self.send_jira(
                                     server,
                                     JiraIntent::Read {
@@ -212,8 +233,14 @@ impl App {
                 }
                 tui.frame_requester().schedule_frame();
             }
+            TuiEvent::Mouse(mouse)
+                if browser.form.is_none() && !browser.busy() && browser.mouse_input(*mouse) =>
+            {
+                tui.frame_requester().schedule_frame();
+            }
             _ => {}
         }
+        self.request_jira_preview(server);
         Ok(true)
     }
 
@@ -237,6 +264,14 @@ impl App {
         let Some((_, intent)) = browser.pending.take() else {
             return;
         };
+        if let JiraIntent::Preview { key } = intent {
+            // Only one automatic read is outstanding. A rapid selection change
+            // drops its body and reads the latest selection, not every passed row.
+            browser.finish_preview(&key, result);
+            self.request_jira_preview(server);
+            tui.frame_requester().schedule_frame();
+            return;
+        }
         browser.loading = false;
         let response = match result {
             Ok(response) => response,
@@ -259,7 +294,7 @@ impl App {
             (JiraIntent::List, JiraResult::List { data, next_cursor }) => {
                 browser.keys.extend(data);
                 if browser.selected.is_none() {
-                    browser.selected = browser.keys.first().cloned();
+                    browser.select(browser.keys.first().cloned());
                 }
                 if let Some(cursor) = next_cursor {
                     self.send_jira(
@@ -288,13 +323,11 @@ impl App {
                     .as_ref()
                     .is_some_and(|revision| revision != &issue.revision)
                 {
-                    browser.observed = Some(issue.revision.clone());
-                    browser.expanded = Some(issue);
+                    browser.preview.result = Some(Ok(issue));
                     browser.error = Some("Issue changed since it was read. Review the current body before trying again.".into());
                 } else {
-                    browser.observed = Some(issue.revision.clone());
+                    browser.preview.result = Some(Ok(issue.clone()));
                     match purpose {
-                        ReadPurpose::Expand => browser.expanded = Some(issue),
                         ReadPurpose::Edit => browser.form = Some(JiraForm::new(Some(issue))),
                         ReadPurpose::Delete => self.send_jira(
                             server,
@@ -375,10 +408,9 @@ impl App {
                 if !browser.filtered().contains(&issue.revision.key) {
                     browser.filter.set_text_clearing_elements("");
                 }
-                browser.selected = Some(issue.revision.key.clone());
+                browser.select(Some(issue.revision.key.clone()));
                 browser.reveal_selection = true;
-                browser.observed = Some(issue.revision.clone());
-                browser.expanded = Some(issue);
+                browser.preview.result = Some(Ok(issue));
                 browser.form = None;
             }
             (JiraIntent::Delete, JiraResult::Deleted) => {
@@ -396,17 +428,16 @@ impl App {
                     .keys
                     .retain(|key| Some(key) != browser.selected.as_ref());
                 let filtered = browser.filtered();
-                browser.selected = filtered
+                let selected = filtered
                     .get(old.min(filtered.len().saturating_sub(/*rhs*/ 1)))
                     .cloned();
-                browser.expanded = None;
-                browser.observed = None;
-                browser.select_neighbor(/*delta*/ 0);
+                browser.select(selected);
             }
             _ => {
                 browser.error = Some("Unexpected Jira response; nothing further dispatched.".into())
             }
         }
+        self.request_jira_preview(server);
         tui.frame_requester().schedule_frame();
     }
 }
@@ -436,7 +467,7 @@ fn issue_work_order(
                 "Triage only: check continued relevance and feasibility, identify ambiguities, and sketch the smallest coherent design with uncertainty. NO implementation or deletion."
             }
         },
-        ReadPurpose::Expand | ReadPurpose::Edit | ReadPurpose::Delete => {
+        ReadPurpose::Edit | ReadPurpose::Delete => {
             return Err("Not a dispatch action".into());
         }
     };

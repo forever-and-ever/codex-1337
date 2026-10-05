@@ -225,6 +225,7 @@ mod exit_summary;
 mod experimental_features;
 mod farm;
 mod jira;
+mod jira_preview;
 mod jira_view;
 pub(crate) use farm::FarmFailure;
 mod feedback_upload;

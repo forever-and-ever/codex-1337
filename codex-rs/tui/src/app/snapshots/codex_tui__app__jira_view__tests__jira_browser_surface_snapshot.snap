@@ -8,20 +8,20 @@ expression: "states.join(\"\\n\\n---\\n\\n\")"
 
  Filter:
 
- › bug/slow-input
-   child · feature/new-panel
+ › bug/slow-input                           │ bug/slow-input
+   child · feature/new-panel                │
+                                            │ Loading…
+                                            │
+                                            │
+                                            │
+                                            │
+                                            │
+                                            │
+                                            │
+                                            │
 
 
-
-
-
-
-
-
-
-
-
- ↑↓ select · Enter body · PgUp/PgDn scroll · Alt+F farm · Alt+T triage · Ctrl+N new · Ctrl+E edit · Del
+ ↑↓/hover select · Enter body · PgUp/PgDn scroll · Alt+F farm · Alt+T triage · Ctrl+N new · Ctrl+E edit · Del
  delete · Esc close
 
 
@@ -33,20 +33,20 @@ expression: "states.join(\"\\n\\n---\\n\\n\")"
 
  Filter:
 
- › bug/slow-input
- Typing stalls when the worker is busy.
+ › bug/slow-input                           │ bug/slow-input
+   child · feature/new-panel                │
+                                            │ Typing stalls when the worker is busy.
+                                            │
+                                            │ • Keep steering responsive.
+                                            │ • Preserve unrelated work.
+                                            │
+                                            │
+                                            │
+                                            │
+                                            │
 
- • Keep steering responsive.
- • Preserve unrelated work.
 
-   child · feature/new-panel
-
-
-
-
-
-
- ↑↓ select · Enter body · PgUp/PgDn scroll · Alt+F farm · Alt+T triage · Ctrl+N new · Ctrl+E edit · Del
+ ↑↓/hover select · Enter body · PgUp/PgDn scroll · Alt+F farm · Alt+T triage · Ctrl+N new · Ctrl+E edit · Del
  delete · Esc close
 
 
@@ -123,3 +123,26 @@ expression: "states.join(\"\\n\\n---\\n\\n\")"
 
 
  Tab field · Ctrl+S save · Esc back
+
+
+---
+
+
+ Jira
+ /workspace/project
+
+ Filter:
+
+ bug/slow-input
+
+ Typing stalls when the worker is busy.
+
+ • Keep steering responsive.
+ • Preserve unrelated work.
+
+
+
+
+ ↑↓ select · Enter list · PgUp/PgDn scroll · Alt+F farm
+ · Alt+T triage · Ctrl+N new · Ctrl+E edit · Del delete ·
+ Esc back

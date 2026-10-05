@@ -1,6 +1,7 @@
 //! Server-backed issue browser. Drafts live here, never in disposable storage;
 //! reload is refused while this surface is open. Reading is never model input.
 
+use super::jira_preview::JiraPreview;
 use crate::bottom_pane::TextArea;
 use crate::bottom_pane::TextAreaState;
 use codex_app_server_protocol::JiraCategory;
@@ -12,7 +13,11 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 use crossterm::event::KeyModifiers;
+use crossterm::event::MouseButton;
+use crossterm::event::MouseEvent;
+use crossterm::event::MouseEventKind;
 use ratatui::buffer::Buffer;
+use ratatui::layout::Position;
 use ratatui::layout::Rect;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
@@ -23,6 +28,9 @@ use ratatui::widgets::Widget;
 
 pub(super) enum JiraIntent {
     List,
+    Preview {
+        key: JiraKey,
+    },
     Read {
         key: JiraKey,
         purpose: ReadPurpose,
@@ -34,7 +42,6 @@ pub(super) enum JiraIntent {
 
 #[derive(Clone, Copy)]
 pub(super) enum ReadPurpose {
-    Expand,
     Edit,
     Delete,
     Farm,
@@ -47,8 +54,8 @@ pub(super) struct JiraBrowser {
     pub(super) scope: Option<String>,
     pub(super) keys: Vec<JiraKey>,
     pub(super) selected: Option<JiraKey>,
-    pub(super) expanded: Option<JiraIssue>,
-    pub(super) observed: Option<JiraRevision>,
+    pub(super) preview: JiraPreview,
+    pub(super) full_body: bool,
     pub(super) form: Option<JiraForm>,
     pub(super) pending: Option<(uuid::Uuid, JiraIntent)>,
     pub(super) error: Option<String>,
@@ -56,7 +63,14 @@ pub(super) struct JiraBrowser {
     pub(super) filter: TextArea,
     scroll: usize,
     pub(super) reveal_selection: bool,
-    markdown: Option<(JiraRevision, u16, Vec<Line<'static>>)>,
+    targets: JiraTargets,
+}
+
+#[derive(Default)]
+struct JiraTargets {
+    list: Rect,
+    body: Rect,
+    rows: Vec<(Rect, JiraKey)>,
 }
 
 pub(super) struct JiraForm {
@@ -205,6 +219,12 @@ impl JiraForm {
 }
 
 impl JiraBrowser {
+    pub(super) fn busy(&self) -> bool {
+        self.pending
+            .as_ref()
+            .is_some_and(|(_, intent)| !matches!(intent, JiraIntent::Preview { .. }))
+    }
+
     pub(super) fn new(thread_id: ThreadId) -> Self {
         Self {
             thread_id,
@@ -212,8 +232,8 @@ impl JiraBrowser {
             scope: None,
             keys: vec![],
             selected: None,
-            expanded: None,
-            observed: None,
+            preview: JiraPreview::default(),
+            full_body: false,
             form: None,
             pending: None,
             error: None,
@@ -221,7 +241,7 @@ impl JiraBrowser {
             filter: TextArea::new(),
             scroll: 0,
             reveal_selection: true,
-            markdown: None,
+            targets: JiraTargets::default(),
         }
     }
 
@@ -253,7 +273,7 @@ impl JiraBrowser {
     pub(super) fn select_neighbor(&mut self, delta: isize) {
         let keys = self.filtered();
         if keys.is_empty() {
-            self.selected = None;
+            self.select(None);
             return;
         }
         let old = keys
@@ -261,9 +281,16 @@ impl JiraBrowser {
             .position(|key| Some(key) == self.selected.as_ref())
             .unwrap_or(/*default*/ 0);
         let index = old.saturating_add_signed(delta).min(keys.len() - 1);
-        self.selected = Some(keys[index].clone());
-        self.expanded = None;
+        self.select(Some(keys[index].clone()));
         self.reveal_selection = true;
+    }
+
+    pub(super) fn select(&mut self, key: Option<JiraKey>) {
+        if self.selected != key {
+            self.selected = key;
+            self.preview = JiraPreview::default();
+            self.reveal_selection = true;
+        }
     }
 
     pub(super) fn filter_key(&mut self, key: KeyEvent) {
@@ -280,8 +307,7 @@ impl JiraBrowser {
             self.filter.input(key);
             let keys = self.filtered();
             if !keys.iter().any(|key| Some(key) == self.selected.as_ref()) {
-                self.selected = keys.first().cloned();
-                self.expanded = None;
+                self.select(keys.first().cloned());
             }
             self.scroll = 0;
             self.reveal_selection = true;
@@ -289,10 +315,51 @@ impl JiraBrowser {
     }
 
     pub(super) fn scroll_body(&mut self, delta: isize) {
-        self.scroll = self.scroll.saturating_add_signed(delta);
+        if self.targets.body.is_empty() {
+            self.scroll = self.scroll.saturating_add_signed(delta);
+        } else {
+            self.preview.scroll(delta);
+        }
+    }
+
+    pub(super) fn mouse_input(&mut self, mouse: MouseEvent) -> bool {
+        let point = Position::new(mouse.column, mouse.row);
+        match mouse.kind {
+            MouseEventKind::Moved | MouseEventKind::Down(MouseButton::Left) => {
+                if let Some((_, key)) = self
+                    .targets
+                    .rows
+                    .iter()
+                    .find(|(area, _)| area.contains(point))
+                    && self.selected.as_ref() != Some(key)
+                    && self.filtered().contains(key)
+                {
+                    self.select(Some(key.clone()));
+                    return true;
+                }
+            }
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+                let delta = if mouse.kind == MouseEventKind::ScrollUp {
+                    -3
+                } else {
+                    3
+                };
+                if self.targets.body.contains(point) {
+                    self.preview.scroll(delta);
+                    return true;
+                }
+                if self.targets.list.contains(point) {
+                    self.scroll = self.scroll.saturating_add_signed(delta);
+                    return true;
+                }
+            }
+            _ => {}
+        }
+        false
     }
 
     pub(super) fn render(&mut self, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
+        self.targets = JiraTargets::default();
         Clear.render(area, buf);
         if area.height < 10 || area.width < 20 {
             Paragraph::new("Enlarge the terminal to browse issues.").render(area, buf);
@@ -327,6 +394,7 @@ impl JiraBrowser {
                 JiraIntent::Delete => "Deleting…",
                 JiraIntent::List => "Loading issues…",
                 JiraIntent::Read { .. } => "Reading issue…",
+                JiraIntent::Preview { .. } => "",
             }
             .to_owned()
         } else {
@@ -334,8 +402,10 @@ impl JiraBrowser {
         };
         let hints = if self.form.is_some() {
             "Tab field · Ctrl+S save · Esc back"
+        } else if self.full_body {
+            "↑↓ select · Enter list · PgUp/PgDn scroll · Alt+F farm · Alt+T triage · Ctrl+N new · Ctrl+E edit · Del delete · Esc back"
         } else {
-            "↑↓ select · Enter body · PgUp/PgDn scroll · Alt+F farm · Alt+T triage · Ctrl+N new · Ctrl+E edit · Del delete · Esc close"
+            "↑↓/hover select · Enter body · PgUp/PgDn scroll · Alt+F farm · Alt+T triage · Ctrl+N new · Ctrl+E edit · Del delete · Esc close"
         };
         let hint_lines: Vec<Line<'static>> = textwrap::wrap(hints, inner.width as usize)
             .into_iter()
@@ -370,52 +440,39 @@ impl JiraBrowser {
             },
             buf,
         );
-        let list = Rect::new(
+        let mut list = Rect::new(
             content.x,
             content.y + 2,
             content.width,
             content.height.saturating_sub(/*rhs*/ 2),
         );
-        if let Some(issue) = &self.expanded
-            && !self.markdown.as_ref().is_some_and(|(revision, width, _)| {
-                revision == &issue.revision && *width == list.width
-            })
-        {
-            let mut body = Vec::new();
-            crate::markdown::append_markdown(
-                &issue.body,
-                Some(list.width.saturating_sub(/*rhs*/ 2) as usize),
-                /*cwd*/ None,
-                &mut body,
+        if self.full_body {
+            self.targets.body = list;
+            list = Rect::default();
+        } else if list.width >= 80 {
+            let width = (list.width / 5 * 2).min(48);
+            self.targets.body = Rect::new(
+                list.x + width + 3,
+                list.y,
+                list.width - width - 3,
+                list.height,
             );
-            self.markdown = Some((issue.revision.clone(), list.width, body));
+            list.width = width;
+            for y in list.y..list.bottom() {
+                Paragraph::new("│".dim()).render(
+                    Rect::new(list.right() + 1, y, /*width*/ 1, /*height*/ 1),
+                    buf,
+                );
+            }
+        }
+        self.targets.list = list;
+        if !self.targets.body.is_empty()
+            && let Some(key) = &self.selected
+        {
+            self.preview
+                .render(&self.issue_label(key), self.targets.body, buf);
         }
         let keys = self.filtered();
-        let expanded_body = self
-            .markdown
-            .as_ref()
-            .filter(|(revision, _, _)| {
-                self.expanded
-                    .as_ref()
-                    .is_some_and(|issue| issue.revision == *revision)
-            })
-            .map(|(_, _, body)| body);
-        let mut total_lines = 0;
-        let mut selected_line = None;
-        for key in &keys {
-            let selected = self.selected.as_ref() == Some(key);
-            if selected {
-                selected_line = Some(total_lines);
-            }
-            total_lines += 1;
-            if self
-                .expanded
-                .as_ref()
-                .is_some_and(|issue| &issue.revision.key == key)
-            {
-                total_lines += expanded_body.map_or(/*default*/ 0, Vec::len) + 1;
-            }
-        }
         if keys.is_empty() && !self.loading && self.error.is_none() {
             Paragraph::new(if self.keys.is_empty() {
                 "No issues. Ctrl+N creates one."
@@ -425,7 +482,10 @@ impl JiraBrowser {
             .render(list, buf);
         }
         if self.reveal_selection
-            && let Some(selected) = selected_line
+            && !list.is_empty()
+            && let Some(selected) = keys
+                .iter()
+                .position(|key| Some(key) == self.selected.as_ref())
         {
             if selected < self.scroll {
                 self.scroll = selected;
@@ -437,59 +497,27 @@ impl JiraBrowser {
         }
         self.scroll = self
             .scroll
-            .min(total_lines.saturating_sub(list.height as usize));
-        let end = self.scroll + list.height as usize;
-        let mut index = 0;
-        for key in &keys {
+            .min(keys.len().saturating_sub(list.height as usize));
+        for (row, key) in keys
+            .iter()
+            .skip(self.scroll)
+            .take(list.height as usize)
+            .enumerate()
+        {
             let selected = self.selected.as_ref() == Some(key);
-            if index >= self.scroll && index < end {
-                let line = format!(
-                    "{} {}",
-                    if selected { "›" } else { " " },
-                    self.issue_label(key)
-                );
-                let line = if selected {
-                    Line::from(line.bold())
-                } else {
-                    line.into()
-                };
-                Paragraph::new(line).render(
-                    Rect::new(
-                        list.x,
-                        list.y + (index - self.scroll) as u16,
-                        list.width,
-                        /*height*/ 1,
-                    ),
-                    buf,
-                );
-            }
-            index += 1;
-            if self
-                .expanded
-                .as_ref()
-                .is_some_and(|issue| &issue.revision.key == key)
-            {
-                if let Some(body) = expanded_body {
-                    for (offset, line) in body
-                        .iter()
-                        .enumerate()
-                        .skip(self.scroll.saturating_sub(index))
-                        .take(end.saturating_sub(index.max(self.scroll)))
-                    {
-                        Paragraph::new(line.clone()).render(
-                            Rect::new(
-                                list.x,
-                                list.y + (index + offset - self.scroll) as u16,
-                                list.width,
-                                /*height*/ 1,
-                            ),
-                            buf,
-                        );
-                    }
-                    index += body.len();
-                }
-                index += 1;
-            }
+            let line = format!(
+                "{} {}",
+                if selected { "›" } else { " " },
+                self.issue_label(key)
+            );
+            let line = if selected {
+                Line::from(line.bold())
+            } else {
+                line.into()
+            };
+            let row = Rect::new(list.x, list.y + row as u16, list.width, /*height*/ 1);
+            Paragraph::new(line).render(row, buf);
+            self.targets.rows.push((row, key.clone()));
         }
         None
     }
