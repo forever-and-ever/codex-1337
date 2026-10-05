@@ -532,6 +532,7 @@ async fn collect_compaction_output(
                     &response_id,
                     token_usage.as_ref(),
                     usage_metadata.as_ref(),
+                    /*thought*/ None,
                 )
                 .await;
                 // Compaction is charged inference too. Record it once at the
@@ -1348,6 +1349,7 @@ mod tests {
                     codex_rollout_budget_units: None,
                 }),
                 usage_metadata: Some(codex_protocol::ResponseUsageMetadata {
+                    reported_reasoning_tokens: None,
                     amount: Some("0.125".to_string()),
                     metadata: Some(serde_json::json!({ "extra": { "label": "example" } })),
                 }),
@@ -1371,6 +1373,7 @@ mod tests {
         assert_eq!(
             completed.usage_metadata,
             Some(codex_protocol::ResponseUsageMetadata {
+                reported_reasoning_tokens: None,
                 amount: Some("0.125".to_string()),
                 metadata: Some(serde_json::json!({ "extra": { "label": "example" } })),
             })

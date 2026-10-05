@@ -366,6 +366,13 @@ impl ChatWidget {
                 );
             }
             ThreadItem::Plan { text, .. } => self.on_plan_item_completed(text),
+            item @ ThreadItem::Thought { .. } => {
+                self.add_to_history(history_cell::ThoughtCell::from_item(
+                    item,
+                    &self.config.cwd,
+                    history_cell::ThoughtTextVisibility::from(&self.config),
+                ))
+            }
             ThreadItem::Reasoning {
                 id,
                 summary,

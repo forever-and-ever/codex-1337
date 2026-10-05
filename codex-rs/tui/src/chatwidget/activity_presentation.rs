@@ -92,7 +92,7 @@ impl ChatWidget {
             activity,
             header,
             auxiliary,
-            tool_output_tokens,
+            header_tokens: tool_output_tokens,
             disclosure,
             controls,
         })

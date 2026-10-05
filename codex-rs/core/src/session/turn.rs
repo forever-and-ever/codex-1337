@@ -2640,6 +2640,7 @@ async fn try_run_sampling_request(
     let mut should_emit_token_count = false;
     const MAX_ANALYTICS_TOOL_CALL_IDS_PER_RESPONSE: usize = 256;
     let mut analytics_tool_call_ids = Vec::new();
+    let mut thought = super::response_thought::ThoughtAccumulator::default();
     let reasoning_effort = step_context
         .settings
         .reasoning_effort()
@@ -2729,6 +2730,7 @@ async fn try_run_sampling_request(
             }
             ResponseEvent::OutputItemDone(mut item) => {
                 assign_missing_streamed_response_item_id(&mut item, active_item.as_ref());
+                thought.observe(&item);
                 sess.reserve_assistant_message_order(&turn_context, &item)
                     .await;
                 if analytics_tool_call_ids.len() < MAX_ANALYTICS_TOOL_CALL_IDS_PER_RESPONSE {
@@ -2850,6 +2852,9 @@ async fn try_run_sampling_request(
                 }
             }
             ResponseEvent::OutputItemAdded(mut item) => {
+                if matches!(&item, ResponseItem::Reasoning { .. }) {
+                    thought.observed.get_or_insert_default();
+                }
                 assign_missing_streamed_response_item_id(&mut item, /*active_item*/ None);
                 sess.reserve_assistant_message_order(&turn_context, &item)
                     .await;
@@ -3012,6 +3017,12 @@ async fn try_run_sampling_request(
                     &response_id,
                     token_usage.as_ref(),
                     usage_metadata.as_ref(),
+                    thought.finish(
+                        &turn_context.sub_id,
+                        usage_metadata
+                            .as_ref()
+                            .and_then(|metadata| metadata.reported_reasoning_tokens),
+                    ),
                 )
                 .await;
                 let budget_result = sess

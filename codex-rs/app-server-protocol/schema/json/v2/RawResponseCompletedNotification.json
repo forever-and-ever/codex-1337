@@ -10,7 +10,16 @@
             "null"
           ]
         },
-        "metadata": true
+        "metadata": true,
+        "reportedReasoningTokens": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
       },
       "type": "object"
     },
@@ -52,7 +61,7 @@
       "type": "object"
     }
   },
-  "description": "Internal-only notification containing the exact usage from one upstream Responses API completion.",
+  "description": "Internal-only notification containing provider-reported usage from one upstream model response completion.",
   "properties": {
     "responseId": {
       "type": "string"

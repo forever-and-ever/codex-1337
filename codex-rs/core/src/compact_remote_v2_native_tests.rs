@@ -24,6 +24,7 @@ async fn native_context_limit_records_usage_without_accepting_a_checkpoint() {
         ..Default::default()
     };
     let metadata = ResponseUsageMetadata {
+        reported_reasoning_tokens: None,
         amount: None,
         metadata: Some(serde_json::json!({
             "provider": "anthropic",
@@ -64,6 +65,7 @@ async fn native_context_limit_records_usage_without_accepting_a_checkpoint() {
     assert_eq!(
         serde_json::to_value(completed).unwrap(),
         serde_json::to_value(RawResponseCompletedEvent {
+            thought: None,
             response_id: "msg_context_limit".into(),
             token_usage: Some(usage.clone()),
             usage_metadata: Some(metadata.clone()),
@@ -107,6 +109,7 @@ async fn native_context_limit_records_usage_without_accepting_a_checkpoint() {
     assert_eq!(
         serde_json::to_value(completed).unwrap(),
         serde_json::to_value(RawResponseCompletedEvent {
+            thought: None,
             response_id: "msg_output_limit".into(),
             token_usage: Some(usage.clone()),
             usage_metadata: Some(output_limit_metadata),

@@ -420,6 +420,18 @@ impl ThreadHistoryBuilder {
             EventMsg::ExitedReviewMode(payload) => self.handle_exited_review_mode(payload),
             EventMsg::ItemStarted(payload) => self.handle_item_started(payload),
             EventMsg::ItemCompleted(payload) => self.handle_item_completed(payload),
+            EventMsg::RawResponseCompleted(payload) => {
+                if let Some(item) = ThreadItem::from_response_thought(payload)
+                    && let Some(thought) = &payload.thought
+                {
+                    if self.current_turn.is_none()
+                        && !self.turns.iter().any(|turn| turn.id == thought.turn_id)
+                    {
+                        self.ensure_turn().id = thought.turn_id.clone();
+                    }
+                    self.upsert_item_in_turn_id(&thought.turn_id, item);
+                }
+            }
             EventMsg::HookStarted(_) | EventMsg::HookCompleted(_) => {}
             EventMsg::Error(payload) => self.handle_error(payload),
             EventMsg::TokenCount(_) => {}

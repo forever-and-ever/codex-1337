@@ -363,6 +363,7 @@ impl<'a> Decoder<'a> {
                     token_usage: Some(token_usage),
                     usage_metadata: Some(ResponseUsageMetadata {
                         amount: None,
+                        reported_reasoning_tokens: self.usage.reported_reasoning_tokens(),
                         metadata: Some(json!({
                             "provider": "anthropic",
                             "stop_reason": reason,

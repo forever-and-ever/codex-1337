@@ -1990,8 +1990,8 @@ pub struct ThreadTokenUsageUpdatedNotification {
     pub token_usage: ThreadTokenUsage,
 }
 
-/// Internal-only notification containing the exact usage from one upstream
-/// Responses API completion.
+/// Internal-only notification containing provider-reported usage from one
+/// upstream model response completion.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
@@ -2010,6 +2010,9 @@ pub struct RawResponseCompletedNotification {
 pub struct ResponseUsageMetadata {
     pub amount: Option<String>,
     pub metadata: Option<JsonValue>,
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub reported_reasoning_tokens: Option<u64>,
 }
 
 impl From<codex_protocol::ResponseUsageMetadata> for ResponseUsageMetadata {
@@ -2017,6 +2020,7 @@ impl From<codex_protocol::ResponseUsageMetadata> for ResponseUsageMetadata {
         Self {
             amount: value.amount,
             metadata: value.metadata,
+            reported_reasoning_tokens: value.reported_reasoning_tokens,
         }
     }
 }

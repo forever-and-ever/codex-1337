@@ -164,6 +164,7 @@ async fn responses_websocket_preserves_credit_usage_metadata() {
     assert_eq!(
         usage_metadata,
         Some(codex_protocol::ResponseUsageMetadata {
+            reported_reasoning_tokens: None,
             amount: Some("0.12345678901234567890".to_string()),
             metadata: Some(expected_metadata),
         }),

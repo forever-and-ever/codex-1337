@@ -10,6 +10,8 @@ pub(super) struct Usage {
     cache_creation_input_tokens: Option<i64>,
     cache_read_input_tokens: Option<i64>,
     iterations: Option<Vec<Usage>>,
+    // Optional observability data must not invalidate otherwise usable accounting.
+    output_tokens_details: Option<Value>,
 }
 
 impl Usage {
@@ -41,7 +43,22 @@ impl Usage {
             .cache_read_input_tokens
             .or(self.cache_read_input_tokens);
         self.iterations = update.iterations.or(self.iterations.take());
+        // The final delta owns this breakdown; initial/provisional values are
+        // not authoritative when the final update omits it.
+        self.output_tokens_details = update.output_tokens_details;
         Ok(())
+    }
+
+    pub(super) fn reported_reasoning_tokens(&self) -> Option<u64> {
+        // The documented breakdown belongs to top-level message usage, excluding
+        // compaction iterations. It is attribution, not another billing increment.
+        let count = self
+            .output_tokens_details
+            .as_ref()?
+            .get("thinking_tokens")?
+            .as_u64()?;
+        let output = u64::try_from(self.output_tokens?).ok()?;
+        (count <= output).then_some(count)
     }
 
     pub(super) fn finish(&self) -> Result<TokenUsage, ApiError> {
@@ -92,7 +109,10 @@ impl Usage {
             cached_input_tokens: read,
             cache_write_input_tokens: write,
             output_tokens: output,
-            reasoning_output_tokens: 0,
+            reasoning_output_tokens: self
+                .reported_reasoning_tokens()
+                .and_then(|count| i64::try_from(count).ok())
+                .unwrap_or(0),
             total_tokens: total,
             codex_rollout_budget_units: None,
         })
