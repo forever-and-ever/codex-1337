@@ -218,6 +218,10 @@ impl App {
     }
 
     /// Project successful turn completion metadata after the corresponding page's final item.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "retain the page's native projection inputs while scoped hydration updates the existing reading view"
+    )]
     fn project_older_history_cells(
         &mut self,
         tui: &mut tui::Tui,

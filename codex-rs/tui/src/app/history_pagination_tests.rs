@@ -92,6 +92,7 @@ async fn hidden_last_item_keeps_turn_groups_and_completion_boundaries() {
         TurnStatus::Interrupted,
     ] {
         let mut app = make_test_app().await;
+        let mut tui = crate::tui::test_support::make_test_tui().unwrap();
         let cwd = app.config.cwd.clone();
         let thread_id = ThreadId::new();
         let expected_completions = usize::from(status == TurnStatus::Completed);
@@ -124,6 +125,7 @@ async fn hidden_last_item_keeps_turn_groups_and_completion_boundaries() {
             .collect::<Vec<_>>();
 
         let cells = app.project_older_history_cells(
+            &mut tui,
             items.clone(),
             &turns,
             &hidden,
@@ -157,6 +159,7 @@ async fn hidden_last_item_keeps_turn_groups_and_completion_boundaries() {
         );
 
         let repeated = app.project_older_history_cells(
+            &mut tui,
             items,
             &turns,
             &hidden,

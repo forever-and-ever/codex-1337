@@ -264,6 +264,11 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
         output("notify-a", "exec-a", "{\"answer\":42}"),
         output("returned-a", "exec-a", "Exact accepted return"),
         ThreadItem::ToolOutputTokens {
+            id: "tool-output-tokens:notify-a".into(),
+            call_id: "exec-a".into(),
+            tokens: Some(3),
+        },
+        ThreadItem::ToolOutputTokens {
             id: "tool-output-tokens:returned-a".into(),
             call_id: "exec-a".into(),
             tokens: Some(7),
@@ -307,7 +312,7 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
     assert_eq!(
         app.transcript_view
             .activity_output_tokens(&terminal.activity_ids()),
-        Some(7)
+        Some(10)
     );
     // An older page's pending child cannot overwrite an already admitted completion.
     app.apply_code_mode_admission(

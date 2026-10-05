@@ -153,7 +153,7 @@ pub(crate) fn thread_items_to_transcript_cells(
 }
 
 fn append_thread_items(
-    mut cells: &mut TranscriptCells,
+    cells: &mut TranscriptCells,
     owned: &mut crate::code_mode_transcript::Reducers,
     thread_id: Option<ThreadId>,
     cwd: &AbsolutePathBuf,
@@ -239,14 +239,14 @@ fn append_thread_items(
                 group.group.push_detail(cell);
             }
             if returned {
-                flush_computer(&mut pending, &mut cells);
+                flush_computer(&mut pending, cells);
             }
             continue;
         }
         if let Some(cell) = tools::historical_tool_fallback(&item) {
-            flush_computer(&mut pending, &mut cells);
+            flush_computer(&mut pending, cells);
             push_activity_cell(
-                &mut cells,
+                cells,
                 Arc::new(crate::history_cell::ToolItemCell::new(
                     item.id().into(),
                     cell,
@@ -257,21 +257,21 @@ fn append_thread_items(
         match item {
             item @ ThreadItem::McpToolCall { .. } => {
                 let Some(call) = tools::McpHistory::from_item(item) else {
-                    flush_computer(&mut pending, &mut cells);
+                    flush_computer(&mut pending, cells);
                     continue;
                 };
                 if call.invocation.is_computer_activity() {
                     computer_groups::append(pending.get_or_insert_default(), call);
                 } else {
-                    flush_computer(&mut pending, &mut cells);
+                    flush_computer(&mut pending, cells);
                     let cell = call.into_cell();
-                    push_activity_cell(&mut cells, Arc::new(cell));
+                    push_activity_cell(cells, Arc::new(cell));
                 }
             }
             item @ ThreadItem::CommandExecution { .. } => {
-                flush_computer(&mut pending, &mut cells);
+                flush_computer(&mut pending, cells);
                 if let Some(command) = tools::CommandHistory::from_item(item) {
-                    push_activity_cell(&mut cells, Arc::new(command.into_cell()));
+                    push_activity_cell(cells, Arc::new(command.into_cell()));
                 }
             }
             item => {
@@ -282,12 +282,12 @@ fn append_thread_items(
                     inline_visualization_context.clone(),
                 );
                 if !projected.is_empty() {
-                    flush_computer(&mut pending, &mut cells);
+                    flush_computer(&mut pending, cells);
                     for cell in projected {
                         if let Some((range, replacements)) =
-                            crate::history_cell::reconcile_code_mode(&cells, &cell).or_else(|| {
+                            crate::history_cell::reconcile_code_mode(cells, &cell).or_else(|| {
                                 crate::history_cell::ToolOutputGroup::attach(
-                                    &cells,
+                                    cells,
                                     Arc::clone(&cell),
                                 )
                             })
@@ -301,7 +301,7 @@ fn append_thread_items(
             }
         }
     }
-    flush_computer(&mut pending, &mut cells);
+    flush_computer(&mut pending, cells);
 }
 
 /// Project one item without changing the active widget or its turn lifecycle.

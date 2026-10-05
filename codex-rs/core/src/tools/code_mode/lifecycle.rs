@@ -288,7 +288,7 @@ impl TranscriptRegistry {
                         break;
                     }
                     changed.await;
-                };
+                }
                 let _admission = draining.admission.lock().await;
                 // An explicit outcome may supersede abandonment while admission
                 // is blocked. Choose the outcome at its ordered admission point.
