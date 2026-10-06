@@ -632,6 +632,10 @@ impl OpenAiModelsManager {
         {
             return Ok(());
         }
+        if matches!(refresh_strategy, RefreshStrategy::Offline) {
+            self.try_load_cache().await;
+            return Ok(());
+        }
         if !self.should_refresh_models().await {
             if matches!(
                 refresh_strategy,
