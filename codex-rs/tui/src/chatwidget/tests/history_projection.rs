@@ -35,7 +35,6 @@ async fn older_tool_projection_matches_initial_replay() {
         exit_code: Some(0),
         duration_ms: Some(25),
     }];
-    // Completion-only replay must group consecutive exploration just like older-page projection.
     for name in ["one.rs", "two.rs"] {
         let command = format!("cat {name}");
         items.push(AppServerThreadItem::CommandExecution {
@@ -95,8 +94,6 @@ async fn older_tool_projection_matches_initial_replay() {
             duration_ms: Some(5),
         });
     }
-    // Switching back to exploration must flush the computer group, while reasoning stays
-    // inside the active exploration group until the completed turn commits it.
     for (index, id) in [(1, "trailing-read-one"), (2, "trailing-read-two")] {
         if index == 2 {
             items.push(AppServerThreadItem::Reasoning {
@@ -160,18 +157,38 @@ async fn older_tool_projection_matches_initial_replay() {
     }
     let exploration = replayed
         .iter()
-        .find(|cell| {
-            cell.as_any()
-                .downcast_ref::<ExecCell>()
-                .is_some_and(|cell| cell.iter_calls().count() == 2)
+        .filter_map(|cell| cell.as_any().downcast_ref::<ExecCell>())
+        .filter(|cell| {
+            cell.iter_calls()
+                .any(|call| call.call_id.starts_with("trailing-read-"))
         })
-        .expect("adjacent completed reads share one exploration group");
+        .collect::<Vec<_>>();
+    assert_eq!(
+        exploration
+            .iter()
+            .map(|cell| cell
+                .iter_calls()
+                .map(|call| call.call_id.as_str())
+                .collect::<Vec<_>>())
+            .collect::<Vec<_>>(),
+        vec![vec!["trailing-read-one"], vec!["trailing-read-two"]],
+    );
     insta::assert_snapshot!(
         "completion_only_replay_exploration_group",
         format!(
             "compact:\n{}\ndetailed:\n{}",
-            lines_to_single_string(&exploration.display_lines(/*width*/ 40)),
-            lines_to_single_string(&exploration.transcript_lines(/*width*/ 40)),
+            lines_to_single_string(
+                &exploration
+                    .iter()
+                    .flat_map(|cell| cell.display_lines(/*width*/ 40))
+                    .collect::<Vec<_>>()
+            ),
+            lines_to_single_string(
+                &exploration
+                    .iter()
+                    .flat_map(|cell| cell.transcript_lines(/*width*/ 40))
+                    .collect::<Vec<_>>()
+            ),
         )
     );
 }

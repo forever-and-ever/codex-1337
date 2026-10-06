@@ -1190,7 +1190,7 @@ async fn live_app_server_file_change_item_started_preserves_changes() {
     assert_eq!(lines_to_single_string(&replayed[0]), transcript);
     insta::assert_snapshot!(transcript, @"
     • Edited
-      foo.txt (+1, -0)
+        foo.txt (+1, -0)
         1 +hello
     ");
 }

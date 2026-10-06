@@ -3,5 +3,5 @@ source: tui/src/chatwidget/tests/history_replay.rs
 expression: "lines_to_single_string(&cells[0])"
 ---
 
-  13:04:05 Sent by SYSADMIN
+  Sent by SYSADMIN
   Follow <up> & report

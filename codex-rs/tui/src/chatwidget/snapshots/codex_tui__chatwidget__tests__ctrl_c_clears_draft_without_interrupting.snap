@@ -4,10 +4,10 @@ expression: "normalize_snapshot_paths(render_bottom_popup(&chat, 80))"
 ---
 • Working (0s • ctrl+c to interrupt)
 
-• Message to be submitted after next tool call (press ⌥+i to interrupt and send
+• Message to be submitted after next tool call (press ⌥i to interrupt and send
   immediately)
   ↳ pending steer
-    ⌥+e edit · ⌥+x cancel
+    ⌥e edit · ⌥x cancel
 
 • Queued follow-up inputs
   ↳ queued draft

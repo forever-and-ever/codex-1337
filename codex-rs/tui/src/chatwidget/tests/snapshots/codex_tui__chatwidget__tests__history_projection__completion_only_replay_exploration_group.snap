@@ -1,17 +1,17 @@
 ---
 source: tui/src/chatwidget/tests/history_projection.rs
-expression: "format!(\"compact:\\n{}\\ndetailed:\\n{}\",\nlines_to_single_string(&exploration.display_lines(40)),\nlines_to_single_string(&exploration.transcript_lines(40)),)"
+expression: "format!(\"compact:\\n{}\\ndetailed:\\n{}\",\nlines_to_single_string(&exploration.iter().flat_map(|cell|\ncell.display_lines(40)).collect::<Vec<_>>()),\nlines_to_single_string(&exploration.iter().flat_map(|cell|\ncell.transcript_lines(40)).collect::<Vec<_>>()),)"
 ---
 compact:
 • Explored
-  └ Read one.rs (whole file), two.rs (whole
-         file)
+    Read one.rs (whole file)
+• Explored
+    Read two.rs (whole file)
 
 detailed:
 $ cat one.rs
 fn main() {}
 ✓ • 5ms
-
 $ cat two.rs
 fn main() {}
 ✓ • 5ms

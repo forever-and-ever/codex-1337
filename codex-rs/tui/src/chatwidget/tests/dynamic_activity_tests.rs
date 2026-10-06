@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::local_settings::LocalSettings;
+use crate::terminal_hyperlinks::visible_lines;
 use crate::transcript_mode::TranscriptMode;
 use codex_app_server_protocol::DynamicToolCallOutputContentItem;
 use codex_app_server_protocol::DynamicToolCallStatus;
@@ -72,12 +73,10 @@ async fn terminal_dynamic_activity_retains_calls_across_both_fallbacks() {
     assert_eq!(outputs[0], outputs[1]);
     insta::assert_snapshot!(
         lines_to_single_string(&outputs[0]),
-        @"
-        • Failed test.lookup · 25ms
-          └ Result for call-1
-        • Called test.lookup · 25ms
-          └ Result for call-2
-        "
+        @r#"
+    • Failed test.lookup · 25ms({"id":"call-1"})
+    • Called test.lookup · 25ms({"id":"call-2"})
+    "#
     );
 }
 
@@ -98,7 +97,7 @@ async fn owned_dynamic_activity_updates_the_retained_row_after_config_refresh() 
     assert_eq!(retained.len(), 1);
     assert_eq!(
         lines_to_single_string(&retained[0].display_lines(/*width*/ 80)),
-        "• Calling test.lookup\n",
+        "• Calling test.lookup({\"id\":\"call-1\"})\n",
     );
 
     chat.on_dynamic_tool_item(dynamic_item("call-1", DynamicToolCallStatus::Completed));
@@ -106,7 +105,13 @@ async fn owned_dynamic_activity_updates_the_retained_row_after_config_refresh() 
     assert!(chat.transcript.dynamic_calls.is_empty());
     assert_eq!(
         lines_to_single_string(&retained[0].display_lines(/*width*/ 80)),
-        "• Called test.lookup · 25ms\n  └ Result for call-1\n",
+        "• Called test.lookup · 25ms({\"id\":\"call-1\"})\n",
+    );
+    assert!(
+        lines_to_single_string(&visible_lines(
+            retained[0].transcript_hyperlink_lines(/*width*/ 80)
+        ))
+        .contains("Result for call-1")
     );
 }
 

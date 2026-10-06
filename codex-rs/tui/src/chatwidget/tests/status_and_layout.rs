@@ -2645,13 +2645,26 @@ async fn ambient_pet_reduces_stream_width_and_composer_text_width() {
     disabled.last_rendered_width.set(Some(80));
     let stream_width_without_pet = disabled.current_stream_width(/*reserved_cols*/ 2);
 
+    let (history_width_with_pet, history_width_without_pet) = (69, 80);
     assert_eq!(
         stream_width_with_pet,
-        crate::width::usable_content_width(/*total_width*/ 69, /*reserved_cols*/ 2)
+        crate::width::usable_content_width(
+            usize::from(crate::transcript_geometry::content_width(
+                history_width_with_pet,
+                history_cell::HistoryRenderMode::Rich
+            )),
+            /*reserved_cols*/ 2,
+        )
     );
     assert_eq!(
         stream_width_without_pet,
-        crate::width::usable_content_width(/*total_width*/ 80, /*reserved_cols*/ 2)
+        crate::width::usable_content_width(
+            usize::from(crate::transcript_geometry::content_width(
+                history_width_without_pet,
+                history_cell::HistoryRenderMode::Rich
+            )),
+            /*reserved_cols*/ 2,
+        )
     );
     assert!(stream_width_with_pet < stream_width_without_pet);
 

@@ -3505,7 +3505,7 @@ async fn model_picker_refreshes_startup_catalog() {
         insta::allow_duplicates! {
             assert_chatwidget_snapshot!(
                 if explicit_all_models {
-                    "model_selection_popup"
+                    "model_selection_popup_refreshed_catalog"
                 } else {
                     "model_picker_refreshes_auto_models"
                 },
@@ -3534,7 +3534,7 @@ async fn model_picker_queued_all_models_uses_refreshed_catalog() {
     assert_matches!(rx.try_recv(), Ok(AppEvent::OpenAllModelsPopup));
     chat.open_all_models_popup();
     assert_chatwidget_snapshot!(
-        "model_selection_popup",
+        "model_selection_popup_refreshed_catalog",
         render_bottom_popup(&chat, /*width*/ 80)
     );
 }
@@ -3659,7 +3659,7 @@ async fn model_picker_refresh_preserves_dismissal_and_reasoning_submenu() {
         } else {
             insta::allow_duplicates! {
                 assert_chatwidget_snapshot!(
-                    "model_selection_popup",
+                    "model_selection_popup_refreshed_catalog",
                     render_bottom_popup(&chat, /*width*/ 80)
                 );
             }

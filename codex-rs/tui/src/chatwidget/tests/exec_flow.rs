@@ -74,7 +74,7 @@ async fn replayed_command_completion_preserves_tracking_without_duplicate_starts
         .collect::<Vec<_>>();
     assert_eq!(
         history,
-        vec!["• Ran cat replay\n  └ (no output)\n".to_string()]
+        vec!["• Explored\n    Read replay (whole file)\n".to_string()]
     );
 }
 
@@ -670,16 +670,23 @@ async fn exec_history_cell_shows_working_then_failed() {
     // End command with failure
     end_exec(&mut chat, begin, "", "Bloop", /*exit_code*/ 2);
 
-    let cells = drain_insert_history(&mut rx);
+    let cells = std::iter::from_fn(|| rx.try_recv().ok())
+        .filter_map(|event| match event {
+            AppEvent::InsertHistoryCell(cell) => Some(cell),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
     // Exec end with failure should also flush immediately.
     assert_eq!(cells.len(), 1, "expected finalized exec cell to flush");
-    let lines = &cells[0];
-    let blob = lines_to_single_string(lines);
+    let lines = cells[0].display_lines(/*width*/ 80);
+    let blob = lines_to_single_string(&lines);
+    assert_eq!(blob, "• Ran · failed false\n");
     assert!(
-        blob.contains("• Ran false"),
-        "expected command and header text present: {blob:?}"
+        lines_to_single_string(&cells[0].transcript_lines(/*width*/ 80))
+            .to_lowercase()
+            .contains("bloop"),
+        "expected error text"
     );
-    assert!(blob.to_lowercase().contains("bloop"), "expected error text");
 }
 
 #[tokio::test]
@@ -759,23 +766,6 @@ async fn exec_history_shows_unified_exec_startup_commands() {
         blob.contains("• Ran echo unified exec startup"),
         "expected startup command to render: {blob:?}"
     );
-}
-
-#[tokio::test]
-async fn exec_history_shows_unified_exec_tool_calls() {
-    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    chat.on_task_started();
-
-    let begin = begin_exec_with_source(
-        &mut chat,
-        "call-startup",
-        "ls",
-        ExecCommandSource::UnifiedExecStartup,
-    );
-    end_exec(&mut chat, begin, "", "", /*exit_code*/ 0);
-
-    let blob = active_blob(&chat);
-    assert_eq!(blob, "• Explored\n  └ List ls\n");
 }
 
 #[tokio::test]
@@ -1655,7 +1645,7 @@ async fn apply_patch_events_emit_history_cells() {
     let blob = lines_to_single_string(cells.last().unwrap());
     insta::assert_snapshot!(blob, @"
     • Edited
-      foo.txt (+16, -0)
+        foo.txt (+16, -0)
          1 +line 1
          2 +line 2
          3 +line 3

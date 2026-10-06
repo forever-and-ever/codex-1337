@@ -362,7 +362,7 @@ async fn mouse_paste_uses_requested_selection_and_discards_stale_reads() {
                 app.transcript_view.handle_mouse(
                     MouseEvent {
                         kind,
-                        column,
+                        column: crate::transcript_geometry::GUTTER_COLUMNS + column,
                         row: 0,
                         ..click
                     },

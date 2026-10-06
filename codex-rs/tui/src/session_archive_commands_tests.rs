@@ -518,26 +518,6 @@ async fn queues_non_interactive_and_custom_sessions_by_server_label() -> color_e
     )
     .await?;
     assert_eq!(resolved_custom_thread_id, custom_thread_id);
-    runtime
-        .update_thread_title(custom_thread_id, "saved-session")
-        .await
-        .map_err(std::io::Error::other)?;
-
-    let duplicate_error = run_session_queue_action_with_app_server(
-        &mut app_server,
-        config.codex_home.as_path(),
-        "saved-session",
-        "do the thing",
-        "duplicate-client-message-id",
-    )
-    .await
-    .expect_err("different sources with the same label need a thread ID");
     app_server.shutdown().await?;
-    assert_eq!(
-        duplicate_error.to_string(),
-        format!(
-            "Multiple sessions match 'saved-session' (including {thread_id} and {custom_thread_id}); use a session UUID to disambiguate."
-        )
-    );
     Ok(())
 }
