@@ -13,7 +13,6 @@ pub struct AnthropicModelCapabilities {
     #[ts(type = "number")]
     pub max_output_tokens: NonZeroU32,
     pub supported_efforts: Vec<ReasoningEffort>,
-    pub supports_mid_conversation_system: bool,
     pub supports_structured_outputs: bool,
 }
 

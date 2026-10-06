@@ -108,7 +108,6 @@ async fn claude_subscription_accounts_are_native_and_conversation_scoped() -> Re
         thinking: AnthropicThinkingMode::Disabled,
         max_output_tokens: std::num::NonZeroU32::new(8192).unwrap(),
         supported_efforts: Vec::new(),
-        supports_mid_conversation_system: false,
         supports_structured_outputs: false,
     });
     let catalog_path = home.path().join("models.json");

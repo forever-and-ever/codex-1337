@@ -196,7 +196,6 @@ async fn native_request_pins_recovery_then_switches_with_exact_custom_tool_repla
         thinking: AnthropicThinkingMode::Disabled,
         max_output_tokens: std::num::NonZeroU32::new(/*n*/ 100).unwrap(),
         supported_efforts: vec![],
-        supports_mid_conversation_system: true,
         supports_structured_outputs: false,
     });
     let mut prompt = Prompt {

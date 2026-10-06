@@ -67,7 +67,6 @@ async fn paginated_native_catalog_preserves_capabilities_through_canonical_cache
                     thinking: AnthropicThinkingMode::Manual,
                     max_output_tokens: NonZeroU32::new(/*n*/ 64000).unwrap(),
                     supported_efforts: vec![],
-                    supports_mid_conversation_system: false,
                     supports_structured_outputs: true,
                 },
                 false,
@@ -92,7 +91,6 @@ async fn paginated_native_catalog_preserves_capabilities_through_canonical_cache
                         ReasoningEffort::XHigh,
                         ReasoningEffort::Max
                     ],
-                    supports_mid_conversation_system: true,
                     supports_structured_outputs: true,
                 },
                 true,

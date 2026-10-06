@@ -176,20 +176,6 @@ fn project(native: NativeModel) -> Result<Option<ModelInfo>, ApiError> {
         thinking,
         max_output_tokens: output_limit,
         supported_efforts,
-        // This capability is absent from /models. Keep the documented list here,
-        // independent of thinking and either compaction protocol.
-        // https://platform.claude.com/docs/en/build-with-claude/mid-conversation-system-messages
-        supports_mid_conversation_system: matches!(
-            id.as_str(),
-            "claude-fable-5-1"
-                | "claude-mythos-5-1"
-                | "claude-fable-5"
-                | "claude-mythos-5"
-                | "claude-opus-5-5"
-                | "claude-opus-4-8"
-                | "claude-opus-5"
-                | "claude-sonnet-5-5"
-        ),
         supports_structured_outputs: capabilities.structured_outputs.supported,
     };
     // /models does not advertise disabled thinking. Unknown models do not inherit it.
