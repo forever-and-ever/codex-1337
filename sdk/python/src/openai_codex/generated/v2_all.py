@@ -4166,18 +4166,6 @@ class CompactionResponseItem(BaseModel):
     type: Annotated[Literal["compaction"], Field(title="CompactionResponseItemType")]
 
 
-class RejectedToolCallResponseItem(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    id: str | None = None
-    type: Annotated[Literal["rejected_tool_call"], Field(title="RejectedToolCallResponseItemType")]
-    call_id: str
-    input: Any
-    name: str
-    provider: Literal["anthropic"]
-
-
 class NativeCompactionResponseItem(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -6573,6 +6561,11 @@ class Tool(BaseModel):
     name: str
     output_schema: Annotated[Any | None, Field(alias="outputSchema")] = None
     title: str | None = None
+
+
+class ToolCallRejection(Enum):
+    undeclared = "undeclared"
+    malformed_input = "malformed_input"
 
 
 class ToolExposureSurface(Enum):
@@ -9559,6 +9552,19 @@ class WebSearchCallResponseItem(BaseModel):
     internal_chat_message_metadata_passthrough: InternalChatMessageMetadataPassthrough | None = None
     status: str | None = None
     type: Annotated[Literal["web_search_call"], Field(title="WebSearchCallResponseItemType")]
+
+
+class RejectedToolCallResponseItem(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: str | None = None
+    reason: ToolCallRejection | None = None
+    type: Annotated[Literal["rejected_tool_call"], Field(title="RejectedToolCallResponseItemType")]
+    call_id: str
+    input: Any
+    name: str
+    provider: Literal["anthropic"]
 
 
 class ConfigurationUpdateResponseItem(BaseModel):

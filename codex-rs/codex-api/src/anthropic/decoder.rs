@@ -12,6 +12,7 @@ use codex_protocol::models::NativeCompaction;
 use codex_protocol::models::NativeToolCall;
 use codex_protocol::models::ReasoningItemReasoningSummary;
 use codex_protocol::models::ResponseItem;
+use codex_protocol::models::ToolCallRejection;
 use serde::Deserialize;
 use serde_json::Map;
 use serde_json::Value;
@@ -312,28 +313,27 @@ impl<'a> Decoder<'a> {
                         "Anthropic thinking signature missing".into(),
                     ));
                 }
-                if let Block::ToolUse { name, input, .. } = &open.block
-                    && self.tools.iter().any(|tool| {
-                        tool.name == *name
-                            && matches!(tool.identity, AnthropicToolIdentity::Custom { .. })
-                    })
-                    && (input.as_object().is_none_or(|object| object.len() != 1)
-                        || input.get("input").and_then(Value::as_str).is_none())
-                {
-                    return Err(ApiError::NativeStream(
-                        "invalid Anthropic custom tool input wrapper".into(),
-                    ));
-                }
-                let item = self.item(&open)?;
+                let item = match &open.block {
+                    Block::ToolUse { id, name, input }
+                        if input.as_object().is_some_and(Map::is_empty)
+                            && self.tools.iter().any(|tool| tool.name == *name) =>
+                    {
+                        ResponseItem::RejectedToolCall {
+                            id: Some(ResponseItemId::from_server(open.item_id.clone())),
+                            reason: ToolCallRejection::MalformedInput,
+                            call: NativeToolCall::Anthropic {
+                                call_id: id.clone(),
+                                name: name.clone(),
+                                input: input.clone(),
+                            },
+                        }
+                    }
+                    _ => self.item(&open)?,
+                };
                 if let ResponseItem::FunctionCall {
                     call_id, arguments, ..
                 } = &item
                 {
-                    if arguments.is_empty() {
-                        return Err(ApiError::NativeStream(
-                            "missing Anthropic function arguments envelope".into(),
-                        ));
-                    }
                     events.push(ResponseEvent::ToolCallInputDelta {
                         item_id: open.item_id.clone(),
                         call_id: Some(call_id.clone()),
@@ -425,25 +425,30 @@ impl<'a> Decoder<'a> {
                         "invalid Anthropic tool block".into(),
                     ));
                 }
+                let rejection = |reason| ResponseItem::RejectedToolCall {
+                    id: id.clone(),
+                    reason,
+                    call: NativeToolCall::Anthropic {
+                        call_id: call_id.clone(),
+                        name: alias.clone(),
+                        input: input.clone(),
+                    },
+                };
                 let Some(tool) = self.tools.iter().find(|tool| tool.name == *alias) else {
                     // Preserve the received name and body, but not as an executable
                     // function: the local registry may contain unadvertised tools.
-                    return Ok(ResponseItem::RejectedToolCall {
-                        id,
-                        call: NativeToolCall::Anthropic {
-                            call_id: call_id.clone(),
-                            name: alias.clone(),
-                            input: input.clone(),
-                        },
-                    });
+                    return Ok(rejection(ToolCallRejection::Undeclared));
                 };
                 match &tool.identity {
                     AnthropicToolIdentity::Function { name, namespace } => {
+                        let Ok(arguments) = function_arguments(input, &open.json) else {
+                            return Ok(rejection(ToolCallRejection::MalformedInput));
+                        };
                         ResponseItem::FunctionCall {
                             id,
                             name: name.clone(),
                             namespace: namespace.clone(),
-                            arguments: function_arguments(input, &open.json)?,
+                            arguments,
                             encrypted_function_args: None,
                             call_id: call_id.clone(),
                             internal_chat_message_metadata_passthrough: None,
@@ -455,15 +460,15 @@ impl<'a> Decoder<'a> {
                         {
                             String::new()
                         } else {
-                            input
-                                .get("input")
+                            let Some(input) = input
+                                .as_object()
+                                .filter(|object| object.len() == 1)
+                                .and_then(|object| object.get("input"))
                                 .and_then(Value::as_str)
-                                .ok_or_else(|| {
-                                    ApiError::NativeStream(
-                                        "Anthropic custom tool input missing".into(),
-                                    )
-                                })?
-                                .to_owned()
+                            else {
+                                return Ok(rejection(ToolCallRejection::MalformedInput));
+                            };
+                            input.to_owned()
                         };
                         ResponseItem::CustomToolCall {
                             id,

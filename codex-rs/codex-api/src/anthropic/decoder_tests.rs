@@ -80,6 +80,49 @@ fn undeclared_tool_preserves_stream_and_replays_as_a_paired_rejection() {
     );
 }
 
+// A malformed envelope for a declared tool is answerable; failing the stream would discard later blocks and usage.
+#[test]
+fn malformed_declared_tool_preserves_later_blocks_and_usage() {
+    let tools = [AnthropicTool {
+        name: "read".into(),
+        description: String::new(),
+        input_schema: json!({}),
+        identity: AnthropicToolIdentity::Function {
+            name: "read".into(),
+            namespace: None,
+        },
+    }];
+    let mut decoder = Decoder::new(&tools);
+    let mut items = Vec::new();
+    let mut completed = None;
+    for frame in [
+        json!({"type":"message_start","message":{"id":"msg","usage":{"input_tokens":5,"output_tokens":0}}}),
+        json!({"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"malformed","name":"read","input":{"path":"one"}}}),
+        json!({"type":"content_block_stop","index":0}),
+        json!({"type":"content_block_start","index":1,"content_block":{"type":"text","text":"Still receiving."}}),
+        json!({"type":"content_block_stop","index":1}),
+        json!({"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":7}}),
+        json!({"type":"message_stop"}),
+    ] {
+        for event in decoder.decode(&frame.to_string()).unwrap() {
+            match event {
+                ResponseEvent::OutputItemDone(item) => items.push(item),
+                ResponseEvent::Completed { token_usage, end_turn, .. } => {
+                    completed = Some((token_usage.unwrap().total_tokens, end_turn));
+                }
+                _ => {}
+            }
+        }
+    }
+    assert_eq!(
+        (serde_json::to_value(items).unwrap(), completed),
+        (json!([
+            {"type":"rejected_tool_call","id":"msg_0","reason":"malformed_input","provider":"anthropic","call_id":"malformed","name":"read","input":{"path":"one"}},
+            {"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"Still receiving."}]}
+        ]), Some((12, Some(false))))
+    );
+}
+
 #[test]
 fn optional_thinking_breakdown_does_not_corrupt_completion_accounting() {
     // Missing/invalid observability must neither become a fabricated zero nor

@@ -18,6 +18,7 @@ use crate::tools::registry::ToolRegistry;
 use crate::tools::spec_plan::finalize_tool_router;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::models::SearchToolCallParams;
+use codex_protocol::models::ToolCallRejection;
 #[cfg(test)]
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ToolMode;
@@ -275,11 +276,17 @@ impl ToolRouter {
     #[instrument(level = "trace", skip_all, err)]
     pub fn build_tool_call(item: ResponseItem) -> Result<Option<ToolCall>, FunctionCallError> {
         match item {
-            ResponseItem::RejectedToolCall { call, .. } => {
-                Err(FunctionCallError::RespondToModel(format!(
+            ResponseItem::RejectedToolCall { call, reason, .. } => {
+                let name = call.name();
+                Err(FunctionCallError::RespondToModel(match reason {
+                    ToolCallRejection::Undeclared => format!(
                     "Tool {:?} is not in the current tool list. Use one of the declared tools.",
-                    call.name()
-                )))
+                    name
+                    ),
+                    ToolCallRejection::MalformedInput => format!(
+                        "Tool {name:?} was called with input that does not match its declared input schema. Call it again with input that matches the schema."
+                    ),
+                }))
             }
             ResponseItem::FunctionCall {
                 name,

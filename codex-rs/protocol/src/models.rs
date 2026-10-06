@@ -1012,6 +1012,20 @@ impl InternalChatMessageMetadataPassthrough {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolCallRejection {
+    #[default]
+    Undeclared,
+    MalformedInput,
+}
+
+impl ToolCallRejection {
+    pub fn is_undeclared(&self) -> bool {
+        *self == Self::Undeclared
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ResponseItem {
@@ -1239,11 +1253,13 @@ pub enum ResponseItem {
         #[ts(optional)]
         internal_chat_message_metadata_passthrough: Option<InternalChatMessageMetadataPassthrough>,
     },
-    /// An undeclared native invocation: answer with an error, never dispatch it.
     RejectedToolCall {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
         id: Option<ResponseItemId>,
+        #[serde(default, skip_serializing_if = "ToolCallRejection::is_undeclared")]
+        #[ts(optional, as = "Option<ToolCallRejection>")]
+        reason: ToolCallRejection,
         #[serde(flatten)]
         call: NativeToolCall,
     },

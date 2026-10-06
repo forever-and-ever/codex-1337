@@ -4959,7 +4959,7 @@
           "type": "object"
         },
         {
-          "description": "An undeclared native invocation: answer with an error, never dispatch it.",
+          "description": "A rejected provider-native invocation, retained for exact tool-result pairing. This is evidence of an attempted call, never authority to dispatch a local tool.",
           "oneOf": [
             {
               "properties": {
@@ -4992,6 +4992,9 @@
                 "string",
                 "null"
               ]
+            },
+            "reason": {
+              "$ref": "#/definitions/ToolCallRejection"
             },
             "type": {
               "enum": [
@@ -9706,6 +9709,13 @@
         "totalTokens"
       ],
       "type": "object"
+    },
+    "ToolCallRejection": {
+      "enum": [
+        "undeclared",
+        "malformed_input"
+      ],
+      "type": "string"
     },
     "Turn": {
       "properties": {
