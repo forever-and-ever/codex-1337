@@ -246,14 +246,7 @@ impl ShellSnapshot {
             temp_path.display()
         );
 
-        if let Err(err) = validate_snapshot(
-            shell,
-            &temp_path,
-            session_cwd,
-            sandbox,
-        )
-        .await
-        {
+        if let Err(err) = validate_snapshot(shell, &temp_path, session_cwd, sandbox).await {
             tracing::error!("Shell snapshot validation failed: {err:?}");
             remove_snapshot_file(&temp_path).await;
             return Err("validation_failed");
@@ -334,13 +327,7 @@ async fn write_shell_snapshot(
     if shell_type == ShellType::PowerShell || shell_type == ShellType::Cmd {
         bail!("Shell snapshot not supported yet for {shell_type:?}");
     }
-    let snapshot = capture_snapshot(
-        shell,
-        cwd,
-        shell_environment_policy,
-        sandbox,
-    )
-    .await?;
+    let snapshot = capture_snapshot(shell, cwd, shell_environment_policy, sandbox).await?;
 
     if let Some(parent) = output_path.parent() {
         let parent_display = parent.display();

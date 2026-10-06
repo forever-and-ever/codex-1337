@@ -125,7 +125,9 @@ impl NetworkProxySpec {
         let base_config = config.clone();
         let _ = permission_profile;
         let mut config = config;
-        let enabled = requirements.as_ref().and_then(|requirements| requirements.enabled);
+        let enabled = requirements
+            .as_ref()
+            .and_then(|requirements| requirements.enabled);
         if let Some(enabled) = enabled {
             config.enabled = enabled;
         }
@@ -223,8 +225,6 @@ impl NetworkProxySpec {
         let _ = (audit_metadata, executor_os, local_binding_policy);
         Err(codex_network_proxy::unsupported_error())
     }
-
-
 }
 
 fn apply_exec_policy_network_rules(config: &mut NetworkProxyConfig, exec_policy: &Policy) {
