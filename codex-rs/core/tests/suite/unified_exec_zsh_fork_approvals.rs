@@ -28,6 +28,7 @@ use codex_protocol::protocol::Op;
 use codex_protocol::protocol::ReviewDecision;
 use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::user_input::UserInput;
+use codex_utils_path_uri::PathUri;
 use core_test_support::responses::ResponseMock;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
@@ -103,6 +104,18 @@ async fn unified_exec_zsh_fork_parent_approval_preserves_denied_reads() -> Resul
     )
     .await?;
     approve_expected_exec(&test, &command).await?;
+    let event = wait_for_event(&test.codex, |event| {
+        matches!(event, EventMsg::ExecApprovalRequest(_))
+    })
+    .await;
+    let EventMsg::ExecApprovalRequest(approval) = event else {
+        unreachable!()
+    };
+    assert_eq!(
+        approval.command.last().map(String::as_str),
+        denied_path.to_str()
+    );
+    approve_exec(&test, approval.effective_approval_id()).await?;
     wait_for_completion_without_approval(&test).await;
 
     let result = command_result(&results, call_id);
@@ -745,8 +758,8 @@ fn permission_profile_from_toml(profile: &str) -> Result<PermissionProfile> {
                 ":project_roots" => FileSystemPath::Special {
                     value: FileSystemSpecialPath::project_roots(/*subpath*/ None),
                 },
-                _ if *access == FileSystemAccessMode::Deny => FileSystemPath::GlobPattern {
-                    pattern: path.clone(),
+                _ if *access == FileSystemAccessMode::Deny => FileSystemPath::Path {
+                    path: PathUri::from_host_native_path(path)?,
                 },
                 _ => anyhow::bail!("unexpected filesystem entry in test profile: {path}"),
             };

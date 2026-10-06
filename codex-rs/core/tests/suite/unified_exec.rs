@@ -3354,7 +3354,16 @@ async fn unified_exec_runs_under_sandbox() -> Result<()> {
         )
         .await?;
 
-    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+    let mut ended = None;
+    let mut completed = false;
+    while ended.is_none() || !completed {
+        match wait_for_event(&codex, |_| true).await {
+            EventMsg::ExecCommandEnd(event) if event.call_id == call_id => ended = Some(event),
+            EventMsg::TurnComplete(_) => completed = true,
+            _ => {}
+        }
+    }
+    let ended = ended.unwrap();
 
     let requests = request_log.requests();
     assert!(!requests.is_empty(), "expected at least one POST request");
@@ -3364,9 +3373,10 @@ async fn unified_exec_runs_under_sandbox() -> Result<()> {
         .collect::<Vec<_>>();
 
     let outputs = collect_tool_outputs(&bodies)?;
-    let output = outputs.get(call_id).expect("missing output");
+    assert!(outputs.contains_key(call_id), "missing output");
 
-    assert_regex_match("hello[\r\n]+", &output.output);
+    assert_eq!(ended.exit_code, 0);
+    assert_regex_match("hello[\r\n]+", &ended.aggregated_output);
 
     Ok(())
 }
