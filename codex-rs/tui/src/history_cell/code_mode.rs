@@ -208,7 +208,11 @@ impl CodeModeCell {
         let newer = std::mem::take(&mut self.children);
         self.children = older.children.clone();
         for (id, cells) in newer {
-            self.admit_children(id, cells);
+            if let Some((_, rows)) = self.children.iter_mut().find(|(old, _)| *old == id) {
+                *rows = cells;
+            } else {
+                self.children.push((id, cells));
+            }
         }
         self.refresh_children();
         for (id, version) in &older.child_versions {
