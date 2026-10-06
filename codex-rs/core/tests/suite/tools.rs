@@ -670,10 +670,7 @@ async fn exec_command_escalated_permissions_rejected_then_ok() -> Result<()> {
         .function_call_output_content_and_success(call_id_success)
         .and_then(|(content, _)| content)
         .expect("success output string");
-    assert_regex_match(
-        r"(?s)^(?:Chunk ID: [^\n]+\n)?Wall time: [0-9]+(?:\.[0-9]+)? seconds\nProcess exited with code 0\n(?:Original token count: \d+\n)?Output:\nshell ok\n?$",
-        &success_output,
-    );
+    assert_regex_match(r"(?s)^shell ok\n?$", &success_output);
 
     Ok(())
 }
@@ -726,7 +723,7 @@ async fn sandbox_denied_exec_command_returns_original_output() -> Result<()> {
         .context("shell output present")?;
     let exit_code = output_text
         .lines()
-        .find_map(|line| line.strip_prefix("Process exited with code "))
+        .find_map(|line| line.strip_prefix("Exit "))
         .context("exit code line present")?
         .trim()
         .parse::<i32>()
@@ -838,7 +835,7 @@ async fn exec_command_enforces_glob_deny_read_policy() -> Result<()> {
         .context("shell output present")?;
     let exit_code = output_text
         .lines()
-        .find_map(|line| line.strip_prefix("Process exited with code "))
+        .find_map(|line| line.strip_prefix("Exit "))
         .context("exit code line present")?
         .trim()
         .parse::<i32>()

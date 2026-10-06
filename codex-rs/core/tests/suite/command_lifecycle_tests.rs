@@ -195,6 +195,7 @@ async fn command_start_receives_rewritten_command_and_executor_workdir(
     wait_for_event_with_timeout(
         &test.codex,
         |event| {
+            let event = event.native_event();
             assert!(
                 !matches!(event, EventMsg::ExecApprovalRequest(_)),
                 "command fixture unexpectedly requested approval: {event:?}"
@@ -343,6 +344,7 @@ async fn interrupting_command_preparation_does_not_start_the_command(
     wait_for_event_with_timeout(
         &test.codex,
         |event| {
+            let event = event.native_event();
             assert!(
                 !matches!(event, EventMsg::ExecApprovalRequest(_)),
                 "command fixture unexpectedly requested approval: {event:?}"

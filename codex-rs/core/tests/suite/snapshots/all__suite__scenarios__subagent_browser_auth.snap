@@ -37,5 +37,4 @@ Settings:
     Run the input tool.
 -- request 2 (turn) --
 03:function_call/mcp__elicitation.request_input:{}
-04:function_call_output:Wall time: <DURATION> seconds
-    Output: | {"action": "accept", "content": {}}
+04:function_call_output:{"action": "accept", "content": {}}

@@ -270,7 +270,7 @@ pub(super) async fn mcp_server_elicitation_scenario(
         .single_request()
         .function_call_output("input-call");
     let response: Value = serde_json::from_str(
-        output["output"][1]["text"]
+        output["output"][0]["text"]
             .as_str()
             .expect("MCP response must reach the model"),
     )?;

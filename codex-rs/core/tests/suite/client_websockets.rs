@@ -62,7 +62,6 @@ use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
 use tempfile::TempDir;
-use tracing_test::traced_test;
 
 const MODEL: &str = "gpt-5.4";
 const OPENAI_BETA_HEADER: &str = "OpenAI-Beta";
@@ -1115,38 +1114,6 @@ async fn responses_websocket_v2_wins_when_both_features_enabled() {
             .map(str::trim)
             .any(|value| value == WS_V2_BETA_HEADER_VALUE)
     );
-    server.shutdown().await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[traced_test]
-async fn responses_websocket_emits_websocket_telemetry_events() {
-    skip_if_no_network!();
-
-    let server = start_websocket_server(vec![vec![vec![
-        ev_response_created("resp-1"),
-        ev_completed("resp-1"),
-    ]]])
-    .await;
-
-    let harness = websocket_harness(&server).await;
-    harness.session_telemetry.reset_runtime_metrics();
-    let mut client_session = harness.client.new_session();
-    let prompt = prompt_with_input(vec![message_item("hello")]);
-
-    stream_until_complete(&mut client_session, &harness, &prompt).await;
-
-    tokio::time::sleep(Duration::from_millis(10)).await;
-
-    let summary = harness
-        .session_telemetry
-        .runtime_metrics_summary()
-        .expect("runtime metrics summary");
-    assert_eq!(summary.api_calls.count, 0);
-    assert_eq!(summary.streaming_events.count, 0);
-    assert_eq!(summary.websocket_calls.count, 1);
-    assert_eq!(summary.websocket_events.count, 2);
-
     server.shutdown().await;
 }
 

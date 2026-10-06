@@ -453,7 +453,7 @@ async fn mcp_result_processing_precedes_completion(
         timeout(
             Duration::from_millis(100),
             wait_for_event(&test.codex, |event| matches!(
-                event,
+                event.native_event(),
                 EventMsg::McpToolCallEnd(_) | EventMsg::TurnComplete(_)
             )),
         )
@@ -464,16 +464,16 @@ async fn mcp_result_processing_precedes_completion(
     assert!(follow_up.requests().is_empty());
 
     contributor.release.notify_one();
-    let EventMsg::McpToolCallEnd(end) = wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::McpToolCallEnd(_))
+    let event = wait_for_event(&test.codex, |event| {
+        matches!(event.native_event(), EventMsg::McpToolCallEnd(_))
     })
-    .await
-    else {
+    .await;
+    let EventMsg::McpToolCallEnd(end) = event.native_event() else {
         unreachable!();
     };
     assert_eq!(
-        end.result.expect("MCP server returned a result"),
-        expected_result
+        end.result.as_ref().expect("MCP server returned a result"),
+        &expected_result
     );
     wait_for_event(&test.codex, |event| {
         matches!(event, EventMsg::TurnComplete(_))

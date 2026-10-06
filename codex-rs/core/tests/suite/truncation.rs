@@ -44,14 +44,6 @@ use wiremock::MockServer;
 use super::rmcp_client::remote_aware_environment_id;
 use super::rmcp_client::remote_aware_stdio_server_bin;
 
-fn assert_wall_time_header(output: &str) {
-    let (wall_time, marker) = output
-        .split_once('\n')
-        .expect("wall-time header should contain an Output marker");
-    assert_regex_match(r"^Wall time: [0-9]+(?:\.[0-9]+)? seconds$", wall_time);
-    assert_eq!(marker, "Output:");
-}
-
 // Verifies that a standard tool call (exec_command) exceeding the model formatting
 // limits is truncated before being sent back to the model.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -197,7 +189,7 @@ async fn tool_call_output_exceeds_limit_truncated_chars_limit() -> Result<()> {
         "expected truncated shell output to be plain text"
     );
 
-    let truncated_pattern = r#"(?s)^Chunk ID: [^\n]+\nWall time: [0-9]+(?:\.[0-9]+)? seconds\nProcess exited with code 0\nOriginal token count: \d+\nOutput:\nWarning: truncated output \(original token count: \d+\)\nTotal output lines: 100000\n\n.*?…\d+ chars truncated….*$"#;
+    let truncated_pattern = r#"(?s)^Warning: truncated output \(original token count: \d+\)\nTotal output lines: 100000\n\n.*?…\d+ chars truncated….*$"#;
 
     assert_regex_match(truncated_pattern, &output);
 
@@ -272,12 +264,7 @@ async fn tool_call_output_exceeds_limit_truncated_for_model() -> Result<()> {
         serde_json::from_str::<Value>(&output).is_err(),
         "expected truncated shell output to be plain text"
     );
-    let truncated_pattern = r#"(?s)^Chunk ID: [^\n]+
-Wall time: [0-9]+(?:\.[0-9]+)? seconds
-Process exited with code 0
-Original token count: \d+
-Output:
-Warning: truncated output \(original token count: \d+\)
+    let truncated_pattern = r#"(?s)^Warning: truncated output \(original token count: \d+\)
 Total output lines: 100000
 
 1
@@ -456,7 +443,7 @@ async fn mcp_tool_call_output_exceeds_limit_truncated_for_model() -> Result<()> 
         "MCP output should not include line-based truncation header: {output}"
     );
 
-    let truncated_pattern = r#"(?s)^Wall time: [0-9]+(?:\.[0-9]+)? seconds\nOutput:\n\{"echo":\s*"ECHOING: long-message-with-newlines-.*tokens truncated.*long-message-with-newlines-.*$"#;
+    let truncated_pattern = r#"(?s)^\{"echo":\s*"ECHOING: long-message-with-newlines-.*tokens truncated.*long-message-with-newlines-.*$"#;
     assert_regex_match(truncated_pattern, &output);
     assert!(output.len() < 2600, "{}", output.len());
 
@@ -573,19 +560,9 @@ async fn mcp_image_output_preserves_image_and_no_text_summary() -> Result<()> {
     // Wait for completion to ensure the outbound request is captured.
     wait_for_event(&fixture.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
     let output_item = final_mock.single_request().function_call_output(call_id);
-    // Expect exactly the wall-time text and image item; no trailing truncation summary.
-    let output = output_item.get("output").expect("output");
-    assert!(output.is_array(), "expected array output");
-    let arr = output.as_array().unwrap();
-    assert_eq!(arr.len(), 2, "no truncation summary should be appended");
-    assert_wall_time_header(
-        arr[0]["text"]
-            .as_str()
-            .expect("first MCP image output item should be wall-time text"),
-    );
     assert_eq!(
-        arr[1],
-        json!({"type": "input_image", "image_url": openai_png, "detail": "high"})
+        output_item["output"],
+        json!([{"type": "input_image", "image_url": openai_png, "detail": "high"}])
     );
 
     Ok(())
@@ -635,7 +612,7 @@ async fn token_policy_marker_reports_tokens() -> Result<()> {
         .function_call_output_text(call_id)
         .context("shell output present")?;
 
-    let pattern = r"(?s)^Chunk ID: [^\n]+\nWall time: [0-9]+(?:\.[0-9]+)? seconds\nProcess exited with code 0\nOriginal token count: \d+\nOutput:\nWarning: truncated output \(original token count: \d+\)\nTotal output lines: 150\n\n1\n2\n3\n.*…\d+ tokens truncated….*149\n150\n$";
+    let pattern = r"(?s)^Warning: truncated output \(original token count: \d+\)\nTotal output lines: 150\n\n1\n2\n3\n.*…\d+ tokens truncated….*149\n150\n$";
 
     assert_regex_match(pattern, &output);
     assert_eq!(output.matches("tokens truncated").count(), 1);
@@ -688,7 +665,7 @@ async fn byte_policy_marker_reports_bytes() -> Result<()> {
         .function_call_output_text(call_id)
         .context("shell output present")?;
 
-    let pattern = r"(?s)^Chunk ID: [^\n]+\nWall time: [0-9]+(?:\.[0-9]+)? seconds\nProcess exited with code 0\nOriginal token count: \d+\nOutput:\nWarning: truncated output \(original token count: \d+\)\nTotal output lines: 150\n\n1\n2\n3\n.*…\d+ chars truncated….*149\n150\n$";
+    let pattern = r"(?s)^Warning: truncated output \(original token count: \d+\)\nTotal output lines: 150\n\n1\n2\n3\n.*…\d+ chars truncated….*149\n150\n$";
 
     assert_regex_match(pattern, &output);
     assert_eq!(output.matches("chars truncated").count(), 1);

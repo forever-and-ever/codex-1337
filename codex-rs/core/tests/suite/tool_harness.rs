@@ -127,10 +127,7 @@ async fn exec_command_tool_executes_command_and_streams_output() -> anyhow::Resu
 
     let req = second_mock.single_request();
     let (output_text, _) = call_output(&req, call_id);
-    assert_regex_match(
-        r"(?s)^(?:Chunk ID: [^\n]+\n)?Wall time: [0-9]+(?:\.[0-9]+)? seconds\nProcess exited with code 0\n(?:Original token count: \d+\n)?Output:\ntool harness\n?$",
-        &output_text,
-    );
+    assert_regex_match(r"(?s)^tool harness\n?$", &output_text);
 
     Ok(())
 }

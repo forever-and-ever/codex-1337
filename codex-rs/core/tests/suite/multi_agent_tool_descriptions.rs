@@ -1,6 +1,7 @@
 //! Verifies V2 catalog tool messages change only their selected description or parameter schema.
 
 use anyhow::Result;
+use codex_code_mode::render_json_schema_to_typescript;
 use codex_core::config::AgentRoleConfig;
 use codex_features::Feature;
 use codex_protocol::openai_models::ToolMessages;
@@ -105,11 +106,41 @@ fn all_tool_messages(message: Value) -> Value {
 #[test_case(json!({"multi_agent": {"send_message": {"parameters": CATALOG_PARAMETERS}}}), Exposure::Namespaced, Some(EXPECTED_CATALOG_PARAMETERS); "sparse_parameters")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn multi_agent_catalog_messages_change_only_selected_tool_fields(
-    tool_messages: Value,
+    mut tool_messages: Value,
     exposure: Exposure,
     expected_parameters: Option<&str>,
 ) -> Result<()> {
     skip_if_no_network!(Ok(()));
+
+    let parameters_for = |name: &str, parameters: &str| -> Result<Value> {
+        let mut parameters: Value = serde_json::from_str(parameters)?;
+        if matches!(name, "spawn_agent" | "send_message" | "followup_task") {
+            let selection = if name == "spawn_agent" {
+                "task_name"
+            } else {
+                "target"
+            };
+            parameters["properties"][selection] = json!({"type": "string"});
+            parameters["properties"]["plaintext_message"] =
+                parameters["properties"]["message"].clone();
+            parameters["properties"]["plaintext_message"]
+                .as_object_mut()
+                .unwrap()
+                .remove("encrypted");
+            parameters["required"] = json!([selection]);
+            parameters["oneOf"] =
+                json!([{"required": ["message"]}, {"required": ["plaintext_message"]}]);
+        }
+        Ok(parameters)
+    };
+    if expected_parameters.is_some() {
+        for name in TOOL_NAMES {
+            if let Some(parameters) = tool_messages["multi_agent"][name]["parameters"].as_str() {
+                tool_messages["multi_agent"][name]["parameters"] =
+                    json!(parameters_for(name, parameters)?.to_string());
+            }
+        }
+    }
 
     let server = start_mock_server().await;
     let response = mount_sse_sequence(
@@ -247,7 +278,7 @@ async fn multi_agent_catalog_messages_change_only_selected_tool_fields(
             if let Some(parameters) = expected_parameters
                 && tool_messages["multi_agent"][name]["parameters"].is_string()
             {
-                expected_tool["parameters"] = serde_json::from_str(parameters)?;
+                expected_tool["parameters"] = parameters_for(name, parameters)?;
                 if matches!(name, "spawn_agent" | "send_message" | "followup_task") {
                     expected_tool["parameters"]["properties"]["message"]["encrypted"] = json!(true);
                 }
@@ -256,9 +287,10 @@ async fn multi_agent_catalog_messages_change_only_selected_tool_fields(
                     let (prefix, signature) =
                         description.rsplit_once("(args: ").expect("arguments");
                     let (_, result) = signature.split_once("): Promise").expect("result type");
-                    expected_tool["description"] = json!(format!(
-                        "{prefix}(args: {{\n  // Catalog limit.\n  catalog_limit: number;\n  // Catalog message.\n  message?: string;\n}}): Promise{result}"
-                    ));
+                    let parameters =
+                        render_json_schema_to_typescript(&expected_tool["parameters"]).root_type;
+                    expected_tool["description"] =
+                        json!(format!("{prefix}(args: {parameters}): Promise{result}"));
                 }
             }
         }
