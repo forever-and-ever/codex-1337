@@ -42,8 +42,7 @@ impl App {
             && !matches!(self.app_server_target, AppServerTarget::Embedded)
             && !self.reconnect.offline
             && self.chat_widget.can_reload_ui()
-            && self.farm.pending.is_none()
-            && self.farm.saved.is_none()
+            && matches!(self.farm.state, farm::FarmRequestState::Idle)
             && self.queued_messages.mutations.is_empty()
             && self.overlay.is_none()
             && self.jira.is_none()
@@ -64,7 +63,7 @@ impl App {
         if self.agents_overview.parked_draft.is_some() {
             return Err("Use /new to return to your unsent draft before reloading.".into());
         }
-        if self.farm.pending.is_some() || self.farm.saved.is_some() {
+        if !matches!(self.farm.state, farm::FarmRequestState::Idle) {
             return Err("Resolve/discard farm request before reload.".into());
         }
         if !self.can_reload_ui() {

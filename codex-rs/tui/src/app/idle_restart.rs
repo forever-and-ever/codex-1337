@@ -4,8 +4,7 @@ use super::*;
 
 impl App {
     pub(super) fn ready_for_idle_restart(&self) -> bool {
-        if self.farm.pending.is_some()
-            || self.farm.saved.is_some()
+        if !matches!(self.farm.state, farm::FarmRequestState::Idle)
             || self.thread_delivery.has_pending_work()
             || self.agents_overview.parked_draft.is_some()
         {

@@ -29,9 +29,8 @@ async fn farm_draft_edits_survive_rejection_view_change_and_discard() {
         request_id: id.clone(),
         mode: ThreadFarmMode::FullHistory,
         submission: submission.clone(),
-        uncertain: true,
     };
-    app.farm.pending = Some(retained.clone());
+    app.farm.state = FarmRequestState::Uncertain(retained.clone());
     app.chat_widget.insert_str(" with newer edits");
     let edited = app.chat_widget.composer_text_with_pending();
     let mut tui = crate::tui::test_support::make_test_tui().expect("test tui");
@@ -46,15 +45,18 @@ async fn farm_draft_edits_survive_rejection_view_change_and_discard() {
     .await;
     assert_eq!(app.chat_widget.composer_text_with_pending(), edited);
     assert_eq!(
-        app.farm.saved.as_ref().map(|saved| &saved.submission),
+        match &app.farm.state {
+            FarmRequestState::Rejected(saved) => Some(&saved.submission),
+            FarmRequestState::Idle | FarmRequestState::Waiting(_) | FarmRequestState::Uncertain(_) => None,
+        },
         Some(&submission)
     );
     app.restore_farm_draft(&id);
     assert_eq!(app.chat_widget.composer_text_with_pending(), edited);
-    app.farm.pending = Some(retained.clone());
+    app.farm.state = FarmRequestState::Uncertain(retained.clone());
     app.discard_farm(&mut tui, &id).await;
     assert_eq!(app.chat_widget.composer_text_with_pending(), edited);
-    assert!(app.farm.pending.is_none());
+    assert!(matches!(app.farm.state, FarmRequestState::Idle));
 
     // Hidden origins follow the same rule: only an exact matching submitted draft is cleared.
     let hidden_edited = app
@@ -69,7 +71,7 @@ async fn farm_draft_edits_survive_rejection_view_change_and_discard() {
     let other = ThreadId::new();
     app.primary_thread_id = Some(other);
     app.active_thread_id = Some(other);
-    app.farm.pending = Some(retained.clone());
+    app.farm.state = FarmRequestState::Uncertain(retained.clone());
     app.finish_farm(
         &mut tui,
         id.clone(),
@@ -84,7 +86,7 @@ async fn farm_draft_edits_survive_rejection_view_change_and_discard() {
             .input_state,
         Some(hidden_edited.clone())
     );
-    app.farm.pending = Some(retained.clone());
+    app.farm.state = FarmRequestState::Uncertain(retained.clone());
     app.discard_farm(&mut tui, &id).await;
     assert_eq!(
         app.thread_event_channels[&root]
@@ -99,7 +101,7 @@ async fn farm_draft_edits_survive_rejection_view_change_and_discard() {
         .lock()
         .await
         .input_state = Some(original_input.clone());
-    app.farm.pending = Some(retained);
+    app.farm.state = FarmRequestState::Uncertain(retained);
     app.discard_farm(&mut tui, &id).await;
     let mut cleared = original_input;
     cleared.clear_farm_draft(&submission.draft);
@@ -137,12 +139,11 @@ async fn farm_receipt_reconciles_identity_and_draft_without_steering_or_navigati
     };
     let draft = app.chat_widget.composer_text_with_pending();
     let id = Uuid::new_v4().to_string();
-    app.farm.pending = Some(RetainedFarm {
+    app.farm.state = FarmRequestState::Waiting(RetainedFarm {
         thread_id: root,
         request_id: id.clone(),
         mode: ThreadFarmMode::FullHistory,
         submission: submission.clone(),
-        uncertain: false,
     });
     let mut tui = crate::tui::test_support::make_test_tui().expect("test tui");
     tui.set_owned_screen(/*owned*/ true).unwrap();
@@ -190,11 +191,11 @@ async fn farm_receipt_reconciles_identity_and_draft_without_steering_or_navigati
     assert_eq!(app.transcript_cells.len(), before);
     assert_eq!(app.chat_widget.composer_text_with_pending(), draft);
     assert_eq!(
-        app.farm
-            .pending
-            .as_ref()
-            .map(|pending| (&pending.request_id, pending.uncertain)),
-        Some((&id, true))
+        match &app.farm.state {
+            FarmRequestState::Uncertain(pending) => Some(&pending.request_id),
+            FarmRequestState::Idle | FarmRequestState::Waiting(_) | FarmRequestState::Rejected(_) => None,
+        },
+        Some(&id)
     );
 
     #[cfg(target_os = "linux")]
@@ -216,7 +217,10 @@ async fn farm_receipt_reconciles_identity_and_draft_without_steering_or_navigati
         insta::assert_snapshot!(error, @"■ Resolve/discard farm request before reload.");
         assert_eq!(app.chat_widget.composer_text_with_pending(), draft);
         assert_eq!(
-            app.farm.pending.as_ref().map(|pending| &pending.request_id),
+            match &app.farm.state {
+                FarmRequestState::Waiting(pending) | FarmRequestState::Uncertain(pending) => Some(&pending.request_id),
+                FarmRequestState::Idle | FarmRequestState::Rejected(_) => None,
+            },
             Some(&id)
         );
     }
@@ -250,7 +254,7 @@ async fn farm_receipt_reconciles_identity_and_draft_without_steering_or_navigati
         }),
     )
     .await;
-    assert!(app.farm.pending.is_none());
+    assert!(matches!(app.farm.state, FarmRequestState::Idle));
     assert_eq!(app.active_thread_id, Some(child));
     assert!(
         app.transcript_cells

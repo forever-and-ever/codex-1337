@@ -21,13 +21,20 @@ pub(super) struct RetainedFarm {
     request_id: String,
     mode: ThreadFarmMode,
     submission: FarmSubmission,
-    uncertain: bool,
+}
+
+#[derive(Default)]
+pub(super) enum FarmRequestState {
+    #[default]
+    Idle,
+    Waiting(RetainedFarm),
+    Uncertain(RetainedFarm),
+    Rejected(RetainedFarm),
 }
 
 #[derive(Default)]
 pub(super) struct FarmUi {
-    pub(super) pending: Option<RetainedFarm>,
-    pub(super) saved: Option<RetainedFarm>,
+    pub(super) state: FarmRequestState,
     receipts: VecDeque<FarmReceipt>,
 }
 
@@ -65,36 +72,43 @@ impl App {
                 .add_error_message("Return to the main conversation before farming a task.".into());
             return;
         }
-        if self.farm.saved.is_some() {
-            self.chat_widget.add_error_message(
-                "Restore/discard the saved farm draft before delegating another task.".into(),
-            );
-            return;
-        }
-        if let Some(pending) = &self.farm.pending {
-            self.chat_widget.add_error_message(if pending.uncertain {
-                format!("Farm outcome is unknown; use /farm to check or discard. Request {} is retained.", pending.request_id)
-            } else {
-                "A farm request is already waiting for its receipt.".into()
-            });
-            return;
+        match &self.farm.state {
+            FarmRequestState::Rejected(_) => {
+                self.chat_widget.add_error_message(
+                    "Restore/discard the saved farm draft before delegating another task.".into(),
+                );
+                return;
+            }
+            FarmRequestState::Uncertain(pending) => {
+                self.chat_widget.add_error_message(format!("Farm outcome is unknown; use /farm to check or discard. Request {} is retained.", pending.request_id));
+                return;
+            }
+            FarmRequestState::Waiting(_) => {
+                self.chat_widget.add_error_message(
+                    "A farm request is already waiting for its receipt.".into(),
+                );
+                return;
+            }
+            FarmRequestState::Idle => {}
         }
         let request_id = Uuid::new_v4().to_string();
-        self.farm.pending = Some(RetainedFarm {
+        self.farm.state = FarmRequestState::Waiting(RetainedFarm {
             thread_id,
             request_id,
             mode,
             submission,
-            uncertain: false,
         });
         self.send_pending_farm(tui, server).await;
     }
 
     async fn send_pending_farm(&mut self, tui: &mut tui::Tui, server: &mut AppServerSession) {
-        let Some(pending) = self.farm.pending.as_mut() else {
-            return;
+        let pending = match std::mem::take(&mut self.farm.state) {
+            FarmRequestState::Waiting(pending) | FarmRequestState::Uncertain(pending) => pending,
+            state @ (FarmRequestState::Idle | FarmRequestState::Rejected(_)) => {
+                self.farm.state = state;
+                return;
+            }
         };
-        pending.uncertain = false;
         let request_id = pending.request_id.clone();
         let origin = pending.thread_id;
         let params = ThreadFarmParams {
@@ -104,6 +118,7 @@ impl App {
             input: pending.submission.input.clone(),
             task_name: pending.submission.task_name.clone(),
         };
+        self.farm.state = FarmRequestState::Waiting(pending);
         self.set_farm_receipt(tui, origin, &request_id, "Farming task…".into())
             .await;
         let handle = server.request_handle();
@@ -149,25 +164,23 @@ impl App {
         {
             return;
         }
-        match &self.farm.pending {
-            Some(pending) if pending.uncertain => {
+        match &self.farm.state {
+            FarmRequestState::Uncertain(pending) => {
                 self.chat_widget.open_farm_recovery(
                     pending.request_id.clone(),
                     crate::chatwidget::FarmRecovery::MissingReceipt,
                 );
             }
-            Some(_) => self
+            FarmRequestState::Waiting(_) => self
                 .chat_widget
                 .add_error_message("A farm request is still waiting for its receipt.".into()),
-            None => match &self.farm.saved {
-                Some(saved) => self.chat_widget.open_farm_recovery(
+            FarmRequestState::Rejected(saved) => self.chat_widget.open_farm_recovery(
                     saved.request_id.clone(),
                     crate::chatwidget::FarmRecovery::SavedDraft,
                 ),
-                None => self
+            FarmRequestState::Idle => self
                     .chat_widget
                     .add_error_message("Usage: /farm <task> or /farm_fresh <task>".into()),
-            },
         }
     }
 
@@ -177,13 +190,11 @@ impl App {
         server: &mut AppServerSession,
         request_id: &str,
     ) {
-        if self.farm.pending.as_ref().is_some_and(|pending| {
-            pending.request_id == request_id
-                && pending.uncertain
-                && self.primary_thread_id.is_some()
-                && self.current_displayed_thread_id() == self.primary_thread_id
-                && !self.chat_widget.is_parent_owned_thread()
-        }) {
+        if matches!(&self.farm.state, FarmRequestState::Uncertain(pending) if pending.request_id == request_id)
+            && self.primary_thread_id.is_some()
+            && self.current_displayed_thread_id() == self.primary_thread_id
+            && !self.chat_widget.is_parent_owned_thread()
+        {
             self.send_pending_farm(tui, server).await;
         }
     }
@@ -195,24 +206,12 @@ impl App {
         {
             return;
         }
-        let pending = if self
-            .farm
-            .pending
-            .as_ref()
-            .is_some_and(|pending| pending.request_id == request_id && pending.uncertain)
-        {
-            self.farm.pending.take()
-        } else if self
-            .farm
-            .saved
-            .as_ref()
-            .is_some_and(|saved| saved.request_id == request_id)
-        {
-            self.farm.saved.take()
-        } else {
-            None
-        };
-        if let Some(pending) = pending {
+        if matches!(&self.farm.state, FarmRequestState::Uncertain(pending) | FarmRequestState::Rejected(pending) if pending.request_id == request_id) {
+            let (FarmRequestState::Uncertain(pending) | FarmRequestState::Rejected(pending)) =
+                std::mem::take(&mut self.farm.state)
+            else {
+                unreachable!()
+            };
             if self.current_displayed_thread_id() == Some(pending.thread_id) {
                 self.chat_widget.clear_farm_draft(&pending.submission.draft);
             } else if let Some(channel) = self.thread_event_channels.get(&pending.thread_id)
@@ -238,25 +237,22 @@ impl App {
     }
 
     pub(super) fn restore_farm_draft(&mut self, request_id: &str) {
-        let pending = self
-            .farm
-            .pending
-            .as_ref()
-            .filter(|pending| pending.request_id == request_id);
-        let saved = pending.or_else(|| {
-            self.farm
-                .saved
-                .as_ref()
-                .filter(|saved| saved.request_id == request_id)
-        });
+        let saved = match &self.farm.state {
+            FarmRequestState::Waiting(saved)
+            | FarmRequestState::Uncertain(saved)
+            | FarmRequestState::Rejected(saved) => Some(saved),
+            FarmRequestState::Idle => None,
+        };
         if let Some(saved) = saved
             && saved.request_id == request_id
             && self.current_displayed_thread_id() == Some(saved.thread_id)
             && self.primary_thread_id == Some(saved.thread_id)
             && !self.chat_widget.is_parent_owned_thread()
         {
-            if self.chat_widget.restore_farm_draft(&saved.submission.draft) && pending.is_none() {
-                self.farm.saved = None;
+            if self.chat_widget.restore_farm_draft(&saved.submission.draft)
+                && matches!(self.farm.state, FarmRequestState::Rejected(_))
+            {
+                self.farm.state = FarmRequestState::Idle;
             }
         } else {
             self.chat_widget.add_error_message(
@@ -272,13 +268,13 @@ impl App {
         result: Result<ThreadFarmResponse, FarmFailure>,
     ) {
         let displayed = self.current_displayed_thread_id();
-        let Some(pending) = self
-            .farm
-            .pending
-            .as_mut()
-            .filter(|pending| pending.request_id == request_id)
-        else {
+        if !matches!(&self.farm.state, FarmRequestState::Waiting(pending) | FarmRequestState::Uncertain(pending) if pending.request_id == request_id) {
             return;
+        }
+        let (FarmRequestState::Waiting(pending) | FarmRequestState::Uncertain(pending)) =
+            std::mem::take(&mut self.farm.state)
+        else {
+            unreachable!()
         };
         let origin = pending.thread_id;
         let message = match result {
@@ -293,18 +289,17 @@ impl App {
                 if let Some(input) = self.agents_overview.input_states.get_mut(&origin) {
                     input.clear_farm_draft(&pending.submission.draft);
                 }
-                self.farm.pending = None;
                 format!(
                     "Farmed to {} · {}",
                     response.agent_path, response.child_thread_id
                 )
             }
             Err(FarmFailure::Rejected(error)) => {
-                self.farm.saved = self.farm.pending.take();
+                self.farm.state = FarmRequestState::Rejected(pending);
                 format!("Farm rejected: {error}. Submitted draft retained; use /farm to restore.")
             }
             Err(FarmFailure::Uncertain(error)) => {
-                pending.uncertain = true;
+                self.farm.state = FarmRequestState::Uncertain(pending);
                 format!(
                     "Farm outcome unknown; use /farm to check or discard. No retry sent. {error}"
                 )
@@ -356,13 +351,19 @@ impl App {
     pub(super) fn queue_farm_receipt_replay(&self) {
         // Only unresolved work needs a fallback if a refreshed/evicted replay buffer
         // lost its original position. Never resurrect old success notices at the tail.
-        for retained in self.farm.pending.iter().chain(self.farm.saved.iter()) {
-            if self.current_displayed_thread_id() == Some(retained.thread_id) {
+        let retained = match &self.farm.state {
+            FarmRequestState::Waiting(retained)
+            | FarmRequestState::Uncertain(retained)
+            | FarmRequestState::Rejected(retained) => Some(retained),
+            FarmRequestState::Idle => None,
+        };
+        if let Some(retained) = retained
+            && self.current_displayed_thread_id() == Some(retained.thread_id)
+        {
                 self.app_event_tx.send(AppEvent::RestoreFarmReceipt {
                     thread_id: retained.thread_id,
                     request_id: retained.request_id.clone(),
                 });
-            }
         }
     }
 
