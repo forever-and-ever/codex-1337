@@ -66,10 +66,8 @@ impl ThreadEventStore {
                             .saturating_sub(delta.delta.len());
                     }
                 }
-                ThreadBufferedEvent::Request(request) => self
-                    .pending_interactive_replay
-                    .note_evicted_server_request(request.as_ref()),
-                ThreadBufferedEvent::HistoryEntryResponse(_)
+                ThreadBufferedEvent::Request(_)
+                | ThreadBufferedEvent::HistoryEntryResponse(_)
                 | ThreadBufferedEvent::FeedbackSubmission(_)
                 | ThreadBufferedEvent::FarmReceipt { .. } => {}
             }

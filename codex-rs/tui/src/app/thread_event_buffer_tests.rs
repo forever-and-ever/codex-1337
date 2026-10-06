@@ -113,9 +113,9 @@ fn thread_event_store_coalesces_only_adjacent_matching_agent_message_deltas() {
             serde_json::to_value(delta("turn-2", "item-2", "next"))
                 .expect("delta should serialize"),
             serde_json::to_value(other_thread_delta).expect("delta should serialize"),
-            serde_json::to_value(approval).expect("request should serialize"),
             serde_json::to_value(delta("turn-2", "item-2", "after approval"))
                 .expect("delta should serialize"),
+            serde_json::to_value(approval.clone()).expect("request should serialize"),
         ]
     );
     assert!(store.has_pending_thread_approvals());
@@ -146,9 +146,10 @@ fn thread_event_store_coalesces_only_adjacent_matching_agent_message_deltas() {
             serde_json::to_value(delta("turn-2", "item-2", &full_chunk))
                 .expect("delta should serialize"),
             serde_json::to_value(delta("turn-2", "item-2", "🙂")).expect("delta should serialize"),
+            serde_json::to_value(approval).expect("request should serialize"),
         ]
     );
-    assert!(!store.has_pending_thread_approvals());
+    assert!(store.has_pending_thread_approvals());
 
     let mut store = ThreadEventStore::new(/*capacity*/ THREAD_EVENT_CHANNEL_CAPACITY);
     store.push_request(exec_approval_request(
@@ -176,9 +177,18 @@ fn thread_event_store_coalesces_only_adjacent_matching_agent_message_deltas() {
                 ))
                 .expect("delta should serialize")
             })
+            .chain(std::iter::once(
+                serde_json::to_value(exec_approval_request(
+                    thread_id,
+                    "turn-budget",
+                    "approval-budget",
+                    /*approval_id*/ None,
+                ))
+                .expect("request should serialize"),
+            ))
             .collect::<Vec<_>>()
     );
-    assert!(!store.has_pending_thread_approvals());
+    assert!(store.has_pending_thread_approvals());
 
     let mut store = ThreadEventStore::new(/*capacity*/ 4);
     store.push_notification(turn_started_notification(thread_id, "turn-oversized"));
@@ -205,6 +215,8 @@ fn thread_event_store_coalesces_only_adjacent_matching_agent_message_deltas() {
         vec![
             serde_json::to_value(turn_started_notification(thread_id, "turn-oversized"))
                 .expect("turn notification should serialize"),
+            serde_json::to_value(delta("turn-oversized", "item-oversized", "retained text"))
+                .expect("delta should serialize"),
             serde_json::to_value(exec_approval_request(
                 thread_id,
                 "turn-oversized",
@@ -212,8 +224,6 @@ fn thread_event_store_coalesces_only_adjacent_matching_agent_message_deltas() {
                 /*approval_id*/ None,
             ))
             .expect("approval should serialize"),
-            serde_json::to_value(delta("turn-oversized", "item-oversized", "retained text"))
-                .expect("delta should serialize"),
         ]
     );
     assert!(store.has_pending_thread_approvals());

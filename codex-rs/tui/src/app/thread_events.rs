@@ -69,6 +69,7 @@ pub(super) struct ThreadEventStore {
     pub(super) session: Option<ThreadSessionState>,
     pub(super) turns: Vec<Turn>,
     pub(super) buffer: VecDeque<ThreadBufferedEvent>,
+    pub(super) unresolved_requests: Vec<ServerRequest>,
     pub(super) pending_interactive_replay: PendingInteractiveReplayState,
     pub(super) active_turn_id: Option<String>,
     // Retain the active item even if its start falls out of the bounded replay buffer.
@@ -116,6 +117,7 @@ impl ThreadEventStore {
             session: None,
             turns: Vec::new(),
             buffer: VecDeque::new(),
+            unresolved_requests: Vec::new(),
             pending_interactive_replay: PendingInteractiveReplayState::default(),
             active_turn_id: None,
             active_reasoning_item: None,
@@ -200,6 +202,10 @@ impl ThreadEventStore {
         }
         self.pending_interactive_replay
             .note_server_notification(notification.as_ref().native_notification());
+        self.unresolved_requests.retain(|request| {
+            self.pending_interactive_replay
+                .should_replay_snapshot_request(request)
+        });
         match notification.as_ref().native_notification() {
             ServerNotification::TurnStarted(turn) => {
                 self.set_active_turn_id(turn.turn.id.clone());
@@ -328,26 +334,17 @@ impl ThreadEventStore {
     pub(super) fn push_request(&mut self, request: ServerRequest) {
         self.pending_interactive_replay
             .note_server_request(&request);
-        self.push_buffered_event(ThreadBufferedEvent::Request(Box::new(request)));
+        self.unresolved_requests.push(request);
     }
 
     pub(super) fn pending_replay_requests(&self) -> Vec<ServerRequest> {
-        self.buffer
+        self.unresolved_requests
             .iter()
-            .filter_map(|event| match event {
-                ThreadBufferedEvent::Request(request)
-                    if self
-                        .pending_interactive_replay
-                        .should_replay_snapshot_request(request.as_ref()) =>
-                {
-                    Some(request.as_ref().clone())
-                }
-                ThreadBufferedEvent::Request(_)
-                | ThreadBufferedEvent::Notification(_)
-                | ThreadBufferedEvent::HistoryEntryResponse(_)
-                | ThreadBufferedEvent::FeedbackSubmission(_)
-                | ThreadBufferedEvent::FarmReceipt { .. } => None,
+            .filter(|request| {
+                self.pending_interactive_replay
+                    .should_replay_snapshot_request(request)
             })
+            .cloned()
             .collect()
     }
 
@@ -379,6 +376,11 @@ impl ThreadEventStore {
                     | ThreadBufferedEvent::FarmReceipt { .. } => true,
                 })
                 .cloned()
+                .chain(self.unresolved_requests.iter().filter_map(|request| {
+                    self.pending_interactive_replay
+                        .should_replay_snapshot_request(request)
+                        .then(|| ThreadBufferedEvent::Request(Box::new(request.clone())))
+                }))
                 .collect(),
             active_reasoning_item: self.active_reasoning_item.clone(),
             input_state: self.input_state.clone(),
@@ -499,6 +501,10 @@ impl ThreadEventStore {
         T: Into<AppCommand>,
     {
         self.pending_interactive_replay.note_outbound_op(op);
+        self.unresolved_requests.retain(|request| {
+            self.pending_interactive_replay
+                .should_replay_snapshot_request(request)
+        });
     }
 
     pub(super) fn op_can_change_pending_replay_state<T>(op: T) -> bool

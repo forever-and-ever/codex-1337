@@ -372,6 +372,7 @@ impl App {
                 ThreadEventStore::new(THREAD_EVENT_CHANNEL_CAPACITY),
             );
             store.pending_interactive_replay = Default::default();
+            store.unresolved_requests.clear();
             store.pending_interrupt_turn_id = None;
             store.active = false;
             store

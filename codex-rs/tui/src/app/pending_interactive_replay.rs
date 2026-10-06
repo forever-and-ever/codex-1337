@@ -22,14 +22,12 @@ impl ElicitationRequestKey {
 }
 
 #[derive(Debug, Default)]
-// Tracks which interactive prompts are still unresolved in the thread-event buffer.
 //
 // Thread snapshots are replayed when switching threads/agents. Most events should replay
 // verbatim, but interactive prompts (approvals, request_user_input, MCP elicitations) must
 // only replay if they are still pending. This state is updated from:
 // - inbound events (`note_event`)
 // - outbound ops that resolve a prompt (`note_outbound_op`)
-// - buffer eviction (`note_evicted_event`)
 //
 // We keep both fast lookup sets (for snapshot filtering by call_id/request key) and
 // turn-indexed queues/vectors so turn completion or interruption can clear
@@ -286,75 +284,6 @@ impl PendingInteractiveReplayState {
         }
     }
 
-    pub(super) fn note_evicted_server_request(&mut self, request: &ServerRequest) {
-        match request {
-            ServerRequest::CommandExecutionRequestApproval { params, .. } => {
-                let approval_id = params
-                    .approval_id
-                    .clone()
-                    .unwrap_or_else(|| params.item_id.clone());
-                self.exec_approval_call_ids.remove(&approval_id);
-                Self::remove_call_id_from_turn_map_entry(
-                    &mut self.exec_approval_call_ids_by_turn_id,
-                    &params.turn_id,
-                    &approval_id,
-                );
-            }
-            ServerRequest::FileChangeRequestApproval { params, .. } => {
-                self.patch_approval_call_ids.remove(&params.item_id);
-                Self::remove_call_id_from_turn_map_entry(
-                    &mut self.patch_approval_call_ids_by_turn_id,
-                    &params.turn_id,
-                    &params.item_id,
-                );
-            }
-            ServerRequest::McpServerElicitationRequest { request_id, params } => {
-                self.elicitation_requests
-                    .remove(&ElicitationRequestKey::new(
-                        params.server_name.clone(),
-                        request_id.clone(),
-                    ));
-            }
-            ServerRequest::ToolRequestUserInput { params, .. } => {
-                self.request_user_input_call_ids.remove(&params.item_id);
-                let mut remove_turn_entry = false;
-                if let Some(call_ids) = self
-                    .request_user_input_call_ids_by_turn_id
-                    .get_mut(&params.turn_id)
-                {
-                    call_ids.retain(|call_id| call_id != &params.item_id);
-                    if call_ids.is_empty() {
-                        remove_turn_entry = true;
-                    }
-                }
-                if remove_turn_entry {
-                    self.request_user_input_call_ids_by_turn_id
-                        .remove(&params.turn_id);
-                }
-            }
-            ServerRequest::PermissionsRequestApproval { params, .. } => {
-                self.request_permissions_call_ids.remove(&params.item_id);
-                let mut remove_turn_entry = false;
-                if let Some(call_ids) = self
-                    .request_permissions_call_ids_by_turn_id
-                    .get_mut(&params.turn_id)
-                {
-                    call_ids.retain(|call_id| call_id != &params.item_id);
-                    if call_ids.is_empty() {
-                        remove_turn_entry = true;
-                    }
-                }
-                if remove_turn_entry {
-                    self.request_permissions_call_ids_by_turn_id
-                        .remove(&params.turn_id);
-                }
-            }
-            _ => {}
-        }
-        self.pending_requests_by_request_id
-            .retain(|_, pending| !Self::request_matches_server_request(pending, request));
-    }
-
     pub(super) fn should_replay_snapshot_request(&self, request: &ServerRequest) -> bool {
         match request {
             ServerRequest::CommandExecutionRequestApproval { params, .. } => self
@@ -528,40 +457,6 @@ impl PendingInteractiveReplayState {
         }
     }
 
-    fn request_matches_server_request(
-        pending: &PendingInteractiveRequest,
-        request: &ServerRequest,
-    ) -> bool {
-        match (pending, request) {
-            (
-                PendingInteractiveRequest::ExecApproval {
-                    turn_id,
-                    approval_id,
-                },
-                ServerRequest::CommandExecutionRequestApproval { params, .. },
-            ) => {
-                turn_id == &params.turn_id
-                    && approval_id == params.approval_id.as_ref().unwrap_or(&params.item_id)
-            }
-            (
-                PendingInteractiveRequest::PatchApproval { turn_id, item_id },
-                ServerRequest::FileChangeRequestApproval { params, .. },
-            ) => turn_id == &params.turn_id && item_id == &params.item_id,
-            (
-                PendingInteractiveRequest::Elicitation(key),
-                ServerRequest::McpServerElicitationRequest { request_id, params },
-            ) => key.server_name == params.server_name && key.request_id == *request_id,
-            (
-                PendingInteractiveRequest::RequestPermissions { turn_id, item_id },
-                ServerRequest::PermissionsRequestApproval { params, .. },
-            ) => turn_id == &params.turn_id && item_id == &params.item_id,
-            (
-                PendingInteractiveRequest::RequestUserInput { turn_id, item_id },
-                ServerRequest::ToolRequestUserInput { params, .. },
-            ) => turn_id == &params.turn_id && item_id == &params.item_id,
-            _ => false,
-        }
-    }
 }
 
 #[cfg(test)]

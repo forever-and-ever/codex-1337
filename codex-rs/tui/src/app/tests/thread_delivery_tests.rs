@@ -2,6 +2,25 @@ use super::*;
 use crate::app::thread_delivery::LocalThreadCompletion;
 use pretty_assertions::assert_eq;
 
+// Approval payloads must outlive transcript retention: evicting one strands a server that is still waiting for the answer.
+#[test]
+fn pending_approval_survives_transcript_eviction() {
+    let mut store = ThreadEventStore::new(/*capacity*/ 1);
+    let request = exec_approval_request(ThreadId::new(), "turn-1", "call-1", /*approval_id*/ None);
+    let history = HistoryLookupResponse::Entry {
+        offset: 0,
+        log_id: 1,
+        entry: None,
+    };
+    store.push_request(request.clone());
+    store.push_buffered_event(ThreadBufferedEvent::HistoryEntryResponse(history.clone()));
+    assert_eq!(store.pending_replay_requests(), vec![request.clone()]);
+    let events = store.snapshot().events;
+    assert_eq!(events.len(), 2);
+    assert!(matches!(&events[0], ThreadBufferedEvent::HistoryEntryResponse(actual) if actual == &history));
+    assert!(matches!(&events[1], ThreadBufferedEvent::Request(actual) if actual.as_ref() == &request));
+}
+
 #[tokio::test]
 async fn bounded_thread_admission_preserves_fifo_with_pending_history_effects() -> Result<()> {
     // The former detached Full sender was not yet reserving a slot when a newer direct send
