@@ -218,12 +218,28 @@ impl Rpc {
             .await?;
         let mut threads = Vec::with_capacity(loaded.data.len());
         for thread in loaded.data {
-            let response: ThreadReadResponse = self
-                .request(
+            let response = match self
+                .request::<ThreadReadResponse>(
                     "thread/read",
                     json!({ "threadId": thread, "includeTurns": false }),
                 )
-                .await?;
+                .await
+            {
+                Ok(response) => response,
+                Err(error) => {
+                    if let Ok(loaded) = self
+                        .request::<ThreadLoadedListResponse>(
+                            "thread/loaded/list",
+                            json!({ "limit": null, "cursor": null }),
+                        )
+                        .await
+                        && !loaded.data.contains(&thread)
+                    {
+                        continue;
+                    }
+                    return Err(error);
+                }
+            };
             if let Some(thread) = project_live(response.thread) {
                 threads.push(thread);
             }
