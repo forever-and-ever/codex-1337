@@ -178,8 +178,9 @@ impl CatalogRequestProcessor {
         &self,
         params: ModelListParams,
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
-        // Native discovery captures its configured account. Rebuild from current
-        // preferences rather than retaining the account chosen at server startup.
+        // Every request reads current configuration. The startup catalog is reused only for an
+        // unchanged provider definition that is not a Claude subscription, whose catalog captures
+        // the default account.
         let config = Arc::new(
             self.config_manager
                 .load_with_overrides(
@@ -222,25 +223,6 @@ impl CatalogRequestProcessor {
                 .await
                 .map_err(|err| config_load_error(&err))?;
             if gateway.resolve_access_token().await.is_err() {
-                let current = self
-                    .config_manager
-                    .load_with_overrides(
-                        /*request_overrides*/ None,
-                        codex_core::config::ConfigOverrides {
-                            model_provider: params.model_provider.clone(),
-                            ..Default::default()
-                        },
-                    )
-                    .await
-                    .map_err(|err| config_load_error(&err))?;
-                // Login RPCs use current config, while the catalog retains its startup provider.
-                if current.model_provider_id != config.model_provider_id
-                    || current.model_provider != config.model_provider
-                {
-                    return Err(invalid_request(
-                        "Model provider settings changed. Restart Codex to apply them, then retry fetching the model list",
-                    ));
-                }
                 return Err(invalid_request(
                     "Gateway sign-in required or unavailable. Complete gateway sign-in and retry fetching the model list",
                 ));
