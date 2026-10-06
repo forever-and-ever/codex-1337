@@ -169,12 +169,23 @@ fn copying_wrapped_text_preserves_only_hard_newlines() {
         /*width*/ 9,
     );
     let area = Rect::new(
-        /*x*/ 0, /*y*/ 0, /*width*/ 9, /*height*/ 64,
+        /*x*/ 0,
+        /*y*/ 0,
+        /*width*/ crate::transcript_geometry::GUTTER_COLUMNS + 5,
+        /*height*/ 64,
     );
     let mut view = crate::transcript_view::TranscriptView::default();
     view.render(area, &mut Buffer::empty(area), &cells);
-    view.begin_selection(&cells, /*column*/ 2, /*row*/ 0, /*clicks*/ 1);
-    view.extend_selection(/*column*/ 8, /*row*/ 63);
+    view.begin_selection(
+        &cells,
+        /*column*/ crate::transcript_geometry::GUTTER_COLUMNS - 2,
+        /*row*/ 0,
+        /*clicks*/ 1,
+    );
+    view.extend_selection(
+        /*column*/ crate::transcript_geometry::GUTTER_COLUMNS + 4,
+        /*row*/ 63,
+    );
     assert_eq!(view.selected_text(&cells).as_deref(), Some(expected.text()));
 }
 

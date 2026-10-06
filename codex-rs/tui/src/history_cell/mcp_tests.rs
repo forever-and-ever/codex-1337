@@ -460,7 +460,6 @@ fn code_mode_output_preserves_trailing_failure_diagnostics_in_transcript() {
     assert!(transcript.ends_with("    Script error:\n    permission denied"));
 }
 
-
 #[test]
 fn projected_content_preserves_full_rendering() {
     let text = "{\"result\": [1, 2, 3], \"text\": \"long output 🦀\"}";

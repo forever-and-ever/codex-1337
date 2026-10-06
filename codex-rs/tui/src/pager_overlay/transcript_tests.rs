@@ -167,7 +167,7 @@ async fn focus_loss_stops_edge_drag_and_preserves_selection_after_focus_returns(
             &mut tui,
             TuiEvent::Mouse(MouseEvent {
                 kind,
-                column,
+                column: column + crate::transcript_geometry::GUTTER_COLUMNS,
                 row,
                 modifiers: KeyModifiers::NONE,
             }),
@@ -212,13 +212,13 @@ async fn focus_loss_stops_edge_drag_and_preserves_selection_after_focus_returns(
         /*x*/ 0, /*y*/ 1, /*width*/ 40, /*height*/ 8,
     );
     assert_snapshot!(buffer_to_text(&before, content_and_status), @"
-    row 01
-    row 02
-    row 03
-    row 04
-    row 05
-    row 06
-    row 07
+                    row 01
+                    row 02
+                    row 03
+                    row 04
+                    row 05
+                    row 06
+                    row 07
     enter copy & follow · esc clear
     ");
     overlay.view.jump_to_latest();
@@ -227,7 +227,7 @@ async fn focus_loss_stops_edge_drag_and_preserves_selection_after_focus_returns(
         &mut tui,
         TuiEvent::Mouse(MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
-            column: 1,
+            column: crate::transcript_geometry::GUTTER_COLUMNS + 1,
             row: 2,
             modifiers: KeyModifiers::NONE,
         }),
@@ -353,9 +353,9 @@ async fn jump_top_holds_the_visible_page_until_all_history_arrives() -> Result<(
     let mut pending = Buffer::empty(area);
     overlay.render(area, &mut pending);
     assert_snapshot!(buffer_to_text(&pending, content_and_status), @"
-    line 5
-    line 6
-    line 7
+                    line 5
+                    line 6
+                    line 7
     ↑ Loading… · end latest
     ");
     for label in ["earlier", "oldest"] {
@@ -379,9 +379,9 @@ async fn jump_top_holds_the_visible_page_until_all_history_arrives() -> Result<(
     let mut complete = Buffer::empty(area);
     overlay.render(area, &mut complete);
     assert_snapshot!(buffer_to_text(&complete, content_and_status), @"
-    oldest zero
-    oldest one
-    oldest two
+                    oldest zero
+                    oldest one
+                    oldest two
     end latest
     ");
     overlay.handle_event(
@@ -766,7 +766,9 @@ fn completing_agent_and_plan_streams_preserves_reading_in_later_fragments() {
         ])) as Arc<dyn HistoryCell>];
         let replacement: Arc<dyn HistoryCell> = if plan {
             let mut controller = PlanStreamController::new(
-                Some(usize::from(area.width - 4)),
+                Some(usize::from(
+                    area.width - crate::transcript_geometry::GUTTER_COLUMNS - 4,
+                )),
                 cwd,
                 HistoryRenderMode::Rich,
             );
@@ -781,7 +783,9 @@ fn completing_agent_and_plan_streams_preserves_reading_in_later_fragments() {
             Arc::new(crate::history_cell::new_proposed_plan(source.clone(), cwd))
         } else {
             let mut controller = StreamController::new(
-                Some(usize::from(area.width - 2)),
+                Some(usize::from(
+                    area.width - crate::transcript_geometry::GUTTER_COLUMNS - 2,
+                )),
                 cwd,
                 HistoryRenderMode::Rich,
             );

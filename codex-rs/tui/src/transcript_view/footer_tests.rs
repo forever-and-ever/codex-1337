@@ -523,10 +523,7 @@ fn empty_tool_disclosures_follow_invocation_truncation() {
     for (script, output) in [
         ("true", ""),
         ("printf '%s' a_long_argument >/dev/null", ""),
-        (
-            "cat config.json",
-            r#"{"content":[],"output":"real file data"}"#,
-        ),
+        ("cat config.json", "real file data"),
     ] {
         let command = vec!["bash".into(), "-lc".into(), script.into()];
         let parsed = parse_command(&command);
@@ -543,15 +540,16 @@ fn empty_tool_disclosures_follow_invocation_truncation() {
             CommandOutput::new(/*exit_code*/ 0, output.into()),
             Duration::ZERO,
         );
-        let result = FunctionCallOutputBody::Text(format!(
-            "Script completed\nWall time 0.1 seconds\nOutput:\n{}",
-            serde_json::json!({"output": output, "exit_code": 0, "wall_time_seconds": 0.1}),
-        ));
+        let result = FunctionCallOutputBody::Text(output.into());
         let cells = vec![ToolOutputGroup::from_cells([
             Arc::new(call) as Arc<dyn HistoryCell>,
             Arc::new(
                 ToolOutputCell::from_output(
-                    "batch", /*call_id*/ None, "exec", /*namespace*/ None, &result,
+                    "batch",
+                    Some("command"),
+                    "exec",
+                    /*namespace*/ None,
+                    &result,
                 )
                 .unwrap(),
             ),

@@ -108,13 +108,14 @@ fn page_join_keeps_selection_and_clearing_it_retains_the_reading_position() {
 
 #[test]
 fn page_join_merges_unseen_groups_while_an_unrelated_selection_is_held() {
+    let width = crate::transcript_geometry::GUTTER_COLUMNS + 16;
     let mut cells = vec![cell("newer group"), cell("tail\nlast")];
     let mut view = TranscriptView::default();
     view.jump_to_entry(&cells, /*index*/ 1);
-    render(&mut view, &cells, /*width*/ 20);
+    render(&mut view, &cells, width);
     view.begin_selection(&cells, /*column*/ 0, /*row*/ 1, /*clicks*/ 3);
     view.end_drag();
-    let before = render(&mut view, &cells, /*width*/ 20);
+    let before = render(&mut view, &cells, width);
     let selected = view.selected_text(&cells);
     assert_eq!(selected, Some("last".to_owned()));
 
@@ -123,14 +124,14 @@ fn page_join_merges_unseen_groups_while_an_unrelated_selection_is_held() {
     let replacement = cell("merged summary\nchanged preview");
     view.replace_group(&cells, 0..2, &replacement);
     cells.splice(0..2, [replacement]);
-    assert_eq!(render(&mut view, &cells, /*width*/ 20), before);
+    assert_eq!(render(&mut view, &cells, width), before);
     assert_eq!(view.selected_text(&cells), selected);
 
     view.scroll(&cells, /*rows*/ -100);
-    let buffer = render(&mut view, &cells, /*width*/ 20);
+    let buffer = render(&mut view, &cells, width);
     let lines = buffer
         .content
-        .chunks(/*chunk_size*/ 20)
+        .chunks(usize::from(width))
         .map(|row| {
             row.iter()
                 .map(ratatui::buffer::Cell::symbol)

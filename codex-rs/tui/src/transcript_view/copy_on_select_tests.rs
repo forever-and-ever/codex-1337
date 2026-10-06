@@ -3,6 +3,7 @@
 use super::*;
 use crate::clipboard_copy::CopyStatus;
 use crate::history_cell::AgentMarkdownCell;
+use crate::transcript_geometry::GUTTER_COLUMNS;
 use crate::transcript_view::tests::cell;
 use crate::transcript_view::tests::render;
 use crate::transcript_view::tests::text;
@@ -30,7 +31,12 @@ fn copy_on_select_waits_for_release_and_retains_selection() {
             copy_on_select: enabled,
             ..Default::default()
         };
-        render(&mut view, &cells, /*width*/ 20, /*height*/ 1);
+        render(
+            &mut view,
+            &cells,
+            /*width*/ GUTTER_COLUMNS + 16,
+            /*height*/ 1,
+        );
         for event in [
             mouse(MouseEventKind::Down(MouseButton::Left), /*column*/ 0),
             mouse(MouseEventKind::Drag(MouseButton::Left), /*column*/ 5),
@@ -51,8 +57,13 @@ fn copy_on_select_waits_for_release_and_retains_selection() {
         assert!(view.handle_mouse(release, &cells).is_none());
         assert!(!view.tick_selection(&cells));
         if let Some(copied) = copied {
-            let buffer = render(&mut view, &cells, /*width*/ 20, /*height*/ 1);
-            let highlight = (0..20)
+            let buffer = render(
+                &mut view,
+                &cells,
+                /*width*/ GUTTER_COLUMNS + 16,
+                /*height*/ 1,
+            );
+            let highlight = (0..GUTTER_COLUMNS + 16)
                 .map(|column| {
                     if buffer[(column, 0)]
                         .modifier
@@ -67,9 +78,9 @@ fn copy_on_select_waits_for_release_and_retains_selection() {
             insta::assert_snapshot!(
                 format!("{}\n{highlight}", text(&buffer)),
                 @"
-                    selected text
-                ····^^^^^^^^········
-                "
+                            selected text
+            ················^^^^^^^^········
+            "
             );
             for result in [
                 Ok(CopyStatus::Confirmed),
@@ -106,7 +117,12 @@ fn copy_on_select_copies_word_and_line_on_release_without_dragging() {
         copy_on_select: true,
         ..Default::default()
     };
-    render(&mut view, &cells, /*width*/ 24, /*height*/ 1);
+    render(
+        &mut view,
+        &cells,
+        /*width*/ GUTTER_COLUMNS + 20,
+        /*height*/ 1,
+    );
     let down = mouse(MouseEventKind::Down(MouseButton::Left), /*column*/ 7);
     let up = MouseEvent {
         kind: MouseEventKind::Up(MouseButton::Left),
@@ -144,7 +160,12 @@ fn copy_on_select_preserves_link_activation_and_ignores_empty_drags() {
             copy_on_select: true,
             ..Default::default()
         };
-        render(&mut view, &cells, /*width*/ 30, /*height*/ 1);
+        render(
+            &mut view,
+            &cells,
+            /*width*/ GUTTER_COLUMNS + 26,
+            /*height*/ 1,
+        );
         let down = mouse(MouseEventKind::Down(MouseButton::Left), /*column*/ 2);
         assert!(matches!(
             view.handle_mouse(down, &cells),
@@ -189,7 +210,12 @@ fn x11_release_preserves_primary_when_auto_copy_is_disabled() {
             primary_selection: true,
             ..Default::default()
         };
-        render(&mut view, &cells, /*width*/ 20, /*height*/ 1);
+        render(
+            &mut view,
+            &cells,
+            /*width*/ GUTTER_COLUMNS + 16,
+            /*height*/ 1,
+        );
         for event in [
             mouse(MouseEventKind::Down(MouseButton::Left), /*column*/ 0),
             mouse(MouseEventKind::Drag(MouseButton::Left), /*column*/ 14),

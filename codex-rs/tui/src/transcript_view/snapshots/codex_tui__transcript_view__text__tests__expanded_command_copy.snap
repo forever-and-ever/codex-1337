@@ -1,6 +1,5 @@
 ---
 source: tui/src/transcript_view/text_tests.rs
-assertion_line: 362
 expression: "format!(\"{buffer:?}\")"
 ---
 Buffer {
@@ -10,21 +9,24 @@ Buffer {
         "    printf 'alpha beta  ",
         "    gamma delta'        ",
         "                        ",
+        "Stored result · exact   ",
+        "capture unavailable     ",
         "      output alpha beta ",
         "    gamma delta         ",
-        "    next line           ",
-        "                        ",
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
         x: 1, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 2, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
         x: 9, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 4, y: 1, fg: Rgb(137, 180, 250), bg: Reset, underline: Reset, modifier: NONE,
-        x: 10, y: 1, fg: Rgb(205, 214, 244), bg: Reset, underline: Reset, modifier: NONE,
-        x: 11, y: 1, fg: Rgb(166, 227, 161), bg: Reset, underline: Reset, modifier: NONE,
-        x: 22, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 4, y: 2, fg: Rgb(166, 227, 161), bg: Reset, underline: Reset, modifier: NONE,
-        x: 16, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 1, fg: Reset, bg: Rgb(57, 57, 57), underline: Reset, modifier: NONE,
+        x: 4, y: 1, fg: Rgb(137, 180, 250), bg: Rgb(57, 57, 57), underline: Reset, modifier: NONE,
+        x: 10, y: 1, fg: Rgb(205, 214, 244), bg: Rgb(57, 57, 57), underline: Reset, modifier: NONE,
+        x: 11, y: 1, fg: Rgb(166, 227, 161), bg: Rgb(57, 57, 57), underline: Reset, modifier: NONE,
+        x: 22, y: 1, fg: Reset, bg: Rgb(57, 57, 57), underline: Reset, modifier: NONE,
+        x: 4, y: 2, fg: Rgb(166, 227, 161), bg: Rgb(57, 57, 57), underline: Reset, modifier: NONE,
+        x: 16, y: 2, fg: Reset, bg: Rgb(57, 57, 57), underline: Reset, modifier: NONE,
+        x: 0, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 4, fg: Reset, bg: Rgb(57, 57, 57), underline: Reset, modifier: NONE,
     ]
 }

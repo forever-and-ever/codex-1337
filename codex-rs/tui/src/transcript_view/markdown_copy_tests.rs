@@ -278,12 +278,13 @@ fn mixed_plain_output_remains_literal_in_html() {
         &codex_protocol::models::FunctionCallOutputBody::Text(emitted.into()),
     )
     .unwrap();
+    let displayed = emitted.replace('\u{1b}', "\\u{1b}");
     for width in [80, 18] {
         let output = TextLayout::new(batch.transcript_hyperlink_lines(width), width);
-        assert_eq!(output.text(), emitted);
+        assert_eq!(output.text(), displayed);
         assert_eq!(
             payload(&output, 0..output.text().len()),
-            (emitted.into(), CopyFormat::PlainText)
+            (displayed.clone(), CopyFormat::PlainText)
         );
     }
 }

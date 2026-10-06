@@ -8,6 +8,7 @@ use crate::history_cell::AgentMarkdownCell;
 use crate::history_cell::AgentMessageCell;
 use crate::history_cell::PlainHistoryCell;
 use crate::history_cell::StreamingAgentTailCell;
+use crate::transcript_geometry::GUTTER_COLUMNS;
 use codex_app_server_protocol::CommandExecutionSource;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
@@ -34,21 +35,29 @@ fn selection_highlights_hard_breaks_within_and_between_entries() {
             })
             .collect();
         let area = Rect::new(
-            /*x*/ 0, /*y*/ 0, /*width*/ 12, /*height*/ 3,
+            /*x*/ 0,
+            /*y*/ 0,
+            /*width*/ GUTTER_COLUMNS + 8,
+            /*height*/ 3,
         );
         let mut view = TranscriptView::default();
         let mut buffer = Buffer::empty(area);
         view.render(area, &mut buffer, &cells);
-        view.begin_selection(&cells, /*column*/ 4, /*row*/ 0, /*clicks*/ 1);
-        view.extend_selection(/*column*/ 11, /*row*/ 0);
+        view.begin_selection(
+            &cells,
+            /*column*/ GUTTER_COLUMNS,
+            /*row*/ 0,
+            /*clicks*/ 1,
+        );
+        view.extend_selection(/*column*/ GUTTER_COLUMNS + 7, /*row*/ 0);
         view.render(area, &mut buffer, &cells);
         assert_eq!(view.selected_text(&cells).as_deref(), Some("code"));
         assert!(
-            !buffer[(8, 0)]
+            !buffer[(GUTTER_COLUMNS + 4, 0)]
                 .modifier
                 .contains(ratatui::style::Modifier::REVERSED)
         );
-        view.extend_selection(/*column*/ 4, end_row);
+        view.extend_selection(/*column*/ GUTTER_COLUMNS, end_row);
         view.render(area, &mut buffer, &cells);
         assert_eq!(view.selected_text(&cells).as_deref(), Some("code\n"));
         frames.push(format!("{buffer:?}"));
@@ -239,7 +248,12 @@ fn live(view: &mut TranscriptView, cell: &dyn HistoryCell, revision: u64) {
         is_tool_entry: cell.is_tool_entry(),
         animation_tick: None,
     };
-    view.sync_live_tail(/*width*/ 32, Some(key), |width| {
+    let width = if view.area.width == 0 {
+        GUTTER_COLUMNS + 28
+    } else {
+        view.area.width
+    };
+    view.sync_live_tail(width, Some(key), |width| {
         Some(if detailed {
             cell.transcript_hyperlink_lines(width)
         } else {
@@ -271,9 +285,19 @@ fn clicking_and_clearing_selection_preserves_the_separator_row() {
         ];
         let mut view = TranscriptView::default();
         view.jump_to_entry(&cells, /*index*/ 1);
-        render(&mut view, &cells, /*width*/ 32, /*height*/ 3);
+        render(
+            &mut view,
+            &cells,
+            /*width*/ GUTTER_COLUMNS + 28,
+            /*height*/ 3,
+        );
         view.scroll(&cells, /*rows*/ -1);
-        let before = render(&mut view, &cells, /*width*/ 32, /*height*/ 3);
+        let before = render(
+            &mut view,
+            &cells,
+            /*width*/ GUTTER_COLUMNS + 28,
+            /*height*/ 3,
+        );
         assert!(matches!(
             view.position,
             Position::Reading(Anchor { row_bias: 1, .. })
@@ -282,22 +306,37 @@ fn clicking_and_clearing_selection_preserves_the_separator_row() {
             cells.insert(/*index*/ 0, agent(&["older"]));
             view.history_loaded(&cells, 0..1);
             assert_eq!(
-                render(&mut view, &cells, /*width*/ 32, /*height*/ 3),
+                render(
+                    &mut view,
+                    &cells,
+                    /*width*/ GUTTER_COLUMNS + 28,
+                    /*height*/ 3
+                ),
                 before
             );
         }
         let position = view.position;
         let down = MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
-            column: 13,
+            column: GUTTER_COLUMNS + 9,
             row: 1,
             modifiers: KeyModifiers::NONE,
         };
         view.handle_mouse(down, &cells);
-        release(&mut view, &cells, /*column*/ 13, /*row*/ 1);
+        release(
+            &mut view,
+            &cells,
+            /*column*/ GUTTER_COLUMNS + 9,
+            /*row*/ 1,
+        );
         assert_eq!(
             (
-                render(&mut view, &cells, /*width*/ 32, /*height*/ 3),
+                render(
+                    &mut view,
+                    &cells,
+                    /*width*/ GUTTER_COLUMNS + 28,
+                    /*height*/ 3
+                ),
                 view.position,
                 view.selected_text(&cells),
             ),
@@ -307,23 +346,38 @@ fn clicking_and_clearing_selection_preserves_the_separator_row() {
         // Keep the real first click's coordinates/count, without depending on test scheduling.
         view.last_click.as_mut().expect("first mouse down").0 = Instant::now();
         view.handle_mouse(down, &cells);
-        release(&mut view, &cells, /*column*/ 13, /*row*/ 1);
+        release(
+            &mut view,
+            &cells,
+            /*column*/ GUTTER_COLUMNS + 9,
+            /*row*/ 1,
+        );
         assert_eq!(
             (
-                render(&mut view, &cells, /*width*/ 32, /*height*/ 3),
+                render(
+                    &mut view,
+                    &cells,
+                    /*width*/ GUTTER_COLUMNS + 28,
+                    /*height*/ 3
+                ),
                 view.position,
                 view.selected_text(&cells),
             ),
             (before.clone(), position, Some("beta".to_string()))
         );
         view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), &cells);
-        let after = render(&mut view, &cells, /*width*/ 32, /*height*/ 3);
+        let after = render(
+            &mut view,
+            &cells,
+            /*width*/ GUTTER_COLUMNS + 28,
+            /*height*/ 3,
+        );
         assert_eq!(
             (after.clone(), view.position, view.selected_text(&cells)),
             (before, position, None)
         );
         // Repeated clicks on padding or a separator must not select adjacent source text.
-        for (column, row) in [(31, down.row), (down.column, 0)] {
+        for (column, row) in [(GUTTER_COLUMNS + 27, down.row), (down.column, 0)] {
             for clicks in [2, 3] {
                 view.last_click = Some((Instant::now(), column, row, clicks - 1));
                 view.handle_mouse(
@@ -342,13 +396,13 @@ fn clicking_and_clearing_selection_preserves_the_separator_row() {
     insta::assert_snapshot!(frames.join("\n\n"), @"
     prepend=false
 
-        • alpha beta gamma
-          second line
+                    • alpha beta gamma
+                      second line
 
     prepend=true
 
-        • alpha beta gamma
-          second line
+                    • alpha beta gamma
+                      second line
     ");
 }
 
@@ -359,9 +413,24 @@ fn live_selection_survives_commits_finalization_new_live_content_and_resize() {
     let tail =
         StreamingAgentTailCell::new(vec!["tail selected".into()], /*is_first_line*/ false);
     live(&mut view, &tail, /*revision*/ 1);
-    render(&mut view, &cells, /*width*/ 32, /*height*/ 4);
-    view.begin_selection(&cells, /*column*/ 8, /*row*/ 1, /*clicks*/ 3);
-    release(&mut view, &cells, /*column*/ 8, /*row*/ 1);
+    render(
+        &mut view,
+        &cells,
+        /*width*/ GUTTER_COLUMNS + 28,
+        /*height*/ 4,
+    );
+    view.begin_selection(
+        &cells,
+        /*column*/ GUTTER_COLUMNS + 4,
+        /*row*/ 1,
+        /*clicks*/ 3,
+    );
+    release(
+        &mut view,
+        &cells,
+        /*column*/ GUTTER_COLUMNS + 4,
+        /*row*/ 1,
+    );
     assert_eq!(view.selected_text(&cells), Some("tail selected".to_owned()));
 
     cells.push(Arc::new(AgentMessageCell::new(
@@ -379,16 +448,26 @@ fn live_selection_survives_commits_finalization_new_live_content_and_resize() {
         /*is_first_line*/ true,
     );
     live(&mut view, &unrelated, /*revision*/ 2);
-    insta::assert_snapshot!(render(&mut view, &cells, /*width*/ 32, /*height*/ 4), @"
+    insta::assert_snapshot!(render(&mut view, &cells, /*width*/ GUTTER_COLUMNS + 28, /*height*/ 4), @"
     • first
       tail selected
     ");
-    render(&mut view, &cells, /*width*/ 10, /*height*/ 6);
+    render(
+        &mut view,
+        &cells,
+        /*width*/ GUTTER_COLUMNS + 6,
+        /*height*/ 6,
+    );
     assert_eq!(view.selected_text(&cells), Some("tail selected".to_owned()));
 
     cells.insert(/*index*/ 0, agent(&["older page"]));
     view.prepend_snapshot_history(&cells, 0..1);
-    render(&mut view, &cells, /*width*/ 32, /*height*/ 5);
+    render(
+        &mut view,
+        &cells,
+        /*width*/ GUTTER_COLUMNS + 28,
+        /*height*/ 5,
+    );
     assert_eq!(view.selected_text(&cells), Some("tail selected".to_owned()));
     assert_eq!(
         view.selection
@@ -404,7 +483,15 @@ fn live_selection_survives_commits_finalization_new_live_content_and_resize() {
     assert!(view.selection.is_none());
     view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), &cells);
     assert!(view.is_following());
-    assert!(render(&mut view, &cells, /*width*/ 32, /*height*/ 5).contains("unrelated next tail"));
+    assert!(
+        render(
+            &mut view,
+            &cells,
+            /*width*/ GUTTER_COLUMNS + 28,
+            /*height*/ 5
+        )
+        .contains("unrelated next tail")
+    );
 }
 
 #[test]
@@ -430,15 +517,25 @@ fn tool_selection_copies_its_displayed_revision_after_the_tool_commits() {
     let mut view = TranscriptView::default();
     view.set_presentation(/*detailed*/ true, HistoryRenderMode::Rich);
     live(&mut view, &tool, /*revision*/ 1);
-    let visible = render(&mut view, &cells, /*width*/ 32, /*height*/ 8);
+    let visible = render(
+        &mut view,
+        &cells,
+        /*width*/ GUTTER_COLUMNS + 28,
+        /*height*/ 8,
+    );
     let row = visible
         .lines()
         .enumerate()
         .filter_map(|(row, line)| line.contains("selected tool output").then_some(row))
         .last()
         .expect("tool output") as u16;
-    view.begin_selection(&cells, /*column*/ 8, row, /*clicks*/ 3);
-    release(&mut view, &cells, /*column*/ 8, row);
+    view.begin_selection(
+        &cells,
+        /*column*/ GUTTER_COLUMNS + 4,
+        row,
+        /*clicks*/ 3,
+    );
+    release(&mut view, &cells, /*column*/ GUTTER_COLUMNS + 4, row);
     let selected = view.selected_text(&cells).expect("selected tool output");
     cells.push(Arc::new(tool) as Arc<dyn HistoryCell>);
     live(
@@ -446,7 +543,12 @@ fn tool_selection_copies_its_displayed_revision_after_the_tool_commits() {
         agent(&["another answer"]).as_ref(),
         /*revision*/ 2,
     );
-    render(&mut view, &cells, /*width*/ 32, /*height*/ 8);
+    render(
+        &mut view,
+        &cells,
+        /*width*/ GUTTER_COLUMNS + 28,
+        /*height*/ 8,
+    );
     let Some(ViewAction::Copy(copied)) = view.handle_key(
         KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
         &cells,
@@ -460,24 +562,37 @@ fn tool_selection_copies_its_displayed_revision_after_the_tool_commits() {
 fn word_and_line_drags_keep_the_initial_unit_when_direction_changes() {
     let cells = vec![agent(&["alpha beta gamma", "second line", "third"])];
     let mut view = TranscriptView::default();
-    render(&mut view, &cells, /*width*/ 32, /*height*/ 5);
-    view.begin_selection(
-        &cells, /*column*/ 13, /*row*/ 0, /*clicks*/ 2,
+    render(
+        &mut view,
+        &cells,
+        /*width*/ GUTTER_COLUMNS + 28,
+        /*height*/ 5,
     );
-    view.extend_selection(/*column*/ 20, /*row*/ 0);
+    view.begin_selection(
+        &cells,
+        /*column*/ GUTTER_COLUMNS + 9,
+        /*row*/ 0,
+        /*clicks*/ 2,
+    );
+    view.extend_selection(/*column*/ GUTTER_COLUMNS + 16, /*row*/ 0);
     assert_eq!(view.selected_text(&cells).as_deref(), Some("beta gamma"));
-    view.extend_selection(/*column*/ 7, /*row*/ 0);
+    view.extend_selection(/*column*/ GUTTER_COLUMNS + 3, /*row*/ 0);
     assert_eq!(view.selected_text(&cells).as_deref(), Some("alpha beta"));
-    view.extend_selection(/*column*/ 20, /*row*/ 0);
+    view.extend_selection(/*column*/ GUTTER_COLUMNS + 16, /*row*/ 0);
     assert_eq!(view.selected_text(&cells).as_deref(), Some("beta gamma"));
 
-    view.begin_selection(&cells, /*column*/ 8, /*row*/ 1, /*clicks*/ 3);
-    view.extend_selection(/*column*/ 7, /*row*/ 0);
+    view.begin_selection(
+        &cells,
+        /*column*/ GUTTER_COLUMNS + 4,
+        /*row*/ 1,
+        /*clicks*/ 3,
+    );
+    view.extend_selection(/*column*/ GUTTER_COLUMNS + 3, /*row*/ 0);
     assert_eq!(
         view.selected_text(&cells).as_deref(),
         Some("alpha beta gamma\nsecond line\n")
     );
-    view.extend_selection(/*column*/ 8, /*row*/ 2);
+    view.extend_selection(/*column*/ GUTTER_COLUMNS + 4, /*row*/ 2);
     assert_eq!(
         view.selected_text(&cells).as_deref(),
         Some("second line\nthird")
@@ -529,8 +644,18 @@ fn plain_and_shift_arrows_move_selection_on_press_and_repeat() {
                 (KeyCode::Down, "ef\ng"),
             ] {
                 let mut view = TranscriptView::default();
-                render(&mut view, &cells, /*width*/ 32, /*height*/ 5);
-                view.begin_selection(&cells, /*column*/ 7, /*row*/ 1, /*clicks*/ 1);
+                render(
+                    &mut view,
+                    &cells,
+                    /*width*/ GUTTER_COLUMNS + 28,
+                    /*height*/ 5,
+                );
+                view.begin_selection(
+                    &cells,
+                    /*column*/ GUTTER_COLUMNS + 3,
+                    /*row*/ 1,
+                    /*clicks*/ 1,
+                );
                 assert!(matches!(
                     view.handle_key(KeyEvent::new_with_kind(code, modifiers, kind), &cells),
                     Some(ViewAction::Changed)
@@ -556,9 +681,17 @@ fn modified_arrows_end_selection_and_return_input_to_the_owner() {
             for modifiers in [modifier, modifier | KeyModifiers::SHIFT] {
                 for code in [KeyCode::Left, KeyCode::Right, KeyCode::Up, KeyCode::Down] {
                     let mut view = TranscriptView::default();
-                    render(&mut view, &cells, /*width*/ 32, /*height*/ 5);
+                    render(
+                        &mut view,
+                        &cells,
+                        /*width*/ GUTTER_COLUMNS + 28,
+                        /*height*/ 5,
+                    );
                     view.begin_selection(
-                        &cells, /*column*/ 13, /*row*/ 0, /*clicks*/ 2,
+                        &cells,
+                        /*column*/ GUTTER_COLUMNS + 9,
+                        /*row*/ 0,
+                        /*clicks*/ 2,
                     );
                     assert_eq!(view.selected_text(&cells).as_deref(), Some("beta"));
                     assert!(
@@ -586,9 +719,17 @@ fn released_arrows_preserve_selection_and_reading_position() {
     ] {
         for code in [KeyCode::Left, KeyCode::Right, KeyCode::Up, KeyCode::Down] {
             let mut view = TranscriptView::default();
-            render(&mut view, &cells, /*width*/ 32, /*height*/ 5);
+            render(
+                &mut view,
+                &cells,
+                /*width*/ GUTTER_COLUMNS + 28,
+                /*height*/ 5,
+            );
             view.begin_selection(
-                &cells, /*column*/ 13, /*row*/ 0, /*clicks*/ 2,
+                &cells,
+                /*column*/ GUTTER_COLUMNS + 9,
+                /*row*/ 0,
+                /*clicks*/ 2,
             );
             let position = view.position;
             let selected = view.selected_text(&cells);

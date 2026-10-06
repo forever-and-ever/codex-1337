@@ -1918,8 +1918,6 @@ fn session_header_directory_front_truncates_long_segment() {
     assert_eq!(formatted, expected);
 }
 
-
-
 #[test]
 fn multiline_command_wraps_with_extra_indent_on_subsequent_lines() {
     // Create a completed exec cell with a multiline command

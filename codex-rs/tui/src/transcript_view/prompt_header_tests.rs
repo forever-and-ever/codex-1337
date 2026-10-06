@@ -3,6 +3,7 @@
 use super::*;
 use crate::history_cell::new_spoken_user_prompt;
 use crate::history_cell::new_user_prompt;
+use crate::transcript_geometry::GUTTER_COLUMNS;
 use crate::transcript_view::tests::cell;
 use crate::transcript_view::tests::render;
 use crate::transcript_view::tests::text;
@@ -123,15 +124,15 @@ fn mouse_selection_preserves_header_reservation_at_turn_boundaries() {
         user("Second question"),
         cell("done 10:16 AM"),
     ];
-    for width in [44, 15] {
+    for width in [GUTTER_COLUMNS + 40, GUTTER_COLUMNS + 11] {
         for height in [6, 7, 8] {
             for drag in [false, true] {
                 let mut view = TranscriptView::default();
                 let before = render(&mut view, &cells, width, height);
                 let down = MouseEvent {
                     kind: MouseEventKind::Down(MouseButton::Left),
-                    column: 9,
-                    row: height - 1 - u16::from(width < 16),
+                    column: GUTTER_COLUMNS + 5,
+                    row: height - 1 - u16::from(width < GUTTER_COLUMNS + 12),
                     modifiers: KeyModifiers::NONE,
                 };
                 view.handle_mouse(down, &cells);
@@ -161,7 +162,11 @@ fn mouse_selection_preserves_header_reservation_at_turn_boundaries() {
                 }
                 let end = MouseEvent {
                     kind: MouseEventKind::Drag(MouseButton::Left),
-                    column: if width < 16 { 6 } else { 17 },
+                    column: if width < GUTTER_COLUMNS + 12 {
+                        GUTTER_COLUMNS + 2
+                    } else {
+                        GUTTER_COLUMNS + 13
+                    },
                     row: height - 1,
                     ..down
                 };
@@ -191,7 +196,11 @@ fn mouse_selection_preserves_header_reservation_at_turn_boundaries() {
                         .filter(|cell| cell.modifier.contains(Modifier::REVERSED))
                         .map(ratatui::buffer::Cell::symbol)
                         .collect::<String>(),
-                    if width < 16 { "10:16AM" } else { &copied }
+                    if width < GUTTER_COLUMNS + 12 {
+                        "10:16AM"
+                    } else {
+                        &copied
+                    }
                 );
             }
         }

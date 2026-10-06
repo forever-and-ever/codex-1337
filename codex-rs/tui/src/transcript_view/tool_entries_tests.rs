@@ -298,7 +298,7 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
                 OutputProvenance::Client
             );
             let layout = TextLayout::new(lines, u16::MAX);
-            assert_eq!(layout.text(), format!("{safe}\n"));
+            assert_eq!(layout.text(), safe);
         }
         if !paint {
             continue;

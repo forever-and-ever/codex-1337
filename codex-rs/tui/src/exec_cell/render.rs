@@ -1256,7 +1256,6 @@ mod tests {
         assert_eq!(first, vec!["• Running echo done".to_string()]);
     }
 
-
     #[test]
     fn output_display_does_not_split_long_url_like_token_without_scheme() {
         let url = "example.test/api/v1/projects/alpha-team/releases/2026-02-17/builds/1234567890/artifacts/reports/performance/summary/detail/session_id=abc123def456ghi789jkl012mno345pqr678";

@@ -288,6 +288,13 @@ fn annotated_diff_preserves_the_existing_hard_wrapped_visual_output() {
     );
     let mut expected = Buffer::empty(area);
     HyperlinkParagraph::new(&lines, Style::default()).render(area, &mut expected);
+    for (row, line) in lines.iter().enumerate() {
+        for column in 0..area.width {
+            if expected[(column, row as u16)].symbol() == " " {
+                expected[(column, row as u16)].set_style(line.line.style);
+            }
+        }
+    }
     let mut actual = Buffer::empty(area);
     TextLayout::new(lines, /*width*/ 40).render(area, &mut actual, /*start_row*/ 0);
     assert_eq!(actual, expected);

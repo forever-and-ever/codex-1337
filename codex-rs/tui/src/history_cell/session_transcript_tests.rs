@@ -69,7 +69,10 @@ fn session_information_waits_for_older_pages_and_reappears_after_completion() {
     }));
     let cells = vec![header];
     let area = Rect::new(
-        /*x*/ 0, /*y*/ 0, /*width*/ 30, /*height*/ 2,
+        /*x*/ 0,
+        /*y*/ 0,
+        /*width*/ crate::transcript_geometry::GUTTER_COLUMNS + 26,
+        /*height*/ 2,
     );
     let mut view = TranscriptView::default();
     let mut output = Vec::new();

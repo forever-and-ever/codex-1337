@@ -5,6 +5,7 @@ use crate::history_cell::HistoryCell;
 use crate::history_cell::ReasoningSummaryCell;
 use crate::history_cell::RequestUserInputResultCell;
 use crate::history_cell::ThreadRecapHistoryCell;
+use crate::transcript_geometry::GUTTER_COLUMNS;
 use codex_app_server_protocol::ToolRequestUserInputAnswer;
 use codex_app_server_protocol::ToolRequestUserInputQuestion;
 use codex_protocol::plan_tool::PlanItemArg;
@@ -128,7 +129,12 @@ fn recap_copy_preserves_hard_lines_and_reflows_only_soft_wraps() {
     let cells: Vec<Arc<dyn HistoryCell>> = vec![Arc::new(cell)];
     let mut view = crate::transcript_view::TranscriptView::default();
 
-    for width in [80, 32, 12, 80] {
+    for width in [
+        GUTTER_COLUMNS + 76,
+        GUTTER_COLUMNS + 28,
+        GUTTER_COLUMNS + 8,
+        GUTTER_COLUMNS + 76,
+    ] {
         // Ordinary resize renders the cell again; a selected revision rewraps its saved source.
         assert_eq!(
             retained.rewrap(width).text(),
@@ -142,7 +148,12 @@ fn recap_copy_preserves_hard_lines_and_reflows_only_soft_wraps() {
                 crate::history_cell::HistoryRenderMode::Rich,
             ),
         ));
-        let area = Rect::new(/*x*/ 0, /*y*/ 0, width, /*height*/ 64);
+        let area = Rect::new(
+            /*x*/ 0,
+            /*y*/ 0,
+            width,
+            u16::try_from(expected_text.len() + 8).unwrap(),
+        );
         let mut expected = Buffer::empty(area);
         HyperlinkParagraph::new(&lines, Style::default()).render(area, &mut expected);
         // The owned viewport inherits the line style on padding and hidden wide-character
@@ -323,6 +334,13 @@ fn assert_layout_paints_like_lines(lines: Vec<HyperlinkLine>, width: u16) {
     let area = Rect::new(/*x*/ 0, /*y*/ 0, width, /*height*/ 30);
     let mut expected = Buffer::empty(area);
     HyperlinkParagraph::new(&lines, Style::default()).render(area, &mut expected);
+    for (row, line) in lines.iter().enumerate() {
+        for column in 0..area.width {
+            if expected[(column, row as u16)].symbol() == " " {
+                expected[(column, row as u16)].set_style(line.line.style);
+            }
+        }
+    }
     let mut actual = Buffer::empty(area);
     TextLayout::new(lines, width).render(area, &mut actual, /*start_row*/ 0);
     assert_eq!(actual, expected);

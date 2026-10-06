@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::history_cell::AgentMarkdownCell;
+use crate::transcript_geometry::GUTTER_COLUMNS;
 use pretty_assertions::assert_eq;
 
 fn transcript(markdown: &str, width: u16) -> (TranscriptView, Vec<Arc<dyn HistoryCell>>) {
@@ -28,7 +29,7 @@ fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
 fn hover_links_match_wrapped_click_targets_and_refresh_after_scrolling() {
     let (mut view, cells) = transcript(
         "before [wide 界 wrapped label](https://example.com) after\n\nplain\n\nmore\n\nlast",
-        /*width*/ 12,
+        /*width*/ GUTTER_COLUMNS + 8,
     );
     let area = view.area;
     view.jump_to_beginning(&cells);
@@ -72,7 +73,7 @@ fn hover_links_match_wrapped_click_targets_and_refresh_after_scrolling() {
 
 #[test]
 fn shift_click_extends_a_double_clicked_word_in_both_directions() {
-    let (mut view, cells) = transcript("alpha beta gamma", /*width*/ 24);
+    let (mut view, cells) = transcript("alpha beta gamma", /*width*/ GUTTER_COLUMNS + 20);
     let area = view.area;
     let mut buffer = Buffer::empty(area);
     for _ in 0..2 {
@@ -122,8 +123,13 @@ fn shift_click_extends_a_double_clicked_word_in_both_directions() {
 #[test]
 fn shift_click_preserves_selection_units_and_allows_dragging() {
     for (clicks, expected) in [(1, "beta gam"), (3, "alpha beta gamma")] {
-        let (mut view, cells) = transcript("alpha beta gamma", /*width*/ 24);
-        view.begin_selection(&cells, /*column*/ 14, /*row*/ 1, clicks);
+        let (mut view, cells) = transcript("alpha beta gamma", /*width*/ GUTTER_COLUMNS + 20);
+        view.begin_selection(
+            &cells,
+            /*column*/ GUTTER_COLUMNS + 10,
+            /*row*/ 1,
+            clicks,
+        );
         view.handle_mouse(
             mouse(
                 MouseEventKind::Drag(MouseButton::Left),
@@ -168,7 +174,7 @@ fn ordinary_click_opens_bare_and_markdown_links_on_release() {
         "https://example.com/docs",
         "[docs](https://example.com/docs)",
     ] {
-        for width in [12, 60] {
+        for width in [GUTTER_COLUMNS + 8, GUTTER_COLUMNS + 56] {
             let (mut view, cells) = transcript(markdown, width);
             let down = mouse(
                 MouseEventKind::Down(MouseButton::Left),

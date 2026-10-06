@@ -1,6 +1,7 @@
 //! Literal search, history continuation, and presentation restoration share source offsets.
 
 use super::*;
+use crate::transcript_geometry::GUTTER_COLUMNS;
 use pretty_assertions::assert_eq;
 use ratatui::style::Modifier;
 
@@ -34,7 +35,10 @@ fn finish_scan(view: &mut TranscriptView, cells: &[Arc<dyn HistoryCell>]) {
 fn selection_pauses_find_and_normalized_navigation_resumes_the_same_query() {
     let cells = vec![cell("older needle"), cell("newer needle")];
     let area = Rect::new(
-        /*x*/ 0, /*y*/ 0, /*width*/ 32, /*height*/ 4,
+        /*x*/ 0,
+        /*y*/ 0,
+        /*width*/ GUTTER_COLUMNS + 28,
+        /*height*/ 4,
     );
     let mut view = TranscriptView {
         area,
@@ -50,7 +54,12 @@ fn selection_pauses_find_and_normalized_navigation_resumes_the_same_query() {
         KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL),
         &cells,
     );
-    view.begin_selection(&cells, /*column*/ 0, /*row*/ 0, /*clicks*/ 3);
+    view.begin_selection(
+        &cells,
+        /*column*/ GUTTER_COLUMNS - 4,
+        /*row*/ 0,
+        /*clicks*/ 3,
+    );
     let selected = view.selected_text(&cells);
     assert!(!view.advance_search(&cells));
     assert_eq!(view.selected_text(&cells), selected);
@@ -211,7 +220,10 @@ fn search_resumes_in_prepended_history_without_rescanning_the_newer_entry() {
 fn empty_find_keeps_following_new_output_after_a_page_join() {
     let mut cells = vec![cell("previous computer action"), cell("latest answer")];
     let area = Rect::new(
-        /*x*/ 0, /*y*/ 0, /*width*/ 40, /*height*/ 8,
+        /*x*/ 0,
+        /*y*/ 0,
+        /*width*/ GUTTER_COLUMNS + 36,
+        /*height*/ 8,
     );
     let mut view = TranscriptView {
         area,
@@ -219,7 +231,7 @@ fn empty_find_keeps_following_new_output_after_a_page_join() {
         ..TranscriptView::default()
     };
     view.begin_search();
-    view.sync_live_tail(/*width*/ 40, /*key*/ None, |_| {
+    view.sync_live_tail(/*width*/ GUTTER_COLUMNS + 36, /*key*/ None, |_| {
         Some(vec![HyperlinkLine::from("stream before page")])
     });
     finish_scan(&mut view, &cells);
@@ -232,7 +244,7 @@ fn empty_find_keeps_following_new_output_after_a_page_join() {
     cells.splice(0..2, [group]);
     view.history = TranscriptHistoryState::Complete;
     cells.push(cell("new committed answer"));
-    view.sync_live_tail(/*width*/ 40, /*key*/ None, |_| {
+    view.sync_live_tail(/*width*/ GUTTER_COLUMNS + 36, /*key*/ None, |_| {
         Some(vec![HyperlinkLine::from("stream after page")])
     });
     finish_scan(&mut view, &cells);
@@ -367,7 +379,10 @@ fn previous_match_finds_the_prepended_part_of_a_regrouped_entry() {
     let newest = cell("needle newest");
     let mut cells = vec![cell("newer group"), Arc::clone(&newest)];
     let area = Rect::new(
-        /*x*/ 0, /*y*/ 0, /*width*/ 30, /*height*/ 3,
+        /*x*/ 0,
+        /*y*/ 0,
+        /*width*/ GUTTER_COLUMNS + 26,
+        /*height*/ 3,
     );
     let mut view = TranscriptView {
         area,
@@ -399,7 +414,11 @@ fn previous_match_finds_the_prepended_part_of_a_regrouped_entry() {
     let mut buffer = Buffer::empty(area);
     view.render(area, &mut buffer, &cells);
     assert_eq!(view.visible[0].key, EntryKey::cell(&older));
-    assert!(buffer[(4, 0)].modifier.contains(Modifier::REVERSED));
+    assert!(
+        buffer[(GUTTER_COLUMNS, 0)]
+            .modifier
+            .contains(Modifier::REVERSED)
+    );
 
     view.handle_search_key(
         KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL),
@@ -540,7 +559,10 @@ fn search_scans_a_page_inserted_after_the_retained_session_header() {
 fn next_previous_highlight_and_cancel_share_the_transcript_position() {
     let cells = vec![cell("Needle one"), cell("Needle two")];
     let area = Rect::new(
-        /*x*/ 0, /*y*/ 0, /*width*/ 20, /*height*/ 3,
+        /*x*/ 0,
+        /*y*/ 0,
+        /*width*/ GUTTER_COLUMNS + 16,
+        /*height*/ 3,
     );
     let mut view = TranscriptView {
         area,
@@ -567,14 +589,14 @@ fn next_previous_highlight_and_cancel_share_the_transcript_position() {
     let mut buffer = Buffer::empty(area);
     view.render(area, &mut buffer, &cells);
     assert_eq!(
-        (4..14)
+        (GUTTER_COLUMNS..GUTTER_COLUMNS + 10)
             .map(|column| buffer[(column, 0)].modifier.contains(Modifier::REVERSED))
             .collect::<Vec<_>>(),
         vec![
             true, true, true, true, true, true, false, false, false, false
         ]
     );
-    insta::assert_snapshot!(view.search.status_line(/*width*/ 80, view.history).to_string(), @"enter next · ctrl+p previous · full transcript · esc close");
+    insta::assert_snapshot!(view.search.status_line(/*width*/ GUTTER_COLUMNS + 76, view.history).to_string(), @"enter next · ctrl+p previous · full transcript · esc close");
     view.handle_search_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE), &cells);
     assert!(matches!(view.search.progress, Progress::Found));
     view.handle_search_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), &cells);
@@ -919,7 +941,10 @@ fn leaving_a_regrouped_search_match_restarts_from_current_history() {
         cell("trailing words ".repeat(/*n*/ 20)),
     ];
     let area = Rect::new(
-        /*x*/ 0, /*y*/ 0, /*width*/ 30, /*height*/ 3,
+        /*x*/ 0,
+        /*y*/ 0,
+        /*width*/ GUTTER_COLUMNS + 26,
+        /*height*/ 3,
     );
     let mut view = TranscriptView {
         area,
@@ -959,7 +984,11 @@ fn leaving_a_regrouped_search_match_restarts_from_current_history() {
     let mut buffer = Buffer::empty(area);
     view.render(area, &mut buffer, &cells);
     assert_eq!(view.visible[0].key, EntryKey::cell(&replacement));
-    assert!(buffer[(11, 0)].modifier.contains(Modifier::REVERSED));
+    assert!(
+        buffer[(GUTTER_COLUMNS + 7, 0)]
+            .modifier
+            .contains(Modifier::REVERSED)
+    );
 }
 
 #[test]
