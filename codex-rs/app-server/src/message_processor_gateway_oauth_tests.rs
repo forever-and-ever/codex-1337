@@ -13,7 +13,7 @@ use codex_app_server_protocol::GatewayOAuthLoginResponse;
 use codex_app_server_protocol::GatewayOAuthReadResponse;
 use codex_app_server_protocol::GatewayOAuthStatus;
 use codex_app_server_protocol::InitializeResponse;
-use codex_app_server_protocol::JSONRPCErrorError;
+use codex_app_server_protocol::ModelListResponse;
 use codex_app_server_protocol::ServerNotification;
 use codex_core::config::ConfigBuilder;
 use codex_login::AuthManager;
@@ -201,23 +201,27 @@ async fn gateway_oauth_model_list_checks_requirements_before_refreshing_token() 
         .mount(&server)
         .await;
     let home = TempDir::new()?;
-    let mut config = ConfigBuilder::default()
-        .codex_home(home.path().to_path_buf())
-        .build()
-        .await?;
-    config.model_provider_id = "gateway".into();
-    config.model_provider = toml::from_str(&format!(
-        r#"
+    std::fs::write(
+        home.path().join("config.toml"),
+        format!(
+            r#"
+model_provider = "gateway"
+[model_providers.gateway]
 name = "Gateway"
 base_url = "{url}/v1"
-[gateway_oauth]
+[model_providers.gateway.gateway_oauth]
 authorization_url = "{url}/authorize"
 token_url = "{url}/token"
 client_id = "app-server-requirements-test"
 delivery = {{ kind = "header", name = "X-Gateway-Authorization" }}
 "#,
-        url = server.uri(),
-    ))?;
+            url = server.uri(),
+        ),
+    )?;
+    let config = ConfigBuilder::default()
+        .codex_home(home.path().to_path_buf())
+        .build()
+        .await?;
     let auth_manager = AuthManager::from_auth_for_testing_with_home(
         CodexAuth::from_api_key("primary"),
         home.path().to_path_buf(),
@@ -251,26 +255,11 @@ delivery = {{ kind = "header", name = "X-Gateway-Authorization" }}
         json!({"id": 2, "method": "model/list", "params": {}}),
     )
     .await;
-    let error = timeout(Duration::from_secs(/*secs*/ 10), async {
-        loop {
-            if let OutgoingEnvelope::ToConnection {
-                message: OutgoingMessage::Error(error),
-                ..
-            } = outgoing
-                .recv()
-                .await
-                .expect("outgoing channel open during request")
-            {
-                break error.error;
-            }
-        }
-    })
-    .await?;
-    assert_eq!(error, JSONRPCErrorError {
-        code: -32600,
-        message: "failed to load configuration: Your organization's required model provider settings changed. Restart Codex to apply them; this request was not sent".to_string(),
-        data: None,
-    });
+    let response: ModelListResponse = read_response(&mut outgoing, /*request_id*/ 2).await;
+    assert_eq!(
+        response.model_provider,
+        Some(codex_model_provider_info::OPENAI_PROVIDER_ID.to_owned())
+    );
     assert!(server.received_requests().await.unwrap().is_empty());
     processor.shutdown_threads().await;
     processor.drain_background_tasks().await;

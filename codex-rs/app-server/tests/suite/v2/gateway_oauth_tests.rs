@@ -11,6 +11,8 @@ use codex_app_server_protocol::GatewayOAuthReadResponse;
 use codex_app_server_protocol::GatewayOAuthStatus;
 use codex_app_server_protocol::InitializeCapabilities;
 use codex_app_server_protocol::JSONRPCErrorError;
+use codex_app_server_protocol::ModelListParams;
+use codex_app_server_protocol::ModelListResponse;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::ThreadStartResponse;
@@ -107,7 +109,7 @@ async fn authorization_url(server: &mut TestAppServer) -> Result<url::Url> {
 const TIMEOUT: Duration = Duration::from_secs(/*secs*/ 30);
 
 #[tokio::test]
-async fn model_list_requests_restart_after_gateway_provider_changes() -> Result<()> {
+async fn model_list_applies_gateway_provider_changes_without_restart() -> Result<()> {
     let oauth = MockServer::start().await;
     let original = gateway_config(&oauth);
     for replacement in [
@@ -118,7 +120,21 @@ async fn model_list_requests_restart_after_gateway_provider_changes() -> Result<
         let config_path = home.path().join("config.toml");
         std::fs::write(&config_path, &original)?;
         let mut server = gateway_server(home.path()).await?;
-        std::fs::write(&config_path, replacement)?;
+        std::fs::write(&config_path, &replacement)?;
+        if replacement.is_empty() {
+            let response: ModelListResponse = server
+                .request(|id| ClientRequest::ModelList {
+                    request_id: id,
+                    params: ModelListParams::default(),
+                })
+                .await?;
+            assert_eq!(
+                response.model_provider,
+                Some(codex_model_provider_info::OPENAI_PROVIDER_ID.to_owned())
+            );
+            assert!(oauth.received_requests().await.unwrap().is_empty());
+            continue;
+        }
         let models = server
             .send_raw_request("model/list", Some(serde_json::json!({})))
             .await?;
@@ -129,9 +145,10 @@ async fn model_list_requests_restart_after_gateway_provider_changes() -> Result<
         .await??;
         assert_eq!(error.error, JSONRPCErrorError {
             code: -32600,
-            message: "Model provider settings changed. Restart Codex to apply them, then retry fetching the model list".to_string(),
+            message: "Gateway sign-in required or unavailable. Complete gateway sign-in and retry fetching the model list".to_string(),
             data: None,
         });
+        assert!(oauth.received_requests().await.unwrap().is_empty());
     }
     Ok(())
 }
