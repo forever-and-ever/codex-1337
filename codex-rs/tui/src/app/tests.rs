@@ -2452,7 +2452,6 @@ async fn open_agent_picker_prunes_terminal_metadata_only_threads() -> Result<()>
         Some("worker".to_string()),
         /*is_closed*/ false,
     );
-
     Box::pin(app.open_agent_picker(&mut app_server)).await;
 
     assert_eq!(app.agent_navigation.get(&thread_id), None);
@@ -2868,6 +2867,8 @@ async fn should_attach_live_thread_for_selection_skips_closed_metadata_only_thre
         Some("worker".to_string()),
         /*is_closed*/ false,
     );
+    app.agent_navigation
+        .set_status(thread_id, codex_app_server_protocol::ThreadStatus::Idle);
     assert!(app.should_attach_live_thread_for_selection(thread_id));
 
     app.thread_event_channels
@@ -4590,6 +4591,9 @@ async fn inactive_thread_started_notification_initializes_replay_session() -> Re
     app.primary_thread_id = Some(main_thread_id);
     app.active_thread_id = Some(main_thread_id);
     app.primary_session_configured = Some(primary_session.clone());
+    app.agent_navigation
+        .descendant_roots
+        .insert(agent_thread_id, main_thread_id);
     app.thread_event_channels.insert(
         main_thread_id,
         ThreadEventChannel::new_with_session(
@@ -5419,6 +5423,9 @@ async fn primary_thread_ignores_child_mcp_startup_notifications() {
     let child_thread_id = ThreadId::new();
     app.primary_thread_id = Some(parent_thread_id);
     app.active_thread_id = Some(parent_thread_id);
+    app.agent_navigation
+        .descendant_roots
+        .insert(child_thread_id, parent_thread_id);
 
     app.handle_app_server_event(
         &app_server,
@@ -8493,11 +8500,11 @@ async fn prompt_edit_reverts_earlier_and_first_visible_prompts_in_place() -> Res
     for (kind, column) in [
         (
             crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
-            2,
+            2 + crate::transcript_geometry::GUTTER_COLUMNS,
         ),
         (
             crossterm::event::MouseEventKind::Drag(crossterm::event::MouseButton::Left),
-            8,
+            8 + crate::transcript_geometry::GUTTER_COLUMNS,
         ),
     ] {
         app.transcript_view.handle_mouse(

@@ -5,11 +5,13 @@ expression: "normalize_snapshot_paths(buffer_text(crate::custom_terminal::test_s
   Browsing · ↑↓/jk scroll · ←→/hl prompts · ctrl+t details · ↵ rewind · esc back
 ────────────────────────────────────────────────────────────────────────────────
 
-› first question
+                › first question
 
 
 
-› second question
+                › second question
+
+────────────────────────────────────────────────────────────────────────────────
 
 
 › Ask Codex to do anything

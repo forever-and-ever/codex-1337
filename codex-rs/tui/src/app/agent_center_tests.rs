@@ -208,6 +208,7 @@ async fn live_center_metadata_clips_at_grapheme_boundaries() {
 #[tokio::test]
 async fn live_center_rename_retains_target_when_status_leaves_filter() -> Result<()> {
     let mut app = make_test_app().await;
+    app.agents_overview.rendered_full_screen = true;
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     app.app_event_tx = AppEventSender::new(tx);
     let id = ThreadId::new();
@@ -586,7 +587,7 @@ async fn live_center_show_more_navigation_search_and_loading() {
         state.loading = false;
         state.refresh_failed = true;
     }
-    view.handle_key_event(KeyCode::Char('f').into());
+    view.handle_key_event(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL));
     view.handle_paste("Older task".into());
     insta::assert_snapshot!(
         "live_center_show_more_search_retry",

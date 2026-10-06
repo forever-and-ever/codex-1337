@@ -11,14 +11,17 @@ use serde_json::json;
 #[tokio::test]
 async fn displaced_tool_calls_complete_once_and_disclosure_navigation_rejoins_current_history()
 -> Result<()> {
+    use crate::history_cell::CodeModeCell;
     use crate::history_cell::ComputerActivityCell;
     use crate::history_cell::McpInvocation;
     use crate::history_cell::ToolOutputCell;
+    use codex_app_server_protocol::CodeModeOwner;
     use codex_protocol::models::FunctionCallOutputBody;
     use std::time::Duration;
 
     let mut app = make_test_app().await;
     let mut tui = crate::tui::test_support::make_test_tui()?;
+    tui.set_owned_screen(/*owned*/ true)?;
     app.transcript_cells.clear();
     let call = |id: &str, server: &str| {
         history_cell::new_active_mcp_tool_call(
@@ -33,22 +36,31 @@ async fn displaced_tool_calls_complete_once_and_disclosure_navigation_rejoins_cu
     };
     // Concurrent starts displace running calls into immutable history. Returned batches can
     // already own those calls when their completions arrive out of order.
+    let owner = CodeModeOwner {
+        thread_id: ThreadId::from_u128(/*value*/ 42),
+        exec_call_id: "outer-exec".into(),
+        cell_id: None,
+        started_at_ms: 0,
+    };
+    let mut batch = CodeModeCell::owned(owner, /*animations_enabled*/ false);
     for id in ["first", "second"] {
-        app.insert_history_cell(&mut tui, Box::new(call(id, "tools")));
+        batch.admit_children(id.into(), vec![Arc::new(call(id, "tools"))]);
+        app.insert_history_cell(&mut tui, Box::new(batch.clone()));
     }
-    app.insert_history_cell(
-        &mut tui,
-        Box::new(
+    batch.admit_children(
+        "batch".into(),
+        vec![Arc::new(
             ToolOutputCell::from_output(
                 "batch",
-                /*call_id*/ None,
+                Some("outer-exec"),
                 "exec",
                 /*namespace*/ None,
                 &FunctionCallOutputBody::Text("model-visible batch".into()),
             )
             .unwrap(),
-        ),
+        )],
     );
+    app.insert_history_cell(&mut tui, Box::new(batch.clone()));
     app.flush_native_history(&mut tui);
     assert!(tui.pending_history_lines_for_test().is_empty());
     for _ in 0..2 {
@@ -69,9 +81,18 @@ async fn displaced_tool_calls_complete_once_and_disclosure_navigation_rejoins_cu
     };
     render(&mut app);
     for (kind, column) in [
-        (MouseEventKind::Down(MouseButton::Left), 4),
-        (MouseEventKind::Drag(MouseButton::Left), 12),
-        (MouseEventKind::Up(MouseButton::Left), 12),
+        (
+            MouseEventKind::Down(MouseButton::Left),
+            4 + crate::transcript_geometry::GUTTER_COLUMNS,
+        ),
+        (
+            MouseEventKind::Drag(MouseButton::Left),
+            12 + crate::transcript_geometry::GUTTER_COLUMNS,
+        ),
+        (
+            MouseEventKind::Up(MouseButton::Left),
+            12 + crate::transcript_geometry::GUTTER_COLUMNS,
+        ),
     ] {
         app.transcript_view.handle_mouse(
             MouseEvent {
@@ -95,22 +116,41 @@ async fn displaced_tool_calls_complete_once_and_disclosure_navigation_rejoins_cu
                 meta: None,
             }),
         );
-        app.insert_history_cell(&mut tui, Box::new(completed));
+        batch.admit_children(id.into(), vec![Arc::new(completed)]);
+        app.insert_history_cell(&mut tui, Box::new(batch.clone()));
     }
     assert_eq!(app.transcript_cells.len(), 1);
     assert_eq!(
         app.transcript_cells[0].activity_ids(),
+        vec![batch.identity(), "output:tool-output-tokens:batch".into()]
+    );
+    assert_eq!(
+        batch
+            .members
+            .iter()
+            .flat_map(|cell| cell.activity_ids())
+            .collect::<Vec<_>>(),
         vec!["mcp:first", "mcp:second", "output:tool-output-tokens:batch"]
     );
     app.flush_native_history(&mut tui);
-    let native = tui
-        .pending_history_lines_for_test()
+    assert!(tui.pending_history_lines_for_test().is_empty());
+    let retained_text = app.transcript_cells[0]
+        .display_lines(/*width*/ 120)
         .iter()
-        .map(|line| line.line.to_string())
+        .map(ToString::to_string)
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(!native.contains("Calling"));
-    assert_eq!(native.matches("Called").count(), 2);
+    assert!(!retained_text.contains("Calling"));
+    assert!(
+        !batch
+            .members
+            .iter()
+            .filter_map(|cell| cell
+                .as_any()
+                .downcast_ref::<history_cell::McpToolCallCell>())
+            .any(history_cell::McpToolCallCell::is_active)
+    );
+    assert_eq!(retained_text.matches("tools.inspect").count(), 2);
     // A selection keeps its source revision, but never also displays the completion alias.
     assert_eq!(render(&mut app), selected);
     app.transcript_view.handle_key(
@@ -124,8 +164,8 @@ async fn displaced_tool_calls_complete_once_and_disclosure_navigation_rejoins_cu
         .map(ratatui::buffer::Cell::symbol)
         .collect::<String>();
     assert!(!text.contains("Calling"));
-    assert_eq!(text.matches("Called").count(), 2);
-    assert_eq!(text.matches("128 tokens").count(), 1);
+    assert_eq!(text.matches("tools.inspect").count(), 2);
+    assert_eq!(text.matches("128").count(), 1);
 
     // A flushed computer group must preserve its other running calls and its own details.
     let mut computer = ComputerActivityCell::default();
@@ -229,7 +269,7 @@ async fn text_selection_temporarily_replaces_the_rendered_backtrack_highlight() 
     let preview = (app.backtrack.base_id, app.backtrack.nth_user_message);
     let render = |app: &mut App| {
         let area = Rect::new(
-            /*x*/ 0, /*y*/ 0, /*width*/ 32, /*height*/ 12,
+            /*x*/ 0, /*y*/ 0, /*width*/ 80, /*height*/ 12,
         );
         let mut buffer = Buffer::empty(area);
         // Match the App owner's footer projection before this fixed-size overlay render.

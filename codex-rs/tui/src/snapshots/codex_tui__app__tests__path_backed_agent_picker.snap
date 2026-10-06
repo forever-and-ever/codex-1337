@@ -3,7 +3,7 @@ source: tui/src/app/tests.rs
 expression: "render_bottom_popup(&app.chat_widget, 80)"
 ---
   Subagents
-  Empty prompt: Esc → main. ⌥+← previous, ⌥+→ next.
+  Empty prompt: Esc → main. ⌥← previous, ⌥→ next.
 
 
 › 1. ? /root/worker  00000000-0000-0000-0000-000000000123

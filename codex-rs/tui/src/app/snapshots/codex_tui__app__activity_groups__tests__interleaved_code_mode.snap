@@ -18,25 +18,22 @@ expanded
 
 cell 2 collapsed
 • Interrupted (Code Mode δοτζ)
-    • Called Inspect child-b
+    • Inspect child-b
 expanded
 • Interrupted (Code Mode δοτζ)
-    • Called
-      └ cua_repl.js({"title":"Inspect child-b"})
+    • cua_repl.js({"title":"Inspect child-b"})
   Stored result · exact capture unavailable
 
 cell 3 collapsed
 • Failed (Code Mode ψγζζ)
-    • Called Inspect child-a1
-    • Called Inspect child-a2
+    • Inspect child-a1
+    • Inspect child-a2
     • Viewed image diagram.png
     • Generated Image:
 expanded
 • Failed (Code Mode ψγζζ)
-    • Called
-      └ cua_repl.js({"title":"Inspect child-a1"})
-    • Called
-      └ cua_repl.js({"title":"Inspect child-a2"})
+    • cua_repl.js({"title":"Inspect child-a1"})
+    • cua_repl.js({"title":"Inspect child-a2"})
     • Viewed image diagram.png
     • Generated Image:
         visible notify-a

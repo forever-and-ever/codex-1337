@@ -796,11 +796,12 @@ async fn metadata_only_receipt_keeps_block_disclosure_and_replay_without_a_token
         .lines()
         .position(|line| line.contains("alpha.rs"))
         .unwrap();
+    let column = painted.lines().nth(row).unwrap().find("[+]").unwrap();
     assert!(
         view.handle_mouse(
             crossterm::event::MouseEvent {
                 kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
-                column: 0,
+                column: u16::try_from(column).unwrap(),
                 row: u16::try_from(row).unwrap(),
                 modifiers: crossterm::event::KeyModifiers::NONE,
             },

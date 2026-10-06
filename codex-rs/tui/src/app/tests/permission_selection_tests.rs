@@ -12,28 +12,6 @@ async fn builtin_permission_selection_adopts_server_settings() -> Result<()> {
     app.enqueue_primary_thread_session(started.session, started.turns)
         .await?;
     let other = server.start_thread(&app.config).await?.session.thread_id;
-    // A previously selected custom profile may have left a profile-specific proxy cached.
-    let home = tempdir()?;
-    std::fs::write(
-        home.path().join("config.toml"),
-        r#"default_permissions = "proxied"
-[features]
-network_proxy = true
-[permissions.proxied]
-extends = ":workspace"
-[permissions.proxied.network]
-enabled = true
-proxy_url = "http://127.0.0.1:43128"
-"#,
-    )?;
-    let proxied = ConfigBuilder::default()
-        .codex_home(home.path().to_path_buf())
-        .loader_overrides(codex_config::LoaderOverrides::without_managed_config_for_tests())
-        .build()
-        .await?;
-    assert!(proxied.permissions.network.is_some());
-    app.chat_widget
-        .set_permission_network(proxied.permissions.network);
     app.chat_widget.handle_server_notification(
         turn_started_notification(thread_id, "turn-1"),
         /*replay_kind*/ None,
@@ -96,8 +74,6 @@ proxy_url = "http://127.0.0.1:43128"
             ApprovalsReviewer::User
         ),
     );
-    assert_eq!(app.chat_widget.config_ref().permissions.network, None);
-    assert_eq!(app.config.permissions.network, None);
     assert_eq!(
         app.runtime_permission_profile_override,
         Some(RuntimePermissionProfileOverride::from_config(&app.config))

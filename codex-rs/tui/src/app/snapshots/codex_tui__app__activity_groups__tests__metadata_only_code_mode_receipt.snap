@@ -4,7 +4,7 @@ expression: "format!(\"Collapsed\\n{}\\nBlock expanded\\n{}\\nFile expanded\\n{}
 ---
 Collapsed
 • Called (Code Mode ωρρλ)
-    • Called semedit.edit({})
+    • semedit.edit({})
         Edited
             /workspace/receipt.rs (+1, -1)
     • Edited
@@ -12,8 +12,7 @@ Collapsed
         beta.rs (+0, -1)
 Block expanded
 • Called (Code Mode ωρρλ)
-    • Called
-      └ semedit.edit({})
+    • semedit.edit({})
         Edited
             /workspace/receipt.rs (+1, -1)
     • Edited
@@ -22,8 +21,7 @@ Block expanded
   Stored result · exact capture unavailable
 File expanded
 • Called (Code Mode ωρρλ)
-    • Called
-      └ semedit.edit({})
+    • semedit.edit({})
         Edited
             /workspace/receipt.rs (+1, -1)
             1 -old
@@ -34,8 +32,7 @@ File expanded
   Stored result · exact capture unavailable
 Transcript
 • Called (Code Mode ωρρλ)
-    • Called
-      └ semedit.edit({})
+    • semedit.edit({})
         Edited
             /workspace/receipt.rs (+1, -1)
             1 -old
@@ -48,7 +45,7 @@ Transcript
   Stored result · exact capture unavailable
 Independent file 0
 • Called (Code Mode ωρρλ)
-    • Called semedit.edit({})
+    • semedit.edit({})
         Edited
             /workspace/receipt.rs (+1, -1)
             1 -old
@@ -58,7 +55,7 @@ Independent file 0
         beta.rs (+0, -1)
 Independent file 1
 • Called (Code Mode ωρρλ)
-    • Called semedit.edit({})
+    • semedit.edit({})
         Edited
             /workspace/receipt.rs (+1, -1)
     • Edited
@@ -67,7 +64,7 @@ Independent file 1
         beta.rs (+0, -1)
 Independent file 2
 • Called (Code Mode ωρρλ)
-    • Called semedit.edit({})
+    • semedit.edit({})
         Edited
             /workspace/receipt.rs (+1, -1)
     • Edited
@@ -75,19 +72,19 @@ Independent file 2
         beta.rs (+0, -1)
         1 -deleted body
 Painted collapsed
-[+] • Called (Code Mode ωρρλ)
-        • Called semedit.edit({})
-            Edited
-[+]             /workspace/receipt.rs (+1, -1)
-        • Edited
-[+]         alpha.rs (+1, -0)
-[+]         beta.rs (+0, -1)
+            [+] • Called (Code Mode ωρρλ)
+                    • semedit.edit({})
+                        Edited
+            [+]             /workspace/receipt.rs (+1, -1)
+                    • Edited
+            [+]         alpha.rs (+1, -0)
+            [+]         beta.rs (+0, -1)
 Clicked native file
-[+] • Called (Code Mode ωρρλ)
-        • Called semedit.edit({})
-            Edited
-[+]             /workspace/receipt.rs (+1, -1)
-        • Edited
-[-]         alpha.rs (+1, -0)
-            1 +created body
-[+]         beta.rs (+0, -1)
+            [+] • Called (Code Mode ωρρλ)
+                    • semedit.edit({})
+                        Edited
+            [+]             /workspace/receipt.rs (+1, -1)
+                    • Edited
+            [-]         alpha.rs (+1, -0)
+                        1 +created body
+            [+]         beta.rs (+0, -1)

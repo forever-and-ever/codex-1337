@@ -431,13 +431,18 @@ async fn fresh_startup_reads_destination_and_cleared_model_uses_catalog() -> Res
         let (mut app, _, _) = make_test_app_with_channels().await;
         app.chat_widget.handle_thread_session_quiet(started.session);
         if !remote {
-            let rendered = render_bottom_popup(&app.chat_widget, /*width*/ 80).replace(
-                &crate::status::format_directory_display(
-                    destination.path(),
-                    /*max_width*/ None,
-                ),
-                "<PROJECT>",
+            let directory = crate::status::format_directory_display(
+                destination.path(),
+                /*max_width*/ None,
             );
+            let displayed_directory =
+                crate::line_truncation::truncate_line_with_ellipsis_if_overflow(
+                    directory.into(),
+                    /*max_width*/ 59,
+                )
+                .to_string();
+            let rendered = render_bottom_popup(&app.chat_widget, /*width*/ 80)
+                .replace(&displayed_directory, "<PROJECT>");
             insta::assert_snapshot!(rendered, @"
             › Ask Codex to do anything
 

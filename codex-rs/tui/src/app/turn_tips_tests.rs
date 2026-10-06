@@ -225,10 +225,22 @@ async fn turn_tip_placements_and_completion_barrier() -> Result<()> {
         app.turn_tips.current.as_mut().unwrap().template = Some("Try /help.");
         if !working {
             deliver(&mut app, answer(thread, /*turn*/ 3));
-            deliver(
-                &mut app,
-                notification("turn/completed", thread, /*turn*/ 3, "completed"),
+            let ServerNotification::TurnCompleted(mut completed) =
+                notification("turn/completed", thread, /*turn*/ 3, "completed")
+            else {
+                unreachable!()
+            };
+            completed.turn.completed_at = Some(
+                chrono::Local::now()
+                    .date_naive()
+                    .and_hms_opt(/*hour*/ 12, /*min*/ 0, /*sec*/ 0)
+                    .unwrap()
+                    .and_local_timezone(chrono::Local)
+                    .single()
+                    .unwrap()
+                    .timestamp(),
             );
+            deliver(&mut app, ServerNotification::TurnCompleted(completed));
             app.render_owned_transcript(&mut tui, size)?;
             assert!(!app.turn_tips.current.as_ref().unwrap().shown);
         }
@@ -422,7 +434,7 @@ async fn working_tip_stays_put_through_mouse_selection() -> Result<()> {
             &mut server,
             &TuiEvent::Mouse(MouseEvent {
                 kind,
-                column,
+                column: column + crate::transcript_geometry::GUTTER_COLUMNS,
                 row: response_row,
                 modifiers: KeyModifiers::NONE,
             }),

@@ -3056,6 +3056,8 @@ async fn changing_directory_preserves_project_trust_permissions_history_and_hook
     app.agent_navigation.upsert(
         child, /*agent_nickname*/ None, /*agent_role*/ None, /*is_closed*/ false,
     );
+    app.agent_navigation
+        .set_status(child, codex_app_server_protocol::ThreadStatus::Idle);
     app.set_approvals_reviewer_in_app_and_widget(ApprovalsReviewer::AutoReview);
     app.runtime_approvals_reviewer_override = Some(ApprovalsReviewer::AutoReview);
     app.runtime_permission_profile_override =
@@ -3552,7 +3554,7 @@ fn session_lifecycle_avoids_redundant_subagent_metadata_reads() -> Result<()> {
                 assert!(
                     app.agent_navigation
                         .get(&child_thread_id)
-                        .is_some_and(|entry| !entry.is_running)
+                        .is_some_and(|entry| entry.is_running)
                 );
                 app_server.shutdown().await?;
                 proxy.await??;

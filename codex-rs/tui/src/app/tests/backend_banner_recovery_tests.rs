@@ -116,6 +116,9 @@ async fn luna_reserve_periodic_refresh_adapts_without_an_experiment_banner() -> 
             .unwrap();
         assert!(usage.headers.contains_key("x-openai-codex-luna-reserve"));
         backend.verify().await;
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(/*secs*/ 60)).await;
+        tokio::time::resume();
     }
     session.shutdown().await?;
     Ok(())

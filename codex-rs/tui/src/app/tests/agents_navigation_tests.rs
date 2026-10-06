@@ -326,6 +326,9 @@ async fn agents_navigation_escape_returns_to_main_but_preserves_drafts_and_popup
     );
     app.handle_key_event(&mut tui, &mut app_server, KeyCode::Esc.into())
         .await;
+    assert_eq!(app.current_displayed_thread_id(), Some(child_id));
+    app.select_agent_thread(&mut tui, &mut app_server, root_id)
+        .await?;
     assert_eq!(app.current_displayed_thread_id(), Some(root_id));
     assert_eq!(
         app.chat_widget.composer_text_with_pending(),

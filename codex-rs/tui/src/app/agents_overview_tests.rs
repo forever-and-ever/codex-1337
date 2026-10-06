@@ -647,6 +647,9 @@ async fn shared_overview_keeps_rows_and_replays_changes_over_stale_reads() -> Re
     .map(|(id, name)| {
         overview_thread(id, /*parent_thread_id*/ None, name, ThreadStatus::Idle)
     });
+    app.agents_overview
+        .threads
+        .insert(retained, Some(retained_thread.clone()));
     let request_id = Uuid::new_v4();
     app.agents_overview.request_id = Some(request_id);
     // The seed is still in flight and the command center has never been opened.
@@ -683,7 +686,14 @@ async fn shared_overview_keeps_rows_and_replays_changes_over_stale_reads() -> Re
     assert_eq!(
         app.agents_overview.threads,
         HashMap::from([
-            (retained, Some(retained_thread.clone())),
+            (
+                retained,
+                Some(Thread {
+                    name: Some("New name".to_string()),
+                    status: ThreadStatus::NotLoaded,
+                    ..retained_thread.clone()
+                })
+            ),
             (created, Some(created_thread.clone())),
         ])
     );
@@ -3002,6 +3012,7 @@ async fn command_center_refresh_failure_is_inline_and_clears_on_success() -> Res
 #[tokio::test]
 async fn command_center_action_failures_remain_visible() -> Result<()> {
     let mut app = Box::pin(make_test_app()).await;
+    app.agents_overview.rendered_full_screen = true;
     let mut server = Box::pin(crate::start_embedded_app_server_for_picker(&app.config)).await?;
     let mut tui = crate::tui::test_support::make_test_tui()?;
     let thread_id = ThreadId::new();

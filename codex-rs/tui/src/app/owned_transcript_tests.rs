@@ -164,7 +164,10 @@ async fn list_spacing_completion_preserves_the_scrolled_reader() -> Result<()> {
     let mut tui = crate::tui::test_support::make_test_tui()?;
     tui.set_owned_screen(/*owned*/ true)?;
     let area = Rect::new(
-        /*x*/ 0, /*y*/ 0, /*width*/ 26, /*height*/ 1,
+        /*x*/ 0,
+        /*y*/ 0,
+        /*width*/ 26 + crate::transcript_geometry::GUTTER_COLUMNS,
+        /*height*/ 1,
     );
     let mut before = Buffer::empty(area);
     app.transcript_view
@@ -573,7 +576,9 @@ async fn owned_transcript_keeps_text_out_of_the_pet_columns() -> Result<()> {
     assert!(width < size.width);
     let bottom = app.render_owned_transcript(&mut tui, size)?;
     let buffer = crate::custom_terminal::test_support::last_rendered_buffer(&tui.terminal);
-    assert!(buffer_text(buffer).contains(&"x".repeat(/*n*/ 60)));
+    assert!(buffer_text(buffer).contains(&"x".repeat(usize::from(
+        crate::transcript_geometry::content_width(width, history_cell::HistoryRenderMode::Rich),
+    ))));
     // The screen header and separator span the terminal; only transcript text
     // reserves the pet columns.
     for y in 2..bottom.y {
@@ -1240,7 +1245,7 @@ async fn double_escape_browses_prompts_without_reverting_and_explains_editing() 
     let mut server = Box::pin(crate::start_embedded_app_server_for_picker(&app.config)).await?;
     let mut tui = crate::tui::test_support::make_test_tui()?;
     tui.set_owned_screen(/*owned*/ true)?;
-    let size = Size::new(/*width*/ 80, /*height*/ 16);
+    let size = Size::new(/*width*/ 80, /*height*/ 18);
     app.render_owned_transcript(&mut tui, size)?;
     for code in [KeyCode::Esc, KeyCode::Esc] {
         app.handle_tui_event(&mut tui, &mut server, TuiEvent::Key(KeyEvent::from(code)))

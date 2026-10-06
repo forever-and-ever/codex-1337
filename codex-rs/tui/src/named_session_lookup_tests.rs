@@ -278,20 +278,22 @@ async fn rejects_duplicate_labels_across_server_pages() -> color_eyre::Result<()
         if matches!(index, 0 | 1 | 101) {
             relevant_ids.push(thread_id);
         }
-        let rollout_path = write_rollout(
-            &config,
-            thread_id,
-            "2025-02-01T10:00:00Z",
-            "preview text",
-            SessionSource::Cli,
-            ThreadHistoryMode::Legacy,
-        )?;
         let name = if index == 0 || index == 101 {
             "same-label".to_string()
         } else {
             format!("other-{index}")
         };
+        let rollout_path = write_rollout(
+            &config,
+            thread_id,
+            "2025-02-01T10:00:00Z",
+            &name,
+            SessionSource::Cli,
+            ThreadHistoryMode::Legacy,
+        )?;
         let mut metadata = thread_metadata(&config, thread_id, rollout_path, &name);
+        metadata.first_user_message = Some(name);
+        metadata.preview = metadata.first_user_message.clone();
         metadata.recency_at += chrono::Duration::seconds(index);
         metadata.updated_at += chrono::Duration::seconds(index);
         upsert_thread(&runtime, metadata).await?;
@@ -353,11 +355,10 @@ async fn skips_stale_listed_thread_before_valid_label() -> color_eyre::Result<()
         SessionSource::Cli,
         ThreadHistoryMode::Legacy,
     )?;
-    upsert_thread(
-        &runtime,
-        thread_metadata(&config, stale_id, stale_path.clone(), "same-label"),
-    )
-    .await?;
+    let mut metadata = thread_metadata(&config, stale_id, stale_path.clone(), "same-label");
+    metadata.first_user_message = Some("same-label".to_string());
+    metadata.preview = metadata.first_user_message.clone();
+    upsert_thread(&runtime, metadata).await?;
     std::fs::remove_file(stale_path)?;
 
     let corrupt_id = ThreadId::new();
@@ -369,11 +370,10 @@ async fn skips_stale_listed_thread_before_valid_label() -> color_eyre::Result<()
         SessionSource::Cli,
         ThreadHistoryMode::Legacy,
     )?;
-    upsert_thread(
-        &runtime,
-        thread_metadata(&config, corrupt_id, corrupt_path.clone(), "same-label"),
-    )
-    .await?;
+    let mut metadata = thread_metadata(&config, corrupt_id, corrupt_path.clone(), "same-label");
+    metadata.first_user_message = Some("same-label".to_string());
+    metadata.preview = metadata.first_user_message.clone();
+    upsert_thread(&runtime, metadata).await?;
     std::fs::write(corrupt_path, "invalid session header\n")?;
 
     let valid_id = ThreadId::new();
@@ -385,17 +385,15 @@ async fn skips_stale_listed_thread_before_valid_label() -> color_eyre::Result<()
         SessionSource::Cli,
         ThreadHistoryMode::Legacy,
     )?;
-    upsert_thread(
-        &runtime,
-        thread_metadata(&config, valid_id, valid_path.clone(), "same-label"),
-    )
-    .await?;
+    let mut metadata = thread_metadata(&config, valid_id, valid_path.clone(), "same-label");
+    metadata.first_user_message = Some("same-label".to_string());
+    metadata.preview = metadata.first_user_message.clone();
+    upsert_thread(&runtime, metadata).await?;
     let wrong_id = ThreadId::new();
-    upsert_thread(
-        &runtime,
-        thread_metadata(&config, wrong_id, valid_path, "same-label"),
-    )
-    .await?;
+    let mut metadata = thread_metadata(&config, wrong_id, valid_path, "same-label");
+    metadata.first_user_message = Some("same-label".to_string());
+    metadata.preview = metadata.first_user_message.clone();
+    upsert_thread(&runtime, metadata).await?;
 
     let found = lookup_name(
         &config,
