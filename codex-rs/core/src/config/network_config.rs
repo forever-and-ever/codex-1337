@@ -60,6 +60,7 @@ pub fn validate_environment_network_policy(
     permission_profile: &PermissionProfile,
     executor_os: Platform,
 ) -> Result<(), EnvironmentNetworkConfigError> {
+    let _ = executor_os;
     NetworkProxySpec::for_environment(
         /*controller*/ None,
         policy,
@@ -67,7 +68,7 @@ pub fn validate_environment_network_policy(
         &Policy::empty(),
         codex_network_proxy::LocalBindingPolicy::DefaultFalse,
     )
-    .and_then(|spec| spec.build_config_state_for_spec(executor_os).map(|_| ()))
+    .map(|_| ())
     .map_err(|_| EnvironmentNetworkConfigError)
 }
 

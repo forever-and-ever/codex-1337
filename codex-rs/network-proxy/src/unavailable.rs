@@ -2,7 +2,6 @@
 
 use crate::config;
 use crate::network_policy::NetworkPolicyDecider;
-use crate::runtime::BlockedRequestObserver;
 use crate::runtime::ConfigState;
 use crate::runtime::NetworkProxyState;
 use anyhow::Result;
@@ -35,16 +34,6 @@ impl NetworkProxyBuilder {
         self
     }
 
-    pub fn http_addr(self, addr: SocketAddr) -> Self {
-        let _ = addr;
-        self
-    }
-
-    pub fn socks_addr(self, addr: SocketAddr) -> Self {
-        let _ = addr;
-        self
-    }
-
     pub fn managed_by_codex(self, managed_by_codex: bool) -> Self {
         let _ = managed_by_codex;
         self
@@ -55,29 +44,8 @@ impl NetworkProxyBuilder {
         self
     }
 
-    pub fn policy_decider<D>(self, decider: D) -> Self
-    where
-        D: NetworkPolicyDecider,
-    {
-        let _ = decider;
-        self
-    }
-
     pub fn policy_decider_arc(self, decider: Arc<dyn NetworkPolicyDecider>) -> Self {
         let _ = decider;
-        self
-    }
-
-    pub fn blocked_request_observer<O>(self, observer: O) -> Self
-    where
-        O: BlockedRequestObserver,
-    {
-        let _ = observer;
-        self
-    }
-
-    pub fn blocked_request_observer_arc(self, observer: Arc<dyn BlockedRequestObserver>) -> Self {
-        let _ = observer;
         self
     }
 
