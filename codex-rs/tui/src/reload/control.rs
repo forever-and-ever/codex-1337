@@ -118,7 +118,14 @@ pub(super) async fn listen(
 }
 
 pub(super) async fn request(directory: &Path, envelope: Envelope) -> io::Result<Response> {
-    let mut stream = UnixStream::connect(directory.join("control.sock")).await?;
+    let path = directory.join("control.sock");
+    let mut stream = UnixStream::connect(&path).await.map_err(|error| {
+        let path = path.display();
+        io::Error::new(
+            error.kind(),
+            format!("Failed to connect to the live-reload host socket {path}: {error}"),
+        )
+    })?;
     write(&mut stream, &envelope).await?;
     read(&mut stream).await
 }

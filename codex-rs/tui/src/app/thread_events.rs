@@ -376,11 +376,15 @@ impl ThreadEventStore {
                     | ThreadBufferedEvent::FarmReceipt { .. } => true,
                 })
                 .cloned()
-                .chain(self.unresolved_requests.iter().filter_map(|request| {
-                    self.pending_interactive_replay
-                        .should_replay_snapshot_request(request)
-                        .then(|| ThreadBufferedEvent::Request(Box::new(request.clone())))
-                }))
+                .chain(
+                    self.unresolved_requests
+                        .iter()
+                        .filter(|&request| {
+                            self.pending_interactive_replay
+                                .should_replay_snapshot_request(request)
+                        })
+                        .map(|request| ThreadBufferedEvent::Request(Box::new(request.clone()))),
+                )
                 .collect(),
             active_reasoning_item: self.active_reasoning_item.clone(),
             input_state: self.input_state.clone(),

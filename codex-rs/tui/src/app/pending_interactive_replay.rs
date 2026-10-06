@@ -456,7 +456,6 @@ impl PendingInteractiveReplayState {
             }
         }
     }
-
 }
 
 #[cfg(test)]

@@ -89,7 +89,7 @@ impl App {
                                 params: ThreadQueueListParams {
                                     thread_id: thread_id.to_string(),
                                     cursor: None,
-                                    limit: Some(100),
+                                    limit: Some(codex_state::MAX_QUEUE_ITEMS as u32),
                                 },
                             },
                         ),
@@ -170,16 +170,10 @@ impl App {
                             .map(|response| response.deleted)
                             .map_err(|error| error.to_string())
                     });
-                    events.send(AppEvent::Queue(QueueEvent::Removed {
-                        thread_id,
-                        result,
-                    }));
+                    events.send(AppEvent::Queue(QueueEvent::Removed { thread_id, result }));
                 });
             }
-            QueueEvent::Removed {
-                thread_id,
-                result,
-            } => {
+            QueueEvent::Removed { thread_id, result } => {
                 let Some(QueueMutation { item, action }) =
                     self.queued_messages.mutations.remove(&thread_id)
                 else {
@@ -206,7 +200,11 @@ impl App {
         }
     }
 
-    pub(super) async fn restore_queued_edit(&mut self, thread_id: ThreadId, item: QueuedSubmission) {
+    pub(super) async fn restore_queued_edit(
+        &mut self,
+        thread_id: ThreadId,
+        item: QueuedSubmission,
+    ) {
         let Some(text) = queued_message_text(&item) else {
             return;
         };

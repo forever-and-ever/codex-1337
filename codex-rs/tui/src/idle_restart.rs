@@ -127,37 +127,31 @@ impl IdleRestart {
         // Older bundles do not understand the handoff: never replay their original
         // command line. Probe before touching terminal state, once per candidate.
         let expected = format!("{IDLE_RESTART_PROTOCOL}\n");
-        let result = tokio::time::timeout(
-            Duration::from_secs(/*secs*/ 2),
-            async {
-                let mut child = tokio::process::Command::new(&candidate)
-                    .args(["debug", "tui-restart-probe"])
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::null())
-                    .kill_on_drop(true)
-                    .spawn()?;
-                let mut stdout = Vec::new();
-                child
-                    .stdout
-                    .take()
-                    .ok_or_else(|| io::Error::from(io::ErrorKind::BrokenPipe))?
-                    .take(expected.len() as u64)
-                    .read_to_end(&mut stdout)
-                    .await?;
-                Ok::<_, io::Error>(std::process::Output {
-                    status: child.wait().await?,
-                    stdout,
-                    stderr: Vec::new(),
-                })
-            },
-        )
+        let result = tokio::time::timeout(Duration::from_secs(/*secs*/ 2), async {
+            let mut child = tokio::process::Command::new(&candidate)
+                .args(["debug", "tui-restart-probe"])
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .kill_on_drop(true)
+                .spawn()?;
+            let mut stdout = Vec::new();
+            child
+                .stdout
+                .take()
+                .ok_or_else(|| io::Error::from(io::ErrorKind::BrokenPipe))?
+                .take(expected.len() as u64)
+                .read_to_end(&mut stdout)
+                .await?;
+            Ok::<_, io::Error>(std::process::Output {
+                status: child.wait().await?,
+                stdout,
+                stderr: Vec::new(),
+            })
+        })
         .await;
         match result {
-            Ok(Ok(output))
-                if output.status.success()
-                    && output.stdout == expected.as_bytes() =>
-            {
+            Ok(Ok(output)) if output.status.success() && output.stdout == expected.as_bytes() => {
                 Some(candidate)
             }
             Ok(Ok(_)) => {

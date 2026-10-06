@@ -8,6 +8,7 @@ use codex_app_server_client::RemoteAppServerEndpoint;
 use codex_protocol::ThreadId;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use std::io;
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::sync::OnceLock;
@@ -60,13 +61,11 @@ pub async fn initialize(cli: &mut Cli) -> io::Result<()> {
         .and_then(|value| value.parse().ok())
         .ok_or_else(|| io::Error::other("Missing UI generation"))?;
     let directory = PathBuf::from(directory);
-    let response = control::request(
+    let response = request_at(
         &directory,
-        control::Envelope {
-            generation,
-            request: control::Request::Hello {
-                protocol: PROTOCOL.into(),
-            },
+        generation,
+        control::Request::Hello {
+            protocol: PROTOCOL.into(),
         },
     )
     .await?;
@@ -181,12 +180,20 @@ async fn request(request: control::Request) -> io::Result<control::Response> {
     let worker = WORKER.get().ok_or_else(|| {
         io::Error::other("This TUI has no reload host; restart once to enable /reload")
     })?;
+    request_at(&worker.directory, worker.generation, request).await
+}
+
+async fn request_at(
+    directory: &Path,
+    generation: u64,
+    request: control::Request,
+) -> io::Result<control::Response> {
     tokio::time::timeout(
         std::time::Duration::from_secs(/*secs*/ 6),
         control::request(
-            &worker.directory,
+            directory,
             control::Envelope {
-                generation: worker.generation,
+                generation,
                 request,
             },
         ),

@@ -6,7 +6,12 @@ use pretty_assertions::assert_eq;
 #[test]
 fn pending_approval_survives_transcript_eviction() {
     let mut store = ThreadEventStore::new(/*capacity*/ 1);
-    let request = exec_approval_request(ThreadId::new(), "turn-1", "call-1", /*approval_id*/ None);
+    let request = exec_approval_request(
+        ThreadId::new(),
+        "turn-1",
+        "call-1",
+        /*approval_id*/ None,
+    );
     let history = HistoryLookupResponse::Entry {
         offset: 0,
         log_id: 1,
@@ -17,8 +22,12 @@ fn pending_approval_survives_transcript_eviction() {
     assert_eq!(store.pending_replay_requests(), vec![request.clone()]);
     let events = store.snapshot().events;
     assert_eq!(events.len(), 2);
-    assert!(matches!(&events[0], ThreadBufferedEvent::HistoryEntryResponse(actual) if actual == &history));
-    assert!(matches!(&events[1], ThreadBufferedEvent::Request(actual) if actual.as_ref() == &request));
+    assert!(
+        matches!(&events[0], ThreadBufferedEvent::HistoryEntryResponse(actual) if actual == &history)
+    );
+    assert!(
+        matches!(&events[1], ThreadBufferedEvent::Request(actual) if actual.as_ref() == &request)
+    );
 }
 
 #[tokio::test]

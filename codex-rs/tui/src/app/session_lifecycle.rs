@@ -162,19 +162,33 @@ impl App {
             .and_then(|index| self.agent_navigation.picker_order.get(index).copied())
             .or(self.active_thread_id);
         let mut threads = self.agent_navigation.ordered_threads();
-        threads.sort_by_key(|(id, _)| {
-            let status = self.agent_navigation.status(*id);
-            (
-                matches!(
-                    status,
-                    Some(codex_app_server_protocol::ThreadStatus::NotLoaded)
-                ),
-                !matches!(
-                    status,
-                    Some(codex_app_server_protocol::ThreadStatus::Active { .. })
-                ),
-            )
-        });
+        if self
+            .chat_widget
+            .selected_index_for_present_view(AGENT_PICKER_VIEW_ID)
+            .is_some()
+        {
+            threads.sort_by_key(|(id, _)| {
+                self.agent_navigation
+                    .picker_order
+                    .iter()
+                    .position(|thread_id| thread_id == id)
+                    .unwrap_or(usize::MAX)
+            });
+        } else {
+            threads.sort_by_key(|(id, _)| {
+                let status = self.agent_navigation.status(*id);
+                (
+                    matches!(
+                        status,
+                        Some(codex_app_server_protocol::ThreadStatus::NotLoaded)
+                    ),
+                    !matches!(
+                        status,
+                        Some(codex_app_server_protocol::ThreadStatus::Active { .. })
+                    ),
+                )
+            });
+        }
         let picker_order = threads.iter().map(|(id, _)| *id).collect();
         let mut initial_selected_idx = None;
         let items: Vec<SelectionItem> = threads
