@@ -257,12 +257,16 @@ When UI or text output changes intentionally, update the snapshots as follows:
 
 - Run the relevant snapshot test or narrow filter, not the whole TUI suite:
   - `just test -p codex-tui <relevant_test_filter>`
+- Only `cargo insta test` accepts `-p`; the other subcommands select the crate with
+  `--manifest-path` (paths below are relative to `codex-rs`).
 - Check what’s pending:
-  - `cargo insta pending-snapshots -p codex-tui`
+  - `cargo insta pending-snapshots --manifest-path tui/Cargo.toml`
 - Review changes by reading the generated `*.snap.new` files directly in the repo, or preview a specific file:
-  - `cargo insta show -p codex-tui path/to/file.snap.new`
+  - `cargo insta show path/to/file.snap.new`
+- Accept one reviewed snapshot:
+  - `cargo insta accept --manifest-path tui/Cargo.toml --snapshot <snapshot-file-name>`
 - Only if you intend to accept all new snapshots in this crate, run:
-  - `cargo insta accept -p codex-tui`
+  - `cargo insta accept --manifest-path tui/Cargo.toml`
 
 If you don’t have the tool:
 
