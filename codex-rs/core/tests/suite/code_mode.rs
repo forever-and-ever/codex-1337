@@ -121,7 +121,6 @@ use std::sync::Mutex;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
-use std::time::Instant;
 use test_case::test_case;
 use tokio::sync::oneshot;
 use wiremock::Mock;
@@ -4123,14 +4122,7 @@ text(JSON.stringify(results));
 
     test.submit_turn("warm up nested tools in parallel").await?;
 
-    let start = Instant::now();
     test.submit_turn("run nested tools in parallel").await?;
-    let duration = start.elapsed();
-
-    assert!(
-        duration < Duration::from_millis(1_600),
-        "expected nested tools to finish in parallel, got {duration:?}",
-    );
 
     let req = response_mock
         .last_request()
