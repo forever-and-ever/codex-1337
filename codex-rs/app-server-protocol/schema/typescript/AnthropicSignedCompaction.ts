@@ -5,7 +5,7 @@
 /**
  * An exact Anthropic summary/signature pair. Reject oversized blocks rather
  * than truncate either signed field. Only the content is visible to the model.
- * The owned summarization request caps output at 4096 provider tokens; this
- * decoded-byte bound is an additional resource limit, not a tokenizer claim.
+ * The request's generation budget includes internal thinking. The decoded-byte
+ * bound limits the retained summary independently; it is not a tokenizer claim.
  */
 export type AnthropicSignedCompaction = { content: string, signature: string, };

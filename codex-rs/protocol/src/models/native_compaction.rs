@@ -12,8 +12,8 @@ pub enum NativeCompaction {
 
 /// An exact Anthropic summary/signature pair. Reject oversized blocks rather
 /// than truncate either signed field. Only the content is visible to the model.
-/// The owned summarization request caps output at 4096 provider tokens; this
-/// decoded-byte bound is an additional resource limit, not a tokenizer claim.
+/// The request's generation budget includes internal thinking. The decoded-byte
+/// bound limits the retained summary independently; it is not a tokenizer claim.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(try_from = "AnthropicSignedCompactionWire")]
 pub struct AnthropicSignedCompaction {
@@ -45,9 +45,9 @@ impl TryFrom<AnthropicSignedCompactionWire> for AnthropicSignedCompaction {
 }
 
 impl AnthropicSignedCompaction {
-    /// Output-token ceiling for the owned signed-summary request.
+    /// Generation-token ceiling, including thinking before the signed summary.
     pub const MAX_OUTPUT_TOKENS: std::num::NonZeroU32 =
-        std::num::NonZeroU32::new(/*n*/ 4_096).unwrap();
+        std::num::NonZeroU32::new(/*n*/ 32_768).unwrap();
 
     pub fn content(&self) -> &str {
         &self.content
