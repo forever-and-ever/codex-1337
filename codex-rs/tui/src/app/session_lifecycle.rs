@@ -1532,13 +1532,15 @@ impl App {
             .await
         {
             Ok(()) => {
-                if self
-                    .runtime_permission_profile_override
-                    .as_ref()
-                    .is_some_and(|profile| {
-                        profile.turn_override == RuntimePermissionProfileTurnOverride::LegacySandbox
-                            && profile.matches_config(self.chat_widget.config_ref())
-                    })
+                if !read_only
+                    && self
+                        .runtime_permission_profile_override
+                        .as_ref()
+                        .is_some_and(|profile| {
+                            profile.turn_override
+                                == RuntimePermissionProfileTurnOverride::LegacySandbox
+                                && profile.matches_config(self.chat_widget.config_ref())
+                        })
                 {
                     self.runtime_permission_profile_override =
                         Some(RuntimePermissionProfileOverride::from_restored_config(
