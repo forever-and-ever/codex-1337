@@ -19,6 +19,8 @@ use codex_protocol::ThreadId;
 use codex_protocol::mcp::ClientMcpExtensions;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
+use codex_protocol::openai_models::AnthropicModelCapabilities;
+use codex_protocol::openai_models::AnthropicThinkingMode;
 use codex_protocol::protocol::CodexErrorInfo;
 use codex_protocol::protocol::ConversationAudioParams;
 use codex_protocol::protocol::ConversationStartParams;
@@ -108,6 +110,16 @@ async fn claude_realtime_rejection_precedes_auth_and_transport_dispatch(
     let ws_url = realtime.uri().to_string();
     let mut builder = test_codex()
         .with_auth(CodexAuth::from_api_key("stored-openai-key"))
+        .with_model_info_override("claude-test", |model| {
+            model.anthropic = Some(AnthropicModelCapabilities {
+                thinking: AnthropicThinkingMode::Disabled,
+                max_output_tokens: 1024_u32
+                    .try_into()
+                    .expect("fixture output limit is nonzero"),
+                supported_efforts: Vec::new(),
+                supports_structured_outputs: false,
+            });
+        })
         .with_config(move |config| {
             config.model_provider.adapter =
                 codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription;

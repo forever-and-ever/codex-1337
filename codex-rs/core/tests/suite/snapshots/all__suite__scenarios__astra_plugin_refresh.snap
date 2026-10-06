@@ -16,8 +16,8 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (turn) --
-00:additional_tools/developer (3; hash=510e3d95189579a3):
-        - namespace/functions; hash=7826de9b3720577c
+00:additional_tools/developer (3; hash=c732f2ef9f51b20d):
+        - namespace/functions; hash=686c31427169ac93
           - custom/exec
           - function/wait
           - function/update_work_status
@@ -27,7 +27,7 @@ Settings:
           - function/retire_agent
         - namespace/clock: Tools for reading and waiting on time.; hash=f402e8c5e9b5e317
           - function/sleep
-        - namespace/wrangler_agents: Tools for spawning and managing sub-agents.; hash=8485fd9eebd191e4
+        - namespace/wrangler_agents: Tools for spawning and managing sub-agents.; hash=c77608f7f86df88f
           - function/followup_task
           - function/interrupt_agent
           - function/list_agents
@@ -82,7 +82,7 @@ Settings:
 
     You can use `spawn_agent` to create a new agent, `followup_task` to give an existing agent a new task an...message to a running agent without triggering a turn. [hash=7d40ff8b58977202]
     `send_message` calls may be read by a human, so ensure they are legible. Always put proper spaces between words and/or numbers.
-    <OMITTED 17 LINES; ~246 TOKENS; hash=780031e2df907944>
+    <OMITTED 17 LINES; ~217 TOKENS; hash=67d1240cb0fdba73>
     - All agents use the same current working directory.
     - As a result, edits made by one agent are immediately visible to all other agents.
 
@@ -106,15 +106,14 @@ Settings:
 -- request 2 (turn) --
 07:custom_tool_call/exec:text(ALL_TOOLS.filter(({ name }) => name === "mcp__notes__echo").map(({ name }) => name));
 08:custom_tool_call_output:Script completed
-    Wall time <DURATION> seconds
     Output:
      | []
 
 ## Window 2 (after request 2: input diverged at item 00)
 Settings: same as window 1
 -- request 3 (turn) --
-00:additional_tools/developer (3; hash=536102b7b0ab180d):
-        - namespace/functions; hash=a6e9d3a7067be032
+00:additional_tools/developer (3; hash=d2a2cf57d02b57f1):
+        - namespace/functions; hash=0ddcea9bade8053f
           - custom/exec
           - function/wait
           - function/update_work_status
@@ -124,7 +123,7 @@ Settings: same as window 1
           - function/retire_agent
         - namespace/clock: Tools for reading and waiting on time.; hash=f402e8c5e9b5e317
           - function/sleep
-        - namespace/wrangler_agents: Tools for spawning and managing sub-agents.; hash=8485fd9eebd191e4
+        - namespace/wrangler_agents: Tools for spawning and managing sub-agents.; hash=c77608f7f86df88f
           - function/followup_task
           - function/interrupt_agent
           - function/list_agents
@@ -179,7 +178,7 @@ Settings: same as window 1
 
     You can use `spawn_agent` to create a new agent, `followup_task` to give an existing agent a new task an...message to a running agent without triggering a turn. [hash=7d40ff8b58977202]
     `send_message` calls may be read by a human, so ensure they are legible. Always put proper spaces between words and/or numbers.
-    <OMITTED 17 LINES; ~246 TOKENS; hash=780031e2df907944>
+    <OMITTED 17 LINES; ~217 TOKENS; hash=67d1240cb0fdba73>
     - All agents use the same current working directory.
     - As a result, edits made by one agent are immediately visible to all other agents.
 
@@ -202,7 +201,6 @@ Settings: same as window 1
     Check whether the Notes plugin echo tool is available.
 07:custom_tool_call/exec:text(ALL_TOOLS.filter(({ name }) => name === "mcp__notes__echo").map(({ name }) => name));
 08:custom_tool_call_output:Script completed
-    Wall time <DURATION> seconds
     Output:
      | []
 09:message/assistant:
@@ -238,13 +236,11 @@ Settings: same as window 1
 -- request 4 (turn) --
 14:custom_tool_call/exec:text(ALL_TOOLS.filter(({ name }) => name === "mcp__notes__echo").map(({ name }) => name));
 15:custom_tool_call_output:Script completed
-    Wall time <DURATION> seconds
     Output:
      | ["mcp__notes__echo"]
 -- request 5 (turn) --
 16:custom_tool_call/exec:const result = await tools.mcp__notes__echo({ message: "Mira owns the kickoff" }); text(result.structuredContent?.echo);
 17:custom_tool_call_output:Script completed
-    Wall time <DURATION> seconds
     Output:
      | ECHOING: Mira owns the kickoff
 -- request 6 (turn) --
@@ -255,6 +251,5 @@ Settings: same as window 1
 -- request 7 (turn) --
 20:custom_tool_call/exec:const result = await tools.mcp__notes__echo({ message: "The kickoff is Friday" }); text(result.structuredContent?.echo);
 21:custom_tool_call_output:Script completed
-    Wall time <DURATION> seconds
     Output:
      | ECHOING: The kickoff is Friday

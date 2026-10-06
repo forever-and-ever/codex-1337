@@ -2250,8 +2250,8 @@ async fn tool_messages_follow_mid_turn_model_changes() -> Result<()> {
         "list_agents",
     ];
 
-    let parameters = |model: &str| {
-        json!({
+    let parameters = |name: &str, model: &str| {
+        let mut parameters = json!({
             "type": "object",
             "properties": {
                 "target": {"type": "string", "description": format!("Agent on {model}.")},
@@ -2259,7 +2259,17 @@ async fn tool_messages_follow_mid_turn_model_changes() -> Result<()> {
             },
             "required": ["target"],
             "additionalProperties": false,
-        })
+        });
+        if matches!(name, "spawn_agent" | "send_message" | "followup_task") {
+            parameters["properties"]["plaintext_message"] = json!({"type": "string"});
+            parameters["oneOf"] =
+                json!([{"required": ["message"]}, {"required": ["plaintext_message"]}]);
+            if name == "spawn_agent" {
+                parameters["properties"]["task_name"] = parameters["properties"]["target"].clone();
+                parameters["required"] = json!(["task_name"]);
+            }
+        }
+        parameters
     };
     let wait_parameters = |model: &str| {
         json!({
@@ -2324,7 +2334,7 @@ async fn tool_messages_follow_mid_turn_model_changes() -> Result<()> {
                 let tool_message = |name| {
                     Some(ToolMessage {
                         description: Some(format!("{name} description for {}.", model.slug)),
-                        parameters: Some(parameters(&model.slug).to_string()),
+                        parameters: Some(parameters(name, &model.slug).to_string()),
                     })
                 };
                 model
@@ -2420,13 +2430,29 @@ async fn tool_messages_follow_mid_turn_model_changes() -> Result<()> {
                 "multi_agent_messages": MULTI_AGENT_TOOLS
                     .map(|name| (name.to_string(), json!({
                         "description": format!("{name} description for {model}."),
-                        "parameters": parameters(model),
+                        "parameters": parameters(name, model),
                     })))
                     .into_iter()
                     .collect::<serde_json::Map<String, Value>>(),
                 "channel_post_description": format!("post description for {model}."),
                 "channel_post_required": ["text"],
-                "exec_description": format!("Exec description for {model}."),
+                "exec_description": codex_code_mode::build_exec_tool_description(
+                    &[],
+                    &[],
+                    &Default::default(),
+                    test.config.code_mode.default_exec_yield_time_ms,
+                    test.config.model_catalog.as_ref().unwrap().models.iter()
+                        .find(|info| info.slug == model).unwrap().tool_mode
+                        == Some(codex_protocol::openai_models::ToolMode::CodeModeOnly),
+                    codex_code_mode::ImageDetailVisibility::Visible,
+                    Some(&CodeModeToolMessages {
+                        exec: Some(ToolMessage {
+                            description: Some(format!("Exec description for {model}.")),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }),
+                ),
                 "wait_description": format!("Wait description for {model}."),
                 "wait_parameters": wait_parameters(model),
             }))
@@ -2813,18 +2839,29 @@ async fn captured_step_controls_exec_completion_and_write_stdin_output() -> Resu
         .expect("exec output");
     // The response budget also reserves space for command metadata and truncation notices.
     assert_eq!(exec.matches("chars truncated").count(), 1, "{exec}");
-    assert!(
-        (15..30).contains(&exec.matches("abcdefghij").count()),
-        "{exec}"
-    );
     let stdin = requests[4]
         .function_call_output_text("stdin-c")
         .expect("stdin output");
     assert_eq!(stdin.matches("chars truncated").count(), 1, "{stdin}");
-    assert!(
-        (60..85).contains(&stdin.matches("abcdefghij").count()),
-        "{stdin}"
-    );
+    for (response, limit) in [(exec, 400), (stdin, 800)] {
+        let (header, actual) = response.split_once('\n').expect("exec output");
+        let output_budget = codex_utils_output_truncation::with_serialization_allowance(
+            TruncationPolicy::Bytes(limit),
+        )
+        .byte_budget()
+        .saturating_sub(header.len() + 1);
+        let mut policy = TruncationPolicy::Bytes(limit);
+        let mut expected = formatted_truncate_text(&output, policy);
+        while expected.len() > output_budget && policy.byte_budget() > 0 {
+            policy = TruncationPolicy::Bytes(
+                policy
+                    .byte_budget()
+                    .saturating_sub(expected.len() - output_budget),
+            );
+            expected = formatted_truncate_text(&output, policy);
+        }
+        assert_eq!(actual, expected);
+    }
     assert_eq!(end.exit_code, 7);
     // The formatting check needs an untruncated chunk, independent of how the executor
     // aggregates output across the initial command and later stdin interactions.

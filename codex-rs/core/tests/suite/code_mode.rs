@@ -1019,10 +1019,10 @@ pub(super) async fn mcp_schema_max_bytes_scenario() -> Result<Vec<ResponsesReque
     wait_for_mcp_server(&test.codex, "expanded_schema").await?;
     let lookup = r#"
 const results = ["default_schema", "expanded_schema"].map(server => {
-  const description = ALL_TOOLS.find(({name}) => name === `mcp__${server}__search`)?.description ?? "";
+  const description = describe_tool(`mcp__${server}__search`);
   return [description.includes("budget_description_marker"), description.includes("query: string;")];
 });
-const shared = ALL_TOOLS.find(({name}) => name === "mcp__default_schema__shared")?.description ?? "";
+const shared = describe_tool("mcp__default_schema__shared");
 results.push([shared.includes("code_mode_description_marker"), shared.includes("term: string;")]);
 text(JSON.stringify(results));"#;
     let responses = responses::mount_sse_sequence(
@@ -2255,7 +2255,10 @@ async fn direct_result_metadata_retained_budget_preserves_resource_access() -> R
         for call_id in expected_calls {
             let output = request.function_call_output(call_id);
             assert_eq!(
-                &output["output"].as_array().expect("direct output content")[1..],
+                output["output"]
+                    .as_array()
+                    .expect("direct output content")
+                    .as_slice(),
                 &[serde_json::json!({
                     "type": "input_text",
                     "text": RESULT_METADATA_PRIVATE_RESULT,
@@ -2467,7 +2470,10 @@ async fn result_metadata_preserves_results_within_request_budget(
         for call_id in call_ids {
             let output = request.function_call_output(call_id);
             assert_eq!(
-                &output["output"].as_array().expect("direct output content")[1..],
+                output["output"]
+                    .as_array()
+                    .expect("direct output content")
+                    .as_slice(),
                 &[serde_json::json!({
                     "type": "input_text",
                     "text": RESULT_METADATA_PRIVATE_RESULT,
@@ -3529,7 +3535,7 @@ text("pressure ready");"#,
     };
     let initial = output_for(/*request_index*/ 1, "call-empty");
     assert_eq!(
-        extract_running_cell_id(initial["output"].as_str().unwrap()),
+        extract_running_cell_id(initial["output"][0]["text"].as_str().unwrap()),
         "1",
     );
     assert!(
@@ -3723,7 +3729,7 @@ if (!tool) {
             })
         })
         .expect("exec description should be present");
-    assert!(exec_description.contains("filter `ALL_TOOLS` by `name` and `description`"));
+    assert!(exec_description.contains("search_tools"));
     assert!(exec_description.contains("Shared MCP Types:"));
     assert!(!exec_description.contains("calendar_timezone_option_99"));
 
@@ -4933,8 +4939,10 @@ text((await tools.exec_command({{cmd: "printf 'phase 3'"}})).output);
     let batches = rollout
         .iter()
         .filter_map(|item| match item {
-            codex_rollout::RolloutItem::EventMsg(EventMsg::ItemCompleted(event)) => {
-                if let codex_protocol::items::TurnItem::FunctionCallOutput(item) = &event.item {
+            codex_rollout::RolloutItem::EventMsg(event) => {
+                if let EventMsg::ItemCompleted(event) = event.native_event()
+                    && let codex_protocol::items::TurnItem::FunctionCallOutput(item) = &event.item
+                {
                     Some(item)
                 } else {
                     None
@@ -6693,7 +6701,13 @@ image({{
             .contains("`image(imageUrlOrItem: string | { image_url: string } | ImageContent)`")
     );
     assert!(!exec_description.contains("codex/imageDetail"));
-    assert!(!exec_description.contains("detail?:"));
+    assert!(
+        !exec_description
+            .lines()
+            .find(|line| line.contains("`image("))
+            .unwrap()
+            .contains("detail?:")
+    );
 
     Ok(())
 }
@@ -7987,7 +8001,7 @@ text(JSON.stringify({
         exec_output,
         serde_json::json!({
             "name": "editor__apply_patch",
-            "description": format!("Editing tools.\n\n{second_description}"),
+            "description": second_description.split("\n\n").next().unwrap(),
             "result": {
                 "namespace": "editor",
                 "name": "apply_patch",
@@ -8094,7 +8108,7 @@ text(JSON.stringify(tool));
         parsed,
         serde_json::json!({
             "name": "view_image",
-            "description": "View a local image file from the filesystem when visual inspection is needed. Use this for images already available on disk.\n\nexec tool declaration:\n```ts\ndeclare const tools: { view_image(args: {\n  // Local filesystem path to an image file.\n  path: string;\n}): Promise<{\n  // Image detail hint returned by view_image. Returns `high` for default resized behavior or `original` when original resolution is preserved.\n  detail: \"high\" | \"original\";\n  // Data URL for the loaded image.\n  image_url: string;\n}>; };\n```",
+            "description": "View a local image file from the filesystem when visual inspection is needed. Use this for images already available on disk.",
         })
     );
 
@@ -8132,15 +8146,7 @@ text(JSON.stringify(tool));
         parsed,
         serde_json::json!({
             "name": "mcp__rmcp__echo",
-            "description": concat!(
-                "Use these tools to exercise the rmcp test server.\n\n",
-                "Echo back the provided message and include environment data.\n\n",
-                "exec tool declaration:\n",
-                "```ts\n",
-                "declare const tools: { mcp__rmcp__echo(args: { env_var?: string; message: string; }): ",
-                "Promise<CallToolResult<{ echo: string; env: string | null; }>>; };\n",
-                "```",
-            ),
+            "description": "Echo back the provided message and include environment data.",
         })
     );
 
@@ -8622,17 +8628,7 @@ text(
         parsed.get("out"),
         Some(&Value::String("hidden-ok".to_string()))
     );
-    assert!(
-        parsed
-            .get("description")
-            .and_then(Value::as_str)
-            .is_some_and(|description| {
-                description.contains("Codex app tools.")
-                    && description.contains("A hidden dynamic tool.")
-                    && description.contains("declare const tools:")
-                    && description.contains("codex_app__hidden_dynamic_tool(args:")
-            })
-    );
+    assert_eq!(parsed["description"], "A hidden dynamic tool.");
 
     Ok(())
 }

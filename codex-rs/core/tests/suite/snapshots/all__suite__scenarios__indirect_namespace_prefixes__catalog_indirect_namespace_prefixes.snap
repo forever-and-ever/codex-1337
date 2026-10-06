@@ -1,8 +1,8 @@
 ---
 source: core/tests/suite/scenarios_indirect_namespace_prefixes.rs
-expression: "context_snapshot::format_request_history_snapshot(\"Catalog namespace and raw MCP server prefixes annotate embedded docs and ALL_TOOLS; a model switch clears them without changing nested dispatch.\",\n&requests,\n&ContextSnapshotOptions::default().rewrite_known_segments().include_request_settings(),)"
+expression: "context_snapshot::format_request_history_snapshot(\"Catalog namespace and raw MCP server prefixes annotate embedded docs and describe_tool contracts; a model switch clears them without changing nested dispatch.\",\n&requests,\n&ContextSnapshotOptions::default().rewrite_known_segments().include_request_settings(),)"
 ---
-Scenario: Catalog namespace and raw MCP server prefixes annotate embedded docs and ALL_TOOLS; a model switch clears them without changing nested dispatch.
+Scenario: Catalog namespace and raw MCP server prefixes annotate embedded docs and describe_tool contracts; a model switch clears them without changing nested dispatch.
 
 ## Window 1
 Settings:
@@ -16,8 +16,8 @@ Settings:
   stream: true
   text: {"verbosity":"low"}
   tool_choice: "auto"
-  tools (5; hash=3301de9406dfc41f):
-    - custom/exec: Run JavaScript code to orchestrate/compose tool calls - Evaluates the provided JavaScript code in...; hash=555634e833a69a6d
+  tools (5; hash=33e2f6033dd23008):
+    - custom/exec: Run JavaScript code to orchestrate/compose tool calls - Evaluates the provided JavaScript code in...; hash=b0c45ea96e2d162a
     - function/wait: Waits on a yielded `exec` cell and returns new output or completion. - Use `wait` only after `exe...; args=[cell_id, max_tokens, terminate, yield_time_ms]; hash=6692d8f6c55be489
     - function/update_work_status: Show what you are currently working on without posting a chat message. Use at the start of substa...; args=[activity]; hash=4835f56613efa5b8
     - function/request_user_input: Request user input for one to three short questions and wait for the response. This tool is only ...; args=[questions]; hash=64a729b25c424fc6
@@ -36,21 +36,20 @@ Settings:
 -- request 2 (turn) --
 05:custom_tool_call/exec:
     const descriptions = ["view_image", "wrangler_agents__list_agents", "mcp__reports_one__echo"]
-      .map(name => ALL_TOOLS.find(t => t.name === name).description);
+      .map(name => describe_tool(name));
     const report = await tools.mcp__reports_one__echo({message: "ping"});
     const agents = await tools.wrangler_agents__list_agents({});
     text({descriptions, echo: report.structuredContent.echo, agent: agents.agents[0].agent_name});
 
 06:custom_tool_call_output:Script completed
-    Wall time <DURATION> seconds
     Output:
-     | {"descriptions":["Functions context.\\n\\nView a local image file from the filesystem when visual inspecti...>>; };\\n```"],"echo":"ECHOING: ping","agent":"/root"} [hash=48127d6c2ea87f5a]
+     | {"descriptions":["Functions context.\\n\\nView a local image file from the filesystem when visual inspecti...t>; };\\n```"],"echo":"ECHOING: ping","agent":"/root"} [hash=110dcdac1c6be63b]
 
 ## Window 2 (after request 2)
 Settings: relative to window 1
   model: "prefixes-cleared"
-  tools (5; hash=87ab2de3ba9b7a8f):
-    ~ custom/exec: Run JavaScript code to orchestrate/compose tool calls - Evaluates the provided JavaScript code in...; hash=b01386b0fb784f27
+  tools (5; hash=e54332bef514897e):
+    ~ custom/exec: Run JavaScript code to orchestrate/compose tool calls - Evaluates the provided JavaScript code in...; hash=5deed88bba20229e
 -- request 3 (turn) --
 00:message/developer:
     <PERMISSIONS_INSTRUCTIONS>
@@ -64,15 +63,14 @@ Settings: relative to window 1
     Find echo, call it, and list the agents.
 05:custom_tool_call/exec:
     const descriptions = ["view_image", "wrangler_agents__list_agents", "mcp__reports_one__echo"]
-      .map(name => ALL_TOOLS.find(t => t.name === name).description);
+      .map(name => describe_tool(name));
     const report = await tools.mcp__reports_one__echo({message: "ping"});
     const agents = await tools.wrangler_agents__list_agents({});
     text({descriptions, echo: report.structuredContent.echo, agent: agents.agents[0].agent_name});
 
 06:custom_tool_call_output:Script completed
-    Wall time <DURATION> seconds
     Output:
-     | {"descriptions":["Functions context.\\n\\nView a local image file from the filesystem when visual inspecti...>>; };\\n```"],"echo":"ECHOING: ping","agent":"/root"} [hash=48127d6c2ea87f5a]
+     | {"descriptions":["Functions context.\\n\\nView a local image file from the filesystem when visual inspecti...t>; };\\n```"],"echo":"ECHOING: ping","agent":"/root"} [hash=110dcdac1c6be63b]
 07:message/assistant:
     Done.
 08:message/developer:
@@ -82,12 +80,11 @@ Settings: relative to window 1
 -- request 4 (turn) --
 10:custom_tool_call/exec:
     const descriptions = ["view_image", "wrangler_agents__list_agents", "mcp__reports_one__echo"]
-      .map(name => ALL_TOOLS.find(t => t.name === name).description);
+      .map(name => describe_tool(name));
     const report = await tools.mcp__reports_one__echo({message: "ping"});
     const agents = await tools.wrangler_agents__list_agents({});
     text({descriptions, echo: report.structuredContent.echo, agent: agents.agents[0].agent_name});
 
 11:custom_tool_call_output:Script completed
-    Wall time <DURATION> seconds
     Output:
-     | {"descriptions":["View a local image file from the filesystem when visual inspection is needed. Use this...>>; };\\n```"],"echo":"ECHOING: ping","agent":"/root"} [hash=2bd02ce1aae6e0bd]
+     | {"descriptions":["View a local image file from the filesystem when visual inspection is needed. Use this...t>; };\\n```"],"echo":"ECHOING: ping","agent":"/root"} [hash=d9b34764d851b54e]

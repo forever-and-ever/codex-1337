@@ -125,7 +125,7 @@ async fn multi_agent_catalog_messages_change_only_selected_tool_fields(
                 parameters["properties"]["message"].clone();
             parameters["properties"]["plaintext_message"]
                 .as_object_mut()
-                .unwrap()
+                .expect("plaintext_message schema is an object")
                 .remove("encrypted");
             parameters["required"] = json!([selection]);
             parameters["oneOf"] =

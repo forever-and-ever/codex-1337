@@ -32,15 +32,15 @@ Settings:
   stream: true
   text: {"verbosity":"low"}
   tool_choice: "auto"
-  tools (10; hash=7c448cbabaebac03):
-    - custom/exec: Run JavaScript code to orchestrate/compose tool calls - Evaluates the provided JavaScript code in...; hash=50ea9b7f60e145b5
+  tools (10; hash=1f55c71d49679f7d):
+    - custom/exec: Run JavaScript code to orchestrate/compose tool calls - Evaluates the provided JavaScript code in...; hash=bb76740510833c9a
     - function/wait: Waits on a yielded `exec` cell and returns new output or completion. - Use `wait` only after `exe...; args=[cell_id, max_tokens, terminate, yield_time_ms]; hash=6692d8f6c55be489
     - function/update_work_status: Show what you are currently working on without posting a chat message. Use at the start of substa...; args=[activity]; hash=4835f56613efa5b8
     - function/request_user_input: Request user input for one to three short questions and wait for the response. This tool is only ...; args=[questions]; hash=64a729b25c424fc6
     - function/request_user_input_async: Ask the user one or more questions during ongoing work. Use this tool only to request missing inf...; args=[questions]; hash=d6d74f33db330162
     - namespace/clock: Tools for reading and waiting on time.; hash=f402e8c5e9b5e317
       - function/sleep
-    - namespace/wrangler_agents: Tools for spawning and managing sub-agents.; hash=8485fd9eebd191e4
+    - namespace/wrangler_agents: Tools for spawning and managing sub-agents.; hash=c77608f7f86df88f
       - function/followup_task
       - function/interrupt_agent
       - function/list_agents
@@ -81,7 +81,7 @@ Settings:
 
     You can use `spawn_agent` to create a new agent, `followup_task` to give an existing agent a new task an...message to a running agent without triggering a turn. [hash=7d40ff8b58977202]
     `send_message` calls may be read by a human, so ensure they are legible. Always put proper spaces between words and/or numbers.
-    <OMITTED 17 LINES; ~246 TOKENS; hash=780031e2df907944>
+    <OMITTED 17 LINES; ~217 TOKENS; hash=67d1240cb0fdba73>
     - All agents use the same current working directory.
     - As a result, edits made by one agent are immediately visible to all other agents.
 
@@ -107,6 +107,5 @@ Settings:
     text(await tools.list_mcp_resource_templates({"server":"resources"}));
     text(await tools.read_mcp_resource({"server":"resources","uri":"memo://codex/example-note"}));
 06:custom_tool_call_output:Script completed
-    Wall time <DURATION> seconds
     Output:
      | {"server":"resources","resources":[{"server":"resources","uri":"memo://codex/example-note","name":"examp...ed for integration tests.","mimeType":"text/plain"}]} [hash=75d187638a7af2d4] | {"server":"resources","resourceTemplates":[{"server":"resources","uriTemplate":"memo://codex/{slug}","na... resources used in tests.","mimeType":"text/plain"}]} [hash=b1c7082eb114fc9b] | {"server":"resources","uri":"memo://codex/example-note","contents":[{"uri":"memo://codex/example-note","...mple MCP resource served by the rmcp test server."}]} [hash=45385fc57640b555]
