@@ -15,6 +15,7 @@ mod footer;
 mod input;
 mod layout;
 mod mutations;
+mod presentation;
 mod prompt_header;
 mod search;
 mod selection;

@@ -2,23 +2,23 @@
 source: tui/src/transcript_view/tool_entries_tests.rs
 expression: rendered
 ---
-    Before tools
+          Before tools
 
-    • Started `/root/worker`
-[+] • Returned (~ 47 tokens)
-[+] • Returned (~ 18 tokens)
-    • Interacted with `/root/worker`
-[+] • Waited (~ 18 tokens)
-[+] • Waited (~ 47 tokens)
-[+] • Returned (~ 47 tokens)
-    • Interrupted `/root/worker`
-[+] • Waited (~ 13 tokens)
-[+] • Waited (~ 13 tokens)
-[+] • Returned (~ 4 tokens)
-    • Waited (~ 7 tokens) · finished
-[+] • Returned (~ 14 tokens)
-[+] • Returned (~ 7 tokens)
-    • Completed `/root/worker`
-[+] • Waited
+          • Started `/root/worker`
+      [+] • Returned (~ 47 tokens)
+      [+] • Returned (~ 18 tokens)
+          • Interacted with `/root/worker`
+      [+] • Waited (~ 18 tokens)
+      [+] • Waited (~ 47 tokens)
+      [+] • Returned (~ 47 tokens)
+          • Interrupted `/root/worker`
+      [+] • Waited (~ 13 tokens)
+      [+] • Waited (~ 13 tokens)
+      [+] • Returned (~ 4 tokens)
+          • Waited (~ 7 tokens) · finished
+      [+] • Returned (~ 14 tokens)
+      [+] • Returned (~ 7 tokens)
+          • Completed `/root/worker`
+      [+] • Waited
 
-    After tools
+          After tools

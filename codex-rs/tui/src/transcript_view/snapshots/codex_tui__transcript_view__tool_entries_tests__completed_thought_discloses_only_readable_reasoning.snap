@@ -3,28 +3,28 @@ source: tui/src/transcript_view/tool_entries_tests.rs
 expression: "snapshots.join(\"\\n\")"
 ---
 counted expanded=false
-HH:MM [+] • Thought (~ 1,300 tokens)
+HH:MM [+] • Thought · Summary (~ 1,300 tokens)
 
 
 
 
 
 counted expanded=true
-HH:MM [-] • Thought (~ 1,300 tokens)
+HH:MM [-] • Thought · Summary (~ 1,300 tokens)
             First block
 
             Second block
 
 
 unknown expanded=false
-HH:MM [+] • Thought
+HH:MM [+] • Thought · Summary
 
 
 
 
 
 unknown expanded=true
-HH:MM [-] • Thought
+HH:MM [-] • Thought · Summary
             Readable summary
 
 

@@ -36,8 +36,7 @@ expanded width=64
           • Explored
               $ cat foo.rs
 
-          • Called
-            └ tools.inspect()
+          • tools.inspect()
 
               combined result
           • Edited
@@ -62,8 +61,7 @@ detailed width=64
           • Explored
               $ cat foo.rs
 
-          • Called
-            └ tools.inspect()
+          • tools.inspect()
 
               combined result
           • Edited
@@ -115,8 +113,7 @@ detailed width=32
           • Explored
               $ cat foo.rs
 
-          • Called
-            └ tools.inspect()
+          • tools.inspect()
 
               combined result
           • Edited

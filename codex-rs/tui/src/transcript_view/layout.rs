@@ -208,14 +208,27 @@ impl TranscriptView {
         cells: &[Arc<dyn HistoryCell>],
         index: usize,
     ) -> Option<Arc<TextLayout>> {
-        let previous = cells.get(..index)?.iter().rev().find(|cell| {
-            self.detailed
-                || self.mode != HistoryRenderMode::Rich
-                || !cell
-                    .as_any()
-                    .downcast_ref::<ReasoningSummaryCell>()
-                    .is_some_and(ReasoningSummaryCell::is_transcript_only)
-        });
+        if self.elides_cell(cells, index) {
+            return Some(Arc::new(TextLayout::new(
+                Vec::new(),
+                self.area.width.max(/*other*/ 1),
+            )));
+        }
+        let previous = cells
+            .get(..index)?
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(index, cell)| {
+                !self.elides_cell(cells, *index)
+                    && (self.detailed
+                        || self.mode != HistoryRenderMode::Rich
+                        || !cell
+                            .as_any()
+                            .downcast_ref::<ReasoningSummaryCell>()
+                            .is_some_and(ReasoningSummaryCell::is_transcript_only))
+            })
+            .map(|(_, cell)| cell);
         let Some(cell) = cells.get(index) else {
             if index != cells.len() {
                 return None;

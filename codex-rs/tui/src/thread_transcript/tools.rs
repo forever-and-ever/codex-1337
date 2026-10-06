@@ -98,7 +98,7 @@ pub(crate) fn historical_tool_fallback(item: &ThreadItem) -> Option<PlainHistory
                 | CollabAgentTool::Wait),
             status,
             ..
-        } if *status != CollabAgentToolCallStatus::Completed => {
+        } if *tool != CollabAgentTool::Wait && *status != CollabAgentToolCallStatus::Completed => {
             let status = match status {
                 CollabAgentToolCallStatus::InProgress => "In progress at last update",
                 CollabAgentToolCallStatus::Failed => "Failed",

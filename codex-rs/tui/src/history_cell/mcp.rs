@@ -83,6 +83,7 @@ enum McpToolCallRenderMode {
     /// Complete invocation and result used by the Ctrl+T transcript.
     Transcript,
     Arguments,
+    NestedArguments,
     Expanded,
 }
 
@@ -240,7 +241,15 @@ impl McpToolCallCell {
             )
             .unwrap_or_else(|| "•".dim()),
         };
-        let header_text = self.header_verb();
+        let nested = matches!(
+            mode,
+            McpToolCallRenderMode::Summary | McpToolCallRenderMode::NestedArguments
+        );
+        let header_text = if nested && status == Some(false) {
+            "Failed"
+        } else {
+            self.header_verb()
+        };
 
         let title = self
             .invocation
@@ -263,16 +272,21 @@ impl McpToolCallCell {
             line_to_static(&format_mcp_invocation(&self.invocation))
         };
         let mut compact_spans = vec![bullet.clone(), " ".into()];
-        compact_spans.extend([header_text.bold(), " ".into()]);
+        if !nested || status == Some(false) {
+            compact_spans.extend([header_text.bold(), " ".into()]);
+        }
         let mut compact_header = Line::from(compact_spans.clone());
         let reserved = compact_header.width();
 
-        let inline_invocation = !matches!(
-            mode,
-            McpToolCallRenderMode::Arguments | McpToolCallRenderMode::Expanded
-        ) && (mode == McpToolCallRenderMode::Summary
-            || compact
-            || invocation_line.width() <= (width as usize).saturating_sub(reserved));
+        let inline_invocation = mode == McpToolCallRenderMode::NestedArguments
+            || (!matches!(
+                mode,
+                McpToolCallRenderMode::Arguments
+                    | McpToolCallRenderMode::NestedArguments
+                    | McpToolCallRenderMode::Expanded
+            ) && (mode == McpToolCallRenderMode::Summary
+                || compact
+                || invocation_line.width() <= (width as usize).saturating_sub(reserved)));
 
         if inline_invocation {
             compact_header.extend(invocation_line.spans.clone());
@@ -295,7 +309,9 @@ impl McpToolCallCell {
             let mut invocation = vec![HyperlinkLine::new(invocation_line)];
             if matches!(
                 mode,
-                McpToolCallRenderMode::Arguments | McpToolCallRenderMode::Expanded
+                McpToolCallRenderMode::Arguments
+                    | McpToolCallRenderMode::NestedArguments
+                    | McpToolCallRenderMode::Expanded
             ) {
                 super::output_provenance::mark_lines(
                     &mut invocation,
@@ -310,9 +326,17 @@ impl McpToolCallCell {
             ));
         }
 
+        if mode == McpToolCallRenderMode::NestedArguments {
+            super::output_provenance::mark_lines(
+                &mut lines,
+                super::output_provenance::OutputProvenance::Client,
+            );
+        }
         let detail_lines = if matches!(
             mode,
-            McpToolCallRenderMode::Arguments | McpToolCallRenderMode::Summary
+            McpToolCallRenderMode::Arguments
+                | McpToolCallRenderMode::NestedArguments
+                | McpToolCallRenderMode::Summary
         ) {
             Vec::new()
         } else {
@@ -493,7 +517,8 @@ impl HistoryCell for McpToolCallCell {
     fn nested_detail_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         let mut nested = self.clone();
         nested.completed_at = None;
-        let mut lines = nested.activity_argument_lines(width);
+        let mut lines =
+            nested.render_hyperlink_lines(width, McpToolCallRenderMode::NestedArguments);
         lines.extend(self.file_change_lines(width, FileChangeDetail::Full));
         lines
     }
@@ -514,7 +539,11 @@ impl HistoryCell for McpToolCallCell {
     ) -> Option<super::activity_parts::ActivityParts> {
         let mut nested = self.clone();
         nested.completed_at = None;
-        Some(nested.nested_receipt_parts(width, expanded, nested.activity_argument_lines(width)))
+        Some(nested.nested_receipt_parts(
+            width,
+            expanded,
+            nested.render_hyperlink_lines(width, McpToolCallRenderMode::NestedArguments),
+        ))
     }
 
     fn has_nested_details(&self, width: u16) -> bool {

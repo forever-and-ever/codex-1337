@@ -5,6 +5,15 @@ expression: "snapshots.join(\"\\n\\n\")"
 pending, compact
 • Calling example.inspect({"path":"src/main.rs"})
 
+pending, nested
+• example.inspect({"path":"src/main.rs"})
+
+pending, nested full
+• example.inspect
+  └ Arguments: {
+      "path": "src/main.rs"
+    }
+
 success, compact
 • Called example.inspect({"path":"src/main.rs"})
 
@@ -21,8 +30,35 @@ success, raw
 Arguments: {"path":"src/main.rs"}
 Found the definition
 
+success, nested
+• example.inspect({"path":"src/main.rs"})
+
+success, nested full
+• example.inspect
+  └ Arguments: {
+      "path": "src/main.rs"
+    }
+
 failure, compact
 • Failed example.inspect({"path":"src/main.rs"})
 
+failure, nested
+• Failed example.inspect({"path":"src/main.rs"})
+
+failure, nested full
+• Failed example.inspect
+  └ Arguments: {
+      "path": "src/main.rs"
+    }
+
 unavailable, compact
 • Called example.inspect({"path":"src/main.rs"})
+
+unavailable, nested
+• example.inspect({"path":"src/main.rs"})
+
+unavailable, nested full
+• example.inspect
+  └ Arguments: {
+      "path": "src/main.rs"
+    }

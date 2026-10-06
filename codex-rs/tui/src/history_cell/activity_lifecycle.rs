@@ -46,6 +46,7 @@ enum Revision<'a> {
     Mcp(&'a McpToolCallCell),
     Exec(&'a ExecCell, usize),
     Web(&'a WebSearchCell),
+    AgentWait(&'a Arc<dyn HistoryCell>),
 }
 
 pub(crate) struct ToolCallReconciliation {
@@ -69,6 +70,19 @@ impl Revision<'_> {
             return Some(ToolOutputGroup::from_cells(members));
         }
         match self {
+            Self::AgentWait(newer) => {
+                let new_wait = crate::multi_agents::AgentToolHistoryCell::wait_for(newer.as_ref())?;
+                let old_wait = crate::multi_agents::AgentToolHistoryCell::wait_for(cell.as_ref())?;
+                (old_wait.id == new_wait.id).then(|| {
+                    if new_wait.status
+                        == codex_app_server_protocol::CollabAgentToolCallStatus::InProgress
+                    {
+                        Arc::clone(cell)
+                    } else {
+                        Arc::clone(newer)
+                    }
+                })
+            }
             Self::Mcp(newer) => {
                 if cell
                     .as_any()
@@ -141,6 +155,8 @@ pub(crate) fn reconcile_tool_calls(
             .collect()
     } else if let Some(cell) = incoming.as_any().downcast_ref::<WebSearchCell>() {
         vec![Revision::Web(cell)]
+    } else if crate::multi_agents::AgentToolHistoryCell::wait_for(incoming.as_ref()).is_some() {
+        vec![Revision::AgentWait(incoming)]
     } else {
         return ToolCallReconciliation {
             replacements: BTreeMap::new(),

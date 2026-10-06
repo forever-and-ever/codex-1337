@@ -732,4 +732,144 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
     assert_eq!(text.matches("Script completed").count(), 1);
     assert_eq!(text.matches("Script failed").count(), 1);
     insta::assert_snapshot!("execution_headers_and_literal_text", text);
+
+    // Empty returns may precede their measurement; only a known zero hides them. The
+    // status slot and media must not be mistaken for an empty successful return.
+    let mut examples = Vec::new();
+    for (label, name, body, tokens) in [
+        (
+            "unknown",
+            "tool",
+            FunctionCallOutputBody::Text(String::new()),
+            None,
+        ),
+        (
+            "positive",
+            "tool",
+            FunctionCallOutputBody::Text(String::new()),
+            Some(3),
+        ),
+        (
+            "zero",
+            "tool",
+            FunctionCallOutputBody::Text(String::new()),
+            Some(0),
+        ),
+        (
+            "completed",
+            "exec",
+            FunctionCallOutputBody::ContentItems(vec![FunctionCallOutputContentItem::InputText {
+                text: completed.into(),
+            }]),
+            Some(0),
+        ),
+        (
+            "failed",
+            "exec",
+            FunctionCallOutputBody::ContentItems(vec![FunctionCallOutputContentItem::InputText {
+                text: "Script failed\nOutput:\n".into(),
+            }]),
+            Some(0),
+        ),
+        (
+            "media",
+            "exec",
+            FunctionCallOutputBody::ContentItems(vec![FunctionCallOutputContentItem::InputImage {
+                image: codex_protocol::models::ImageReference::Inline {
+                    image_url: "data:image/png;base64,AA==".into(),
+                },
+                detail: None,
+            }]),
+            Some(0),
+        ),
+    ] {
+        let cell = Arc::new(
+            ToolOutputCell::from_output(label, Some(label), name, /*namespace*/ None, &body)
+                .unwrap(),
+        ) as Arc<dyn HistoryCell>;
+        let cells = vec![
+            agent(SubAgentActivityKind::Started),
+            cell.clone(),
+            agent(SubAgentActivityKind::Completed),
+        ];
+        let mut view = TranscriptView::default();
+        view.record_tool_output_tokens(format!("tool-output-tokens:{label}"), label.into(), tokens);
+        let buffer = tests::render(&mut view, &cells, /*width*/ 64, /*height*/ 6);
+        examples.push(format!("{label}\n{}", tests::text(&buffer).trim_end()));
+        if matches!(label, "zero" | "completed") {
+            let layout = view.current_layout(&cells, /*index*/ 1).unwrap();
+            assert!(layout.text().is_empty() && layout.fold_targets().is_empty());
+        }
+        assert_eq!(view.activity_output_tokens(&cell.activity_ids()), tokens);
+    }
+    insta::assert_snapshot!("empty_return_measurements", examples.join("\n\n"));
+
+    // Live revisions replace the transient wait by call identity, just as resumed history
+    // does. The completion's raw capture survives while its entire presentation retires.
+    use codex_app_server_protocol::CollabAgentTool;
+    use codex_app_server_protocol::CollabAgentToolCallStatus;
+    let wait_item = |status| ThreadItem::CollabAgentToolCall {
+        id: "agent-wait".into(),
+        tool: CollabAgentTool::Wait,
+        status,
+        sender_thread_id: "00000000-0000-0000-0000-000000000001".into(),
+        receiver_thread_ids: Vec::new(),
+        prompt: None,
+        model: None,
+        reasoning_effort: None,
+        agents_states: Default::default(),
+    };
+    let cwd = codex_utils_absolute_path::AbsolutePathBuf::from_absolute_path(
+        std::env::current_dir().unwrap(),
+    )
+    .unwrap();
+    let mut retained = vec![agent(SubAgentActivityKind::Started)];
+    let mut stages = Vec::new();
+    for status in [
+        CollabAgentToolCallStatus::InProgress,
+        CollabAgentToolCallStatus::Completed,
+    ] {
+        let cell = Arc::new(crate::history_cell::ToolItemCell::new(
+            "agent-wait".into(),
+            crate::multi_agents::tool_call_history_cell(
+                &wait_item(status.clone()),
+                /*cached_spawn_request*/ None,
+                |_| crate::multi_agents::AgentMetadata::default(),
+            )
+            .unwrap(),
+        )) as Arc<dyn HistoryCell>;
+        let revision = crate::history_cell::reconcile_tool_calls(&retained, &cell);
+        for (index, cell) in revision.replacements {
+            retained[index] = cell;
+        }
+        retained.extend(revision.remainder);
+        let mut view = TranscriptView::default();
+        let buffer = tests::render(&mut view, &retained, /*width*/ 64, /*height*/ 6);
+        stages.push(format!("{status:?}\n{}", tests::text(&buffer).trim_end()));
+        let replay = crate::thread_transcript::thread_items_to_transcript_cells(
+            /*thread_id*/ None,
+            &cwd,
+            [
+                wait_item(CollabAgentToolCallStatus::InProgress),
+                wait_item(status.clone()),
+            ],
+            crate::thread_transcript::RawReasoningVisibility::Hidden,
+            /*config*/ None,
+        );
+        assert_eq!(replay.len(), 1);
+        assert_eq!(
+            retained[1].display_lines(/*width*/ 64),
+            replay[0].display_lines(/*width*/ 64)
+        );
+        if status == CollabAgentToolCallStatus::Completed {
+            assert!(!tests::text(&buffer).contains("waiting"));
+            assert!(
+                retained[1]
+                    .raw_lines()
+                    .iter()
+                    .any(|line| line.to_string().contains("Finished waiting"))
+            );
+        }
+    }
+    insta::assert_snapshot!("agent_wait_lifecycle", stages.join("\n\n"));
 }

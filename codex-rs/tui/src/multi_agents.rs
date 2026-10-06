@@ -31,6 +31,10 @@ const COLLAB_PROMPT_PREVIEW_GRAPHEMES: usize = 160;
 const COLLAB_AGENT_ERROR_PREVIEW_GRAPHEMES: usize = 160;
 const COLLAB_AGENT_RESPONSE_PREVIEW_GRAPHEMES: usize = 240;
 
+mod wait;
+pub(crate) use wait::AgentToolHistoryCell;
+use wait::WaitPresentation;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AgentPickerThreadEntry {
     /// Human-friendly nickname shown in picker rows and footer labels.
@@ -196,8 +200,9 @@ pub(crate) fn tool_call_history_cell(
     item: &ThreadItem,
     cached_spawn_request: Option<&SpawnRequestSummary>,
     mut agent_metadata: impl FnMut(ThreadId) -> AgentMetadata,
-) -> Option<PlainHistoryCell> {
+) -> Option<AgentToolHistoryCell> {
     let ThreadItem::CollabAgentToolCall {
+        id,
         tool,
         status,
         receiver_thread_ids,
@@ -214,7 +219,7 @@ pub(crate) fn tool_call_history_cell(
         .and_then(|id| parse_thread_id(id));
     let prompt = prompt.as_deref().unwrap_or_default();
 
-    match tool {
+    let captured = match tool {
         // V2 uses SubAgentActivity for display; these variants are analytics-only.
         CollabAgentTool::SendMessage
         | CollabAgentTool::FollowupTask
@@ -272,7 +277,55 @@ pub(crate) fn tool_call_history_cell(
             first_receiver
                 .map(|receiver_thread_id| close_end(receiver_thread_id, &mut agent_metadata))
         }
-    }
+    }?;
+    let wait = (*tool == CollabAgentTool::Wait).then(|| {
+        let mut terminal_lines = match status {
+            CollabAgentToolCallStatus::Failed => vec![title_text("Agent wait failed")],
+            CollabAgentToolCallStatus::Interrupted => vec![title_text("Agent wait interrupted")],
+            CollabAgentToolCallStatus::Completed | CollabAgentToolCallStatus::InProgress => {
+                Vec::new()
+            }
+        };
+        if matches!(
+            status,
+            CollabAgentToolCallStatus::Failed | CollabAgentToolCallStatus::Interrupted
+        ) && !agents_states.is_empty()
+        {
+            terminal_lines.extend(wait_complete_lines(
+                receiver_thread_ids,
+                agents_states,
+                &mut agent_metadata,
+            ));
+        } else if *status == CollabAgentToolCallStatus::Completed {
+            let errors = agents_states
+                .iter()
+                .filter(|(_, state)| {
+                    matches!(
+                        state.status,
+                        CollabAgentStatus::Errored | CollabAgentStatus::NotFound
+                    )
+                })
+                .map(|(id, state)| (id.clone(), state.clone()))
+                .collect::<std::collections::HashMap<_, _>>();
+            if !errors.is_empty() {
+                terminal_lines.extend(wait_complete_lines(
+                    receiver_thread_ids,
+                    &errors,
+                    &mut agent_metadata,
+                ));
+            }
+        }
+        WaitPresentation {
+            id: id.clone(),
+            status: status.clone(),
+            terminal_lines,
+        }
+    });
+    Some(AgentToolHistoryCell {
+        timestamp: None,
+        captured,
+        wait,
+    })
 }
 
 pub(crate) fn sub_agent_activity_display(item: &ThreadItem) -> Option<SubAgentActivityDisplay> {
@@ -825,6 +878,7 @@ mod tests {
         let snapshot = [spawn, send, waiting, finished, close]
             .iter()
             .map(cell_to_text)
+            .filter(|text| !text.is_empty())
             .collect::<Vec<_>>()
             .join("\n\n");
         assert_snapshot!("collab_agent_transcript", snapshot);
@@ -971,7 +1025,7 @@ mod tests {
         }
     }
 
-    fn cell_to_text(cell: &PlainHistoryCell) -> String {
+    fn cell_to_text(cell: &impl crate::history_cell::HistoryCell) -> String {
         cell.display_lines(/*width*/ 200)
             .iter()
             .map(line_to_text)

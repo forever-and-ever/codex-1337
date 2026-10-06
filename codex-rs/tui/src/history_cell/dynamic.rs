@@ -33,7 +33,51 @@ struct DynamicToolCallData {
     duration_ms: Option<i64>,
 }
 
+#[derive(Clone, Copy)]
+enum CallHeading {
+    Standalone,
+    Nested,
+}
+
 impl DynamicToolCallCell {
+    fn summary_lines(&self, width: u16, heading: CallHeading) -> Vec<HyperlinkLine> {
+        let data = self
+            .data
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut header = data.header(heading).0;
+        header.push_span("(");
+        header.push_span(
+            super::activity_preview::compact_arguments(
+                &data.arguments,
+                super::activity_preview::ArgumentSyntax::Json,
+            )
+            .dim(),
+        );
+        header.push_span(")");
+        vec![super::activity_preview::compact_header(header, usize::from(width)).into()]
+    }
+
+    fn arguments_with_heading(&self, width: u16, heading: CallHeading) -> Vec<HyperlinkLine> {
+        let data = self
+            .data
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut lines = vec![data.header(heading).0.into()];
+        let mut arguments = plain_hyperlink_lines(data.argument_lines());
+        super::output_provenance::mark_lines(
+            &mut arguments,
+            super::output_provenance::OutputProvenance::Client,
+        );
+        lines.extend(adaptive_wrap_hyperlink_lines(
+            &arguments,
+            RtOptions::new(usize::from(width).max(/*other*/ 1))
+                .initial_indent(crate::transcript_geometry::CHILD_BRANCH.dim().into())
+                .subsequent_indent(crate::transcript_geometry::CHILD_PREFIX.into()),
+        ));
+        lines
+    }
+
     pub(crate) fn from_item(item: ThreadItem) -> Option<Self> {
         let (call_id, data) = DynamicToolCallData::from_item(item)?;
         Some(Self {
@@ -134,7 +178,10 @@ impl DynamicToolCallData {
         matches!(self.status, DynamicToolCallStatus::InProgress)
     }
 
-    fn header(&self) -> (Line<'static>, super::activity_parts::ActivityHeader) {
+    fn header(
+        &self,
+        heading: CallHeading,
+    ) -> (Line<'static>, super::activity_parts::ActivityHeader) {
         let (marker, verb) = if self.interrupted {
             ("•".red().bold(), "Interrupted")
         } else {
@@ -144,9 +191,18 @@ impl DynamicToolCallData {
                 DynamicToolCallStatus::Failed => ("•".red().bold(), "Failed"),
             }
         };
-        let mut line = Line::from(vec![marker, " ".into(), verb.bold()]);
+        let mut line = Line::from(vec![marker, " ".into()]);
+        let keep_verb = matches!(heading, CallHeading::Standalone)
+            || self.interrupted
+            || self.status == DynamicToolCallStatus::Failed;
+        if keep_verb {
+            line.push_span(verb.bold());
+        }
         let header = super::activity_parts::ActivityHeader::at_end(&line);
-        line.extend([" ".into(), self.name.clone().fg(accent_color())]);
+        if keep_verb {
+            line.push_span(" ");
+        }
+        line.push_span(self.name.clone().fg(accent_color()));
         if let Some(duration_ms) = self.duration_ms.filter(|duration| *duration >= 0) {
             line.push_span(format!(" · {duration_ms}ms").dim());
         }
@@ -181,7 +237,7 @@ impl HistoryCell for DynamicToolCallCell {
             self.data
                 .read()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .header()
+                .header(CallHeading::Standalone)
                 .1,
         )
     }
@@ -216,21 +272,15 @@ impl HistoryCell for DynamicToolCallCell {
     }
 
     fn compact_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        let data = self
-            .data
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let mut header = data.header().0;
-        header.push_span("(");
-        header.push_span(
-            super::activity_preview::compact_arguments(
-                &data.arguments,
-                super::activity_preview::ArgumentSyntax::Json,
-            )
-            .dim(),
-        );
-        header.push_span(")");
-        vec![super::activity_preview::compact_header(header, usize::from(width)).into()]
+        self.summary_lines(width, CallHeading::Standalone)
+    }
+
+    fn nested_summary_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        self.summary_lines(width, CallHeading::Nested)
+    }
+
+    fn nested_detail_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        self.arguments_with_heading(width, CallHeading::Nested)
     }
 
     fn transcript_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
@@ -238,7 +288,7 @@ impl HistoryCell for DynamicToolCallCell {
             .data
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let mut lines = vec![data.header().0.into()];
+        let mut lines = vec![data.header(CallHeading::Standalone).0.into()];
         let details = data
             .argument_lines()
             .into_iter()
@@ -264,23 +314,7 @@ impl HistoryCell for DynamicToolCallCell {
     }
 
     fn activity_argument_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        let data = self
-            .data
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let mut lines = vec![data.header().0.into()];
-        let mut arguments = plain_hyperlink_lines(data.argument_lines());
-        super::output_provenance::mark_lines(
-            &mut arguments,
-            super::output_provenance::OutputProvenance::Client,
-        );
-        lines.extend(adaptive_wrap_hyperlink_lines(
-            &arguments,
-            RtOptions::new(usize::from(width).max(/*other*/ 1))
-                .initial_indent(crate::transcript_geometry::CHILD_BRANCH.dim().into())
-                .subsequent_indent(crate::transcript_geometry::CHILD_PREFIX.into()),
-        ));
-        lines
+        self.arguments_with_heading(width, CallHeading::Standalone)
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
@@ -288,7 +322,7 @@ impl HistoryCell for DynamicToolCallCell {
             .data
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let mut lines = vec![data.header().0];
+        let mut lines = vec![data.header(CallHeading::Standalone).0];
         lines.extend(raw_lines_from_source(&format!(
             "Arguments: {}",
             data.arguments

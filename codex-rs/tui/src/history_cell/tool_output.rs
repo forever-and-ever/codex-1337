@@ -33,6 +33,25 @@ pub(crate) struct ToolOutputCell {
 }
 
 impl ToolOutputCell {
+    /// Only a known zero measurement may hide this empty, successful presentation.
+    /// Captured headers with status other than successful completion remain visible.
+    pub(crate) fn is_empty_completed_return(&self) -> bool {
+        if !self.readable.is_empty() || self.wait.is_some() {
+            return false;
+        }
+        match &self.output {
+            FunctionCallOutputBody::Text(text) => !self.code_mode && text.is_empty(),
+            FunctionCallOutputBody::ContentItems(items) => {
+                items.iter().enumerate().all(|(index, item)| {
+                    matches!(item, FunctionCallOutputContentItem::InputText { text }
+                    if text.is_empty() || (self.code_mode && index == 0
+                        && text.starts_with("Script completed\n")
+                        && super::returned_output::is_execution_header(text)))
+                })
+            }
+        }
+    }
+
     fn heading(&self) -> &'static str {
         if self.wait.is_some() {
             "Waited"
@@ -223,9 +242,12 @@ impl HistoryCell for ToolOutputCell {
         self.transcript_hyperlink_lines(width)
     }
     fn activity_header(&self) -> Option<super::activity_parts::ActivityHeader> {
-        Some(super::activity_parts::ActivityHeader::at_end(&Line::from(
-            vec!["• ".into(), self.heading().into()],
-        )))
+        let mut header = super::activity_parts::ActivityHeader::at_end(&Line::from(vec![
+            "• ".into(),
+            self.heading().into(),
+        ]));
+        header.expand_on_truncation = false;
+        Some(header)
     }
     fn outer_call_id(&self) -> Option<&str> {
         Some(&self.call_id)

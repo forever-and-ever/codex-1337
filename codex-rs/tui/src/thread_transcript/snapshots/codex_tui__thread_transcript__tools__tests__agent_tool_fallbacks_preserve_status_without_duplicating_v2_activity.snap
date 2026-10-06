@@ -6,4 +6,4 @@ agent tool: SpawnAgent · In progress at last update
 agent tool: SendInput · Failed
 agent tool: CloseAgent · Interrupted
 agent tool: ResumeAgent · Failed
-agent tool: Wait · Interrupted
+• Agent wait interrupted

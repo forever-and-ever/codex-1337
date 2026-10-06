@@ -64,6 +64,12 @@ fn push_activity_cell(cells: &mut TranscriptCells, cell: Arc<dyn HistoryCell>) {
     }
     if let Some((range, replacements)) = crate::history_cell::reconcile_code_mode(cells, &cell) {
         cells.splice(range, replacements);
+    } else if crate::multi_agents::AgentToolHistoryCell::wait_for(cell.as_ref()).is_some() {
+        let reconciliation = crate::history_cell::reconcile_tool_calls(cells, &cell);
+        for (index, replacement) in reconciliation.replacements {
+            cells[index] = replacement;
+        }
+        cells.extend(reconciliation.remainder);
     } else {
         cells.push(cell);
     }
@@ -317,7 +323,7 @@ fn append_thread_items(
                         {
                             cells.splice(range, replacements);
                         } else {
-                            cells.push(cell);
+                            push_activity_cell(cells, cell);
                         }
                     }
                 }

@@ -35,6 +35,7 @@ pub(crate) struct ThoughtCell {
     timestamp: Option<HistoryTimestamp>,
     tokens: Option<u64>,
     text: String,
+    summary_only: bool,
     cwd: PathBuf,
 }
 
@@ -42,6 +43,9 @@ impl ThoughtCell {
     fn heading(&self) -> Line<'static> {
         let mut heading = Line::default();
         heading.push_span("Thought".bold());
+        if self.summary_only {
+            heading.push_span(" · Summary".dim());
+        }
         heading
     }
 
@@ -61,6 +65,10 @@ impl ThoughtCell {
         else {
             unreachable!("ThoughtCell requires a Thought item")
         };
+        let summary_only = !matches!(visibility, ThoughtTextVisibility::Hidden)
+            && summary.iter().any(|text| !text.trim().is_empty())
+            && (!matches!(visibility, ThoughtTextVisibility::SummaryAndContent)
+                || content.iter().all(|text| text.trim().is_empty()));
         let text = if matches!(visibility, ThoughtTextVisibility::Hidden) {
             String::new()
         } else {
@@ -81,6 +89,7 @@ impl ThoughtCell {
             timestamp: HistoryTimestamp::from_millis(completed_at_ms),
             tokens: reported_reasoning_tokens,
             text,
+            summary_only,
             cwd: cwd.to_owned(),
         }
     }

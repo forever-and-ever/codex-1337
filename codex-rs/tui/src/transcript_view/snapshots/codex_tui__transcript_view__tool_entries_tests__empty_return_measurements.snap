@@ -1,0 +1,31 @@
+---
+source: tui/src/transcript_view/tool_entries_tests.rs
+expression: "examples.join(\"\\n\\n\")"
+---
+unknown
+          • Started `/root/worker`
+          • Returned
+          • Completed `/root/worker`
+
+positive
+          • Started `/root/worker`
+          • Returned (~ 3 tokens)
+          • Completed `/root/worker`
+
+zero
+          • Started `/root/worker`
+          • Completed `/root/worker`
+
+completed
+          • Started `/root/worker`
+          • Completed `/root/worker`
+
+failed
+          • Started `/root/worker`
+          • Returned (~ 0 tokens)
+          • Completed `/root/worker`
+
+media
+          • Started `/root/worker`
+          • Returned (~ 0 tokens)
+          • Completed `/root/worker`

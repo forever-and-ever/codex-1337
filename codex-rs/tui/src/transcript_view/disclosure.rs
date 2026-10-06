@@ -291,10 +291,11 @@ impl TranscriptView {
         target: &FoldTarget,
     ) -> Option<usize> {
         let candidate = self.canonical_activity_index(cells, ids)?;
-        if *target == FoldTarget::Activity
-            || self
-                .current_layout(cells, candidate)
-                .is_some_and(|layout| layout.fold_position(target).is_some())
+        if !self.elides_cell(cells, candidate)
+            && (*target == FoldTarget::Activity
+                || self
+                    .current_layout(cells, candidate)
+                    .is_some_and(|layout| layout.fold_position(target).is_some()))
         {
             return Some(candidate);
         }

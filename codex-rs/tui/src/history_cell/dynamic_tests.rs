@@ -59,13 +59,21 @@ fn dynamic_status_and_output_match_persisted_presentations() {
                 visible_lines(cell.transcript_hyperlink_lines(/*width*/ 80)),
             ),
             ("raw", cell.raw_lines()),
+            (
+                "nested",
+                visible_lines(cell.nested_summary_lines(/*width*/ 80)),
+            ),
+            (
+                "nested full",
+                visible_lines(cell.nested_detail_lines(/*width*/ 80)),
+            ),
         ] {
             let text = lines
                 .iter()
                 .map(ToString::to_string)
                 .collect::<Vec<_>>()
                 .join("\n");
-            if mode == "compact" || label == "success" {
+            if mode == "compact" || label == "success" || mode.starts_with("nested") {
                 snapshots.push(format!("{label}, {mode}\n{text}"));
             }
         }
