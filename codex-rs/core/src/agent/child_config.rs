@@ -115,8 +115,7 @@ pub(crate) async fn prepare_agent_spawn_config_from_settings(
     let role_name = options
         .role_name
         .or_else(|| {
-            (options.model_precedence == SpawnModelPrecedence::RequestedOverrides
-                && options.version == SpawnConfigVersion::V2
+            (options.version == SpawnConfigVersion::V2
                 && !full_history_fork
                 && config
                     .agent_roles
