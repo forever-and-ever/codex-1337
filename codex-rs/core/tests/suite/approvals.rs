@@ -369,10 +369,6 @@ fn exec_command_event(
 
 #[derive(Clone)]
 enum Expectation {
-    FileCreated {
-        target: TargetPath,
-        content: &'static str,
-    },
     FileCreatedNoExitCode {
         target: TargetPath,
         content: &'static str,
@@ -385,17 +381,11 @@ enum Expectation {
         target: TargetPath,
         message_contains: &'static [&'static str],
     },
-    NetworkSuccess {
-        body_contains: &'static str,
-    },
     NetworkSuccessNoExitCode {
         body_contains: &'static str,
     },
     NetworkFailure {
         expect_tag: &'static str,
-    },
-    CommandSuccess {
-        stdout_contains: &'static str,
     },
     CommandSuccessNoExitCode {
         stdout_contains: &'static str,
@@ -408,25 +398,6 @@ enum Expectation {
 impl Expectation {
     fn verify(&self, test: &TestCodex, result: &CommandResult) -> Result<()> {
         match self {
-            Expectation::FileCreated { target, content } => {
-                let (path, _) = target.resolve_for_patch(test);
-                assert_eq!(
-                    result.exit_code,
-                    Some(0),
-                    "expected successful exit for {path:?}"
-                );
-                assert!(
-                    result.stdout.contains(content),
-                    "stdout missing {content:?}: {}",
-                    result.stdout
-                );
-                let file_contents = fs::read_to_string(&path)?;
-                assert!(
-                    file_contents.contains(content),
-                    "file contents missing {content:?}: {file_contents}"
-                );
-                let _ = fs::remove_file(path);
-            }
             Expectation::FileCreatedNoExitCode { target, content } => {
                 let (path, _) = target.resolve_for_patch(test);
                 assert!(
@@ -502,24 +473,6 @@ impl Expectation {
                     "command should not create {path:?}, but file exists"
                 );
             }
-            Expectation::NetworkSuccess { body_contains } => {
-                assert_eq!(
-                    result.exit_code,
-                    Some(0),
-                    "expected successful network exit: {}",
-                    result.stdout
-                );
-                assert!(
-                    result.stdout.contains("OK:"),
-                    "stdout missing OK prefix: {}",
-                    result.stdout
-                );
-                assert!(
-                    result.stdout.contains(body_contains),
-                    "stdout missing body text {body_contains:?}: {}",
-                    result.stdout
-                );
-            }
             Expectation::NetworkSuccessNoExitCode { body_contains } => {
                 assert!(
                     result.exit_code.is_none() || result.exit_code == Some(0),
@@ -552,19 +505,6 @@ impl Expectation {
                 assert!(
                     result.stdout.contains(expect_tag),
                     "stdout missing expected tag {expect_tag:?}: {}",
-                    result.stdout
-                );
-            }
-            Expectation::CommandSuccess { stdout_contains } => {
-                assert_eq!(
-                    result.exit_code,
-                    Some(0),
-                    "expected successful command exit: {}",
-                    result.stdout
-                );
-                assert!(
-                    result.stdout.contains(stdout_contains),
-                    "command stdout missing {stdout_contains:?}: {}",
                     result.stdout
                 );
             }
@@ -732,6 +672,22 @@ fn parse_result(item: &Value) -> CommandResult {
         .get("output")
         .and_then(Value::as_str)
         .expect("shell output payload");
+    if output_str == "Completed" {
+        return CommandResult {
+            exit_code: Some(0),
+            stdout: String::new(),
+        };
+    }
+    let (header, stdout) = output_str.split_once('\n').unwrap_or((output_str, ""));
+    if let Some(exit_code) = header
+        .strip_prefix("Exit ")
+        .and_then(|exit| exit.parse().ok())
+    {
+        return CommandResult {
+            exit_code: Some(exit_code),
+            stdout: stdout.to_string(),
+        };
+    }
     match serde_json::from_str::<Value>(output_str) {
         Ok(parsed) => {
             let exit_code = parsed["metadata"]["exit_code"].as_i64();
@@ -913,7 +869,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
             outcome: Outcome::Auto,
-            expectation: Expectation::FileCreated {
+            expectation: Expectation::FileCreatedNoExitCode {
                 target: TargetPath::OutsideWorkspace("dfa_on_request.txt"),
                 content: "danger-on-request",
             },
@@ -929,7 +885,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
             outcome: Outcome::Auto,
-            expectation: Expectation::FileCreated {
+            expectation: Expectation::FileCreatedNoExitCode {
                 target: TargetPath::OutsideWorkspace("dfa_on_request_5_1.txt"),
                 content: "danger-on-request",
             },
@@ -945,7 +901,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
             outcome: Outcome::Auto,
-            expectation: Expectation::NetworkSuccess {
+            expectation: Expectation::NetworkSuccessNoExitCode {
                 body_contains: "danger-network-ok",
             },
         },
@@ -1194,7 +1150,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
                 decision: ReviewDecision::Approved,
                 expected_reason: None,
             },
-            expectation: Expectation::FileCreated {
+            expectation: Expectation::FileCreatedNoExitCode {
                 target: TargetPath::OutsideWorkspace("dfa_unless_trusted.txt"),
                 content: "danger-unless-trusted",
             },
@@ -1229,7 +1185,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
             outcome: Outcome::Auto,
-            expectation: Expectation::FileCreated {
+            expectation: Expectation::FileCreatedNoExitCode {
                 target: TargetPath::OutsideWorkspace("dfa_never.txt"),
                 content: "danger-never",
             },
@@ -1264,7 +1220,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
                 decision: ReviewDecision::Approved,
                 expected_reason: None,
             },
-            expectation: Expectation::FileCreated {
+            expectation: Expectation::FileCreatedNoExitCode {
                 target: TargetPath::Workspace("ro_on_request.txt"),
                 content: "read-only-approval",
             },
@@ -1298,7 +1254,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
             outcome: Outcome::Auto,
-            expectation: Expectation::CommandSuccess {
+            expectation: Expectation::CommandSuccessNoExitCode {
                 stdout_contains: "trusted-read-only",
             },
         },
@@ -1362,7 +1318,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
                 decision: ReviewDecision::Approved,
                 expected_reason: None,
             },
-            expectation: Expectation::NetworkSuccess {
+            expectation: Expectation::NetworkSuccessNoExitCode {
                 body_contains: "read-only-network-ok",
             },
         },
@@ -1562,7 +1518,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
             outcome: Outcome::Auto,
-            expectation: Expectation::CommandSuccess {
+            expectation: Expectation::CommandSuccessNoExitCode {
                 stdout_contains: "trusted-never",
             },
         },
@@ -1577,7 +1533,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
             outcome: Outcome::Auto,
-            expectation: Expectation::FileCreated {
+            expectation: Expectation::FileCreatedNoExitCode {
                 target: TargetPath::Workspace("ww_on_request.txt"),
                 content: "workspace-on-request",
             },
@@ -1609,7 +1565,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
                 decision: ReviewDecision::Approved,
                 expected_reason: None,
             },
-            expectation: Expectation::FileCreated {
+            expectation: Expectation::FileCreatedNoExitCode {
                 target: TargetPath::OutsideWorkspace("ww_on_request_outside.txt"),
                 content: "workspace-on-request-outside",
             },
@@ -1625,7 +1581,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![],
             outcome: Outcome::Auto,
-            expectation: Expectation::NetworkSuccess {
+            expectation: Expectation::NetworkSuccessNoExitCode {
                 body_contains: "workspace-network-ok",
             },
         },
@@ -1663,7 +1619,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             sandbox_permissions: SandboxPermissions::UseDefault,
             features: vec![Feature::UnifiedExec],
             outcome: Outcome::Auto,
-            expectation: Expectation::CommandSuccess {
+            expectation: Expectation::CommandSuccessNoExitCode {
                 stdout_contains: "hello unified exec",
             },
         },
@@ -1683,7 +1639,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
                 decision: ReviewDecision::Approved,
                 expected_reason: Some(DEFAULT_UNIFIED_EXEC_JUSTIFICATION),
             },
-            expectation: Expectation::CommandSuccess {
+            expectation: Expectation::CommandSuccessNoExitCode {
                 stdout_contains: "escalated unified exec",
             },
         },
@@ -3073,7 +3029,7 @@ touch {outside_path:?}
     assert_eq!(
         result,
         CommandResult {
-            exit_code: Some(0),
+            exit_code: None,
             stdout: format!("{BUILT_IN_PERMISSION_PROFILE_WORKSPACE}\n"),
         },
         "the unsandboxed script should inherit CODEX_PERMISSION_PROFILE from the shell command"

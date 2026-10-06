@@ -627,43 +627,49 @@ async fn exec_command_consumes_pushed_remote_process_events(
     });
     let test = expect_startup(builder.build(&server)).await;
 
-    let turn_permission_profile = if matches!(scenario, PushedExecScenario::FullDiskInterceptedPatch) {
-        PermissionProfile::from_runtime_permissions(
-            &FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry::new(
-                FileSystemPath::Special {
-                    value: FileSystemSpecialPath::Root,
-                },
-                FileSystemAccessMode::Write,
-            )]),
-            NetworkSandboxPolicy::Enabled,
-        )
-    } else if foreign_cwd
-        && matches!(
-            scenario,
-            PushedExecScenario::Complete | PushedExecScenario::ElevatedPowerShell
-        )
-    {
-        let mut file_system = PermissionProfile::workspace_write().file_system_sandbox_policy();
-        file_system.entries.extend([
-            FileSystemSandboxEntry::new(
-                FileSystemPath::Path {
-                    path: "file:///C:/workspace/blocked".parse()?,
-                },
-                FileSystemAccessMode::Deny,
-            ),
-            FileSystemSandboxEntry::new(
-                FileSystemPath::GlobPattern {
-                    pattern: r"C:\workspace\private\**".into(),
-                },
-                FileSystemAccessMode::Deny,
-            ),
-        ]);
-        PermissionProfile::from_runtime_permissions(&file_system, NetworkSandboxPolicy::Restricted)
-    } else if foreign_cwd && !matches!(scenario, PushedExecScenario::UnsandboxedInterceptedPatch) {
-        PermissionProfile::workspace_write()
-    } else {
-        PermissionProfile::Disabled
-    };
+    let turn_permission_profile =
+        if matches!(scenario, PushedExecScenario::FullDiskInterceptedPatch) {
+            PermissionProfile::from_runtime_permissions(
+                &FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry::new(
+                    FileSystemPath::Special {
+                        value: FileSystemSpecialPath::Root,
+                    },
+                    FileSystemAccessMode::Write,
+                )]),
+                NetworkSandboxPolicy::Enabled,
+            )
+        } else if foreign_cwd
+            && matches!(
+                scenario,
+                PushedExecScenario::Complete | PushedExecScenario::ElevatedPowerShell
+            )
+        {
+            let mut file_system = PermissionProfile::workspace_write().file_system_sandbox_policy();
+            file_system.entries.extend([
+                FileSystemSandboxEntry::new(
+                    FileSystemPath::Path {
+                        path: "file:///C:/workspace/blocked".parse()?,
+                    },
+                    FileSystemAccessMode::Deny,
+                ),
+                FileSystemSandboxEntry::new(
+                    FileSystemPath::GlobPattern {
+                        pattern: r"C:\workspace\private\**".into(),
+                    },
+                    FileSystemAccessMode::Deny,
+                ),
+            ]);
+            PermissionProfile::from_runtime_permissions(
+                &file_system,
+                NetworkSandboxPolicy::Restricted,
+            )
+        } else if foreign_cwd
+            && !matches!(scenario, PushedExecScenario::UnsandboxedInterceptedPatch)
+        {
+            PermissionProfile::workspace_write()
+        } else {
+            PermissionProfile::Disabled
+        };
     let (sandbox_policy, permission_profile) =
         turn_permission_fields(turn_permission_profile, test.config.cwd.as_path());
     test.codex
@@ -691,11 +697,10 @@ async fn exec_command_consumes_pushed_remote_process_events(
                 }),
                 approval_policy: Some(
                     if matches!(
-                            scenario,
-                            PushedExecScenario::SandboxedDirectPatchDenied
-                                | PushedExecScenario::SandboxedDirectPatchRetry
-                        )
-                    {
+                        scenario,
+                        PushedExecScenario::SandboxedDirectPatchDenied
+                            | PushedExecScenario::SandboxedDirectPatchRetry
+                    ) {
                         AskForApproval::OnRequest
                     } else {
                         AskForApproval::Never
@@ -953,8 +958,7 @@ async fn exec_command_consumes_pushed_remote_process_events(
         PushedExecScenario::Complete | PushedExecScenario::ElevatedPowerShell => {
             assert_ne!(success, Some(false));
             assert!(saw_exec_command_begin);
-            assert!(output.contains("Process exited with code 0"));
-            assert!(output.contains(COMPLETE_OUTPUT));
+            assert_eq!(output, COMPLETE_OUTPUT);
             assert_eq!(process_read_requests, 0, "unexpected compatibility read");
         }
         PushedExecScenario::RejectedLongWindowsDangerousCommand => {
@@ -962,7 +966,7 @@ async fn exec_command_consumes_pushed_remote_process_events(
         }
         PushedExecScenario::DirectDenied => {
             assert!(!saw_exec_command_begin);
-            assert!(output.contains("Process exited with code 1"));
+            assert_eq!(output, "Exit 1");
             assert_eq!(process_read_requests, 0, "unexpected compatibility read");
         }
         PushedExecScenario::SandboxedInterceptedPatch
@@ -977,7 +981,7 @@ async fn exec_command_consumes_pushed_remote_process_events(
         }
         PushedExecScenario::LegacyExit => {
             assert!(!saw_exec_command_begin);
-            assert!(output.contains("Process exited with code 1"));
+            assert_eq!(output, "Exit 1");
             assert_eq!(process_read_requests, 1, "expected compatibility read");
         }
         PushedExecScenario::ReplayGap => {

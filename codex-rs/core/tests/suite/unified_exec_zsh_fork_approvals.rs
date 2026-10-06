@@ -895,6 +895,22 @@ fn parse_result(item: &Value) -> CommandResult {
             stdout: String::new(),
         };
     };
+    if output_str == "Completed" {
+        return CommandResult {
+            exit_code: Some(0),
+            stdout: String::new(),
+        };
+    }
+    let (header, stdout) = output_str.split_once('\n').unwrap_or((output_str, ""));
+    if let Some(exit_code) = header
+        .strip_prefix("Exit ")
+        .and_then(|exit| exit.parse().ok())
+    {
+        return CommandResult {
+            exit_code: Some(exit_code),
+            stdout: stdout.to_string(),
+        };
+    }
     match serde_json::from_str::<Value>(output_str) {
         Ok(parsed) => {
             let exit_code = parsed["metadata"]["exit_code"].as_i64();

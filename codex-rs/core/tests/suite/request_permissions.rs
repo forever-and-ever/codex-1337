@@ -74,6 +74,22 @@ fn parse_result(item: &Value) -> CommandResult {
         .get("output")
         .and_then(Value::as_str)
         .expect("shell output payload");
+    if output_str == "Completed" {
+        return CommandResult {
+            exit_code: Some(0),
+            stdout: String::new(),
+        };
+    }
+    let (header, stdout) = output_str.split_once('\n').unwrap_or((output_str, ""));
+    if let Some(exit_code) = header
+        .strip_prefix("Exit ")
+        .and_then(|exit| exit.parse().ok())
+    {
+        return CommandResult {
+            exit_code: Some(exit_code),
+            stdout: stdout.to_string(),
+        };
+    }
     match serde_json::from_str::<Value>(output_str) {
         Ok(parsed) => {
             let exit_code = parsed["metadata"]["exit_code"].as_i64();
@@ -1350,7 +1366,7 @@ async fn request_permissions_grants_apply_to_later_exec_command_calls() -> Resul
         .map(|output| json!({ "output": output }))
         .expect("expected exec-call output");
     let result = parse_result(&exec_output);
-    assert_eq!(result.exit_code, Some(0));
+    assert_eq!(result.exit_code, None);
     assert_eq!(result.stdout.trim(), "sticky-grant-ok");
     assert_eq!(fs::read_to_string(&outside_write)?, "sticky-grant-ok");
 
@@ -1743,7 +1759,7 @@ async fn partial_request_permissions_grants_do_not_preapprove_new_permissions() 
         .map(|output| json!({ "output": output }))
         .expect("expected exec-call output");
     let result = parse_result(&exec_output);
-    assert_eq!(result.exit_code, Some(0));
+    assert_eq!(result.exit_code, None);
     assert_eq!(result.stdout.trim(), "partial-grant-ok");
     assert_eq!(fs::read_to_string(&second_write)?, "partial-grant-ok");
 

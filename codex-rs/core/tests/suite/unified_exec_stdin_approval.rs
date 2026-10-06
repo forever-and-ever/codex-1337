@@ -126,9 +126,7 @@ async fn stdin_reviews_retained_grants_after_turn_permissions_expire() -> Result
         .single_request()
         .function_call_output("open");
     assert!(
-        output
-            .to_string()
-            .contains("Process running with session ID 1000"),
+        output.to_string().contains("Running (session 1000)"),
         "{output}"
     );
 
@@ -175,17 +173,27 @@ async fn stdin_reviews_retained_grants_after_turn_permissions_expire() -> Result
             })
             .await?;
     }
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
+    let mut exit_code = None;
+    let mut turn_complete = false;
+    while exit_code.is_none() || !turn_complete {
+        match wait_for_event(&test.codex, |_| true).await {
+            EventMsg::ExecCommandEnd(event)
+                if event.call_id == "open" && event.process_id.as_deref() == Some("1000") =>
+            {
+                exit_code = Some(event.exit_code);
+            }
+            EventMsg::TurnComplete(_) => turn_complete = true,
+            _ => {}
+        }
+    }
+    assert_eq!(exit_code, Some(0));
     let output = writes
         .requests()
         .last()
         .unwrap()
         .function_call_output("allowed");
     assert!(
-        output.to_string().contains("Process exited with code 0"),
+        output.get("output").and_then(Value::as_str).is_some(),
         "{output}"
     );
     assert_eq!(harness.read_file_text("allowed/result").await?, "allowed");

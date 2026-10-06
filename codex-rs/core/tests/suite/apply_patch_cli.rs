@@ -1596,12 +1596,7 @@ async fn apply_patch_cli_can_use_exec_command_output_as_patch_input() -> Result<
 
     fn stdout_from_shell_output(output: &str) -> String {
         let normalized = output.replace("\r\n", "\n").replace('\r', "\n");
-        normalized
-            .split_once("Output:\n")
-            .map(|x| x.1)
-            .unwrap_or("")
-            .trim_end_matches('\n')
-            .to_string()
+        normalized.trim_end_matches('\n').to_string()
     }
 
     fn function_call_output_text(body: &serde_json::Value, call_id: &str) -> String {

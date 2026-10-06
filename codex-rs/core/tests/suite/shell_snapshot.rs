@@ -832,11 +832,7 @@ exec /bin/bash --noprofile --norc "$@"
         .await?;
     let output = harness.function_call_stdout("snapshot-policy").await;
     assert_eq!(
-        normalize_newlines(&output)
-            .split_once("Output:\n")
-            .unwrap()
-            .1
-            .trim(),
+        normalize_newlines(&output).trim(),
         "first\nsecond|missing|missing|missing|dummy|dummy"
     );
     harness.test().codex.shutdown_and_wait().await?;

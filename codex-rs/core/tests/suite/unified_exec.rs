@@ -1724,9 +1724,9 @@ async fn exec_command_clamps_model_requested_max_output_tokens_to_policy() -> Re
     let output = wait_for_raw_unified_exec_output(&test, call_id).await?;
     assert_eq!(output.original_token_count, Some(8_991));
     let output_text = output.output.replace("\r\n", "\n");
-    assert_regex_match(
-        r"(?s)^Warning: truncated output \(original token count: 8991\)\nTotal output lines: 999\n\nEXEC-LINE-.*…\d+ tokens truncated…x+\n$",
-        &output_text,
+    assert_eq!(
+        output_text,
+        "Warning: truncated output (original token count: 8991)\nTotal output lines: 999\n\nEXEC-LINE-0001 xxxxxxxxxxxxxxxxxxxx\nEXEC-LINE-0002 xxxxxxxxx…8961 tokens truncated…98 xxxxxxxxxxxxxxxxxxxx\nEXEC-LINE-0999 xxxxxxxxxxxxxxxxxxxx\n",
     );
     assert_eq!(output_text.matches("tokens truncated").count(), 1);
 
@@ -1840,9 +1840,9 @@ async fn write_stdin_clamps_model_requested_max_output_tokens_to_policy() -> Res
     let stdin_output = wait_for_raw_unified_exec_output(&test, stdin_call_id).await?;
     assert_eq!(stdin_output.original_token_count, Some(9_492));
     let stdin_output_text = stdin_output.output.replace("\r\n", "\n");
-    assert_regex_match(
-        r"(?s)^Warning: truncated output \(original token count: 9492\)\nTotal output lines: 1000\n\ngo\nSTDIN.*…\d+ tokens truncated…y+\n$",
-        &stdin_output_text,
+    assert_eq!(
+        stdin_output_text,
+        "Warning: truncated output (original token count: 9492)\nTotal output lines: 1000\n\ngo\nSTDIN-LINE-0001 yyyyyyyyyyyyyyyyyyyy\nSTDIN-LINE-0002 yy…9462 tokens truncated…yyyyyyyyyyyyyyyyyyyy\nSTDIN-LINE-0999 yyyyyyyyyyyyyyyyyyyy\n",
     );
     assert_eq!(stdin_output_text.matches("tokens truncated").count(), 1);
 
