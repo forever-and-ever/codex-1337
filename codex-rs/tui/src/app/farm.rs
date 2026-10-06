@@ -84,9 +84,8 @@ impl App {
                 return;
             }
             FarmRequestState::Waiting(_) => {
-                self.chat_widget.add_error_message(
-                    "A farm request is already waiting for its receipt.".into(),
-                );
+                self.chat_widget
+                    .add_error_message("A farm request is already waiting for its receipt.".into());
                 return;
             }
             FarmRequestState::Idle => {}
@@ -175,12 +174,12 @@ impl App {
                 .chat_widget
                 .add_error_message("A farm request is still waiting for its receipt.".into()),
             FarmRequestState::Rejected(saved) => self.chat_widget.open_farm_recovery(
-                    saved.request_id.clone(),
-                    crate::chatwidget::FarmRecovery::SavedDraft,
-                ),
+                saved.request_id.clone(),
+                crate::chatwidget::FarmRecovery::SavedDraft,
+            ),
             FarmRequestState::Idle => self
-                    .chat_widget
-                    .add_error_message("Usage: /farm <task> or /farm_fresh <task>".into()),
+                .chat_widget
+                .add_error_message("Usage: /farm <task> or /farm_fresh <task>".into()),
         }
     }
 
@@ -206,7 +205,8 @@ impl App {
         {
             return;
         }
-        if matches!(&self.farm.state, FarmRequestState::Uncertain(pending) | FarmRequestState::Rejected(pending) if pending.request_id == request_id) {
+        if matches!(&self.farm.state, FarmRequestState::Uncertain(pending) | FarmRequestState::Rejected(pending) if pending.request_id == request_id)
+        {
             let (FarmRequestState::Uncertain(pending) | FarmRequestState::Rejected(pending)) =
                 std::mem::take(&mut self.farm.state)
             else {
@@ -268,7 +268,8 @@ impl App {
         result: Result<ThreadFarmResponse, FarmFailure>,
     ) {
         let displayed = self.current_displayed_thread_id();
-        if !matches!(&self.farm.state, FarmRequestState::Waiting(pending) | FarmRequestState::Uncertain(pending) if pending.request_id == request_id) {
+        if !matches!(&self.farm.state, FarmRequestState::Waiting(pending) | FarmRequestState::Uncertain(pending) if pending.request_id == request_id)
+        {
             return;
         }
         let (FarmRequestState::Waiting(pending) | FarmRequestState::Uncertain(pending)) =
@@ -360,10 +361,10 @@ impl App {
         if let Some(retained) = retained
             && self.current_displayed_thread_id() == Some(retained.thread_id)
         {
-                self.app_event_tx.send(AppEvent::RestoreFarmReceipt {
-                    thread_id: retained.thread_id,
-                    request_id: retained.request_id.clone(),
-                });
+            self.app_event_tx.send(AppEvent::RestoreFarmReceipt {
+                thread_id: retained.thread_id,
+                request_id: retained.request_id.clone(),
+            });
         }
     }
 
@@ -396,41 +397,6 @@ impl App {
                 .is_some_and(|cell| cell.request_id == request_id)
         }) {
             let receipt: Arc<dyn HistoryCell> = receipt.into();
-            if !tui.is_owned_screen()
-                && !self.native_history.contains(&self.transcript_cells[index])
-            {
-                let width = self
-                    .chat_widget
-                    .history_wrap_width(tui.terminal.last_known_screen_size.width);
-                let lines = receipt.display_hyperlink_lines_for_mode(
-                    width,
-                    self.chat_widget.history_render_mode(),
-                );
-                let previous = self
-                    .last_rendered_history_tail
-                    .as_ref()
-                    .filter(|tail| {
-                        tail.cell
-                            .upgrade()
-                            .is_some_and(|cell| Arc::ptr_eq(&cell, &self.transcript_cells[index]))
-                    })
-                    .map(|tail| tail.lines.clone());
-                let replaced = previous.is_some_and(|previous| {
-                    tui.replace_visible_history_tail(
-                        &previous,
-                        &lines,
-                        self.history_line_wrap_policy(),
-                    )
-                    .unwrap_or(false)
-                });
-                if !replaced {
-                    self.insert_history_cell_lines(tui, receipt.as_ref(), width);
-                }
-                self.last_rendered_history_tail = Some(history_ui::RenderedHistoryTail {
-                    cell: Arc::downgrade(&receipt),
-                    lines,
-                });
-            }
             self.native_history
                 .consolidate(&self.transcript_cells[index..=index], &receipt);
             self.transcript_view
