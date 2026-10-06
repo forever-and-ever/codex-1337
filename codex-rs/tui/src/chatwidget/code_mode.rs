@@ -32,7 +32,7 @@ impl ChatWidget {
         match Admission::notification(notification, source) {
             Ok(None) => false,
             Err(error) => {
-                tracing::warn!(error, "rejecting invalid scoped transcript event");
+                tracing::warn!(%error, "rejecting invalid scoped transcript event");
                 true
             }
             Ok(Some(admission)) => {

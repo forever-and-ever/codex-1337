@@ -14,12 +14,43 @@ use codex_app_server_protocol::ThreadItem;
 use codex_protocol::ThreadId;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use std::collections::HashMap;
+use std::fmt::Display;
+use std::fmt::Formatter;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Source {
     Live,
     Historical,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AdmissionFault {
+    NestedItem,
+    IneligibleNotification,
+    ConflictingThread,
+    UnownedHydration,
+    MissingDescriptor,
+    ConflictingHydration,
+    ConflictingExecutionDescriptor,
+    UnvalidatedNotification,
+    ConflictingFact,
+}
+
+impl Display for AdmissionFault {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::NestedItem => "nested Code Mode item",
+            Self::IneligibleNotification => "ineligible Code Mode notification",
+            Self::ConflictingThread => "conflicting Code Mode thread",
+            Self::UnownedHydration => "unowned Code Mode hydration",
+            Self::MissingDescriptor => "missing Code Mode descriptor",
+            Self::ConflictingHydration => "conflicting Code Mode hydration",
+            Self::ConflictingExecutionDescriptor => "conflicting Code Mode execution descriptor",
+            Self::UnvalidatedNotification => "unvalidated Code Mode notification",
+            Self::ConflictingFact => "conflicting Code Mode fact",
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -37,7 +68,7 @@ impl Admission {
     pub(crate) fn notification(
         notification: &ServerNotification,
         source: Source,
-    ) -> Result<Option<Self>, &'static str> {
+    ) -> Result<Option<Self>, AdmissionFault> {
         let (owner, native) = match notification {
             ServerNotification::CodeModeOwned(owned) => {
                 (owned.owner.clone(), owned.payload().as_ref().clone())
@@ -66,13 +97,13 @@ impl Admission {
         let thread = match &native {
             ServerNotification::ItemStarted(item) => {
                 if matches!(item.item, ThreadItem::CodeModeOwned(_)) {
-                    return Err("nested Code Mode item");
+                    return Err(AdmissionFault::NestedItem);
                 }
                 &item.thread_id
             }
             ServerNotification::ItemCompleted(item) => {
                 if matches!(item.item, ThreadItem::CodeModeOwned(_)) {
-                    return Err("nested Code Mode item");
+                    return Err(AdmissionFault::NestedItem);
                 }
                 &item.thread_id
             }
@@ -81,10 +112,10 @@ impl Admission {
             ServerNotification::FileChangeOutputDelta(item) => &item.thread_id,
             ServerNotification::FileChangePatchUpdated(item) => &item.thread_id,
             ServerNotification::McpToolCallProgress(item) => &item.thread_id,
-            _ => return Err("ineligible Code Mode notification"),
+            _ => return Err(AdmissionFault::IneligibleNotification),
         };
         if *thread != owner.thread_id.to_string() {
-            return Err("conflicting Code Mode thread");
+            return Err(AdmissionFault::ConflictingThread);
         }
         Ok(Some(Self {
             owner,
@@ -132,12 +163,19 @@ struct Block {
 }
 
 #[derive(Debug)]
+pub(crate) struct TokenBill {
+    pub(crate) item_id: String,
+    pub(crate) call_id: String,
+    pub(crate) tokens: Option<u64>,
+}
+
+#[derive(Debug)]
 pub(crate) struct Projection {
     pub(crate) opens_live: bool,
     pub(crate) block: Arc<dyn HistoryCell>,
     pub(crate) terminal_transition: bool,
     pub(crate) wait: Option<Arc<dyn HistoryCell>>,
-    pub(crate) tokens: Option<(String, String, Option<u64>)>,
+    pub(crate) tokens: Option<TokenBill>,
 }
 
 impl Reducers {
@@ -158,11 +196,11 @@ impl Reducers {
         &mut self,
         display: ThreadId,
         incoming: &CodeModeCell,
-    ) -> Result<Arc<dyn HistoryCell>, &'static str> {
+    ) -> Result<Arc<dyn HistoryCell>, AdmissionFault> {
         let owner = incoming
             .owner
             .as_ref()
-            .ok_or("unowned Code Mode hydration")?;
+            .ok_or(AdmissionFault::UnownedHydration)?;
         let block = self
             .0
             .entry(display)
@@ -175,7 +213,7 @@ impl Reducers {
             .cell
             .owner
             .as_mut()
-            .ok_or("missing Code Mode descriptor")?;
+            .ok_or(AdmissionFault::MissingDescriptor)?;
         if retained.started_at_ms != owner.started_at_ms
             || retained
                 .cell_id
@@ -183,7 +221,7 @@ impl Reducers {
                 .zip(owner.cell_id.as_ref())
                 .is_some_and(|(old, new)| old != new)
         {
-            return Err("conflicting Code Mode hydration");
+            return Err(AdmissionFault::ConflictingHydration);
         }
         if retained.cell_id.is_none() {
             retained.cell_id = owner.cell_id.clone();
@@ -198,7 +236,7 @@ impl Reducers {
         admission: Admission,
         cwd: &AbsolutePathBuf,
         animations: bool,
-    ) -> Result<Projection, &'static str> {
+    ) -> Result<Projection, AdmissionFault> {
         self.admit_with_agents(display, admission, cwd, animations, &|_| {
             crate::multi_agents::AgentMetadata::default()
         })
@@ -211,7 +249,7 @@ impl Reducers {
         cwd: &AbsolutePathBuf,
         animations: bool,
         metadata: &dyn Fn(ThreadId) -> crate::multi_agents::AgentMetadata,
-    ) -> Result<Projection, &'static str> {
+    ) -> Result<Projection, AdmissionFault> {
         let Admission {
             owner,
             notification,
@@ -229,7 +267,7 @@ impl Reducers {
             .cell
             .owner
             .as_mut()
-            .ok_or("missing Code Mode descriptor")?;
+            .ok_or(AdmissionFault::MissingDescriptor)?;
         if descriptor.started_at_ms != owner.started_at_ms
             || descriptor
                 .cell_id
@@ -237,7 +275,7 @@ impl Reducers {
                 .zip(owner.cell_id.as_ref())
                 .is_some_and(|(old, new)| old != new)
         {
-            return Err("conflicting Code Mode execution descriptor");
+            return Err(AdmissionFault::ConflictingExecutionDescriptor);
         }
         if descriptor.cell_id.is_none() {
             descriptor.cell_id = owner.cell_id;
@@ -338,7 +376,7 @@ impl Reducers {
             // Process/approval/roster observation remains outside this renderer.
             ServerNotification::FileChangeOutputDelta(_)
             | ServerNotification::McpToolCallProgress(_) => {}
-            _ => return Err("unvalidated Code Mode notification"),
+            _ => return Err(AdmissionFault::UnvalidatedNotification),
         }
         Ok(Projection {
             opens_live: !active_before && block.cell.is_active(),
@@ -357,17 +395,17 @@ impl Block {
         source: Source,
         cwd: &AbsolutePathBuf,
         wait: &mut Option<Arc<dyn HistoryCell>>,
-        tokens: &mut Option<(String, String, Option<u64>)>,
+        tokens: &mut Option<TokenBill>,
         metadata: &dyn Fn(ThreadId) -> crate::multi_agents::AgentMetadata,
-    ) -> Result<(), &'static str> {
+    ) -> Result<(), AdmissionFault> {
         match item {
-            ThreadItem::CodeModeOwned(_) => return Err("nested Code Mode item"),
+            ThreadItem::CodeModeOwned(_) => return Err(AdmissionFault::NestedItem),
             ThreadItem::CodeMode(fact) => {
                 let owner = self
                     .cell
                     .owner
                     .as_ref()
-                    .ok_or("missing Code Mode descriptor")?;
+                    .ok_or(AdmissionFault::MissingDescriptor)?;
                 if fact.exec_call_id != owner.exec_call_id
                     || fact
                         .cell_id
@@ -375,7 +413,7 @@ impl Block {
                         .zip(owner.cell_id.as_ref())
                         .is_some_and(|(fact, owner)| fact != owner)
                 {
-                    return Err("conflicting Code Mode fact");
+                    return Err(AdmissionFault::ConflictingFact);
                 }
                 if matches!(
                     fact.event,
@@ -394,7 +432,11 @@ impl Block {
                 tokens: count,
                 ..
             } => {
-                *tokens = Some((id, call_id, count));
+                *tokens = Some(TokenBill {
+                    item_id: id,
+                    call_id,
+                    tokens: count,
+                });
             }
             mut item => {
                 let id = item.id().to_owned();

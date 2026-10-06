@@ -3,6 +3,7 @@ use super::*;
 use crate::code_mode_transcript::Admission;
 use crate::code_mode_transcript::Projection;
 use crate::code_mode_transcript::Source;
+use crate::code_mode_transcript::TokenBill;
 
 impl App {
     pub(super) fn prepare_live_code_mode(&mut self, notification: &ServerNotification) -> bool {
@@ -10,7 +11,7 @@ impl App {
             Ok(None) => return false,
             Ok(Some(admission)) => admission,
             Err(error) => {
-                tracing::warn!(error, "rejecting invalid owned notification");
+                tracing::warn!(%error, "rejecting invalid owned notification");
                 return true;
             }
         };
@@ -32,7 +33,7 @@ impl App {
         ) {
             Ok(projection) => projection,
             Err(error) => {
-                tracing::warn!(error, "rejecting conflicting live owned notification");
+                tracing::warn!(%error, "rejecting conflicting live owned notification");
                 return true;
             }
         };
@@ -69,7 +70,7 @@ impl App {
         ) {
             Ok(projection) => projection,
             Err(error) => {
-                tracing::warn!(error, "rejecting conflicting Code Mode update");
+                tracing::warn!(%error, "rejecting conflicting Code Mode update");
                 return;
             }
         };
@@ -81,9 +82,13 @@ impl App {
         tui: &mut tui::Tui,
         projection: Projection,
     ) {
-        if let Some((id, call, tokens)) = projection.tokens {
+        if let Some(TokenBill {
+            item_id,
+            call_id,
+            tokens,
+        }) = projection.tokens {
             self.transcript_view
-                .record_tool_output_tokens(id, call, tokens);
+                .record_tool_output_tokens(item_id, call_id, tokens);
         }
         self.set_code_mode_cell(tui, projection.block, projection.terminal_transition);
         if let Some(wait) = projection.wait {
@@ -113,7 +118,7 @@ impl App {
         };
         match self.code_mode_transcript.hydrate(display, block) {
             Ok(cell) => self.set_code_mode_cell(tui, cell, /*terminal_transition*/ false),
-            Err(error) => tracing::warn!(error, "rejecting conflicting Code Mode hydration"),
+            Err(error) => tracing::warn!(%error, "rejecting conflicting Code Mode hydration"),
         }
     }
 
@@ -160,7 +165,7 @@ impl App {
         let canonical = match self.code_mode_transcript.hydrate(display, block) {
             Ok(cell) => cell,
             Err(error) => {
-                tracing::warn!(error, "rejecting conflicting owned history page");
+                tracing::warn!(%error, "rejecting conflicting owned history page");
                 return;
             }
         };

@@ -231,7 +231,7 @@ fn append_thread_items(
                         }
                     }
                 }
-                Err(error) => tracing::warn!(error, "rejecting conflicting owned history item"),
+                Err(error) => tracing::warn!(%error, "rejecting conflicting owned history item"),
             }
             continue;
         }
