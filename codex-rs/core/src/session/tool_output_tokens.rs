@@ -20,6 +20,7 @@ pub(super) struct CapturedOutput {
     id: String,
     call_id: String,
     body: FunctionCallOutputBody,
+    countable: bool,
     tool: Option<ToolName>,
     owner: Option<codex_protocol::code_mode::CodeModeOwner>,
     origin: CaptureOrigin,
@@ -66,10 +67,30 @@ pub(super) fn capture(history: &ContextManager, previous_len: usize) -> Vec<Capt
                     _ => None,
                 })
             });
+            let (body, countable) = match body {
+                FunctionCallOutputBody::Text(text) => {
+                    (FunctionCallOutputBody::Text(text.clone()), true)
+                }
+                FunctionCallOutputBody::ContentItems(items) => (
+                    FunctionCallOutputBody::ContentItems(
+                        items
+                            .iter()
+                            .filter(|item| {
+                                matches!(item, FunctionCallOutputContentItem::InputText { .. })
+                            })
+                            .cloned()
+                            .collect(),
+                    ),
+                    items.iter().all(|item| {
+                        matches!(item, FunctionCallOutputContentItem::InputText { .. })
+                    }),
+                ),
+            };
             Some(CapturedOutput {
                 id: item.id()?.to_string(),
                 call_id: call_id.clone(),
-                body: body.clone(),
+                body,
+                countable,
                 tool,
                 owner: None,
                 // notify() explicitly retains the exec name; ordinary returned
@@ -117,22 +138,6 @@ impl Session {
             if let Some(tool) = &output.tool {
                 // The audit surface observes text, not duplicate multi-megabyte media.
                 // Preserve captured text blocks and their IDs without reserializing results.
-                let text = match &output.body {
-                    FunctionCallOutputBody::Text(text) => {
-                        FunctionCallOutputBody::Text(text.clone())
-                    }
-                    FunctionCallOutputBody::ContentItems(items) => {
-                        FunctionCallOutputBody::ContentItems(
-                            items
-                                .iter()
-                                .filter(|item| {
-                                    matches!(item, FunctionCallOutputContentItem::InputText { .. })
-                                })
-                                .cloned()
-                                .collect(),
-                        )
-                    }
-                };
                 self.send_event_with_owner(
                     turn,
                     EventMsg::ItemCompleted(ItemCompletedEvent {
@@ -143,7 +148,7 @@ impl Session {
                             call_id: Some(output.call_id.clone()),
                             name: tool.name.clone(),
                             namespace: tool.namespace.clone(),
-                            output: text,
+                            output: output.body.clone(),
                         }),
                         started_at_ms: None,
                         completed_at_ms: super::now_unix_timestamp_ms(),
@@ -181,9 +186,11 @@ impl Session {
                                 // measurement needs its own persisted identity for idempotent replay.
                                 id: format!("tool-output-tokens:{}", output.id),
                                 call_id: output.call_id,
-                                tokens: codex_utils_output_truncation::count_o200k_text_tokens(
-                                    &output.body,
-                                ),
+                                tokens: output.countable.then(|| {
+                                    codex_utils_output_truncation::count_o200k_text_tokens(
+                                        &output.body,
+                                    )
+                                }).flatten(),
                             },
                             output.owner,
                         )
