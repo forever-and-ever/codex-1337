@@ -50,8 +50,11 @@ async fn api_key_discovery_startup_flag_controls_fetches_and_cached_catalogs() {
     let models = vec![remote_model("dynamic", "Dynamic", /*priority*/ 0)];
     let endpoint = TestModelsEndpoint::without_refresh(vec![models.clone()]);
     let auth = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("test-key"));
-    let manager =
-        OpenAiModelsManager::new(home.path().into(), endpoint.clone(), Some(auth.clone()));
+    let manager = OpenAiModelsManager::new(
+        home.path().join("models_cache.json"),
+        endpoint.clone(),
+        Some(auth.clone()),
+    );
     let bundled = load_remote_models_from_file().unwrap();
 
     for strategy in [
@@ -69,8 +72,11 @@ async fn api_key_discovery_startup_flag_controls_fetches_and_cached_catalogs() {
     }
     assert_eq!(endpoint.fetch_count(), 0);
 
-    let manager =
-        OpenAiModelsManager::new(home.path().into(), endpoint.clone(), Some(auth.clone()));
+    let manager = OpenAiModelsManager::new(
+        home.path().join("models_cache.json"),
+        endpoint.clone(),
+        Some(auth.clone()),
+    );
     manager.set_api_key_model_discovery_enabled(/*enabled*/ true);
     assert_eq!(
         manager
@@ -83,8 +89,11 @@ async fn api_key_discovery_startup_flag_controls_fetches_and_cached_catalogs() {
 
     // A new session must honor its startup flag even when a matching disk cache exists.
     for enabled in [false, true] {
-        let restarted =
-            OpenAiModelsManager::new(home.path().into(), endpoint.clone(), Some(auth.clone()));
+        let restarted = OpenAiModelsManager::new(
+            home.path().join("models_cache.json"),
+            endpoint.clone(),
+            Some(auth.clone()),
+        );
         restarted.set_api_key_model_discovery_enabled(enabled);
         let expected = if enabled { &models } else { &bundled };
         for strategy in [RefreshStrategy::Offline, RefreshStrategy::OnlineIfUncached] {

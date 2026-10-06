@@ -321,7 +321,7 @@ async fn models_cache_is_reused_only_for_matching_gateway_configuration() {
         for _ in 0..2 {
             let provider = create_model_provider(info.clone(), Some(primary.clone()));
             let models = provider.models_manager(
-                home.path().to_path_buf(),
+                home.path().join("models_cache.json"),
                 /*config_model_catalog*/ None,
             );
             models.set_api_key_model_discovery_enabled(/*enabled*/ true);

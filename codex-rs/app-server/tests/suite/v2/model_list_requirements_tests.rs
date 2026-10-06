@@ -93,7 +93,7 @@ requires_openai_auth = true
     // Let the startup refresh populate the cache before exercising cached RPCs.
     tokio::time::timeout(Duration::from_secs(/*secs*/ 10), async {
         loop {
-            if let Ok(bytes) = tokio::fs::read(home.path().join("models_cache.json")).await
+            if let Ok(bytes) = tokio::fs::read(home.path().join("models_cache_gateway.json")).await
                 && let Ok(cache) = serde_json::from_slice::<serde_json::Value>(&bytes)
                 && cache["models"][0]["slug"] == "gateway-model"
             {
@@ -137,17 +137,16 @@ requires_openai_auth = true
     };
     let updated = format!("model_provider = '{required_selection}'\n{updated_providers}");
     std::fs::write(&requirements_path, &updated)?;
-    let id = server
-        .send_raw_request("model/list", Some(json!({})))
-        .await?;
-    let error = server
-        .read_stream_until_error_message(RequestId::Integer(id))
-        .await?;
-    assert_eq!(error.error, codex_app_server_protocol::JSONRPCErrorError {
-        code: -32600,
-        message: "failed to load configuration: Your organization's required model provider settings changed. Restart Codex to apply them; this request was not sent".to_string(),
-        data: None,
-    });
+    let updated = list_models(&mut server).await?;
+    // Each request reads current requirements, so a newly required provider applies without a restart.
+    assert_eq!(
+        updated
+            .data
+            .iter()
+            .map(|model| model.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["other-model"]
+    );
     assert_eq!(
         gateway
             .received_requests()
@@ -156,12 +155,13 @@ requires_openai_auth = true
             .len(),
         1
     );
-    assert!(
+    assert_eq!(
         other
             .received_requests()
             .await
             .expect("request recording enabled")
-            .is_empty()
+            .len(),
+        1
     );
 
     // A warm catalog must not hide a policy load failure or make any stale request.
@@ -182,24 +182,29 @@ requires_openai_auth = true
             .len(),
         1
     );
-    assert!(
+    assert_eq!(
         other
             .received_requests()
             .await
             .expect("request recording enabled")
-            .is_empty()
+            .len(),
+        1
     );
 
-    // Removing the requirement makes the retained provider permissible again.
     std::fs::remove_file(requirements_path)?;
     assert_eq!(list_models(&mut server).await?, initial);
+    // The redefined provider keeps its ID and therefore its cache file, so restoring the definition refetches once.
     assert_eq!(
         gateway
             .received_requests()
             .await
             .expect("request recording enabled")
             .len(),
-        1
+        if required_selection == "gateway" {
+            2
+        } else {
+            1
+        }
     );
     Ok(())
 }

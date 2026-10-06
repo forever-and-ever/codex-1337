@@ -33,10 +33,8 @@ impl Session {
             .provider
             .clone();
         let provider = provider.for_anthropic_account(&account)?;
-        let manager = provider.models_manager(
-            config.codex_home.to_path_buf(),
-            config.model_catalog.clone(),
-        );
+        let manager =
+            provider.models_manager(config.models_cache_path(), config.model_catalog.clone());
         let catalog = manager
             .raw_model_catalog(
                 RefreshStrategy::OnlineIfUncached,

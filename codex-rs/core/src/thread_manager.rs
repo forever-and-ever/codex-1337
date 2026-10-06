@@ -456,10 +456,7 @@ pub(crate) fn build_models_manager_with_anthropic_account(
         Some(auth_manager),
         discovery_account,
     );
-    let manager = provider.models_manager(
-        config.codex_home.to_path_buf(),
-        config.model_catalog.clone(),
-    );
+    let manager = provider.models_manager(config.models_cache_path(), config.model_catalog.clone());
     manager.set_api_key_model_discovery_enabled(
         config.features.enabled(Feature::ApiKeyModelDiscovery)
             || config.model_provider.adapter
@@ -772,7 +769,10 @@ impl ThreadManager {
                 agent_control_factory: None,
                 model_catalog_provider: provider.clone(),
                 models_manager: create_model_provider(provider, Some(auth_manager.clone()))
-                    .models_manager(codex_home, /*config_model_catalog*/ None),
+                    .models_manager(
+                        codex_home.join("models_cache.json"),
+                        /*config_model_catalog*/ None,
+                    ),
                 git_root_discovery: Arc::default(),
                 environment_manager,
                 starting_mcp_runtimes: std::sync::Mutex::new(Vec::new()),
@@ -2278,10 +2278,7 @@ impl ThreadManagerState {
                 config.startup_warnings.push("This conversation's account is unavailable. Use /account to choose another, or run codex login.".to_owned());
             }
             let models = create_model_provider(config.model_provider.clone(), Some(auth.clone()))
-                .models_manager(
-                    config.codex_home.to_path_buf(),
-                    config.model_catalog.clone(),
-                );
+                .models_manager(config.models_cache_path(), config.model_catalog.clone());
             let plugins = Arc::new(PluginsManager::new_with_options(
                 config.codex_home.to_path_buf(),
                 session_source.restriction_product(),

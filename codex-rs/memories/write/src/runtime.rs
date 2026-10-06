@@ -279,10 +279,8 @@ impl MemoryStartupContext {
             };
         let models_manager = if let Some(account) = &anthropic_account {
             let provider = self.provider.for_anthropic_account(&account.to_string())?;
-            let manager = provider.models_manager(
-                config.codex_home.to_path_buf(),
-                config.model_catalog.clone(),
-            );
+            let manager =
+                provider.models_manager(config.models_cache_path(), config.model_catalog.clone());
             let catalog = manager
                 .raw_model_catalog(
                     RefreshStrategy::OnlineIfUncached,

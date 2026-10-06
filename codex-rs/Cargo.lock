@@ -279,6 +279,7 @@ dependencies = [
  "codex-features",
  "codex-login",
  "codex-model-provider",
+ "codex-model-provider-info",
  "codex-protocol",
  "codex-utils-cargo-bin",
  "core_test_support",

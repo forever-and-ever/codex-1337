@@ -1038,7 +1038,7 @@ mod tests {
                 /*anthropic_auth_context*/ None,
             ));
             let manager = OpenAiModelsManager::new(
-                home.path().to_path_buf(),
+                home.path().join("models_cache.json"),
                 endpoint,
                 Some(auth_manager.clone()),
             )

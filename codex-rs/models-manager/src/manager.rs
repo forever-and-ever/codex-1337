@@ -29,7 +29,6 @@ use tracing::Instrument as _;
 use tracing::error;
 use tracing::info;
 
-const MODEL_CACHE_FILE: &str = "models_cache.json";
 const DEFAULT_MODEL_CACHE_TTL: Duration = Duration::from_secs(300);
 
 /// Remote endpoint used by the OpenAI-compatible model manager.
@@ -328,13 +327,13 @@ pub struct StaticModelsManager {
 }
 
 impl OpenAiModelsManager {
-    /// Construct an OpenAI-compatible remote model manager.
+    /// Construct an OpenAI-compatible remote model manager that caches its
+    /// catalog in the file at `cache_path`.
     pub fn new(
-        codex_home: PathBuf,
+        cache_path: PathBuf,
         endpoint_client: Arc<dyn ModelsEndpointClient>,
         auth_manager: Option<Arc<AuthManager>>,
     ) -> Self {
-        let cache_path = codex_home.join(MODEL_CACHE_FILE);
         Self::new_with_optional_cache(
             Some(Arc::new(FileModelsCache::new(
                 cache_path,

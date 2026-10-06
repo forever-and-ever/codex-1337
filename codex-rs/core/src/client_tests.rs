@@ -300,10 +300,10 @@ impl ModelProvider for SetupRefreshProvider {
 
     fn models_manager(
         &self,
-        codex_home: PathBuf,
+        cache_path: PathBuf,
         config_model_catalog: Option<ModelsResponse>,
     ) -> SharedModelsManager {
-        self.inner.models_manager(codex_home, config_model_catalog)
+        self.inner.models_manager(cache_path, config_model_catalog)
     }
 }
 
@@ -1645,10 +1645,10 @@ impl ModelProvider for TestRecoveryProvider {
 
     fn models_manager(
         &self,
-        codex_home: PathBuf,
+        cache_path: PathBuf,
         config_model_catalog: Option<ModelsResponse>,
     ) -> SharedModelsManager {
-        self.inner.models_manager(codex_home, config_model_catalog)
+        self.inner.models_manager(cache_path, config_model_catalog)
     }
 }
 

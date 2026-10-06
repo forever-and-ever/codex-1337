@@ -69,6 +69,26 @@ const MAX_REQUEST_MAX_RETRIES: u64 = 100;
 const OPENAI_PROVIDER_NAME: &str = "OpenAI";
 const OPENAI_ACTOR_AUTHORIZATION_HEADER: &str = "x-openai-actor-authorization";
 pub const OPENAI_PROVIDER_ID: &str = "openai";
+
+/// File name of a provider's model catalog cache in Codex home. OpenAI keeps
+/// upstream's `models_cache.json`; every other provider ID gets `models_cache_<id>.json`,
+/// with each character outside `[A-Za-z0-9_-]` replaced by `_`.
+pub fn models_cache_file_name(provider_id: &str) -> String {
+    if provider_id == OPENAI_PROVIDER_ID {
+        return "models_cache.json".into();
+    }
+    let slug: String = provider_id
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '_' | '-') {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    format!("models_cache_{slug}.json")
+}
 pub const CLAUDE_SUBSCRIPTION_PROVIDER_ID: &str = "claude_subscription";
 pub const ANTHROPIC_BASE_URL: &str = "https://api.anthropic.com/v1";
 

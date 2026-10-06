@@ -82,7 +82,6 @@ fn preset_to_info(preset: &ModelPreset, priority: i32) -> ModelInfo {
     }
 }
 
-/// Write a models_cache.json file to the codex home directory.
 /// This prevents ModelsManager from making network requests to refresh models.
 /// The cache will be treated as fresh (within TTL) and used instead of fetching from the network.
 /// Uses bundled-catalog-derived presets, converted to ModelInfo format.
@@ -107,7 +106,6 @@ pub async fn write_models_cache(codex_home: &Path) -> std::io::Result<()> {
     write_models_cache_with_models(codex_home, models).await
 }
 
-/// Write a models_cache.json file with specific models.
 /// Useful when tests need specific models to be available.
 pub async fn write_models_cache_with_models(
     codex_home: &Path,
@@ -131,6 +129,8 @@ pub async fn write_models_cache_with_models(
         auth.as_ref(),
         models,
     );
-    let cache_path = codex_home.join("models_cache.json");
+    let cache_path = codex_home.join(codex_model_provider_info::models_cache_file_name(
+        &config.model_provider_id,
+    ));
     std::fs::write(cache_path, serde_json::to_string_pretty(&cache)?)
 }

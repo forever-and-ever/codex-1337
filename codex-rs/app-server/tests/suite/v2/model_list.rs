@@ -94,7 +94,7 @@ async fn provider_catalogs_remain_isolated_without_openai_credentials() -> Resul
         .identity
         .map(|identity| format!("anthropic:{account_id}:{identity}"));
     std::fs::write(
-        home.path().join("models_cache.json"),
+        home.path().join("models_cache_claude_subscription.json"),
         serde_json::to_vec(&cache)?,
     )?;
     std::fs::write(

@@ -39,6 +39,7 @@ mod cache_identity_tests;
 #[path = "model_info_overrides_tests.rs"]
 mod model_info_overrides_tests;
 
+const MODEL_CACHE_FILE: &str = "models_cache.json";
 const DEFAULT_HTTP_CLIENT_FACTORY: HttpClientFactory =
     HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault);
 
@@ -334,7 +335,11 @@ fn openai_manager_for_tests_with_auth(
     endpoint_client: Arc<dyn ModelsEndpointClient>,
     auth_manager: Option<Arc<AuthManager>>,
 ) -> OpenAiModelsManager {
-    OpenAiModelsManager::new(codex_home, endpoint_client, auth_manager)
+    OpenAiModelsManager::new(
+        codex_home.join("models_cache.json"),
+        endpoint_client,
+        auth_manager,
+    )
 }
 
 async fn mutate_file_cache_for_test<F>(codex_home: &Path, f: F)

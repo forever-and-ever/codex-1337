@@ -337,10 +337,11 @@ pub trait ModelProvider: fmt::Debug + Send + Sync {
         })
     }
 
-    /// Creates the model manager implementation appropriate for this provider.
+    /// Creates the model manager implementation appropriate for this provider,
+    /// caching its catalog in the file at `cache_path`.
     fn models_manager(
         &self,
-        codex_home: PathBuf,
+        cache_path: PathBuf,
         config_model_catalog: Option<ModelsResponse>,
     ) -> SharedModelsManager;
 
@@ -454,7 +455,7 @@ struct ConfiguredModelProvider {
 }
 
 enum ModelsCacheConfig {
-    Disk { codex_home: PathBuf },
+    Disk { cache_path: PathBuf },
     Disabled,
     Custom(Arc<dyn ModelsCache>),
 }
@@ -503,8 +504,8 @@ impl ConfiguredModelProvider {
         ));
         let auth_manager = self.auth_manager.clone();
         let manager = match cache {
-            ModelsCacheConfig::Disk { codex_home } => {
-                OpenAiModelsManager::new(codex_home, endpoint, auth_manager)
+            ModelsCacheConfig::Disk { cache_path } => {
+                OpenAiModelsManager::new(cache_path, endpoint, auth_manager)
             }
             ModelsCacheConfig::Disabled => {
                 OpenAiModelsManager::new_without_cache(endpoint, auth_manager)
@@ -719,10 +720,10 @@ impl ModelProvider for ConfiguredModelProvider {
 
     fn models_manager(
         &self,
-        codex_home: PathBuf,
+        cache_path: PathBuf,
         config_model_catalog: Option<ModelsResponse>,
     ) -> SharedModelsManager {
-        self.create_models_manager(config_model_catalog, ModelsCacheConfig::Disk { codex_home })
+        self.create_models_manager(config_model_catalog, ModelsCacheConfig::Disk { cache_path })
     }
 
     fn models_manager_without_cache(
@@ -1092,8 +1093,10 @@ mod tests {
                     provider_info.clone(),
                     auth.clone().map(AuthManager::from_auth_for_testing),
                 );
-                let manager =
-                    provider.models_manager(test_codex_home(), /*config_model_catalog*/ None);
+                let manager = provider.models_manager(
+                    test_codex_home().join("models_cache.json"),
+                    /*config_model_catalog*/ None,
+                );
                 manager.set_api_key_model_discovery_enabled(enabled);
                 let refresh_strategy = if enabled {
                     RefreshStrategy::Online

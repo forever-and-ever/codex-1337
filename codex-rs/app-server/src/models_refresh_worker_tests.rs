@@ -118,7 +118,11 @@ async fn refreshes_immediately_periodically_and_stops_when_dropped() {
             .unwrap(),
     );
     let models_manager: SharedModelsManager = Arc::new(OpenAiModelsManager::new(
-        codex_home.path().to_path_buf(),
+        codex_home
+            .path()
+            .join(codex_model_provider_info::models_cache_file_name(
+                &config.model_provider_id,
+            )),
         endpoint.clone(),
         /*auth_manager*/ None,
     ));
@@ -176,7 +180,10 @@ async fn background_refresh_blocks_changed_and_invalid_requirements_then_recover
     );
     let endpoint = TestModelsEndpoint::new();
     let models_manager: SharedModelsManager = Arc::new(OpenAiModelsManager::new(
-        home.path().to_path_buf(),
+        home.path()
+            .join(codex_model_provider_info::models_cache_file_name(
+                &config.model_provider_id,
+            )),
         endpoint.clone(),
         /*auth_manager*/ None,
     ));
