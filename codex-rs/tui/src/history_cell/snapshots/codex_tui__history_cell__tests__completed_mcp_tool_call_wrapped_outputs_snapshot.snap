@@ -4,9 +4,9 @@ expression: rendered
 ---
 • Called
   └ metrics.get_nearby_metric({"query":"
-        very_long_query_that_needs_wrapp
-        ing_to_display_properly_in_the_h
-        istory","limit":1})
+    very_long_query_that_needs_wrapping_
+    to_display_properly_in_the_history",
+    "limit":1})
     Line one of the response, which is
     quite long and needs wrapping.
     Line two continues the response with

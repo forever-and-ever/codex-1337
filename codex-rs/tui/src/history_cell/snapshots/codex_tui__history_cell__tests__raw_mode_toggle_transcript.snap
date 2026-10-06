@@ -17,7 +17,7 @@ rich before:
   copy me
 • Called
   └ workspace.inspect({"path":"README.md
-        "})
+    "})
     structured output
     second line
 
@@ -53,6 +53,6 @@ rich after:
   copy me
 • Called
   └ workspace.inspect({"path":"README.md
-        "})
+    "})
     structured output
     second line

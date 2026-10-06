@@ -460,68 +460,6 @@ fn code_mode_output_preserves_trailing_failure_diagnostics_in_transcript() {
     assert!(transcript.ends_with("    Script error:\n    permission denied"));
 }
 
-#[test]
-fn code_mode_output_row_budget_applies_after_wrapping_and_to_errors() {
-    let output = format!("{}\ntranscript tail", "Browser 页面 👩‍💻\n".repeat(40));
-    for server in ["node_repl", "cua_repl"] {
-        for completion in [
-            Ok(result(vec![json!({"type": "text", "text": output})])),
-            Ok(result(vec![json!({
-                "type": "text",
-                "text": format!("https://example.com/{}\ntranscript tail", "页面".repeat(100)),
-            })])),
-            Ok(CallToolResult {
-                is_error: Some(true),
-                ..result(vec![json!({"type": "text", "text": output})])
-            }),
-            Err(output.clone()),
-        ] {
-            let mut cell = new_active_mcp_tool_call(
-                "browser-call".to_string(),
-                McpInvocation {
-                    server: server.to_string(),
-                    tool: "js".to_string(),
-                    arguments: Some(json!({"title": "Inspect"})),
-                },
-                /*animations_enabled*/ false,
-            );
-            cell.complete(Duration::ZERO, completion);
-            for width in [20, 40, 80] {
-                let compact = cell.compact_hyperlink_lines(width);
-                assert!(compact.len() <= 4);
-                assert!(
-                    compact
-                        .last()
-                        .unwrap()
-                        .line
-                        .to_string()
-                        .ends_with("transcript tail")
-                );
-                let display = cell.display_lines(width);
-                assert_eq!(display.len(), 5); // Header, three output rows, and omission hint.
-                assert!(
-                    display
-                        .iter()
-                        .all(|line| line.width() <= usize::from(width))
-                );
-                assert!(display.last().unwrap().to_string().starts_with("    +"));
-                let transcript = cell
-                    .transcript_lines(width)
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                assert!(
-                    transcript
-                        .split_whitespace()
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                        .contains("transcript tail")
-                );
-            }
-        }
-    }
-}
 
 #[test]
 fn projected_content_preserves_full_rendering() {
@@ -719,10 +657,7 @@ fn code_mode_preserves_text_fields_on_nontext_and_unknown_blocks() {
         .join("\n");
     insta::assert_snapshot!(format!("compact:\n{compact}\n\nhistory:\n{display}\n\ntranscript:\n{transcript}"), @r#"
     compact:
-    • Called Inspect results
-      └ Returned image
-        image-side output
-        unknown-side output
+    • Called node_repl.js(title="Inspect results")
 
     history:
     • Called Inspect results

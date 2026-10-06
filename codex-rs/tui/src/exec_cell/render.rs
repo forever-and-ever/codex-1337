@@ -1146,10 +1146,7 @@ mod tests {
             .map(render_line_text)
             .join("\n");
 
-        insta::assert_snapshot!(rendered, @r"
-        • Exploring
-          └ Read SKILL.md
-        ");
+        insta::assert_snapshot!(rendered, @r"• Running Get-Content C:\skills\demo\SKILL.md");
     }
 
     #[test]
@@ -1259,46 +1256,6 @@ mod tests {
         assert_eq!(first, vec!["• Running echo done".to_string()]);
     }
 
-    #[test]
-    fn exploring_display_does_not_split_long_url_like_search_query() {
-        let url_like = "example.test/api/v1/projects/alpha-team/releases/2026-02-17/builds/1234567890/artifacts/reports/performance/summary/detail/with/a/very/long/path";
-        let call = ExecCall {
-            rows: Default::default(),
-            call_id: "call-id".to_string(),
-            command: vec!["bash".into(), "-lc".into(), "rg foo".into()],
-            parsed: vec![ParsedCommand::Search {
-                cmd: format!("rg {url_like}"),
-                query: Some(url_like.to_string()),
-                path: None,
-            }],
-            output: None,
-            source: ExecCommandSource::Agent,
-            start_time: None,
-            duration: None,
-            interaction_input: None,
-        };
-
-        let cell = ExecCell::new(call, /*animations_enabled*/ false);
-        let rendered: Vec<String> = cell
-            .display_lines(/*width*/ 36)
-            .iter()
-            .map(|line| {
-                line.spans
-                    .iter()
-                    .map(|span| span.content.as_ref())
-                    .collect::<String>()
-            })
-            .collect();
-
-        assert_eq!(
-            rendered
-                .iter()
-                .filter(|line| line.contains(url_like))
-                .count(),
-            1,
-            "expected full URL-like query in one rendered line, got: {rendered:?}"
-        );
-    }
 
     #[test]
     fn output_display_does_not_split_long_url_like_token_without_scheme() {

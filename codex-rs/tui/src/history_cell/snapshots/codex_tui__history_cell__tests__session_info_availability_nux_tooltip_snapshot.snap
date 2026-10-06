@@ -3,7 +3,7 @@ source: tui/src/history_cell/tests.rs
 expression: rendered
 ---
 
-  >_ OpenAI Codex (v0.159.1-1337)
+  >_ OpenAI Codex (v0.160.0-1337)
      /tmp/project
 
   Tip: Model just became available

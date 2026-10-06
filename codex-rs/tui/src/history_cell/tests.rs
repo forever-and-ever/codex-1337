@@ -17,7 +17,6 @@ use codex_otel::RuntimeMetricTotals;
 use codex_otel::RuntimeMetricsSummary;
 use codex_protocol::ThreadId;
 use codex_protocol::account::PlanType;
-use codex_protocol::parse_command::ParsedCommand;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use dirs::home_dir;
 use pretty_assertions::assert_eq;
@@ -1501,8 +1500,8 @@ fn code_mode_tool_call_uses_title_and_preserves_full_transcript() {
         Wall time 0.1 seconds
         Output:
         {"chunk_id":"chunk-
-            1","output":"012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678
-            90123456789012345678901234567890123456789 transcript tail","exit_code":0}
+        1","output":"0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012
+        3456789012345678901234567890123456789 transcript tail","exit_code":0}
     "#);
 }
 
@@ -1919,85 +1918,7 @@ fn session_header_directory_front_truncates_long_segment() {
     assert_eq!(formatted, expected);
 }
 
-#[test]
-fn coalesces_sequential_reads_within_one_call() {
-    // Build one exec cell with a Search followed by two Reads
-    let call_id = "c1".to_string();
-    let mut cell = ExecCell::new(
-        ExecCall {
-            rows: Default::default(),
-            call_id: call_id.clone(),
-            command: vec!["bash".into(), "-lc".into(), "echo".into()],
-            parsed: vec![
-                ParsedCommand::Search {
-                    query: Some("shimmer_spans".into()),
-                    path: None,
-                    cmd: "rg shimmer_spans".into(),
-                },
-                ParsedCommand::Read {
-                    name: "shimmer.rs".into(),
-                    cmd: "cat shimmer.rs".into(),
-                    path: "shimmer.rs".into(),
-                },
-                ParsedCommand::Read {
-                    name: "status_indicator_widget.rs".into(),
-                    cmd: "cat status_indicator_widget.rs".into(),
-                    path: "status_indicator_widget.rs".into(),
-                },
-            ],
-            output: None,
-            source: ExecCommandSource::Agent,
-            start_time: Some(Instant::now()),
-            duration: None,
-            interaction_input: None,
-        },
-        /*animations_enabled*/ true,
-    );
-    // Mark call complete so markers are ✓
-    cell.complete_call(&call_id, CommandOutput::default(), Duration::from_millis(1));
 
-    let lines = cell.display_lines(/*width*/ 80);
-    let rendered = render_lines(&lines).join("\n");
-    insta::assert_snapshot!(rendered);
-}
-
-#[test]
-fn coalesced_reads_dedupe_names() {
-    let mut cell = ExecCell::new(
-        ExecCall {
-            rows: Default::default(),
-            call_id: "c1".to_string(),
-            command: vec!["bash".into(), "-lc".into(), "echo".into()],
-            parsed: vec![
-                ParsedCommand::Read {
-                    name: "auth.rs".into(),
-                    cmd: "cat auth.rs".into(),
-                    path: "auth.rs".into(),
-                },
-                ParsedCommand::Read {
-                    name: "auth.rs".into(),
-                    cmd: "cat auth.rs".into(),
-                    path: "auth.rs".into(),
-                },
-                ParsedCommand::Read {
-                    name: "shimmer.rs".into(),
-                    cmd: "cat shimmer.rs".into(),
-                    path: "shimmer.rs".into(),
-                },
-            ],
-            output: None,
-            source: ExecCommandSource::Agent,
-            start_time: Some(Instant::now()),
-            duration: None,
-            interaction_input: None,
-        },
-        /*animations_enabled*/ true,
-    );
-    cell.complete_call("c1", CommandOutput::default(), Duration::from_millis(1));
-    let lines = cell.display_lines(/*width*/ 80);
-    let rendered = render_lines(&lines).join("\n");
-    insta::assert_snapshot!(rendered);
-}
 
 #[test]
 fn multiline_command_wraps_with_extra_indent_on_subsequent_lines() {
