@@ -659,8 +659,8 @@ fn executed_tool_call_recorder_bounds_retained_history_and_keeps_latest_calls() 
     let mut history = Vec::new();
     let arguments = json!({ "payload": "x".repeat(7 * 1024) });
     let argument_bytes = serialized_json_bytes(&arguments).expect("tool arguments must serialize");
-    let cell_count = 100;
     let calls_per_cell = 4;
+    let cell_count = (2 * 1024 * 1024) / (argument_bytes * calls_per_cell) + 2;
     assert!(argument_bytes < MAX_EXECUTED_TOOL_CALL_ARGUMENT_BYTES);
     assert!(
         argument_bytes * calls_per_cell < MAX_EXECUTED_TOOL_CALL_FULL_ARGUMENT_BYTES_PER_OUTPUT
