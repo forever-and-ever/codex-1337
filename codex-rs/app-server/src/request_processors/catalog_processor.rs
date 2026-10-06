@@ -180,40 +180,32 @@ impl CatalogRequestProcessor {
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
         // Native discovery captures its configured account. Rebuild from current
         // preferences rather than retaining the account chosen at server startup.
-        let (config, catalog) = if params
-            .model_provider
-            .as_ref()
-            .is_some_and(|provider| provider != &self.config.model_provider_id)
-            || self.config.model_provider.adapter
-                == codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription
+        let config = Arc::new(
+            self.config_manager
+                .load_with_overrides(
+                    /*request_overrides*/ None,
+                    codex_core::config::ConfigOverrides {
+                        model_provider: params.model_provider.clone(),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .map_err(|err| config_load_error(&err))?,
+        );
+        let catalog = if config.model_provider_id == self.config.model_provider_id
+            && config.model_provider == self.config.model_provider
+            && config.model_provider.adapter
+                != codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription
         {
-            let config = Arc::new(
-                self.config_manager
-                    .load_with_overrides(
-                        /*request_overrides*/ None,
-                        codex_core::config::ConfigOverrides {
-                            model_provider: Some(
-                                params
-                                    .model_provider
-                                    .clone()
-                                    .unwrap_or_else(|| self.config.model_provider_id.clone()),
-                            ),
-                            ..Default::default()
-                        },
-                    )
-                    .await
-                    .map_err(|err| config_load_error(&err))?,
-            );
+            self.model_catalog.clone()
+        } else {
             let manager =
                 codex_core::build_models_manager(&config, self.thread_manager.auth_manager());
-            let catalog = Arc::new(ModelCatalog::new(
+            Arc::new(ModelCatalog::new(
                 self.config_manager.clone(),
                 config.clone(),
                 manager,
-            ));
-            (config, catalog)
-        } else {
-            (self.config.clone(), self.model_catalog.clone())
+            ))
         };
         // Gate the same provider used by the catalog, including when its model cache is warm.
         // Resolving credentials may refresh them, but explicit host policy prevents browser login.
