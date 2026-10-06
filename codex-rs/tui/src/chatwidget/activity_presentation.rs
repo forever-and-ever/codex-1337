@@ -44,11 +44,22 @@ impl ChatWidget {
             )
         });
         let (activity, header, disclosure, controls) = if let Some(parts) = parts {
-            (parts.lines, parts.header, parts.output, parts.controls)
+            (
+                crate::transcript_geometry::clock_lines(
+                    parts.lines,
+                    active.and_then(HistoryCell::transcript_timestamp),
+                ),
+                parts.header,
+                parts.output,
+                parts.controls,
+            )
         } else {
             let activity = active.map_or_else(Vec::new, |cell| {
                 if expanded && has_activity {
-                    cell.expanded_output_lines(width, output_mode)
+                    crate::transcript_geometry::clock_lines(
+                        cell.expanded_output_lines(width, output_mode),
+                        cell.transcript_timestamp(),
+                    )
                 } else {
                     render_compact(cell, width)
                 }
@@ -88,10 +99,7 @@ impl ChatWidget {
             output_mode: (expanded && active.is_some_and(HistoryCell::has_formatted_output))
                 .then_some(output_mode),
             is_tool_entry: active.is_some_and(HistoryCell::is_tool_entry),
-            activity: crate::transcript_geometry::clock_lines(
-                activity,
-                active.and_then(HistoryCell::transcript_timestamp),
-            ),
+            activity,
             header,
             auxiliary,
             header_tokens: active

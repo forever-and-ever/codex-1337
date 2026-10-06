@@ -187,22 +187,24 @@ fn try_wsl_clipboard_fallback(
         return Err(error.clone());
     };
 
-    let Ok((w, h)) = image::image_dimensions(&mapped_path) else {
-        return Err(error.clone());
-    };
-
-    let png = std::fs::read(&mapped_path).map_err(|e| PasteImageError::IoError(e.to_string()))?;
-    let path = persist_clipboard_png(codex_home, &png)?;
+    let result = (|| {
+        let Ok((w, h)) = image::image_dimensions(&mapped_path) else {
+            return Err(error.clone());
+        };
+        let png = std::fs::read(&mapped_path).map_err(|e| PasteImageError::IoError(e.to_string()))?;
+        let path = persist_clipboard_png(codex_home, &png)?;
+        Ok((
+            path,
+            PastedImageInfo {
+                width: w,
+                height: h,
+                encoded_format: EncodedImageFormat::Png,
+            },
+        ))
+    })();
     // This file was created by our clipboard-export command, not supplied by the user.
     let _ = std::fs::remove_file(mapped_path);
-    Ok((
-        path,
-        PastedImageInfo {
-            width: w,
-            height: h,
-            encoded_format: EncodedImageFormat::Png,
-        },
-    ))
+    result
 }
 
 /// Try to call a Windows PowerShell command (several common names) to save the
