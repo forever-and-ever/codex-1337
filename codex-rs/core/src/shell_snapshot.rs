@@ -15,13 +15,11 @@ use anyhow::Result;
 use anyhow::anyhow;
 use anyhow::bail;
 use codex_exec_server::Environment;
-use codex_network_proxy::CREDENTIAL_BROKER_ACTIVE_ENV_KEY;
 use codex_network_proxy::CredentialBrokerContext;
 use codex_network_proxy::NetworkProxy;
 use codex_otel::SessionTelemetry;
 use codex_protocol::ThreadId;
 use codex_protocol::config_types::ShellEnvironmentPolicy;
-use codex_protocol::shell_environment::create_env_from_vars;
 use codex_shell_command::shell_snapshot::CapturedSnapshot;
 use codex_shell_command::shell_snapshot::SnapshotCaptureOptions;
 use codex_shell_command::shell_snapshot::SnapshotStartup;
@@ -66,34 +64,7 @@ pub(crate) enum SnapshotCredentialBrokerState {
 
 pub(crate) struct ShellSnapshotFile {
     path: AbsolutePathBuf,
-    credentials: Option<SnapshotCredentials>,
     pub(crate) shell_environment_policy: ShellEnvironmentPolicy,
-}
-
-struct SnapshotCredentials {
-    network_proxy: NetworkProxy,
-    broker_config_revision: u64,
-    shell_environment_policy: ShellEnvironmentPolicy,
-    protected_startup_env: Option<String>,
-    credential_env: HashMap<String, String>,
-    unset_credential_keys: Vec<String>,
-    // Retain discovered key identity even when policy replaces or removes its value.
-    startup_credential_keys: Vec<String>,
-    context_env: HashMap<String, String>,
-    fail_open_aliases: HashMap<String, FailOpenAlias>,
-    context_credential_keys: HashMap<String, Vec<String>>,
-    binding_context_credential_keys: HashMap<String, Vec<String>>,
-}
-
-struct SnapshotCredentialBroker {
-    network_proxy: NetworkProxy,
-    shell_environment_policy: ShellEnvironmentPolicy,
-}
-
-struct FailOpenAlias {
-    value: String,
-    dummy_value: Option<String>,
-    authorized: bool,
 }
 
 const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -172,7 +143,7 @@ impl ShellSnapshot {
     ) -> Option<Arc<ShellSnapshotFile>> {
         let snapshot_span = info_span!("shell_snapshot", thread_id = %config.session_id);
         async {
-            let credential_broker = if let Some(receiver) = config.credential_broker.as_ref() {
+            if let Some(receiver) = config.credential_broker.as_ref() {
                 let mut receiver = receiver.clone();
                 if matches!(&*receiver.borrow(), SnapshotCredentialBrokerState::Starting)
                     && receiver.changed().await.is_err()
@@ -186,18 +157,10 @@ impl ShellSnapshot {
                     SnapshotCredentialBrokerState::Inactive if config.prefer_executor_snapshots => {
                         return None;
                     }
-                    SnapshotCredentialBrokerState::Inactive => None,
-                    SnapshotCredentialBrokerState::Ready(network_proxy) if sandbox.is_some() => {
-                        Some(SnapshotCredentialBroker {
-                            network_proxy,
-                            shell_environment_policy: shell_environment_policy.clone(),
-                        })
-                    }
-                    SnapshotCredentialBrokerState::Ready(_) => return None,
+                    SnapshotCredentialBrokerState::Inactive => {}
+                    SnapshotCredentialBrokerState::Ready(network_proxy) => match network_proxy {},
                 }
-            } else {
-                None
-            };
+            }
             let timer = config
                 .session_telemetry
                 .start_timer("codex.shell_snapshot.duration_ms", &[("version", "v1")]);
@@ -208,7 +171,6 @@ impl ShellSnapshot {
                 &shell_environment_policy,
                 &shell,
                 config.state_db.clone(),
-                credential_broker,
                 sandbox.as_ref(),
             )
             .await;
@@ -227,7 +189,6 @@ impl ShellSnapshot {
         .await
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn try_create(
         codex_home: &AbsolutePathBuf,
         session_id: ThreadId,
@@ -235,7 +196,6 @@ impl ShellSnapshot {
         shell_environment_policy: &ShellEnvironmentPolicy,
         shell: &Shell,
         state_db: Option<StateDbHandle>,
-        credential_broker: Option<SnapshotCredentialBroker>,
         sandbox: Option<&ShellSnapshotSandbox>,
     ) -> std::result::Result<ShellSnapshotFile, &'static str> {
         // File to store the snapshot
@@ -266,12 +226,11 @@ impl ShellSnapshot {
         });
 
         // Make the new snapshot.
-        let credentials = write_shell_snapshot(
+        write_shell_snapshot(
             shell,
             &temp_path,
             session_cwd,
             shell_environment_policy,
-            credential_broker.as_ref(),
             sandbox,
         )
         .await
@@ -291,7 +250,6 @@ impl ShellSnapshot {
             shell,
             &temp_path,
             session_cwd,
-            credential_broker.as_ref(),
             sandbox,
         )
         .await
@@ -309,7 +267,6 @@ impl ShellSnapshot {
 
         Ok(ShellSnapshotFile {
             path,
-            credentials,
             shell_environment_policy: shell_environment_policy.clone(),
         })
     }
@@ -320,13 +277,8 @@ impl ShellSnapshotFile {
         &self,
         shell_environment_policy: &ShellEnvironmentPolicy,
     ) -> bool {
-        self.credentials.as_ref().is_some_and(|credentials| {
-            &credentials.shell_environment_policy == shell_environment_policy
-                && credentials.broker_config_revision
-                    == credentials
-                        .network_proxy
-                        .credential_broker_config_revision()
-        })
+        let _ = shell_environment_policy;
+        false
     }
 
     pub(crate) fn path(&self) -> AbsolutePathBuf {
@@ -334,15 +286,11 @@ impl ShellSnapshotFile {
     }
 
     pub(crate) fn protected_startup_env(&self) -> Option<&str> {
-        self.credentials
-            .as_ref()
-            .and_then(|credentials| credentials.protected_startup_env.as_deref())
+        None
     }
 
     pub(crate) fn startup_credential_keys(&self) -> &[String] {
-        self.credentials.as_ref().map_or(&[], |credentials| {
-            credentials.startup_credential_keys.as_slice()
-        })
+        &[]
     }
 
     #[must_use = "pass private context to the broker when preparing a managed child"]
@@ -351,98 +299,8 @@ impl ShellSnapshotFile {
         env: &mut HashMap<String, String>,
         shell_environment_policy: &ShellEnvironmentPolicy,
     ) -> CredentialBrokerContext {
-        let Some(credentials) = self.credentials.as_ref() else {
-            return CredentialBrokerContext::default();
-        };
-        let mut credential_context = HashMap::new();
-
-        let mut allowed_snapshot_env = create_env_from_vars(
-            credentials
-                .credential_env
-                .iter()
-                .chain(&credentials.context_env)
-                .map(|(key, value)| (key.clone(), value.clone())),
-            shell_environment_policy,
-            /*thread_id*/ None,
-        );
-        let explicit_env_overrides = &shell_environment_policy.r#set;
-        for key in &credentials.unset_credential_keys {
-            if !contains_env_key(explicit_env_overrides, key) {
-                remove_env_value(env, key);
-                remove_env_value(&mut allowed_snapshot_env, key);
-            }
-        }
-        let mut snapshot_real_credentials = credentials.credential_env.clone();
-        snapshot_real_credentials.insert(
-            CREDENTIAL_BROKER_ACTIVE_ENV_KEY.to_string(),
-            "1".to_string(),
-        );
-        credentials
-            .network_proxy
-            .restore_brokered_credentials(&mut snapshot_real_credentials, &mut []);
-        let mut restored_credential_keys = Vec::new();
-        for (key, value) in &credentials.credential_env {
-            if contains_env_key(explicit_env_overrides, key)
-                || !contains_env_key(&allowed_snapshot_env, key)
-            {
-                continue;
-            }
-            if snapshot_real_credentials.get(key) != env_value(env, key) {
-                insert_env_value(env, key, value);
-                restored_credential_keys.push(key);
-            }
-        }
-        for (key, value) in &credentials.context_env {
-            let Some(credential_keys) = credentials.context_credential_keys.get(key) else {
-                continue;
-            };
-            let binding_keys = credentials.binding_context_credential_keys.get(key);
-            let restores_binding_context = binding_keys.is_some_and(|keys| {
-                keys.iter()
-                    .any(|key| restored_credential_keys.contains(&key))
-            });
-            let needs_binding_context = restores_binding_context
-                || binding_keys.is_some_and(|keys| {
-                    keys.iter().any(|key| {
-                        env_value(env, key)
-                            .is_some_and(|value| snapshot_real_credentials.get(key) == Some(value))
-                    })
-                });
-            let allowed_context = contains_env_key(&allowed_snapshot_env, key);
-            let explicit_context = env_value(explicit_env_overrides, key);
-            if explicit_context.is_some() && allowed_context
-                || !allowed_context && !needs_binding_context
-                || !credential_keys
-                    .iter()
-                    .any(|credential_key| contains_env_key(&allowed_snapshot_env, credential_key))
-            {
-                continue;
-            }
-            if restores_binding_context || !contains_env_key(env, key) {
-                let target = if allowed_context {
-                    &mut *env
-                } else {
-                    &mut credential_context
-                };
-                insert_env_value(target, key, explicit_context.unwrap_or(value));
-            }
-        }
-
-        for env in [env, &mut credential_context] {
-            let previous = env.insert(
-                CREDENTIAL_BROKER_ACTIVE_ENV_KEY.to_string(),
-                "1".to_string(),
-            );
-            credentials
-                .network_proxy
-                .restore_brokered_credentials(env, &mut []);
-            if let Some(previous) = previous {
-                env.insert(CREDENTIAL_BROKER_ACTIVE_ENV_KEY.to_string(), previous);
-            } else {
-                env.remove(CREDENTIAL_BROKER_ACTIVE_ENV_KEY);
-            }
-        }
-        credential_context.into()
+        let _ = (env, shell_environment_policy);
+        CredentialBrokerContext::default()
     }
 
     pub(crate) fn restore_fail_open_aliases(
@@ -450,61 +308,7 @@ impl ShellSnapshotFile {
         env: &mut HashMap<String, String>,
         environment_id: Option<&str>,
     ) {
-        let Some(credentials) = self.credentials.as_ref() else {
-            return;
-        };
-        if env_value(env, CREDENTIAL_BROKER_ACTIVE_ENV_KEY).is_some_and(|active| active == "1") {
-            for (key, alias) in &credentials.fail_open_aliases {
-                let has_snapshot_value = alias.dummy_value.as_ref().is_some_and(|dummy| {
-                    env_value(env, key).is_some_and(|value| {
-                        value == dummy
-                            || credentials.network_proxy.child_credential_alias_matches(
-                                key,
-                                value,
-                                dummy,
-                                environment_id,
-                            )
-                    })
-                });
-                if has_snapshot_value {
-                    if !alias.authorized {
-                        remove_env_value(env, key);
-                    }
-                    continue;
-                }
-                if env_value(env, key).is_some_and(|value| {
-                    let mut virtualized = value.clone();
-                    !credentials
-                        .network_proxy
-                        .virtualize_brokered_text(&mut virtualized, env)
-                }) {
-                    remove_env_value(env, key);
-                }
-            }
-            return;
-        }
-
-        let policy = &credentials.shell_environment_policy;
-        for (key, alias) in &credentials.fail_open_aliases {
-            if contains_env_key(&policy.r#set, key)
-                || credentials.unset_credential_keys.contains(key)
-            {
-                continue;
-            }
-            let has_snapshot_dummy = alias
-                .dummy_value
-                .as_ref()
-                .is_some_and(|dummy| env_value(env, key) == Some(dummy));
-            if has_snapshot_dummy {
-                if alias.authorized {
-                    insert_env_value(env, key, &alias.value);
-                } else {
-                    remove_env_value(env, key);
-                }
-            } else if alias.authorized && !contains_env_key(env, key) {
-                insert_env_value(env, key, &alias.value);
-            }
-        }
+        let _ = (env, environment_id);
     }
 }
 
@@ -524,18 +328,16 @@ async fn write_shell_snapshot(
     output_path: &AbsolutePathBuf,
     cwd: &AbsolutePathBuf,
     shell_environment_policy: &ShellEnvironmentPolicy,
-    credential_broker: Option<&SnapshotCredentialBroker>,
     sandbox: Option<&ShellSnapshotSandbox>,
-) -> Result<Option<SnapshotCredentials>> {
+) -> Result<()> {
     let shell_type = shell.shell_type;
     if shell_type == ShellType::PowerShell || shell_type == ShellType::Cmd {
         bail!("Shell snapshot not supported yet for {shell_type:?}");
     }
-    let (snapshot, credentials) = capture_snapshot(
+    let snapshot = capture_snapshot(
         shell,
         cwd,
         shell_environment_policy,
-        credential_broker,
         sandbox,
     )
     .await?;
@@ -552,19 +354,15 @@ async fn write_shell_snapshot(
         .await
         .with_context(|| format!("Failed to write snapshot to {snapshot_path}"))?;
 
-    Ok(credentials)
+    Ok(())
 }
 
 async fn capture_snapshot(
     shell: &Shell,
     cwd: &AbsolutePathBuf,
     shell_environment_policy: &ShellEnvironmentPolicy,
-    credential_broker: Option<&SnapshotCredentialBroker>,
     sandbox: Option<&ShellSnapshotSandbox>,
-) -> Result<(String, Option<SnapshotCredentials>)> {
-    if credential_broker.is_some() {
-        return Err(codex_network_proxy::unsupported_error().into());
-    }
+) -> Result<String> {
     let shell_type = shell.shell_type;
     let script = snapshot_capture_script(
         shell_type,
@@ -581,42 +379,12 @@ async fn capture_snapshot(
         SNAPSHOT_TIMEOUT,
         SnapshotShellMode::Login,
         cwd,
-        credential_broker,
         sandbox,
     )
     .await?;
     let capture = CapturedSnapshot::parse(shell_type, raw_snapshot.as_bytes())
         .ok_or_else(|| anyhow!("invalid shell snapshot capture"))?;
-    Ok((capture.render_script(shell_environment_policy), None))
-}
-
-fn contains_env_key(env: &HashMap<String, String>, key: &str) -> bool {
-    env_value(env, key).is_some()
-}
-
-fn env_value<'a>(env: &'a HashMap<String, String>, key: &str) -> Option<&'a String> {
-    env.get(key).or_else(|| {
-        cfg!(windows)
-            .then(|| {
-                env.iter().find_map(|(candidate, value)| {
-                    candidate.eq_ignore_ascii_case(key).then_some(value)
-                })
-            })
-            .flatten()
-    })
-}
-
-fn insert_env_value(env: &mut HashMap<String, String>, key: &str, value: &str) {
-    #[cfg(windows)]
-    env.retain(|candidate, _| !candidate.eq_ignore_ascii_case(key));
-    env.insert(key.to_string(), value.to_string());
-}
-
-fn remove_env_value(env: &mut HashMap<String, String>, key: &str) {
-    #[cfg(windows)]
-    env.retain(|candidate, _| !candidate.eq_ignore_ascii_case(key));
-    #[cfg(not(windows))]
-    env.remove(key);
+    Ok(capture.render_script(shell_environment_policy))
 }
 
 #[derive(Clone, Copy)]
@@ -629,7 +397,6 @@ async fn validate_snapshot(
     shell: &Shell,
     snapshot_path: &AbsolutePathBuf,
     cwd: &AbsolutePathBuf,
-    credential_broker: Option<&SnapshotCredentialBroker>,
     sandbox: Option<&ShellSnapshotSandbox>,
 ) -> Result<()> {
     let snapshot_path_display = snapshot_path.display();
@@ -640,7 +407,6 @@ async fn validate_snapshot(
         SNAPSHOT_TIMEOUT,
         SnapshotShellMode::Validation(snapshot_path),
         cwd,
-        credential_broker,
         sandbox,
     )
     .await
@@ -653,27 +419,10 @@ async fn run_script_with_timeout(
     snapshot_timeout: Duration,
     shell_mode: SnapshotShellMode<'_>,
     cwd: &AbsolutePathBuf,
-    credential_broker: Option<&SnapshotCredentialBroker>,
     sandbox: Option<&ShellSnapshotSandbox>,
 ) -> Result<String> {
-    let suppress_startup_files =
-        credential_broker.is_some() && matches!(shell_mode, SnapshotShellMode::Validation(_));
-    let mut args = shell.derive_exec_args(script, matches!(shell_mode, SnapshotShellMode::Login));
-    if suppress_startup_files && shell.shell_type == ShellType::Zsh {
-        args[1] = "-fc".to_string();
-    }
+    let args = shell.derive_exec_args(script, matches!(shell_mode, SnapshotShellMode::Login));
     let shell_name = shell.name();
-    let mut prepared_env = None;
-    if let Some(credential_broker) = credential_broker {
-        let policy = &credential_broker.shell_environment_policy;
-        let mut env = create_env_from_vars(std::env::vars(), policy, /*thread_id*/ None);
-        if suppress_startup_files {
-            env.remove("BASH_ENV");
-            env.remove("ENV");
-        }
-        credential_broker.network_proxy.apply_to_env(&mut env);
-        prepared_env = Some(env);
-    }
     if let Some(sandbox) = sandbox {
         let snapshot_read_path = match shell_mode {
             SnapshotShellMode::Validation(path) => Some(path),
@@ -683,7 +432,7 @@ async fn run_script_with_timeout(
             .run(
                 args,
                 cwd,
-                prepared_env.unwrap_or_else(|| std::env::vars().collect()),
+                std::env::vars().collect(),
                 snapshot_timeout,
                 shell_name,
                 snapshot_read_path,
@@ -702,10 +451,6 @@ async fn run_script_with_timeout(
         // The shared launcher needs the complete child environment.
         handler.env_clear();
         handler.envs(std::env::vars_os());
-    }
-    if let Some(env) = prepared_env {
-        handler.env_clear();
-        handler.envs(env);
     }
     codex_protocol::shell_environment::scrub_non_inheritable_env_vars(handler.as_std_mut());
     #[cfg(unix)]

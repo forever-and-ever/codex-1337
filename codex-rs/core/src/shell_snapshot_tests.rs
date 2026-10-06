@@ -78,19 +78,6 @@ fn assert_posix_snapshot_sections(snapshot: &str) {
     assert!(snapshot.contains("setopts "));
 }
 
-#[cfg(windows)]
-#[test]
-fn inserted_environment_values_match_windows_casing() {
-    let mut env = HashMap::from([("GH_HOST".to_string(), "github.example.com".to_string())]);
-
-    insert_env_value(&mut env, "gh_host", "github.alternate.example");
-    assert_eq!(
-        env_value(&env, "GH_HOST").map(String::as_str),
-        Some("github.alternate.example")
-    );
-    assert_eq!(env.len(), 1);
-}
-
 async fn get_snapshot(shell_type: ShellType) -> Result<String> {
     let dir = tempdir()?;
     let path = dir.path().join("snapshot.sh");
@@ -101,7 +88,6 @@ async fn get_snapshot(shell_type: ShellType) -> Result<String> {
         &path.abs(),
         &dir.path().abs(),
         &ShellEnvironmentPolicy::default(),
-        /*credential_broker*/ None,
         /*sandbox*/ None,
     )
     .await?;
@@ -210,7 +196,6 @@ async fn try_create_creates_and_deletes_snapshot_file() -> Result<()> {
         &ShellEnvironmentPolicy::default(),
         &shell,
         /*state_db*/ None,
-        /*credential_broker*/ None,
         /*sandbox*/ None,
     )
     .await
@@ -242,7 +227,6 @@ async fn try_create_uses_distinct_generation_paths() -> Result<()> {
         &ShellEnvironmentPolicy::default(),
         &shell,
         /*state_db*/ None,
-        /*credential_broker*/ None,
         /*sandbox*/ None,
     )
     .await
@@ -254,7 +238,6 @@ async fn try_create_uses_distinct_generation_paths() -> Result<()> {
         &ShellEnvironmentPolicy::default(),
         &shell,
         /*state_db*/ None,
-        /*credential_broker*/ None,
         /*sandbox*/ None,
     )
     .await
@@ -315,7 +298,6 @@ async fn snapshot_shell_does_not_inherit_stdin() -> Result<()> {
         Duration::from_secs(2),
         SnapshotShellMode::Login,
         &home,
-        /*credential_broker*/ None,
         /*sandbox*/ None,
     )
     .await
@@ -360,7 +342,6 @@ async fn timed_out_snapshot_shell_is_terminated() -> Result<()> {
         Duration::from_secs(1),
         SnapshotShellMode::Login,
         &dir.path().abs(),
-        /*credential_broker*/ None,
         /*sandbox*/ None,
     )
     .await
@@ -544,7 +525,6 @@ async fn snapshot_rejects_nul_script_before_execution() -> Result<()> {
         Duration::from_secs(5),
         SnapshotShellMode::Login,
         &root.path().abs(),
-        /*credential_broker*/ None,
         /*sandbox*/ None,
     )
     .await
