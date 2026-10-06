@@ -56,10 +56,10 @@ fmt-check:
     @{{ python }} ../scripts/format.py --check
 
 fix *args:
-    cargo clippy --fix --tests --allow-dirty {{ args }}
+    cargo clippy --fix --tests --allow-dirty {args}
 
 clippy *args:
-    cargo clippy --tests {{ args }}
+    cargo clippy --tests {args}
 
 [unix]
 install:
@@ -178,7 +178,7 @@ write-config-schema:
 
 # Regenerate app-server protocol schemas and the Python SDK derived from them.
 write-app-server-schema *args:
-    python3 app-server-protocol/scripts/write_schema_fixtures.py {{ args }}
+    {{ python }} app-server-protocol/scripts/write_schema_fixtures.py {args}
 
 [no-cd]
 write-hooks-schema:
