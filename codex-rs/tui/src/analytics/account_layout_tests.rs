@@ -333,19 +333,59 @@ fn business_chats_display_only_supplied_dollars() {
 
 #[tokio::test]
 async fn unsupported_workspace_plans_hide_top_chats_and_skip_loading() {
-    for plan in [
-        "team",
-        "self_serve_business_prolite",
-        "self_serve_business_usage_based",
-        "enterprise",
-        "ent26",
-        "edu",
-        "edu_plus",
-        "edu_pro",
-    ] {
-        let server = test_support::server().await;
-        let (_home, _app_server, mut view) = client::tests::connected_view(&server, plan).await;
+    let server = test_support::server().await;
+    let (home, app_server, mut view) = client::tests::connected_view(&server, "team").await;
+    let config = std::sync::Arc::clone(&view.connection.as_ref().unwrap().0);
+    view.cancel_loads();
+    let plans = [
+        ("team", false),
+        ("self_serve_business_prolite", false),
+        ("self_serve_business_usage_based", false),
+        ("enterprise", false),
+        ("ent26", false),
+        ("edu", false),
+        ("edu_plus", false),
+        ("edu_pro", false),
+        ("business", true),
+        ("enterprise_cbp_usage_based", true),
+        ("enterprise_cbp_automation", true),
+    ];
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .and(wiremock::matchers::path("/backend-api/wham/accounts/check"))
+        .respond_with(wiremock::ResponseTemplate::new(http::StatusCode::OK.as_u16()).set_body_json(
+            serde_json::json!({
+                "accounts": plans.iter().map(|(plan, _)| serde_json::json!({
+                    "id": format!("account-{plan}"), "plan_type": plan,
+                })).collect::<Vec<_>>(),
+                "account_ordering": plans.iter().map(|(plan, _)| format!("account-{plan}")).collect::<Vec<_>>(),
+            }),
+        ))
+        .with_priority(std::num::NonZeroU8::MIN.get())
+        .mount(&server)
+        .await;
+    for (plan, chats_available) in plans {
+        let account = format!("account-{plan}");
+        client::tests::sign_in(home.path(), &account, "user-a", plan);
+        view.open(
+            app_server.request_handle(),
+            crate::tui::FrameRequester::test_dummy(),
+            Vec::new(),
+            std::sync::Arc::clone(&config),
+        );
         test_support::settle(&mut view).await;
+        let expected_plan: codex_protocol::account::PlanType =
+            serde_json::from_value(serde_json::json!(plan)).unwrap();
+        assert_eq!(
+            view.account.ready().ok_or(view.account.message()),
+            Ok(&expected_plan),
+            "{plan}"
+        );
+        if chats_available {
+            assert!(view.visible_sections().contains(&Section::Chats), "{plan}");
+            press(&mut view, KeyCode::Char('6'));
+            assert_eq!(view.section, Section::Chats);
+            continue;
+        }
         assert_eq!(
             view.visible_sections(),
             &[
@@ -361,18 +401,6 @@ async fn unsupported_workspace_plans_hide_top_chats_and_skip_loading() {
         let selected = view.section;
         press(&mut view, KeyCode::Char('6'));
         assert_eq!(view.section, selected);
-    }
-    for plan in [
-        "business",
-        "enterprise_cbp_usage_based",
-        "enterprise_cbp_automation",
-    ] {
-        let server = test_support::server().await;
-        let (_home, _app_server, mut view) = client::tests::connected_view(&server, plan).await;
-        test_support::settle(&mut view).await;
-        assert!(view.visible_sections().contains(&Section::Chats), "{plan}");
-        press(&mut view, KeyCode::Char('6'));
-        assert_eq!(view.section, Section::Chats);
     }
 }
 

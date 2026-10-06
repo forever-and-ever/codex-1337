@@ -248,6 +248,7 @@ async fn analytics_retries_session_initialization_after_sign_in() {
 #[tokio::test]
 async fn analytics_matches_app_account_routes_and_parameters() {
     let server = MockServer::start().await;
+    let (home, initial) = live(&server, "plus").await;
     for (plan, report, grouping, endpoint, extra) in [
         (
             "plus",
@@ -388,7 +389,18 @@ async fn analytics_matches_app_account_routes_and_parameters() {
         ),
     ] {
         server.reset().await;
-        let (_home, live) = live(&server, plan).await;
+        sign_in(home.path(), "account-a", "user-a", plan);
+        Mock::given(method("GET"))
+            .and(path("/backend-api/wham/accounts/check"))
+            .respond_with(
+                ResponseTemplate::new(http::StatusCode::OK.as_u16()).set_body_json(json!({
+                    "accounts": [{"id": "account-a", "plan_type": plan}],
+                    "account_ordering": ["account-a"]
+                })),
+            )
+            .mount(&server)
+            .await;
+        let live = Live::new(Arc::clone(&initial.config), initial.end_date);
         let today = live.end_date;
         let start = (today - chrono::Days::new(/*num*/ 6)).to_string();
         let response = if endpoint == "usage/daily-workspace-user-credit-usage" {
