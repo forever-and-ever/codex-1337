@@ -483,14 +483,15 @@ impl Session {
         let models_manager = match self.request_models_manager(&config).await {
             Ok(manager) => manager,
             Err(error) => {
-                let mut active = self.active_turn.lock().await;
-                if active
-                    .as_ref()
-                    .is_some_and(|turn| Arc::ptr_eq(&turn.turn_state, &turn_state))
                 {
-                    *active = None;
+                    let mut active = self.active_turn.lock().await;
+                    if active
+                        .as_ref()
+                        .is_some_and(|turn| Arc::ptr_eq(&turn.turn_state, &turn_state))
+                    {
+                        *active = None;
+                    }
                 }
-                drop(active);
                 self.send_event_raw(Event {
                     id: sub_id,
                     msg: EventMsg::Error(error.to_error_event(/*message_prefix*/ None)),

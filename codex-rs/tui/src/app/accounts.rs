@@ -562,11 +562,10 @@ impl App {
                     .iter()
                     .position(|completion| completion.login_id.as_ref() == Some(&login_id))
                 {
-                    let completion = self
-                        .account_ui
-                        .early_login_completions
-                        .remove(index)
-                        .expect("matched completion exists");
+                    let Some(completion) = self.account_ui.early_login_completions.remove(index)
+                    else {
+                        return;
+                    };
                     self.account_ui.early_login_completions.clear();
                     self.finish_claude_login(&completion);
                     return;
