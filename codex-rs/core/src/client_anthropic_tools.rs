@@ -20,6 +20,7 @@ pub(crate) fn project_tools(specs: &[ToolSpec]) -> Result<Arc<[AnthropicTool]>, 
             ToolSpec::Function(tool) => tools.push(function(tool, /*namespace*/ None)?),
             ToolSpec::Freeform(tool) => tools.push(custom(tool, /*namespace*/ None)?),
             ToolSpec::Namespace(namespace) => {
+                let mut first = None;
                 for tool in &namespace.tools {
                     let mut tool = match tool {
                         ResponsesApiNamespaceTool::Function(tool) => {
@@ -30,8 +31,16 @@ pub(crate) fn project_tools(specs: &[ToolSpec]) -> Result<Arc<[AnthropicTool]>, 
                         }
                     };
                     if !namespace.description.is_empty() {
-                        tool.description =
-                            format!("{}\n\n{}", namespace.description, tool.description);
+                        tool.description = if let Some(first) = &first {
+                            format!(
+                                "Instructions for the {namespace} tools are in the description of {first}.\n\n{}",
+                                tool.description,
+                                namespace = namespace.name,
+                            )
+                        } else {
+                            first = Some(tool.name.clone());
+                            format!("{}\n\n{}", namespace.description, tool.description)
+                        };
                     }
                     tools.push(tool);
                 }
