@@ -403,6 +403,7 @@ impl App {
         for id in ids {
             self.discard_thread_local_state(id).await;
         }
-        self.app_event_tx.send(AppEvent::RefreshSubagentRoster(root));
+        self.app_event_tx
+            .send(AppEvent::RefreshSubagentRoster(root));
     }
 }

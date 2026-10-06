@@ -1,4 +1,3 @@
-use anyhow::Result;
 use super::connection_handling_websocket::connect_websocket;
 use super::connection_handling_websocket::read_notification_for_method;
 use super::connection_handling_websocket::read_response_and_notification_for_method;
@@ -6,6 +5,8 @@ use super::connection_handling_websocket::read_response_for_id;
 use super::connection_handling_websocket::send_initialize_request;
 use super::connection_handling_websocket::send_request;
 use super::connection_handling_websocket::spawn_websocket_server;
+use anyhow::Context;
+use anyhow::Result;
 use app_test_support::DEFAULT_CLIENT_NAME;
 use app_test_support::MockResponsesConfig;
 use app_test_support::TestAppServer;
@@ -1091,34 +1092,36 @@ features.shell_tool = false
                 })?),
             )
             .await?;
-            let _: ThreadResumeResponse = app_test_support::to_response(
-                read_response_for_id(client, /*id*/ 2).await?,
-            )?;
+            let _: ThreadResumeResponse =
+                app_test_support::to_response(read_response_for_id(client, /*id*/ 2).await?)?;
         }
         send_request(
             &mut owner,
             "thread/retire",
             /*id*/ 3,
-            Some(serde_json::to_value(codex_app_server_protocol::ThreadRetireParams {
+            Some(serde_json::to_value(
+                codex_app_server_protocol::ThreadRetireParams {
                     root_thread_id: thread_id.clone(),
                     thread_id: child_thread_id.clone(),
-                })?),
+                },
+            )?),
         )
         .await?;
-        let (response, owner_notification) = read_response_and_notification_for_method(
-            &mut owner,
-            /*id*/ 3,
-            "thread/retired",
-        )
-        .await?;
+        let (response, owner_notification) =
+            read_response_and_notification_for_method(&mut owner, /*id*/ 3, "thread/retired")
+                .await?;
         let retired: codex_app_server_protocol::ThreadRetireResponse =
             app_test_support::to_response(response)?;
         assert_eq!(retired.thread_ids, vec![child_thread_id.clone()]);
-        let observer_notification = read_notification_for_method(&mut observer, "thread/retired")
-            .await?;
+        let observer_notification =
+            read_notification_for_method(&mut observer, "thread/retired").await?;
         for notification in [owner_notification, observer_notification] {
             let retired: codex_app_server_protocol::ThreadRetiredNotification =
-                serde_json::from_value(notification.params.unwrap())?;
+                serde_json::from_value(
+                    notification
+                        .params
+                        .context("thread/retired should include params")?,
+                )?;
             assert_eq!(
                 retired,
                 codex_app_server_protocol::ThreadRetiredNotification {
