@@ -198,7 +198,8 @@ impl App {
             .initial_history_replay_buffer
             .as_ref()
             .is_some_and(|buffer| buffer.render_from_transcript_tail);
-        let lines = if render_from_tail && !cell.as_any().is::<history_cell::CompositeHistoryCell>()
+        let lines = if (render_from_tail || tui.is_owned_screen())
+            && !cell.as_any().is::<history_cell::CompositeHistoryCell>()
         {
             Vec::new()
         } else {
