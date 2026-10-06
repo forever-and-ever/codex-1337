@@ -1443,9 +1443,9 @@ async fn mcp_code_mode_exclusion_does_not_change_direct_mode_tool_exposure() -> 
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[test_case(true; "enabled")]
 #[test_case(false; "disabled")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn code_mode_finished_discovery_has_empty_tool_inventory(
     metadata_enabled: bool,
 ) -> Result<()> {
@@ -1548,11 +1548,11 @@ async fn code_mode_terminated_empty_cell_has_complete_tool_inventory() -> Result
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[test_case(false, false, false; "disabled")]
 #[test_case(true, false, false; "completed")]
 #[test_case(true, true, false; "yielded")]
 #[test_case(true, false, true; "oversized")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn code_mode_tool_call_completeness_is_private_and_opt_in(
     metadata_enabled: bool,
     yielded: bool,
@@ -2543,7 +2543,6 @@ async fn result_metadata_preserves_results_within_request_budget(
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[test_case(true, true, true, false, "user@example.com", ToolMode::CodeModeOnly, ResultMetadataAnalytics::Config(None); "copies_full_metadata_without_rules")]
 #[test_case(true, true, true, true, "user@example.com", ToolMode::CodeModeOnly, ResultMetadataAnalytics::Config(None); "accepted_error_keeps_metadata")]
 #[test_case(true, true, false, false, "user@example.com", ToolMode::CodeModeOnly, ResultMetadataAnalytics::Config(None); "missing_metadata_stays_absent")]
@@ -2563,6 +2562,7 @@ async fn result_metadata_preserves_results_within_request_budget(
 #[test_case(true, true, true, false, "user@example.com", ToolMode::CodeModeOnly, ResultMetadataAnalytics::HostDisabled(Some(true)); "host_analytics_disabled_with_config_enabled_omits_metadata")]
 #[test_case(true, true, true, false, "user@example.com", ToolMode::Direct, ResultMetadataAnalytics::HostDisabled(None); "direct_host_analytics_disabled_with_config_unset_omits_metadata")]
 #[test_case(true, true, true, false, "user@example.com", ToolMode::Direct, ResultMetadataAnalytics::HostDisabled(Some(true)); "direct_host_analytics_disabled_with_config_enabled_omits_metadata")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn result_metadata_follows_call_binding(
     metadata_enabled: bool,
     host_owned: bool,
@@ -7079,9 +7079,9 @@ async fn code_mode_records_mcp_completion_even_when_result_is_not_printed() -> R
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[test_case("node_repl"; "node_repl")]
 #[test_case("cua_repl"; "cua_repl")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn code_mode_node_repl_screenshots_can_be_captured_without_guardian_transcript_flags(
     repl_server: &'static str,
 ) -> Result<()> {
@@ -7158,9 +7158,9 @@ async fn code_mode_node_repl_screenshots_can_be_captured_without_guardian_transc
 }
 
 #[cfg_attr(windows, ignore = "no exec_command on Windows")]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[test_case("node_repl"; "node_repl")]
 #[test_case("cua_repl"; "cua_repl")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn code_mode_node_repl_image_flag_without_enhanced_stays_disabled(
     repl_server: &'static str,
 ) -> Result<()> {
@@ -7258,7 +7258,6 @@ await tools.exec_command({ cmd: "true", sandbox_permissions: "require_escalated"
 }
 
 #[cfg_attr(windows, ignore = "no exec_command on Windows")]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[test_case("node_repl", false, false, false, None; "disabled")]
 #[test_case("node_repl", true, false, false, None; "manually_enabled_text_only")]
 #[test_case("node_repl", true, true, false, None; "manually_enabled_multimodal")]
@@ -7276,6 +7275,7 @@ await tools.exec_command({ cmd: "true", sandbox_permissions: "require_escalated"
 #[test_case("cua_repl", true, true, false, Some("unbounded"); "cua_text_fallback_without_context_bound")]
 #[test_case("cua_repl", true, true, false, Some("small"); "cua_text_fallback_with_insufficient_context")]
 #[test_case("cua_repl", true, true, false, Some("large_prompt"); "cua_images_resume_after_prompt_pressure")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn code_mode_node_repl_text_evidence_is_visible_only_to_guardian(
     repl_server: &'static str,
     enhanced_transcripts: bool,

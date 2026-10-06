@@ -75,13 +75,13 @@ use wiremock::matchers::body_partial_json;
 use wiremock::matchers::method;
 use wiremock::matchers::path_regex;
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[test_case(json!({"ui": {"resourceUri": "ui://calendar/widget"}, "openai/ui": {"preferredModelDisplayMode": "fullscreen"}}), Some(McpAppDisplayMode::Fullscreen), Some("ui://calendar/widget"); "fullscreen")]
 #[test_case(json!({"ui": {"resourceUri": "ui://calendar/widget"}, "openai/ui": {"preferredModelDisplayMode": "inline"}}), Some(McpAppDisplayMode::Inline), Some("ui://calendar/widget"); "inline")]
 #[test_case(json!({"ui": {"resourceUri": "ui://calendar/widget"}}), None, Some("ui://calendar/widget"); "missing preference")]
 #[test_case(json!({"ui": {"resourceUri": "ui://calendar/widget"}, "openai/ui": {"preferredModelDisplayMode": "unsupported"}}), None, Some("ui://calendar/widget"); "unsupported preference")]
 #[test_case(json!({"openai/outputTemplate": "ui://calendar/widget"}), None, Some("ui://calendar/widget"); "legacy uri")]
 #[test_case(json!({}), None, None; "result only ui")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn mcp_app_ui_survives_tool_events_and_resume(
     mut metadata: Value,
     expected_mode: Option<McpAppDisplayMode>,
@@ -549,9 +549,9 @@ async fn wait_for_mcp_tool_call_item(
     .await
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[test_case(false; "without strict auto review")]
 #[test_case(true; "with strict auto review")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn approved_mcp_tool_call_metadata_records_prior_user_input_request(
     strict_auto_review: bool,
 ) -> Result<()> {
@@ -769,10 +769,10 @@ async fn approved_mcp_tool_call_metadata_records_prior_user_input_request(
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[test_case(false, false; "unmanaged model")]
 #[test_case(true, false; "protected model")]
 #[test_case(false, true; "work mode link reviewer")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn apps_prompt_with_auto_review_routes_actual_mcp_approval_to_guardian(
     protected_model: bool,
     work_link_reviewer: bool,

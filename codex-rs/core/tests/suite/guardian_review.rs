@@ -175,13 +175,13 @@ impl TimeProvider for RecordingTimeProvider {
     }
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[test_case(CodexAuth::from_api_key("test-api-key"), "OpenAI", "/v1", true, "/v1/responses", true; "api_key_uses_responses")]
 #[test_case(CodexAuth::create_dummy_chatgpt_auth_for_testing(), "OpenAI", "/backend-api/codex", false, "/backend-api/codex/responses", true; "chatgpt_marks_guardian_by_default")]
 #[test_case(CodexAuth::create_dummy_chatgpt_auth_for_testing(), "OpenAI", "/backend-api/codex", true, "/backend-api/codex/responses", true; "legacy_opt_in_still_accepted")]
 #[test_case(CodexAuth::create_dummy_chatgpt_auth_for_testing(), "OpenAI", "/v1", true, "/v1/responses", true; "custom_openai_url_uses_responses")]
 #[test_case(CodexAuth::create_dummy_chatgpt_auth_for_testing(), "Custom", "/backend-api/codex", true, "/backend-api/codex/responses", true; "custom_provider_uses_responses")]
 #[test_case(CodexAuth::create_dummy_chatgpt_auth_for_testing(), "OpenAI", "/backend-api/codex", true, "/backend-api/codex/responses", false; "retry_without_response_id_keeps_last_parent")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn guardian_session_inherits_parent_http_fallback(
     auth: CodexAuth,
     provider_name: &str,
@@ -803,10 +803,10 @@ async fn guardian_requests_record_only_their_own_tool_calls() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[test_case(CodexAuth::from_api_key("test-api-key"), true, "gpt-5.6-luna"; "api_key_uses_luna_with_responses_lite")]
 #[test_case(CodexAuth::create_dummy_chatgpt_auth_for_testing(), true, "codex-auto-review"; "chatgpt_uses_codex_auto_review")]
 #[test_case(CodexAuth::create_dummy_chatgpt_auth_for_testing(), false, "codex-auto-review"; "chatgpt_without_free_guardian")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn guardian_session_prewarms_and_is_reused_for_first_review(
     auth: CodexAuth,
     free_guardian: bool,
@@ -1150,7 +1150,6 @@ async fn guardian_session_prewarms_and_is_reused_for_first_review(
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[test_case("first_node", "node_repl", None; "injects_policy_for_first_node_action")]
 #[test_case("shell_then_nodes", "node_repl", None; "reuses_shell_reviewer_and_injects_policy_once")]
 #[test_case("ineligible_node", "node_repl", None; "omits_policy_for_ineligible_parent_model")]
@@ -1160,6 +1159,7 @@ async fn guardian_session_prewarms_and_is_reused_for_first_review(
 #[test_case("shell_then_nodes", "node_repl", Some("Catalog REPL policy."); "catalog_node_policy")]
 #[test_case("shell_then_nodes", "cua_repl", Some("Catalog REPL policy."); "catalog_cua_policy")]
 #[test_case("first_node", "node_repl", Some(""); "empty_catalog_policy")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn guardian_node_repl_policy_follows_production_approval_path(
     scenario: &str,
     repl_server: &'static str,
@@ -2009,12 +2009,12 @@ async fn interrupted_guardian_review_across_model_change_does_not_execute_the_co
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[tracing_test::traced_test]
 #[test_case(None, false; "legacy_fallback")]
 #[test_case(None, true; "otel_enabled")]
 #[test_case(Some("Acting model rejection instructions."), false; "catalog_override")]
 #[test_case(Some(""), false; "empty_override")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn guardian_denial_rejects_tool_call_with_rationale(
     rejection_instructions: Option<&'static str>,
     log_assessments: bool,
@@ -2269,10 +2269,10 @@ async fn guardian_denial_rejects_tool_call_with_rationale(
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[test_case(None; "legacy_fallback")]
 #[test_case(Some("Acting model timeout instructions."); "catalog_override")]
 #[test_case(Some(""); "empty_override")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn guardian_timeout_rejects_tool_call_with_acting_model_instructions(
     timeout_instructions: Option<&'static str>,
 ) -> Result<()> {

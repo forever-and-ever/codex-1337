@@ -55,9 +55,9 @@ fn wire_request_contains(request: &wiremock::Request, text: &str) -> bool {
     std::str::from_utf8(&request.body).is_ok_and(|body| body.contains(text))
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[test_case(None ; "weighted token usage")]
 #[test_case(Some(40.5) ; "provider budget units")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn adds_weighted_initial_and_threshold_reminders(
     rollout_budget_units: Option<f64>,
 ) -> Result<()> {
@@ -331,11 +331,11 @@ async fn exhausted_budget_fails_current_and_later_turns() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[test_case(false, false ; "local token usage")]
 #[test_case(false, true ; "local provider units")]
 #[test_case(true, false ; "remote v2 token usage")]
 #[test_case(true, true ; "remote v2 provider units")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn compaction_budget_exhaustion_fails_without_retry(
     remote_v2: bool,
     provider_units: bool,

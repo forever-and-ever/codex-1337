@@ -249,9 +249,9 @@ async fn owner_cancellation_closes_agent_and_preserves_history_and_parent() -> a
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[test_case(vec![ToolName::namespaced("functions", "update_plan")]; "selected_tool")]
 #[test_case(vec![]; "no_tools")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn startup_allowlist_controls_advertising_and_execution(
     tools: Vec<ToolName>,
 ) -> anyhow::Result<()> {
