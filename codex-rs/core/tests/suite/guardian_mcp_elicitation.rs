@@ -346,7 +346,7 @@ async fn server_initiated_mcp_elicitation_can_require_synchronous_auto_review(
         .single_request()
         .function_call_output("eliciting-tool");
     let response: Value = serde_json::from_str(
-        output["output"][1]["text"]
+        output["output"][0]["text"]
             .as_str()
             .expect("MCP fixture should echo the wire response"),
     )?;
@@ -702,7 +702,7 @@ async fn node_elicitations_attribute_independent_reviews_without_changing_action
         .single_request()
         .function_call_output("eliciting-tool");
     let replies: Value = serde_json::from_str(
-        output["output"][1]["text"]
+        output["output"][0]["text"]
             .as_str()
             .context("MCP fixture responses")?,
     )?;
@@ -807,7 +807,7 @@ async fn strict_browser_nested_review_requires_live_browser_identity(
         .single_request()
         .function_call_output("eliciting-tool");
     let reply: Value = serde_json::from_str(
-        output["output"][1]["text"]
+        output["output"][0]["text"]
             .as_str()
             .context("MCP fixture response")?,
     )?;
@@ -1053,16 +1053,16 @@ async fn yielded_code_mode_elicitation_keeps_live_invocation_metadata() -> Resul
     loop {
         let event =
             tokio::time::timeout(Duration::from_secs(60), test.codex.next_event()).await??;
-        match event.msg {
+        match event.msg.native_event() {
             EventMsg::ItemCompleted(event) => {
-                if let TurnItem::McpToolCall(item) = event.item {
-                    invocation_id = Some(item.id);
+                if let TurnItem::McpToolCall(item) = &event.item {
+                    invocation_id = Some(item.id.clone());
                 }
             }
             EventMsg::GuardianAssessment(assessment)
                 if assessment.status == GuardianAssessmentStatus::Approved =>
             {
-                assessment_target = assessment.target_item_id;
+                assessment_target = assessment.target_item_id.clone();
             }
             EventMsg::ElicitationRequest(_) => panic!("strict review must not prompt the user"),
             EventMsg::TurnComplete(_) => break,

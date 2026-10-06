@@ -720,8 +720,7 @@ printf 'STDIN_OK\n'
     })
     .await;
     let output = responses.function_call_output_text("input").unwrap();
-    assert!(output.contains("Process exited with code 0"), "{output}");
-    assert!(output.contains("STDIN_OK"), "{output}");
+    assert_eq!(output.lines().collect::<Vec<_>>(), ["continue", "STDIN_OK"]);
     let measurement = wait_for_analytics_event(&server, "codex_plugin_measurement_event").await;
     assert_eq!(
         serde_json::json!({

@@ -415,7 +415,7 @@ async fn run_mcp_permission_request_hook_test(outcome: PermissionRequestHookOutc
     let output_item = requests[1].function_call_output(call_id);
     let output = match outcome {
         PermissionRequestHookOutcome::Allow => output_item["output"].as_str(),
-        PermissionRequestHookOutcome::Deny(_) => output_item["output"][1]["text"].as_str(),
+        PermissionRequestHookOutcome::Deny(_) => output_item["output"][0]["text"].as_str(),
     }
     .expect("MCP tool output should contain text");
     match outcome {

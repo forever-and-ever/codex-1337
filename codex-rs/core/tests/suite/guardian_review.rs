@@ -766,14 +766,7 @@ async fn guardian_requests_record_only_their_own_tool_calls() -> Result<()> {
     );
     let guardian_output = requests[3].function_call_output("guardian-command");
     let guardian_text = guardian_output["output"].as_str().expect("command output");
-    assert!(
-        guardian_text.contains("Process exited with code 0"),
-        "Guardian command did not complete successfully: {guardian_text}"
-    );
-    assert!(
-        guardian_text.ends_with("guardian-metadata-own-call"),
-        "Guardian command returned unexpected output: {guardian_text}"
-    );
+    assert_eq!(guardian_text, "guardian-metadata-own-call");
     assert_eq!(
         super::direct_tool_metadata::tool_call_metadata(guardian_output),
         json!({

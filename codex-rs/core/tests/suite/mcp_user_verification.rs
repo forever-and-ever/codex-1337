@@ -141,7 +141,7 @@ async fn mcp_user_verification_rejects_configured_servers(source: CapabilitySour
         .single_request()
         .function_call_output("verify-call");
     let echoed: Value = serde_json::from_str(
-        output["output"][1]["text"]
+        output["output"][0]["text"]
             .as_str()
             .expect("MCP wire response"),
     )?;

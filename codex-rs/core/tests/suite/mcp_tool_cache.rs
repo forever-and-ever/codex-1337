@@ -809,6 +809,20 @@ async fn cached_mcp_startup_is_eager_for_root_and_lazy_for_subagents() -> anyhow
         ]),
     )
     .await;
+    let cached_retry_response = mount_sse_once(
+        &responses_server,
+        responses::sse(vec![
+            responses::ev_response_created("cached-retry"),
+            responses::ev_function_call_with_namespace(
+                "cached-retry",
+                NAMESPACE,
+                "echo",
+                r#"{"message":"hello"}"#,
+            ),
+            responses::ev_completed("cached-retry"),
+        ]),
+    )
+    .await;
     let cached_done_response = mount_sse_once(
         &responses_server,
         responses::sse(vec![
@@ -850,6 +864,22 @@ async fn cached_mcp_startup_is_eager_for_root_and_lazy_for_subagents() -> anyhow
             "deferred startup should emit its starting status"
         );
         assert!(saw_ready, "deferred startup should emit its ready status");
+        let EventMsg::McpToolCallEnd(end) = end else {
+            unreachable!("event predicate guarantees an MCP tool result");
+        };
+        assert_eq!(
+            end.result,
+            Err(format!(
+                "MCP tool `{SERVER_NAME}/echo` is unavailable or its definition changed. No call was dispatched. Inspect the current catalog on the next model step before retrying."
+            ))
+        );
+        let end = wait_for_event(&second_for_turn, |event| {
+            matches!(
+                event,
+                EventMsg::McpToolCallEnd(end) if end.call_id == "cached-retry"
+            )
+        })
+        .await;
         let EventMsg::McpToolCallEnd(end) = end else {
             unreachable!("event predicate guarantees an MCP tool result");
         };
@@ -902,6 +932,11 @@ async fn cached_mcp_startup_is_eager_for_root_and_lazy_for_subagents() -> anyhow
         "starting the cached server must invalidate the dormant binding"
     );
     assert_definition(
+        &cached_retry_response,
+        &format!("Use the tools from {second_process}."),
+        &format!("Echo from {second_process}."),
+    );
+    assert_definition(
         &cached_done_response,
         &format!("Use the tools from {second_process}."),
         &format!("Echo from {second_process}."),
@@ -909,7 +944,7 @@ async fn cached_mcp_startup_is_eager_for_root_and_lazy_for_subagents() -> anyhow
     let output_item = cached_done_response
         .single_request()
         .function_call_output(app_only_call_id);
-    let output = output_item["output"][1]["text"]
+    let output = output_item["output"][0]["text"]
         .as_str()
         .expect("app-only tool error should be returned to the model");
     assert!(
@@ -918,7 +953,7 @@ async fn cached_mcp_startup_is_eager_for_root_and_lazy_for_subagents() -> anyhow
     );
     let output = cached_done_response
         .single_request()
-        .function_call_output_text("cached-call")
+        .function_call_output_text("cached-retry")
         .expect("successful tool output should be returned to the model");
     assert!(
         output.contains(&second_process),

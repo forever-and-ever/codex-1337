@@ -448,7 +448,7 @@ approvals_reviewer = "user"
             .as_array()
             .expect("auth elicitation result should contain content items");
         assert_eq!(
-            &items[1..],
+            items,
             &[json!({
                 "type": "input_text",
                 "text": "Authentication for Calendar was requested and accepted. Retry this tool call now.",

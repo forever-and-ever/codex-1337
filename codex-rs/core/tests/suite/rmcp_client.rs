@@ -94,7 +94,6 @@ use codex_protocol::user_input::UserInput;
 use codex_utils_cargo_bin::cargo_bin;
 use codex_utils_path_uri::PathUri;
 use core_test_support::apps_test_server::AppsTestServer;
-use core_test_support::assert_regex_match;
 use core_test_support::is_remote_test_environment;
 use core_test_support::responses;
 use core_test_support::responses::mount_models_once;
@@ -134,27 +133,6 @@ use wiremock::MockServer;
 mod oauth_refresh_tests;
 
 static OPENAI_PNG: &str = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAD0AAAA9CAYAAAAeYmHpAAAE6klEQVR4Aeyau44UVxCGx1fZsmRLlm3Zoe0XcGQ5cUiCCIgJeS9CHgAhMkISQnIuGQgJEkBcxLW+nqnZ6uqqc+nuWRC7q/P3qetf9e+MtOwyX25O4Nep6JPyop++0qev9HrfgZ+F6r2DuB/vHOrt/UIkqdDHYvujOW6fO7h/CNEI+a5jc+pBR8uy0jVFsziYu5HtfSUk+Io34q921hLNctFSX0gwww+S8wce8K1LfCU+cYW4888aov8NxqvQILUPPReLOrm6zyLxa4i+6VZuFbJo8d1MOHZm+7VUtB/aIvhPWc/3SWg49JcwFLlHxuXKjtyloo+YNhuW3VS+WPBuUEMvCFKjEDVgFBQHXrnazpqiSxNZCkQ1kYiozsbm9Oz7l4i2Il7vGccGNWAc3XosDrZe/9P3ZnMmzHNEQw4smf8RQ87XEAMsC7Az0Au+dgXerfH4+sHvEc0SYGic8WBBUGqFH2gN7yDrazy7m2pbRTeRmU3+MjZmr1h6LJgPbGy23SI6GlYT0brQ71IY8Us4PNQCm+zepSbaD2BY9xCaAsD9IIj/IzFmKMSdHHonwdZATbTnYREf6/VZGER98N9yCWIvXQwXDoDdhZJoT8jwLnJXDB9w4Sb3e6nK5ndzlkTLnP3JBu4LKkbrYrU69gCVceV0JvpyuW1xlsUVngzhwMetn/XamtTORF9IO5YnWNiyeF9zCAfqR3fUW+vZZKLtgP+ts8BmQRBREAdRDhH3o8QuRh/YucNFz2BEjxbRN6LGzphfKmvP6v6QhqIQyZ8XNJ0W0X83MR1PEcJBNO2KC2Z1TW/v244scp9FwRViZxIOBF0Lctk7ZVSavdLvRlV1hz/ysUi9sr8CIcB3nvWBwA93ykTz18eAYxQ6N/K2DkPA1lv3iXCwmDUT7YkjIby9siXueIJj9H+pzSqJ9oIuJWTUgSSt4WO7o/9GGg0viR4VinNRUDoIj34xoCd6pxD3aK3zfdbnx5v1J3ZNNEJsE0sBG7N27ReDrJc4sFxz7dI/ZAbOmmiKvHBitQXpAdR6+F7v+/ol/tOouUV01EeMZQF2BoQDn6dP4XNr+j9GZEtEK1/L8pFw7bd3a53tsTa7WD+054jOFmPg1XBKPQgnqFfmFcy32ZRvjmiIIQTYFvyDxQ8nH8WIwwGwlyDjDznnilYyFr6njrlZwsKkBpO59A7OwgdzPEWRm+G+oeb7IfyNuzjEEVLrOVxJsxvxwF8kmCM6I2QYmJunz4u4TrADpfl7mlbRTWQ7VmrBzh3+C9f6Grc3YoGN9dg/SXFthpRsT6vobfXRs2VBlgBHXVMLHjDNbIZv1sZ9+X3hB09cXdH1JKViyG0+W9bWZDa/r2f9zAFR71sTzGpMSWz2iI4YssWjWo3REy1MDGjdwe5e0dFSiAC1JakBvu4/CUS8Eh6dqHdU0Or0ioY3W5ClSqDXAy7/6SRfgw8vt4I+tbvvNtFT2kVDhY5+IGb1rCqYaXNF08vSALsXCPmt0kQNqJT1p5eI1mkIV/BxCY1z85lOzeFbPBQHURkkPTlwTYK9gTVE25l84IbFFN+YJDHjdpn0gq6mrHht0dkcjbM4UL9283O5p77GN+SPW/QwVB4IUYg7Or+Kp7naR6qktP98LNF2UxWo9yObPIT9KYg+hK4i56no4rfnM0qeyFf6AwAAAP//trwR3wAAAAZJREFUAwBZ0sR75itw5gAAAABJRU5ErkJggg==";
-
-fn assert_wall_time_line(line: &str) {
-    assert_regex_match(r"^Wall time: [0-9]+(?:\.[0-9]+)? seconds$", line);
-}
-
-fn split_wall_time_wrapped_output(output: &str) -> &str {
-    let (wall_time, rest) = output
-        .split_once('\n')
-        .expect("wall-time output should contain an Output section");
-    assert_wall_time_line(wall_time);
-    rest.strip_prefix("Output:\n")
-        .expect("wall-time output should contain Output marker")
-}
-
-fn assert_wall_time_header(output: &str) {
-    let (wall_time, marker) = output
-        .split_once('\n')
-        .expect("wall-time header should contain an Output marker");
-    assert_wall_time_line(wall_time);
-    assert_eq!(marker, "Output:");
-}
 
 fn read_only_user_turn(fixture: &TestCodex, text: impl Into<String>) -> TurnInputRequest {
     read_only_user_turn_with_model(fixture, text, fixture.session_configured.model.clone())
@@ -678,17 +656,9 @@ async fn text_only_mcp_content_uses_content_items() -> anyhow::Result<()> {
 
     let request = final_mock.single_request();
     let output = request.function_call_output(call_id);
-    let header = output["output"][0]["text"]
-        .as_str()
-        .expect("first content item should contain the wall-time header");
-    assert_wall_time_header(header);
     assert_eq!(
         output["output"],
         json!([
-            {
-                "type": "input_text",
-                "text": header,
-            },
             {
                 "type": "input_text",
                 "text": "content item fixture result",
@@ -1241,8 +1211,7 @@ async fn stdio_server_round_trip(server_name: &'static str, namespace: &str) -> 
         .get("output")
         .and_then(Value::as_str)
         .expect("function_call_output output should be a string");
-    let wrapped_payload = split_wall_time_wrapped_output(output_text);
-    let output_json: Value = serde_json::from_str(wrapped_payload)
+    let output_json: Value = serde_json::from_str(output_text)
         .expect("wrapped MCP output should preserve structured JSON");
     assert_eq!(output_json["echo"], "ECHOING: ping");
     assert_eq!(output_json["env"], expected_env_value);
@@ -1358,7 +1327,7 @@ server_names = ["history", "notes"]
     let output_text = output["output"]
         .as_str()
         .expect("MCP function-call output should be a string");
-    let output_json: Value = serde_json::from_str(split_wall_time_wrapped_output(output_text))?;
+    let output_json: Value = serde_json::from_str(output_text)?;
     assert_eq!(output_json["echo"], "ECHOING: ping");
 
     server.verify().await;
@@ -2339,7 +2308,7 @@ async fn stdio_mcp_tool_call_includes_sandbox_state_meta(
     let final_request = final_mock.single_request();
     if attachment_owned_permissions {
         let restricted_output_item = final_request.function_call_output(restricted_call_id);
-        let restricted_output = restricted_output_item["output"][1]["text"]
+        let restricted_output = restricted_output_item["output"][0]["text"]
             .as_str()
             .expect("restricted MCP tool should produce a denied call output");
         assert!(
@@ -2354,8 +2323,7 @@ async fn stdio_mcp_tool_call_includes_sandbox_state_meta(
         .get("output")
         .and_then(Value::as_str)
         .expect("function_call_output output should be a string");
-    let wrapped_payload = split_wall_time_wrapped_output(output_text);
-    let output_json: Value = serde_json::from_str(wrapped_payload)
+    let output_json: Value = serde_json::from_str(output_text)
         .expect("wrapped MCP output should preserve sandbox metadata JSON");
     let meta = output_json
         .as_object()
@@ -2532,8 +2500,7 @@ async fn stdio_mcp_parallel_tool_calls_default_false_runs_serially() -> anyhow::
         let output_text = request
             .function_call_output_text(call_id)
             .expect("function_call_output present for rmcp sync call");
-        let wrapped_payload = split_wall_time_wrapped_output(&output_text);
-        let output_json: Value = serde_json::from_str(wrapped_payload)
+        let output_json: Value = serde_json::from_str(&output_text)
             .expect("wrapped MCP output should preserve structured JSON");
         assert_eq!(output_json, json!({ "result": "ok" }));
     }
@@ -2635,8 +2602,7 @@ async fn stdio_mcp_read_only_tool_calls_run_concurrently_without_server_opt_in()
         let output_text = request
             .function_call_output_text(call_id)
             .expect("function_call_output present for rmcp sync call");
-        let wrapped_payload = split_wall_time_wrapped_output(&output_text);
-        let output_json: Value = serde_json::from_str(wrapped_payload)
+        let output_json: Value = serde_json::from_str(&output_text)
             .expect("wrapped MCP output should preserve structured JSON");
         assert_eq!(output_json, json!({ "result": "ok" }));
     }
@@ -2728,8 +2694,7 @@ async fn stdio_mcp_parallel_tool_calls_opt_in_runs_concurrently() -> anyhow::Res
         let output_text = request
             .function_call_output_text(call_id)
             .expect("function_call_output present for rmcp sync call");
-        let wrapped_payload = split_wall_time_wrapped_output(&output_text);
-        let output_json: Value = serde_json::from_str(wrapped_payload)
+        let output_json: Value = serde_json::from_str(&output_text)
             .expect("wrapped MCP output should preserve structured JSON");
         assert_eq!(output_json, json!({ "result": "ok" }));
     }
@@ -2806,14 +2771,9 @@ async fn stdio_encrypted_content_responses_round_trip() -> anyhow::Result<()> {
     let output = output_item["output"]
         .as_array()
         .expect("encrypted MCP output should be content items");
-    assert_eq!(output.len(), 3);
-    assert_wall_time_header(
-        output[0]["text"]
-            .as_str()
-            .expect("first encrypted MCP output item should be wall-time text"),
-    );
+    assert_eq!(output.len(), 2);
     assert_eq!(
-        &output[1..],
+        output,
         &[
             json!({
                 "type": "input_text",
@@ -2968,14 +2928,9 @@ async fn stdio_image_responses_round_trip() -> anyhow::Result<()> {
     let output = output_item["output"]
         .as_array()
         .expect("image MCP output should be content items");
-    assert_eq!(output.len(), 2);
-    assert_wall_time_header(
-        output[0]["text"]
-            .as_str()
-            .expect("first MCP image output item should be wall-time text"),
-    );
+    assert_eq!(output.len(), 1);
     assert_eq!(
-        output[1],
+        output[0],
         json!({
             "type": "input_image",
             "image_url": OPENAI_PNG,
@@ -3072,10 +3027,10 @@ async fn stdio_image_responses_resize_large_image() -> anyhow::Result<()> {
     let output = output_item["output"]
         .as_array()
         .expect("image MCP output should be content items");
-    let resized_url = output[1]["image_url"]
+    let resized_url = output[0]["image_url"]
         .as_str()
         .expect("MCP image output should contain a data URL");
-    assert_eq!(output[1]["detail"], "high");
+    assert_eq!(output[0]["detail"], "high");
     let (_, resized_base64) = resized_url
         .split_once(',')
         .expect("resized image should contain a data URL prefix");
@@ -3160,14 +3115,9 @@ async fn stdio_image_responses_preserve_original_detail_metadata() -> anyhow::Re
     let output = output_item["output"]
         .as_array()
         .expect("image MCP output should be content items");
-    assert_eq!(output.len(), 2);
-    assert_wall_time_header(
-        output[0]["text"]
-            .as_str()
-            .expect("first MCP image output item should be wall-time text"),
-    );
+    assert_eq!(output.len(), 1);
     assert_eq!(
-        output[1],
+        output[0],
         json!({
             "type": "input_image",
             "image_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==",
@@ -3333,14 +3283,9 @@ async fn stdio_image_responses_are_sanitized_for_text_only_model() -> anyhow::Re
     wait_for_event(&fixture.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let output_item = final_mock.single_request().function_call_output(call_id);
-    let header = output_item["output"][0]["text"]
-        .as_str()
-        .expect("first content item should contain the wall-time header");
-    assert_wall_time_header(header);
     assert_eq!(
         output_item["output"],
         json!([
-            {"type": "input_text", "text": header},
             {
                 "type": "input_text",
                 "text": "<image content omitted because you do not support image input>",
