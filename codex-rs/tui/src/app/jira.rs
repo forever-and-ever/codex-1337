@@ -275,7 +275,6 @@ impl App {
             tui.frame_requester().schedule_frame();
             return;
         }
-        browser.loading = false;
         let response = match result {
             Ok(response) => response,
             Err(error) => {

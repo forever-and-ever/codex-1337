@@ -10,7 +10,6 @@ use ratatui::backend::TestBackend;
 fn jira_browser_surface_snapshot() {
     let mut browser = JiraBrowser::new(ThreadId::new());
     browser.project = "/workspace/project".into();
-    browser.loading = false;
     let key = JiraKey {
         project: None,
         category: JiraCategory::Bug,

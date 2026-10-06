@@ -284,12 +284,12 @@ impl Store {
         Ok(JiraIssue { revision, body })
     }
 
-    fn guard(&self, revision: &JiraRevision) -> Result<JiraIssue, String> {
+    fn guard(&self, revision: &JiraRevision) -> Result<(), String> {
         let current = self.read(&revision.key)?;
         if &current.revision != revision {
             return Err("Issue changed since it was read; draft retained. Reopen it before saving or deleting".into());
         }
-        Ok(current)
+        Ok(())
     }
 
     fn path(&self, key: &JiraKey, epic: Option<&str>) -> Result<PathBuf, String> {

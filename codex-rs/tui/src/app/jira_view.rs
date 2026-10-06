@@ -59,7 +59,6 @@ pub(super) struct JiraBrowser {
     pub(super) form: Option<JiraForm>,
     pub(super) pending: Option<(uuid::Uuid, JiraIntent)>,
     pub(super) error: Option<String>,
-    pub(super) loading: bool,
     pub(super) filter: TextArea,
     scroll: usize,
     pub(super) reveal_selection: bool,
@@ -237,7 +236,6 @@ impl JiraBrowser {
             form: None,
             pending: None,
             error: None,
-            loading: true,
             filter: TextArea::new(),
             scroll: 0,
             reveal_selection: true,
@@ -473,7 +471,11 @@ impl JiraBrowser {
                 .render(&self.issue_label(key), self.targets.body, buf);
         }
         let keys = self.filtered();
-        if keys.is_empty() && !self.loading && self.error.is_none() {
+        if keys.is_empty()
+            && self.scope.is_some()
+            && !matches!(self.pending, Some((_, JiraIntent::List)))
+            && self.error.is_none()
+        {
             Paragraph::new(if self.keys.is_empty() {
                 "No issues. Ctrl+N creates one."
             } else {
