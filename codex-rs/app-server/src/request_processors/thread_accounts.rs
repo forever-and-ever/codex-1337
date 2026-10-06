@@ -144,6 +144,9 @@ impl TurnRequestProcessor {
                 .into(),
             ));
         }
+        let _lock = codex_config::lock_account_preferences(config.codex_home.as_path())
+            .await
+            .map_err(|error| internal_error(error.to_string()))?;
         let id = config
             .wrangler
             .account_aliases
