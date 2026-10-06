@@ -43,13 +43,17 @@ async fn queued_edit_acknowledgement_preserves_the_original_threads_draft() -> R
             .await
             .input_state = input;
         app.chat_widget.apply_external_edit("current draft".into());
-        app.queued_messages.mutations.insert(original);
+        app.queued_messages.mutations.insert(
+            original,
+            super::super::queued_messages::QueueMutation {
+                item: item.clone(),
+                action: PendingSteerCancelAction::Edit,
+            },
+        );
         app.handle_queue_event(
             &server,
             QueueEvent::Removed {
                 thread_id: original,
-                item: item.clone(),
-                action: PendingSteerCancelAction::Edit,
                 result,
             },
         )

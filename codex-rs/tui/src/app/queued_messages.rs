@@ -23,7 +23,26 @@ use uuid::Uuid;
 pub(super) struct QueuedMessages {
     reads: HashMap<ThreadId, Uuid>,
     read_again: HashSet<ThreadId>,
-    pub(super) mutations: HashSet<ThreadId>,
+    pub(super) mutations: HashMap<ThreadId, QueueMutation>,
+}
+
+pub(super) struct QueueMutation {
+    pub(super) item: QueuedSubmission,
+    pub(super) action: PendingSteerCancelAction,
+}
+
+impl QueuedMessages {
+    pub(super) fn retire(&mut self) -> Vec<(ThreadId, QueuedSubmission)> {
+        self.reads.clear();
+        self.read_again.clear();
+        self.mutations
+            .drain()
+            .filter_map(|(thread_id, mutation)| {
+                (mutation.action == PendingSteerCancelAction::Edit)
+                    .then_some((thread_id, mutation.item))
+            })
+            .collect()
+    }
 }
 
 #[derive(Debug)]
@@ -41,8 +60,6 @@ pub(crate) enum QueueEvent {
     },
     Removed {
         thread_id: ThreadId,
-        item: QueuedSubmission,
-        action: PendingSteerCancelAction,
         result: Result<bool, String>,
     },
 }
@@ -104,7 +121,7 @@ impl App {
                     match result {
                         Ok(items) => self.chat_widget.update_server_queue(
                             items,
-                            self.queued_messages.mutations.contains(&thread_id),
+                            self.queued_messages.mutations.contains_key(&thread_id),
                         ),
                         Err(error) => {
                             tracing::warn!(%thread_id, %error, "could not refresh queued messages")
@@ -121,9 +138,13 @@ impl App {
                 item,
                 action,
             } => {
-                if !self.queued_messages.mutations.insert(thread_id) {
+                if self.queued_messages.mutations.contains_key(&thread_id) {
                     return;
                 }
+                let queued_submission_id = item.id.clone();
+                self.queued_messages
+                    .mutations
+                    .insert(thread_id, QueueMutation { item, action });
                 let handle = server.request_handle();
                 let events = self.app_event_tx.clone();
                 tokio::spawn(async move {
@@ -137,7 +158,7 @@ impl App {
                                 )),
                                 params: ThreadQueueDeleteParams {
                                     thread_id: thread_id.to_string(),
-                                    queued_submission_id: item.id.clone(),
+                                    queued_submission_id,
                                 },
                             },
                         ),
@@ -151,46 +172,30 @@ impl App {
                     });
                     events.send(AppEvent::Queue(QueueEvent::Removed {
                         thread_id,
-                        item,
-                        action,
                         result,
                     }));
                 });
             }
             QueueEvent::Removed {
                 thread_id,
-                item,
-                action,
                 result,
             } => {
-                if !self.queued_messages.mutations.remove(&thread_id) {
+                let Some(QueueMutation { item, action }) =
+                    self.queued_messages.mutations.remove(&thread_id)
+                else {
                     return;
-                }
+                };
                 // Ignore any pre-cancellation snapshot still in flight.
                 self.queued_messages.reads.remove(&thread_id);
                 self.queued_messages.read_again.remove(&thread_id);
                 // An uncertain acknowledgement must not lose an explicitly requested draft.
                 // Never submit it automatically: the original may already have been sent.
-                let draft = (action == PendingSteerCancelAction::Edit && result != Ok(false))
-                    .then(|| queued_message_text(&item))
-                    .flatten();
                 if self.chat_widget.thread_id() == Some(thread_id) {
                     self.chat_widget
                         .finish_server_queue_removal(&item.id, &result);
-                    if let Some(text) = draft {
-                        self.chat_widget
-                            .restore_user_message_to_composer(UserMessage::from(text));
-                    }
-                } else if let Some(text) = draft {
-                    if let Some(channel) = self.thread_event_channels.get(&thread_id)
-                        && let Some(input) = channel.store.lock().await.input_state.as_mut()
-                    {
-                        input.restore_queued_text(text);
-                    } else {
-                        self.chat_widget
-                            .restore_user_message_to_composer(UserMessage::from(text));
-                        self.chat_widget.add_warning_message(format!("The original thread {thread_id} is no longer open. Its queued edit was recovered into this draft."));
-                    }
+                }
+                if action == PendingSteerCancelAction::Edit && result != Ok(false) {
+                    self.restore_queued_edit(thread_id, item).await;
                 }
                 if let Err(error) = result {
                     self.chat_widget.add_error_message(format!("Could not confirm queue cancellation for {thread_id}: {error}. Any requested edit was recovered as a draft; check before resending."));
@@ -198,6 +203,24 @@ impl App {
                 self.app_event_tx
                     .send(AppEvent::Queue(QueueEvent::Refresh(thread_id)));
             }
+        }
+    }
+
+    pub(super) async fn restore_queued_edit(&mut self, thread_id: ThreadId, item: QueuedSubmission) {
+        let Some(text) = queued_message_text(&item) else {
+            return;
+        };
+        if self.chat_widget.thread_id() == Some(thread_id) {
+            self.chat_widget
+                .restore_user_message_to_composer(UserMessage::from(text));
+        } else if let Some(channel) = self.thread_event_channels.get(&thread_id)
+            && let Some(input) = channel.store.lock().await.input_state.as_mut()
+        {
+            input.restore_queued_text(text);
+        } else {
+            self.chat_widget
+                .restore_user_message_to_composer(UserMessage::from(text));
+            self.chat_widget.add_warning_message(format!("The original thread {thread_id} is no longer open. Its queued edit was recovered into this draft."));
         }
     }
 }
