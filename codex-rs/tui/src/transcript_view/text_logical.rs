@@ -6,6 +6,7 @@ use std::sync::Arc;
 use ratatui::text::Line;
 use ratatui::text::Span;
 
+use crate::history_cell::output_provenance::OutputProvenance;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::terminal_hyperlinks::LineWrapPolicy;
 use crate::terminal_hyperlinks::LogicalLineSource;
@@ -53,6 +54,12 @@ pub(super) fn logical_lines(lines: &[HyperlinkLine]) -> Vec<LogicalLine> {
 }
 
 impl LogicalLine {
+    pub(super) fn is_client_label(&self) -> bool {
+        self.origin.text.is_empty()
+            && self.origin.output_provenance == OutputProvenance::Client
+            && !self.initial_indent.spans.is_empty()
+    }
+
     fn append(&mut self, line: &HyperlinkLine, source: LogicalLineSource) {
         self.line.line.spans.extend(
             source

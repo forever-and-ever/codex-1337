@@ -8,7 +8,6 @@
 
 use crate::history_cell::activity_parts::FoldTarget;
 use crate::history_cell::output_provenance::OutputMode;
-use crate::history_cell::output_provenance::OutputProvenance;
 use std::borrow::Cow;
 use std::ops::Range;
 
@@ -534,8 +533,10 @@ impl TextLayout {
         let width = width.max(/*other*/ 1);
         let mut text = String::new();
         let mut rows = Vec::new();
-        for (index, line) in logical.iter().enumerate() {
-            if index > 0 {
+        let mut has_source_line = false;
+        for line in &logical {
+            let client_label = line.is_client_label();
+            if has_source_line && !client_label {
                 text.push('\n');
             }
             let start = text.len();
@@ -547,7 +548,8 @@ impl TextLayout {
                     .map(|span| span.content.as_ref()),
             );
             rows.extend(layout_line(line, start, width));
-            if let Some(row) = rows.last_mut() {
+            has_source_line |= !client_label;
+            if !client_label && let Some(row) = rows.last_mut() {
                 row.line_end = Some(text.len());
             }
         }
@@ -569,10 +571,7 @@ fn layout_line(logical: &LogicalLine, text_start: usize, width: u16) -> Vec<Text
     let content_width = width.saturating_sub(logical.right_reserve).max(/*other*/ 1);
     // Client labels are painted text, not selectable source. Wrap the synthetic text itself,
     // rather than discarding it as an oversized indentation on narrow terminals.
-    if logical.origin.text.is_empty()
-        && logical.origin.output_provenance == OutputProvenance::Client
-        && !logical.initial_indent.spans.is_empty()
-    {
+    if logical.is_client_label() {
         let subsequent_indent = if logical.subsequent_indent.width() < usize::from(content_width) {
             logical.subsequent_indent.clone()
         } else {
