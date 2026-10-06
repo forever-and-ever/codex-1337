@@ -14,6 +14,7 @@ impl ChatWidget {
             && self.no_modal_or_popup_active()
             && !self.has_pending_protected_request()
             && self.external_editor_state == ExternalEditorState::Closed
+            && self.pending_image_submission.is_none()
             && self
                 .bottom_pane
                 .questions
