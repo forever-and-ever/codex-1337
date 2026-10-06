@@ -10,6 +10,7 @@ use anyhow::anyhow;
 use codex_config::McpStartupReadiness;
 use codex_connectors::ConnectorRuntimeFetchSource;
 use futures::future::join_all;
+use rmcp::model::Tool;
 use tracing::Instrument;
 use tracing::instrument;
 use tracing::trace;
@@ -425,10 +426,8 @@ impl McpConnectionSet {
             let server_tools = server_tools
                 .into_iter()
                 .map(|mut tool| {
-                    if client.is_none()
-                        && let Some(annotations) = tool.tool.annotations.as_mut()
-                    {
-                        annotations.read_only_hint = None;
+                    if client.is_none() {
+                        withhold_read_only_hint(&mut tool.tool);
                     }
                     Self::with_server_metadata(tool, &view.metadata)
                 })
@@ -544,9 +543,22 @@ impl McpConnectionSet {
         if !tool_is_model_visible(&tool_info) {
             return None;
         }
-        if tool_info.tool != advertised_tool.tool
-            || tool_info.openai_file_input_optional_fields
-                != advertised_tool.openai_file_input_optional_fields
+        // Cached and dormant listings withhold annotations; a call made from such a
+        // listing keeps that lesser authority instead of failing as a changed definition.
+        if tool_info.tool != advertised_tool.tool {
+            let mut withheld = tool_info.tool.clone();
+            if advertised_tool.tool.annotations.is_none() {
+                withheld.annotations = None;
+            } else {
+                withhold_read_only_hint(&mut withheld);
+            }
+            if withheld != advertised_tool.tool {
+                return None;
+            }
+            tool_info.tool = withheld;
+        }
+        if tool_info.openai_file_input_optional_fields
+            != advertised_tool.openai_file_input_optional_fields
         {
             return None;
         }
@@ -726,5 +738,11 @@ impl McpConnectionSet {
             .as_ref()
             .map(|origin| origin.as_str().to_string());
         tool
+    }
+}
+
+fn withhold_read_only_hint(tool: &mut Tool) {
+    if let Some(annotations) = tool.annotations.as_mut() {
+        annotations.read_only_hint = None;
     }
 }

@@ -221,22 +221,19 @@ async fn ordinary_catalog_refresh_coalesces_and_preserves_failed_and_racing_noti
         .expect_err("old definition must not reach the changed server");
     assert!(error.to_string().contains("catalog changed"));
 
-    // An annotation-only edit changes call authority even when the schema is identical.
+    // An annotation-only edit never grants a call more authority than it was advertised with.
     fixture.tools.write().await[0].annotations =
         Some(rmcp::model::ToolAnnotations::new().read_only(true));
     fixture.notify().await?;
-    assert!(
-        fixture
-            .connections
-            .prepare_call_for_tool(
-                Arc::clone(after.config()),
-                after
-                    .prepare_call("docs", "search")
-                    .expect("search")
-                    .tool_info(),
-            )
-            .await
-            .is_none()
+    let advertised = after.prepare_call("docs", "search").expect("search");
+    let prepared = fixture
+        .connections
+        .prepare_call_for_tool(Arc::clone(after.config()), advertised.tool_info())
+        .await
+        .expect("search");
+    assert_eq!(
+        prepared.tool_info().tool.annotations,
+        advertised.tool_info().tool.annotations
     );
     let after = capture_binding(&fixture.connections).await;
 
