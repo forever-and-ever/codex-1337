@@ -56,7 +56,10 @@ output remain supported and must stay correct.
 TUI transcript state follows the Code Mode block design: events enter an owned
 reducer, which projects immutable cells (`codex-rs/tui/src/code_mode_transcript.rs`,
 `codex-rs/tui/src/history_cell/code_mode.rs`). Do not mutate emitted cells by
-index from separate call sites.
+index from separate call sites. Fork code replaces retained cells only through
+`App::commit_transcript_splice` (`codex-rs/tui/src/app/transcript_splice.rs`),
+which updates native history, the transcript view, the overlay and the retained
+cells in one step.
 
 ## Glossary
 
