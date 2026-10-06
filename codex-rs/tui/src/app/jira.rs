@@ -117,11 +117,14 @@ impl App {
         server: &mut AppServerSession,
         event: &TuiEvent,
     ) -> Result<bool> {
+        if matches!(event, TuiEvent::FocusGained | TuiEvent::FocusLost) {
+            return Ok(false);
+        }
         let Some(browser) = &mut self.jira else {
             return Ok(false);
         };
         match event {
-            TuiEvent::Draw | TuiEvent::Resume | TuiEvent::Resize(_) | TuiEvent::FocusGained => {
+            TuiEvent::Draw | TuiEvent::Resume | TuiEvent::Resize(_) => {
                 tui.draw(u16::MAX, |frame| {
                     if let Some(cursor) = browser.render(frame.area(), frame.buffer) {
                         frame.set_cursor_position(cursor);

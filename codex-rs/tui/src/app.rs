@@ -853,9 +853,6 @@ impl App {
         app_server: &mut AppServerSession,
         event: TuiEvent,
     ) -> Result<AppRunControl> {
-        if self.handle_jira_input(tui, app_server, &event).await? {
-            return Ok(AppRunControl::Continue);
-        }
         if matches!(
             &event,
             TuiEvent::Key(_) | TuiEvent::Mouse(_) | TuiEvent::Paste(_)
@@ -870,6 +867,9 @@ impl App {
             {
                 tui.frame_requester().schedule_interactive_frame();
             }
+        }
+        if self.handle_jira_input(tui, app_server, &event).await? {
+            return Ok(AppRunControl::Continue);
         }
         let scheduled_draw = matches!(event, TuiEvent::Draw);
         tui.link_hover.observe(&event);
@@ -1076,6 +1076,12 @@ impl App {
                 self.recap.note_focus_gained();
             }
             _ => {}
+        }
+
+        if matches!(&event, TuiEvent::FocusGained | TuiEvent::FocusLost) && self.jira.is_some() {
+            self.handle_jira_input(tui, app_server, &TuiEvent::Draw)
+                .await?;
+            return Ok(AppRunControl::Continue);
         }
 
         if self.overlay.is_some() {
