@@ -10,6 +10,8 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 use crossterm::event::KeyModifiers;
+use crossterm::event::MouseButton;
+use crossterm::event::MouseEventKind;
 
 use super::STARTUP_PASTE_NEWLINE_TIMEOUT;
 use super::StartupCancelled;
@@ -167,18 +169,27 @@ impl StartupDraftPump {
             TuiEvent::Mouse(mouse) => {
                 if !tui.is_owned_screen()
                     || self.initial_screen != StartupDraftInitialScreen::Composer
-                    || !matches!(
-                        self.session_action,
-                        super::StartupDraftSessionAction::New
-                            | super::StartupDraftSessionAction::NewFromCommandCenter
-                    )
                 {
                     return Ok(());
                 }
+                let composer_ready = self.bottom_pane.prepare_composer_mouse(mouse);
                 // Size, composer, and modal ownership must be current before hit testing.
                 self.draw(tui, screen_size)?;
-                if !self.blossom.borrow_mut().handle_mouse(mouse) {
-                    return Ok(());
+                if !(matches!(
+                    self.session_action,
+                    super::StartupDraftSessionAction::New
+                        | super::StartupDraftSessionAction::NewFromCommandCenter
+                ) && self.blossom.borrow_mut().handle_mouse(mouse))
+                {
+                    if !composer_ready || !self.bottom_pane.handle_composer_mouse(mouse) {
+                        return Ok(());
+                    }
+                    if mouse.kind == MouseEventKind::Up(MouseButton::Left) {
+                        let _ = self.bottom_pane.copy_composer_selection(
+                            &TuiEvent::Mouse(mouse),
+                            |text| tui.publish_primary_selection(text),
+                        );
+                    }
                 }
             }
         }

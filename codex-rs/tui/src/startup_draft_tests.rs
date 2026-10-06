@@ -66,6 +66,63 @@ pub(crate) fn startup_test_pump_with_input(text: &str) -> StartupDraftPump {
     pump
 }
 
+#[tokio::test]
+async fn startup_draft_mouse_selection() {
+    use crossterm::event::MouseButton;
+    use crossterm::event::MouseEvent;
+    use crossterm::event::MouseEventKind;
+    use ratatui::style::Modifier;
+
+    let mut pump = quiet_startup_test_pump();
+    pump.bottom_pane.set_composer_text(
+        "draft while loading".into(),
+        Vec::new(),
+        Vec::new(),
+    );
+    let mut tui = crate::tui::test_support::make_test_tui().unwrap();
+    tui.set_owned_screen(/*owned*/ true).unwrap();
+    pump.handle_event(&mut tui, TuiEvent::Draw).unwrap();
+    let area = Rect::new(/*x*/ 0, /*y*/ 0, /*width*/ 80, /*height*/ 24);
+    let (x, y) = super::layout::OwnedStartupLayout::new(&pump)
+        .cursor_pos(area)
+        .unwrap();
+    for (kind, column) in [
+        (MouseEventKind::Down(MouseButton::Left), x - 19),
+        (MouseEventKind::Drag(MouseButton::Left), x - 14),
+    ] {
+        pump.handle_event(
+            &mut tui,
+            TuiEvent::Mouse(MouseEvent {
+                kind,
+                column,
+                row: y,
+                modifiers: KeyModifiers::NONE,
+            }),
+        )
+        .unwrap();
+    }
+    let mut buffer = Buffer::empty(area);
+    super::layout::OwnedStartupLayout::new(&pump).render(area, &mut buffer);
+    let rows = buffer
+        .content
+        .chunks(usize::from(area.width))
+        .filter(|row| row.iter().any(|cell| cell.modifier.contains(Modifier::REVERSED)))
+        .map(|row| {
+            row.iter()
+                .map(|cell| {
+                    if cell.modifier.contains(Modifier::REVERSED) {
+                        cell.symbol()
+                    } else {
+                        "·"
+                    }
+                })
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    insta::assert_snapshot!("startup_draft_mouse_selection", rows);
+}
+
 #[test]
 fn startup_draft_renders_full_empty_and_multiline_composer_frames() {
     let mut snapshots = Vec::new();
