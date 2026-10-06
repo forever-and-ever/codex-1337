@@ -42,8 +42,8 @@ use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
 use http::header::HeaderName;
-use tokio::time::timeout;
 use tokio::sync::Mutex;
+use tokio::time::timeout;
 use url::Url;
 
 use crate::AnthropicAuthContext;
@@ -152,7 +152,8 @@ impl OpenAiModelsEndpoint {
         }
         let mut captured = None;
         let api_auth = if self.provider_info.adapter == ModelProviderAdapter::ClaudeSubscription {
-            let native = self.anthropic_auth_context
+            let native = self
+                .anthropic_auth_context
                 .as_ref()
                 .ok_or_else(|| {
                     CodexErr::InvalidRequest(
@@ -212,10 +213,7 @@ impl OpenAiModelsEndpoint {
             if (self.provider_info.model_catalog_url.is_some()
                 || self.provider_info.adapter == ModelProviderAdapter::ClaudeSubscription)
                 && let ApiError::Transport(TransportError::Http {
-                    url,
-                    headers,
-                    body,
-                    ..
+                    url, headers, body, ..
                 }) = &mut error
             {
                 // Provider diagnostics may echo URL credentials or other secrets.
@@ -226,7 +224,7 @@ impl OpenAiModelsEndpoint {
             map_api_error(error)
         };
         let (models, etag) = if let Some(captured) = captured {
-            let captured = Mutex::new(captured);
+            let captured = Mutex::new(Arc::new(captured));
             crate::native_claude_catalog::list_models(|cursor| {
                 let captured = &captured;
                 let request_url = &request_url;
@@ -234,81 +232,107 @@ impl OpenAiModelsEndpoint {
                 let request_telemetry = &request_telemetry;
                 let http_client_factory = &http_client_factory;
                 async move {
-                let mut captured = captured.lock().await;
-                let mut url = Url::parse(&request_url).map_err(|_| ApiError::InvalidRequest {
-                    message: "invalid native model URL".into(),
-                })?;
-                url.query_pairs_mut().append_pair("limit", "100");
-                if let Some(cursor) = cursor {
-                    url.query_pairs_mut().append_pair("after_id", &cursor);
-                }
-                // Subscription authentication and signed compaction each require their beta.
-                let headers = HeaderMap::from_iter([
-                    (
-                        HeaderName::from_static("anthropic-version"),
-                        HeaderValue::from_static("2023-06-01"),
-                    ),
-                    (
-                        HeaderName::from_static("anthropic-beta"),
-                        HeaderValue::from_static("oauth-2025-04-20,compact-2026-09-04"),
-                    ),
-                ]);
-                for attempt in 0..2 {
-                    let result = timeout(MODELS_REFRESH_TIMEOUT, async {
-                        let transport = self.transport_builder
-                            .build(http_client_factory.clone(), url.to_string())
-                            .await
-                            .map_err(|error| ApiError::Transport(TransportError::Build(error.to_string())))?;
-                        ModelsClient::new(transport, api_provider.clone(), captured.auth())
-                            .with_telemetry(Some(Arc::clone(request_telemetry)))
-                            .list_models_raw(url.to_string(), headers.clone(), Some(MAX_MODEL_CATALOG_BYTES))
-                            .await
-                    })
-                    .await
-                    .unwrap_or(Err(ApiError::Transport(TransportError::Timeout)));
-                    match result {
-                        Err(ApiError::Transport(TransportError::Http { status: StatusCode::UNAUTHORIZED, .. })
-                            | ApiError::Api { status: StatusCode::UNAUTHORIZED, .. }) if attempt == 0 => {
-                            *captured = captured.refresh_after_rejection().await.map_err(|error| {
-                                let message = if let CodexErrorDetails::InvalidRequest(message) = error.details() {
-                                    message.clone()
-                                } else {
-                                    error.to_string()
-                                };
-                                ApiError::InvalidRequest { message }
-                            })?;
-                        }
-                        Ok((body, _)) => {
-                            return serde_json::from_slice(&body).map_err(|_| ApiError::InvalidRequest {
-                                message: "invalid native Anthropic model catalogue".into(),
-                            });
-                        }
-                        Err(error) => return Err(error),
+                    let mut page_auth = Arc::clone(&*captured.lock().await);
+                    let mut url =
+                        Url::parse(request_url).map_err(|_| ApiError::InvalidRequest {
+                            message: "invalid native model URL".into(),
+                        })?;
+                    url.query_pairs_mut().append_pair("limit", "100");
+                    if let Some(cursor) = cursor {
+                        url.query_pairs_mut().append_pair("after_id", &cursor);
                     }
+                    // Subscription authentication and signed compaction each require their beta.
+                    let headers = HeaderMap::from_iter([
+                        (
+                            HeaderName::from_static("anthropic-version"),
+                            HeaderValue::from_static("2023-06-01"),
+                        ),
+                        (
+                            HeaderName::from_static("anthropic-beta"),
+                            HeaderValue::from_static("oauth-2025-04-20,compact-2026-09-04"),
+                        ),
+                    ]);
+                    for attempt in 0..2 {
+                        let result = timeout(MODELS_REFRESH_TIMEOUT, async {
+                            let transport = self
+                                .transport_builder
+                                .build(http_client_factory.clone(), url.to_string())
+                                .await
+                                .map_err(|error| {
+                                    ApiError::Transport(TransportError::Build(error.to_string()))
+                                })?;
+                            ModelsClient::new(transport, api_provider.clone(), page_auth.auth())
+                                .with_telemetry(Some(Arc::clone(request_telemetry)))
+                                .list_models_raw(
+                                    url.to_string(),
+                                    headers.clone(),
+                                    Some(MAX_MODEL_CATALOG_BYTES),
+                                )
+                                .await
+                        })
+                        .await
+                        .unwrap_or(Err(ApiError::Transport(TransportError::Timeout)));
+                        match result {
+                            Err(
+                                ApiError::Transport(TransportError::Http {
+                                    status: StatusCode::UNAUTHORIZED,
+                                    ..
+                                })
+                                | ApiError::Api {
+                                    status: StatusCode::UNAUTHORIZED,
+                                    ..
+                                },
+                            ) if attempt == 0 => {
+                                page_auth = Arc::new(
+                                    page_auth.refresh_after_rejection().await.map_err(|error| {
+                                        let message =
+                                            if let CodexErrorDetails::InvalidRequest(message) =
+                                                error.details()
+                                            {
+                                                message.clone()
+                                            } else {
+                                                error.to_string()
+                                            };
+                                        ApiError::InvalidRequest { message }
+                                    })?,
+                                );
+                                *captured.lock().await = Arc::clone(&page_auth);
+                            }
+                            Ok((body, _)) => {
+                                return serde_json::from_slice(&body).map_err(|_| {
+                                    ApiError::InvalidRequest {
+                                        message: "invalid native Anthropic model catalogue".into(),
+                                    }
+                                });
+                            }
+                            Err(error) => return Err(error),
+                        }
+                    }
+                    unreachable!()
                 }
-                unreachable!()
-                }
-            }).await.map_err(map_error)?
+            })
+            .await
+            .map_err(map_error)?
         } else {
             timeout(MODELS_REFRESH_TIMEOUT, async {
-            let transport = self
-                .transport_builder
-                .build(http_client_factory, request_url.clone())
-                .await?;
-            let client = ModelsClient::new(transport, api_provider, api_auth)
-                .with_telemetry(Some(request_telemetry));
-            let response_body_limit_bytes = self
-                .provider_info
-                .model_catalog_url
-                .as_ref()
-                .map(|_| MAX_MODEL_CATALOG_BYTES);
-            client
-                        .list_models(request_url, HeaderMap::new(), response_body_limit_bytes)
-                        .await
-                        .map_err(map_error)
-        })
-        .await
-        .map_err(|_| CodexErr::RequestTimeout)??
+                let transport = self
+                    .transport_builder
+                    .build(http_client_factory, request_url.clone())
+                    .await?;
+                let client = ModelsClient::new(transport, api_provider, api_auth)
+                    .with_telemetry(Some(request_telemetry));
+                let response_body_limit_bytes = self
+                    .provider_info
+                    .model_catalog_url
+                    .as_ref()
+                    .map(|_| MAX_MODEL_CATALOG_BYTES);
+                client
+                    .list_models(request_url, HeaderMap::new(), response_body_limit_bytes)
+                    .await
+                    .map_err(map_error)
+            })
+            .await
+            .map_err(|_| CodexErr::RequestTimeout)??
         };
         if self.provider_info.model_catalog_url.is_some() {
             let mut slugs = HashSet::new();

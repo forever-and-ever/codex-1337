@@ -16,9 +16,9 @@ use codex_model_provider::create_model_provider_with_anthropic_account;
 use codex_model_provider_info::ANTHROPIC_BASE_URL;
 use codex_model_provider_info::ModelProviderAdapter;
 use codex_model_provider_info::ModelProviderInfo;
-use codex_protocol::openai_models::ModelsResponse;
 use codex_protocol::openai_models::AnthropicModelCapabilities;
 use codex_protocol::openai_models::AnthropicThinkingMode;
+use codex_protocol::openai_models::ModelsResponse;
 use pretty_assertions::assert_eq;
 use std::sync::Arc;
 use wiremock::Mock;
@@ -39,15 +39,19 @@ async fn fresh_child_routes_model_and_provider_but_history_forks_stay_locked(
     // fresh-child execution can use that provider. Both directions must agree.
     let server = MockServer::start().await;
     let home = tempfile::tempdir().unwrap();
-    let account_id = AccountStore::new(home.path().to_owned()).upsert(
-        AccountInfo {
-            identity: AccountIdentity::new("claude-test-child").unwrap(),
-            email: None,
-            organization_uuid: None,
-            organization_name: None,
-        },
-        SubscriptionGrant::bearer_only("test-bearer".into()).unwrap(),
-    ).await.unwrap().to_string();
+    let account_id = AccountStore::new(home.path().to_owned())
+        .upsert(
+            AccountInfo {
+                identity: AccountIdentity::new("claude-test-child").unwrap(),
+                email: None,
+                organization_uuid: None,
+                organization_name: None,
+            },
+            SubscriptionGrant::bearer_only("test-bearer".into()).unwrap(),
+        )
+        .await
+        .unwrap()
+        .to_string();
     let mut model = codex_models_manager::bundled_models_response()
         .unwrap()
         .models
@@ -98,7 +102,9 @@ async fn fresh_child_routes_model_and_provider_but_history_forks_stay_locked(
         supported_efforts: Vec::new(),
         supports_structured_outputs: false,
     });
-    let native_catalog = ModelsResponse { models: vec![model] };
+    let native_catalog = ModelsResponse {
+        models: vec![model],
+    };
     let (session, turn, _rx) = make_session_and_context_with_auth_config_home_and_rx(
         CodexAuth::from_api_key("test-key"),
         Vec::new(),
@@ -154,9 +160,17 @@ async fn fresh_child_routes_model_and_provider_but_history_forks_stay_locked(
             native_config.model_provider,
             Some(Arc::clone(&session.services.auth_manager)),
             Some(account_id),
-        ).models_manager_without_cache(Some(native_catalog));
-        session.services.agent_models_managers.0.lock().await
-            .get_mut("claude").unwrap().manager = manager;
+        )
+        .models_manager_without_cache(Some(native_catalog));
+        session
+            .services
+            .agent_models_managers
+            .0
+            .lock()
+            .await
+            .get_mut("claude")
+            .unwrap()
+            .manager = manager;
     }
     session
         .services

@@ -6,7 +6,8 @@ use codex_protocol::openai_models::ToolMode;
 use codex_protocol::protocol::MultiAgentVersion;
 
 pub(crate) fn normalize(models: Vec<ModelInfo>) -> Vec<ModelInfo> {
-    models.into_iter()
+    models
+        .into_iter()
         .filter(|model| model.slug.starts_with("claude-"))
         .map(normalize_model_info)
         .collect()

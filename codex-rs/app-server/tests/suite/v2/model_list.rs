@@ -51,22 +51,26 @@ async fn provider_catalogs_remain_isolated_without_openai_credentials() -> Resul
     use codex_protocol::openai_models::AnthropicThinkingMode;
 
     let home = TempDir::new()?;
-    let account_id = AccountStore::new(home.path().to_owned()).upsert(
-        AccountInfo {
-            identity: AccountIdentity::new("claude-sonnet-5-5")?,
-            email: None,
-            organization_uuid: None,
-            organization_name: None,
-        },
-        SubscriptionGrant::bearer_only("test-bearer".into())?,
-    ).await?.to_string();
+    let account_id = AccountStore::new(home.path().to_owned())
+        .upsert(
+            AccountInfo {
+                identity: AccountIdentity::new("claude-sonnet-5-5")?,
+                email: None,
+                organization_uuid: None,
+                organization_name: None,
+            },
+            SubscriptionGrant::bearer_only("test-bearer".into())?,
+        )
+        .await?
+        .to_string();
     let mut claude = codex_models_manager::bundled_models_response()?
         .models
         .remove(0);
     claude.slug = "claude-sonnet-5-5".into();
     claude.display_name = claude.slug.clone();
     claude.tool_mode = Some(codex_protocol::openai_models::ToolMode::CodeModeOnly);
-    claude.apply_patch_tool_type = Some(codex_protocol::openai_models::ApplyPatchToolType::Freeform);
+    claude.apply_patch_tool_type =
+        Some(codex_protocol::openai_models::ApplyPatchToolType::Freeform);
     claude.multi_agent_version = Some(codex_protocol::protocol::MultiAgentVersion::V2);
     claude.additional_speed_tiers.clear();
     claude.service_tiers.clear();
@@ -79,17 +83,23 @@ async fn provider_catalogs_remain_isolated_without_openai_credentials() -> Resul
     });
     claude.visibility = codex_protocol::openai_models::ModelVisibility::List;
     let provider = built_in_model_providers(/*openai_base_url*/ None)
-        .remove(CLAUDE_SUBSCRIPTION_PROVIDER_ID).unwrap();
+        .remove(CLAUDE_SUBSCRIPTION_PROVIDER_ID)
+        .unwrap();
     let mut cache = codex_model_provider::test_support::models_cache_entry(
-        &provider, /*auth*/ None, vec![claude],
+        &provider,
+        /*auth*/ None,
+        vec![claude],
     );
-    cache.identity = cache.identity.map(|identity| format!("anthropic:{account_id}:{identity}"));
-    std::fs::write(home.path().join("models_cache.json"), serde_json::to_vec(&cache)?)?;
+    cache.identity = cache
+        .identity
+        .map(|identity| format!("anthropic:{account_id}:{identity}"));
+    std::fs::write(
+        home.path().join("models_cache.json"),
+        serde_json::to_vec(&cache)?,
+    )?;
     std::fs::write(
         home.path().join("config.toml"),
-        format!(
-            "[wrangler]\ndefault_claude_account = {account_id:?}\n"
-        ),
+        format!("[wrangler]\ndefault_claude_account = {account_id:?}\n"),
     )?;
     let mut app = TestAppServer::builder()
         .with_codex_home(home.path())

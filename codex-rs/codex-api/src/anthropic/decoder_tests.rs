@@ -107,7 +107,11 @@ fn malformed_declared_tool_preserves_later_blocks_and_usage() {
         for event in decoder.decode(&frame.to_string()).unwrap() {
             match event {
                 ResponseEvent::OutputItemDone(item) => items.push(item),
-                ResponseEvent::Completed { token_usage, end_turn, .. } => {
+                ResponseEvent::Completed {
+                    token_usage,
+                    end_turn,
+                    ..
+                } => {
                     completed = Some((token_usage.unwrap().total_tokens, end_turn));
                 }
                 _ => {}
@@ -116,10 +120,13 @@ fn malformed_declared_tool_preserves_later_blocks_and_usage() {
     }
     assert_eq!(
         (serde_json::to_value(items).unwrap(), completed),
-        (json!([
-            {"type":"rejected_tool_call","id":"msg_0","reason":"malformed_input","provider":"anthropic","call_id":"malformed","name":"read","input":{"path":"one"}},
-            {"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"Still receiving."}]}
-        ]), Some((12, Some(false))))
+        (
+            json!([
+                {"type":"rejected_tool_call","id":"msg_0","reason":"malformed_input","provider":"anthropic","call_id":"malformed","name":"read","input":{"path":"one"}},
+                {"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"Still receiving."}]}
+            ]),
+            Some((12, Some(false)))
+        )
     );
 }
 

@@ -513,9 +513,12 @@ impl ConfiguredModelProvider {
                 OpenAiModelsManager::new_with_cache(cache, endpoint, auth_manager)
             }
         };
-        match &self.info.model_catalog_url {
-            Some(_) => Arc::new(manager.with_provider_catalog()),
-            None => Arc::new(manager),
+        if self.info.adapter == codex_model_provider_info::ModelProviderAdapter::OpenaiCompatible
+            && self.info.model_catalog_url.is_some()
+        {
+            Arc::new(manager.with_provider_catalog())
+        } else {
+            Arc::new(manager)
         }
     }
 }

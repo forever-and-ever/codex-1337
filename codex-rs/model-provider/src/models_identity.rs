@@ -26,7 +26,9 @@ pub(crate) fn identity(
     field(api_provider.base_url.as_bytes());
     // Preserve existing cache identities when no explicit catalog is configured.
     // The API provider resolves base_url defaults; model_catalog_url stays on ModelProviderInfo.
-    if let Some(catalog_url) = &provider_info.model_catalog_url {
+    if provider_info.adapter == codex_model_provider_info::ModelProviderAdapter::OpenaiCompatible
+        && let Some(catalog_url) = &provider_info.model_catalog_url
+    {
         field(b"model_catalog_url");
         field(catalog_url.as_bytes());
     }

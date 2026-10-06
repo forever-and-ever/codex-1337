@@ -30,12 +30,19 @@ async fn paginated_native_catalog_preserves_capabilities_through_canonical_cache
         cursors.push(cursor.clone());
         let page = match cursor.as_deref() {
             None => json!({"data":[haiku],"has_more":true,"last_id":"claude-haiku-4-5-20251001"}),
-            Some("claude-haiku-4-5-20251001") => json!({"data":[sonnet],"has_more":false,"last_id":"claude-sonnet-5-5"}),
+            Some("claude-haiku-4-5-20251001") => {
+                json!({"data":[sonnet],"has_more":false,"last_id":"claude-sonnet-5-5"})
+            }
             Some(_) => unreachable!(),
         };
         async move { Ok(serde_json::from_value(page).unwrap()) }
-    }).await.unwrap();
-    assert_eq!(cursors, vec![None, Some("claude-haiku-4-5-20251001".into())]);
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        cursors,
+        vec![None, Some("claude-haiku-4-5-20251001".into())]
+    );
     assert_eq!(etag, None);
     let restored: Vec<ModelInfo> =
         serde_json::from_slice(&serde_json::to_vec(&models).unwrap()).unwrap();

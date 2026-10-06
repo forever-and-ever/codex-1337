@@ -230,6 +230,11 @@ impl ModelProviderInfo {
         }
         if self.adapter == ModelProviderAdapter::ClaudeSubscription {
             self.native_claude_url()?;
+            if self.model_catalog_url.is_some() {
+                return Err(
+                    "model_catalog_url is not supported for native Anthropic providers".into(),
+                );
+            }
             if self.env_key.is_some()
                 || self.experimental_bearer_token.is_some()
                 || self.auth.is_some()

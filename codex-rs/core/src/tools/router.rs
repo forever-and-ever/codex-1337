@@ -280,8 +280,7 @@ impl ToolRouter {
                 let name = call.name();
                 Err(FunctionCallError::RespondToModel(match reason {
                     ToolCallRejection::Undeclared => format!(
-                    "Tool {:?} is not in the current tool list. Use one of the declared tools.",
-                    name
+                        "Tool {name:?} is not in the current tool list. Use one of the declared tools."
                     ),
                     ToolCallRejection::MalformedInput => format!(
                         "Tool {name:?} was called with input that does not match its declared input schema. Call it again with input that matches the schema."
