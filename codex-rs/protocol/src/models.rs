@@ -1012,11 +1012,14 @@ impl InternalChatMessageMetadataPassthrough {
     }
 }
 
+/// Why a provider-native tool call was answered with an error instead of being dispatched.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolCallRejection {
+    /// The call named a tool that the request did not declare. Serialized history omits this default.
     #[default]
     Undeclared,
+    /// The call named a declared tool, but its input does not fit that tool's local envelope.
     MalformedInput,
 }
 

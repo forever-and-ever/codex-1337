@@ -5961,11 +5961,23 @@
       "type": "object"
     },
     "ToolCallRejection": {
-      "enum": [
-        "undeclared",
-        "malformed_input"
-      ],
-      "type": "string"
+      "description": "Why a provider-native tool call was answered with an error instead of being dispatched.",
+      "oneOf": [
+        {
+          "description": "The call named a tool that the request did not declare. Serialized history omits this default.",
+          "enum": [
+            "undeclared"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The call named a declared tool, but its input does not fit that tool's local envelope.",
+          "enum": [
+            "malformed_input"
+          ],
+          "type": "string"
+        }
+      ]
     },
     "TurnEnvironmentParams": {
       "properties": {

@@ -225,6 +225,7 @@ impl OpenAiModelsEndpoint {
         };
         let (models, etag) = if let Some(captured) = captured {
             let captured = Mutex::new(Arc::new(captured));
+            // Pages are fetched one at a time; the lock only swaps the account snapshot and is never held across an await.
             crate::native_claude_catalog::list_models(|cursor| {
                 let captured = &captured;
                 let request_url = &request_url;
