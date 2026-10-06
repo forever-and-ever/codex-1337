@@ -1,0 +1,12 @@
+---
+source: tui/src/subagent_roster_tests.rs
+expression: "snapshots.join(\"\\n\\n\")"
+---
+"  ■ gpt-6.1-sol low   alpha   Inspect parser                              1.5M  "
+"  ■ claude-sonnet-4-6 worker  —                                              —  "
+"  ■                   worker  Inspect parser                                 —  "
+"  Ctrl+X retire · ↑↓ select · Enter open · Esc back                             "
+
+
+" ↓■ gpt-6.1-sol low   alpha   Inspect parser                              1.5M  "
+"  Ctrl+X retire · ↑↓ select · Enter open · Esc back                             "

@@ -62,7 +62,6 @@ pub(crate) struct SubagentRoster {
     pub focused: Option<ThreadId>,
     pub retiring: Option<Retirement>,
     first: usize,
-    name_width: usize,
 }
 
 impl SubagentRoster {
@@ -100,13 +99,6 @@ impl SubagentRoster {
                 .sort_by_key(|row| order.get(&row.id).copied().unwrap_or(usize::MAX));
         }
         self.sort_by_activity();
-        self.name_width = self
-            .rows
-            .iter()
-            .map(|row| Line::from(row.name.as_str()).width())
-            .max()
-            .unwrap_or(0)
-            .min(24);
         self.watched = watched;
         if self
             .focused
@@ -152,6 +144,27 @@ impl SubagentRoster {
 pub(crate) struct RosterView {
     pub roster: SharedRoster,
     pub use_theme_colors: bool,
+}
+
+impl RosterView {
+    fn model_cell(&self, row: &AgentRow) -> Line<'static> {
+        let Some(model) = &row.model else {
+            return Line::default();
+        };
+        let mut label = model.model.clone();
+        if let Some(effort) = &model.effort {
+            label.push(' ');
+            label.push_str(&ChatWidget::status_line_reasoning_effort_label(Some(
+                effort,
+            )));
+        }
+        status_line_from_segments(
+            [(StatusLineItem::ModelWithReasoning, label)],
+            self.use_theme_colors,
+            Some(row.id),
+        )
+        .unwrap_or_default()
+    }
 }
 
 impl Renderable for RosterView {
@@ -211,7 +224,20 @@ impl Renderable for RosterView {
                 .max(index.saturating_sub(height - 1));
         }
         roster.first = roster.first.min(roster.rows.len().saturating_sub(height));
-        let name_width = roster.name_width.min(usize::from(area.width) / 3);
+        let name_width = roster
+            .rows
+            .iter()
+            .map(|row| Line::from(row.name.as_str()).width())
+            .max()
+            .unwrap_or(0)
+            .min(24)
+            .min(usize::from(area.width) / 3);
+        let model_width = roster
+            .rows
+            .iter()
+            .map(|row| self.model_cell(row).width())
+            .max()
+            .unwrap_or(0);
         for (offset, row) in roster
             .rows
             .iter()
@@ -244,22 +270,11 @@ impl Renderable for RosterView {
                 agent_status::marker(row.status.as_ref()),
                 " ".into(),
             ];
-            if let Some(model) = &row.model {
-                let mut label = model.model.clone();
-                if let Some(effort) = &model.effort {
-                    label.push(' ');
-                    label.push_str(&ChatWidget::status_line_reasoning_effort_label(Some(
-                        effort,
-                    )));
-                }
-                if let Some(line) = status_line_from_segments(
-                    [(StatusLineItem::ModelWithReasoning, label)],
-                    self.use_theme_colors,
-                    Some(row.id),
-                ) {
-                    spans.extend(line.spans);
-                    spans.push(" ".into());
-                }
+            if model_width > 0 {
+                let model = self.model_cell(row);
+                let padding = model_width.saturating_sub(model.width()) + 1;
+                spans.extend(model.spans);
+                spans.push(" ".repeat(padding).into());
             }
             let name = truncate_line_to_width(Line::from(row.name.clone()), name_width);
             let padding = name_width.saturating_sub(name.width()) + 2;
@@ -293,3 +308,7 @@ impl Renderable for RosterView {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "subagent_roster_tests.rs"]
+mod tests;
