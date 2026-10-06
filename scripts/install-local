@@ -14,7 +14,7 @@ root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 # rustup selects the workspace toolchain by cwd, not Cargo's --manifest-path.
 cd "$root/codex-rs"
 
-for command in bash bwrap cargo cat clang cut git install ln mktemp mold mv python3 readlink rg rm rustc sccache sed uname zsh; do
+for command in bash bwrap cargo cat clang cut flock git install ln mktemp mold mv python3 readlink rg rm rustc sccache sed uname zsh; do
     command -v "$command" >/dev/null 2>&1 || die "required command is absent: $command"
 done
 
@@ -94,15 +94,21 @@ PY
         "$codex_version" "$revision" \
         >"$package/distribution"
     python3 "$root/scripts/tui_revision.py" "$package" "$state_home/codex-1337"
-    if [ ! -d "$payload" ]; then
-        mv "$package" "$payload"
-    fi
+fi
+
+exec 9>"$distribution_root/.publish.lock"
+flock -x 9
+if [ -n "$stage" ] && [ ! -d "$payload" ]; then
+    mv "$stage/package" "$payload"
 fi
 
 for executable in codex codex-code-mode-host codex-wrangler-bridge; do
     [ -x "$payload/bin/$executable" ] || die "payload lacks $executable"
 done
 [ -f "$payload/distribution" ] || die 'payload provenance is absent'
+
+python3 "$root/scripts/local_integration.py" check-launcher-ownership \
+    "$distribution_root" "$install_root/bin/codex"
 
 previous=
 if [ -L "$distribution_root/current" ]; then

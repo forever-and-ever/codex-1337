@@ -47,7 +47,7 @@ def launcher_contents(distributions: Path) -> str:
     return f'#!/bin/sh\n# codex-1337 launcher\nexec {command} "$@"\n'
 
 
-def install_launcher(distributions: Path, launcher: Path) -> None:
+def check_launcher_ownership(distributions: Path, launcher: Path) -> None:
     if not distributions.is_absolute() or not launcher.is_absolute():
         raise ValueError("launcher and distributions paths must be absolute")
     if launcher.is_symlink():
@@ -62,6 +62,10 @@ def install_launcher(distributions: Path, launcher: Path) -> None:
                 raise FileExistsError(
                     f"refusing to replace an unowned launcher: {launcher}"
                 )
+
+
+def install_launcher(distributions: Path, launcher: Path) -> None:
+    check_launcher_ownership(distributions, launcher)
     contents = launcher_contents(distributions)
     with tempfile.NamedTemporaryFile(
         mode="w", dir=launcher.parent, delete=False
@@ -121,16 +125,24 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "action",
-        choices=("install", "install-launcher", "uninstall"),
+        choices=(
+            "install",
+            "install-launcher",
+            "check-launcher-ownership",
+            "uninstall",
+        ),
     )
     parser.add_argument("install_root", type=Path)
     parser.add_argument("launcher", nargs="?", type=Path)
     args = parser.parse_args()
     if not args.install_root.is_absolute():
         parser.error("install_root must be absolute")
-    if args.action == "install-launcher":
+    if args.action in ("install-launcher", "check-launcher-ownership"):
         if args.launcher is None:
-            parser.error("install-launcher requires a destination")
-        install_launcher(args.install_root, args.launcher)
+            parser.error("launcher action requires a destination")
+        if args.action == "check-launcher-ownership":
+            check_launcher_ownership(args.install_root, args.launcher)
+        else:
+            install_launcher(args.install_root, args.launcher)
     else:
         integrate(args.action, args.install_root)
