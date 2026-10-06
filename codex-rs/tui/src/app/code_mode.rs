@@ -1,7 +1,7 @@
 //! Apply canonical scoped blocks through the existing retained-history/reading snapshot boundary.
-use super::*;
 use super::transcript_splice::SpliceShape;
 use super::transcript_splice::TranscriptSplice;
+use super::*;
 use crate::code_mode_transcript::Admission;
 use crate::code_mode_transcript::Projection;
 use crate::code_mode_transcript::Source;

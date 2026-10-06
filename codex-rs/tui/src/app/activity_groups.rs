@@ -3,9 +3,9 @@
 //! Only persisted member adjacency within one turn permits joins. Overlay callbacks retain the
 //! displayed source revision before canonical cells are replaced or absorbed into the live tail.
 
-use super::*;
 use super::transcript_splice::SpliceShape;
 use super::transcript_splice::TranscriptSplice;
+use super::*;
 use crate::thread_transcript::join_computer_groups;
 
 impl App {

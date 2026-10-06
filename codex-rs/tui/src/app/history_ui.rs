@@ -4,9 +4,9 @@
 //! state, and resetting transcript-related app state after `/clear` or Ctrl-L. Owned-screen sessions
 //! keep committed cells as the render source and never enqueue terminal-scrollback rows here.
 
-use super::*;
 use super::transcript_splice::SpliceShape;
 use super::transcript_splice::TranscriptSplice;
+use super::*;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use std::sync::Weak;
 

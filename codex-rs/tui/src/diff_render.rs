@@ -652,6 +652,14 @@ fn render_change(
                                 new_ln += 1;
                             }
                         }
+                        let text = match l {
+                            diffy::Line::Insert(text)
+                            | diffy::Line::Delete(text)
+                            | diffy::Line::Context(text) => text,
+                        };
+                        if !text.ends_with('\n') {
+                            out.push(RtLine::from("\\ No newline at end of file".dim()).into());
+                        }
                     }
                 }
             }
@@ -1504,6 +1512,22 @@ mod tests {
             lines,
             /*width*/ 90,
             /*height*/ 8,
+        );
+    }
+
+    #[test]
+    fn diff_marks_missing_end_of_file_newline() {
+        let lines = file_change_lines(
+            &FileChange::Update {
+                unified_diff: diffy::create_patch("a", "a\n").to_string(),
+                move_path: None,
+            },
+            Path::new("example.txt"),
+            /*width*/ 80,
+        );
+        snapshot_lines_text(
+            "diff_marks_missing_end_of_file_newline",
+            &visible_lines(lines),
         );
     }
 

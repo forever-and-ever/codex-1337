@@ -257,7 +257,6 @@ fn append_thread_items(
                 })
                 .any(|block| block.owns(group))
         {
-            let returned = crate::history_cell::ToolOutputCell::is_item(&item);
             for cell in item_to_cells(
                 item,
                 cwd,
@@ -267,9 +266,6 @@ fn append_thread_items(
                 metadata,
             ) {
                 group.group.push_detail(cell);
-            }
-            if returned {
-                flush_computer(&mut pending, cells);
             }
             continue;
         }

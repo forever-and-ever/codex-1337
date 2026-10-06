@@ -1594,7 +1594,11 @@ async fn older_page_hydration_keeps_pending_computer_and_exploration_completion(
         app.transcript_cells = project(&app, &current.items[..1]);
         app.transcript_cells
             .extend(project(&app, &current.items[1..2]));
-        app.join_older_activity_group(&mut tui, /*boundary*/ 1, std::slice::from_ref(&current));
+        app.join_older_activity_group(
+            &mut tui,
+            /*boundary*/ 1,
+            std::slice::from_ref(&current),
+        );
         assert_eq!(
             app.transcript_cells.len(),
             if matches!(kind, ActivityKind::Computer) {
