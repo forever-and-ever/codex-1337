@@ -4474,27 +4474,31 @@ text(result);
     let batches = items
         .iter()
         .filter_map(|item| match item {
-            codex_rollout::RolloutItem::EventMsg(EventMsg::ItemCompleted(event)) => {
-                if let codex_protocol::items::TurnItem::FunctionCallOutput(item) = &event.item {
-                    Some((item.id.clone(), item.name.clone(), item.output.clone()))
-                } else {
-                    None
+            codex_rollout::RolloutItem::EventMsg(event) => match event.native_event() {
+                EventMsg::ItemCompleted(event) => {
+                    if let codex_protocol::items::TurnItem::FunctionCallOutput(item) = &event.item {
+                        Some((item.id.clone(), item.name.clone(), item.output.clone()))
+                    } else {
+                        None
+                    }
                 }
-            }
+                _ => None,
+            },
             _ => None,
         })
         .collect::<Vec<_>>();
     let measured = items
         .into_iter()
         .filter_map(|item| match item {
-            codex_rollout::RolloutItem::EventMsg(EventMsg::ItemCompleted(event)) => {
-                match event.item {
+            codex_rollout::RolloutItem::EventMsg(event) => match event.native_event() {
+                EventMsg::ItemCompleted(event) => match &event.item {
                     codex_protocol::items::TurnItem::ToolOutputTokens(item) => {
-                        Some((item.call_id, item.tokens))
+                        Some((item.call_id.clone(), item.tokens))
                     }
                     _ => None,
-                }
-            }
+                },
+                _ => None,
+            },
             _ => None,
         })
         .collect::<Vec<_>>();
