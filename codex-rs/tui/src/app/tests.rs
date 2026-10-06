@@ -5206,6 +5206,22 @@ async fn side_parent_status_prioritizes_input_over_approval() -> Result<()> {
         app.side_threads
             .get(&side_thread_id)
             .and_then(|state| state.parent_status),
+        Some(SideParentStatus::NeedsInput)
+    );
+    app.enqueue_thread_notification(
+        parent_thread_id,
+        ServerNotification::ServerRequestResolved(
+            codex_app_server_protocol::ServerRequestResolvedNotification {
+                thread_id: parent_thread_id.to_string(),
+                request_id: AppServerRequestId::Integer(2),
+            },
+        ),
+    )
+    .await?;
+    assert_eq!(
+        app.side_threads
+            .get(&side_thread_id)
+            .and_then(|state| state.parent_status),
         Some(SideParentStatus::NeedsApproval)
     );
     let approval_footer = side_footer(&app);
@@ -5226,6 +5242,29 @@ async fn side_parent_status_prioritizes_input_over_approval() -> Result<()> {
             "turn-eviction",
             "item-eviction",
             &chunk,
+        ),
+    )
+    .await?;
+    assert_eq!(
+        app.side_threads
+            .get(&side_thread_id)
+            .and_then(|state| state.parent_status),
+        Some(SideParentStatus::NeedsApproval)
+    );
+    assert!(
+        app.thread_event_channels[&parent_thread_id]
+            .store
+            .lock()
+            .await
+            .has_pending_thread_approvals()
+    );
+    app.enqueue_thread_notification(
+        parent_thread_id,
+        ServerNotification::ServerRequestResolved(
+            codex_app_server_protocol::ServerRequestResolvedNotification {
+                thread_id: parent_thread_id.to_string(),
+                request_id: AppServerRequestId::Integer(1),
+            },
         ),
     )
     .await?;

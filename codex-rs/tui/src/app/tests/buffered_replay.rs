@@ -605,23 +605,23 @@ async fn buffered_replay_renders_completed_text_without_streaming_again() {
 
 #[test]
 fn buffered_replay_preserves_text_before_interactive_requests() {
-    let mut store = ThreadEventStore::new(/*capacity*/ 16);
-    store.push_notification(delta("thread", "turn", "answer"));
-    store.push_request(
-        codex_app_server_protocol::ServerRequest::ToolRequestUserInput {
-            request_id: codex_app_server_protocol::RequestId::Integer(1),
-            params: codex_app_server_protocol::ToolRequestUserInputParams {
-                thread_id: "thread".into(),
-                turn_id: "turn".into(),
-                item_id: "tool".into(),
-                questions: Vec::new(),
-                is_blocking: true,
-                auto_resolution_ms: None,
+    let mut events = vec![
+        ThreadBufferedEvent::Notification(Box::new(delta("thread", "turn", "answer"))),
+        ThreadBufferedEvent::Request(Box::new(
+            codex_app_server_protocol::ServerRequest::ToolRequestUserInput {
+                request_id: codex_app_server_protocol::RequestId::Integer(1),
+                params: codex_app_server_protocol::ToolRequestUserInputParams {
+                    thread_id: "thread".into(),
+                    turn_id: "turn".into(),
+                    item_id: "tool".into(),
+                    questions: Vec::new(),
+                    is_blocking: true,
+                    auto_resolution_ms: None,
+                },
             },
-        },
-    );
-    store.push_notification(completed("thread"));
-    let mut events = store.snapshot().events;
+        )),
+        ThreadBufferedEvent::Notification(Box::new(completed("thread"))),
+    ];
     let before = format!("{events:?}");
     replay_filter::omit_completed_agent_deltas(&mut events);
     assert_eq!(format!("{events:?}"), before);

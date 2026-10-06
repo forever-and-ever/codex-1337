@@ -955,7 +955,16 @@ mod tests {
             ));
         }
 
-        assert_eq!(store.buffer.len(), 2);
+        assert_eq!(store.buffer.len(), 1);
+        assert_eq!(
+            store.pending_replay_requests(),
+            vec![exec_approval_request(
+                thread_id,
+                "turn-1",
+                "command-approval",
+                /*approval_id*/ None,
+            )]
+        );
         assert!(store.has_pending_thread_approvals());
         assert_eq!(store.active_turn_id(), Some("turn-1"));
     }
