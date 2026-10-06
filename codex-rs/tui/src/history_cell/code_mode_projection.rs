@@ -9,7 +9,7 @@ use std::collections::HashSet;
 use std::ops::Range;
 use std::sync::Arc;
 
-type ProjectionChange = (Range<usize>, Vec<Arc<dyn HistoryCell>>);
+pub(crate) type ProjectionChange = (Range<usize>, Vec<Arc<dyn HistoryCell>>);
 
 /// Existing exploration batching may straddle scripts or include unattributed reasoning.
 /// Split those presentation groups before attributing their concrete invocations.

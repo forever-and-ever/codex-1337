@@ -26,6 +26,7 @@ use std::time::Instant;
 
 #[path = "code_mode_projection.rs"]
 mod projection;
+pub(crate) use projection::ProjectionChange;
 pub(crate) use projection::reconcile_code_mode;
 pub(crate) use projection::reunite_code_mode;
 pub(crate) use projection::split_code_mode_members;

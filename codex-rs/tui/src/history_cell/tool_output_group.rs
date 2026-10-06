@@ -2,6 +2,7 @@
 
 use super::HistoryCell;
 use super::PatchHistoryCell;
+use super::ProjectionChange;
 use super::ReasoningSummaryCell;
 use super::ToolOutputCell;
 use super::output_provenance::OutputMode;
@@ -11,7 +12,6 @@ use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::Turn;
 use ratatui::text::Line;
 use std::collections::HashSet;
-use std::ops::Range;
 use std::sync::Arc;
 
 #[derive(Debug)]
@@ -36,7 +36,7 @@ impl ToolOutputGroup {
     pub(crate) fn attach(
         cells: &[Arc<dyn HistoryCell>],
         output: Arc<dyn HistoryCell>,
-    ) -> Option<(Range<usize>, Vec<Arc<dyn HistoryCell>>)> {
+    ) -> Option<ProjectionChange> {
         output.as_any().downcast_ref::<ToolOutputCell>()?;
         if let Some(start) = Self::patch_owner(cells) {
             if cells[start].outer_call_id() != output.outer_call_id() {
