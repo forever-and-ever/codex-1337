@@ -20,6 +20,8 @@ pub(super) struct CapturedOutput {
     id: String,
     call_id: String,
     body: FunctionCallOutputBody,
+    /// Whether the accepted body was pure text. `body` keeps only the text parts, so a
+    /// mixed-media body records no count instead of a misleading text subtotal.
     countable: bool,
     tool: Option<ToolName>,
     owner: Option<codex_protocol::code_mode::CodeModeOwner>,

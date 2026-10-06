@@ -69,6 +69,8 @@ pub(super) struct ThreadEventStore {
     pub(super) session: Option<ThreadSessionState>,
     pub(super) turns: Vec<Turn>,
     pub(super) buffer: VecDeque<ThreadBufferedEvent>,
+    /// Requests the server is still waiting on, in arrival order. They leave only through
+    /// resolution or cancellation, never through transcript eviction.
     pub(super) unresolved_requests: Vec<ServerRequest>,
     pub(super) pending_interactive_replay: PendingInteractiveReplayState,
     pub(super) active_turn_id: Option<String>,

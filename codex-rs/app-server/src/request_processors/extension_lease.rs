@@ -107,6 +107,8 @@ impl ThreadRequestProcessor {
                 .map_err(|_| invalid_request(format!("thread not loaded: {thread_id}")))?;
             let (lease_id, cancellation) = {
                 let mut leases = self.extension_leases.lock().await;
+                // An unsubscribe or disconnect that began after this attach has already scanned
+                // the leases, so an owner without a subscription must not insert one.
                 if !subscription_lifetimes.contains(owner, thread_id) {
                     return Err(invalid_request("extension lease owner disconnected"));
                 }
@@ -245,6 +247,8 @@ impl ThreadRequestProcessor {
         let Ok(thread_id) = ThreadId::from_string(thread_id) else {
             return;
         };
+        // Withdraw admission before scanning, so an attach still in flight cannot insert a lease
+        // after the scan.
         self.thread_state_manager
             .subscription_lifetimes
             .remove(owner, thread_id);

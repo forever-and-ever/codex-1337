@@ -32,6 +32,8 @@ pub(super) struct QueueMutation {
 }
 
 impl QueuedMessages {
+    /// Drops every operation started on the current connection and returns the edits whose
+    /// outcome is unknown, so they can return to their drafts; nothing is resubmitted.
     pub(super) fn retire(&mut self) -> Vec<(ThreadId, QueuedSubmission)> {
         self.reads.clear();
         self.read_again.clear();

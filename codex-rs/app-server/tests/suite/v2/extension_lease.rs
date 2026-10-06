@@ -200,6 +200,8 @@ async fn unsubscribe_revokes_pending_extension_attach() -> Result<()> {
         }
     })
     .await?;
+    // This attach is queued behind the first attach's initialization, so it starts before the
+    // unsubscribe and reaches lease insertion after it.
     let queued_attach = app
         .send_raw_request("thread/extensionAttach", Some(attach_params))
         .await?;

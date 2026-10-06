@@ -3,6 +3,8 @@ use codex_protocol::ThreadId;
 use std::collections::HashSet;
 use std::sync::Mutex;
 
+/// Synchronous mirror of thread subscriptions, readable under the extension-lease lock without
+/// awaiting. `ThreadStateManager` updates it wherever it adds or removes a subscription.
 #[derive(Default)]
 pub(crate) struct SubscriptionLifetimes(Mutex<HashSet<(ConnectionId, ThreadId)>>);
 

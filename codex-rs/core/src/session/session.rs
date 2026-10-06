@@ -89,6 +89,8 @@ pub(crate) struct Session {
     pub(super) mcp_extension: std::sync::RwLock<Option<super::mcp_extension::McpExtensionLease>>,
     /// Serializes extension attachment with every turn-construction path.
     pub(crate) mcp_extension_admission: Semaphore,
+    /// Held while a terminal turn event is published and the active turn cleared, so an
+    /// extension attach that follows the event observes the cleared turn.
     pub(crate) terminal_publication: tokio::sync::Mutex<()>,
     pub(super) last_mcp_extension_instruction: std::sync::Mutex<Option<String>>,
     pub(super) mcp_extension_context_delta: std::sync::Mutex<Option<String>>,
