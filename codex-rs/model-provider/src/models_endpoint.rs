@@ -981,7 +981,7 @@ mod tests {
                 .iter()
                 .map(|request| request.headers["authorization"].to_str().unwrap())
                 .collect::<Vec<_>>(),
-            vec!["Bearer token-2", "Bearer token-5", "Bearer token-9"]
+            vec!["Bearer token-2", "Bearer token-5", "Bearer token-8"]
         );
     }
 

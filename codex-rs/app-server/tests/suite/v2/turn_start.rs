@@ -1002,7 +1002,11 @@ async fn turn_start_emits_thread_scoped_warning_notification_for_trimmed_skills(
     let codex_home = TempDir::new()?;
     MockResponsesConfig::new(&server.uri()).write(codex_home.path())?;
     write_models_cache(codex_home.path()).await?;
-    let cache_path = codex_home.path().join("models_cache.json");
+    let cache_path = codex_home
+        .path()
+        .join(codex_model_provider_info::models_cache_file_name(
+            "mock_provider",
+        ));
     let mut cache: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&cache_path)?)?;
     let models = cache["models"]
@@ -3979,7 +3983,9 @@ async fn turn_start_streams_apply_patch_change_updates_v2() -> Result<()> {
         .disable_feature(Feature::ShellSnapshot)
         .write(&codex_home)?;
     write_models_cache(&codex_home).await?;
-    let cache_path = codex_home.join("models_cache.json");
+    let cache_path = codex_home.join(codex_model_provider_info::models_cache_file_name(
+        "mock_provider",
+    ));
     let mut cache: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&cache_path)?)?;
     let models = cache["models"]
