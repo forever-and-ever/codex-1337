@@ -54,6 +54,7 @@ fn file_disclosures_are_independent_and_not_copied() {
         ],
         crate::thread_transcript::RawReasoningVisibility::Hidden,
         /*config*/ None,
+        &|_| crate::multi_agents::AgentMetadata::default(),
     );
     let mut view = TranscriptView::default();
     let area = Rect::new(
@@ -194,6 +195,7 @@ fn file_disclosures_are_independent_and_not_copied() {
         ],
         crate::thread_transcript::RawReasoningVisibility::Hidden,
         /*config*/ None,
+        &|_| crate::multi_agents::AgentMetadata::default(),
     ));
     view.record_tool_output_tokens(
         "tool-output-tokens:next-batch".into(),

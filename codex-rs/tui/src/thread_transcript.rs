@@ -86,6 +86,7 @@ pub(crate) async fn load_session_transcript(
     thread_id: ThreadId,
     raw_reasoning_visibility: RawReasoningVisibility,
     config: Option<&Config>,
+    metadata: &(dyn Fn(ThreadId) -> crate::multi_agents::AgentMetadata + Sync),
 ) -> std::io::Result<TranscriptCells> {
     let mut thread = app_server
         .thread_read(thread_id, /*include_turns*/ false)
@@ -106,6 +107,7 @@ pub(crate) async fn load_session_transcript(
         thread,
         raw_reasoning_visibility,
         config,
+        metadata,
     ))
 }
 
@@ -113,6 +115,7 @@ pub(crate) fn thread_to_transcript_cells(
     thread: Thread,
     raw_reasoning_visibility: RawReasoningVisibility,
     config: Option<&Config>,
+    metadata: &dyn Fn(ThreadId) -> crate::multi_agents::AgentMetadata,
 ) -> TranscriptCells {
     let cwd = thread.cwd;
     let thread_id = ThreadId::from_string(&thread.id).ok();
@@ -127,6 +130,7 @@ pub(crate) fn thread_to_transcript_cells(
             turn.items,
             raw_reasoning_visibility,
             config,
+            metadata,
         );
     }
     if cells.is_empty() {
@@ -143,6 +147,7 @@ pub(crate) fn thread_items_to_transcript_cells(
     items: impl IntoIterator<Item = ThreadItem>,
     raw_reasoning_visibility: RawReasoningVisibility,
     config: Option<&Config>,
+    metadata: &dyn Fn(ThreadId) -> crate::multi_agents::AgentMetadata,
 ) -> TranscriptCells {
     let mut cells = Vec::new();
     let mut owned = crate::code_mode_transcript::Reducers::default();
@@ -154,10 +159,15 @@ pub(crate) fn thread_items_to_transcript_cells(
         items,
         raw_reasoning_visibility,
         config,
+        metadata,
     );
     cells
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "private body shared by the two projection entry points"
+)]
 fn append_thread_items(
     cells: &mut TranscriptCells,
     owned: &mut crate::code_mode_transcript::Reducers,
@@ -166,6 +176,7 @@ fn append_thread_items(
     items: impl IntoIterator<Item = ThreadItem>,
     raw_reasoning_visibility: RawReasoningVisibility,
     config: Option<&Config>,
+    metadata: &dyn Fn(ThreadId) -> crate::multi_agents::AgentMetadata,
 ) {
     let inline_visualization_context = config.and_then(|config| {
         thread_id.and_then(|thread_id| InlineVisualizationContext::from_config(config, thread_id))
@@ -190,6 +201,7 @@ fn append_thread_items(
                 crate::code_mode_transcript::Admission::item(scope, String::new()),
                 cwd,
                 /*animations*/ false,
+                metadata,
             ) {
                 Ok(projection) => {
                     let incoming = projection
@@ -252,6 +264,7 @@ fn append_thread_items(
                 raw_reasoning_visibility,
                 inline_visualization_context.clone(),
                 thought_visibility,
+                metadata,
             ) {
                 group.group.push_detail(cell);
             }
@@ -298,6 +311,7 @@ fn append_thread_items(
                     raw_reasoning_visibility,
                     inline_visualization_context.clone(),
                     thought_visibility,
+                    metadata,
                 );
                 if !projected.is_empty() {
                     flush_computer(&mut pending, cells);
@@ -340,6 +354,7 @@ fn item_to_cells(
     raw_reasoning_visibility: RawReasoningVisibility,
     inline_visualization_context: Option<InlineVisualizationContext>,
     thought_visibility: crate::history_cell::ThoughtTextVisibility,
+    metadata: &dyn Fn(ThreadId) -> crate::multi_agents::AgentMetadata,
 ) -> TranscriptCells {
     let mut cells: TranscriptCells = Vec::new();
     match item {
@@ -456,7 +471,7 @@ fn item_to_cells(
                 cells.push(Arc::new(command.into_cell()));
             }
         }
-        other => cells.extend(other_items::cells(other, cwd)),
+        other => cells.extend(other_items::cells(other, cwd, metadata)),
     }
     cells
 }
@@ -512,5 +527,6 @@ pub(crate) fn scoped_item_cells(
         RawReasoningVisibility::Hidden,
         /*inline_visualization_context*/ None,
         crate::history_cell::ThoughtTextVisibility::Hidden,
+        metadata,
     )
 }

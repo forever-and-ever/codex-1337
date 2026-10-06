@@ -878,6 +878,7 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
             ],
             crate::thread_transcript::RawReasoningVisibility::Hidden,
             /*config*/ None,
+            &|_| crate::multi_agents::AgentMetadata::default(),
         );
         assert_eq!(replay.len(), 1);
         assert_eq!(

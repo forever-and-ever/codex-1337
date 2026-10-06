@@ -11,11 +11,16 @@ use crate::multi_agents;
 use codex_app_server_protocol::PatchApplyStatus;
 use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::WebSearchAction;
+use codex_protocol::ThreadId;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use ratatui::style::Stylize as _;
 use std::sync::Arc;
 
-pub(super) fn cells(item: ThreadItem, cwd: &AbsolutePathBuf) -> TranscriptCells {
+pub(super) fn cells(
+    item: ThreadItem,
+    cwd: &AbsolutePathBuf,
+    metadata: &dyn Fn(ThreadId) -> crate::multi_agents::AgentMetadata,
+) -> TranscriptCells {
     let call_id = matches!(
         item,
         ThreadItem::FileChange { .. }
@@ -33,6 +38,7 @@ pub(super) fn cells(item: ThreadItem, cwd: &AbsolutePathBuf) -> TranscriptCells 
                 [item],
                 super::RawReasoningVisibility::Hidden,
                 None,
+                metadata,
             ))
         }
         ThreadItem::CodeMode(item) => cells.push(Arc::new(history_cell::CodeModeFactCell(
@@ -105,9 +111,7 @@ pub(super) fn cells(item: ThreadItem, cwd: &AbsolutePathBuf) -> TranscriptCells 
         }
         item @ ThreadItem::CollabAgentToolCall { .. } => {
             if let Some(cell) = multi_agents::tool_call_history_cell(
-                &item,
-                /*cached_spawn_request*/ None,
-                |_| multi_agents::AgentMetadata::default(),
+                &item, /*cached_spawn_request*/ None, metadata,
             ) {
                 cells.push(Arc::new(cell));
             }

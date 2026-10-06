@@ -424,6 +424,7 @@ fn code_mode_batches_display_their_own_counts_and_replay_without_double_counting
         items,
         crate::thread_transcript::RawReasoningVisibility::Hidden,
         /*config*/ None,
+        &|_| crate::multi_agents::AgentMetadata::default(),
     );
     assert_eq!(cells.len(), 2);
     let mut view = TranscriptView::default();

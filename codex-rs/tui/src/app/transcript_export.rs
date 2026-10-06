@@ -50,6 +50,7 @@ impl App {
             visibility,
             Some(&self.config),
             self.transcript_cells.clone(),
+            &|thread| self.chat_widget.collab_agent_metadata(thread),
         )
         .await?;
         let markdown = render_markdown_transcript(&cells)?;
@@ -84,6 +85,7 @@ pub(super) async fn load_export_transcript(
     visibility: RawReasoningVisibility,
     config: Option<&Config>,
     visible_transcript: Vec<Arc<dyn HistoryCell>>,
+    metadata: &dyn Fn(ThreadId) -> crate::multi_agents::AgentMetadata,
 ) -> Result<Vec<Arc<dyn HistoryCell>>, String> {
     let mut thread = app_server
         .thread_read(thread_id, /*include_turns*/ false)
@@ -130,6 +132,7 @@ pub(super) async fn load_export_transcript(
                 [item],
                 visibility,
                 config,
+                metadata,
             ));
         }
     }

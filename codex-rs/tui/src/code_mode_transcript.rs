@@ -236,18 +236,6 @@ impl Reducers {
         admission: Admission,
         cwd: &AbsolutePathBuf,
         animations: bool,
-    ) -> Result<Projection, AdmissionFault> {
-        self.admit_with_agents(display, admission, cwd, animations, &|_| {
-            crate::multi_agents::AgentMetadata::default()
-        })
-    }
-
-    pub(crate) fn admit_with_agents(
-        &mut self,
-        display: ThreadId,
-        admission: Admission,
-        cwd: &AbsolutePathBuf,
-        animations: bool,
         metadata: &dyn Fn(ThreadId) -> crate::multi_agents::AgentMetadata,
     ) -> Result<Projection, AdmissionFault> {
         let Admission {

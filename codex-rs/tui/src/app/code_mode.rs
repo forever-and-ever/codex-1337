@@ -24,7 +24,7 @@ impl App {
         }
         let animations =
             self.local_settings.tui.animations && self.local_settings.tui.effects.progress;
-        let projection = match self.code_mode_transcript.admit_with_agents(
+        let projection = match self.code_mode_transcript.admit(
             display,
             admission,
             &self.chat_widget.config_ref().cwd,
@@ -61,7 +61,7 @@ impl App {
         }
         let animations =
             self.local_settings.tui.animations && self.local_settings.tui.effects.progress;
-        let projection = match self.code_mode_transcript.admit_with_agents(
+        let projection = match self.code_mode_transcript.admit(
             display,
             admission,
             &self.chat_widget.config_ref().cwd,
@@ -86,7 +86,8 @@ impl App {
             item_id,
             call_id,
             tokens,
-        }) = projection.tokens {
+        }) = projection.tokens
+        {
             self.transcript_view
                 .record_tool_output_tokens(item_id, call_id, tokens);
         }

@@ -360,7 +360,13 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
         )
     };
     let partial_fork = banks
-        .admit(fork, suffix(), &app.config.cwd, /*animations*/ false)
+        .admit(
+            fork,
+            suffix(),
+            &app.config.cwd,
+            /*animations*/ false,
+            &|_| crate::multi_agents::AgentMetadata::default(),
+        )
         .unwrap();
     let partial_sibling = banks
         .admit(
@@ -368,6 +374,7 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
             suffix(),
             &app.config.cwd,
             /*animations*/ false,
+            &|_| crate::multi_agents::AgentMetadata::default(),
         )
         .unwrap();
     assert!(
@@ -385,6 +392,7 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
             suffix(),
             &app.config.cwd,
             /*animations*/ false,
+            &|_| crate::multi_agents::AgentMetadata::default(),
         )
         .unwrap();
     assert!(
@@ -418,6 +426,7 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
             ),
             &app.config.cwd,
             /*animations*/ false,
+            &|_| crate::multi_agents::AgentMetadata::default(),
         )
         .unwrap();
     let conflicting = CodeModeOwner {
@@ -433,7 +442,8 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
                     "turn".into()
                 ),
                 &app.config.cwd,
-                /*animations*/ false
+                /*animations*/ false,
+                &|_| crate::multi_agents::AgentMetadata::default(),
             )
             .is_err()
     );
@@ -536,6 +546,7 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
         history.clone(),
         RawReasoningVisibility::Hidden,
         None,
+        &|_| crate::multi_agents::AgentMetadata::default(),
     ));
     for split in 1..history.len() {
         app.reset_transcript_state_after_clear();
@@ -545,6 +556,7 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
             history[split..].iter().cloned(),
             RawReasoningVisibility::Hidden,
             None,
+            &|_| crate::multi_agents::AgentMetadata::default(),
         );
         for cell in app.transcript_cells.clone() {
             if cell.as_any().is::<history_cell::CodeModeCell>() {
@@ -557,6 +569,7 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
             history[..split].iter().cloned(),
             RawReasoningVisibility::Hidden,
             None,
+            &|_| crate::multi_agents::AgentMetadata::default(),
         );
         let mut page = Vec::new();
         for cell in older {
@@ -574,6 +587,7 @@ fn project(app: &App, items: &[ThreadItem]) -> Vec<Arc<dyn HistoryCell>> {
         items.iter().cloned(),
         RawReasoningVisibility::Hidden,
         Some(&app.config),
+        &|_| crate::multi_agents::AgentMetadata::default(),
     )
 }
 

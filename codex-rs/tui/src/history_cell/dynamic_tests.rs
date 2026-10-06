@@ -49,6 +49,7 @@ fn dynamic_status_and_output_match_persisted_presentations() {
             [item(status, output)],
             RawReasoningVisibility::Hidden,
             /*config*/ None,
+            &|_| crate::multi_agents::AgentMetadata::default(),
         );
         assert_eq!(replayed.len(), 1);
         let cell = &replayed[0];

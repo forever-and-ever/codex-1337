@@ -73,6 +73,7 @@ fn completed_patch_restores_rich_diff_and_styles() {
             status: PatchApplyStatus::Completed,
         },
         &cwd,
+        &|_| crate::multi_agents::AgentMetadata::default(),
     );
 
     assert_eq!(
@@ -108,6 +109,7 @@ fn unfinished_and_rejected_patches_keep_their_outcome() {
                 status,
             },
             &cwd,
+            &|_| crate::multi_agents::AgentMetadata::default(),
         )
     })
     .flat_map(|cell| cell.display_lines(/*width*/ 80))
@@ -176,7 +178,11 @@ fn tool_and_notice_projection_uses_normal_transcript_presentation() {
     ];
     let rendered = items
         .into_iter()
-        .flat_map(|item| cells(item, &cwd))
+        .flat_map(|item| {
+            cells(item, &cwd, &|_| {
+                crate::multi_agents::AgentMetadata::default()
+            })
+        })
         .flat_map(|cell| cell.display_lines(/*width*/ 80))
         .map(|line| line.to_string())
         .collect::<Vec<_>>()

@@ -167,6 +167,7 @@ impl App {
             user_items.iter().map(|(_, item)| item.clone()),
             visibility,
             Some(&self.config),
+            &|thread| self.chat_widget.collab_agent_metadata(thread),
         );
         let persisted_user_cells = user_items
             .into_iter()
@@ -256,6 +257,7 @@ impl App {
                     visible.iter().cloned(),
                     visibility,
                     Some(&self.config),
+                    &|thread| self.chat_widget.collab_agent_metadata(thread),
                 );
                 for cell in projected {
                     if cell.as_any().is::<history_cell::CodeModeWaitCell>()

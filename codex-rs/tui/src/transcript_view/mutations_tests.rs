@@ -394,6 +394,7 @@ fn folding_a_reasoning_only_page_retains_its_find_and_copy_revision() {
             items.iter().cloned(),
             RawReasoningVisibility::Hidden,
             /*config*/ None,
+            &|_| crate::multi_agents::AgentMetadata::default(),
         )
     };
     for selecting in [false, true] {

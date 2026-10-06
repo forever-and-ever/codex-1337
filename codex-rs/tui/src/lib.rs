@@ -3591,6 +3591,7 @@ requires_openai_auth = {requires_openai_auth}
                 thread_id,
                 crate::thread_transcript::RawReasoningVisibility::Hidden,
                 /*config*/ None,
+                &|_| crate::multi_agents::AgentMetadata::default(),
             )
             .await?;
             assert!(cells.len() > 100);

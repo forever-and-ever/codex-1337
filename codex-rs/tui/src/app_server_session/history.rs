@@ -430,6 +430,7 @@ fn rendered_history_rows(
         items,
         visibility,
         Some(config),
+        &|_| crate::multi_agents::AgentMetadata::default(),
     )
     .into_iter()
     .fold(rendered_rows, |rows, cell| {

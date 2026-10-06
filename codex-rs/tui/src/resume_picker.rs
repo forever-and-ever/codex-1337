@@ -724,6 +724,7 @@ fn spawn_app_server_page_loader(
                             thread_id,
                             raw_reasoning_visibility,
                             config.as_ref(),
+                            &|_| crate::multi_agents::AgentMetadata::default(),
                         ) => {
                             let _ = bg_tx.send(BackgroundEvent::Transcript {
                                 thread_id,
@@ -6704,6 +6705,7 @@ session_picker_view = "dense"
             thread,
             RawReasoningVisibility::Visible,
             /*config*/ None,
+            &|_| crate::multi_agents::AgentMetadata::default(),
         )
         .into_iter()
         .flat_map(|cell| cell.transcript_lines(/*width*/ 80))
@@ -6775,6 +6777,7 @@ session_picker_view = "dense"
             thread.clone(),
             RawReasoningVisibility::Hidden,
             /*config*/ None,
+            &|_| crate::multi_agents::AgentMetadata::default(),
         )
         .into_iter()
         .flat_map(|cell| cell.transcript_lines(/*width*/ 80))
@@ -6785,6 +6788,7 @@ session_picker_view = "dense"
             thread,
             RawReasoningVisibility::Visible,
             /*config*/ None,
+            &|_| crate::multi_agents::AgentMetadata::default(),
         )
         .into_iter()
         .flat_map(|cell| cell.transcript_lines(/*width*/ 80))
@@ -6854,6 +6858,7 @@ session_picker_view = "dense"
             thread,
             RawReasoningVisibility::Visible,
             /*config*/ None,
+            &|_| crate::multi_agents::AgentMetadata::default(),
         )
         .into_iter()
         .flat_map(|cell| cell.transcript_lines(/*width*/ 80))
