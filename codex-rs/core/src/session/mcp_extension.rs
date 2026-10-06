@@ -58,6 +58,10 @@ impl Drop for PendingMcpExtensionAttach {
 }
 
 impl Session {
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "waits for an in-flight terminal publication before checking for an active turn"
+    )]
     pub(crate) async fn attach_mcp_extension(
         self: &Arc<Self>,
         server_name: String,
@@ -72,8 +76,11 @@ impl Session {
                 let _admission = self.mcp_extension_admission.acquire().await.unwrap_or_else(|_| {
                     unreachable!("extension admission semaphore is never closed")
                 });
-                if self.active_turn.lock().await.is_some() {
-                    anyhow::bail!("thread has an active turn");
+                {
+                    let _publication = self.terminal_publication.lock().await;
+                    if self.active_turn.lock().await.is_some() {
+                        anyhow::bail!("thread has an active turn");
+                    }
                 }
                 self.refresh_mcp_if_dirty().await;
                 if self

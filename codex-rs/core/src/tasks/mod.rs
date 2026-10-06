@@ -658,6 +658,10 @@ impl Session {
         }
     }
 
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "terminal_publication spans the terminal event and the active_turn clear; no awaited path acquires it"
+    )]
     pub async fn on_task_finished(
         self: &Arc<Self>,
         turn_context: Arc<TurnContext>,
@@ -885,11 +889,12 @@ impl Session {
         };
         let saved_guardian_completion =
             matches!(event, EventMsg::TurnComplete(_)) && self.is_private_guardian_reviewer().await;
-        if !saved_guardian_completion {
-            self.send_event(turn_context.as_ref(), event.clone()).await;
-        }
-
         let cleared_active_turn = {
+            let _publication;
+            if !saved_guardian_completion {
+                _publication = self.terminal_publication.lock().await;
+                self.send_event(turn_context.as_ref(), event.clone()).await;
+            }
             let mut active = self.active_turn.lock().await;
             if let Some(active_turn) = active.as_ref()
                 && active_turn.task.is_none()

@@ -308,12 +308,13 @@ async fn extension_attach_refuses_active_turn() -> Result<()> {
         matches!(event, EventMsg::TurnStarted(_))
     })
     .await;
-    let config = serde_json::from_value(json!({ "command": stdio_server_bin()? }))?;
+    let config: codex_config::McpServerConfig =
+        serde_json::from_value(json!({ "command": stdio_server_bin()? }))?;
     let error = fixture
         .codex
         .attach_mcp_extension(
             "leased_mcp".into(),
-            config,
+            config.clone(),
             "Temporary instructions".into(),
             Arc::new(CancellationToken::new()),
         )
@@ -324,5 +325,35 @@ async fn extension_attach_refuses_active_turn() -> Result<()> {
         "unexpected attach error: {error}"
     );
     fixture.codex.submit(Op::Interrupt).await?;
+    wait_for_event(&fixture.codex, |event| {
+        matches!(event, EventMsg::TurnAborted(_))
+    })
+    .await;
+    server.reset().await;
+    let _completed = responses::mount_sse_once(
+        &server,
+        responses::sse(vec![responses::ev_completed("late")]),
+    )
+    .await;
+    fixture
+        .codex
+        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+            text: "Keep this turn active".into(),
+            text_elements: Vec::new(),
+        }]))
+        .await?;
+    wait_for_event(&fixture.codex, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+    fixture
+        .codex
+        .attach_mcp_extension(
+            "leased_mcp".into(),
+            config,
+            "Temporary instructions".into(),
+            Arc::new(CancellationToken::new()),
+        )
+        .await?;
     Ok(())
 }
