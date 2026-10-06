@@ -8,8 +8,10 @@ use crate::terminal_hyperlinks::prefix_hyperlink_lines;
 
 pub(crate) const DISCLOSURE_COLUMNS: u16 = 3;
 pub(crate) const CLOCK_COLUMNS: u16 = 6;
-pub(crate) const DISCLOSURE_COLUMN: u16 = CLOCK_COLUMNS;
-pub(crate) const GUTTER_COLUMNS: u16 = CLOCK_COLUMNS + DISCLOSURE_COLUMNS + 1;
+pub(crate) const TOKEN_COLUMN: u16 = CLOCK_COLUMNS;
+pub(crate) const TOKEN_COLUMNS: u16 = 5;
+pub(crate) const DISCLOSURE_COLUMN: u16 = TOKEN_COLUMN + TOKEN_COLUMNS + 1;
+pub(crate) const GUTTER_COLUMNS: u16 = DISCLOSURE_COLUMN + DISCLOSURE_COLUMNS + 1;
 pub(crate) const MARKER_COLUMNS: u16 = 2;
 pub(crate) const BODY_COLUMN: u16 = GUTTER_COLUMNS + MARKER_COLUMNS;
 pub(crate) const CHILD_INDENT: u16 = BODY_COLUMN - GUTTER_COLUMNS + 2;
@@ -29,7 +31,11 @@ pub(crate) fn rich_lines(lines: Vec<HyperlinkLine>) -> Vec<HyperlinkLine> {
     for line in &mut lines {
         if let Some(clock) = line.clock.take() {
             // Prefix provenance already excludes the entire gutter from copy/selection.
-            let mut spans = vec![clock.span(), "    ".into()];
+            let mut spans = vec![
+                clock.span(),
+                " ".repeat(usize::from(GUTTER_COLUMNS - CLOCK_COLUMNS))
+                    .into(),
+            ];
             spans.extend(line.line.spans.drain(1..));
             line.line.spans = spans;
         }

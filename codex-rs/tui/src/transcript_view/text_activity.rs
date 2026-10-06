@@ -1,25 +1,29 @@
-//! Heading decorations are visual only: disclosure and estimates never enter copied source.
+//! Heading decorations are visual only; controls and token bills never enter copied source.
 
 use super::*;
 
 impl TextRow {
-    pub(super) fn estimate_column(&self, column: usize) -> usize {
+    pub(super) fn decoration_column(&self, column: usize) -> usize {
         column
             + self
-                .estimate
+                .inline_decoration
                 .filter(|(start, _)| column >= *start)
                 .map_or(0, |(_, width)| width)
     }
 }
 
 impl TextLayout {
+    pub(in crate::transcript_view) fn with_header_tokens(mut self, tokens: Option<u64>) -> Self {
+        self.heading.tokens = tokens;
+        self
+    }
+
     pub(in crate::transcript_view) fn with_output_controls(
         mut self,
         offset: usize,
         mode: OutputMode,
-        estimate: Option<String>,
     ) -> Self {
-        let mut decoration = estimate.unwrap_or_default();
+        let mut decoration = String::new();
         let mut controls = Vec::new();
         for (mode, label) in [(OutputMode::Raw, "[Raw]"), (OutputMode::Fmt, "[Fmt]")] {
             decoration.push(' ');
@@ -27,7 +31,7 @@ impl TextLayout {
             decoration.push_str(label);
             controls.push((mode, label, start..display_width(&decoration)));
         }
-        self = self.with_estimate_at(offset, decoration);
+        self = self.with_inline_decoration_at(offset, decoration);
         for (mode, label, columns) in controls {
             self = self.with_output_target(label.into(), offset, mode, columns);
         }
@@ -143,7 +147,7 @@ impl TextLayout {
             })
     }
 
-    pub(in crate::transcript_view) fn with_estimate_at(
+    pub(in crate::transcript_view) fn with_inline_decoration_at(
         mut self,
         offset: usize,
         label: String,
@@ -174,8 +178,8 @@ impl TextLayout {
                 link.columns.end += width;
             }
         }
-        row.estimate = Some((column, width));
-        self.activity_estimate = Some((offset, label));
+        row.inline_decoration = Some((column, width));
+        self.heading.output_controls = Some((offset, label));
         self
     }
 }

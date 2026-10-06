@@ -597,9 +597,7 @@ impl HistoryCell for McpToolCallCell {
     fn activity_header(&self) -> Option<super::activity_parts::ActivityHeader> {
         let mut heading = Line::default();
         heading.push_span(self.header_verb());
-        let mut header = super::activity_parts::ActivityHeader::at_end(&heading);
-        header.columns += usize::from(crate::transcript_geometry::MARKER_COLUMNS);
-        Some(header)
+        Some(super::activity_parts::ActivityHeader::at_end(&heading))
     }
     fn activity_disclosure(&self, width: u16) -> Option<ActivityDisclosure> {
         let has_output = match &self.result {

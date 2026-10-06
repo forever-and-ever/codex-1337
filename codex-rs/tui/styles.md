@@ -1,8 +1,9 @@
 # Transcript entries
 
-Rich transcript rows reserve six columns for a local `HH:MM` clock, four for
-`[+]`/`[-]` disclosure, and two for the entry marker. Content starts at column
-13; nested rows retain their extra indentation. Missing clocks and controls
+Rich transcript rows reserve six columns for a local `HH:MM` clock, six for
+a right-aligned five-character token bill and separator, four for `[+]`/`[-]`
+disclosure, and two for the entry marker. Content starts at column
+19; nested rows retain their extra indentation. Missing clocks, bills and controls
 leave their columns empty. A captured clock appears only on an entry's first
 content row, never continuation rows or copied source. Composer and status
 geometry are independent.
@@ -29,7 +30,7 @@ never merge. Nested calls and `notify()` outputs within one Code Mode call share
 
 Adjacent edits share one **Edited** heading, but each file retains its own
 disclosure. Messages and other tool entries start a new group. Per-call token
-estimates remain on their owning file row when its heading is omitted.
+bills remain on their owning file row when its heading is omitted.
 
 # Expanded tool details
 

@@ -96,7 +96,7 @@ fn shell_rows_share_output_but_have_independent_source_folds() {
         /*expanded*/ false,
         |width, expanded, _| {
             let parts = cells[0]
-                .activity_parts(width, /*header_reserve*/ 17, expanded)
+                .activity_parts(width, /*header_reserve*/ 0, expanded)
                 .unwrap();
             Some(ActivityTranscriptLines {
                 output_mode: None,

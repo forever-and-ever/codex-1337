@@ -33,13 +33,11 @@ pub(crate) struct ActivityParts {
     pub(crate) controls: Vec<PartControl>,
 }
 
-/// Token insertion anchor supplied by the header's owner, never inferred from rendered styling.
+/// Inline output-control anchor supplied by the header's owner.
 #[derive(Clone, Copy)]
 pub(crate) struct ActivityHeader {
     /// Byte offset in selectable header source, excluding synthetic marker/timestamp prefixes.
     pub(crate) source_offset: usize,
-    /// Visible columns before the estimate, excluding the outer disclosure gutter.
-    pub(crate) columns: usize,
     /// Clipping an invocation can reveal more arguments; a fixed label cannot.
     pub(crate) expand_on_truncation: bool,
 }
@@ -48,15 +46,7 @@ impl ActivityHeader {
     pub(crate) fn at_end(line: &ratatui::text::Line<'_>) -> Self {
         Self {
             source_offset: line.spans.iter().map(|span| span.content.len()).sum(),
-            columns: line.width(),
             expand_on_truncation: true,
         }
     }
-}
-
-pub(crate) fn token_label(tokens: u64) -> String {
-    let tokens = codex_protocol::num_format::format_with_separators(
-        i64::try_from(tokens).unwrap_or(i64::MAX),
-    );
-    format!(" (~ {tokens} tokens)")
 }

@@ -21,6 +21,9 @@ mod tabs;
 #[path = "text_activity.rs"]
 mod activity;
 
+#[path = "text_gutter.rs"]
+mod gutter;
+
 use ratatui::buffer::Buffer;
 use ratatui::layout::Alignment;
 use ratatui::layout::Rect;
@@ -55,8 +58,14 @@ pub(super) struct TextLayout {
     pub(super) separated: bool,
     pub(super) disclosure: bool,
     disclosure_controls: Vec<DisclosureControl>,
-    activity_estimate: Option<(usize, String)>,
+    heading: HeadingDecorations,
     output_mode: Option<OutputMode>,
+}
+
+#[derive(Default)]
+struct HeadingDecorations {
+    tokens: Option<u64>,
+    output_controls: Option<(usize, String)>,
 }
 
 struct DisclosureControl {
@@ -84,7 +93,7 @@ struct TextRow {
     first_column: usize,
     prefix_columns: usize,
     tabs: tabs::TabStops,
-    estimate: Option<(usize, usize)>,
+    inline_decoration: Option<(usize, usize)>,
 }
 
 impl TextLayout {
@@ -96,8 +105,9 @@ impl TextLayout {
     /// Reflow the same displayed content revision, retaining styles, links and disclosure label.
     pub(super) fn rewrap(&self, width: u16) -> Self {
         let mut layout = Self::from_logical(self.logical.clone(), width);
-        if let Some((offset, label)) = &self.activity_estimate {
-            layout = layout.with_estimate_at(*offset, label.clone());
+        layout.heading.tokens = self.heading.tokens;
+        if let Some((offset, label)) = &self.heading.output_controls {
+            layout = layout.with_inline_decoration_at(*offset, label.clone());
         }
         for control in &self.disclosure_controls {
             layout =
@@ -170,7 +180,7 @@ impl TextLayout {
                 first_column: indent,
                 prefix_columns: indent,
                 tabs: tabs::TabStops::default(),
-                estimate: None,
+                inline_decoration: None,
             },
         );
         self.disclosure = true;
@@ -230,7 +240,7 @@ impl TextLayout {
                     first_column: 0,
                     prefix_columns: 0,
                     tabs: tabs::TabStops::default(),
-                    estimate: None,
+                    inline_decoration: None,
                 },
             );
             for control in &mut self.disclosure_controls {
@@ -321,7 +331,7 @@ impl TextLayout {
                         .min(self.width)
             }
             DisclosurePlacement::Output { start, end } => {
-                let anchor = row.estimate.map_or(0, |(column, _)| column);
+                let anchor = row.inline_decoration.map_or(0, |(column, _)| column);
                 (anchor + start).min(usize::from(self.width)) as u16
                     ..(anchor + end).min(usize::from(self.width)) as u16
             }
@@ -337,6 +347,20 @@ impl TextLayout {
             row_area.width = row.content_width;
             HyperlinkParagraph::new(std::slice::from_ref(&row.line), row.line.line.style)
                 .render(row_area, buf);
+            if let Some(tokens) = self.heading.tokens
+                && start_row + usize::from(screen_row) == self.row_for_offset(0)
+                && area.width
+                    >= crate::transcript_geometry::TOKEN_COLUMN
+                        + crate::transcript_geometry::TOKEN_COLUMNS
+            {
+                let span = gutter::token_span(tokens);
+                buf.set_span(
+                    area.x + crate::transcript_geometry::TOKEN_COLUMN,
+                    area.y + screen_row,
+                    &span,
+                    crate::transcript_geometry::TOKEN_COLUMNS,
+                );
+            }
             for control in self.disclosure_controls.iter().filter(|control| {
                 matches!(
                     control.placement,
@@ -371,7 +395,7 @@ impl TextLayout {
         for (offset, grapheme) in
             self.text[row.source.clone()].grapheme_indices(/*is_extended*/ true)
         {
-            if let Some((start, width)) = row.estimate
+            if let Some((start, width)) = row.inline_decoration
                 && current_column == start
             {
                 current_column += width;
@@ -416,7 +440,7 @@ impl TextLayout {
                 display_width(&self.text[row.source.start..offset]),
                 offset - row.source.start,
             );
-        row.estimate_column(column).min(usize::from(self.width)) as u16
+        row.decoration_column(column).min(usize::from(self.width)) as u16
     }
 
     /// Highlight source graphemes only, leaving alignment and viewport padding untouched.
@@ -432,7 +456,7 @@ impl TextLayout {
             for (offset, grapheme) in
                 self.text[row.source.clone()].grapheme_indices(/*is_extended*/ true)
             {
-                if let Some((start, width)) = row.estimate
+                if let Some((start, width)) = row.inline_decoration
                     && column == start
                 {
                     column += width;
@@ -470,7 +494,7 @@ impl TextLayout {
             let selected = range.contains(&end)
                 || (end == self.text.len()
                     && next.is_some_and(|next| self.separator_after(next).contains('\n')));
-            let column = row.estimate_column(
+            let column = row.decoration_column(
                 row.first_column
                     + row.tabs.column_for_offset(
                         display_width(&self.text[row.source.clone()]),
@@ -536,7 +560,7 @@ impl TextLayout {
             disclosure: false,
             disclosure_controls: Vec::new(),
             output_mode: None,
-            activity_estimate: None,
+            heading: HeadingDecorations::default(),
         }
     }
 }
@@ -565,7 +589,7 @@ fn layout_line(logical: &LogicalLine, text_start: usize, width: u16) -> Vec<Text
                     first_column: 0,
                     prefix_columns: 0,
                     tabs: tabs::TabStops::default(),
-                    estimate: None,
+                    inline_decoration: None,
                 }
             })
             .collect();
@@ -644,7 +668,7 @@ fn layout_line(logical: &LogicalLine, text_start: usize, width: u16) -> Vec<Text
                 first_column: first_column + prefix_columns,
                 prefix_columns,
                 tabs,
-                estimate: None,
+                inline_decoration: None,
             }
         })
         .collect()

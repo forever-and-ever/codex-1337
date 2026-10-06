@@ -113,7 +113,6 @@ impl HistoryCell for ThoughtCell {
 
     fn activity_header(&self) -> Option<super::activity_parts::ActivityHeader> {
         let mut header = super::activity_parts::ActivityHeader::at_end(&self.heading());
-        header.columns += usize::from(crate::transcript_geometry::MARKER_COLUMNS);
         header.expand_on_truncation = false;
         Some(header)
     }

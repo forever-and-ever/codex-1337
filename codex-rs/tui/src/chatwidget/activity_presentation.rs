@@ -38,9 +38,7 @@ impl ChatWidget {
         let parts = active.filter(|_| has_activity).and_then(|cell| {
             cell.output_parts(
                 width,
-                tool_output_tokens
-                    .map(history_cell::activity_parts::token_label)
-                    .map_or(0, |label| label.len()),
+                /*header_reserve*/ 0,
                 expanded_parts,
                 output_mode,
             )
@@ -96,7 +94,9 @@ impl ChatWidget {
             ),
             header,
             auxiliary,
-            header_tokens: tool_output_tokens,
+            header_tokens: active
+                .and_then(HistoryCell::activity_header_tokens)
+                .or(tool_output_tokens),
             disclosure,
             controls,
         })

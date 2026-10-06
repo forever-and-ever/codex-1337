@@ -1,6 +1,7 @@
 //! Copy and painting regressions over the shared source-backed text layout.
 
 use super::TextLayout;
+use super::gutter;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::terminal_hyperlinks::adaptive_wrap_hyperlink_lines;
 use crate::terminal_hyperlinks::prefix_hyperlink_lines;
@@ -13,6 +14,122 @@ use ratatui::style::Color;
 use ratatui::style::Modifier;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
+use unicode_segmentation::UnicodeSegmentation;
+
+#[test]
+fn token_gutter_rounding_color_and_reflow_preserve_source() {
+    use crate::transcript_geometry::GUTTER_COLUMNS;
+    use crate::transcript_geometry::TOKEN_COLUMN;
+    use crate::transcript_geometry::TOKEN_COLUMNS;
+
+    crate::terminal_palette::with_test_default_colors(
+        crate::terminal_probe::DefaultColors {
+            fg: (220, 220, 220),
+            bg: (0, 0, 0),
+        },
+        || {
+            let colors =
+                [0, 301, 1_001, 3_001, 10_001].map(|tokens| gutter::token_span(tokens).style.fg);
+            for (tokens, expected, tier) in [
+                (0, "    0", 0),
+                (300, "  300", 0),
+                (301, "  301", 1),
+                (1_000, " 1000", 1),
+                (1_001, " 1001", 2),
+                (3_000, " 3000", 2),
+                (3_001, " 3001", 3),
+                (10_000, "10000", 3),
+                (10_001, "10001", 4),
+                (99_999, "99999", 4),
+                (100_000, " 100K", 4),
+                (123_456, " 123K", 4),
+                (999_499, " 999K", 4),
+                (999_500, "1.00M", 4),
+                (1_234_567, "1.23M", 4),
+                (12_345_678, "12.3M", 4),
+                (123_456_789, " 123M", 4),
+                (1_000_000_000, "1.00G", 4),
+                (1_000_000_000_000, "1.00T", 4),
+                (1_000_000_000_000_000, "1.00P", 4),
+                (u64::MAX, "18.4E", 4),
+            ] {
+                let span = gutter::token_span(tokens);
+                assert_eq!(
+                    (span.content.as_ref(), span.style.fg),
+                    (expected, colors[tier])
+                );
+                assert_eq!(span.width(), usize::from(TOKEN_COLUMNS));
+            }
+            assert_eq!(
+                colors
+                    .iter()
+                    .copied()
+                    .collect::<std::collections::HashSet<_>>()
+                    .len(),
+                5
+            );
+            let source = "• Ran a command whose body wraps over several continuation rows";
+            for tokens in [None, Some(0), Some(999_500)] {
+                let layout = TextLayout::new(
+                    crate::transcript_geometry::rich_lines(vec![
+                        Line::from(source).bold().dim().into(),
+                    ]),
+                    /*width*/ 80,
+                )
+                .with_header_tokens(tokens)
+                .with_leading_separator();
+                for width in [80, 40, 10] {
+                    let layout = layout.rewrap(width).with_leading_spacer();
+                    assert_eq!(layout.text(), source);
+                    let area = Rect::new(/*x*/ 0, /*y*/ 0, width, /*height*/ 12);
+                    let mut buffer = Buffer::empty(area);
+                    layout.render(area, &mut buffer, /*start_row*/ 0);
+                    let rendered = crate::transcript_view::tests::text(&buffer);
+                    if width >= TOKEN_COLUMN + TOKEN_COLUMNS {
+                        let expected = tokens.map_or("     ".to_owned(), |count| {
+                            gutter::token_span(count).content.into_owned()
+                        });
+                        assert_eq!(
+                            (TOKEN_COLUMN..TOKEN_COLUMN + TOKEN_COLUMNS)
+                                .map(|x| buffer[(x, 2)].symbol())
+                                .collect::<String>(),
+                            expected
+                        );
+                        assert_eq!(buffer[(GUTTER_COLUMNS, 2)].fg, Color::Reset);
+                        if tokens.is_some() {
+                            assert_eq!(buffer[(TOKEN_COLUMN, 2)].modifier, Modifier::empty());
+                        }
+                        assert_eq!(
+                            rendered.matches("1.00M").count(),
+                            usize::from(tokens == Some(999_500))
+                        );
+                        for row in 3..area.height {
+                            assert_eq!(
+                                (TOKEN_COLUMN..TOKEN_COLUMN + TOKEN_COLUMNS)
+                                    .map(|x| buffer[(x, row)].symbol())
+                                    .collect::<String>(),
+                                "     "
+                            );
+                        }
+                        for (row_index, row) in layout.rows.iter().enumerate() {
+                            for (offset, _) in source[row.source.clone()]
+                                .grapheme_indices(/*is_extended*/ true)
+                            {
+                                let offset = offset + row.source.start;
+                                assert_eq!(
+                                    layout.position_at(row_index, layout.column_for_offset(offset)),
+                                    offset
+                                );
+                            }
+                        }
+                    } else {
+                        assert!(!rendered.contains("1.00M") && !rendered.contains("1.00"));
+                    }
+                }
+            }
+        },
+    );
+}
 
 #[test]
 fn copying_wrapped_text_preserves_only_hard_newlines() {

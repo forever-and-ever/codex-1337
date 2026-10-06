@@ -34,7 +34,7 @@ impl HistoryCell for Cell {
 }
 
 #[test]
-fn tool_output_disclosure_shows_full_estimate_when_it_fits() {
+fn tool_output_disclosure_shows_fixed_token_column() {
     let layout = activity_layout(
         ActivityTranscriptLines {
             output_mode: None,
@@ -124,11 +124,19 @@ fn tool_heading_decorations_preserve_source_and_hit_targets() {
         let area = Rect::new(/*x*/ 0, /*y*/ 0, width, /*height*/ 8);
         let mut buffer = Buffer::empty(area);
         layout.render(area, &mut buffer, /*start_row*/ 0);
-        assert_eq!(layout.disclosure_columns(), 6..9);
+        assert_eq!(
+            layout.disclosure_columns(),
+            crate::transcript_geometry::DISCLOSURE_COLUMN
+                ..crate::transcript_geometry::DISCLOSURE_COLUMN
+                    + crate::transcript_geometry::DISCLOSURE_COLUMNS
+        );
         assert!(!layout.text().contains("tokens)"));
         assert!(layout.text().starts_with("Called"));
         if tokens.is_some() {
-            assert!(crate::transcript_view::tests::text(&buffer).contains("Called (~ 82 tokens)"));
+            assert!(
+                crate::transcript_view::tests::text(&buffer).contains("   82 [+] • Called")
+                    || crate::transcript_view::tests::text(&buffer).contains("   82 [-] • Called")
+            );
         }
         assert_eq!(layout.position_at(/*row*/ 0, /*column*/ 0), 0);
         if !expanded {
@@ -138,7 +146,7 @@ fn tool_heading_decorations_preserve_source_and_hit_targets() {
             "width={width}, expanded={expanded}, tokens={tokens:?}\n{buffer:?}"
         ));
     }
-    // Every selectable character lands back on the same source offset after a mid-header estimate.
+    // Every selectable character lands back on the same source offset after the fixed gutter.
     let layout = activity_layout(
         ActivityTranscriptLines {
             output_mode: None,

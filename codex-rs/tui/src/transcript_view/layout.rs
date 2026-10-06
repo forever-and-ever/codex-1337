@@ -44,33 +44,14 @@ pub(super) fn activity_layout(
         Some(ActivityDisclosure::EditedFile { header }) => usize::from(header),
         _ => 0,
     };
-    let heading_width = lines.header.map_or(0, |header| header.columns);
-    let mut estimate = lines
-        .header_tokens
-        .map(crate::history_cell::activity_parts::token_label)
-        .filter(|label| {
-            lines.header.is_some()
-                && label.len()
-                    + usize::from(crate::transcript_geometry::GUTTER_COLUMNS)
-                    + heading_width
-                    + 3
-                    <= usize::from(width)
-        });
-    // Reserve the estimate before clipping, so invocation arguments never wrap collapsed.
     if lines.is_tool_entry
         && (lines.header.is_some() || lines.disclosure.is_some() || !lines.controls.is_empty())
         && !expanded
         && !lines.controls.iter().any(|control| control.expanded)
     {
-        for (index, header) in lines.activity.iter_mut().enumerate() {
-            let estimate_width = if index == 0 {
-                estimate.as_ref().map_or(0, String::len)
-            } else {
-                0
-            };
-            let available = usize::from(width).saturating_sub(
-                usize::from(crate::transcript_geometry::GUTTER_COLUMNS) + estimate_width,
-            );
+        for header in &mut lines.activity {
+            let available = usize::from(width)
+                .saturating_sub(usize::from(crate::transcript_geometry::GUTTER_COLUMNS));
             if header.width() > available {
                 if lines
                     .header
@@ -103,21 +84,8 @@ pub(super) fn activity_layout(
     let mut layout = TextLayout::new(
         crate::transcript_geometry::rich_lines(lines.activity),
         width,
-    );
-    if (!expanded || lines.output_mode.is_none())
-        && let (Some(estimate), Some(header)) = (estimate.clone(), lines.header)
-    {
-        layout = if matches!(
-            lines.disclosure,
-            Some(ActivityDisclosure::EditedFile { header: false })
-        ) {
-            // Keep each call's bill on its file row when the shared Edited heading is omitted.
-            let offset = layout.text().find('\n').unwrap_or(layout.text().len());
-            layout.with_estimate_at(offset, estimate)
-        } else {
-            layout.with_estimate_at(header.source_offset, estimate)
-        };
-    }
+    )
+    .with_header_tokens(lines.header_tokens);
     if has_details {
         layout = layout.with_leading_disclosure_control(
             if expanded { "[-]" } else { "[+]" }.into(),
@@ -128,8 +96,7 @@ pub(super) fn activity_layout(
         layout = layout.with_part_control(part);
     }
     if expanded && let (Some(mode), Some(header)) = (lines.output_mode, lines.header) {
-        // One synthetic decoration owns both controls and the estimate; none is copy source.
-        layout = layout.with_output_controls(header.source_offset, mode, estimate.take());
+        layout = layout.with_output_controls(header.source_offset, mode);
     }
     layout
 }
@@ -290,12 +257,12 @@ impl TranscriptView {
         Some(self.cache.get(cell, width, presentation, || {
             let content_width = crate::transcript_geometry::content_width(width, mode);
             if disclosure {
-                let reserve = header_tokens
-                    .map(crate::history_cell::activity_parts::token_label)
-                    .map_or(0, |label| label.len());
-                if let Some(parts) =
-                    cell.output_parts(content_width, reserve, expanded_parts, output_mode)
-                {
+                if let Some(parts) = cell.output_parts(
+                    content_width,
+                    /*header_reserve*/ 0,
+                    expanded_parts,
+                    output_mode,
+                ) {
                     return activity_layout(
                         ActivityTranscriptLines {
                             output_mode: (expanded && cell.has_formatted_output())
@@ -367,7 +334,12 @@ impl TranscriptView {
                 } else {
                     lines
                 };
-                TextLayout::new(lines, width)
+                let layout = TextLayout::new(lines, width);
+                if mode == HistoryRenderMode::Rich {
+                    layout.with_header_tokens(header_tokens)
+                } else {
+                    layout
+                }
             }
         }))
     }
