@@ -273,10 +273,36 @@ impl App {
             }
             _ => None,
         };
-        if self.account_ui.displayed.as_ref() == Some(&(thread_id, response.clone()))
+        if self
+            .account_ui
+            .displayed
+            .as_ref()
+            .is_some_and(|(shown, account)| *shown == thread_id && account == &response)
             && self.chat_widget.status_account_display() == display.as_ref()
             && self.chat_widget.active_account_label == active_account_label
         {
+            return;
+        }
+        if self.account_ui.displayed.as_ref().is_some_and(|(shown, previous)| {
+            *shown == thread_id
+                && previous.account_id == response.account_id
+                && previous.requires_openai_auth == response.requires_openai_auth
+                && previous.workspace_routing == response.workspace_routing
+                && match (&previous.account, &response.account) {
+                    (
+                        Some(Account::Chatgpt { plan_type: previous, .. }),
+                        Some(Account::Chatgpt { plan_type, .. }),
+                    ) => previous == plan_type,
+                    (Some(Account::ClaudeSubscription { .. }), Some(Account::ClaudeSubscription { .. }))
+                    | (Some(Account::ApiKey {}), Some(Account::ApiKey {}))
+                    | (None, None) => true,
+                    _ => false,
+                }
+        }) {
+            self.account_ui.displayed = Some((thread_id, response));
+            self.chat_widget.active_account_label = active_account_label;
+            self.chat_widget.set_status_account_display(display);
+            self.chat_widget.refresh_status_line();
             return;
         }
         self.chat_widget.cyber_policy_notice = Default::default();

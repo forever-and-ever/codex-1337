@@ -6,6 +6,10 @@ const ACCOUNT_PICKER_LOADING_VIEW: &str = "account-picker-loading";
 const CLAUDE_LOGIN_PENDING_VIEW: &str = "claude-login";
 
 impl ChatWidget {
+    pub(crate) fn set_status_account_display(&mut self, display: Option<StatusAccountDisplay>) {
+        self.status_account_display = display;
+    }
+
     pub(crate) fn show_account_picker(
         &mut self,
         thread_id: ThreadId,
