@@ -129,15 +129,6 @@ pub enum LocalBindingPolicy {
     RequireTrue,
 }
 
-impl LocalBindingPolicy {
-    /// Resolves omission without changing the configured value.
-    pub fn resolve(self, config: &NetworkProxyConfig) -> bool {
-        config
-            .allow_local_binding
-            .unwrap_or(config.enabled && self == Self::RequireTrue)
-    }
-}
-
 /// The removed proxy state has no instances.
 #[derive(Clone, Debug)]
 pub enum NetworkProxyState {}

@@ -2,7 +2,6 @@
 mod configured;
 mod destination;
 mod environment;
-mod matching;
 mod provider_config;
 mod providers;
 
@@ -10,13 +9,11 @@ use std::collections::HashMap;
 
 pub use environment::CredentialBrokerContext;
 pub use environment::CredentialBrokerEnvironment;
-pub use environment::brokered_credential_binding_env_keys;
-pub use environment::brokered_credential_dummy_env_keys;
+#[cfg(test)]
+use environment::brokered_credential_dummy_env_keys;
 pub use environment::brokered_credential_env_keys;
 pub use environment::brokered_credential_marker_env_keys;
 pub use environment::brokered_credential_value_env_keys;
-pub use environment::credential_broker_provider_context_env_keys;
-pub use environment::credential_broker_provider_sources_allowed;
 pub use environment::is_credential_broker_provider_env_key;
 pub(crate) use environment::marked_credential_dummy_env_keys;
 pub use provider_config::CredentialAuthMethod;
@@ -43,13 +40,6 @@ fn env_entry<'a>(env: &'a HashMap<String, String>, key: &str) -> Option<(&'a str
 
 pub(super) fn env_value<'a>(env: &'a HashMap<String, String>, key: &str) -> Option<&'a str> {
     env_entry(env, key).map(|(_, value)| value)
-}
-
-fn set_env_value(env: &mut HashMap<String, String>, key: &str, value: String) {
-    if cfg!(windows) {
-        env.retain(|candidate, _| !env_key_matches(candidate, key));
-    }
-    env.insert(key.to_string(), value);
 }
 
 #[cfg(test)]

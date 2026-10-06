@@ -34,31 +34,11 @@ pub struct NetworkPolicyAuditEvent {
 /// Implementations must return immediately and treat notification delivery as best effort.
 pub type NetworkPolicyAuditObserver = Arc<dyn Fn(NetworkPolicyAuditEvent) + Send + Sync + 'static>;
 
-impl NetworkProtocol {
-    pub const fn as_policy_protocol(self) -> &'static str {
-        match self {
-            Self::Http => "http",
-            Self::HttpsConnect => "https_connect",
-            Self::Socks5Tcp => "socks5_tcp",
-            Self::Socks5Udp => "socks5_udp",
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, serde::Deserialize, serde::Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum NetworkPolicyDecision {
     Deny,
     Ask,
-}
-
-impl NetworkPolicyDecision {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Deny => "deny",
-            Self::Ask => "ask",
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, serde::Deserialize, serde::Serialize, PartialEq, Eq)]
@@ -68,17 +48,6 @@ pub enum NetworkDecisionSource {
     ModeGuard,
     ProxyState,
     Decider,
-}
-
-impl NetworkDecisionSource {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::BaselinePolicy => "baseline_policy",
-            Self::ModeGuard => "mode_guard",
-            Self::ProxyState => "proxy_state",
-            Self::Decider => "decider",
-        }
-    }
 }
 
 #[derive(Clone, Debug)]

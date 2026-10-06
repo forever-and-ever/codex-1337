@@ -23,7 +23,6 @@ pub const PROXY_URL_ENV_KEYS: &[&str] = &[
     "DOCKER_HTTPS_PROXY",
 ];
 
-pub const ALL_PROXY_ENV_KEYS: &[&str] = &["ALL_PROXY", "all_proxy"];
 pub const PROXY_ACTIVE_ENV_KEY: &str = "CODEX_NETWORK_PROXY_ACTIVE";
 pub const ALLOW_LOCAL_BINDING_ENV_KEY: &str = "CODEX_NETWORK_ALLOW_LOCAL_BINDING";
 // Internal wire format shared with windows-sandbox-rs/src/setup.rs. The value is a
@@ -104,14 +103,6 @@ pub fn strip_managed_proxy_env(env: &mut HashMap<String, String>) {
 
 #[cfg(target_os = "macos")]
 pub const PROXY_GIT_SSH_COMMAND_ENV_KEY: &str = "GIT_SSH_COMMAND";
-
-pub const NO_PROXY_ENV_KEYS: &[&str] = &[
-    "NO_PROXY",
-    "no_proxy",
-    "npm_config_noproxy",
-    "NPM_CONFIG_NOPROXY",
-    "BUNDLE_NO_PROXY",
-];
 
 pub const DEFAULT_NO_PROXY_VALUE: &str = concat!(
     "localhost,127.0.0.1,::1,",

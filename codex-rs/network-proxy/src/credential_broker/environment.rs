@@ -6,22 +6,19 @@ use super::configured::valid_environment_key;
 use super::env_entry;
 use super::env_key_matches;
 use super::env_value;
-use super::matching;
 use super::providers;
-use super::set_env_value;
 use crate::NetworkProxy;
 use crate::NetworkProxyConfig;
 use crate::PreparedManagedNetwork;
-use std::borrow::Cow;
 use std::collections::HashMap;
 
-/// Trusted local destination hints retained for environment sanitation.
 #[derive(Clone, Default, Eq, PartialEq)]
-pub struct CredentialBrokerContext(HashMap<String, String>);
+pub struct CredentialBrokerContext;
 
 impl From<HashMap<String, String>> for CredentialBrokerContext {
     fn from(env: HashMap<String, String>) -> Self {
-        Self(env)
+        let _ = env;
+        Self
     }
 }
 
@@ -48,38 +45,8 @@ impl CredentialBrokerContext {
         config: &NetworkProxyConfig,
         overrides: &HashMap<String, String>,
     ) -> Self {
-        Self(
-            credential_broker_provider_context_env_keys()
-                .map(str::to_string)
-                .chain(
-                    config
-                        .credential_providers
-                        .values()
-                        .filter_map(|provider| provider.url_prefix_from_env.clone()),
-                )
-                .filter_map(|key| {
-                    env_value(overrides, &key)
-                        .map(str::to_string)
-                        .or_else(|| std::env::var(&key).ok())
-                        .map(|value| (key, value))
-                })
-                .collect(),
-        )
-    }
-
-    /// Resolves destination hints without applying or changing child environment policy.
-    pub fn with_fallbacks<'a>(
-        &self,
-        env: &'a HashMap<String, String>,
-    ) -> Cow<'a, HashMap<String, String>> {
-        let mut context = Cow::Borrowed(env);
-        for (key, value) in &self.0 {
-            // A present value, including an empty one, overrides the trusted fallback.
-            if env_value(&context, key).is_none() {
-                set_env_value(context.to_mut(), key, value.clone());
-            }
-        }
-        context
+        let _ = (config, overrides);
+        Self
     }
 }
 
@@ -87,11 +54,7 @@ impl CredentialBrokerContext {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct CredentialBrokerEnvironment {
     pub credential_keys: Vec<String>,
-    pub binding_keys: Vec<String>,
     pub context_keys: Vec<String>,
-    pub provider_keys: Vec<String>,
-    pub provider_context_keys: Vec<String>,
-    pub configured_provider_context_keys: Vec<String>,
 }
 
 /// Returns supported environment keys whose current values still match the child-scoped dummy
@@ -213,86 +176,6 @@ pub fn brokered_credential_value_env_keys(env: &HashMap<String, String>) -> Vec<
     keys
 }
 
-/// Returns environment keys used to bind currently brokered credentials to hosts.
-pub fn brokered_credential_binding_env_keys(
-    env: &HashMap<String, String>,
-) -> impl Iterator<Item = &'static str> {
-    let brokered_keys = brokered_credential_dummy_env_keys(env);
-    providers::credential_binding_env_keys(&brokered_keys)
-        .filter(|key| env_value(env, key).is_some())
-        .collect::<Vec<_>>()
-        .into_iter()
-}
-
-/// Returns environment keys used to bind registered credential providers to their destinations.
-pub fn credential_broker_provider_context_env_keys() -> impl Iterator<Item = &'static str> {
-    providers::credential_providers().flat_map(|provider| provider.context_env_vars.iter().copied())
-}
-
-/// Checks whether each credential in a value has an allowed source environment key.
-pub fn credential_broker_provider_sources_allowed(
-    value: &str,
-    virtualized: &str,
-    source_env: &HashMap<String, String>,
-    is_allowed: impl Fn(&str) -> bool,
-) -> bool {
-    let mut recognized = false;
-    let allowed = providers::credential_providers()
-        .filter(move |provider| {
-            provider.credential_prefixes.iter().any(|prefix| {
-                value.match_indices(*prefix).any(|(start, _)| {
-                    matching::recognized_credential_match(provider, value, virtualized, start)
-                        .is_some()
-                })
-            })
-        })
-        .all(|provider| {
-            recognized = true;
-            let actual_sources = provider
-                .sources()
-                .iter()
-                .flat_map(|source| source.env_vars.iter().copied())
-                .filter(|source| {
-                    env_value(source_env, source).is_some_and(|source_value| {
-                        source_value.len() >= provider.minimum_credential_len
-                            && value.contains(source_value)
-                    })
-                })
-                .collect::<Vec<_>>();
-            let unattributed = provider.credential_prefixes.iter().any(|prefix| {
-                value.match_indices(*prefix).any(|(start, _)| {
-                    matching::recognized_credential_match(provider, value, virtualized, start)
-                        .is_some_and(|credential| {
-                            !actual_sources.iter().any(|source| {
-                                env_value(source_env, source).is_some_and(|source_value| {
-                                    credential == source_value
-                                        || credential
-                                            .strip_prefix(source_value)
-                                            .is_some_and(|suffix| suffix.starts_with(['_', '-']))
-                                })
-                            })
-                        })
-                })
-            });
-            if actual_sources.is_empty() || unattributed {
-                provider
-                    .sources()
-                    .iter()
-                    .flat_map(|source| source.env_vars.iter().copied())
-                    .all(&is_allowed)
-            } else {
-                actual_sources.iter().all(|source| {
-                    actual_sources.iter().any(|equivalent| {
-                        env_value(source_env, source) == env_value(source_env, equivalent)
-                            && is_allowed(equivalent)
-                    })
-                })
-            }
-        });
-    allowed && recognized
-}
-
-/// Returns whether an environment key belongs to a supported credential provider.
 pub fn is_credential_broker_provider_env_key(key: &str) -> bool {
     providers::credential_providers().any(|provider| {
         provider

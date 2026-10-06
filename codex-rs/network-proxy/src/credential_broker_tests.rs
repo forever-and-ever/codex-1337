@@ -10,66 +10,6 @@ fn env_map<const N: usize>(entries: [(&str, &str); N]) -> HashMap<String, String
 }
 
 #[test]
-fn credential_provider_sources_respect_environment_ownership() {
-    for key in [
-        "sk-ant-api03-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmno",
-        "sk-ant-oat01-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmno",
-        "sk-or-v1-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmno",
-    ] {
-        assert!(!credential_broker_provider_sources_allowed(
-            key,
-            key,
-            &HashMap::new(),
-            |_| true,
-        ));
-    }
-    let unknown_github_token = "ghp_0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefgh";
-    let unknown_legacy_openai_key = format!("sk-{}", "a".repeat(48));
-    let unrelated_collision = format!("sk-ant-api03-{}-sk-{}", "a".repeat(40), "b".repeat(48));
-    let redacted_collision = format!("sk-ant-api03-{}-", "a".repeat(40));
-    assert!(credential_broker_provider_sources_allowed(
-        &unrelated_collision,
-        &redacted_collision,
-        &HashMap::new(),
-        |_| true,
-    ));
-    assert!(!credential_broker_provider_sources_allowed(
-        &format!("{unknown_github_token}_{unrelated_collision}"),
-        &format!("_{redacted_collision}"),
-        &HashMap::new(),
-        |source| source != "OPENAI_API_KEY",
-    ));
-    let unrelated = "sk-ant-api03-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmno";
-    assert!(!credential_broker_provider_sources_allowed(
-        &format!("{unknown_github_token}_{unknown_legacy_openai_key}_{unrelated}"),
-        &format!("__{unrelated}"),
-        &HashMap::new(),
-        |source| source != "OPENAI_API_KEY",
-    ));
-    let equivalent_sources = env_map([
-        ("GH_TOKEN", unknown_github_token),
-        ("GITHUB_TOKEN", unknown_github_token),
-    ]);
-    assert!(credential_broker_provider_sources_allowed(
-        unknown_github_token,
-        "",
-        &equivalent_sources,
-        |source| source == "GH_TOKEN",
-    ));
-    let distinct_github_token = "ghp_abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH";
-    let distinct_sources = env_map([
-        ("GH_TOKEN", unknown_github_token),
-        ("GITHUB_TOKEN", distinct_github_token),
-    ]);
-    assert!(!credential_broker_provider_sources_allowed(
-        &format!("{unknown_github_token}\n{distinct_github_token}"),
-        "",
-        &distinct_sources,
-        |source| source == "GH_TOKEN",
-    ));
-}
-
-#[test]
 fn brokered_credential_env_keys_only_include_registered_credentials() {
     let mut env = env_map([
         ("OPENAI_API_KEY", "sk-real"),

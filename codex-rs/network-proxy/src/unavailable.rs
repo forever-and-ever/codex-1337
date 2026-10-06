@@ -2,7 +2,6 @@
 
 use crate::config;
 use crate::network_policy::NetworkPolicyDecider;
-use crate::runtime::ConfigState;
 use crate::runtime::NetworkProxyState;
 use anyhow::Result;
 use codex_utils_absolute_path::AbsolutePathBuf;
@@ -96,9 +95,6 @@ impl NetworkProxy {
     pub fn http_addr(&self) -> SocketAddr {
         match *self {}
     }
-    pub fn managed_proxy_routing(&self) -> ManagedProxyRouting {
-        match *self {}
-    }
     pub fn socks_addr(&self) -> SocketAddr {
         match *self {}
     }
@@ -107,9 +103,6 @@ impl NetworkProxy {
         match *self {}
     }
     pub async fn current_cfg(&self) -> Result<config::NetworkProxyConfig> {
-        match *self {}
-    }
-    pub fn credential_broker_config_revision(&self) -> u64 {
         match *self {}
     }
     pub async fn remote_launch_config(
@@ -122,12 +115,6 @@ impl NetworkProxy {
         &self,
         allow_local_binding: bool,
     ) -> Option<Arc<dyn NetworkPolicyDecider>> {
-        match *self {}
-    }
-    pub async fn add_allowed_domain(&self, host: &str) -> Result<()> {
-        match *self {}
-    }
-    pub async fn add_denied_domain(&self, host: &str) -> Result<()> {
         match *self {}
     }
     pub fn allow_local_binding(&self) -> bool {
@@ -145,18 +132,6 @@ impl NetworkProxy {
     pub fn apply_to_env(&self, env: &mut HashMap<String, String>) {
         match *self {}
     }
-    pub fn apply_to_env_for_snapshot(&self, env: &mut HashMap<String, String>) {
-        match *self {}
-    }
-    pub fn child_credential_alias_matches(
-        &self,
-        key: &str,
-        value: &str,
-        snapshot_value: &str,
-        environment_id: Option<&str>,
-    ) -> bool {
-        match *self {}
-    }
     pub fn restore_brokered_credentials(
         &self,
         env: &mut HashMap<String, String>,
@@ -171,51 +146,10 @@ impl NetworkProxy {
     ) {
         match *self {}
     }
-    pub fn virtualize_brokered_text(
-        &self,
-        text: &mut String,
-        env: &HashMap<String, String>,
-    ) -> bool {
-        match *self {}
-    }
     pub fn credential_broker_environment(
         &self,
         env: &HashMap<String, String>,
     ) -> crate::CredentialBrokerEnvironment {
-        match *self {}
-    }
-    pub fn credential_broker_environment_for_text(
-        &self,
-        text: &str,
-        env: &HashMap<String, String>,
-    ) -> crate::CredentialBrokerEnvironment {
-        match *self {}
-    }
-    pub fn credential_broker_source_matches_text(
-        &self,
-        source: &str,
-        source_value: &str,
-        text: &str,
-    ) -> bool {
-        match *self {}
-    }
-    pub fn credential_broker_sources_allowed(
-        &self,
-        value: &str,
-        virtualized: &str,
-        source_env: &HashMap<String, String>,
-        is_allowed: impl Fn(&str) -> bool,
-    ) -> bool {
-        match *self {}
-    }
-    pub fn restore_brokered_text(&self, text: &mut String) -> bool {
-        match *self {}
-    }
-    pub fn apply_to_env_for_environment(
-        &self,
-        env: &mut HashMap<String, String>,
-        environment_id: &str,
-    ) -> Result<()> {
         match *self {}
     }
     pub fn apply_to_env_for_optional_environment(
@@ -230,16 +164,6 @@ impl NetworkProxy {
         env: HashMap<String, String>,
         environment_id: Option<&str>,
     ) -> Result<PreparedManagedNetwork> {
-        match *self {}
-    }
-    pub fn prepare_for_remote_environment(
-        &self,
-        env: HashMap<String, String>,
-        environment_id: &str,
-    ) -> Result<PreparedManagedNetwork> {
-        match *self {}
-    }
-    pub async fn replace_config_state(&self, new_state: ConfigState) -> Result<()> {
         match *self {}
     }
     pub async fn run(&self) -> Result<NetworkProxyHandle> {
@@ -262,9 +186,6 @@ impl NetworkProxy {
 pub enum NetworkProxyHandle {}
 
 impl NetworkProxyHandle {
-    pub async fn wait(self) -> Result<()> {
-        match self {}
-    }
     pub async fn shutdown(self) -> Result<()> {
         match self {}
     }

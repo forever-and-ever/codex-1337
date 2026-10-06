@@ -4,10 +4,6 @@ mod openai;
 /// Metadata used to recognize built-in credentials and sanitize carried environments.
 pub(super) struct CredentialProvider {
     pub(super) context_env_vars: &'static [&'static str],
-    pub(super) credential_prefixes: &'static [&'static str],
-    pub(super) ignored_credential_prefixes: &'static [&'static str],
-    pub(super) credential_watermark: Option<&'static str>,
-    pub(super) minimum_credential_len: usize,
     sources: &'static [CredentialSource],
 }
 
@@ -38,21 +34,6 @@ pub(super) fn credential_context_env_keys(
             })
         })
         .flat_map(|provider| provider.context_env_vars.iter().copied())
-}
-
-pub(super) fn credential_binding_env_keys(
-    brokered_keys: &[String],
-) -> impl Iterator<Item = &'static str> + '_ {
-    credential_providers()
-        .flat_map(CredentialProvider::sources)
-        .filter(move |source| {
-            source.env_vars.iter().any(|key| {
-                brokered_keys
-                    .iter()
-                    .any(|brokered_key| super::env_key_matches(brokered_key, key))
-            })
-        })
-        .flat_map(|source| source.binding_env_vars.iter().copied())
 }
 
 pub(super) fn credential_env_keys() -> impl Iterator<Item = &'static str> {

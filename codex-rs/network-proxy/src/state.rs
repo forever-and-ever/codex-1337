@@ -1,14 +1,10 @@
-use crate::config::NetworkDomainPermissions;
 use crate::config::NetworkMode;
 use crate::config::NetworkProxyConfig;
-use crate::config::NetworkUnixSocketPermissions;
-use crate::mitm_hook::MitmHookConfig;
 use crate::policy::DomainPattern;
 use crate::policy::compile_allowlist_globset;
 use crate::policy::compile_denylist_globset;
 use crate::policy::is_global_wildcard_domain_pattern;
 use crate::runtime::ConfigState;
-use serde::Deserialize;
 use std::collections::HashSet;
 
 pub use crate::runtime::NetworkProxyAuditMetadata;
@@ -26,25 +22,6 @@ pub struct NetworkProxyConstraints {
     pub denylist_expansion_enabled: Option<bool>,
     pub allow_unix_sockets: Option<Vec<String>>,
     pub allow_local_binding: Option<bool>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct PartialNetworkProxyConfig {
-    pub enabled: Option<bool>,
-    pub mode: Option<NetworkMode>,
-    pub allow_upstream_proxy: Option<bool>,
-    pub dangerously_allow_non_loopback_proxy: Option<bool>,
-    pub dangerously_allow_all_unix_sockets: Option<bool>,
-    #[serde(default)]
-    pub domains: Option<NetworkDomainPermissions>,
-    #[serde(default)]
-    pub unix_sockets: Option<NetworkUnixSocketPermissions>,
-    pub allow_local_binding: Option<bool>,
-    pub mitm: Option<bool>,
-    pub credential_broker: Option<bool>,
-    pub dangerously_allow_plaintext_credential_injection: Option<bool>,
-    #[serde(default)]
-    pub mitm_hooks: Option<Vec<MitmHookConfig>>,
 }
 
 /// Compiles policy using the supplied executor OS, which may differ from this host.
