@@ -57,8 +57,10 @@ impl ComputerActivityCell {
         result: Result<codex_protocol::mcp::CallToolResult, String>,
     ) {
         let id = call.call_id.clone();
+        let completed_at = call.completed_at;
         self.start(call);
         if let Some(call) = self.group.calls.iter_mut().find(|call| call.call_id == id) {
+            call.completed_at = completed_at;
             call.complete(duration, result);
         }
     }
