@@ -121,7 +121,7 @@ impl App {
                         .await
                         .map_err(|error| {
                             self.add_session_picker_error(format!(
-                                "Unable to check resumed folder: {error}"
+                                "Unable to check resumed folder: {error:#}"
                             ));
                             AppRunControl::Continue
                         })?,

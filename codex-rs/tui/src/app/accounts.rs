@@ -283,22 +283,33 @@ impl App {
         {
             return;
         }
-        if self.account_ui.displayed.as_ref().is_some_and(|(shown, previous)| {
-            *shown == thread_id
-                && previous.account_id == response.account_id
-                && previous.requires_openai_auth == response.requires_openai_auth
-                && previous.workspace_routing == response.workspace_routing
-                && match (&previous.account, &response.account) {
-                    (
-                        Some(Account::Chatgpt { plan_type: previous, .. }),
-                        Some(Account::Chatgpt { plan_type, .. }),
-                    ) => previous == plan_type,
-                    (Some(Account::ClaudeSubscription { .. }), Some(Account::ClaudeSubscription { .. }))
-                    | (Some(Account::ApiKey {}), Some(Account::ApiKey {}))
-                    | (None, None) => true,
-                    _ => false,
-                }
-        }) {
+        if self
+            .account_ui
+            .displayed
+            .as_ref()
+            .is_some_and(|(shown, previous)| {
+                *shown == thread_id
+                    && previous.account_id == response.account_id
+                    && previous.requires_openai_auth == response.requires_openai_auth
+                    && previous.workspace_routing == response.workspace_routing
+                    && match (&previous.account, &response.account) {
+                        (
+                            Some(Account::Chatgpt {
+                                plan_type: previous,
+                                ..
+                            }),
+                            Some(Account::Chatgpt { plan_type, .. }),
+                        ) => previous == plan_type,
+                        (
+                            Some(Account::ClaudeSubscription { .. }),
+                            Some(Account::ClaudeSubscription { .. }),
+                        )
+                        | (Some(Account::ApiKey {}), Some(Account::ApiKey {}))
+                        | (None, None) => true,
+                        _ => false,
+                    }
+            })
+        {
             self.account_ui.displayed = Some((thread_id, response));
             self.chat_widget.active_account_label = active_account_label;
             self.chat_widget.set_status_account_display(display);

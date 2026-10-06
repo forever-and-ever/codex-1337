@@ -27,7 +27,8 @@ impl ChatWidget {
             preset.model = LUNA_RESERVE_MODEL.to_string();
             let single_supported_effort = preset.supported_reasoning_efforts.len() == 1;
             let name = preset.display_name.clone();
-            let description = (!preset.description.is_empty()).then_some(preset.description.clone());
+            let description =
+                (!preset.description.is_empty()).then_some(preset.description.clone());
             let actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
                 tx.send(AppEvent::OpenReasoningPopup {
                     model: preset.clone(),
