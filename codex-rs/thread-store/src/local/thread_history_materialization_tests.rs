@@ -5,6 +5,8 @@ use std::time::Duration;
 
 use chrono::Utc;
 use codex_app_server_protocol::ThreadItem;
+use codex_protocol::ResponseThought;
+use codex_protocol::ResponseUsageMetadata;
 use codex_protocol::ThreadId;
 use codex_protocol::items::AgentMessageContent;
 use codex_protocol::items::AgentMessageItem;
@@ -19,6 +21,7 @@ use codex_protocol::protocol::HistoryPosition;
 use codex_protocol::protocol::ItemCompletedEvent;
 use codex_protocol::protocol::RateLimitSnapshot;
 use codex_protocol::protocol::RateLimitWindow;
+use codex_protocol::protocol::RawResponseCompletedEvent;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::ThreadHistoryMode;
 use codex_protocol::protocol::ThreadMemoryMode;
@@ -47,6 +50,9 @@ use crate::AppendThreadItemsParams;
 use crate::CreateThreadParams;
 use crate::DeleteThreadParams;
 use crate::ForkBoundary;
+use crate::ItemSortKey;
+use crate::ListItemsParams;
+use crate::ListItemsPosition;
 use crate::ListThreadsParams;
 use crate::ListTurnsParams;
 use crate::PersistContext;
@@ -431,6 +437,114 @@ WHERE thread_id = ?
     .await
     .expect("read projection state");
     assert_eq!(projection_state, (rollout_len, 5));
+    // Thought snapshots must project from a new suffix even when earlier history is indexed.
+    let thoughts = [
+        ("openai-response", 12_345, Vec::new(), Vec::new(), 321),
+        (
+            "claude-response",
+            13_456,
+            vec!["Readable summary".to_string()],
+            vec!["Readable content".to_string()],
+            1300,
+        ),
+    ];
+    let events = thoughts
+        .iter()
+        .map(|(response_id, completed_at_ms, summary, content, count)| {
+            RolloutItem::EventMsg(EventMsg::RawResponseCompleted(RawResponseCompletedEvent {
+                response_id: (*response_id).to_string(),
+                token_usage: None,
+                usage_metadata: Some(ResponseUsageMetadata {
+                    reported_reasoning_tokens: Some(*count),
+                    ..Default::default()
+                }),
+                thought: Some(ResponseThought {
+                    turn_id: "turn-2".to_string(),
+                    completed_at_ms: *completed_at_ms,
+                    summary: summary.clone(),
+                    content: content.clone(),
+                }),
+            }))
+        })
+        .collect::<Vec<_>>();
+    let mut items = vec![turn_started("turn-2")];
+    items.extend(events.iter().cloned());
+    items.extend(events);
+    items.push(turn_completed("turn-2"));
+    store
+        .append_items(AppendThreadItemsParams { thread_id, items })
+        .await
+        .expect("append thought snapshots and duplicate completions");
+    store
+        .shutdown_thread(thread_id)
+        .await
+        .expect("shutdown thread");
+
+    let ordinals = sqlx::query_as::<_, (String, i64, i64)>(
+        "SELECT item_id, rollout_ordinal, updated_at_ordinal FROM thread_items WHERE thread_id = ? AND turn_id = ? ORDER BY rollout_ordinal",
+    )
+    .bind(thread_id.to_string())
+    .bind("turn-2")
+    .fetch_all(&pool)
+    .await
+    .expect("read thought ordinals");
+    assert_eq!(
+        ordinals,
+        vec![
+            ("thought:turn-2:openai-response".to_string(), 6, 8),
+            ("thought:turn-2:claude-response".to_string(), 7, 9),
+        ]
+    );
+    drop(store);
+
+    let reopened = projection_store(home.path()).await;
+    let mut params = ListItemsParams {
+        thread_id,
+        turn_id: Some("turn-2".to_string()),
+        include_archived: false,
+        position: None,
+        page_size: 1,
+        sort_direction: SortDirection::Asc,
+        sort_key: ItemSortKey::CreatedAtOrdinal,
+        after_updated_at_ordinal: None,
+    };
+    for (response_id, completed_at_ms, summary, content, count) in thoughts {
+        let page = reopened
+            .list_items(params.clone())
+            .await
+            .expect("read reopened thought page");
+        assert_eq!(
+            page.items
+                .iter()
+                .map(|item| {
+                    (
+                        item.turn_id.clone(),
+                        item.item_id.clone(),
+                        item.started_at_ms,
+                        item.completed_at_ms,
+                        serde_json::from_slice::<ThreadItem>(&item.item_json)
+                            .expect("parse persisted thought"),
+                    )
+                })
+                .collect::<Vec<_>>(),
+            vec![(
+                "turn-2".to_string(),
+                format!("thought:turn-2:{response_id}"),
+                None,
+                Some(completed_at_ms),
+                ThreadItem::Thought {
+                    id: format!("thought:turn-2:{response_id}"),
+                    response_id: response_id.to_string(),
+                    completed_at_ms,
+                    summary,
+                    content,
+                    reported_reasoning_tokens: Some(count),
+                },
+            )]
+        );
+        params.position = page.next_cursor.map(ListItemsPosition::Cursor);
+    }
+    assert_eq!(params.position, None);
 }
 
 #[tokio::test]

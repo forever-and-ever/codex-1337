@@ -95,7 +95,7 @@ fn thought_completion_is_self_contained_and_response_scoped() {
                 turn_id: "turn-1".into(),
                 completed_at_ms: 12345,
                 summary: vec!["First block".into(), "Second block".into()],
-                content: Vec::new(),
+                content: vec!["Readable content".into()],
             }),
         });
     // An independent page needs no preceding reasoning item or turn-start event.
@@ -106,7 +106,9 @@ fn thought_completion_is_self_contained_and_response_scoped() {
     if let EventMsg::RawResponseCompleted(completed) = &mut next {
         completed.response_id = "response-2".into();
         completed.usage_metadata = None;
-        completed.thought.as_mut().unwrap().summary.clear();
+        let thought = completed.thought.as_mut().unwrap();
+        thought.summary.clear();
+        thought.content.clear();
     }
     builder.handle_event(&next);
     let turns = builder.finish();
@@ -118,7 +120,7 @@ fn thought_completion_is_self_contained_and_response_scoped() {
                 response_id: "response-1".into(),
                 completed_at_ms: 12345,
                 summary: vec!["First block".into(), "Second block".into()],
-                content: Vec::new(),
+                content: vec!["Readable content".into()],
                 reported_reasoning_tokens: Some(1300),
             },
             ThreadItem::Thought {
@@ -130,6 +132,27 @@ fn thought_completion_is_self_contained_and_response_scoped() {
                 reported_reasoning_tokens: None,
             },
         ]
+    );
+    for (event, item) in [event, next.clone()].into_iter().zip(&turns[0].items) {
+        assert_eq!(
+            project(RolloutItem::EventMsg(event)),
+            ThreadHistoryChangeSet {
+                changed_items: vec![ThreadHistoryItemChange {
+                    turn_id: "turn-1".into(),
+                    item: item.clone(),
+                    started_at_ms: None,
+                    completed_at_ms: Some(12345),
+                }],
+                ..Default::default()
+            }
+        );
+    }
+    if let EventMsg::RawResponseCompleted(completed) = &mut next {
+        completed.thought = None;
+    }
+    assert_eq!(
+        project(RolloutItem::EventMsg(next)),
+        ThreadHistoryChangeSet::default()
     );
 }
 

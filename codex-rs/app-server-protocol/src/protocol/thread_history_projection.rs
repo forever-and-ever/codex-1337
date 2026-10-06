@@ -96,6 +96,23 @@ pub fn project_rollout_line(line: &RolloutLine) -> ThreadHistoryChangeSet {
             }],
             ..Default::default()
         },
+        RolloutItem::EventMsg(EventMsg::RawResponseCompleted(event)) => {
+            let (Some(thought), Some(item)) = (
+                event.thought.as_ref(),
+                ThreadItem::from_response_thought(event),
+            ) else {
+                return ThreadHistoryChangeSet::default();
+            };
+            ThreadHistoryChangeSet {
+                changed_items: vec![ThreadHistoryItemChange {
+                    turn_id: thought.turn_id.clone(),
+                    item,
+                    started_at_ms: None,
+                    completed_at_ms: Some(thought.completed_at_ms),
+                }],
+                ..Default::default()
+            }
+        }
         RolloutItem::SessionMeta(_)
         | RolloutItem::ResponseItem(_)
         | RolloutItem::InterAgentCommunication(_)
