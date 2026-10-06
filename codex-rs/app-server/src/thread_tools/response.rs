@@ -7,10 +7,14 @@ use serde_json::json;
 // tool wrappers. Explicitly configured smaller harness budgets may still truncate.
 pub(super) const MAX_RESPONSE_BYTES: usize = 8_000;
 
-pub(super) fn serialize(mut value: Value) -> Result<String, String> {
+pub(super) fn serialize(value: Value) -> Result<String, String> {
+    bound(value).map(|value| value.to_string())
+}
+
+pub(super) fn bound(mut value: Value) -> Result<Value, String> {
     let text = value.to_string();
     if text.len() <= MAX_RESPONSE_BYTES {
-        return Ok(text);
+        return Ok(value);
     }
 
     value["truncated"] = Value::Bool(true);
@@ -62,7 +66,7 @@ pub(super) fn serialize(mut value: Value) -> Result<String, String> {
 
     let text = value.to_string();
     if text.len() <= MAX_RESPONSE_BYTES {
-        return Ok(text);
+        return Ok(value);
     }
 
     // Search from the original compact result each time: a failed fit must not
@@ -83,7 +87,7 @@ pub(super) fn serialize(mut value: Value) -> Result<String, String> {
             }
             let text = candidate.to_string();
             if text.len() <= MAX_RESPONSE_BYTES {
-                best = Some(text);
+                best = Some(candidate);
                 low = limit + 1;
             } else if limit == 0 {
                 break;
@@ -91,8 +95,8 @@ pub(super) fn serialize(mut value: Value) -> Result<String, String> {
                 high = limit - 1;
             }
         }
-        if let Some(text) = best {
-            return Ok(text);
+        if let Some(value) = best {
+            return Ok(value);
         }
     }
     Err("Task response metadata exceeds the output budget".to_string())

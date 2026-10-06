@@ -174,9 +174,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for CoordinationTool {
                     };
                     FunctionCallError::RespondToModel(message)
                 })?;
-            let text = response::serialize(result).map_err(FunctionCallError::RespondToModel)?;
-            let result = serde_json::from_str(&text)
-                .map_err(|err| FunctionCallError::Fatal(err.to_string()))?;
+            let result = response::bound(result).map_err(FunctionCallError::RespondToModel)?;
             Ok(Box::new(JsonToolOutput::new(result)) as Box<dyn ToolOutput>)
         })
     }
