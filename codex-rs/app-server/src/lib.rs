@@ -132,7 +132,6 @@ mod model_catalog;
 mod models;
 mod models_refresh_worker;
 mod notification_media;
-mod otel_reloader;
 mod outgoing_message;
 mod plugin_config_reload;
 mod request_processors;
@@ -631,13 +630,11 @@ pub async fn run_main_with_transport_options(
     let log_db_layer = log_db
         .clone()
         .map(|layer| layer.with_filter(log_db::default_filter()));
-    let (otel_layers, otel_logger_reload_handle) = otel_reloader::layers(otel.as_ref());
     let _ = tracing_subscriber::registry()
         .with(stderr_fmt)
         .with(feedback_layer)
         .with(feedback_metadata_layer)
         .with(log_db_layer)
-        .with(otel_layers)
         .try_init();
     for warning in &config_warnings {
         match &warning.details {
@@ -787,15 +784,6 @@ pub async fn run_main_with_transport_options(
         }
     }
     transport_accept_handles.push(remote_control_accept_handle);
-
-    let otel_reloader_handle = otel_reloader::spawn(
-        otel,
-        otel_logger_reload_handle,
-        config_manager.clone(),
-        Arc::clone(&auth_manager),
-        default_analytics_enabled,
-        transport_shutdown_token.clone(),
-    );
 
     let outbound_handle = tokio::spawn(async move {
         let mut outbound_connections = HashMap::<ConnectionId, OutboundConnectionState>::new();
@@ -1244,7 +1232,6 @@ pub async fn run_main_with_transport_options(
     let _ = outbound_handle.await;
 
     transport_shutdown_token.cancel();
-    let _ = otel_reloader_handle.await;
     for handle in transport_accept_handles {
         let _ = handle.await;
     }
