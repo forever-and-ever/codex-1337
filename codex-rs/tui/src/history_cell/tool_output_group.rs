@@ -227,6 +227,18 @@ impl ToolOutputGroup {
 }
 
 impl HistoryCell for ToolOutputGroup {
+    fn has_stable_transcript_height(&self) -> bool {
+        self.members
+            .iter()
+            .all(|member| member.has_stable_transcript_height())
+    }
+    // Members count from their own start times; the sum changes whenever any member advances.
+    fn transcript_animation_tick(&self) -> Option<u64> {
+        self.members
+            .iter()
+            .filter_map(|member| member.transcript_animation_tick())
+            .reduce(u64::wrapping_add)
+    }
     fn transcript_timestamp(&self) -> Option<super::HistoryTimestamp> {
         self.members
             .iter()
