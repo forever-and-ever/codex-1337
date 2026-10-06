@@ -614,6 +614,11 @@ impl ChatComposerConfig {
     }
 }
 
+pub(crate) enum ParentOwnedInput {
+    Watch,
+    ChildText,
+}
+
 pub(crate) struct ChatComposer {
     draft: DraftState,
     popups: PopupState,
@@ -1661,11 +1666,18 @@ impl ChatComposer {
     }
 
     pub(crate) fn set_parent_owned_thread(&mut self) {
-        self.blocks_direct_input = true;
+        self.set_parent_owned_input(ParentOwnedInput::Watch);
     }
 
     pub(crate) fn set_child_text_input_enabled(&mut self) {
-        self.child_text_input_enabled = true;
+        self.set_parent_owned_input(ParentOwnedInput::ChildText);
+    }
+
+    pub(crate) fn set_parent_owned_input(&mut self, input: ParentOwnedInput) {
+        (self.blocks_direct_input, self.child_text_input_enabled) = match input {
+            ParentOwnedInput::Watch => (true, false),
+            ParentOwnedInput::ChildText => (true, true),
+        };
     }
 
     /// Move the cursor to the end of the current text buffer.
