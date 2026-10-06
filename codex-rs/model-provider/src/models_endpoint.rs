@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use codex_api::AgentIdentityTelemetry;
+use codex_api::ApiError;
 use codex_api::ModelsClient;
 use codex_api::RequestTelemetry;
 use codex_api::ReqwestTransport;
@@ -31,13 +32,19 @@ use codex_models_manager::manager::ModelsEndpointFuture;
 use codex_models_manager::manager::ModelsEndpointResponse;
 use codex_otel::TelemetryAuthMode;
 use codex_protocol::error::CodexErr;
+use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::error::Result as CoreResult;
 use codex_protocol::openai_models::ModelInfo;
 use codex_response_debug_context::extract_response_debug_context;
 use codex_response_debug_context::telemetry_transport_error_message;
 use http::HeaderMap;
+use http::HeaderValue;
 use http::Method;
+use http::StatusCode;
+use http::header::HeaderName;
 use tokio::time::timeout;
+use tokio::sync::Mutex;
+use url::Url;
 
 use crate::AnthropicAuthContext;
 use crate::auth::ResolvedProviderAuth;
@@ -143,8 +150,9 @@ impl OpenAiModelsEndpoint {
             // Codex metadata is served by the Codex backend, not the public /v1/models API.
             api_provider.base_url = CHATGPT_CODEX_BASE_URL.to_string();
         }
+        let mut captured = None;
         let api_auth = if self.provider_info.adapter == ModelProviderAdapter::ClaudeSubscription {
-            self.anthropic_auth_context
+            let native = self.anthropic_auth_context
                 .as_ref()
                 .ok_or_else(|| {
                     CodexErr::InvalidRequest(
@@ -154,7 +162,10 @@ impl OpenAiModelsEndpoint {
                 .as_ref()
                 .map_err(|message| CodexErr::InvalidRequest(message.clone()))?
                 .discovery_auth()
-                .await?
+                .await?;
+            let auth = native.auth();
+            captured = Some(native);
+            auth
         } else {
             compose_auth(
                 &self.provider_info,
@@ -197,7 +208,89 @@ impl OpenAiModelsEndpoint {
             agent_identity_telemetry,
             auth_env: self.auth_env(),
         });
-        let (models, etag) = timeout(MODELS_REFRESH_TIMEOUT, async {
+        let map_error = |mut error| {
+            if (self.provider_info.model_catalog_url.is_some()
+                || self.provider_info.adapter == ModelProviderAdapter::ClaudeSubscription)
+                && let ApiError::Transport(TransportError::Http {
+                    url,
+                    headers,
+                    body,
+                    ..
+                }) = &mut error
+            {
+                // Provider diagnostics may echo URL credentials or other secrets.
+                *url = None;
+                *headers = None;
+                *body = None;
+            }
+            map_api_error(error)
+        };
+        let (models, etag) = if let Some(captured) = captured {
+            let captured = Mutex::new(captured);
+            crate::native_claude_catalog::list_models(|cursor| {
+                let captured = &captured;
+                let request_url = &request_url;
+                let api_provider = &api_provider;
+                let request_telemetry = &request_telemetry;
+                let http_client_factory = &http_client_factory;
+                async move {
+                let mut captured = captured.lock().await;
+                let mut url = Url::parse(&request_url).map_err(|_| ApiError::InvalidRequest {
+                    message: "invalid native model URL".into(),
+                })?;
+                url.query_pairs_mut().append_pair("limit", "100");
+                if let Some(cursor) = cursor {
+                    url.query_pairs_mut().append_pair("after_id", &cursor);
+                }
+                // Subscription authentication and signed compaction each require their beta.
+                let headers = HeaderMap::from_iter([
+                    (
+                        HeaderName::from_static("anthropic-version"),
+                        HeaderValue::from_static("2023-06-01"),
+                    ),
+                    (
+                        HeaderName::from_static("anthropic-beta"),
+                        HeaderValue::from_static("oauth-2025-04-20,compact-2026-09-04"),
+                    ),
+                ]);
+                for attempt in 0..2 {
+                    let result = timeout(MODELS_REFRESH_TIMEOUT, async {
+                        let transport = self.transport_builder
+                            .build(http_client_factory.clone(), url.to_string())
+                            .await
+                            .map_err(|error| ApiError::Transport(TransportError::Build(error.to_string())))?;
+                        ModelsClient::new(transport, api_provider.clone(), captured.auth())
+                            .with_telemetry(Some(Arc::clone(request_telemetry)))
+                            .list_models_raw(url.to_string(), headers.clone(), Some(MAX_MODEL_CATALOG_BYTES))
+                            .await
+                    })
+                    .await
+                    .unwrap_or(Err(ApiError::Transport(TransportError::Timeout)));
+                    match result {
+                        Err(ApiError::Transport(TransportError::Http { status: StatusCode::UNAUTHORIZED, .. })
+                            | ApiError::Api { status: StatusCode::UNAUTHORIZED, .. }) if attempt == 0 => {
+                            *captured = captured.refresh_after_rejection().await.map_err(|error| {
+                                let message = if let CodexErrorDetails::InvalidRequest(message) = error.details() {
+                                    message.clone()
+                                } else {
+                                    error.to_string()
+                                };
+                                ApiError::InvalidRequest { message }
+                            })?;
+                        }
+                        Ok((body, _)) => {
+                            return serde_json::from_slice(&body).map_err(|_| ApiError::InvalidRequest {
+                                message: "invalid native Anthropic model catalogue".into(),
+                            });
+                        }
+                        Err(error) => return Err(error),
+                    }
+                }
+                unreachable!()
+                }
+            }).await.map_err(map_error)?
+        } else {
+            timeout(MODELS_REFRESH_TIMEOUT, async {
             let transport = self
                 .transport_builder
                 .build(http_client_factory, request_url.clone())
@@ -209,36 +302,14 @@ impl OpenAiModelsEndpoint {
                 .model_catalog_url
                 .as_ref()
                 .map(|_| MAX_MODEL_CATALOG_BYTES);
-            let result = match self.provider_info.adapter {
-                ModelProviderAdapter::OpenaiCompatible => {
-                    client
+            client
                         .list_models(request_url, HeaderMap::new(), response_body_limit_bytes)
                         .await
-                }
-                ModelProviderAdapter::ClaudeSubscription => {
-                    crate::native_claude_catalog::list_models(&client, request_url).await
-                }
-            };
-            result.map_err(|mut error| {
-                if (self.provider_info.model_catalog_url.is_some()
-                    || self.provider_info.adapter == ModelProviderAdapter::ClaudeSubscription)
-                    && let codex_api::ApiError::Transport(TransportError::Http {
-                        url,
-                        headers,
-                        body,
-                        ..
-                    }) = &mut error
-                {
-                    // Provider diagnostics may echo URL credentials or other secrets.
-                    *url = None;
-                    *headers = None;
-                    *body = None;
-                }
-                map_api_error(error)
-            })
+                        .map_err(map_error)
         })
         .await
-        .map_err(|_| CodexErr::RequestTimeout)??;
+        .map_err(|_| CodexErr::RequestTimeout)??
+        };
         if self.provider_info.model_catalog_url.is_some() {
             let mut slugs = HashSet::new();
             if models

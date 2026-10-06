@@ -52,11 +52,11 @@ impl AnthropicAuthContext {
         })
     }
 
-    pub async fn discovery_auth(&self) -> Result<SharedAuthProvider> {
+    pub async fn discovery_auth(&self) -> Result<AnthropicRequestAuth> {
         let id = self.discovery_account.as_ref().ok_or_else(|| {
             CodexErr::InvalidRequest("Select an Anthropic account before discovering models".into())
         })?;
-        Ok(self.capture_id(id.clone()).await?.auth())
+        self.capture_id(id.clone()).await
     }
 
     pub async fn capture(&self, id: &str) -> Result<AnthropicRequestAuth> {

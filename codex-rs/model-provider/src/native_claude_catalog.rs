@@ -1,6 +1,4 @@
 use codex_api::ApiError;
-use codex_api::ModelsClient;
-use codex_api::ReqwestTransport;
 use codex_models_manager::model_info::model_info_with_local_defaults;
 use codex_protocol::openai_models::AnthropicModelCapabilities;
 use codex_protocol::openai_models::AnthropicThinkingMode;
@@ -9,19 +7,14 @@ use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelVisibility;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::openai_models::ReasoningEffortPreset;
-use http::HeaderMap;
-use http::HeaderValue;
-use http::header::HeaderName;
 use serde::Deserialize;
 use std::collections::BTreeSet;
+use std::future::Future;
 use std::num::NonZeroU32;
-use url::Url;
-
-const MAX_CATALOG_BYTES: usize = 1024 * 1024;
 const MAX_MODELS: usize = 1000;
 
 #[derive(Deserialize)]
-struct Page {
+pub(crate) struct Page {
     data: Vec<NativeModel>,
     has_more: bool,
     last_id: Option<String>,
@@ -96,32 +89,17 @@ struct Capabilities {
     image_input: Supported,
 }
 
-pub(crate) async fn list_models(
-    client: &ModelsClient<ReqwestTransport>,
-    request_url: String,
-) -> Result<(Vec<ModelInfo>, Option<String>), ApiError> {
-    let mut url = Url::parse(&request_url).map_err(|_| invalid("invalid native model URL"))?;
-    url.query_pairs_mut().append_pair("limit", "100");
-    let base_url = url.clone();
+pub(crate) async fn list_models<Fut>(
+    mut fetch_page: impl FnMut(Option<String>) -> Fut,
+) -> Result<(Vec<ModelInfo>, Option<String>), ApiError>
+where
+    Fut: Future<Output = Result<Page, ApiError>> + Send,
+{
+    let mut cursor = None;
     let mut seen = BTreeSet::new();
     let mut models = Vec::new();
     for _ in 0..10 {
-        // Subscription authentication and signed compaction each require their beta.
-        let headers = HeaderMap::from_iter([
-            (
-                HeaderName::from_static("anthropic-version"),
-                HeaderValue::from_static("2023-06-01"),
-            ),
-            (
-                HeaderName::from_static("anthropic-beta"),
-                HeaderValue::from_static("oauth-2025-04-20,compact-2026-09-04"),
-            ),
-        ]);
-        let (body, _) = client
-            .list_models_raw(url.to_string(), headers, Some(MAX_CATALOG_BYTES))
-            .await?;
-        let page: Page = serde_json::from_slice(&body)
-            .map_err(|_| invalid("invalid native Anthropic model catalogue"))?;
+        let page = fetch_page(cursor).await?;
         for native in page.data {
             if !seen.insert(native.id.clone()) || seen.len() > MAX_MODELS {
                 return Err(invalid(
@@ -142,8 +120,7 @@ pub(crate) async fn list_models(
             .last_id
             .filter(|id| seen.contains(id))
             .ok_or_else(|| invalid("native model catalogue lacks a valid next cursor"))?;
-        url = base_url.clone();
-        url.query_pairs_mut().append_pair("after_id", &last_id);
+        cursor = Some(last_id);
     }
     Err(invalid("native model catalogue exceeds its page limit"))
 }
