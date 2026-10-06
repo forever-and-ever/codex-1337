@@ -85,6 +85,8 @@ def main() -> int:
         environment = os.environ | dict.fromkeys(("TMPDIR", "TMP", "TEMP"), scratch)
         if full_workspace:
             environment.update(v8_environment)
+        # Tests must not see the developer's Codex home, so every run gets an empty one.
+        environment["CODEX_HOME"] = tempfile.mkdtemp(dir=scratch)
         child: subprocess.Popen[bytes] | None = None
         pending: list[int] = []
 
