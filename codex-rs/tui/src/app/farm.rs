@@ -32,6 +32,17 @@ pub(super) enum FarmRequestState {
     Rejected(RetainedFarm),
 }
 
+impl FarmRequestState {
+    fn retained(&self) -> Option<&RetainedFarm> {
+        match self {
+            Self::Waiting(retained) | Self::Uncertain(retained) | Self::Rejected(retained) => {
+                Some(retained)
+            }
+            Self::Idle => None,
+        }
+    }
+}
+
 #[derive(Default)]
 pub(super) struct FarmUi {
     pub(super) state: FarmRequestState,
@@ -205,45 +216,42 @@ impl App {
         {
             return;
         }
-        if matches!(&self.farm.state, FarmRequestState::Uncertain(pending) | FarmRequestState::Rejected(pending) if pending.request_id == request_id)
+        let pending = match std::mem::take(&mut self.farm.state) {
+            FarmRequestState::Uncertain(pending) | FarmRequestState::Rejected(pending)
+                if pending.request_id == request_id =>
+            {
+                pending
+            }
+            state => {
+                self.farm.state = state;
+                return;
+            }
+        };
+        if self.current_displayed_thread_id() == Some(pending.thread_id) {
+            self.chat_widget.clear_farm_draft(&pending.submission.draft);
+        } else if let Some(channel) = self.thread_event_channels.get(&pending.thread_id)
+            && let Some(input) = channel.store.lock().await.input_state.as_mut()
         {
-            let (FarmRequestState::Uncertain(pending) | FarmRequestState::Rejected(pending)) =
-                std::mem::take(&mut self.farm.state)
-            else {
-                unreachable!()
-            };
-            if self.current_displayed_thread_id() == Some(pending.thread_id) {
-                self.chat_widget.clear_farm_draft(&pending.submission.draft);
-            } else if let Some(channel) = self.thread_event_channels.get(&pending.thread_id)
-                && let Some(input) = channel.store.lock().await.input_state.as_mut()
-            {
-                input.clear_farm_draft(&pending.submission.draft);
-            }
-            if let Some(input) = self
-                .agents_overview
-                .input_states
-                .get_mut(&pending.thread_id)
-            {
-                input.clear_farm_draft(&pending.submission.draft);
-            }
-            self.set_farm_receipt(
-                tui,
-                pending.thread_id,
-                request_id,
-                "Farm request discarded; a child may still be running. Nothing resent.".into(),
-            )
-            .await;
+            input.clear_farm_draft(&pending.submission.draft);
         }
+        if let Some(input) = self
+            .agents_overview
+            .input_states
+            .get_mut(&pending.thread_id)
+        {
+            input.clear_farm_draft(&pending.submission.draft);
+        }
+        self.set_farm_receipt(
+            tui,
+            pending.thread_id,
+            request_id,
+            "Farm request discarded; a child may still be running. Nothing resent.".into(),
+        )
+        .await;
     }
 
     pub(super) fn restore_farm_draft(&mut self, request_id: &str) {
-        let saved = match &self.farm.state {
-            FarmRequestState::Waiting(saved)
-            | FarmRequestState::Uncertain(saved)
-            | FarmRequestState::Rejected(saved) => Some(saved),
-            FarmRequestState::Idle => None,
-        };
-        if let Some(saved) = saved
+        if let Some(saved) = self.farm.state.retained()
             && saved.request_id == request_id
             && self.current_displayed_thread_id() == Some(saved.thread_id)
             && self.primary_thread_id == Some(saved.thread_id)
@@ -268,14 +276,16 @@ impl App {
         result: Result<ThreadFarmResponse, FarmFailure>,
     ) {
         let displayed = self.current_displayed_thread_id();
-        if !matches!(&self.farm.state, FarmRequestState::Waiting(pending) | FarmRequestState::Uncertain(pending) if pending.request_id == request_id)
-        {
-            return;
-        }
-        let (FarmRequestState::Waiting(pending) | FarmRequestState::Uncertain(pending)) =
-            std::mem::take(&mut self.farm.state)
-        else {
-            unreachable!()
+        let pending = match std::mem::take(&mut self.farm.state) {
+            FarmRequestState::Waiting(pending) | FarmRequestState::Uncertain(pending)
+                if pending.request_id == request_id =>
+            {
+                pending
+            }
+            state => {
+                self.farm.state = state;
+                return;
+            }
         };
         let origin = pending.thread_id;
         let message = match result {
@@ -352,13 +362,7 @@ impl App {
     pub(super) fn queue_farm_receipt_replay(&self) {
         // Only unresolved work needs a fallback if a refreshed/evicted replay buffer
         // lost its original position. Never resurrect old success notices at the tail.
-        let retained = match &self.farm.state {
-            FarmRequestState::Waiting(retained)
-            | FarmRequestState::Uncertain(retained)
-            | FarmRequestState::Rejected(retained) => Some(retained),
-            FarmRequestState::Idle => None,
-        };
-        if let Some(retained) = retained
+        if let Some(retained) = self.farm.state.retained()
             && self.current_displayed_thread_id() == Some(retained.thread_id)
         {
             self.app_event_tx.send(AppEvent::RestoreFarmReceipt {
