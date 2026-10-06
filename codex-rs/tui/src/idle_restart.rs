@@ -12,8 +12,10 @@ use serde::Serialize;
 use std::io;
 use std::path::Path;
 use std::path::PathBuf;
+use std::process::Stdio;
 use std::sync::OnceLock;
 use std::time::Duration;
+use tokio::io::AsyncReadExt;
 use tokio::time::Instant;
 
 pub const IDLE_RESTART_PROTOCOL: &str = "codex-tui-idle-restart-v1";
@@ -118,20 +120,43 @@ impl IdleRestart {
         if candidate == self.running || self.rejected.as_ref() == Some(&candidate) {
             return None;
         }
+        #[cfg(target_os = "linux")]
+        if crate::reload::worker::is_hosted() {
+            return Some(candidate);
+        }
         // Older bundles do not understand the handoff: never replay their original
         // command line. Probe before touching terminal state, once per candidate.
+        let expected = format!("{IDLE_RESTART_PROTOCOL}\n");
         let result = tokio::time::timeout(
             Duration::from_secs(/*secs*/ 2),
-            tokio::process::Command::new(&candidate)
-                .args(["debug", "tui-restart-probe"])
-                .kill_on_drop(true)
-                .output(),
+            async {
+                let mut child = tokio::process::Command::new(&candidate)
+                    .args(["debug", "tui-restart-probe"])
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::null())
+                    .kill_on_drop(true)
+                    .spawn()?;
+                let mut stdout = Vec::new();
+                child
+                    .stdout
+                    .take()
+                    .ok_or_else(|| io::Error::from(io::ErrorKind::BrokenPipe))?
+                    .take(expected.len() as u64)
+                    .read_to_end(&mut stdout)
+                    .await?;
+                Ok::<_, io::Error>(std::process::Output {
+                    status: child.wait().await?,
+                    stdout,
+                    stderr: Vec::new(),
+                })
+            },
         )
         .await;
         match result {
             Ok(Ok(output))
                 if output.status.success()
-                    && output.stdout == format!("{IDLE_RESTART_PROTOCOL}\n").as_bytes() =>
+                    && output.stdout == expected.as_bytes() =>
             {
                 Some(candidate)
             }
