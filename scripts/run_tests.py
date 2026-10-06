@@ -7,6 +7,7 @@ No other run's directories are inspected or removed. Requires Python 3.12+.
 """
 
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -14,6 +15,206 @@ import tempfile
 import time
 from pathlib import Path
 from types import FrameType
+
+
+# Binaries that tests spawn from other packages, which cargo does not build for
+# them: (package, binary, packages whose tests spawn it). Derived on Linux from
+# the tests' fixture lookups; a test that spawns a new binary needs a row here.
+FIXTURE_BINARIES = (
+    (
+        "codex-app-server",
+        "codex-app-server",
+        (
+            "app_test_support",
+            "codex-app-server",
+            "codex-cli",
+            "codex-tui",
+        ),
+    ),
+    ("codex-app-server", "codex-app-server-test-notify-capture", ("codex-app-server",)),
+    (
+        "codex-app-server",
+        "exec-server",
+        (
+            "app_test_support",
+            "codex-app-server",
+            "codex-cli",
+            "codex-tui",
+        ),
+    ),
+    ("codex-apply-patch", "apply_patch", ("codex-apply-patch",)),
+    (
+        "codex-bwrap",
+        "bwrap",
+        (
+            "app_test_support",
+            "codex-agent-extension",
+            "codex-app-server",
+            "codex-cli",
+            "codex-core",
+            "codex-exec",
+            "codex-exec-server",
+            "codex-guardian-v2",
+            "codex-history-notes-extension",
+            "codex-linux-sandbox",
+            "codex-login",
+            "codex-mcp-extension",
+            "codex-memories-write",
+            "codex-queue-extension",
+            "codex-tui",
+            "core_test_support",
+        ),
+    ),
+    (
+        "codex-cli",
+        "codex",
+        (
+            "app_test_support",
+            "codex-agent-extension",
+            "codex-app-server",
+            "codex-cli",
+            "codex-core",
+            "codex-exec",
+            "codex-guardian-v2",
+            "codex-history-notes-extension",
+            "codex-login",
+            "codex-mcp-extension",
+            "codex-memories-write",
+            "codex-queue-extension",
+            "codex-rmcp-client",
+            "codex-tui",
+            "core_test_support",
+        ),
+    ),
+    (
+        "codex-code-mode-host",
+        "codex-code-mode-host",
+        (
+            "app_test_support",
+            "codex-agent-extension",
+            "codex-app-server",
+            "codex-cli",
+            "codex-code-mode-host",
+            "codex-core",
+            "codex-exec",
+            "codex-guardian-v2",
+            "codex-history-notes-extension",
+            "codex-login",
+            "codex-mcp-extension",
+            "codex-memories-write",
+            "codex-queue-extension",
+            "codex-tui",
+            "core_test_support",
+        ),
+    ),
+    (
+        "codex-exec",
+        "codex-exec",
+        (
+            "app_test_support",
+            "codex-agent-extension",
+            "codex-app-server",
+            "codex-cli",
+            "codex-core",
+            "codex-exec",
+            "codex-guardian-v2",
+            "codex-history-notes-extension",
+            "codex-login",
+            "codex-mcp-extension",
+            "codex-memories-write",
+            "codex-queue-extension",
+            "codex-tui",
+            "core_test_support",
+        ),
+    ),
+    ("codex-http-client", "custom_ca_probe", ("codex-http-client",)),
+    (
+        "codex-linux-sandbox",
+        "codex-linux-sandbox",
+        (
+            "app_test_support",
+            "codex-agent-extension",
+            "codex-app-server",
+            "codex-cli",
+            "codex-core",
+            "codex-exec",
+            "codex-guardian-v2",
+            "codex-history-notes-extension",
+            "codex-linux-sandbox",
+            "codex-login",
+            "codex-mcp-extension",
+            "codex-memories-write",
+            "codex-queue-extension",
+            "codex-tui",
+            "core_test_support",
+        ),
+    ),
+    (
+        "codex-rmcp-client",
+        "test_mcp_2026_discovery_stdio_server",
+        ("codex-rmcp-client",),
+    ),
+    ("codex-rmcp-client", "test_mcp_2026_stdio_server", ("codex-rmcp-client",)),
+    (
+        "codex-rmcp-client",
+        "test_stdio_server",
+        (
+            "app_test_support",
+            "codex-agent-extension",
+            "codex-app-server",
+            "codex-cli",
+            "codex-core",
+            "codex-exec",
+            "codex-guardian-v2",
+            "codex-history-notes-extension",
+            "codex-login",
+            "codex-mcp-extension",
+            "codex-memories-write",
+            "codex-queue-extension",
+            "codex-rmcp-client",
+            "codex-tui",
+            "core_test_support",
+        ),
+    ),
+    (
+        "codex-rmcp-client",
+        "test_streamable_http_server",
+        (
+            "codex-core",
+            "codex-rmcp-client",
+        ),
+    ),
+    (
+        "codex-shell-escalation",
+        "codex-execve-wrapper",
+        (
+            "app_test_support",
+            "codex-agent-extension",
+            "codex-app-server",
+            "codex-cli",
+            "codex-core",
+            "codex-exec",
+            "codex-guardian-v2",
+            "codex-history-notes-extension",
+            "codex-login",
+            "codex-mcp-extension",
+            "codex-memories-write",
+            "codex-queue-extension",
+            "codex-tui",
+            "core_test_support",
+        ),
+    ),
+    ("codex-stdio-to-uds", "codex-stdio-to-uds", ("codex-stdio-to-uds",)),
+    ("codex-tui", "codex-tui", ("codex-tui",)),
+    ("codex-voice-host", "codex-voice-host", ("codex-voice-host",)),
+)
+
+
+# Fixtures that unit tests spawn. A --lib run builds only these: building a
+# package's binary compiles its library again outside the test configuration.
+UNIT_TEST_FIXTURES = (
+    ("codex-code-mode-host", "codex-code-mode-host", ("codex-guardian-v2",)),
+)
 
 
 def reap_orphans() -> bool:
@@ -59,6 +260,57 @@ def main() -> int:
             ["rustc", "--print", "host-tuple"], text=True
         ).strip()
         v8_environment = resolve_codex_v8_cargo_env(TARGET_SPECS[host])
+
+    # Build only the fixtures that the selected packages' tests spawn; a selection
+    # this parser does not understand builds every fixture.
+    selected_packages: set[str] = set()
+    all_fixtures = False
+    arguments = iter(sys.argv[1:])
+    for argument in arguments:
+        if argument in {"-p", "--package"}:
+            selected_packages.add(next(arguments, ""))
+        elif argument.startswith("--package="):
+            selected_packages.add(argument.removeprefix("--package="))
+        elif argument.startswith("-p"):
+            selected_packages.add(argument[2:])
+        elif argument in {"--workspace", "--exclude"} or argument.startswith(
+            "--exclude="
+        ):
+            all_fixtures = True
+    if not selected_packages or any(
+        re.fullmatch(r"[A-Za-z0-9_-]+", package) is None
+        for package in selected_packages
+    ):
+        all_fixtures = True
+    unit_tests_only = "--lib" in sys.argv[1:] and not any(
+        argument.partition("=")[0]
+        in {
+            "--bin",
+            "--bins",
+            "--example",
+            "--examples",
+            "--test",
+            "--tests",
+            "--bench",
+            "--benches",
+            "--all-targets",
+        }
+        for argument in sys.argv[1:]
+    )
+    fixtures = [
+        (package, binary)
+        for package, binary, consumers in (
+            UNIT_TEST_FIXTURES if unit_tests_only else FIXTURE_BINARIES
+        )
+        if all_fixtures or selected_packages.intersection(consumers)
+    ]
+    commands = []
+    if fixtures:
+        build = ["cargo", "build"]
+        for package, binary in fixtures:
+            build.extend(("-p", package, "--bin", binary))
+        commands.append(build)
+    commands.append(["cargo", "nextest", "run", "--no-fail-fast", *sys.argv[1:]])
 
     root = Path(os.environ.get("CODEX_TEST_TMP_ROOT", "/var/tmp")).resolve()
     root.mkdir(parents=True, exist_ok=True)
@@ -106,35 +358,40 @@ def main() -> int:
         try:
             # Separate groups let a signal to this wrapper reach the entire owned run.
             # Waiting precedes directory cleanup; live tests never lose their scratch.
-            with subprocess.Popen(
-                ["cargo", "nextest", "run", "--no-fail-fast", *sys.argv[1:]],
-                env=environment,
-                start_new_session=True,
-            ) as child:
+            for command in commands:
+                with subprocess.Popen(
+                    command,
+                    env=environment,
+                    start_new_session=True,
+                ) as child:
 
-                def reap_exited(_signum: int, _frame: FrameType | None) -> None:
-                    # Adoption also transfers zombie-reaping responsibility during
-                    # the run. Leave Cargo's exit status to its Popen owner.
-                    children = Path(f"/proc/self/task/{os.getpid()}/children")
-                    for pid in map(int, children.read_text().split()):
-                        if pid != child.pid:
-                            try:
-                                os.waitpid(pid, os.WNOHANG)
-                            except ChildProcessError:
-                                pass
+                    def reap_exited(_signum: int, _frame: FrameType | None) -> None:
+                        # Adoption also transfers zombie-reaping responsibility during
+                        # the run. Leave Cargo's exit status to its Popen owner.
+                        children = Path(f"/proc/self/task/{os.getpid()}/children")
+                        for pid in map(int, children.read_text().split()):
+                            if pid != child.pid:
+                                try:
+                                    os.waitpid(pid, os.WNOHANG)
+                                except ChildProcessError:
+                                    pass
 
-                if sys.platform == "linux":
-                    # Install only after Popen owns its PID: a child exiting during
-                    # construction must not be mistaken for an adopted fixture.
-                    previous_child = signal.signal(signal.SIGCHLD, reap_exited)
-                    reap_exited(signal.SIGCHLD, None)
-                try:
-                    for sig in pending:
-                        forward(sig, None)
-                    status = child.wait()
-                finally:
                     if sys.platform == "linux":
-                        signal.signal(signal.SIGCHLD, previous_child)
+                        # Install only after Popen owns its PID: a child exiting during
+                        # construction must not be mistaken for an adopted fixture.
+                        previous_child = signal.signal(signal.SIGCHLD, reap_exited)
+                        reap_exited(signal.SIGCHLD, None)
+                    try:
+                        for sig in pending:
+                            forward(sig, None)
+                        pending.clear()
+                        status = child.wait()
+                    finally:
+                        if sys.platform == "linux":
+                            signal.signal(signal.SIGCHLD, previous_child)
+                child = None
+                if status != 0:
+                    break
         finally:
             if sys.platform == "linux":
                 clean = False
