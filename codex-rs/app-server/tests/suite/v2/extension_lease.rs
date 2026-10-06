@@ -177,24 +177,22 @@ async fn unsubscribe_revokes_pending_extension_attach() -> Result<()> {
         .id;
     let barrier = codex_home.path().join("allow-mcp-initialize");
     let pid_file = codex_home.path().join("extension-mcp.pid");
+    let attach_params = json!({
+        "threadId": thread_id,
+        "serverName": "leased_mcp",
+        "serverConfig": {
+            "command": stdio_server_bin()?,
+            "required": true,
+            "startup_timeout_sec": 30,
+            "env": {
+                "MCP_TEST_INITIALIZE_BARRIER_FILE": barrier,
+                "MCP_TEST_PID_FILE": pid_file,
+            },
+        },
+        "developerInstructions": "Use this temporary MCP lease.",
+    });
     let attach = app
-        .send_raw_request(
-            "thread/extensionAttach",
-            Some(json!({
-                "threadId": thread_id,
-                "serverName": "leased_mcp",
-                "serverConfig": {
-                    "command": stdio_server_bin()?,
-                    "required": true,
-                    "startup_timeout_sec": 30,
-                    "env": {
-                        "MCP_TEST_INITIALIZE_BARRIER_FILE": barrier,
-                        "MCP_TEST_PID_FILE": pid_file,
-                    },
-                },
-                "developerInstructions": "Use this temporary MCP lease.",
-            })),
-        )
+        .send_raw_request("thread/extensionAttach", Some(attach_params.clone()))
         .await?;
     timeout(Duration::from_secs(10), async {
         while !pid_file.exists() {
@@ -202,6 +200,9 @@ async fn unsubscribe_revokes_pending_extension_attach() -> Result<()> {
         }
     })
     .await?;
+    let queued_attach = app
+        .send_raw_request("thread/extensionAttach", Some(attach_params))
+        .await?;
     let unsubscribe = app
         .send_raw_request(
             "thread/unsubscribe",
@@ -221,6 +222,14 @@ async fn unsubscribe_revokes_pending_extension_attach() -> Result<()> {
             .error
             .message
             .contains("extension MCP lease revoked")
+    );
+    let queued_attach_error = app
+        .read_stream_until_error_message(RequestId::Integer(queued_attach))
+        .await?;
+    assert_eq!(queued_attach_error.error.code, -32600);
+    assert_eq!(
+        queued_attach_error.error.message,
+        "extension lease owner disconnected"
     );
     let _: ThreadUnsubscribeResponse = app.read_response(unsubscribe).await?;
     Ok(())

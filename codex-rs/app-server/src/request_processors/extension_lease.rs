@@ -1,6 +1,7 @@
 //! Connection-owned, thread-scoped MCP overlay RPCs.
 
 use super::*;
+use crate::subscription_lifetimes::SubscriptionLifetimes;
 use codex_app_server_protocol::ThreadExtensionAttachParams;
 use codex_app_server_protocol::ThreadExtensionAttachResponse;
 use codex_app_server_protocol::ThreadExtensionDetachParams;
@@ -62,6 +63,8 @@ impl ThreadRequestProcessor {
         owner: ConnectionId,
         params: ThreadExtensionAttachParams,
     ) -> Result<ThreadExtensionAttachResponse, JSONRPCErrorError> {
+        let subscription_lifetimes: Arc<SubscriptionLifetimes> =
+            Arc::clone(&self.thread_state_manager.subscription_lifetimes);
         let operation = async {
             let ThreadExtensionAttachParams {
                 thread_id,
@@ -104,6 +107,9 @@ impl ThreadRequestProcessor {
                 .map_err(|_| invalid_request(format!("thread not loaded: {thread_id}")))?;
             let (lease_id, cancellation) = {
                 let mut leases = self.extension_leases.lock().await;
+                if !subscription_lifetimes.contains(owner, thread_id) {
+                    return Err(invalid_request("extension lease owner disconnected"));
+                }
                 if leases
                     .get(&thread_id)
                     .is_some_and(|lease| lease.cancellation.is_cancelled())
@@ -239,6 +245,9 @@ impl ThreadRequestProcessor {
         let Ok(thread_id) = ThreadId::from_string(thread_id) else {
             return;
         };
+        self.thread_state_manager
+            .subscription_lifetimes
+            .remove(owner, thread_id);
         let cancellation = {
             let mut leases = self.extension_leases.lock().await;
             if leases

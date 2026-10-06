@@ -875,10 +875,11 @@ impl MessageProcessor {
         connection_id: ConnectionId,
         session_state: &ConnectionSessionState,
     ) {
+        session_state.rpc_gate.close().await;
+        self.thread_processor.connection_closed(connection_id).await;
         self.thread_processor
             .revoke_extension_connection(connection_id)
             .await;
-        session_state.rpc_gate.close().await;
         self.account_processor
             .gateway_connection_closed(connection_id);
         self.request_serialization_queues.discard_closed().await;
@@ -907,7 +908,6 @@ impl MessageProcessor {
         self.process_exec_processor
             .connection_closed(connection_id)
             .await;
-        self.thread_processor.connection_closed(connection_id).await;
     }
 
     pub(crate) fn subscribe_running_assistant_turn_count(&self) -> watch::Receiver<usize> {

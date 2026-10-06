@@ -140,6 +140,7 @@ mod request_serialization;
 mod server_request_error;
 mod shutdown;
 mod skills_watcher;
+mod subscription_lifetimes;
 mod thread_state;
 mod thread_status;
 mod thread_tools;

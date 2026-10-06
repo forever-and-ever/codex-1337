@@ -186,11 +186,14 @@ impl Session {
                                 // measurement needs its own persisted identity for idempotent replay.
                                 id: format!("tool-output-tokens:{}", output.id),
                                 call_id: output.call_id,
-                                tokens: output.countable.then(|| {
-                                    codex_utils_output_truncation::count_o200k_text_tokens(
-                                        &output.body,
-                                    )
-                                }).flatten(),
+                                tokens: output
+                                    .countable
+                                    .then(|| {
+                                        codex_utils_output_truncation::count_o200k_text_tokens(
+                                            &output.body,
+                                        )
+                                    })
+                                    .flatten(),
                             },
                             output.owner,
                         )

@@ -1,5 +1,6 @@
 use crate::outgoing_message::ConnectionId;
 use crate::outgoing_message::ConnectionRequestId;
+use crate::subscription_lifetimes::SubscriptionLifetimes;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ThreadGoal;
 use codex_app_server_protocol::ThreadHistoryBuilder;
@@ -367,6 +368,7 @@ pub(crate) struct ConnectionCapabilities {
 #[derive(Clone, Default)]
 pub(crate) struct ThreadStateManager {
     state: Arc<Mutex<ThreadStateManagerInner>>,
+    pub(crate) subscription_lifetimes: Arc<SubscriptionLifetimes>,
     // Extension event sinks are synchronous, so they need an await-free way to
     // enqueue work on the active per-thread listener.
     listener_commands:
@@ -493,6 +495,7 @@ impl ThreadStateManager {
     pub(crate) async fn remove_thread_state(&self, thread_id: ThreadId) {
         let thread_state = {
             let mut state = self.state.lock().await;
+            self.subscription_lifetimes.remove_thread(thread_id);
             let thread_state = state
                 .threads
                 .remove(&thread_id)
@@ -571,6 +574,7 @@ impl ThreadStateManager {
                 thread_entry.connection_ids.remove(&connection_id);
                 thread_entry.update_has_connections();
             }
+            self.subscription_lifetimes.remove(connection_id, thread_id);
         };
 
         true
@@ -603,6 +607,7 @@ impl ThreadStateManager {
                 .insert(thread_id);
             let thread_entry = state.threads.entry(thread_id).or_default();
             thread_entry.connection_ids.insert(connection_id);
+            self.subscription_lifetimes.insert(connection_id, thread_id);
             thread_entry.update_has_connections();
             thread_entry.state.clone()
         };
@@ -631,6 +636,7 @@ impl ThreadStateManager {
             .insert(thread_id);
         let thread_entry = state.threads.entry(thread_id).or_default();
         thread_entry.connection_ids.insert(connection_id);
+        self.subscription_lifetimes.insert(connection_id, thread_id);
         thread_entry.update_has_connections();
         true
     }
@@ -639,6 +645,7 @@ impl ThreadStateManager {
         {
             let mut state = self.state.lock().await;
             state.live_connections.remove(&connection_id);
+            self.subscription_lifetimes.remove_connection(connection_id);
             let thread_ids = state
                 .thread_ids_by_connection
                 .remove(&connection_id)
