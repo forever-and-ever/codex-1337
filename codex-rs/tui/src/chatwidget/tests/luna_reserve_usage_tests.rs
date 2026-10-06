@@ -135,6 +135,23 @@ async fn luna_reserve_status_tracks_the_active_model() {
     assert!(
         normalize_snapshot_paths(render_bottom_popup(&chat, /*width*/ 80)).contains("Luna Reserve")
     );
+    let provider_id = codex_model_provider_info::CLAUDE_SUBSCRIPTION_PROVIDER_ID;
+    Arc::make_mut(&mut chat.model_catalog)
+        .providers
+        .push(codex_app_server_protocol::ModelProviderOption {
+            id: provider_id.to_owned(),
+            name: chat.config.model_providers[provider_id].name.clone(),
+        });
+    chat.open_model_popup_with_presets(chat.model_catalog.models.clone());
+    assert_chatwidget_snapshot!(
+        "reserve_model_picker_offers_provider_choices",
+        render_bottom_popup(&chat, /*width*/ 80)
+    );
+    chat.open_model_popup_with_presets(Vec::new());
+    assert!(
+        render_bottom_popup(&chat, /*width*/ 80)
+            .contains(&chat.config.model_providers[provider_id].name)
+    );
 }
 
 #[tokio::test]
