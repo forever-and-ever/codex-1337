@@ -7,6 +7,7 @@ use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::FunctionCallOutputPayload;
 use codex_protocol::models::ImageReference;
 use codex_protocol::models::NativeCompaction;
+use codex_protocol::models::NativeToolCall;
 use codex_protocol::models::ReasoningItemReasoningSummary;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::models::plaintext_agent_message_content;
@@ -26,6 +27,13 @@ pub(super) struct Message {
 pub(super) struct History {
     pub system: Vec<Value>,
     pub messages: Vec<Message>,
+}
+
+#[derive(PartialEq)]
+enum ResultKind {
+    Function,
+    Custom,
+    Rejected,
 }
 
 pub(super) fn invalid(message: impl Into<String>) -> ApiError {
@@ -155,7 +163,7 @@ pub(super) fn encode_history(
                 if !calls.insert(call_id.as_str()) {
                     return Err(invalid("duplicate Anthropic tool call ID"));
                 }
-                pending.insert(call_id.as_str(), identity);
+                pending.insert(call_id.as_str(), ResultKind::Function);
                 (
                     "assistant",
                     vec![
@@ -178,12 +186,33 @@ pub(super) fn encode_history(
                 if !calls.insert(call_id.as_str()) {
                     return Err(invalid("duplicate Anthropic tool call ID"));
                 }
-                pending.insert(call_id.as_str(), identity);
+                pending.insert(call_id.as_str(), ResultKind::Custom);
                 (
                     "assistant",
                     vec![
                         json!({"type":"tool_use", "id":call_id, "name":alias, "input":{"input":input}}),
                     ],
+                )
+            }
+            ResponseItem::RejectedToolCall {
+                call:
+                    NativeToolCall::Anthropic {
+                        call_id,
+                        name,
+                        input,
+                    },
+                ..
+            } => {
+                if call_id.is_empty() || name.is_empty() || !input.is_object() {
+                    return Err(invalid("invalid rejected Anthropic tool call"));
+                }
+                if !calls.insert(call_id.as_str()) {
+                    return Err(invalid("duplicate Anthropic tool call ID"));
+                }
+                pending.insert(call_id.as_str(), ResultKind::Rejected);
+                (
+                    "assistant",
+                    vec![json!({"type":"tool_use", "id":call_id, "name":name, "input":input})],
                 )
             }
             ResponseItem::FunctionCallOutput {
@@ -222,21 +251,27 @@ pub(super) fn encode_history(
                 let call_id = call_id
                     .as_deref()
                     .ok_or_else(|| invalid("Anthropic tool result has no call ID"))?;
-                let identity = pending
+                let kind = pending
                     .remove(call_id)
                     .ok_or_else(|| invalid("unpaired Anthropic tool result"))?;
-                if !matches!(identity, AnthropicToolIdentity::Function { .. }) {
+                if kind == ResultKind::Custom {
                     return Err(invalid("function result paired with custom Anthropic tool"));
                 }
-                ("user", vec![encode_result(call_id, output, modalities)?])
+                let mut result = encode_result(call_id, output, modalities)?;
+                if kind == ResultKind::Rejected {
+                    // FunctionCallOutputPayload's success hint is not serialized.
+                    // The durable rejected call remains authoritative on resume.
+                    result["is_error"] = json!(true);
+                }
+                ("user", vec![result])
             }
             ResponseItem::CustomToolCallOutput {
                 call_id, output, ..
             } => {
-                let identity = pending
+                let kind = pending
                     .remove(call_id.as_str())
                     .ok_or_else(|| invalid("unpaired Anthropic custom tool result"))?;
-                if !matches!(identity, AnthropicToolIdentity::Custom { .. }) {
+                if kind != ResultKind::Custom {
                     return Err(invalid("custom result paired with function Anthropic tool"));
                 }
                 ("user", vec![encode_result(call_id, output, modalities)?])

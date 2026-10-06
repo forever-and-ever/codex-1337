@@ -2,6 +2,85 @@ use super::*;
 use pretty_assertions::assert_eq;
 
 #[test]
+fn undeclared_tool_preserves_stream_and_replays_as_a_paired_rejection() {
+    // A model can name a nested/retired tool. Keep later blocks and usage, never
+    // infer a dispatch address, and preserve the original wire name on resume.
+    let tools = [AnthropicTool {
+        name: "read".into(),
+        description: String::new(),
+        input_schema: json!({}),
+        identity: AnthropicToolIdentity::Function {
+            name: "read".into(),
+            namespace: None,
+        },
+    }];
+    let frames = [
+        json!({"type":"message_start","message":{"id":"msg","usage":{"input_tokens":5,"output_tokens":0}}}),
+        json!({"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"Check both.","signature":"signed/+=="}}),
+        json!({"type":"content_block_stop","index":0}),
+        json!({"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"known","name":"read","input":{"arguments":{"path":"one"}}}}),
+        json!({"type":"content_block_stop","index":1}),
+        json!({"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"unknown","name":"functions__exec","input":{}}}),
+        json!({"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"input\":\"text('never dispatch');\"}"}}),
+        json!({"type":"content_block_stop","index":2}),
+        json!({"type":"content_block_start","index":3,"content_block":{"type":"text","text":"Still receiving."}}),
+        json!({"type":"content_block_stop","index":3}),
+        json!({"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":7}}),
+        json!({"type":"message_stop"}),
+    ];
+    let mut decoder = Decoder::new(&tools);
+    let mut items = Vec::new();
+    let mut completed = None;
+    for frame in frames {
+        for event in decoder.decode(&frame.to_string()).unwrap() {
+            match event {
+                ResponseEvent::OutputItemDone(item) => items.push(item),
+                ResponseEvent::Completed {
+                    token_usage,
+                    end_turn,
+                    ..
+                } => completed = Some((token_usage.unwrap().total_tokens, end_turn)),
+                _ => {}
+            }
+        }
+    }
+    assert_eq!(completed, Some((12, Some(false))));
+    assert_eq!(
+        serde_json::to_value(&items[2]).unwrap(),
+        json!({"type":"rejected_tool_call","id":"msg_2","provider":"anthropic","call_id":"unknown","name":"functions__exec","input":{"input":"text('never dispatch');"}})
+    );
+    items.extend([
+        serde_json::from_value(json!({"type":"function_call_output","call_id":"known","output":"first result"})).unwrap(),
+        serde_json::from_value(json!({"type":"function_call_output","call_id":"unknown","output":"Tool is not declared."})).unwrap(),
+    ]);
+    // Rollout serialization drops transient success hints; rejection must retain
+    // its identity and is_error flag without a live declaration or decoder.
+    let restored: Vec<ResponseItem> = serde_json::from_value(json!(items)).unwrap();
+    let history = crate::anthropic::history::encode_history(
+        &restored,
+        "",
+        &[],
+        &[codex_protocol::openai_models::InputModality::Text],
+    )
+    .unwrap();
+    assert_eq!(
+        json!(history.messages),
+        json!([
+            {"role":"assistant","content":[
+                {"type":"thinking","thinking":"Check both.","signature":"signed/+=="},
+                {"type":"tool_use","id":"known","name":"read","input":{"arguments":{"path":"one"}}},
+                {"type":"tool_use","id":"unknown","name":"functions__exec","input":{"input":"text('never dispatch');"}},
+                {"type":"text","text":"Still receiving."}
+            ]},
+            {"role":"user","content":[
+                {"type":"tool_result","tool_use_id":"known","content":"first result","is_error":false},
+                {"type":"tool_result","tool_use_id":"unknown","content":"Tool is not declared.","is_error":true}
+            ]}
+        ])
+    );
+}
+
+#[test]
 fn optional_thinking_breakdown_does_not_corrupt_completion_accounting() {
     // Missing/invalid observability must neither become a fabricated zero nor
     // make a successful response unusable. Iterations do not define this field.

@@ -2806,6 +2806,7 @@ async fn try_run_sampling_request(
                     ResponseItem::AdditionalTools { .. }
                     | ResponseItem::LocalShellCall { .. }
                     | ResponseItem::FunctionCall { .. }
+                    | ResponseItem::RejectedToolCall { .. }
                     | ResponseItem::ToolSearchCall { .. }
                     | ResponseItem::FunctionCallOutput { .. }
                     | ResponseItem::CustomToolCall { .. }

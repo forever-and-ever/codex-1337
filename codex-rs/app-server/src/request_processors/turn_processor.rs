@@ -86,6 +86,7 @@ pub(super) fn validate_response_item_image_urls(
         | ResponseItem::AgentMessage { .. }
         | ResponseItem::LocalShellCall { .. }
         | ResponseItem::FunctionCall { .. }
+        | ResponseItem::RejectedToolCall { .. }
         | ResponseItem::ToolSearchCall { .. }
         | ResponseItem::CustomToolCall { .. }
         | ResponseItem::ToolSearchOutput { .. }

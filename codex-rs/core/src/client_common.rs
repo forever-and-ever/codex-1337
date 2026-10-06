@@ -94,6 +94,7 @@ fn normalize_image_details(items: &mut [ResponseItem], model_info: &ModelInfo) {
             | ResponseItem::AgentMessage { .. }
             | ResponseItem::LocalShellCall { .. }
             | ResponseItem::FunctionCall { .. }
+            | ResponseItem::RejectedToolCall { .. }
             | ResponseItem::ToolSearchCall { .. }
             | ResponseItem::CustomToolCall { .. }
             | ResponseItem::ToolSearchOutput { .. }

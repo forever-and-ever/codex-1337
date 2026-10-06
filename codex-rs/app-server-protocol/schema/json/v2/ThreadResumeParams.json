@@ -1203,6 +1203,55 @@
           "type": "object"
         },
         {
+          "description": "An undeclared native invocation: answer with an error, never dispatch it.",
+          "oneOf": [
+            {
+              "properties": {
+                "call_id": {
+                  "type": "string"
+                },
+                "input": true,
+                "name": {
+                  "type": "string"
+                },
+                "provider": {
+                  "enum": [
+                    "anthropic"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "call_id",
+                "input",
+                "name",
+                "provider"
+              ],
+              "type": "object"
+            }
+          ],
+          "properties": {
+            "id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "enum": [
+                "rejected_tool_call"
+              ],
+              "title": "RejectedToolCallResponseItemType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "RejectedToolCallResponseItem",
+          "type": "object"
+        },
+        {
           "description": "Provider-native signed state, persisted and replayed without conversion.",
           "oneOf": [
             {

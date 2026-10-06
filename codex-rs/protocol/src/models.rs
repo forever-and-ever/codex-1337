@@ -36,6 +36,7 @@ mod configuration_update;
 mod executed_tool_calls;
 mod item_metadata;
 mod native_compaction;
+mod native_tool_call;
 
 pub use crate::local_media::MAX_PROMPT_AUDIO_INPUT_BYTES;
 pub use crate::local_media::snapshot_local_user_input;
@@ -56,6 +57,7 @@ pub use executed_tool_calls::executed_tool_call_metadata_bytes;
 pub use item_metadata::ContentItemKind;
 pub use native_compaction::AnthropicSignedCompaction;
 pub use native_compaction::NativeCompaction;
+pub use native_tool_call::NativeToolCall;
 
 /// Controls the per-command sandbox override requested by a shell-like tool call.
 #[derive(
@@ -1237,6 +1239,14 @@ pub enum ResponseItem {
         #[ts(optional)]
         internal_chat_message_metadata_passthrough: Option<InternalChatMessageMetadataPassthrough>,
     },
+    /// An undeclared native invocation: answer with an error, never dispatch it.
+    RejectedToolCall {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        id: Option<ResponseItemId>,
+        #[serde(flatten)]
+        call: NativeToolCall,
+    },
     /// Provider-native signed state, persisted and replayed without conversion.
     NativeCompaction {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1290,6 +1300,7 @@ impl ResponseItem {
             | Self::ImageGenerationCall { id, .. }
             | Self::Compaction { id, .. }
             | Self::NativeCompaction { id, .. }
+            | Self::RejectedToolCall { id, .. }
             | Self::ContextCompaction { id, .. } => id.as_ref(),
             Self::ConfigurationUpdate { .. } | Self::CompactionTrigger { .. } | Self::Other => None,
         }
@@ -1313,6 +1324,7 @@ impl ResponseItem {
             | Self::ImageGenerationCall { id, .. }
             | Self::Compaction { id, .. }
             | Self::NativeCompaction { id, .. }
+            | Self::RejectedToolCall { id, .. }
             | Self::ContextCompaction { id, .. } => *id = new_id,
             Self::ConfigurationUpdate { .. } | Self::CompactionTrigger { .. } | Self::Other => {}
         }
@@ -1326,7 +1338,7 @@ impl ResponseItem {
             Self::AgentMessage { .. } => Some("amsg"),
             Self::Reasoning { .. } => Some("rs"),
             Self::LocalShellCall { .. } => Some("lsh"),
-            Self::FunctionCall { .. } => Some("fc"),
+            Self::FunctionCall { .. } | Self::RejectedToolCall { .. } => Some("fc"),
             Self::ToolSearchCall { .. } => Some("tsc"),
             Self::FunctionCallOutput { .. } => Some("fco"),
             Self::CustomToolCall { .. } => Some("ctc"),
@@ -1474,6 +1486,7 @@ impl ResponseItem {
             } => metadata.as_ref(),
             Self::ConfigurationUpdate { .. }
             | Self::NativeCompaction { .. }
+            | Self::RejectedToolCall { .. }
             | Self::CompactionTrigger { .. }
             | Self::AdditionalTools { .. }
             | Self::Other => None,
@@ -1542,6 +1555,7 @@ impl ResponseItem {
             } => Some(metadata),
             Self::ConfigurationUpdate { .. }
             | Self::NativeCompaction { .. }
+            | Self::RejectedToolCall { .. }
             | Self::CompactionTrigger { .. }
             | Self::AdditionalTools { .. }
             | Self::Other => None,

@@ -4166,6 +4166,18 @@ class CompactionResponseItem(BaseModel):
     type: Annotated[Literal["compaction"], Field(title="CompactionResponseItemType")]
 
 
+class RejectedToolCallResponseItem(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: str | None = None
+    type: Annotated[Literal["rejected_tool_call"], Field(title="RejectedToolCallResponseItemType")]
+    call_id: str
+    input: Any
+    name: str
+    provider: Literal["anthropic"]
+
+
 class NativeCompactionResponseItem(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -11810,6 +11822,7 @@ class ResponseItem(
         | WebSearchCallResponseItem
         | ImageGenerationCallResponseItem
         | CompactionResponseItem
+        | RejectedToolCallResponseItem
         | NativeCompactionResponseItem
         | ConfigurationUpdateResponseItem
         | CompactionTriggerResponseItem
@@ -11834,6 +11847,7 @@ class ResponseItem(
         | WebSearchCallResponseItem
         | ImageGenerationCallResponseItem
         | CompactionResponseItem
+        | RejectedToolCallResponseItem
         | NativeCompactionResponseItem
         | ConfigurationUpdateResponseItem
         | CompactionTriggerResponseItem

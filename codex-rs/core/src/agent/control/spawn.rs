@@ -99,6 +99,7 @@ fn keep_forked_rollout_item(item: &RolloutItem, preserve_context_baselines: bool
             | ResponseItem::Reasoning { .. }
             | ResponseItem::LocalShellCall { .. }
             | ResponseItem::FunctionCall { .. }
+            | ResponseItem::RejectedToolCall { .. }
             | ResponseItem::ToolSearchCall { .. }
             | ResponseItem::FunctionCallOutput {
                 call_id: Some(_), ..

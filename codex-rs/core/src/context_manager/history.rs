@@ -1014,6 +1014,7 @@ fn is_api_message(message: &ResponseItem, metadata: Option<&CodexHarnessMetadata
         | ResponseItem::AgentMessage { .. }
         | ResponseItem::FunctionCallOutput { .. }
         | ResponseItem::FunctionCall { .. }
+        | ResponseItem::RejectedToolCall { .. }
         | ResponseItem::ToolSearchCall { .. }
         | ResponseItem::ToolSearchOutput { .. }
         | ResponseItem::CustomToolCall { .. }
@@ -1122,6 +1123,7 @@ fn estimate_response_item_model_visible_bytes(item: &ResponseItem) -> i64 {
             compaction: codex_protocol::models::NativeCompaction::Anthropic(summary),
             ..
         } => text_bytes(summary.content()),
+        ResponseItem::RejectedToolCall { call, .. } => json_content_bytes(call),
         ResponseItem::FunctionCall {
             name,
             namespace,
@@ -1328,6 +1330,7 @@ fn is_model_generated_item(item: &ResponseItem) -> bool {
         ResponseItem::Message { role, .. } => role == "assistant",
         ResponseItem::Reasoning { .. }
         | ResponseItem::FunctionCall { .. }
+        | ResponseItem::RejectedToolCall { .. }
         | ResponseItem::ToolSearchCall { .. }
         | ResponseItem::WebSearchCall { .. }
         | ResponseItem::ImageGenerationCall { .. }

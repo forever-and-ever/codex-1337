@@ -423,6 +423,7 @@ fn response_item_records_turn_ttft(item: &ResponseItem) -> bool {
         ResponseItem::AgentMessage { .. } => false,
         ResponseItem::LocalShellCall { .. }
         | ResponseItem::FunctionCall { .. }
+        | ResponseItem::RejectedToolCall { .. }
         | ResponseItem::CustomToolCall { .. }
         | ResponseItem::ToolSearchCall { .. }
         | ResponseItem::WebSearchCall { .. }

@@ -118,19 +118,21 @@ fn normalize_model_item(
                 .and_then(Value::as_str)
                 .map(ToString::to_string),
         }),
-        "tool_search_call" | "web_search_call" | "image_generation_call" | "local_shell_call" => {
-            Ok(NormalizedConversationItem {
-                role: ConversationRole::Assistant,
-                channel: Some(ConversationChannel::Commentary),
-                kind: ConversationItemKind::FunctionCall,
-                agent_message: None,
-                body: json_body(item, raw_payload),
-                call_id: item
-                    .get("call_id")
-                    .and_then(Value::as_str)
-                    .map(ToString::to_string),
-            })
-        }
+        "tool_search_call"
+        | "web_search_call"
+        | "image_generation_call"
+        | "local_shell_call"
+        | "rejected_tool_call" => Ok(NormalizedConversationItem {
+            role: ConversationRole::Assistant,
+            channel: Some(ConversationChannel::Commentary),
+            kind: ConversationItemKind::FunctionCall,
+            agent_message: None,
+            body: json_body(item, raw_payload),
+            call_id: item
+                .get("call_id")
+                .and_then(Value::as_str)
+                .map(ToString::to_string),
+        }),
         "tool_search_output" | "mcp_tool_call_output" => Ok(NormalizedConversationItem {
             role: ConversationRole::Tool,
             channel: Some(ConversationChannel::Commentary),

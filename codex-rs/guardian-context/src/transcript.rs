@@ -225,6 +225,24 @@ pub fn collect_transcript(
                     arguments.clone(),
                 )
             }
+            ResponseItem::RejectedToolCall {
+                call:
+                    codex_protocol::models::NativeToolCall::Anthropic {
+                        call_id,
+                        name,
+                        input,
+                    },
+                ..
+            } => {
+                tool_names_by_call_id.insert(call_id.as_str(), (name.as_str(), None));
+                if !config.options.include_tool_calls {
+                    continue;
+                }
+                (
+                    ConversationTranscriptEntryKind::ToolCall(format!("rejected tool {name} call")),
+                    input.to_string(),
+                )
+            }
             ResponseItem::FunctionCallOutput {
                 call_id: Some(call_id),
                 output,

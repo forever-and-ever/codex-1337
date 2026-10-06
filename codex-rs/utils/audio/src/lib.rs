@@ -75,6 +75,7 @@ pub fn prepare_response_items(items: &mut [ResponseItem]) {
             | ResponseItem::AgentMessage { .. }
             | ResponseItem::LocalShellCall { .. }
             | ResponseItem::FunctionCall { .. }
+            | ResponseItem::RejectedToolCall { .. }
             | ResponseItem::ToolSearchCall { .. }
             | ResponseItem::CustomToolCall { .. }
             | ResponseItem::ToolSearchOutput { .. }

@@ -328,6 +328,74 @@ async fn handle_output_item_done_returns_contributed_last_agent_message() {
 }
 
 #[tokio::test]
+async fn rejected_native_call_is_not_dispatched_and_keeps_its_result_on_resume() {
+    // The undeclared wire name can coincide with an installed local tool. It
+    // must remain a rejection, not fall through to registry dispatch or lose
+    // its error to orphan-output normalization after a restart.
+    let (session, turn_context, _events) = make_session_and_context_with_auth_and_config_and_rx(
+        CodexAuth::from_api_key("Test API Key"),
+        Vec::new(),
+        |config| config.update_plan_enabled = true,
+    )
+    .await;
+    let mut ctx = output_context(Arc::clone(&session), turn_context);
+    let rejected: ResponseItem = serde_json::from_value(json!({
+        "type":"rejected_tool_call", "provider":"anthropic", "call_id":"refused-1",
+        "name":"update_plan", "input":{"arguments":{"plan":[]}}
+    }))
+    .unwrap();
+    let output = handle_output_item_done(
+        &mut ctx,
+        rejected.clone(),
+        /*previously_active_item*/ None,
+    )
+    .await
+    .unwrap();
+    assert!(output.needs_follow_up);
+    assert!(output.tool_future.is_none());
+
+    let history = session.clone_history().await;
+    let recorded: Vec<_> = history.raw_items().cloned().collect();
+    let restored: Vec<ResponseItem> = serde_json::from_value(json!(recorded)).unwrap();
+    let mut recovered = crate::context_manager::ContextManager::new();
+    recovered.replace(restored);
+    let normalized = recovered
+        .clone()
+        .for_prompt(&[codex_protocol::openai_models::InputModality::Text]);
+    let mut actual: Vec<_> = normalized.iter().map(|item| json!(item)).collect();
+    for item in &mut actual {
+        let item = item.as_object_mut().unwrap();
+        item.remove("internal_chat_message_metadata_passthrough");
+        item.remove("id");
+    }
+    assert_eq!(
+        actual,
+        vec![
+            json!(rejected),
+            json!({
+                "type":"function_call_output", "call_id":"refused-1",
+                "output":"Tool \"update_plan\" is not in the current tool list. Use one of the declared tools."
+            })
+        ]
+    );
+    recovered.remove_first_item();
+    assert_eq!(recovered.raw_items().count(), 0);
+
+    // A subsequent valid declaration still dispatches: this is per-call
+    // rejection, not a frozen turn or a blanket tool ban.
+    let valid = serde_json::from_value(json!({
+        "type":"function_call", "call_id":"accepted-2", "name":"update_plan",
+        "arguments":"{\"plan\":[]}"
+    }))
+    .unwrap();
+    let accepted = handle_output_item_done(&mut ctx, valid, /*previously_active_item*/ None)
+        .await
+        .unwrap();
+    assert!(accepted.needs_follow_up);
+    assert!(accepted.tool_future.is_some());
+}
+
+#[tokio::test]
 async fn direct_results_keep_their_own_records_when_call_ids_repeat() {
     let (session, turn_context, _events) = make_session_and_context_with_auth_and_config_and_rx(
         CodexAuth::from_api_key("Test API Key"),

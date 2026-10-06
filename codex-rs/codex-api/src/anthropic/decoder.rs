@@ -9,6 +9,7 @@ use codex_protocol::ResponseUsageMetadata;
 use codex_protocol::models::AnthropicSignedCompaction;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::NativeCompaction;
+use codex_protocol::models::NativeToolCall;
 use codex_protocol::models::ReasoningItemReasoningSummary;
 use codex_protocol::models::ResponseItem;
 use serde::Deserialize;
@@ -219,12 +220,25 @@ impl<'a> Decoder<'a> {
                     item_id: format!("{id}_{index}"),
                     json: String::new(),
                 };
-                if let Block::ToolUse { id, .. } = &open.block
-                    && (id.len() > 512 || !self.call_ids.insert(id.clone()))
-                {
-                    return Err(ApiError::NativeStream(
-                        "invalid or repeated Anthropic tool call id".into(),
-                    ));
+                if let Block::ToolUse { id, name, .. } = &open.block {
+                    if id.is_empty()
+                        || id.len() > 512
+                        || name.is_empty()
+                        || name.len() > 512
+                        || !self.call_ids.insert(id.clone())
+                    {
+                        return Err(ApiError::NativeStream(
+                            "invalid or repeated Anthropic tool call identity".into(),
+                        ));
+                    }
+                    if !self.tools.iter().any(|tool| tool.name == *name) {
+                        tracing::warn!(
+                            tool_alias = ?name,
+                            call_id = %id,
+                            declared_tool_count = self.tools.len(),
+                            "Rejecting undeclared Anthropic tool without dispatch"
+                        );
+                    }
                 }
                 if !matches!(open.block, Block::Compaction { .. }) {
                     events.push(ResponseEvent::OutputItemAdded(self.item(&open)?));
@@ -406,18 +420,23 @@ impl<'a> Decoder<'a> {
                 name: alias,
                 input,
             } => {
-                let tool = self
-                    .tools
-                    .iter()
-                    .find(|tool| tool.name == *alias)
-                    .ok_or_else(|| {
-                        ApiError::NativeStream("Anthropic returned undeclared tool alias".into())
-                    })?;
                 if !input.is_object() || call_id.is_empty() {
                     return Err(ApiError::NativeStream(
                         "invalid Anthropic tool block".into(),
                     ));
                 }
+                let Some(tool) = self.tools.iter().find(|tool| tool.name == *alias) else {
+                    // Preserve the received name and body, but not as an executable
+                    // function: the local registry may contain unadvertised tools.
+                    return Ok(ResponseItem::RejectedToolCall {
+                        id,
+                        call: NativeToolCall::Anthropic {
+                            call_id: call_id.clone(),
+                            name: alias.clone(),
+                            input: input.clone(),
+                        },
+                    });
+                };
                 match &tool.identity {
                     AnthropicToolIdentity::Function { name, namespace } => {
                         ResponseItem::FunctionCall {

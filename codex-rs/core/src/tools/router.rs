@@ -275,6 +275,12 @@ impl ToolRouter {
     #[instrument(level = "trace", skip_all, err)]
     pub fn build_tool_call(item: ResponseItem) -> Result<Option<ToolCall>, FunctionCallError> {
         match item {
+            ResponseItem::RejectedToolCall { call, .. } => {
+                Err(FunctionCallError::RespondToModel(format!(
+                    "Tool {:?} is not in the current tool list. Use one of the declared tools.",
+                    call.name()
+                )))
+            }
             ResponseItem::FunctionCall {
                 name,
                 namespace,

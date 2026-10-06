@@ -296,6 +296,7 @@ fn response_item_type(item: &ResponseItemEnvelope) -> &'static str {
         ResponseItem::Reasoning { .. } => "response.reasoning",
         ResponseItem::LocalShellCall { .. } => "response.local_shell_call",
         ResponseItem::FunctionCall { .. } => "response.function_call",
+        ResponseItem::RejectedToolCall { .. } => "response.rejected_tool_call",
         ResponseItem::ToolSearchCall { .. } => "response.tool_search_call",
         ResponseItem::FunctionCallOutput { .. } => "response.function_call_output",
         ResponseItem::ToolSearchOutput { .. } => "response.tool_search_output",

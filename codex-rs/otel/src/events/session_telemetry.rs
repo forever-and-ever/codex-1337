@@ -1359,6 +1359,7 @@ impl SessionTelemetry {
             ResponseItem::Reasoning { .. } => "reasoning".into(),
             ResponseItem::LocalShellCall { .. } => "local_shell_call".into(),
             ResponseItem::FunctionCall { .. } => "function_call".into(),
+            ResponseItem::RejectedToolCall { .. } => "rejected_tool_call".into(),
             ResponseItem::ToolSearchCall { .. } => "tool_search_call".into(),
             ResponseItem::FunctionCallOutput { .. } => "function_call_output".into(),
             ResponseItem::ToolSearchOutput { .. } => "tool_search_output".into(),

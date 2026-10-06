@@ -526,6 +526,7 @@ fn recent_images(
             | ResponseItem::AgentMessage { .. }
             | ResponseItem::LocalShellCall { .. }
             | ResponseItem::FunctionCall { .. }
+            | ResponseItem::RejectedToolCall { .. }
             | ResponseItem::ToolSearchCall { .. }
             | ResponseItem::CustomToolCall { .. }
             | ResponseItem::ToolSearchOutput { .. }

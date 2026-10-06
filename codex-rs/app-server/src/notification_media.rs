@@ -49,6 +49,7 @@ pub(crate) fn without_notification_media(notification: ServerNotification) -> Se
                 | ResponseItem::Reasoning { .. }
                 | ResponseItem::LocalShellCall { .. }
                 | ResponseItem::FunctionCall { .. }
+                | ResponseItem::RejectedToolCall { .. }
                 | ResponseItem::ToolSearchCall { .. }
                 | ResponseItem::CustomToolCall { .. }
                 | ResponseItem::ToolSearchOutput { .. }

@@ -402,11 +402,42 @@ pub(crate) async fn handle_output_item_done(
                 .services
                 .executed_tool_calls
                 .observe_non_dispatched_call(&item);
-            let response = ResponseInputItem::FunctionCallOutput {
-                call_id: String::new(),
-                output: FunctionCallOutputPayload {
-                    body: FunctionCallOutputBody::Text(message),
-                    ..Default::default()
+            // A rejected invocation still needs its own paired result. An empty ID
+            // corrupts native replay and can attach the error to the wrong call.
+            let (call_id, custom_name) = match &item {
+                ResponseItem::RejectedToolCall { call, .. } => (call.call_id(), None),
+                ResponseItem::FunctionCall { call_id, .. }
+                | ResponseItem::ToolSearchCall {
+                    call_id: Some(call_id),
+                    ..
+                } => (call_id.as_str(), None),
+                ResponseItem::CustomToolCall { call_id, name, .. } => {
+                    (call_id.as_str(), Some(name))
+                }
+                _ => {
+                    return Err(CodexErr::Fatal(format!(
+                        "Unpaired tool rejection: {message}"
+                    )));
+                }
+            };
+            if call_id.is_empty() {
+                return Err(CodexErr::Fatal(format!(
+                    "Tool rejection has no call ID: {message}"
+                )));
+            }
+            let payload = FunctionCallOutputPayload {
+                body: FunctionCallOutputBody::Text(message),
+                success: Some(false),
+            };
+            let response = match custom_name {
+                Some(name) => ResponseInputItem::CustomToolCallOutput {
+                    call_id: call_id.to_owned(),
+                    name: Some(name.clone()),
+                    output: payload,
+                },
+                None => ResponseInputItem::FunctionCallOutput {
+                    call_id: call_id.to_owned(),
+                    output: payload,
                 },
             };
             record_completed_response_item(ctx.sess.as_ref(), ctx.step_context.as_ref(), &item)
@@ -445,6 +476,7 @@ pub(crate) async fn handle_non_tool_response_item(
         ResponseItem::Reasoning { .. } => "reasoning",
         ResponseItem::LocalShellCall { .. } => "local_shell_call",
         ResponseItem::FunctionCall { .. } => "function_call",
+        ResponseItem::RejectedToolCall { .. } => "rejected_tool_call",
         ResponseItem::ToolSearchCall { .. } => "tool_search_call",
         ResponseItem::FunctionCallOutput { .. } => "function_call_output",
         ResponseItem::CustomToolCall { .. } => "custom_tool_call",

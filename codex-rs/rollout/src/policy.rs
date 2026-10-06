@@ -48,6 +48,7 @@ pub fn should_persist_response_item(item: &ResponseItem) -> bool {
         | ResponseItem::Reasoning { .. }
         | ResponseItem::LocalShellCall { .. }
         | ResponseItem::FunctionCall { .. }
+        | ResponseItem::RejectedToolCall { .. }
         | ResponseItem::ToolSearchCall { .. }
         | ResponseItem::FunctionCallOutput { .. }
         | ResponseItem::ToolSearchOutput { .. }
@@ -73,6 +74,7 @@ pub fn should_persist_response_item_for_memories(item: &ResponseItem) -> bool {
         ResponseItem::AgentMessage { .. }
         | ResponseItem::LocalShellCall { .. }
         | ResponseItem::FunctionCall { .. }
+        | ResponseItem::RejectedToolCall { .. }
         | ResponseItem::ToolSearchCall { .. }
         | ResponseItem::FunctionCallOutput { .. }
         | ResponseItem::ToolSearchOutput { .. }

@@ -2327,13 +2327,15 @@ impl ModelClientSession {
         inference_trace: &InferenceTraceContext,
     ) -> Result<ResponseStream> {
         if !self.client.uses_claude_subscription()
-            && prompt
-                .input
-                .iter()
-                .any(|item| matches!(item, ResponseItem::NativeCompaction { .. }))
+            && prompt.input.iter().any(|item| {
+                matches!(
+                    item,
+                    ResponseItem::NativeCompaction { .. } | ResponseItem::RejectedToolCall { .. }
+                )
+            })
         {
             return Err(CodexErr::InvalidRequest(
-                "An Anthropic signed checkpoint cannot be sent to another provider".into(),
+                "Anthropic native history cannot be sent to another provider".into(),
             ));
         }
         if self.client.uses_claude_subscription()

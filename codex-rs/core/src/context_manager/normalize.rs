@@ -5,6 +5,7 @@ use codex_protocol::ResponseItemId;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::FunctionCallOutputPayload;
+use codex_protocol::models::NativeToolCall;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::InputModality;
 use std::collections::HashSet;
@@ -51,8 +52,10 @@ pub(crate) fn ensure_call_outputs_present(items: &mut Vec<ResponseItemEnvelope>)
     for (idx, envelope) in items.iter().enumerate() {
         match &envelope.item {
             ResponseItem::FunctionCall { id, call_id, .. }
-                if !function_output_ids.contains(call_id.as_str()) =>
-            {
+            | ResponseItem::RejectedToolCall {
+                id,
+                call: NativeToolCall::Anthropic { call_id, .. },
+            } if !function_output_ids.contains(call_id.as_str()) => {
                 info!("Function call output is missing for call id: {call_id}");
                 missing_outputs_to_insert.push((
                     idx,
@@ -157,6 +160,10 @@ pub(crate) fn remove_orphan_outputs(items: &mut Vec<ResponseItemEnvelope>) {
     for envelope in items.iter() {
         match &envelope.item {
             ResponseItem::FunctionCall { call_id, .. }
+            | ResponseItem::RejectedToolCall {
+                call: NativeToolCall::Anthropic { call_id, .. },
+                ..
+            }
             | ResponseItem::LocalShellCall {
                 call_id: Some(call_id),
                 ..
@@ -224,7 +231,11 @@ pub(crate) fn remove_orphan_outputs(items: &mut Vec<ResponseItemEnvelope>) {
 
 pub(crate) fn remove_corresponding_for(items: &mut Vec<ResponseItemEnvelope>, item: &ResponseItem) {
     match item {
-        ResponseItem::FunctionCall { call_id, .. } => {
+        ResponseItem::FunctionCall { call_id, .. }
+        | ResponseItem::RejectedToolCall {
+            call: NativeToolCall::Anthropic { call_id, .. },
+            ..
+        } => {
             remove_first_matching(items, |i| {
                 matches!(
                     i,
@@ -240,7 +251,10 @@ pub(crate) fn remove_corresponding_for(items: &mut Vec<ResponseItemEnvelope>, it
             ..
         } => {
             if let Some(pos) = items.iter().position(|envelope| {
-                matches!(&envelope.item, ResponseItem::FunctionCall { call_id: existing, .. } if existing == call_id)
+                matches!(&envelope.item,
+                    ResponseItem::FunctionCall { call_id: existing, .. }
+                    | ResponseItem::RejectedToolCall { call: NativeToolCall::Anthropic { call_id: existing, .. }, .. }
+                    if existing == call_id)
             }) {
                 items.remove(pos);
             } else if let Some(pos) = items.iter().position(|envelope| {
