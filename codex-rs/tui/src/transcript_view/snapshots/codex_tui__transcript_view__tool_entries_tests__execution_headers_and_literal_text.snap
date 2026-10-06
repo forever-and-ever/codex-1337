@@ -2,19 +2,19 @@
 source: tui/src/transcript_view/tool_entries_tests.rs
 expression: text
 ---
-      [-] • Waited [Raw] [Fmt]
-              {
-                "chunk_id": "sample",
-                "wall_time_seconds": 5.0,
-                "output": "",
-                "exit_code": 0,
-                "session_id": null
-              }
-          • Waited · finished
-      [-] • Returned
-              Script failed
-              Output:
+            [-] • Waited [Raw] [Fmt]
+                    {
+                      "chunk_id": "sample",
+                      "wall_time_seconds": 5.0,
+                      "output": "",
+                      "exit_code": 0,
+                      "session_id": null
+                    }
+                • Waited · finished
+            [-] • Returned
+                    Script failed
+                    Output:
 
-      [-] • Returned
-              Script completed
-              Output:
+            [-] • Returned
+                    Script completed
+                    Output:

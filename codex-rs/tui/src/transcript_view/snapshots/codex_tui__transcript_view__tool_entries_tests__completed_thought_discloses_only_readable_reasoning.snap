@@ -3,57 +3,57 @@ source: tui/src/transcript_view/tool_entries_tests.rs
 expression: "snapshots.join(\"\\n\")"
 ---
 counted expanded=false
-HH:MM [+] • Thought · Summary (~ 1,300 tokens)
+HH:MM  1300 [+] • Thought · Summary
 
 
 
 
 
 counted expanded=true
-HH:MM [-] • Thought · Summary (~ 1,300 tokens)
-            First block
+HH:MM  1300 [-] • Thought · Summary
+                  First block
 
-            Second block
+                  Second block
 
 
 unknown expanded=false
-HH:MM [+] • Thought · Summary
+HH:MM       [+] • Thought · Summary
 
 
 
 
 
 unknown expanded=true
-HH:MM [-] • Thought · Summary
-            Readable summary
+HH:MM       [-] • Thought · Summary
+                  Readable summary
 
 
 
 
 encrypted-only expanded=false
-HH:MM     • Thought (~ 1,300 tokens)
+HH:MM  1300     • Thought
 
 
 
 
 
 encrypted-only narrow
-HH:MM:SS     • Thought
+HH:MM  1300     •...
 opaque-unknown expanded=false
-HH:MM     • Thought
+HH:MM           • Thought
 
 
 
 
 
 opaque-unknown narrow
-HH:MM:SS     • Thought
+HH:MM           •...
 hidden expanded=false
-HH:MM     • Thought (~ 1,300 tokens)
+HH:MM  1300     • Thought
 
 
 
 
 
 hidden narrow
-HH:MM:SS     • Thought
+HH:MM  1300     •...

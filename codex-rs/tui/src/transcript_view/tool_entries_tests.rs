@@ -79,7 +79,7 @@ fn completed_thought_discloses_only_readable_reasoning() {
             let buffer = tests::render(&mut view, &cells, /*width*/ 20, /*height*/ 1);
             snapshots.push(format!(
                 "{label} narrow\n{}",
-                tests::text(&buffer).replace(&clock, "HH:MM:SS")
+                tests::text(&buffer).replace(&clock, "HH:MM")
             ));
         }
     }
@@ -317,7 +317,22 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
         assert_eq!(view.selected_text(&cells), Some(safe));
         view.end_selection(&cells);
         let buffer = tests::render(&mut view, &cells, /*width*/ 32, /*height*/ 12);
-        assert!(tests::text(&buffer).contains("escaped for display"));
+        assert!(
+            tests::text(&buffer)
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .contains("escaped for display")
+        );
+        // Client-only labels have no selectable source. Their wraps must still
+        // respect the gutter rather than putting notice text into metadata columns.
+        for row in 1..buffer.area.height {
+            assert!(
+                (0..crate::transcript_geometry::GUTTER_COLUMNS
+                    + crate::transcript_geometry::CHILD_INDENT)
+                    .all(|column| buffer[(column, row)].symbol() == " ")
+            );
+        }
         painted.push(format!("escaped capture\n{buffer:?}"));
     }
     insta::assert_snapshot!(painted.join("\n"));

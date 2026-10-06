@@ -291,10 +291,10 @@ pub(crate) fn tool_call_history_cell(
             CollabAgentToolCallStatus::Failed | CollabAgentToolCallStatus::Interrupted
         ) && !agents_states.is_empty()
         {
-            terminal_lines.extend(wait_complete_lines(
-                receiver_thread_ids,
-                agents_states,
-                &mut agent_metadata,
+            terminal_lines.extend(prefix_lines(
+                wait_complete_lines(receiver_thread_ids, agents_states, &mut agent_metadata),
+                "  └ ".dim(),
+                "    ".into(),
             ));
         } else if *status == CollabAgentToolCallStatus::Completed {
             let errors = agents_states
@@ -308,10 +308,10 @@ pub(crate) fn tool_call_history_cell(
                 .map(|(id, state)| (id.clone(), state.clone()))
                 .collect::<std::collections::HashMap<_, _>>();
             if !errors.is_empty() {
-                terminal_lines.extend(wait_complete_lines(
-                    receiver_thread_ids,
-                    &errors,
-                    &mut agent_metadata,
+                terminal_lines.extend(prefix_lines(
+                    wait_complete_lines(receiver_thread_ids, &errors, &mut agent_metadata),
+                    "• ".dim(),
+                    "• ".dim(),
                 ));
             }
         }

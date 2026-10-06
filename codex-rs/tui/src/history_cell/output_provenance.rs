@@ -39,6 +39,9 @@ pub(crate) fn client_notice(text: &str) -> HyperlinkLine {
     let mut line = HyperlinkLine::from(ratatui::text::Line::from(text.to_owned()));
     let mut source = crate::terminal_hyperlinks::LogicalLineSource::new(String::new());
     source.prefix_bytes = text.len();
+    source.continuation_indent = text[..text.len() - text.trim_start_matches(' ').len()]
+        .to_owned()
+        .into();
     line.source = Some(source);
     mark_lines(std::slice::from_mut(&mut line), OutputProvenance::Client);
     line

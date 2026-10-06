@@ -4,127 +4,142 @@ expression: "snapshots.join(\"\\n\\n\").replace(&clock, \"14:17\")"
 ---
 width=64
 
-          › Review the layout
+                › Review the layout
 
 
-14:17     • Activity Reviewing layout
+14:17           • Activity Reviewing layout
 
-            More text
+                  More text
 
-14:17 [+] • Explored (~ 128 tokens)
-              Read foo.rs (whole file)
-          • Called tools.inspect()
-          • Edited
-      [+]     foo.rs (+1, -0)
-      [+]     bar.rs (+1, -0)
+14:17   128 [+] • Explored
+                    Read foo.rs (whole file)
+                • Called tools.inspect()
+                • Edited
+            [+]     foo.rs (+1, -0)
+            [+]     bar.rs (+1, -0)
 
-14:17     • The layout keeps prose, code, and tools aligned.
+14:17           • The layout keeps prose, code, and tools
+                  aligned.
 
-              source_indent();
+                    source_indent();
 
 expanded width=64
 
-          › Review the layout
+                › Review the layout
 
 
-14:17     • Activity Reviewing layout
+14:17           • Activity Reviewing layout
 
-            More text
+                  More text
 
-14:17 [-]     $ poll foo
+14:17   128 [-]     $ poll foo
 
-          • Explored
-              $ cat foo.rs
+                • Explored
+                    $ cat foo.rs
 
-          • tools.inspect()
+                • tools.inspect()
 
-              combined result
-          • Edited
-      [+]     foo.rs (+1, -0)
-      [+]     bar.rs (+1, -0)
+                    combined result
+                • Edited
+            [+]     foo.rs (+1, -0)
+            [+]     bar.rs (+1, -0)
 
-14:17     • The layout keeps prose, code, and tools aligned.
+14:17           • The layout keeps prose, code, and tools
+                  aligned.
 
-              source_indent();
+                    source_indent();
 
 detailed width=64
 
-          › Review the layout
+                › Review the layout
 
 
-14:17     • Activity Reviewing layout
+14:17           • Activity Reviewing layout
 
-            More text
+                  More text
 
-14:17         $ poll foo
+14:17   128         $ poll foo
 
-          • Explored
-              $ cat foo.rs
+                • Explored
+                    $ cat foo.rs
 
-          • tools.inspect()
+                • tools.inspect()
 
-              combined result
-          • Edited
-              foo.rs (+1, -0)
-              1 +new line
-          • Edited
-              bar.rs (+1, -0)
-              1 +new line
+                    combined result
+                • Edited
+                    foo.rs (+1, -0)
+                    1 +new line
+                • Edited
+                    bar.rs (+1, -0)
+                    1 +new line
 
-14:17     • The layout keeps prose, code, and tools aligned.
+14:17           • The layout keeps prose, code, and tools
+                  aligned.
 
-              source_indent();
+                    source_indent();
 
 width=32
 
-          › Review the layout
+                › Review the
+                  layout
 
 
-14:17     • Activity Reviewing
-            layout
+14:17           • Activity
+                  Reviewing
+                  layout
 
-            More text
+                  More text
 
-14:17 [+] • Explored
-              Read foo.rs (wh...
-          • Called tools.insp...
-          • Edited
-      [+]     foo.rs (+1, -0)
-      [+]     bar.rs (+1, -0)
+14:17   128 [+] • Explored
+                    Read foo....
+                • Called tool...
+                • Edited
+            [+]     fo… (+1, -0)
+            [+]     ba… (+1, -0)
 
-14:17     • The layout keeps
-            prose, code, and
-            tools aligned.
+14:17           • The layout
+                  keeps prose,
+                  code, and
+                  tools aligned.
 
-              source_indent();
+
+                  source_indent(
+                  );
 
 detailed width=32
 
-          › Review the layout
+                › Review the
+                  layout
 
 
-14:17     • Activity Reviewing
-            layout
+14:17           • Activity
+                  Reviewing
+                  layout
 
-            More text
+                  More text
 
-14:17         $ poll foo
+14:17   128         $ poll foo
 
-          • Explored
-              $ cat foo.rs
+                • Explored
+                    $ cat foo.rs
 
-          • tools.inspect()
+                • tools.inspect(
+                )
 
-              combined result
-          • Edited
-              foo.rs (+1, -0)
-              1 +new line
-          • Edited
-              bar.rs (+1, -0)
-              1 +new line
+                    combined
+                    result
+                • Edited
+                    fo… (+1, -0)
+                    1 +new line
+                • Edited
+                    ba… (+1, -0)
+                    1 +new line
 
-14:17     • The layout keeps
-            prose, code, and
-            tools aligned.
+14:17           • The layout
+                  keeps prose,
+                  code, and
+                  tools aligned.
 
-              source_indent();
+
+                  source_indent(
+                  );

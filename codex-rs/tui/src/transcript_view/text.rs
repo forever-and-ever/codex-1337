@@ -573,26 +573,34 @@ fn layout_line(logical: &LogicalLine, text_start: usize, width: u16) -> Vec<Text
         && logical.origin.output_provenance == OutputProvenance::Client
         && !logical.initial_indent.spans.is_empty()
     {
-        return word_wrap_line_with_source(&logical.initial_indent, usize::from(content_width))
-            .into_iter()
-            .map(|wrapped| {
-                let mut line =
-                    HyperlinkLine::new(crate::render::line_utils::line_to_static(&wrapped.line));
-                let mut source = logical.origin.clone();
-                source.prefix_bytes = line.line.spans.iter().map(|span| span.content.len()).sum();
-                line.source = Some(source);
-                TextRow {
-                    line,
-                    source: text_start..text_start,
-                    line_end: None,
-                    content_width,
-                    first_column: 0,
-                    prefix_columns: 0,
-                    tabs: tabs::TabStops::default(),
-                    inline_decoration: None,
-                }
-            })
-            .collect();
+        let subsequent_indent = if logical.subsequent_indent.width() < usize::from(content_width) {
+            logical.subsequent_indent.clone()
+        } else {
+            Line::default()
+        };
+        return word_wrap_line_with_source(
+            &logical.initial_indent,
+            RtOptions::new(usize::from(content_width)).subsequent_indent(subsequent_indent),
+        )
+        .into_iter()
+        .map(|wrapped| {
+            let mut line =
+                HyperlinkLine::new(crate::render::line_utils::line_to_static(&wrapped.line));
+            let mut source = logical.origin.clone();
+            source.prefix_bytes = line.line.spans.iter().map(|span| span.content.len()).sum();
+            line.source = Some(source);
+            TextRow {
+                line,
+                source: text_start..text_start,
+                line_end: None,
+                content_width,
+                first_column: 0,
+                prefix_columns: 0,
+                tabs: tabs::TabStops::default(),
+                inline_decoration: None,
+            }
+        })
+        .collect();
     }
     let mut logical = Cow::Borrowed(logical);
     if line_width(&logical.initial_indent) >= usize::from(content_width)

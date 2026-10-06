@@ -1,0 +1,16 @@
+---
+source: tui/src/transcript_view/layout_tests.rs
+expression: "format!(\"{buffer:?}\")"
+---
+Buffer {
+    area: Rect { x: 0, y: 0, width: 80, height: 2 },
+    content: [
+        "       1280 [+] Called tool                                                     ",
+        "                                                                                ",
+    ],
+    styles: [
+        x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 12, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 15, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+    ]
+}
