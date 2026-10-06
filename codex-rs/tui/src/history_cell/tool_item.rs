@@ -25,6 +25,18 @@ impl ToolItemCell {
 }
 
 impl HistoryCell for ToolItemCell {
+    fn transcript_timestamp(&self) -> Option<super::HistoryTimestamp> {
+        self.inner.transcript_timestamp()
+    }
+    fn has_stable_transcript_height(&self) -> bool {
+        self.inner.has_stable_transcript_height()
+    }
+    fn warning_entries(&self) -> Vec<super::WarningEntry> {
+        self.inner.warning_entries()
+    }
+    fn warning_keys(&self) -> Vec<super::WarningKey<'_>> {
+        self.inner.warning_keys()
+    }
     fn tool_call_ids(&self) -> Vec<&str> {
         vec![&self.call_id]
     }
@@ -34,11 +46,20 @@ impl HistoryCell for ToolItemCell {
     fn raw_lines(&self) -> Vec<Line<'static>> {
         self.inner.raw_lines()
     }
+    fn live_raw_lines(&self) -> Vec<Line<'static>> {
+        self.inner.live_raw_lines()
+    }
+    fn desired_height(&self, width: u16) -> u16 {
+        self.inner.desired_height(width)
+    }
     fn display_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         self.inner.display_hyperlink_lines(width)
     }
     fn compact_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         self.inner.compact_hyperlink_lines(width)
+    }
+    fn retained_hyperlink_lines(&self, width: u16, detailed: bool) -> Vec<HyperlinkLine> {
+        self.inner.retained_hyperlink_lines(width, detailed)
     }
     fn expanded_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         self.inner.expanded_hyperlink_lines(width)
@@ -110,6 +131,9 @@ impl HistoryCell for ToolItemCell {
     }
     fn activity_header(&self) -> Option<ActivityHeader> {
         self.inner.activity_header()
+    }
+    fn activity_header_tokens(&self) -> Option<u64> {
+        self.inner.activity_header_tokens()
     }
     fn expanded_activity_header(&self) -> Option<ActivityHeader> {
         self.inner.expanded_activity_header()
