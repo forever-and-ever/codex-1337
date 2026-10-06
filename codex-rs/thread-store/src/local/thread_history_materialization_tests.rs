@@ -345,6 +345,22 @@ async fn paginated_live_append_materializes_turn_items_and_state() {
         .live_rollout_path(thread_id)
         .await
         .expect("rollout path");
+    // Public pagination also requires thread metadata, which projection-only fixtures omit.
+    let mut metadata = codex_state::ThreadMetadataBuilder::new(
+        thread_id,
+        rollout_path.clone(),
+        Utc::now(),
+        SessionSource::Exec,
+    );
+    metadata.history_mode = ThreadHistoryMode::Paginated;
+    store
+        .state_db()
+        .await
+        .expect("state database")
+        .upsert_thread(&metadata.build("test-provider"))
+        .await
+        .expect("seed paginated thread metadata");
+
     let (turn_start_byte_offset, _) =
         rollout_line_byte_offsets(rollout_path.as_path(), /*ordinal*/ 1);
     let (_, turn_end_byte_offset) =
