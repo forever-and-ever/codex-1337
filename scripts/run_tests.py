@@ -8,6 +8,7 @@ No other run's directories are inspected or removed. Requires Python 3.12+.
 
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -246,6 +247,8 @@ def reap_orphans() -> bool:
 
 
 def main() -> int:
+    if sys.platform == "linux" and shutil.which("bwrap") is None:
+        sys.exit("bwrap is required to isolate the test runtime directory")
     full_workspace = not sys.argv[1:] or "--workspace" in sys.argv[1:]
     if full_workspace:
         # The fork publishes its own checked V8 archive; rusty_v8's upstream
@@ -339,6 +342,32 @@ def main() -> int:
             environment.update(v8_environment)
         # Tests must not see the developer's Codex home, so every run gets an empty one.
         environment["CODEX_HOME"] = tempfile.mkdtemp(dir=scratch)
+        if sys.platform == "linux":
+            private_runtime = Path(scratch) / "runtime"
+            private_runtime.mkdir(mode=0o700)
+            runtime = Path(f"/run/user/{os.geteuid()}/codex-1337")
+            runtime.mkdir(mode=0o700, exist_ok=True)
+            private_legacy_runtime = Path(scratch) / "legacy-runtime"
+            private_legacy_runtime.mkdir(mode=0o700)
+            legacy_runtime = Path(f"/tmp/codex-daemon-{os.geteuid()}")
+            legacy_runtime.mkdir(mode=0o700, exist_ok=True)
+            # Tests must not reach the live runtime directories, where the daemon and
+            # reload host keep their sockets; each run gets private ones.
+            commands[-1] = [
+                "bwrap",
+                "--dev-bind",
+                "/",
+                "/",
+                "--bind",
+                str(private_runtime),
+                str(runtime),
+                "--bind",
+                str(private_legacy_runtime),
+                str(legacy_runtime),
+                "--die-with-parent",
+                "--",
+                *commands[-1],
+            ]
         child: subprocess.Popen[bytes] | None = None
         pending: list[int] = []
 
