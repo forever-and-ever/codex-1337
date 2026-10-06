@@ -68,7 +68,6 @@ impl CodeModeExecuteHandler {
             );
             enabled_tools.extend(definitions.into_iter().map(|mut definition| {
                 definition.input_schema = None;
-                definition.output_schema = None;
                 definition
             }));
         }

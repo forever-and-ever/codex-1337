@@ -292,7 +292,6 @@ impl CoreToolRuntime for McpHandler {
             );
             for definition in &mut definitions {
                 definition.input_schema = None;
-                definition.output_schema = None;
             }
             (code_mode_input_schema_max_bytes, definitions)
         });
@@ -833,7 +832,7 @@ mod tests {
             .expect("MCP definitions should be cached");
         assert_eq!(first.len(), 1);
         assert!(first[0].input_schema.is_none());
-        assert!(first[0].output_schema.is_none());
+        assert!(first[0].output_schema.is_some());
 
         let second = handler
             .cached_code_mode_definitions(/*code_mode_input_schema_max_bytes*/ None)
