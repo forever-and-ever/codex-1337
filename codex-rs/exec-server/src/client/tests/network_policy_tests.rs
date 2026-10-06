@@ -21,6 +21,7 @@ use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::time::timeout;
 use tracing::instrument::WithSubscriber;
+use tracing_subscriber::layer::SubscriberExt;
 
 use super::super::LazyRemoteExecServerClient;
 use super::super::NetworkPolicyAuditContext;

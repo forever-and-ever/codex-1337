@@ -1870,7 +1870,7 @@ mod tests {
     use codex_exec_server_protocol::JSONRPCResponse;
     use codex_http_client::HttpClientFactory;
     use codex_http_client::OutboundProxyPolicy;
-    use codex_utils_path_uri::PathUri;
+
     use futures::SinkExt;
     use futures::StreamExt;
     use http::HeaderMap;
@@ -1898,7 +1898,6 @@ mod tests {
     use tokio_tungstenite::WebSocketStream;
     use tokio_tungstenite::accept_async;
     use tokio_tungstenite::tungstenite::Message;
-    use tracing_subscriber::prelude::*;
 
     use super::ExecServerClient;
     use super::ExecServerClientConnectOptions;
@@ -1915,7 +1914,7 @@ mod tests {
     use crate::process::ExecProcessEvent;
     use crate::protocol::EXEC_CLOSED_METHOD;
     use crate::protocol::EXEC_EXITED_METHOD;
-    use crate::protocol::EXEC_METHOD;
+
     use crate::protocol::EXEC_OUTPUT_DELTA_METHOD;
     use crate::protocol::EXEC_READ_METHOD;
     use crate::protocol::EXEC_WRITE_METHOD;
@@ -1924,13 +1923,12 @@ mod tests {
     use crate::protocol::ExecExitedNotification;
     use crate::protocol::ExecOutputDeltaNotification;
     use crate::protocol::ExecOutputStream;
-    use crate::protocol::ExecParams;
-    use crate::protocol::ExecResponse;
+
     use crate::protocol::INITIALIZE_METHOD;
     use crate::protocol::INITIALIZED_METHOD;
     use crate::protocol::InitializeResponse;
     use crate::protocol::ProcessOutputChunk;
-    use crate::protocol::ProcessSandboxType;
+
     use crate::protocol::ReadResponse;
     use crate::protocol::WriteParams;
     use crate::protocol::WriteResponse;

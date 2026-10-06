@@ -885,7 +885,7 @@ mod tests {
 
     use codex_exec_server_protocol::JSONRPCMessage;
     use codex_exec_server_protocol::JSONRPCNotification;
-    use codex_exec_server_protocol::JSONRPCRequest;
+
     use codex_exec_server_protocol::JSONRPCResponse;
     use codex_exec_server_protocol::RequestId;
     use pretty_assertions::assert_eq;
@@ -900,7 +900,7 @@ mod tests {
     use super::RESERVED_OUTBOUND_CONTROL_MESSAGES;
     use super::RpcCallError;
     use super::RpcClient;
-    use super::RpcClientEvent;
+
     use super::RpcNotificationSender;
     use crate::connection::JsonRpcConnection;
     use crate::connection::JsonRpcConnectionEvent;

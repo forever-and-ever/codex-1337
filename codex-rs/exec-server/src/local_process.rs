@@ -1247,15 +1247,6 @@ mod tests {
     use tokio::sync::oneshot;
     use tokio::time::timeout;
 
-    #[cfg(not(target_os = "windows"))]
-    use crate::protocol::ExecServerNetworkPolicyDecision;
-    #[cfg(not(target_os = "windows"))]
-    use crate::protocol::NETWORK_POLICY_REQUEST_METHOD;
-    #[cfg(not(target_os = "windows"))]
-    use crate::protocol::NetworkPolicyRequestParams;
-    #[cfg(not(target_os = "windows"))]
-    use crate::protocol::NetworkPolicyRequestResponse;
-
     #[cfg(target_os = "linux")]
     #[ctor::ctor]
     fn initialize_spawn_helper() {

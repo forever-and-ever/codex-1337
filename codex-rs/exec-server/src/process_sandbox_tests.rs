@@ -1,7 +1,5 @@
 use std::collections::HashMap;
-use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Duration;
 
 use codex_exec_server_protocol::JSONRPCErrorError;
 #[cfg(unix)]
@@ -10,7 +8,6 @@ use codex_file_system::WindowsSandboxSelection;
 use codex_network_proxy::ManagedNetworkSandboxContext;
 use codex_network_proxy::NetworkPolicyAuditObserver;
 use codex_network_proxy::NetworkPolicyDecider;
-use codex_network_proxy::PROXY_ATTRIBUTION_TOKEN_ENV_KEY;
 #[cfg(any(unix, windows))]
 use codex_protocol::models::PermissionProfile;
 #[cfg(target_os = "linux")]
@@ -22,9 +19,6 @@ use pretty_assertions::assert_eq;
 use tempfile::tempdir;
 #[cfg(windows)]
 use test_case::test_case;
-use tokio::io::AsyncReadExt;
-use tokio::io::AsyncWriteExt;
-use tokio::time::timeout;
 
 use super::PreparedExecRequest;
 use super::prepare_exec_request_with_telemetry;
