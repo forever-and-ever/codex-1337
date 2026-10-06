@@ -188,6 +188,7 @@ impl App {
                 self.chat_widget.restore_user_message_to_composer(message);
             }
             self.agent_navigation.clear_statuses();
+            self.sync_subagent_roster();
             if let Some(owner) = self.background_voice.as_mut() {
                 owner.reset_realtime_conversation();
             }

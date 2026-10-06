@@ -336,7 +336,6 @@ impl AgentNavigationState {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .rows
         {
-            row.status = None;
             row.activity = None;
         }
     }

@@ -569,6 +569,7 @@ async fn agents_navigation_status_notifications_survive_discovery_and_roster_ref
     );
     assert_eq!(app.agent_navigation.status(child), Some(&active));
     app.agent_navigation.clear_statuses();
+    app.sync_subagent_roster();
     app.track_subagent_panel(&status(active.clone()));
     app.sync_subagent_roster();
     let inline = render_bottom_popup(&app.chat_widget, /*width*/ 90);
