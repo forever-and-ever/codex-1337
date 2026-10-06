@@ -16,15 +16,12 @@ async fn account_routes_do_not_leak_into_catalog_or_admit_openai_fallbacks() {
         .models
         .remove(0);
     let mut first = unrelated.clone();
-    first.slug = "account-a/claude-sonnet-5-5".into();
+    first.slug = "claude-sonnet-5-5".into();
     first.display_name = first.slug.clone();
     first.context_window = Some(1_000_000);
     first.max_context_window = Some(1_000_000);
-    let mut second = first.clone();
-    second.slug = "account-b/claude-sonnet-5-5".into();
-    second.display_name = second.slug.clone();
     let source_catalog = ModelsResponse {
-        models: vec![first.clone(), second, unrelated],
+        models: vec![first.clone(), unrelated],
     };
     let provider = create_model_provider(
         ModelProviderInfo {
@@ -66,7 +63,6 @@ async fn account_routes_do_not_leak_into_catalog_or_admit_openai_fallbacks() {
     let expected = ModelsResponse {
         models: vec![first.clone()],
     };
-    // Configured catalogs retain namespace normalization without a remote credential.
     let configured = provider.models_manager_without_cache(Some(source_catalog));
     assert_eq!(
         configured

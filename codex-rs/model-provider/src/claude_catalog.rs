@@ -4,31 +4,12 @@ use codex_protocol::openai_models::ApplyPatchToolType;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ToolMode;
 use codex_protocol::protocol::MultiAgentVersion;
-use std::collections::BTreeMap;
 
 pub(crate) fn normalize(models: Vec<ModelInfo>) -> Vec<ModelInfo> {
-    let mut canonical = BTreeMap::new();
-    for mut model in models {
-        // Credential prefixes are transport routes, not model identities. The
-        // chosen account's prefix is applied only when constructing a request.
-        let slug = model
-            .slug
-            .rsplit('/')
-            .next()
-            .unwrap_or(&model.slug)
-            .to_owned();
-        if !slug.starts_with("claude-") {
-            continue;
-        }
-        if model.display_name == model.slug {
-            model.display_name = slug.clone();
-        }
-        model.slug = slug.clone();
-        canonical
-            .entry(slug)
-            .or_insert_with(|| normalize_model_info(model));
-    }
-    canonical.into_values().collect()
+    models.into_iter()
+        .filter(|model| model.slug.starts_with("claude-"))
+        .map(normalize_model_info)
+        .collect()
 }
 
 pub(crate) fn normalize_model_info(mut model: ModelInfo) -> ModelInfo {

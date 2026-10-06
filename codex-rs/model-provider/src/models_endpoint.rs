@@ -322,12 +322,7 @@ impl OpenAiModelsEndpoint {
             }
         }
         Ok(ModelsEndpointResponse {
-            models: match self.provider_info.adapter {
-                ModelProviderAdapter::OpenaiCompatible => models,
-                ModelProviderAdapter::ClaudeSubscription => {
-                    crate::claude_catalog::normalize(models)
-                }
-            },
+            models,
             etag,
             identity,
         })

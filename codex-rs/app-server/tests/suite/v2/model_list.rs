@@ -41,36 +41,54 @@ const INVALID_REQUEST_ERROR_CODE: i64 = -32600;
 
 #[tokio::test]
 async fn provider_catalogs_remain_isolated_without_openai_credentials() -> Result<()> {
-    let server = MockServer::start().await;
+    use codex_login::anthropic::AccountIdentity;
+    use codex_login::anthropic::AccountInfo;
+    use codex_login::anthropic::AccountStore;
+    use codex_login::anthropic::SubscriptionGrant;
+    use codex_model_provider_info::CLAUDE_SUBSCRIPTION_PROVIDER_ID;
+    use codex_model_provider_info::built_in_model_providers;
+    use codex_protocol::openai_models::AnthropicModelCapabilities;
+    use codex_protocol::openai_models::AnthropicThinkingMode;
+
+    let home = TempDir::new()?;
+    let account_id = AccountStore::new(home.path().to_owned()).upsert(
+        AccountInfo {
+            identity: AccountIdentity::new("claude-sonnet-5-5")?,
+            email: None,
+            organization_uuid: None,
+            organization_name: None,
+        },
+        SubscriptionGrant::bearer_only("test-bearer".into())?,
+    ).await?.to_string();
     let mut claude = codex_models_manager::bundled_models_response()?
         .models
         .remove(0);
-    claude.slug = "account-a/claude-sonnet-5-5".into();
+    claude.slug = "claude-sonnet-5-5".into();
+    claude.display_name = claude.slug.clone();
+    claude.tool_mode = Some(codex_protocol::openai_models::ToolMode::CodeModeOnly);
+    claude.apply_patch_tool_type = Some(codex_protocol::openai_models::ApplyPatchToolType::Freeform);
+    claude.multi_agent_version = Some(codex_protocol::protocol::MultiAgentVersion::V2);
+    claude.additional_speed_tiers.clear();
+    claude.service_tiers.clear();
+    claude.default_service_tier = None;
+    claude.anthropic = Some(AnthropicModelCapabilities {
+        thinking: AnthropicThinkingMode::Disabled,
+        max_output_tokens: std::num::NonZeroU32::new(/*n*/ 8192).unwrap(),
+        supported_efforts: Vec::new(),
+        supports_structured_outputs: false,
+    });
     claude.visibility = codex_protocol::openai_models::ModelVisibility::List;
-    Mock::given(method("GET"))
-        .and(path("/v1/models"))
-        .and(header("authorization", "Bearer proxy-test-key"))
-        .respond_with(
-            ResponseTemplate::new(/*s*/ 200).set_body_json(ModelsResponse {
-                models: vec![claude],
-            }),
-        )
-        .mount(&server)
-        .await;
-    let home = TempDir::new()?;
-    write_models_cache(home.path()).await?;
-    let url = server.uri();
+    let provider = built_in_model_providers(/*openai_base_url*/ None)
+        .remove(CLAUDE_SUBSCRIPTION_PROVIDER_ID).unwrap();
+    let mut cache = codex_model_provider::test_support::models_cache_entry(
+        &provider, /*auth*/ None, vec![claude],
+    );
+    cache.identity = cache.identity.map(|identity| format!("anthropic:{account_id}:{identity}"));
+    std::fs::write(home.path().join("models_cache.json"), serde_json::to_vec(&cache)?)?;
     std::fs::write(
         home.path().join("config.toml"),
         format!(
-            r#"
-[model_providers.claude_subscription]
-name = "Claude"
-adapter = "claude_subscription"
-base_url = "{url}/v1"
-model_catalog_url = "{url}/v1/models"
-experimental_bearer_token = "proxy-test-key"
-"#
+            "[wrangler]\ndefault_claude_account = {account_id:?}\n"
         ),
     )?;
     let mut app = TestAppServer::builder()

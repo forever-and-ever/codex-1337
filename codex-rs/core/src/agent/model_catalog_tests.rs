@@ -5,13 +5,22 @@ use crate::agent::child_config::SpawnModelPrecedence;
 use crate::agent::child_config::prepare_agent_spawn_config;
 use crate::agent::types::SpawnAgentForkMode;
 use crate::session::step_context::StepContext;
-use crate::session::tests::make_session_and_context_with_auth_and_config_and_rx;
+use crate::session::tests::make_session_and_context_with_auth_config_home_and_rx;
 use codex_features::Feature;
 use codex_login::CodexAuth;
+use codex_login::anthropic::AccountIdentity;
+use codex_login::anthropic::AccountInfo;
+use codex_login::anthropic::AccountStore;
+use codex_login::anthropic::SubscriptionGrant;
+use codex_model_provider::create_model_provider_with_anthropic_account;
+use codex_model_provider_info::ANTHROPIC_BASE_URL;
 use codex_model_provider_info::ModelProviderAdapter;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_protocol::openai_models::ModelsResponse;
+use codex_protocol::openai_models::AnthropicModelCapabilities;
+use codex_protocol::openai_models::AnthropicThinkingMode;
 use pretty_assertions::assert_eq;
+use std::sync::Arc;
 use wiremock::Mock;
 use wiremock::MockServer;
 use wiremock::ResponseTemplate;
@@ -29,6 +38,16 @@ async fn fresh_child_routes_model_and_provider_but_history_forks_stay_locked(
     // A parent's catalog cannot validate another provider's models, even though
     // fresh-child execution can use that provider. Both directions must agree.
     let server = MockServer::start().await;
+    let home = tempfile::tempdir().unwrap();
+    let account_id = AccountStore::new(home.path().to_owned()).upsert(
+        AccountInfo {
+            identity: AccountIdentity::new("claude-test-child").unwrap(),
+            email: None,
+            organization_uuid: None,
+            organization_name: None,
+        },
+        SubscriptionGrant::bearer_only("test-bearer".into()).unwrap(),
+    ).await.unwrap().to_string();
     let mut model = codex_models_manager::bundled_models_response()
         .unwrap()
         .models
@@ -37,18 +56,15 @@ async fn fresh_child_routes_model_and_provider_but_history_forks_stay_locked(
     model.multi_agent_version = Some(MultiAgentVersion::V2);
     model.context_window = Some(300_000);
     model.max_context_window = Some(500_000);
-    for (slug, endpoint) in [
-        ("gpt-test-child", "/models"),
-        ("claude-test-child", "/v1/codex/claude/models"),
-    ] {
-        let mut model = model.clone();
-        model.slug = slug.into();
-        model.display_name = slug.into();
+    {
+        let mut openai = model.clone();
+        openai.slug = "gpt-test-child".into();
+        openai.display_name = openai.slug.clone();
         Mock::given(method("GET"))
-            .and(path(endpoint))
+            .and(path("/models"))
             .respond_with(
                 ResponseTemplate::new(/*s*/ 200).set_body_json(ModelsResponse {
-                    models: vec![model],
+                    models: vec![openai],
                 }),
             )
             .expect(1..)
@@ -57,11 +73,10 @@ async fn fresh_child_routes_model_and_provider_but_history_forks_stay_locked(
     }
     let provider = |id: &str| {
         if id == "claude" {
-            // The owned adapter discovers models without a custom catalog URL.
             ModelProviderInfo {
                 adapter: ModelProviderAdapter::ClaudeSubscription,
                 name: id.into(),
-                base_url: Some(format!("{}/v1", server.uri())),
+                base_url: Some(ANTHROPIC_BASE_URL.into()),
                 ..Default::default()
             }
         } else {
@@ -75,12 +90,26 @@ async fn fresh_child_routes_model_and_provider_but_history_forks_stay_locked(
     };
     let parent_provider = provider(parent_id);
     let child_provider = provider(child_id);
-    let (session, turn, _rx) = make_session_and_context_with_auth_and_config_and_rx(
+    model.slug = "claude-test-child".into();
+    model.display_name = model.slug.clone();
+    model.anthropic = Some(AnthropicModelCapabilities {
+        thinking: AnthropicThinkingMode::Disabled,
+        max_output_tokens: std::num::NonZeroU32::new(/*n*/ 8192).unwrap(),
+        supported_efforts: Vec::new(),
+        supports_structured_outputs: false,
+    });
+    let native_catalog = ModelsResponse { models: vec![model] };
+    let (session, turn, _rx) = make_session_and_context_with_auth_config_home_and_rx(
         CodexAuth::from_api_key("test-key"),
         Vec::new(),
+        home.path(),
         |config| {
+            config.wrangler.default_claude_account = Some(account_id.clone());
             config.model_provider_id = parent_id.into();
             config.model_provider = parent_provider.clone();
+            if parent_id == "claude" {
+                config.model_catalog = Some(native_catalog.clone());
+            }
             config.model_provider_context_defaults = [
                 (
                     "openai".into(),
@@ -111,6 +140,24 @@ async fn fresh_child_routes_model_and_provider_but_history_forks_stay_locked(
         },
     )
     .await;
+    if parent_id == "claude" {
+        session.services.model_client.commit_provider_account(
+            crate::agent::control::ProviderAccountSelection::ClaudeSubscription { id: account_id },
+        );
+    } else {
+        let mut native_config = (*turn.config).clone();
+        native_config.model_provider_id = "claude".into();
+        native_config.model_provider = provider("claude");
+        native_config.model_catalog = None;
+        session.agent_models_manager(&native_config).await.unwrap();
+        let manager = create_model_provider_with_anthropic_account(
+            native_config.model_provider,
+            Some(Arc::clone(&session.services.auth_manager)),
+            Some(account_id),
+        ).models_manager_without_cache(Some(native_catalog));
+        session.services.agent_models_managers.0.lock().await
+            .get_mut("claude").unwrap().manager = manager;
+    }
     session
         .services
         .models_manager
