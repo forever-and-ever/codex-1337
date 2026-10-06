@@ -5,11 +5,10 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use crate::acl::grant_read_execute_aces;
+use crate::path_mask_allows;
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::ensure;
-use codex_windows_sandbox::ensure_allow_mask_aces_with_inheritance;
-use codex_windows_sandbox::path_mask_allows;
 use windows_sys::Win32::Security::CONTAINER_INHERIT_ACE;
 use windows_sys::Win32::Security::OBJECT_INHERIT_ACE;
 use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
