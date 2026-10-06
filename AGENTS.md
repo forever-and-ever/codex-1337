@@ -127,7 +127,7 @@ ritual: use the smallest existing test filter, snapshot, or smoke check that
 addresses the actual risk. Do not add tests merely because code changed.
 
 1. Do not run `cargo test` directly. Use `just test` so test execution follows the repo defaults.
-2. Prefer named tests or narrow filters within affected crates; also select `--lib` or `--test <target>` when known. A name filter alone still compiles unrelated test binaries. Do not automatically run an entire crate. Changes to common, core, or protocol do not trigger broader testing by themselves.
+2. Prefer named tests or narrow filters within affected crates; also select `--lib` or `--test <target>` when known. A name filter alone still compiles unrelated test binaries. Do not automatically run an entire crate. Changes to common, core, or protocol do not trigger broader testing by themselves. The exception is `codex-tui`: its library suite is kept green, so a change to the crate lands only after a full `just test -p codex-tui --lib` passes.
 3. Full-workspace runs are a last resort: identify the concrete uncertainty a focused check cannot answer and obtain explicit user approval first. Avoid `--all-features` unless that feature matrix is specifically needed.
 4. Report exactly what ran, what failed, and what remains untested. Do not repeatedly rerun broad suites to chase timing failures on a loaded machine.
 
@@ -135,8 +135,8 @@ For consequential agent-logic changes, prefer extending an existing integration
 case that exercises the relevant interaction. New permanent tests must earn
 their cost under the unit-test doctrine; there is no test-per-feature quota.
 
-For snapshot changes, run the relevant snapshot test or a narrow filter, such as
-`just test -p codex-tui <filter>`, not the whole TUI suite. Of the `cargo insta`
+For snapshot changes, iterate with the relevant snapshot test or a narrow filter,
+such as `just test -p codex-tui <filter>`. Of the `cargo insta`
 subcommands, only `test` accepts `-p`; the others select the crate with
 `--manifest-path`. From `codex-rs`:
 
