@@ -246,6 +246,7 @@ pub(crate) use new_session::has_launch_setting;
 mod clipboard;
 mod native_history;
 mod owned_transcript;
+mod transcript_splice;
 mod pending_interactive_replay;
 mod permission_shortcuts;
 mod pets;

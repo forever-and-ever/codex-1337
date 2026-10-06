@@ -1,5 +1,7 @@
 //! Apply canonical scoped blocks through the existing retained-history/reading snapshot boundary.
 use super::*;
+use super::transcript_splice::SpliceShape;
+use super::transcript_splice::TranscriptSplice;
 use crate::code_mode_transcript::Admission;
 use crate::code_mode_transcript::Projection;
 use crate::code_mode_transcript::Source;
@@ -232,27 +234,25 @@ impl App {
             } else {
                 index..index + 1
             };
-            let mut replacements = if terminal_transition {
+            let retained = if terminal_transition {
                 self.transcript_cells[index + 1..].to_vec()
             } else {
                 Vec::new()
             };
-            replacements.push(incoming.clone());
-            self.native_history
-                .consolidate(&self.transcript_cells[index..=index], &incoming);
-            self.transcript_view.replace_group_members(
-                &self.transcript_cells,
-                range.clone(),
-                &replacements,
+            let mut replacements = retained.clone();
+            replacements.push(incoming);
+            self.commit_transcript_splice(
+                tui,
+                TranscriptSplice {
+                    range,
+                    cells: replacements,
+                    shape: SpliceShape::Members(retained),
+                },
             );
-            if let Some(Overlay::Transcript(overlay)) = self.overlay.as_mut() {
-                overlay.regroup_cell_members(range.clone(), &replacements);
-            }
-            self.transcript_cells.splice(range, replacements);
         } else {
             self.transcript_cells.push(incoming);
+            tui.frame_requester().schedule_frame();
         }
         self.native_history.retain(&self.transcript_cells);
-        tui.frame_requester().schedule_frame();
     }
 }

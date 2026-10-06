@@ -5,6 +5,8 @@
 //! keep committed cells as the render source and never enqueue terminal-scrollback rows here.
 
 use super::*;
+use super::transcript_splice::SpliceShape;
+use super::transcript_splice::TranscriptSplice;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use std::sync::Weak;
 
@@ -86,33 +88,19 @@ impl App {
         if let Some((range, replacements)) =
             history_cell::reconcile_code_mode(&self.transcript_cells, &cell)
         {
-            let previous = self.transcript_cells[range.clone()]
+            let retained = self.transcript_cells[range.clone()]
                 .iter()
-                .filter(|old| !replacements.iter().any(|new| Arc::ptr_eq(old, new)))
+                .filter(|old| replacements.iter().any(|new| Arc::ptr_eq(old, new)))
                 .cloned()
                 .collect::<Vec<_>>();
-            if let Some(block) = replacements
-                .iter()
-                .find(|cell| cell.as_any().is::<history_cell::CodeModeCell>())
-            {
-                let old_blocks = previous
-                    .iter()
-                    .filter(|cell| cell.as_any().is::<history_cell::CodeModeCell>())
-                    .cloned()
-                    .collect::<Vec<_>>();
-                self.native_history.consolidate(&old_blocks, block);
-            }
-            self.transcript_view.replace_group_members(
-                &self.transcript_cells,
-                range.clone(),
-                &replacements,
+            self.commit_transcript_splice(
+                tui,
+                TranscriptSplice {
+                    range,
+                    cells: replacements,
+                    shape: SpliceShape::Members(retained),
+                },
             );
-            if let Some(Overlay::Transcript(overlay)) = self.overlay.as_mut() {
-                overlay.regroup_cell_members(range.clone(), &replacements);
-            }
-            self.transcript_cells.splice(range, replacements);
-            tui.frame_requester().schedule_frame();
-            self.chat_widget.request_pending_usage_output_insertion();
             return;
         }
         let reconciliation = history_cell::reconcile_tool_calls(&self.transcript_cells, &cell);
@@ -121,50 +109,40 @@ impl App {
                 if Arc::ptr_eq(&self.transcript_cells[index], &replacement) {
                     continue;
                 }
-                self.native_history
-                    .consolidate(&self.transcript_cells[index..=index], &replacement);
-                self.transcript_view.replace_range(
-                    &self.transcript_cells,
-                    index..index + 1,
-                    &replacement,
+                self.commit_transcript_splice(
+                    tui,
+                    TranscriptSplice {
+                        range: index..index + 1,
+                        cells: vec![replacement],
+                        shape: SpliceShape::Revision,
+                    },
                 );
-                if let Some(Overlay::Transcript(overlay)) = self.overlay.as_mut() {
-                    overlay
-                        .regroup_cell_members(index..index + 1, std::slice::from_ref(&replacement));
-                }
-                self.transcript_cells[index] = replacement;
             }
             for cell in reconciliation.remainder {
                 self.insert_retained_history_cell(tui, cell);
             }
-            tui.frame_requester().schedule_frame();
-            self.chat_widget.request_pending_usage_output_insertion();
             return;
         }
         if let Some((range, replacements)) =
             history_cell::ToolOutputGroup::attach(&self.transcript_cells, Arc::clone(&cell))
         {
-            let previous = self.transcript_cells[range.clone()]
+            let retained = self.transcript_cells[range.clone()]
                 .iter()
                 .filter(|cell| {
-                    !replacements
+                    replacements
                         .iter()
                         .any(|replacement| Arc::ptr_eq(cell, replacement))
                 })
                 .cloned()
                 .collect::<Vec<_>>();
-            self.native_history.consolidate(&previous, &replacements[0]);
-            self.transcript_view.replace_group_members(
-                &self.transcript_cells,
-                range.clone(),
-                &replacements,
+            self.commit_transcript_splice(
+                tui,
+                TranscriptSplice {
+                    range,
+                    cells: replacements,
+                    shape: SpliceShape::Members(retained),
+                },
             );
-            if let Some(Overlay::Transcript(overlay)) = self.overlay.as_mut() {
-                overlay.regroup_cell_members(range.clone(), &replacements);
-            }
-            self.transcript_cells.splice(range, replacements);
-            tui.frame_requester().schedule_frame();
-            self.chat_widget.request_pending_usage_output_insertion();
             return;
         }
         if let Some(Overlay::Transcript(t)) = &mut self.overlay {

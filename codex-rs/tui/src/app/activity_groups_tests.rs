@@ -750,7 +750,7 @@ async fn metadata_only_receipt_keeps_block_disclosure_and_replay_without_a_token
             .into_iter()
             .chain(project(&app, &current.items[split..]))
             .collect();
-        app.join_older_activity_group(boundary, std::slice::from_ref(&current));
+        app.join_older_activity_group(&mut tui, boundary, std::slice::from_ref(&current));
         assert_eq!(
             app.transcript_cells[0].expanded_hyperlink_lines(90),
             expected[0].expanded_hyperlink_lines(90),
@@ -1102,7 +1102,7 @@ async fn interleaved_scripts_keep_exact_ownership_after_terminal_wait_and_replay
             .into_iter()
             .chain(project(&app, &current.items[split..]))
             .collect();
-        app.join_older_activity_group(boundary, std::slice::from_ref(&current));
+        app.join_older_activity_group(&mut tui, boundary, std::slice::from_ref(&current));
         assert_eq!(
             rendered(&app.transcript_cells),
             rendered(&expected),
@@ -1365,7 +1365,7 @@ async fn returned_batches_keep_one_disclosure_and_bill_across_live_replay_and_pa
                 .chain(project(&app, &current.items[split..]))
                 .chain([Arc::clone(&separator)])
                 .collect();
-            app.join_older_activity_group(boundary, std::slice::from_ref(&current));
+            app.join_older_activity_group(&mut tui, boundary, std::slice::from_ref(&current));
             assert_eq!(
                 rendered(&app.transcript_cells[..app.transcript_cells.len() - 1]),
                 rendered(&expected),
@@ -1516,7 +1516,7 @@ async fn legacy_patch_files_keep_independent_outputs_across_live_replay_and_page
                 .into_iter()
                 .chain(project(&app, &current.items[split..]))
                 .collect();
-            app.join_older_activity_group(boundary, std::slice::from_ref(&current));
+            app.join_older_activity_group(&mut tui, boundary, std::slice::from_ref(&current));
             assert_eq!(
                 rendered(&app.transcript_cells),
                 rendered(&expected),
@@ -1554,6 +1554,7 @@ async fn legacy_patch_files_keep_independent_outputs_across_live_replay_and_page
 
 #[tokio::test]
 async fn older_page_hydration_keeps_pending_computer_and_exploration_completion() {
+    let mut tui = crate::tui::test_support::make_test_tui().unwrap();
     for kind in [ActivityKind::Computer, ActivityKind::Exploration] {
         let mut app = make_test_app().await;
         match kind {
@@ -1593,7 +1594,7 @@ async fn older_page_hydration_keeps_pending_computer_and_exploration_completion(
         app.transcript_cells = project(&app, &current.items[..1]);
         app.transcript_cells
             .extend(project(&app, &current.items[1..2]));
-        app.join_older_activity_group(/*boundary*/ 1, std::slice::from_ref(&current));
+        app.join_older_activity_group(&mut tui, /*boundary*/ 1, std::slice::from_ref(&current));
         assert_eq!(
             app.transcript_cells.len(),
             if matches!(kind, ActivityKind::Computer) {
@@ -1650,6 +1651,7 @@ async fn older_page_hydration_keeps_pending_computer_and_exploration_completion(
 
 #[tokio::test]
 async fn trailing_reasoning_identity_rejects_identical_text_from_another_turn() {
+    let mut tui = crate::tui::test_support::make_test_tui().unwrap();
     for kind in [ActivityKind::Computer, ActivityKind::Exploration] {
         let mut app = make_test_app().await;
         let mut same_turn = reasoning("same-turn-detail");
@@ -1667,7 +1669,7 @@ async fn trailing_reasoning_identity_rejects_identical_text_from_another_turn() 
             let older = project(&app, &turns[0].items[..1]).remove(/*index*/ 0);
             let trailing = project(&app, std::slice::from_ref(&detail)).remove(/*index*/ 0);
             app.transcript_cells = vec![Arc::clone(&older), Arc::clone(&trailing)];
-            app.join_older_activity_group(/*boundary*/ 1, &turns);
+            app.join_older_activity_group(&mut tui, /*boundary*/ 1, &turns);
             if detail.id() == "same-turn-detail" && matches!(kind, ActivityKind::Computer) {
                 let expected = project(&app, &turns[0].items);
                 assert_eq!(app.transcript_cells.len(), 1);
@@ -1687,7 +1689,7 @@ async fn trailing_reasoning_identity_rejects_identical_text_from_another_turn() 
         ));
         app.transcript_cells = project(&app, &turns[0].items[..1]);
         app.transcript_cells.push(Arc::clone(&unidentified));
-        app.join_older_activity_group(/*boundary*/ 1, &turns);
+        app.join_older_activity_group(&mut tui, /*boundary*/ 1, &turns);
         assert_eq!(app.transcript_cells.len(), 2);
         assert!(Arc::ptr_eq(&app.transcript_cells[1], &unidentified));
     }
@@ -1695,6 +1697,7 @@ async fn trailing_reasoning_identity_rejects_identical_text_from_another_turn() 
 
 #[tokio::test]
 async fn every_page_split_folds_reasoning_before_answer_and_completion_boundaries() {
+    let mut tui = crate::tui::test_support::make_test_tui().unwrap();
     for kind in [ActivityKind::Computer, ActivityKind::Exploration] {
         for answer in [None, Some("The answer")] {
             let mut app = make_test_app().await;
@@ -1723,7 +1726,7 @@ async fn every_page_split_folds_reasoning_before_answer_and_completion_boundarie
                 newer.push(Arc::clone(&separator));
                 let boundary = older.len();
                 app.transcript_cells = older.into_iter().chain(newer).collect();
-                app.join_older_activity_group(boundary, std::slice::from_ref(&current));
+                app.join_older_activity_group(&mut tui, boundary, std::slice::from_ref(&current));
                 for width in [24, 80] {
                     let rendered = |cells: &[Arc<dyn HistoryCell>]| {
                         cells
@@ -1754,6 +1757,7 @@ async fn every_page_split_folds_reasoning_before_answer_and_completion_boundarie
 
 #[tokio::test]
 async fn failed_exploration_retains_following_reasoning_at_every_page_split() {
+    let mut tui = crate::tui::test_support::make_test_tui().unwrap();
     let mut app = make_test_app().await;
     let mut failed = call("failed", ActivityKind::Exploration, "failed");
     if let ThreadItem::CommandExecution { exit_code, .. } = &mut failed {
@@ -1773,7 +1777,7 @@ async fn failed_exploration_retains_following_reasoning_at_every_page_split() {
             .into_iter()
             .chain(project(&app, &current.items[split..]))
             .collect();
-        app.join_older_activity_group(boundary, std::slice::from_ref(&current));
+        app.join_older_activity_group(&mut tui, boundary, std::slice::from_ref(&current));
         let rendered = |cells: &[Arc<dyn HistoryCell>]| {
             cells
                 .iter()

@@ -4,21 +4,32 @@
 //! displayed source revision before canonical cells are replaced or absorbed into the live tail.
 
 use super::*;
+use super::transcript_splice::SpliceShape;
+use super::transcript_splice::TranscriptSplice;
 use crate::thread_transcript::join_computer_groups;
 
 impl App {
-    pub(super) fn join_older_activity_group(&mut self, boundary: usize, turns: &[Turn]) {
+    pub(super) fn join_older_activity_group(
+        &mut self,
+        tui: &mut tui::Tui,
+        boundary: usize,
+        turns: &[Turn],
+    ) {
         if let Some((range, replacements)) = history_cell::reunite_code_mode(&self.transcript_cells)
         {
-            self.transcript_view.replace_group_members(
-                &self.transcript_cells,
-                range.clone(),
-                &replacements,
+            let retained = self.transcript_cells[range.clone()]
+                .iter()
+                .filter(|old| replacements.iter().any(|new| Arc::ptr_eq(old, new)))
+                .cloned()
+                .collect();
+            self.commit_transcript_splice(
+                tui,
+                TranscriptSplice {
+                    range,
+                    cells: replacements,
+                    shape: SpliceShape::Members(retained),
+                },
             );
-            if let Some(Overlay::Transcript(overlay)) = self.overlay.as_mut() {
-                overlay.regroup_cell_members(range.clone(), &replacements);
-            }
-            self.transcript_cells.splice(range, replacements);
             self.native_history.retain(&self.transcript_cells);
             return;
         }
@@ -90,25 +101,23 @@ impl App {
                 )
                 .collect::<Vec<_>>();
             let range = owner..newer_index;
-            let previous = self.transcript_cells[range.clone()]
+            let retained = self.transcript_cells[range.clone()]
                 .iter()
                 .filter(|cell| {
-                    !replacements
+                    replacements
                         .iter()
                         .any(|replacement| Arc::ptr_eq(cell, replacement))
                 })
                 .cloned()
                 .collect::<Vec<_>>();
-            self.native_history.consolidate(&previous, &group);
-            self.transcript_view.replace_group_members(
-                &self.transcript_cells,
-                range.clone(),
-                &replacements,
+            self.commit_transcript_splice(
+                tui,
+                TranscriptSplice {
+                    range,
+                    cells: replacements,
+                    shape: SpliceShape::Members(retained),
+                },
             );
-            if let Some(Overlay::Transcript(overlay)) = self.overlay.as_mut() {
-                overlay.regroup_cell_members(range.clone(), &replacements);
-            }
-            self.transcript_cells.splice(range, replacements);
             return;
         }
         // A reasoning-only page belongs to the preceding group even when an answer or turn
