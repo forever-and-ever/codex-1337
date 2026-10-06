@@ -384,6 +384,10 @@ impl AgentNavigationState {
         self.remove(thread_id);
     }
 
+    pub(super) fn is_retired(&self, thread_id: ThreadId) -> bool {
+        self.retired_threads.contains(&thread_id)
+    }
+
     /// Returns whether there is at least one tracked thread other than the primary one.
     ///
     /// `App` uses this to decide whether the picker should be available even when the collaboration

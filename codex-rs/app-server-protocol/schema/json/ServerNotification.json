@@ -5541,6 +5541,26 @@
           "properties": {
             "method": {
               "enum": [
+                "thread/retired"
+              ],
+              "title": "Thread/retiredNotificationMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ThreadRetiredNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "title": "Thread/retiredNotification",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
                 "thread/reverted"
               ],
               "title": "Thread/revertedNotificationMethod",
@@ -9337,6 +9357,20 @@
       ],
       "type": "string"
     },
+    "ThreadRetiredNotification": {
+      "properties": {
+        "threadIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "threadIds"
+      ],
+      "type": "object"
+    },
     "ThreadRevertedNotification": {
       "properties": {
         "threadId": {
@@ -10540,6 +10574,26 @@
         "params"
       ],
       "title": "Thread/closedNotification",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "thread/retired"
+          ],
+          "title": "Thread/retiredNotificationMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ThreadRetiredNotification"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "title": "Thread/retiredNotification",
       "type": "object"
     },
     {

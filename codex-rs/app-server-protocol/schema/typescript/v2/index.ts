@@ -588,6 +588,7 @@ export type { ThreadResumeParams } from "./ThreadResumeParams";
 export type { ThreadResumeResponse } from "./ThreadResumeResponse";
 export type { ThreadRetireParams } from "./ThreadRetireParams";
 export type { ThreadRetireResponse } from "./ThreadRetireResponse";
+export type { ThreadRetiredNotification } from "./ThreadRetiredNotification";
 export type { ThreadRevertParams } from "./ThreadRevertParams";
 export type { ThreadRevertResponse } from "./ThreadRevertResponse";
 export type { ThreadRevertedNotification } from "./ThreadRevertedNotification";

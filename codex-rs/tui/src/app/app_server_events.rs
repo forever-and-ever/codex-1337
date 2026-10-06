@@ -126,6 +126,15 @@ impl App {
         app_server_client: &AppServerSession,
         notification: ServerNotification,
     ) {
+        if let ServerNotification::ThreadRetired(retired) = &notification {
+            let ids = retired
+                .thread_ids
+                .iter()
+                .filter_map(|id| ThreadId::from_string(id).ok())
+                .collect::<Vec<_>>();
+            self.forget_retired_agents(&ids).await;
+            return;
+        }
         if let ServerNotification::AccountLoginCompleted(completion) = &notification {
             self.finish_claude_login(completion);
         }

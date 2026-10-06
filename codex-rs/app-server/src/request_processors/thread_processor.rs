@@ -3617,6 +3617,10 @@ impl ThreadRequestProcessor {
         self.thread_manager.subscribe_thread_created()
     }
 
+    pub(crate) fn threads_retired_receiver(&self) -> broadcast::Receiver<Vec<ThreadId>> {
+        self.thread_manager.subscribe_threads_retired()
+    }
+
     pub(crate) async fn connection_initialized(
         &self,
         connection_id: ConnectionId,

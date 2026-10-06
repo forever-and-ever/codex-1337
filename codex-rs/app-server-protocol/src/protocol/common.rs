@@ -1961,6 +1961,7 @@ server_notification_definitions! {
     ThreadDeleted => "thread/deleted" (v2::ThreadDeletedNotification),
     ThreadUnarchived => "thread/unarchived" (v2::ThreadUnarchivedNotification),
     ThreadClosed => "thread/closed" (v2::ThreadClosedNotification),
+    ThreadRetired => "thread/retired" (v2::ThreadRetiredNotification),
     ThreadReverted => "thread/reverted" (v2::ThreadRevertedNotification),
     SkillsChanged => "skills/changed" (v2::SkillsChangedNotification),
     ThreadNameUpdated => "thread/name/updated" (v2::ThreadNameUpdatedNotification),

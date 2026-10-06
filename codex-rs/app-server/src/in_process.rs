@@ -517,10 +517,12 @@ async fn start_uninitialized(mut args: InProcessStartArgs) -> IoResult<InProcess
                 plugin_startup_tasks: Some(PluginStartupConfig::Current),
             }));
             let mut thread_created_rx = processor.thread_created_receiver();
+            let mut threads_retired_rx = processor.threads_retired_receiver();
             let session = Arc::new(ConnectionSessionState::new(
                 crate::transport::ConnectionOrigin::InProcess,
             ));
             let mut listen_for_threads = true;
+            let mut listen_for_retirements = true;
 
             loop {
                 tokio::select! {
@@ -563,6 +565,25 @@ async fn start_uninitialized(mut args: InProcessStartArgs) -> IoResult<InProcess
                             }
                             None => {
                                 break;
+                            }
+                        }
+                    }
+                    retired = threads_retired_rx.recv(), if listen_for_retirements => {
+                        match retired {
+                            Ok(thread_ids) => {
+                                processor_outgoing
+                                    .send_server_notification(ServerNotification::ThreadRetired(
+                                        codex_app_server_protocol::ThreadRetiredNotification {
+                                            thread_ids: thread_ids.into_iter().map(|id| id.to_string()).collect(),
+                                        },
+                                    ))
+                                    .await;
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                                warn!("threads_retired receiver lagged; skipping missed retirements");
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                                listen_for_retirements = false;
                             }
                         }
                     }

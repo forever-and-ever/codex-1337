@@ -11,9 +11,16 @@ impl LocalAgentControl {
         target: ThreadId,
     ) -> CodexResult<Vec<ThreadId>> {
         let control = self.clone();
-        tokio::spawn(async move { control.retire_subtree(caller, target).await })
-            .await
-            .map_err(|err| CodexErr::Fatal(format!("agent retirement failed: {err}")))?
+        tokio::spawn(async move {
+            let state = control.runtime.upgrade()?;
+            let ids = control.retire_subtree(caller, target).await?;
+            if !ids.is_empty() {
+                state.notify_threads_retired(ids.clone());
+            }
+            Ok(ids)
+        })
+        .await
+        .map_err(|err| CodexErr::Fatal(format!("agent retirement failed: {err}")))?
     }
 
     #[expect(

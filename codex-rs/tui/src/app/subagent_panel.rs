@@ -347,18 +347,7 @@ impl App {
                     .iter()
                     .filter_map(|id| ThreadId::from_string(id).ok())
                     .collect::<Vec<_>>();
-                let return_to_root = self.active_thread_id.is_some_and(|id| ids.contains(&id));
-                for id in &ids {
-                    self.agent_navigation.retire(*id);
-                }
-                self.sync_subagent_roster();
-                if return_to_root {
-                    self.select_agent_thread(tui, server, root).await?;
-                }
-                for id in ids {
-                    self.discard_thread_local_state(id).await;
-                }
-                self.refresh_agent_picker_threads(server, root);
+                self.forget_retired_agents(&ids).await;
             }
             Err(error) => {
                 self.chat_widget
@@ -376,5 +365,44 @@ impl App {
         }
         tui.frame_requester().schedule_frame();
         Ok(())
+    }
+
+    pub(super) async fn forget_retired_agents(&mut self, thread_ids: &[ThreadId]) {
+        let Some(root) = self.primary_thread_id else {
+            return;
+        };
+        let ids = {
+            let roster = self
+                .agent_navigation
+                .roster
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            thread_ids
+                .iter()
+                .copied()
+                .filter(|id| {
+                    !self.agent_navigation.is_retired(*id)
+                        && (self.agent_navigation.get(id).is_some()
+                            || roster.rows.iter().any(|row| row.id == *id))
+                })
+                .collect::<Vec<_>>()
+        };
+        if ids.is_empty() {
+            return;
+        }
+        let return_to_root = self
+            .current_displayed_thread_id()
+            .is_some_and(|id| ids.contains(&id));
+        for id in &ids {
+            self.agent_navigation.retire(*id);
+        }
+        self.sync_subagent_roster();
+        if return_to_root {
+            self.app_event_tx.send(AppEvent::SelectAgentThread(root));
+        }
+        for id in ids {
+            self.discard_thread_local_state(id).await;
+        }
+        self.app_event_tx.send(AppEvent::RefreshSubagentRoster(root));
     }
 }

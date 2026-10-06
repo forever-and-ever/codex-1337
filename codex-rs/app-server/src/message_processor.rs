@@ -774,6 +774,10 @@ impl MessageProcessor {
         self.thread_processor.thread_created_receiver()
     }
 
+    pub(crate) fn threads_retired_receiver(&self) -> broadcast::Receiver<Vec<ThreadId>> {
+        self.thread_processor.threads_retired_receiver()
+    }
+
     pub(crate) async fn daemon_recovery_snapshot(
         &self,
     ) -> codex_app_server_transport::daemon_recovery::RecoverySnapshot {

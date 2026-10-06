@@ -408,6 +408,7 @@ pub(crate) struct ThreadManagerState {
     pub(crate) threads: Arc<RwLock<HashMap<ThreadId, Arc<CodexThread>>>>,
     shared_thread_instructions: shared_instructions::SharedThreadInstructionsProviders,
     thread_created_tx: broadcast::Sender<ThreadId>,
+    threads_retired_tx: broadcast::Sender<Vec<ThreadId>>,
     thread_id_generator: ThreadIdGenerator,
     agent_control_factory: Option<AgentControlFactory>,
     auth_manager: Arc<AuthManager>,
@@ -561,6 +562,7 @@ impl ThreadManager {
         let codex_home = config.codex_home.clone();
         let restriction_product = session_source.restriction_product();
         let (thread_created_tx, _) = broadcast::channel(THREAD_CREATED_CHANNEL_CAPACITY);
+        let (threads_retired_tx, _) = broadcast::channel(THREAD_CREATED_CHANNEL_CAPACITY);
         let skills_service = Arc::new(HostSkillsService::new_with_restriction_product(
             codex_home.clone(),
             config.bundled_skills_enabled(),
@@ -590,6 +592,7 @@ impl ThreadManager {
                 threads: Arc::new(RwLock::new(HashMap::new())),
                 shared_thread_instructions: Default::default(),
                 thread_created_tx,
+                threads_retired_tx,
                 thread_id_generator: default_thread_id_generator(),
                 agent_control_factory: None,
                 models_manager,
@@ -734,6 +737,7 @@ impl ThreadManager {
             Err(err) => panic!("test codex_home should be absolute: {err}"),
         };
         let (thread_created_tx, _) = broadcast::channel(THREAD_CREATED_CHANNEL_CAPACITY);
+        let (threads_retired_tx, _) = broadcast::channel(THREAD_CREATED_CHANNEL_CAPACITY);
         let restriction_product = SessionSource::Exec.restriction_product();
         let skills_service = Arc::new(HostSkillsService::new_with_restriction_product(
             absolute_codex_home.clone(),
@@ -763,6 +767,7 @@ impl ThreadManager {
                 threads: Arc::new(RwLock::new(HashMap::new())),
                 shared_thread_instructions: Default::default(),
                 thread_created_tx,
+                threads_retired_tx,
                 thread_id_generator: default_thread_id_generator(),
                 agent_control_factory: None,
                 model_catalog_provider: provider.clone(),
@@ -953,6 +958,10 @@ impl ThreadManager {
 
     pub fn subscribe_thread_created(&self) -> broadcast::Receiver<ThreadId> {
         self.state.thread_created_tx.subscribe()
+    }
+
+    pub fn subscribe_threads_retired(&self) -> broadcast::Receiver<Vec<ThreadId>> {
+        self.state.threads_retired_tx.subscribe()
     }
 
     pub async fn get_thread(&self, thread_id: ThreadId) -> CodexResult<Arc<CodexThread>> {
@@ -2549,6 +2558,10 @@ impl ThreadManagerState {
 
     pub(crate) fn notify_thread_created(&self, thread_id: ThreadId) {
         let _ = self.thread_created_tx.send(thread_id);
+    }
+
+    pub(crate) fn notify_threads_retired(&self, thread_ids: Vec<ThreadId>) {
+        let _ = self.threads_retired_tx.send(thread_ids);
     }
 
     async fn parent_rollout_thread_trace_for_source(

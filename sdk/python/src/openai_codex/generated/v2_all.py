@@ -6215,6 +6215,13 @@ class ThreadRetireResponse(BaseModel):
     thread_ids: Annotated[list[str], Field(alias="threadIds")]
 
 
+class ThreadRetiredNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    thread_ids: Annotated[list[str], Field(alias="threadIds")]
+
+
 class ThreadRevertParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -9717,6 +9724,21 @@ class ThreadClosedServerNotification(BaseModel):
     params: ThreadClosedNotification
 
 
+class ThreadRetiredServerNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    emitted_at_ms: Annotated[
+        int | None,
+        Field(
+            alias="emittedAtMs",
+            description="Unix timestamp (in milliseconds) when app-server emitted this notification.",
+        ),
+    ] = None
+    method: Annotated[Literal["thread/retired"], Field(title="Thread/retiredNotificationMethod")]
+    params: ThreadRetiredNotification
+
+
 class ThreadRevertedServerNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -13177,6 +13199,7 @@ class ServerNotification(
         | ThreadDeletedServerNotification
         | ThreadUnarchivedServerNotification
         | ThreadClosedServerNotification
+        | ThreadRetiredServerNotification
         | ThreadRevertedServerNotification
         | SkillsChangedServerNotification
         | ThreadNameUpdatedServerNotification
@@ -13268,6 +13291,7 @@ class ServerNotification(
         | ThreadDeletedServerNotification
         | ThreadUnarchivedServerNotification
         | ThreadClosedServerNotification
+        | ThreadRetiredServerNotification
         | ThreadRevertedServerNotification
         | SkillsChangedServerNotification
         | ThreadNameUpdatedServerNotification

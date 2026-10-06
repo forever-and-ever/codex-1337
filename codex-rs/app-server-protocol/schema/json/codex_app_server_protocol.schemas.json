@@ -5058,6 +5058,26 @@
           "properties": {
             "method": {
               "enum": [
+                "thread/retired"
+              ],
+              "title": "Thread/retiredNotificationMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/ThreadRetiredNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "title": "Thread/retiredNotification",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
                 "thread/reverted"
               ],
               "title": "Thread/revertedNotificationMethod",
@@ -25545,6 +25565,22 @@
           "threadIds"
         ],
         "title": "ThreadRetireResponse",
+        "type": "object"
+      },
+      "ThreadRetiredNotification": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "threadIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "threadIds"
+        ],
+        "title": "ThreadRetiredNotification",
         "type": "object"
       },
       "ThreadRevertParams": {

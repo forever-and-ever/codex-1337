@@ -1,4 +1,12 @@
 use anyhow::Result;
+use super::connection_handling_websocket::connect_websocket;
+use super::connection_handling_websocket::read_notification_for_method;
+use super::connection_handling_websocket::read_response_and_notification_for_method;
+use super::connection_handling_websocket::read_response_for_id;
+use super::connection_handling_websocket::send_initialize_request;
+use super::connection_handling_websocket::send_request;
+use super::connection_handling_websocket::spawn_websocket_server;
+use app_test_support::DEFAULT_CLIENT_NAME;
 use app_test_support::MockResponsesConfig;
 use app_test_support::TestAppServer;
 use app_test_support::write_models_cache;
@@ -1067,30 +1075,58 @@ features.shell_tool = false
             }
         }
         app_server.shutdown_gracefully().await?;
-        let mut app_server = TestAppServer::builder()
-            .with_codex_home(codex_home.path())
-            .build_initialized()
-            .await?;
-        let _: ThreadResumeResponse = app_server
-            .request(|request_id| ClientRequest::ThreadResume {
-                request_id,
-                params: ThreadResumeParams {
+        let (mut process, bind_addr) = spawn_websocket_server(codex_home.path()).await?;
+        let mut owner = connect_websocket(bind_addr).await?;
+        let mut observer = connect_websocket(bind_addr).await?;
+        for client in [&mut owner, &mut observer] {
+            send_initialize_request(client, /*id*/ 1, DEFAULT_CLIENT_NAME).await?;
+            read_response_for_id(client, /*id*/ 1).await?;
+            send_request(
+                client,
+                "thread/resume",
+                /*id*/ 2,
+                Some(serde_json::to_value(ThreadResumeParams {
                     thread_id: thread_id.clone(),
                     ..Default::default()
-                },
-            })
+                })?),
+            )
             .await?;
-        let retired: codex_app_server_protocol::ThreadRetireResponse = app_server
-            .request(|request_id| ClientRequest::ThreadRetire {
-                request_id,
-                params: codex_app_server_protocol::ThreadRetireParams {
+            let _: ThreadResumeResponse = app_test_support::to_response(
+                read_response_for_id(client, /*id*/ 2).await?,
+            )?;
+        }
+        send_request(
+            &mut owner,
+            "thread/retire",
+            /*id*/ 3,
+            Some(serde_json::to_value(codex_app_server_protocol::ThreadRetireParams {
                     root_thread_id: thread_id.clone(),
                     thread_id: child_thread_id.clone(),
-                },
-            })
-            .await?;
+                })?),
+        )
+        .await?;
+        let (response, owner_notification) = read_response_and_notification_for_method(
+            &mut owner,
+            /*id*/ 3,
+            "thread/retired",
+        )
+        .await?;
+        let retired: codex_app_server_protocol::ThreadRetireResponse =
+            app_test_support::to_response(response)?;
         assert_eq!(retired.thread_ids, vec![child_thread_id.clone()]);
-        app_server.shutdown_gracefully().await?;
+        let observer_notification = read_notification_for_method(&mut observer, "thread/retired")
+            .await?;
+        for notification in [owner_notification, observer_notification] {
+            let retired: codex_app_server_protocol::ThreadRetiredNotification =
+                serde_json::from_value(notification.params.unwrap())?;
+            assert_eq!(
+                retired,
+                codex_app_server_protocol::ThreadRetiredNotification {
+                    thread_ids: vec![child_thread_id.clone()],
+                },
+            );
+        }
+        process.kill().await?;
         let mut app_server = TestAppServer::builder()
             .with_codex_home(codex_home.path())
             .build_initialized()

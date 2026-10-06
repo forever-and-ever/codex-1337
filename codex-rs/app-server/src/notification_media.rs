@@ -70,6 +70,7 @@ pub(crate) fn without_notification_media(notification: ServerNotification) -> Se
         | ServerNotification::ThreadDeleted(_)
         | ServerNotification::ThreadUnarchived(_)
         | ServerNotification::ThreadClosed(_)
+        | ServerNotification::ThreadRetired(_)
         | ServerNotification::ThreadReverted(_)
         | ServerNotification::SkillsChanged(_)
         | ServerNotification::ThreadNameUpdated(_)

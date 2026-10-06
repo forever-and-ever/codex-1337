@@ -373,6 +373,7 @@ impl ChatWidget {
             | ServerNotification::ThreadReverted(_)
             | ServerNotification::ThreadArchived(_)
             | ServerNotification::ThreadDeleted(_)
+            | ServerNotification::ThreadRetired(_)
             | ServerNotification::ThreadUnarchived(_)
             | ServerNotification::ThreadAttachmentUpdated(_)
             | ServerNotification::RawResponseItemCompleted(_)

@@ -872,6 +872,7 @@ pub async fn run_main_with_transport_options(
             .then_some(plugin_startup_config),
         }));
         let mut thread_created_rx = processor.thread_created_receiver();
+        let mut threads_retired_rx = processor.threads_retired_receiver();
         let mut running_turn_count_rx = processor.subscribe_running_assistant_turn_count();
         let mut active_admissions_rx = processor.turn_admission.subscribe_active();
         let mut connections = HashMap::<ConnectionId, ConnectionState>::new();
@@ -898,6 +899,7 @@ pub async fn run_main_with_transport_options(
                 None
             };
             let mut listen_for_threads = true;
+            let mut listen_for_retirements = true;
             // Keep force signals and daemon control events responsive while saving.
             let mut snapshot = Box::pin(async {
                 let processor = Arc::clone(&processor);
@@ -1155,6 +1157,25 @@ pub async fn run_main_with_transport_options(
                         initialize_notification_sender
                             .send_server_notification(notification)
                             .await;
+                    }
+                    retired = threads_retired_rx.recv(), if listen_for_retirements && !ready_to_exit => {
+                        match retired {
+                            Ok(thread_ids) => {
+                                initialize_notification_sender
+                                    .send_server_notification(ServerNotification::ThreadRetired(
+                                        codex_app_server_protocol::ThreadRetiredNotification {
+                                            thread_ids: thread_ids.into_iter().map(|id| id.to_string()).collect(),
+                                        },
+                                    ))
+                                    .await;
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                                warn!("threads_retired receiver lagged; skipping missed retirements");
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                                listen_for_retirements = false;
+                            }
+                        }
                     }
                     created = thread_created_rx.recv(), if listen_for_threads && !ready_to_exit => {
                         match created {
