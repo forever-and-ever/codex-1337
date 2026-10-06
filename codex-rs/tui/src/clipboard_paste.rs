@@ -191,7 +191,8 @@ fn try_wsl_clipboard_fallback(
         let Ok((w, h)) = image::image_dimensions(&mapped_path) else {
             return Err(error.clone());
         };
-        let png = std::fs::read(&mapped_path).map_err(|e| PasteImageError::IoError(e.to_string()))?;
+        let png =
+            std::fs::read(&mapped_path).map_err(|e| PasteImageError::IoError(e.to_string()))?;
         let path = persist_clipboard_png(codex_home, &png)?;
         Ok((
             path,

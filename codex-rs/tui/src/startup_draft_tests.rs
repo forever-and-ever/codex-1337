@@ -74,15 +74,14 @@ async fn startup_draft_mouse_selection() {
     use ratatui::style::Modifier;
 
     let mut pump = quiet_startup_test_pump();
-    pump.bottom_pane.set_composer_text(
-        "draft while loading".into(),
-        Vec::new(),
-        Vec::new(),
-    );
+    pump.bottom_pane
+        .set_composer_text("draft while loading".into(), Vec::new(), Vec::new());
     let mut tui = crate::tui::test_support::make_test_tui().unwrap();
     tui.set_owned_screen(/*owned*/ true).unwrap();
     pump.handle_event(&mut tui, TuiEvent::Draw).unwrap();
-    let area = Rect::new(/*x*/ 0, /*y*/ 0, /*width*/ 80, /*height*/ 24);
+    let area = Rect::new(
+        /*x*/ 0, /*y*/ 0, /*width*/ 80, /*height*/ 24,
+    );
     let (x, y) = super::layout::OwnedStartupLayout::new(&pump)
         .cursor_pos(area)
         .unwrap();
@@ -106,7 +105,10 @@ async fn startup_draft_mouse_selection() {
     let rows = buffer
         .content
         .chunks(usize::from(area.width))
-        .filter(|row| row.iter().any(|cell| cell.modifier.contains(Modifier::REVERSED)))
+        .filter(|row| {
+            row.iter()
+                .any(|cell| cell.modifier.contains(Modifier::REVERSED))
+        })
         .map(|row| {
             row.iter()
                 .map(|cell| {

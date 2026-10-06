@@ -1675,7 +1675,7 @@ impl ChatComposer {
 
     pub(crate) fn set_parent_owned_input(&mut self, input: ParentOwnedInput) {
         (self.blocks_direct_input, self.child_text_input_enabled) = match input {
-            ParentOwnedInput::Watch => (true, false),
+            ParentOwnedInput::Watch => (true, self.child_text_input_enabled),
             ParentOwnedInput::ChildText => (true, true),
         };
     }

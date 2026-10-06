@@ -185,10 +185,11 @@ impl StartupDraftPump {
                         return Ok(());
                     }
                     if mouse.kind == MouseEventKind::Up(MouseButton::Left) {
-                        let _ = self.bottom_pane.copy_composer_selection(
-                            &TuiEvent::Mouse(mouse),
-                            |text| tui.publish_primary_selection(text),
-                        );
+                        let _ = self
+                            .bottom_pane
+                            .copy_composer_selection(&TuiEvent::Mouse(mouse), |text| {
+                                tui.publish_primary_selection(text)
+                            });
                     }
                 }
             }
