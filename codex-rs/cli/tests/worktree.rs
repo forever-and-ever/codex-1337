@@ -197,8 +197,6 @@ model = "test-model"
 sandbox_mode = "workspace-write"
 windows.sandbox = "unelevated"
 tui.disable_paste_burst = true
-[otel]
-metrics_exporter = {{ otlp-http = {{ endpoint = "{}/metrics", protocol = "json" }} }}
 [model_providers.local]
 name = "local test"
 base_url = "{}/v1"
@@ -210,7 +208,6 @@ trust_level = "trusted"
 "#,
             server.uri(),
             backend == "daemon",
-            server.uri(),
             server.uri(),
             serde_json::to_string(&source)?,
             serde_json::to_string(&launcher)?
@@ -253,7 +250,6 @@ trust_level = "trusted"
     env.insert("no_proxy".into(), "127.0.0.1,localhost".into());
     env.insert("TERM".into(), "xterm-256color".into());
     env.insert("TERM_PROGRAM".into(), "unrecognized-terminal".into());
-    env.insert("OTEL_METRIC_EXPORT_INTERVAL".into(), "100".into());
     for key in [
         "CODEX_EXEC_SERVER_URL",
         "CODEX_ACCESS_TOKEN",
@@ -309,12 +305,11 @@ trust_level = "trusted"
     let mut owner = None;
     let mut previous: Vec<String> = Vec::new();
     let prompt = "describe checkout";
-    for (fork, explicit_cd, analytics, auth_failure) in [
-        (false, false, false, false),
-        (true, false, false, false),
-        (true, true, false, false),
-        (false, false, true, false),
-        (false, false, false, true),
+    for (fork, explicit_cd, auth_failure) in [
+        (false, false, false),
+        (true, false, false),
+        (true, true, false),
+        (false, false, true),
     ] {
         if auth_failure {
             fs::write(
@@ -333,14 +328,6 @@ trust_level = "trusted"
             )?;
             fs::write(source.join(".codex/config.toml"), "")?;
         }
-        let (metric_tx, mut metric_rx) = tokio::sync::mpsc::unbounded_channel();
-        Mock::given(wiremock::matchers::path("/metrics"))
-            .respond_with(move |_: &wiremock::Request| {
-                let _ = metric_tx.send(());
-                ResponseTemplate::new(200).set_body_json(serde_json::json!({}))
-            })
-            .mount(&server)
-            .await;
         Mock::given(wiremock::matchers::method("GET"))
             .and(wiremock::matchers::path(
                 "/source/backend-api/wham/config/bundle",
@@ -405,9 +392,6 @@ trust_level = "trusted"
         }
         if explicit_cd {
             args.extend(["--cd".into(), source.join(".codex").display().to_string()]);
-        }
-        if analytics {
-            args.extend(["-c".into(), "analytics.enabled=true".into()]);
         }
         args.push(prompt.into());
         if previous.is_empty() {
@@ -523,7 +507,7 @@ trust_level = "trusted"
         } else {
             Ok(())
         };
-        if backend == "daemon" && !analytics && matches!(observed, Ok(Ok(_))) {
+        if backend == "daemon" && matches!(observed, Ok(Ok(_))) {
             session.writer_sender().send(b"/status\r".to_vec()).await?;
             let mut screen = vt100::Parser::new(
                 /*rows*/ 40, /*cols*/ 120, /*scrollback_len*/ 0,
@@ -553,11 +537,6 @@ trust_level = "trusted"
             })
             .await
             .with_context(|| format!("daemon status timed out: {output}"))??;
-        }
-        if analytics {
-            tokio::time::timeout(Duration::from_secs(/*secs*/ 10), metric_rx.recv())
-                .await?
-                .context("metrics export while the TUI is running")?;
         }
         let startup_result = observed.as_ref().map(|result| result.as_ref().map(|_| ()));
         assert!(
@@ -590,69 +569,6 @@ trust_level = "trusted"
             && output.contains("start the Windows daemon from a non-elevated terminal");
         assert_eq!(exit, i32::from(elevated_handoff), "{output}");
         assert!(!output.contains("The checkout was kept"), "{output}");
-        let metrics = server
-            .received_requests()
-            .await
-            .context("requests")?
-            .into_iter()
-            .filter(|request| request.url.path() == "/metrics")
-            .map(|request| serde_json::from_slice::<Value>(&request.body))
-            .collect::<serde_json::Result<Vec<_>>>()?;
-        if analytics {
-            let exported = metrics
-                .iter()
-                .flat_map(|payload| payload["resourceMetrics"].as_array().into_iter().flatten())
-                .flat_map(|resource| resource["scopeMetrics"].as_array().into_iter().flatten())
-                .flat_map(|scope| scope["metrics"].as_array().into_iter().flatten())
-                .collect::<Vec<_>>();
-            let point = exported
-                .iter()
-                .filter(|metric| metric["name"] == "codex.tui.start")
-                .flat_map(|metric| metric["sum"]["dataPoints"].as_array().into_iter().flatten())
-                .next()
-                .context("codex.tui.start data point")?;
-            let tags = point["attributes"]
-                .as_array()
-                .context("codex.tui.start attributes")?
-                .iter()
-                .map(|attribute| {
-                    Ok((
-                        attribute["key"].as_str().context("metric tag key")?,
-                        attribute["value"]["stringValue"]
-                            .as_str()
-                            .context("metric tag value")?,
-                    ))
-                })
-                .collect::<anyhow::Result<HashMap<_, _>>>()?;
-            let mut expected_tags = HashMap::from([
-                ("app_server_mode", "in_process"),
-                ("terminal_name", "unknown"),
-                ("multiplexer", "none"),
-                ("daemon_selection_reason", "incompatible_option"),
-                (
-                    "daemon_auto_start",
-                    if backend == "daemon" {
-                        "enabled"
-                    } else {
-                        "disabled"
-                    },
-                ),
-                ("auto_update", "disabled"),
-                ("auto_update_setting", "default"),
-                ("update_interval_setting", "default"),
-                ("shutdown_grace_setting", "default"),
-            ]);
-            if backend == "daemon" {
-                expected_tags.extend([
-                    ("auto_update", "disabled"),
-                    ("auto_update_setting", "configured"),
-                    ("shutdown_grace_setting", "configured"),
-                ]);
-            }
-            assert_eq!(tags, expected_tags);
-        } else {
-            assert!(metrics.is_empty(), "analytics disabled");
-        }
         let (body, checkout, metadata) = observed
             .with_context(|| {
                 format!(

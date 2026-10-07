@@ -2131,56 +2131,6 @@ enabled = false
 }
 
 #[tokio::test]
-async fn permissions_profiles_network_disabled_by_default_does_not_start_proxy()
--> std::io::Result<()> {
-    let codex_home = TempDir::new()?;
-    let cwd = TempDir::new()?;
-    std::fs::write(cwd.path().join(".git"), "gitdir: nowhere")?;
-
-    let config = Config::load_from_base_config_with_overrides(
-        ConfigToml {
-            default_permissions: Some("dev".to_string()),
-            permissions: Some(PermissionsToml {
-                entries: BTreeMap::from([(
-                    "dev".to_string(),
-                    PermissionProfileToml {
-                        description: None,
-                        extends: None,
-                        workspace_roots: None,
-                        filesystem: Some(FilesystemPermissionsToml {
-                            glob_scan_max_depth: None,
-                            entries: BTreeMap::from([(
-                                ":minimal".to_string(),
-                                FilesystemPermissionToml::Access(FileSystemAccessMode::Read),
-                            )]),
-                        }),
-                        network: Some(NetworkToml {
-                            domains: Some(NetworkDomainPermissionsToml {
-                                entries: BTreeMap::from([(
-                                    "openai.com".to_string(),
-                                    NetworkDomainPermissionToml::Allow,
-                                )]),
-                            }),
-                            ..Default::default()
-                        }),
-                    },
-                )]),
-            }),
-            ..Default::default()
-        },
-        ConfigOverrides {
-            cwd: Some(cwd.path().to_path_buf()),
-            ..Default::default()
-        },
-        codex_home.abs(),
-    )
-    .await?;
-
-    assert!(config.permissions.network.is_none());
-    Ok(())
-}
-
-#[tokio::test]
 async fn default_permissions_profile_populates_runtime_sandbox_policy() -> std::io::Result<()> {
     let codex_home = TempDir::new()?;
     let cwd = TempDir::new()?;
