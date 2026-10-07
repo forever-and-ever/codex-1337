@@ -358,6 +358,7 @@ export type { NetworkPolicyAmendment } from "./NetworkPolicyAmendment";
 export type { NetworkPolicyRuleAction } from "./NetworkPolicyRuleAction";
 export type { NetworkRequirements } from "./NetworkRequirements";
 export type { NetworkUnixSocketPermission } from "./NetworkUnixSocketPermission";
+export type { NewThreadAccountParams } from "./NewThreadAccountParams";
 export type { NewThreadModelDefaults } from "./NewThreadModelDefaults";
 export type { NonSteerableTurnKind } from "./NonSteerableTurnKind";
 export type { OverriddenMetadata } from "./OverriddenMetadata";

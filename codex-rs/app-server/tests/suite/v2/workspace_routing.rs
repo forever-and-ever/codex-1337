@@ -62,6 +62,7 @@ async fn start(home: &TempDir) -> Result<TestAppServer> {
 async fn read(server: &mut TestAppServer) -> Result<Value> {
     let request = server
         .send_get_account_request(GetAccountParams {
+            new_thread: None,
             thread_id: None,
             refresh_token: false,
         })
@@ -221,6 +222,7 @@ async fn stable_clients_do_not_treat_failed_workspace_discovery_as_unrestricted(
     .await??;
     let request = server
         .send_get_account_request(GetAccountParams {
+            new_thread: None,
             thread_id: None,
             refresh_token: false,
         })
@@ -316,6 +318,7 @@ async fn unavailable_or_malformed_discovery_never_returns_unrestricted_success()
         let mut server = start(&home).await?;
         let request = server
             .send_get_account_request(GetAccountParams {
+                new_thread: None,
                 thread_id: None,
                 refresh_token: false,
             })
@@ -431,6 +434,7 @@ async fn failed_workspace_requirements_do_not_fall_back_to_startup_config() -> R
     assert_eq!(notification.params.unwrap()["success"], false);
     let request = server
         .send_get_account_request(GetAccountParams {
+            new_thread: None,
             thread_id: None,
             refresh_token: false,
         })

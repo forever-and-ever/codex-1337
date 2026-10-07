@@ -1841,7 +1841,7 @@ impl MessageProcessor {
             }
             ClientRequest::GetAccount { params, .. } => {
                 self.account_processor
-                    .for_thread(params.thread_id.as_deref())
+                    .for_account_read(&params)
                     .await?
                     .get_account(params)
                     .await

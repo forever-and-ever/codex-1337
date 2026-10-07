@@ -196,6 +196,7 @@ async fn personal_access_token_without_email_supports_auth_status_and_account_re
 
     let request_id = mcp
         .send_get_account_request(GetAccountParams {
+            new_thread: None,
             thread_id: None,
             refresh_token: false,
         })

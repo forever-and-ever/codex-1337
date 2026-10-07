@@ -4,7 +4,7 @@
 import type { Account } from "./Account";
 
 export type GetAccountResponse = {/**
- * Saved conversation binding; null for an unscoped global-account read.
+ * Saved conversation or fresh-root binding; null for an unscoped global-account read.
  */
 accountId: string | null, account: Account | null, /**
  * Stored nickname or legacy ChatGPT alias; display-only, never a routing selector.

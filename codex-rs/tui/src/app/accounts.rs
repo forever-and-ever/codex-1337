@@ -177,6 +177,7 @@ impl App {
                             uuid::Uuid::new_v4()
                         )),
                         params: codex_app_server_protocol::GetAccountParams {
+                            new_thread: None,
                             thread_id: Some(thread_id.to_string()),
                             refresh_token: false,
                         },

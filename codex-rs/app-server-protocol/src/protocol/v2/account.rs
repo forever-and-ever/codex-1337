@@ -10,6 +10,7 @@ use codex_protocol::protocol::RateLimitReachedType as CoreRateLimitReachedType;
 use codex_protocol::protocol::RateLimitSnapshot as CoreRateLimitSnapshot;
 use codex_protocol::protocol::RateLimitWindow as CoreRateLimitWindow;
 use codex_protocol::protocol::SpendControlLimitSnapshot as CoreSpendControlLimitSnapshot;
+use codex_utils_path_uri::LegacyAppPathString;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -576,6 +577,10 @@ pub struct GetAccountParams {
     /// Read the conversation's account instead of the global login.
     #[ts(optional = nullable)]
     pub thread_id: Option<String>,
+    /// Read a fresh root conversation's account instead of the global login.
+    /// Cannot be combined with `threadId`.
+    #[ts(optional = nullable)]
+    pub new_thread: Option<NewThreadAccountParams>,
     /// When `true`, requests a proactive token refresh before returning.
     ///
     /// In managed auth mode this triggers the normal refresh-token flow. In
@@ -585,11 +590,26 @@ pub struct GetAccountParams {
     pub refresh_token: bool,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct NewThreadAccountParams {
+    /// Provider override, as in `thread/start`; omission uses the server default.
+    #[ts(optional = nullable)]
+    pub model_provider: Option<String>,
+    /// Absolute working directory used to resolve the new conversation's configuration.
+    #[ts(optional = nullable)]
+    pub cwd: Option<LegacyAppPathString>,
+    /// Configuration overrides, as in `thread/start`.
+    #[ts(optional = nullable)]
+    pub config: Option<HashMap<String, serde_json::Value>>,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS, ExperimentalApi)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct GetAccountResponse {
-    /// Saved conversation binding; null for an unscoped global-account read.
+    /// Saved conversation or fresh-root binding; null for an unscoped global-account read.
     pub account_id: Option<String>,
     pub account: Option<Account>,
     /// Stored nickname or legacy ChatGPT alias; display-only, never a routing selector.

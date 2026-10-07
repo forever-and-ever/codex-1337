@@ -2544,6 +2544,7 @@ mod tests {
         let account_read = ClientRequest::GetAccount {
             request_id: request_id(),
             params: v2::GetAccountParams {
+                new_thread: None,
                 thread_id: None,
                 refresh_token: false,
             },
@@ -3543,6 +3544,7 @@ mod tests {
         let request = ClientRequest::GetAccount {
             request_id: RequestId::Integer(6),
             params: v2::GetAccountParams {
+                new_thread: None,
                 thread_id: None,
                 refresh_token: false,
             },
@@ -3551,13 +3553,14 @@ mod tests {
             json!({
                 "method": "account/read",
                 "id": 6,
-                "params": { "threadId": null }
+                "params": { "threadId": null, "newThread": null }
             }),
             serde_json::to_value(&request)?,
         );
         let request = ClientRequest::GetAccount {
             request_id: RequestId::Integer(7),
             params: v2::GetAccountParams {
+                new_thread: None,
                 thread_id: None,
                 refresh_token: true,
             },
@@ -3568,6 +3571,7 @@ mod tests {
                 "id": 7,
                 "params": {
                     "threadId": null,
+                    "newThread": null,
                     "refreshToken": true
                 }
             }),

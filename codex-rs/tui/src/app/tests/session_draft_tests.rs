@@ -2,8 +2,14 @@ use super::session_lifecycle_requests::recorded_params;
 use super::session_lifecycle_requests::start_recording_remote_app_server;
 use super::*;
 use crate::chatwidget::SessionDraft;
+use crate::status::StatusAccountDisplay;
 use clap::Parser;
+use codex_app_server_client::AppServerEvent;
+use codex_app_server_protocol::AccountUpdatedNotification;
+use codex_app_server_protocol::AuthMode;
 use codex_app_server_protocol::ModelProviderOption;
+use codex_app_server_protocol::ServerNotification;
+use codex_protocol::account::PlanType;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
@@ -15,6 +21,28 @@ async fn session_draft_switches_provider_without_creating_threads_or_losing_inpu
     let (mut server, requests, proxy) = start_recording_remote_app_server(&app.config).await?;
     let mut tui = crate::tui::test_support::make_test_tui()?;
     app.chat_widget.session_draft = Some(SessionDraft::Editing);
+    // Routing discovery can publish the global login after draft bootstrap has
+    // already resolved a different account for the new conversation.
+    let selected_account = Some(StatusAccountDisplay::ChatGpt {
+        email: Some("main@example.com".into()),
+        plan: Some("Pro".into()),
+    });
+    app.chat_widget
+        .set_status_account_display(selected_account.clone());
+    app.handle_app_server_event(
+        &server,
+        AppServerEvent::ServerNotification(Box::new(ServerNotification::AccountUpdated(
+            AccountUpdatedNotification {
+                auth_mode: Some(AuthMode::Chatgpt),
+                plan_type: Some(PlanType::Plus),
+            },
+        ))),
+    )
+    .await;
+    assert_eq!(
+        app.chat_widget.status_account_display(),
+        selected_account.as_ref()
+    );
     app.chat_widget.insert_str("/account");
     app.chat_widget
         .handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));

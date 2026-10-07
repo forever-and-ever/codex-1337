@@ -134,7 +134,7 @@
       ]
     },
     "accountId": {
-      "description": "Saved conversation binding; null for an unscoped global-account read.",
+      "description": "Saved conversation or fresh-root binding; null for an unscoped global-account read.",
       "type": [
         "string",
         "null"

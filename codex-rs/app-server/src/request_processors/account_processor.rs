@@ -7,6 +7,7 @@ use codex_app_server_protocol::DesktopOnboardingEntrypoint;
 use codex_app_server_protocol::GetAccountRateLimitsParams;
 use codex_login::LoginOnboardingEntrypoint;
 
+mod account_scope;
 mod claude_login;
 mod gateway_oauth;
 mod quota;

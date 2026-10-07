@@ -287,6 +287,20 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
         .with_env_overrides(&[("OPENAI_API_KEY", None)])
         .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
         .await?;
+    Mock::given(method("GET"))
+        .and(path("/api/codex/accounts/check"))
+        .respond_with(|request: &wiremock::Request| {
+            let account_id = request.headers["chatgpt-account-id"]
+                .to_str()
+                .expect("workspace account header");
+            ResponseTemplate::new(200).set_body_json(json!({"accounts": [{
+                "id": account_id,
+                "workspace_backend_origin": "https://chatgpt.com",
+                "account_routing_override": "NO_CONSTRAINT"
+            }]}))
+        })
+        .mount(&server)
+        .await;
     let mut threads = Vec::new();
     for _ in 0..2 {
         let request = app
@@ -317,6 +331,44 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
             default_saved: true
         }
     );
+    // A draft previews the saved default while login detection still sees the
+    // global active login. Neither read may retarget either source of credentials.
+    for (new_thread, id, account_id) in [
+        (None, "alice", None),
+        (
+            Some(codex_app_server_protocol::NewThreadAccountParams {
+                model_provider: None,
+                cwd: None,
+                config: None,
+            }),
+            "bob",
+            Some("bob:bob".to_owned()),
+        ),
+        (None, "alice", None),
+    ] {
+        let request = app
+            .send_get_account_request(GetAccountParams {
+                new_thread,
+                thread_id: None,
+                refresh_token: false,
+            })
+            .await?;
+        let response: GetAccountResponse =
+            timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
+        assert_eq!(
+            response,
+            GetAccountResponse {
+                account_id,
+                display_name: None,
+                account: Some(Account::Chatgpt {
+                    email: Some(format!("{id}@example.com")),
+                    plan_type: AccountPlanType::Pro,
+                }),
+                requires_openai_auth: true,
+                workspace_routing: expected_workspace_routing(id),
+            }
+        );
+    }
     let request = app
         .send_thread_start_request_with_auto_env(ThreadStartParams::default())
         .await?;
@@ -335,20 +387,6 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
             .chatgpt_user_id("alice"),
         AuthCredentialsStoreMode::File,
     )?;
-    Mock::given(method("GET"))
-        .and(path("/api/codex/accounts/check"))
-        .respond_with(|request: &wiremock::Request| {
-            let account_id = request.headers["chatgpt-account-id"]
-                .to_str()
-                .expect("workspace account header");
-            ResponseTemplate::new(200).set_body_json(json!({"accounts": [{
-                "id": account_id,
-                "workspace_backend_origin": "https://chatgpt.com",
-                "account_routing_override": "NO_CONSTRAINT"
-            }]}))
-        })
-        .mount(&server)
-        .await;
     for (thread, expected) in threads.iter().zip(["bob:bob", "alice:alice", "bob:bob"]) {
         let request = app
             .send_request("thread/account/list", Some(json!({"threadId": thread})))
@@ -360,6 +398,7 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
 
         let request = app
             .send_get_account_request(GetAccountParams {
+                new_thread: None,
                 thread_id: Some(thread.clone()),
                 refresh_token: false,
             })

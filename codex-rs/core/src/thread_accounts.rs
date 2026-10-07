@@ -9,6 +9,21 @@ pub(crate) enum AccountInheritance {
     OtherProvider,
 }
 
+impl ThreadManager {
+    /// Resolves a fresh root conversation's account without creating a conversation.
+    pub async fn auth_for_new_thread(&self, config: &Config) -> CodexResult<Arc<AuthManager>> {
+        Ok(account_auth_for_provider(
+            config,
+            &ProviderAccountSelections::default(),
+            &self.state.auth_manager,
+            /*persisted*/ None,
+            &AccountInheritance::None,
+        )
+        .await?
+        .unwrap_or_else(|| self.state.auth_manager.clone()))
+    }
+}
+
 impl ThreadManagerState {
     pub(super) async fn account_for_spawn(
         &self,

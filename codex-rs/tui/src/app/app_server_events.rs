@@ -350,6 +350,10 @@ impl App {
                 self.agents_overview.usage.clear();
                 self.agents_overview.pending_usage = None;
                 self.agents_overview.usage_disabled = false;
+                // Global-login notifications cannot replace a draft's fresh-root identity.
+                if self.chat_widget.session_draft.is_some() {
+                    return;
+                }
                 if let Some(thread_id) = self.current_displayed_thread_id()
                     && !self
                         .account_ui

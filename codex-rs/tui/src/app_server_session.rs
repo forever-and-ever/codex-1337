@@ -3,6 +3,7 @@
 //! This module owns the typed JSON-RPC calls needed by the TUI and keeps
 //! request/response plumbing out of `App` and `ChatWidget`.
 
+mod account;
 mod external_agent_config;
 pub(crate) mod fs;
 mod history;
@@ -486,16 +487,14 @@ impl AppServerSession {
 
     pub(crate) async fn bootstrap(&mut self, config: &Config) -> Result<AppServerBootstrap> {
         let started_at = Instant::now();
-        let account = self.read_account().await?;
+        let account = self.read_new_thread_account(config).await?;
         let mut bootstrap = self.bootstrap_with_account(config, account).await?;
         bootstrap.duration = started_at.elapsed();
         Ok(bootstrap)
     }
 
-    /// Bootstraps using a previously read account.
-    ///
-    /// Callers must discard a prefetched account after authentication, server, or provider changes.
-    pub(crate) async fn bootstrap_with_account(
+    /// Bootstraps using the server-resolved fresh-root account.
+    async fn bootstrap_with_account(
         &mut self,
         config: &Config,
         account: GetAccountResponse,
@@ -635,14 +634,15 @@ impl AppServerSession {
 
     /// Fetches the current account info without refreshing the auth token.
     ///
-    /// Used by both `bootstrap` (to populate the initial UI) and `get_login_status`
-    /// (to check auth mode without the overhead of a full bootstrap).
+    /// Used for login detection; draft identity is resolved separately through
+    /// the same account selection as a fresh root conversation.
     pub(crate) async fn read_account(&mut self) -> Result<GetAccountResponse> {
         let account_request_id = self.next_request_id();
         self.client
             .request_typed(ClientRequest::GetAccount {
                 request_id: account_request_id,
                 params: GetAccountParams {
+                    new_thread: None,
                     thread_id: None,
                     refresh_token: false,
                 },
@@ -2551,7 +2551,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn bootstrap_reuses_prefetched_account_without_another_account_read() -> Result<()> {
+    async fn bootstrap_projects_resolved_account_without_another_account_read() -> Result<()> {
         let codex_home = tempfile::tempdir()?;
         let config = build_config(&codex_home).await;
         let mut app_server = crate::start_embedded_app_server_for_picker(&config).await?;
@@ -2592,7 +2592,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn bootstrap_reads_account_when_no_prefetched_account_is_available() -> Result<()> {
+    async fn bootstrap_reads_new_thread_account() -> Result<()> {
         let codex_home = tempfile::tempdir()?;
         let config = build_config(&codex_home).await;
         let mut app_server = crate::start_embedded_app_server_for_picker(&config).await?;

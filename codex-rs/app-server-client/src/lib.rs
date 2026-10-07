@@ -1444,6 +1444,7 @@ mod tests {
                 .request_typed(ClientRequest::GetAccount {
                     request_id: RequestId::Integer(1),
                     params: codex_app_server_protocol::GetAccountParams {
+                        new_thread: None,
                         thread_id: None,
                         refresh_token: false,
                     },
@@ -1508,6 +1509,7 @@ mod tests {
             .request_typed(ClientRequest::GetAccount {
                 request_id: RequestId::Integer(1),
                 params: codex_app_server_protocol::GetAccountParams {
+                    new_thread: None,
                     thread_id: None,
                     refresh_token: false,
                 },
@@ -1552,6 +1554,7 @@ mod tests {
             .request_typed(ClientRequest::GetAccount {
                 request_id: RequestId::Integer(1),
                 params: codex_app_server_protocol::GetAccountParams {
+                    new_thread: None,
                     thread_id: None,
                     refresh_token: false,
                 },
@@ -1691,6 +1694,7 @@ mod tests {
                 .request_typed::<GetAccountResponse>(ClientRequest::GetAccount {
                     request_id: RequestId::Integer(1),
                     params: codex_app_server_protocol::GetAccountParams {
+                        new_thread: None,
                         thread_id: None,
                         refresh_token: false,
                     },
@@ -1707,6 +1711,7 @@ mod tests {
             .request_typed::<GetAccountResponse>(ClientRequest::GetAccount {
                 request_id: RequestId::Integer(1),
                 params: codex_app_server_protocol::GetAccountParams {
+                    new_thread: None,
                     thread_id: None,
                     refresh_token: false,
                 },

@@ -1236,7 +1236,7 @@ async fn run_ratatui_app(
     #[cfg(target_os = "windows")]
     let mut trust_decision_was_made = false;
     let startup_model_provider = initial_config.model_provider_id.clone();
-    let (login_status, mut startup_account) = if workload_identity_selected {
+    let (login_status, login_account) = if workload_identity_selected {
         (LoginStatus::AuthMode(AuthMode::Chatgpt), None)
     } else {
         let Some(active_app_server) = app_server.as_mut() else {
@@ -1258,7 +1258,7 @@ async fn run_ratatui_app(
         }
     };
     // Workload identity bypasses interactive login; every other provider uses account/read.
-    let requires_openai_auth = startup_account
+    let requires_openai_auth = login_account
         .as_ref()
         .is_some_and(|account| account.requires_openai_auth);
     let should_show_onboarding = should_show_onboarding(
@@ -1272,8 +1272,6 @@ async fn run_ratatui_app(
             shutdown_startup_session(app_server.take(), &mut terminal_restore_guard).await;
             return Err(err.into());
         }
-        // Authentication can change while any interactive onboarding screen is open.
-        startup_account = None;
         let show_login_screen = should_show_login_screen(login_status, requires_openai_auth);
         let onboarding_result = run_onboarding_app(
             OnboardingScreenArgs {
@@ -1639,11 +1637,7 @@ async fn run_ratatui_app(
     .await
     {
         Ok(ResolveCwdOutcome::Continue(cwd)) => cwd,
-        Ok(ResolveCwdOutcome::ContinueAfterPrompt(cwd)) => {
-            // Another daemon client can change authentication while this prompt is open.
-            startup_account = None;
-            Some(cwd)
-        }
+        Ok(ResolveCwdOutcome::ContinueAfterPrompt(cwd)) => Some(cwd),
         Ok(ResolveCwdOutcome::Exit) => {
             terminal_restore_guard.restore_silently();
             session_log::log_session_end();
@@ -1720,13 +1714,12 @@ async fn run_ratatui_app(
     }
     startup_draft.apply_config(&config);
 
-    if config.model_provider_id != startup_model_provider {
-        startup_account = None;
-        if matches!(&app_server_target, AppServerTarget::Embedded) {
-            // App-server providers are fixed at startup, so onboarding cannot
-            // reuse a server initialized before it persisted another provider.
-            shutdown_app_server_if_present(app_server.take()).await;
-        }
+    if config.model_provider_id != startup_model_provider
+        && matches!(&app_server_target, AppServerTarget::Embedded)
+    {
+        // App-server providers are fixed at startup, so onboarding cannot
+        // reuse a server initialized before it persisted another provider.
+        shutdown_app_server_if_present(app_server.take()).await;
     }
     let mut app_server = match app_server {
         Some(app_server) => app_server,
@@ -1751,8 +1744,6 @@ async fn run_ratatui_app(
             .await
         {
             Ok(Ok(app_server)) => {
-                // A picker can replace the server; account reads belong to their original session.
-                startup_account = None;
                 AppServerSession::new(app_server, app_server_target.thread_params_mode())
                     .with_remote_cwd_override(remote_cwd_override.clone())
             }
@@ -1802,7 +1793,7 @@ async fn run_ratatui_app(
             Some(&mut startup_draft),
         )
         .await?;
-        startup_account = None;
+
         if consent.directory_trust_persisted && !uses_remote_workspace {
             let previous_provider = config.model_provider_id.clone();
             config = load_config_or_exit_with_fallback_cwd(
@@ -1941,12 +1932,7 @@ async fn run_ratatui_app(
     let startup_prefetch = startup_draft
         .run_until(&mut tui, async {
             tokio::join!(
-                async {
-                    match startup_account {
-                        Some(account) => app_server.bootstrap_with_account(&config, account).await,
-                        None => app_server.bootstrap(&config).await,
-                    }
-                },
+                app_server.bootstrap(&config),
                 load_startup_hooks_review_entry(hooks_request_handle, hooks_cwd),
             )
         })
@@ -2073,7 +2059,7 @@ pub enum LoginStatus {
     NotAuthenticated,
 }
 
-/// Reads the account once to determine login status and preserve the response for bootstrap.
+/// Reads the global login for onboarding, not the account a conversation will select.
 async fn get_login_status(
     app_server: &mut AppServerSession,
 ) -> color_eyre::Result<(LoginStatus, GetAccountResponse)> {

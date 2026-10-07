@@ -1928,26 +1928,6 @@ class GatewayOAuthStatus(Enum):
     failed = "failed"
 
 
-class GetAccountParams(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    refresh_token: Annotated[
-        bool | None,
-        Field(
-            alias="refreshToken",
-            description="When `true`, requests a proactive token refresh before returning.\n\nIn managed auth mode this triggers the normal refresh-token flow. In external auth mode this flag is ignored. Clients should refresh tokens themselves and call `account/login/start` with `chatgptAuthTokens`.",
-        ),
-    ] = None
-    thread_id: Annotated[
-        str | None,
-        Field(
-            alias="threadId",
-            description="Read the conversation's account instead of the global login.",
-        ),
-    ] = None
-
-
 class GetAccountRateLimitsParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -3100,6 +3080,28 @@ class NetworkRequirements(BaseModel):
 class NetworkUnixSocketPermission(Enum):
     allow = "allow"
     deny = "deny"
+
+
+class NewThreadAccountParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    config: Annotated[
+        dict[str, Any] | None, Field(description="Configuration overrides, as in `thread/start`.")
+    ] = None
+    cwd: Annotated[
+        LegacyAppPathString | None,
+        Field(
+            description="Absolute working directory used to resolve the new conversation's configuration."
+        ),
+    ] = None
+    model_provider: Annotated[
+        str | None,
+        Field(
+            alias="modelProvider",
+            description="Provider override, as in `thread/start`; omission uses the server default.",
+        ),
+    ] = None
 
 
 class NonSteerableTurnKind(Enum):
@@ -8124,15 +8126,6 @@ class ConfigRequirementsReadRequest(BaseModel):
     params: None = None
 
 
-class AccountReadRequest(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    id: RequestId
-    method: Annotated[Literal["account/read"], Field(title="Account/readRequestMethod")]
-    params: GetAccountParams
-
-
 class FuzzyFileSearchRequest(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -8782,6 +8775,33 @@ class GatewayOAuthReadResponse(BaseModel):
     ] = None
 
 
+class GetAccountParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    new_thread: Annotated[
+        NewThreadAccountParams | None,
+        Field(
+            alias="newThread",
+            description="Read a fresh root conversation's account instead of the global login. Cannot be combined with `threadId`.",
+        ),
+    ] = None
+    refresh_token: Annotated[
+        bool | None,
+        Field(
+            alias="refreshToken",
+            description="When `true`, requests a proactive token refresh before returning.\n\nIn managed auth mode this triggers the normal refresh-token flow. In external auth mode this flag is ignored. Clients should refresh tokens themselves and call `account/login/start` with `chatgptAuthTokens`.",
+        ),
+    ] = None
+    thread_id: Annotated[
+        str | None,
+        Field(
+            alias="threadId",
+            description="Read the conversation's account instead of the global login.",
+        ),
+    ] = None
+
+
 class GetAccountResponse(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -8791,7 +8811,7 @@ class GetAccountResponse(BaseModel):
         str | None,
         Field(
             alias="accountId",
-            description="Saved conversation binding; null for an unscoped global-account read.",
+            description="Saved conversation or fresh-root binding; null for an unscoped global-account read.",
         ),
     ] = None
     display_name: Annotated[
@@ -11382,6 +11402,15 @@ class ConfigValueWriteRequest(BaseModel):
     id: RequestId
     method: Annotated[Literal["config/value/write"], Field(title="Config/value/writeRequestMethod")]
     params: ConfigValueWriteParams
+
+
+class AccountReadRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[Literal["account/read"], Field(title="Account/readRequestMethod")]
+    params: GetAccountParams
 
 
 class ComputerUseConfig(BaseModel):

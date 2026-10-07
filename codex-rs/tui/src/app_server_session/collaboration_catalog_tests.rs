@@ -29,6 +29,14 @@ async fn collaboration_catalog_is_optional_and_refetched_on_bootstrap() -> Resul
             .build()
             .await?;
         config.model = Some("task-model".into());
+        let expected_account_params = json!({
+            "threadId": null,
+            "newThread": {
+                "modelProvider": null,
+                "cwd": null,
+                "config": config_request_overrides_from_config(&config)
+            }
+        });
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let endpoint = crate::resolve_remote_addr(&format!("ws://{}", listener.local_addr()?))?;
         let server = tokio::spawn(async move {
@@ -42,6 +50,9 @@ async fn collaboration_catalog_is_optional_and_refetched_on_bootstrap() -> Resul
                 let mut reply = match request.method.as_str() {
                     "initialize" => json!({"result": {"userAgent": "catalog-test/1.0.0"}}),
                     "account/read" => {
+                        // A remote draft previews the server's default, not the
+                        // local provider or the server's globally active login.
+                        assert_eq!(request.params.as_ref(), Some(&expected_account_params));
                         json!({"result": {"account": null, "requiresOpenaiAuth": false}})
                     }
                     "model/list" => json!({"result": {"data": [], "nextCursor": null}}),
