@@ -1,4 +1,14 @@
 #![recursion_limit = "256"]
+#![allow(
+    hidden_glob_reexports,
+    reason = "this root's own imports of library items need no public re-export"
+)]
+
+extern crate self as codex_cli;
+
+#[path = "lib.rs"]
+mod commands;
+pub use commands::*;
 
 use clap::Args;
 use clap::CommandFactory;
@@ -1009,7 +1019,7 @@ fn stage_str(stage: Stage) -> &'static str {
     }
 }
 
-fn main() -> anyhow::Result<()> {
+pub fn main() -> anyhow::Result<()> {
     codex_build_info::initialize!();
     let remote_control_disabled = codex_app_server::take_remote_control_disabled_env();
     arg0_dispatch_or_else(move |arg0_paths: Arg0DispatchPaths| async move {

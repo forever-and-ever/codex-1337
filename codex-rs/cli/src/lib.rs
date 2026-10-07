@@ -1,6 +1,6 @@
 mod claude_login;
 pub(crate) mod debug_sandbox;
-mod exit_status;
+pub(crate) mod exit_status;
 pub(crate) mod login;
 mod quota;
 

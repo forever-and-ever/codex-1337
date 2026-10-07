@@ -5,18 +5,21 @@ edition.workspace = true
 license.workspace = true
 build = "build.rs"
 default-run = "codex"
+autobins = false
 
 [[bin]]
 name = "codex"
-path = "src/main.rs"
+path = "src/bin/codex.rs"
 
 [[bin]]
 name = "logs_client"
 path = "src/bin/logs_client.rs"
 
+# The command tree is the library root, so its code generation overlaps with
+# its dependencies' instead of waiting for all of them; `codex` only links.
 [lib]
 name = "codex_cli"
-path = "src/lib.rs"
+path = "src/main.rs"
 doctest = false
 
 [lints]
