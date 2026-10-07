@@ -64,7 +64,7 @@ async fn root_metadata_symlinks_cannot_reopen_approved_denials() {
         command.args(
             "--ro-bind /usr /usr --ro-bind /etc /etc --proc /proc --dev /dev".split_whitespace(),
         );
-        command.args("--dir /run --dir /.agents --symlink /private-link /.git".split_whitespace());
+        command.args("--dir /run --dir /run/user --perms 0700 --dir /run/user/0 --dir /.agents --symlink /private-link /.git".split_whitespace());
         command.args(["--symlink", codex_target, "/.codex"]);
         command.args(["--symlink", "/private/reopened", "/private-link"]);
         for path in ["/bin", "/sbin", "/lib", "/lib64"] {

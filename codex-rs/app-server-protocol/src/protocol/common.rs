@@ -3333,6 +3333,7 @@ mod tests {
                         "originator": null,
                         "source": "exec",
                         "canAcceptDirectInput": null,
+                        "canAcceptTextInput": null,
                         "threadSource": null,
                         "agentNickname": null,
                         "agentRole": null,

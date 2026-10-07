@@ -5483,10 +5483,36 @@ async fn refreshed_catalog_follows_reused_client_without_mutating_old_bindings()
     )
     .await?;
     let manager = Arc::get_mut(&mut previous).expect("unshared manager");
-    manager.insert_test_client(
-        "docs",
-        create_ready_async_managed_client(vec![create_test_tool("docs", "unrelated")]).await,
+    let unrelated_tool = create_test_tool("docs", "unrelated");
+    let client = Arc::new(
+        RmcpClient::new_in_process_client(Arc::new(RefreshTestTransportFactory {
+            tool: unrelated_tool.tool.clone(),
+            list_started: None,
+            release_list: None,
+            next_cursor: None,
+            list_requests: Arc::new(AtomicUsize::new(0)),
+        }))
+        .await?,
     );
+    client
+        .initialize(
+            InitializeRequestParams::new(
+                ClientCapabilities::default(),
+                Implementation::new("codex-test", "0.0.0-test"),
+            )
+            .with_protocol_version(ProtocolVersion::V_2025_06_18),
+            Some(Duration::from_secs(5)),
+            Box::new(|_, _| async { Err(anyhow!("unexpected elicitation")) }.boxed()),
+        )
+        .await?;
+    let mut unrelated_client = create_ready_async_managed_client(vec![unrelated_tool]).await;
+    let mut managed_client = unrelated_client.client().await?;
+    managed_client.client = client;
+    unrelated_client.client =
+        futures::future::ready::<Result<ManagedClient, StartupOutcomeError>>(Ok(managed_client))
+            .boxed()
+            .shared();
+    manager.insert_test_client("docs", unrelated_client);
     let connection = Arc::get_mut(
         &mut manager
             .servers

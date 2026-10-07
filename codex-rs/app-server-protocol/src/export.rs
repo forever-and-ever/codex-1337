@@ -2257,6 +2257,7 @@ mod tests {
                         || matches!(
                             stem,
                             "CollabAgentRef"
+                                | "JiraAction"
                                 | "CollabAgentStatusEntry"
                                 | "CollabAgentSpawnEndEvent"
                                 | "CollabAgentInteractionEndEvent"
