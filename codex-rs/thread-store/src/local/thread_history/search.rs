@@ -339,6 +339,7 @@ fn searchable_text(item: &ThreadItem) -> Option<Cow<'_, str>> {
         | ThreadItem::Plan { .. }
         | ThreadItem::Reasoning { .. }
         | ThreadItem::Thought { .. }
+        | ThreadItem::Preamble { .. }
         | ThreadItem::CommandExecution { .. }
         | ThreadItem::FileChange { .. }
         | ThreadItem::McpToolCall { .. }

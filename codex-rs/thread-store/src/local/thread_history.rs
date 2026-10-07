@@ -531,6 +531,7 @@ WHERE thread_id = ?
             | ThreadItem::Plan { .. }
             | ThreadItem::Reasoning { .. }
             | ThreadItem::Thought { .. }
+            | ThreadItem::Preamble { .. }
             | ThreadItem::CommandExecution { .. }
             | ThreadItem::FileChange { .. }
             | ThreadItem::McpToolCall { .. }

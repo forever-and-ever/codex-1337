@@ -66,6 +66,7 @@ async fn native_context_limit_records_usage_without_accepting_a_checkpoint() {
         serde_json::to_value(completed).unwrap(),
         serde_json::to_value(RawResponseCompletedEvent {
             thought: None,
+            preamble: None,
             response_id: "msg_context_limit".into(),
             token_usage: Some(usage.clone()),
             usage_metadata: Some(metadata.clone()),
@@ -110,6 +111,7 @@ async fn native_context_limit_records_usage_without_accepting_a_checkpoint() {
         serde_json::to_value(completed).unwrap(),
         serde_json::to_value(RawResponseCompletedEvent {
             thought: None,
+            preamble: None,
             response_id: "msg_output_limit".into(),
             token_usage: Some(usage.clone()),
             usage_metadata: Some(output_limit_metadata),

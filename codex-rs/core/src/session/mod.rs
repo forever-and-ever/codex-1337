@@ -254,6 +254,7 @@ mod mcp_runtime;
 mod model_catalog;
 pub(crate) mod multi_agents;
 mod plugin_selection;
+pub(crate) mod preamble;
 mod realtime_history;
 mod retained_context;
 mod review;
@@ -4833,6 +4834,7 @@ impl Session {
         usage: Option<&TokenUsage>,
         usage_metadata: Option<&ResponseUsageMetadata>,
         thought: Option<codex_protocol::ResponseThought>,
+        preamble: Option<codex_protocol::PreambleCensus>,
     ) {
         self.send_event(
             turn_context,
@@ -4841,6 +4843,7 @@ impl Session {
                 token_usage: usage.cloned(),
                 usage_metadata: usage_metadata.cloned(),
                 thought,
+                preamble,
             }),
         )
         .await;

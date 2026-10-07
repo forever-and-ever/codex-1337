@@ -3671,6 +3671,22 @@ class PluginsMigration(BaseModel):
     plugin_names: Annotated[list[str], Field(alias="pluginNames")]
 
 
+class PreambleChange(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    added: list[str]
+    previous_tokens: Annotated[int, Field(alias="previousTokens", ge=0)]
+    removed: list[str]
+    resized: list[str]
+
+
+class PreambleSection(Enum):
+    instructions = "instructions"
+    tools = "tools"
+    context = "context"
+
+
 class ProcessExitedNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -9402,6 +9418,18 @@ class PluginShareUpdateTargetsResponse(BaseModel):
     principals: list[PluginSharePrincipal]
 
 
+class PreamblePart(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    group: Annotated[
+        str | None, Field(description="The MCP server or tool namespace a tool belongs to.")
+    ] = None
+    label: str
+    section: PreambleSection
+    tokens: Annotated[int, Field(ge=0)]
+
+
 class ProcessOutputDeltaNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -10500,6 +10528,26 @@ class AgentMessageThreadItem(BaseModel):
     questions: list[AsyncUserInputQuestion] | None = None
     text: str
     type: Annotated[Literal["agentMessage"], Field(title="AgentMessageThreadItemType")]
+
+
+class PreambleThreadItem(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    change: PreambleChange | None = None
+    completed_at_ms: Annotated[int, Field(alias="completedAtMs")]
+    id: str
+    parts: list[PreamblePart]
+    reported_input_tokens: Annotated[
+        int | None,
+        Field(
+            alias="reportedInputTokens",
+            description="Provider-reported input of the whole request, conversation included.",
+            ge=0,
+        ),
+    ] = None
+    response_id: Annotated[str, Field(alias="responseId")]
+    type: Annotated[Literal["preamble"], Field(title="PreambleThreadItemType")]
 
 
 class CommandExecutionThreadItem(BaseModel):
@@ -13595,6 +13643,7 @@ class ThreadItem(
         | PlanThreadItem
         | ReasoningThreadItem
         | ThoughtThreadItem
+        | PreambleThreadItem
         | CommandExecutionThreadItem
         | FileChangeThreadItem
         | McpToolCallThreadItem
@@ -13624,6 +13673,7 @@ class ThreadItem(
         | PlanThreadItem
         | ReasoningThreadItem
         | ThoughtThreadItem
+        | PreambleThreadItem
         | CommandExecutionThreadItem
         | FileChangeThreadItem
         | McpToolCallThreadItem

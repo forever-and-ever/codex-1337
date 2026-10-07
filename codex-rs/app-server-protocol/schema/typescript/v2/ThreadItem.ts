@@ -5,6 +5,8 @@ import type { FunctionCallOutputBody } from "../FunctionCallOutputBody";
 import type { ImageGenerationItem } from "../ImageGenerationItem";
 import type { LegacyAppPathString } from "../LegacyAppPathString";
 import type { MessagePhase } from "../MessagePhase";
+import type { PreambleChange } from "../PreambleChange";
+import type { PreamblePart } from "../PreamblePart";
 import type { ReasoningEffort } from "../ReasoningEffort";
 import type { SleepItem } from "../SleepItem";
 import type { WebSearchItem } from "../WebSearchItem";
@@ -41,7 +43,11 @@ callId: string | null, name: string, namespace: string | null, output: FunctionC
 /**
  * Approximate text tokens after truncation, measured with local o200k_base.
  */
-tokens: number | null, } | { "type": "plan", id: string, text: string, } | { "type": "reasoning", id: string, summary: Array<string>, content: Array<string>, } | { "type": "thought", id: string, responseId: string, completedAtMs: number, summary: Array<string>, content: Array<string>, reportedReasoningTokens: number | null, } | { "type": "commandExecution", id: string,
+tokens: number | null, } | { "type": "plan", id: string, text: string, } | { "type": "reasoning", id: string, summary: Array<string>, content: Array<string>, } | { "type": "thought", id: string, responseId: string, completedAtMs: number, summary: Array<string>, content: Array<string>, reportedReasoningTokens: number | null, } | { "type": "preamble", id: string, responseId: string, completedAtMs: number, parts: Array<PreamblePart>, change: PreambleChange | null,
+/**
+ * Provider-reported input of the whole request, conversation included.
+ */
+reportedInputTokens: number | null, } | { "type": "commandExecution", id: string,
 /**
  * Trusted first-party plugin id when this command resolves to one plugin script.
  */

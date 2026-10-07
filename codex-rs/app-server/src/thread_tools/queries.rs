@@ -331,6 +331,7 @@ pub(super) async fn wait(
                                     | ThreadItem::Plan { .. }
                                     | ThreadItem::Reasoning { .. }
                                     | ThreadItem::Thought { .. }
+                                    | ThreadItem::Preamble { .. }
                                     | ThreadItem::SubAgentActivity { .. }
                                     | ThreadItem::ImageView { .. }
                                     | ThreadItem::EnteredReviewMode { .. }

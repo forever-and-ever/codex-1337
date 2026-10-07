@@ -73,6 +73,7 @@ pub use remote_control::*;
 pub use review::*;
 pub use rollout::*;
 pub use shared::*;
+pub use thought::ResponseProjection;
 pub use thread::*;
 pub use thread_attachment::*;
 pub use thread_data::*;

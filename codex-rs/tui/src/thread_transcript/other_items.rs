@@ -166,6 +166,7 @@ pub(super) fn cells(
         | ThreadItem::Plan { .. }
         | ThreadItem::Reasoning { .. }
         | ThreadItem::Thought { .. }
+        | ThreadItem::Preamble { .. }
         | ThreadItem::CommandExecution { .. }
         | ThreadItem::McpToolCall { .. }
         | ThreadItem::Sleep(_) => {}

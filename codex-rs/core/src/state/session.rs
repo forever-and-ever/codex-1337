@@ -97,6 +97,8 @@ pub(crate) struct SessionState {
     pub(crate) startup_prewarm: Option<SessionStartupPrewarmHandle>,
     /// Retained after completion so later turns do not repeat speculative captures.
     pub(crate) shell_snapshot_prewarm: Option<AbortOnDropHandle<()>>,
+    /// The standing model context the runtime last censused.
+    pub(crate) preamble_mark: Option<crate::session::preamble::PreambleMark>,
     pub(crate) current_time_reminder: CurrentTimeReminderState,
     pub(crate) active_connector_selection: HashSet<String>,
     pub(crate) pending_session_start_sources: VecDeque<codex_hooks::SessionStartSource>,
@@ -138,6 +140,7 @@ impl SessionState {
             shutting_down: false,
             startup_prewarm: None,
             shell_snapshot_prewarm: None,
+            preamble_mark: None,
             current_time_reminder: CurrentTimeReminderState::default(),
             active_connector_selection: HashSet::new(),
             pending_session_start_sources: VecDeque::new(),

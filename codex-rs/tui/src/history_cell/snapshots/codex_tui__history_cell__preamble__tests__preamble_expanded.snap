@@ -1,0 +1,21 @@
+---
+source: tui/src/history_cell/preamble_tests.rs
+expression: text
+---
+• Preamble · changed +1,774
+      7,412  Instructions
+      7,412    Base instructions
+      6,068  Tools
+      3,532    exec (2)
+      3,120      guidance and grammar
+        412      apply_patch
+      2,515    mcp__depot (2)
+      1,904      sem_read_search
+        611      lsp_symbols
+         21    web_search
+     11,294  Context
+      9,734    AGENTS.md /repo
+      1,560    environment_context
+     31,208  reported input of the whole request, conversation included
+  +mcp__depot/lsp_symbols
+  ~Base instructions

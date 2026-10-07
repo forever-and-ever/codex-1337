@@ -3013,6 +3013,9 @@ async fn try_run_sampling_request(
                     &mut assistant_message_stream_parsers,
                 )
                 .await;
+                let preamble = sess
+                    .take_preamble_census(&turn_context.sub_id, prompt)
+                    .await;
                 sess.record_observed_response_completed(
                     &turn_context,
                     &response_id,
@@ -3024,6 +3027,7 @@ async fn try_run_sampling_request(
                             .as_ref()
                             .and_then(|metadata| metadata.reported_reasoning_tokens),
                     ),
+                    preamble,
                 )
                 .await;
                 let budget_result = sess

@@ -474,6 +474,7 @@ WHERE thread_id = ?
                     reported_reasoning_tokens: Some(*count),
                     ..Default::default()
                 }),
+                preamble: None,
                 thought: Some(ResponseThought {
                     turn_id: "turn-2".to_string(),
                     completed_at_ms: *completed_at_ms,

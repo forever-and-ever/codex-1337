@@ -373,6 +373,9 @@ impl ChatWidget {
                     history_cell::ThoughtTextVisibility::from(&self.config),
                 ))
             }
+            item @ ThreadItem::Preamble { .. } => {
+                self.add_to_history(history_cell::PreambleCell::from_item(item));
+            }
             ThreadItem::Reasoning {
                 id,
                 summary,

@@ -890,6 +890,77 @@
         }
       ]
     },
+    "PreambleChange": {
+      "description": "Parts named `group/label`, or `label` when ungrouped.",
+      "properties": {
+        "added": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "previousTokens": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "removed": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "resized": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "added",
+        "previousTokens",
+        "removed",
+        "resized"
+      ],
+      "type": "object"
+    },
+    "PreamblePart": {
+      "properties": {
+        "group": {
+          "description": "The MCP server or tool namespace a tool belongs to.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "label": {
+          "type": "string"
+        },
+        "section": {
+          "$ref": "#/definitions/PreambleSection"
+        },
+        "tokens": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "label",
+        "section",
+        "tokens"
+      ],
+      "type": "object"
+    },
+    "PreambleSection": {
+      "enum": [
+        "instructions",
+        "tools",
+        "context"
+      ],
+      "type": "string"
+    },
     "ReasoningEffort": {
       "description": "A non-empty reasoning effort value advertised by the model.",
       "minLength": 1,
@@ -1310,6 +1381,62 @@
             "type"
           ],
           "title": "ThoughtThreadItem",
+          "type": "object"
+        },
+        {
+          "description": "Human-only census of the standing model context one request carried, not model input.",
+          "properties": {
+            "change": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/PreambleChange"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "completedAtMs": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "id": {
+              "type": "string"
+            },
+            "parts": {
+              "items": {
+                "$ref": "#/definitions/PreamblePart"
+              },
+              "type": "array"
+            },
+            "reportedInputTokens": {
+              "description": "Provider-reported input of the whole request, conversation included.",
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "responseId": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "preamble"
+              ],
+              "title": "PreambleThreadItemType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "completedAtMs",
+            "id",
+            "parts",
+            "responseId",
+            "type"
+          ],
+          "title": "PreambleThreadItem",
           "type": "object"
         },
         {

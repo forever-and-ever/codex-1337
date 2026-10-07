@@ -317,6 +317,20 @@ pub enum ThreadItem {
         #[ts(type = "number | null")]
         reported_reasoning_tokens: Option<u64>,
     },
+    /// Human-only census of the standing model context one request carried, not model input.
+    #[serde(rename_all = "camelCase")]
+    #[ts(rename_all = "camelCase")]
+    Preamble {
+        id: String,
+        response_id: String,
+        #[ts(type = "number")]
+        completed_at_ms: i64,
+        parts: Vec<codex_protocol::PreamblePart>,
+        change: Option<codex_protocol::PreambleChange>,
+        /// Provider-reported input of the whole request, conversation included.
+        #[ts(type = "number | null")]
+        reported_input_tokens: Option<u64>,
+    },
     #[serde(rename_all = "camelCase")]
     #[ts(rename_all = "camelCase")]
     CommandExecution {
@@ -494,6 +508,7 @@ impl ThreadItem {
             | ThreadItem::Plan { id, .. }
             | ThreadItem::Reasoning { id, .. }
             | ThreadItem::Thought { id, .. }
+            | ThreadItem::Preamble { id, .. }
             | ThreadItem::CommandExecution { id, .. }
             | ThreadItem::FileChange { id, .. }
             | ThreadItem::McpToolCall { id, .. }

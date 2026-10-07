@@ -357,6 +357,9 @@ fn item_to_cells(
         item @ ThreadItem::Thought { .. } => cells.push(Arc::new(
             crate::history_cell::ThoughtCell::from_item(item, cwd.as_path(), thought_visibility),
         )),
+        item @ ThreadItem::Preamble { .. } => {
+            cells.push(Arc::new(crate::history_cell::PreambleCell::from_item(item)));
+        }
         ThreadItem::UserMessage {
             id,
             client_id,

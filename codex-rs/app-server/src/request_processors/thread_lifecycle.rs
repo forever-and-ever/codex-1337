@@ -344,7 +344,7 @@ pub(super) async fn ensure_listener_task_running(
                     {
                         continue;
                     }
-                    if matches!(&event.msg, EventMsg::RawResponseCompleted(event) if event.thought.is_none())
+                    if matches!(&event.msg, EventMsg::RawResponseCompleted(event) if event.thought.is_none() && event.preamble.is_none())
                         && !raw_events_enabled
                     {
                         continue;

@@ -2105,6 +2105,7 @@ async fn spawn_agent_fork_sanitizes_inherited_compaction_metadata() {
             Some(&child_usage),
             /*usage_metadata*/ None,
             /*thought*/ None,
+            /*preamble*/ None,
         )
         .await;
     child_thread

@@ -1,6 +1,7 @@
 pub mod account;
 mod agent_path;
 pub mod auth;
+mod preamble;
 mod response_item_id;
 mod response_usage;
 mod sanitized_git_url;
@@ -10,6 +11,10 @@ mod tool_name;
 pub use agent_path::AgentPath;
 pub use permission_profile_intersection::PermissionIntersectionError;
 pub use permission_profile_intersection::intersect_effective_permission_profiles;
+pub use preamble::PreambleCensus;
+pub use preamble::PreambleChange;
+pub use preamble::PreamblePart;
+pub use preamble::PreambleSection;
 pub use response_item_id::ResponseItemId;
 pub use response_usage::ResponseThought;
 pub use response_usage::ResponseUsageMetadata;
