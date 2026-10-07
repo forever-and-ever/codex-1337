@@ -624,14 +624,19 @@ strip = false
 codegen-units = 4
 
 [profile.local]
-# Installed workstation builds favor the next edit, not maximum optimization.
+# Installed workstation builds favor the next edit, not maximum optimization:
+# workspace crates, which every edit recompiles, take the cheapest optimizing level.
 inherits = "release"
-opt-level = 2
+opt-level = 1
 incremental = true
 codegen-units = 256
 lto = false
 debug = "none"
 strip = "symbols"
+
+[profile.local.package."*"]
+# Dependencies recompile only when the lockfile moves, and sccache shares them.
+opt-level = 2
 
 [profile.profiling]
 inherits = "release"
