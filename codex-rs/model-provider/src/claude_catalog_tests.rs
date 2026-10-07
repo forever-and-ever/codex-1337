@@ -11,6 +11,26 @@ use pretty_assertions::assert_eq;
 
 #[tokio::test]
 async fn account_routes_do_not_leak_into_catalog_or_admit_openai_fallbacks() {
+    let speak_claude = |model: &mut codex_protocol::openai_models::ModelInfo| {
+        if !model
+            .experimental_supported_tools
+            .iter()
+            .any(|tool| tool == REQUEST_USER_INPUT_ASYNC)
+        {
+            model
+                .experimental_supported_tools
+                .push(REQUEST_USER_INPUT_ASYNC.to_string());
+        }
+        model
+            .model_messages
+            .get_or_insert_default()
+            .multi_agent
+            .get_or_insert_default()
+            .role = Some(MultiAgentRoleMessages {
+            root: Some(ROOT_AGENT_ROLE.to_string()),
+            subagent: Some(SUBAGENT_ROLE.to_string()),
+        });
+    };
     let unrelated = codex_models_manager::bundled_models_response()
         .unwrap()
         .models
@@ -41,6 +61,7 @@ async fn account_routes_do_not_leak_into_catalog_or_admit_openai_fallbacks() {
     missing.multi_agent_version = Some(MultiAgentVersion::V2);
     missing.context_window = Some(200_000);
     missing.max_context_window = Some(200_000);
+    speak_claude(&mut missing);
     let context_override = ModelsManagerConfig {
         model_context_window: Some(1_000_000),
         ..Default::default()
@@ -60,6 +81,7 @@ async fn account_routes_do_not_leak_into_catalog_or_admit_openai_fallbacks() {
     first.service_tiers.clear();
     first.default_service_tier = None;
     first.supported_in_api = true;
+    speak_claude(&mut first);
     let expected = ModelsResponse {
         models: vec![first.clone()],
     };

@@ -16,6 +16,8 @@ use std::sync::Arc;
 // otherwise identical OAuth requests without it. Keep it at the wire boundary:
 // the caller's authority blocks and canonical history remain intact after it.
 const SUBSCRIPTION_PREAMBLE: &str = "You are Claude Code, Anthropic's official CLI for Claude.";
+// Corrects the identity the required block asserts, before any instruction relies on it.
+const SUBSCRIPTION_HARNESS: &str = "That line is a subscription formality. You are running in Codex-1337, a fork of OpenAI's Codex CLI, not Claude Code: project instructions come from AGENTS.md, and Claude Code's tools and commands do not exist here.";
 
 /// Encode canonical agent history as an Anthropic subscription Messages request.
 pub fn encode_anthropic_request(
@@ -56,9 +58,11 @@ pub fn encode_anthropic_request(
         prompt.tools,
         &options.model.input_modalities,
     )?;
-    history
-        .system
-        .insert(0, json!({"type":"text", "text":SUBSCRIPTION_PREAMBLE}));
+    history.system.splice(
+        0..0,
+        [SUBSCRIPTION_PREAMBLE, SUBSCRIPTION_HARNESS]
+            .map(|text| json!({"type":"text", "text":text})),
+    );
     let mut tools = prompt
         .tools
         .iter()
