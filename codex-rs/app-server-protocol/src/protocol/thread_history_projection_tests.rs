@@ -91,7 +91,6 @@ fn thought_completion_is_self_contained_and_response_scoped() {
                 reported_reasoning_tokens: Some(1300),
                 ..Default::default()
             }),
-            preamble: None,
             thought: Some(codex_protocol::ResponseThought {
                 turn_id: "turn-1".into(),
                 completed_at_ms: 12345,

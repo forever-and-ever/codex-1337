@@ -108,6 +108,7 @@ pub fn should_persist_event_msg(ev: &EventMsg, history_mode: ThreadHistoryMode) 
                     TurnItem::CodeMode(_)
                         | TurnItem::FunctionCallOutput(_)
                         | TurnItem::ToolOutputTokens(_)
+                        | TurnItem::Preamble(_)
                         | TurnItem::Plan(_)
                         | TurnItem::Extension(ExtensionItem::Sleep(_))
                 )
@@ -124,9 +125,7 @@ pub fn should_persist_event_msg(ev: &EventMsg, history_mode: ThreadHistoryMode) 
         | EventMsg::TurnStarted(_)
         | EventMsg::TurnComplete(_)
         | EventMsg::ThreadSettingsApplied(_) => true,
-        EventMsg::RawResponseCompleted(event) => {
-            event.thought.is_some() || event.preamble.is_some()
-        }
+        EventMsg::RawResponseCompleted(event) => event.thought.is_some(),
 
         // Only persist these legacy events when the thread's history mode is Legacy.
         // New, paginated rollouts persist ItemCompleted events with TurnItems.

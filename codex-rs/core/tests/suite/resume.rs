@@ -3,8 +3,10 @@ use codex_core::TurnInputRequest;
 use codex_history::InitialHistory;
 use codex_history::ResumedHistory;
 use codex_protocol::config_types::WindowsSandboxLevel;
+use codex_protocol::items::TurnItem;
 use codex_protocol::mcp::ClientMcpExtensions;
 use codex_protocol::protocol::EventMsg;
+use codex_protocol::protocol::ItemCompletedEvent;
 use codex_protocol::protocol::ThreadHistoryMode;
 use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::user_input::ByteRange;
@@ -165,12 +167,17 @@ async fn resume_includes_initial_messages_from_rollout_events() -> Result<()> {
             EventMsg::TurnStarted(started),
             EventMsg::UserMessage(first_user),
             EventMsg::AgentMessage(assistant_message),
+            EventMsg::ItemCompleted(ItemCompletedEvent {
+                item: TurnItem::Preamble(preamble),
+                ..
+            }),
             EventMsg::TokenCount(_),
             EventMsg::TurnComplete(completed),
         ] => {
             assert_eq!(first_user.message, "Record some messages");
             assert_eq!(first_user.text_elements, text_elements);
             assert_eq!(assistant_message.message, "Completed first turn");
+            assert_eq!(preamble.response_id, "resp-initial");
             assert_eq!(completed.turn_id, started.turn_id);
             assert_eq!(
                 completed.last_agent_message.as_deref(),
@@ -248,6 +255,11 @@ async fn resume_includes_initial_messages_from_reasoning_events() -> Result<()> 
             EventMsg::AgentReasoning(reasoning),
             EventMsg::AgentReasoningRawContent(raw),
             EventMsg::AgentMessage(assistant_message),
+            // The census is an item of its own: each rollout line projects at most one item.
+            EventMsg::ItemCompleted(ItemCompletedEvent {
+                item: TurnItem::Preamble(preamble),
+                ..
+            }),
             EventMsg::RawResponseCompleted(_),
             EventMsg::TokenCount(_),
             EventMsg::TurnComplete(completed),
@@ -256,6 +268,7 @@ async fn resume_includes_initial_messages_from_reasoning_events() -> Result<()> 
             assert_eq!(reasoning.text, "Summarized step");
             assert_eq!(raw.text, "raw detail");
             assert_eq!(assistant_message.message, "Completed reasoning turn");
+            assert_eq!(preamble.response_id, "resp-initial");
             assert_eq!(completed.turn_id, started.turn_id);
             assert_eq!(
                 completed.last_agent_message.as_deref(),

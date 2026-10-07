@@ -421,7 +421,7 @@ impl ThreadHistoryBuilder {
             EventMsg::ItemStarted(payload) => self.handle_item_started(payload),
             EventMsg::ItemCompleted(payload) => self.handle_item_completed(payload),
             EventMsg::RawResponseCompleted(payload) => {
-                for projection in ThreadItem::from_response_completed(payload) {
+                if let Some(projection) = ThreadItem::from_response_completed(payload) {
                     if self.current_turn.is_none()
                         && !self.turns.iter().any(|turn| turn.id == projection.turn_id)
                     {
@@ -661,6 +661,7 @@ impl ThreadHistoryBuilder {
             | codex_protocol::items::TurnItem::HookPrompt(_)
             | codex_protocol::items::TurnItem::FunctionCallOutput(_)
             | codex_protocol::items::TurnItem::ToolOutputTokens(_)
+            | codex_protocol::items::TurnItem::Preamble(_)
             | codex_protocol::items::TurnItem::CommandExecution(_)
             | codex_protocol::items::TurnItem::DynamicToolCall(_)
             | codex_protocol::items::TurnItem::CollabAgentToolCall(_)

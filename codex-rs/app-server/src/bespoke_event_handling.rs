@@ -1183,7 +1183,7 @@ pub(crate) async fn apply_bespoke_event_handling(
             outgoing.send_server_notification(notification).await;
         }
         EventMsg::RawResponseCompleted(raw_response_completed_event) => {
-            for projection in codex_app_server_protocol::ThreadItem::from_response_completed(
+            if let Some(projection) = codex_app_server_protocol::ThreadItem::from_response_completed(
                 &raw_response_completed_event,
             ) {
                 outgoing

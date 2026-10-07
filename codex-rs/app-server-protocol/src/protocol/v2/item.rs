@@ -965,6 +965,14 @@ impl From<CoreTurnItem> for ThreadItem {
                 call_id: output.call_id,
                 tokens: output.tokens,
             },
+            CoreTurnItem::Preamble(preamble) => ThreadItem::Preamble {
+                id: preamble.id,
+                response_id: preamble.response_id,
+                completed_at_ms: preamble.completed_at_ms,
+                parts: preamble.parts,
+                change: preamble.change,
+                reported_input_tokens: preamble.reported_input_tokens,
+            },
             CoreTurnItem::Plan(plan) => ThreadItem::Plan {
                 id: plan.id,
                 text: plan.text,

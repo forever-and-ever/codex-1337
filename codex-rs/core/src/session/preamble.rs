@@ -4,12 +4,16 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use codex_protocol::PreambleCensus;
 use codex_protocol::PreambleChange;
+use codex_protocol::PreambleItem;
 use codex_protocol::PreamblePart;
 use codex_protocol::PreambleSection;
+use codex_protocol::items::TurnItem;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
+use codex_protocol::protocol::EventMsg;
+use codex_protocol::protocol::ItemCompletedEvent;
+use codex_protocol::protocol::TokenUsage;
 use codex_tools::FreeformTool;
 use codex_tools::ResponsesApiNamespaceTool;
 use codex_tools::ToolSpec;
@@ -17,6 +21,7 @@ use codex_utils_output_truncation::count_o200k_text;
 use serde::Serialize;
 
 use super::Session;
+use super::TurnContext;
 use crate::client_common::Prompt;
 use crate::context::is_contextual_user_fragment;
 
@@ -28,18 +33,22 @@ pub(crate) struct PreambleMark {
 }
 
 impl Session {
-    /// Censuses `prompt` when its instructions or tools differ from the latest census.
-    pub(super) async fn take_preamble_census(
+    /// Completes the Preamble of `response_id` when the instructions or tools its `prompt`
+    /// carried differ from the latest census. The Preamble is an item of its own, never part
+    /// of the response's completion record: each rollout line projects at most one item.
+    pub(super) async fn record_preamble(
         &self,
-        turn_id: &str,
+        turn_context: &TurnContext,
         prompt: &Prompt,
-    ) -> Option<PreambleCensus> {
+        response_id: &str,
+        usage: Option<&TokenUsage>,
+    ) {
         let previous = match &self.state.lock().await.preamble_mark {
             Some(mark)
                 if mark.instructions == prompt.base_instructions.text
                     && (Arc::ptr_eq(&mark.tools, &prompt.tools) || mark.tools == prompt.tools) =>
             {
-                return None;
+                return;
             }
             mark => mark.as_ref().map(|mark| mark.parts.clone()),
         };
@@ -50,12 +59,27 @@ impl Session {
             tools: Arc::clone(&prompt.tools),
             parts: parts.clone(),
         });
-        Some(PreambleCensus {
-            turn_id: turn_id.to_string(),
-            completed_at_ms: crate::turn_timing::now_unix_timestamp_ms(),
+        let turn_id = &turn_context.sub_id;
+        let completed_at_ms = crate::turn_timing::now_unix_timestamp_ms();
+        let preamble = PreambleItem {
+            id: format!("preamble:{turn_id}:{response_id}"),
+            response_id: response_id.to_string(),
+            completed_at_ms,
             parts,
             change,
-        })
+            reported_input_tokens: usage.and_then(|usage| u64::try_from(usage.input_tokens).ok()),
+        };
+        self.send_event(
+            turn_context,
+            EventMsg::ItemCompleted(ItemCompletedEvent {
+                thread_id: self.thread_id,
+                turn_id: turn_id.clone(),
+                item: TurnItem::Preamble(preamble),
+                started_at_ms: None,
+                completed_at_ms,
+            }),
+        )
+        .await;
     }
 }
 

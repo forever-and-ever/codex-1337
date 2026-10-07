@@ -1943,9 +1943,6 @@ pub struct RawResponseCompletedEvent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub thought: Option<crate::response_usage::ResponseThought>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub preamble: Option<crate::PreambleCensus>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, TS, JsonSchema)]

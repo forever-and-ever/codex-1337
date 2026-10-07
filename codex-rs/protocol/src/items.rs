@@ -48,6 +48,8 @@ pub enum TurnItem {
     UserMessage(UserMessageItem),
     FunctionCallOutput(FunctionCallOutputItem),
     ToolOutputTokens(ToolOutputTokensItem),
+    /// Human-only census of the standing context one request carried; never model input.
+    Preamble(crate::PreambleItem),
     HookPrompt(HookPromptItem),
     AgentMessage(AgentMessageItem),
     Plan(PlanItem),
@@ -770,6 +772,7 @@ impl TurnItem {
             TurnItem::UserMessage(item) => item.id.clone(),
             TurnItem::FunctionCallOutput(item) => item.id.clone(),
             TurnItem::ToolOutputTokens(item) => item.id.clone(),
+            TurnItem::Preamble(item) => item.id.clone(),
             TurnItem::HookPrompt(item) => item.id.clone(),
             TurnItem::AgentMessage(item) => item.id.clone(),
             TurnItem::Plan(item) => item.id.clone(),

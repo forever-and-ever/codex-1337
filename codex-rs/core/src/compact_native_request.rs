@@ -180,7 +180,6 @@ async fn collect(
                     token_usage.as_ref(),
                     usage_metadata.as_ref(),
                     /*thought*/ None,
-                    /*preamble*/ None,
                 )
                 .await;
                 // Compaction is charged inference too. Record it at the completion boundary,

@@ -52,7 +52,6 @@ async fn unusable_completions_record_usage_and_name_their_rung_escalation() {
             },
             RawResponseCompletedEvent {
                 thought: None,
-                preamble: None,
                 response_id: format!("msg_{stop_reason}"),
                 token_usage: Some(usage.clone()),
                 usage_metadata: Some(metadata),
