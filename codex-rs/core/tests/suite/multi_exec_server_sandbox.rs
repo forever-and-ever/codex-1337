@@ -53,14 +53,20 @@ pub(super) struct ExecServerProcess {
 impl ExecServerProcess {
     pub(super) async fn start() -> Result<Self> {
         let codex_home = TempDir::new()?;
-        let mut child = Command::new(codex_utils_cargo_bin::cargo_bin("codex")?)
-            .args(["exec-server", "--listen", "ws://127.0.0.1:0"])
+        // The fixture listens on an ephemeral local port, as `codex exec-server` would here.
+        let mut command = Command::new(codex_utils_cargo_bin::cargo_bin("exec-server")?);
+        command
             .env("CODEX_HOME", codex_home.path())
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
-            .kill_on_drop(true)
-            .spawn()?;
+            .kill_on_drop(true);
+        #[cfg(target_os = "linux")]
+        command.env(
+            "CODEX_TEST_LINUX_SANDBOX_EXE",
+            core_test_support::find_codex_linux_sandbox_exe()?,
+        );
+        let mut child = command.spawn()?;
         let stdout = child
             .stdout
             .take()

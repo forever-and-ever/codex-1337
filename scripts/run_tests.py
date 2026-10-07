@@ -40,6 +40,7 @@ FIXTURE_BINARIES = (
             "app_test_support",
             "codex-app-server",
             "codex-cli",
+            "codex-core",
             "codex-tui",
         ),
     ),
@@ -66,25 +67,17 @@ FIXTURE_BINARIES = (
             "core_test_support",
         ),
     ),
+    # Core-side suites take `codex-exec`, which serves the same arg0 helpers
+    # without compiling the TUI.
     (
         "codex-cli",
         "codex",
         (
             "app_test_support",
-            "codex-agent-extension",
             "codex-app-server",
             "codex-cli",
-            "codex-core",
-            "codex-exec",
-            "codex-guardian-v2",
-            "codex-history-notes-extension",
-            "codex-login",
-            "codex-mcp-extension",
-            "codex-memories-write",
-            "codex-queue-extension",
             "codex-rmcp-client",
             "codex-tui",
-            "core_test_support",
         ),
     ),
     (
@@ -313,7 +306,9 @@ def main() -> int:
         for package, binary in fixtures:
             build.extend(("-p", package, "--bin", binary))
         commands.append(build)
-    commands.append(["cargo", "nextest", "run", "--no-fail-fast", *sys.argv[1:]])
+    # nextest rejects --no-fail-fast for a build-only run.
+    fail_fast = [] if "--no-run" in sys.argv[1:] else ["--no-fail-fast"]
+    commands.append(["cargo", "nextest", "run", *fail_fast, *sys.argv[1:]])
 
     root = Path(os.environ.get("CODEX_TEST_TMP_ROOT", "/var/tmp")).resolve()
     root.mkdir(parents=True, exist_ok=True)
