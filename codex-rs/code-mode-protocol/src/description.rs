@@ -25,16 +25,14 @@ const TOOL_DISCOVERY_GUIDANCE: &str = r#"Tool discovery helpers (synchronous):
 - `ALL_TOOLS`: `{ name, description }` catalogue; exact callable names and purpose summaries, not signatures or full instructions.
 - `search_tools(query: string, options?: { namespace?: string, limit?: number, offset?: number })`: returns `{ matches: Array<{ name, description }>, truncated: boolean, next_offset: number | null }`. All case-insensitive literal query words must match a name or summary; an empty query browses. `namespace` restricts the normalized namespace or callable-name prefix (`functions` for plain tools). Limit defaults to 8, capped at 20. Continue with the same query/options and `offset: next_offset`.
 - `describe_tool(name: string, options?: { detail?: "contract" | "output" })`: defaults to full instructions, namespace guidance, input declaration, and a compact return type. Retrieve this contract when missing from context. `{detail: "output"}` returns only the detailed output type; request it when inspecting result fields. MCP contracts use the shared `CallToolResult` envelope. Other return types over 1 KiB are abbreviated; explicit output declarations retain the 16,000-byte schema limit.
-Print bounded search results, not the whole catalogue:
-```js
-text(search_tools("symbol", { namespace: "mcp__depot", limit: 5 }));
-text(describe_tool("mcp__depot__lsp_symbols"));
-```"#;
-const EXECUTION_OUTPUT_GUIDANCE: &str = r#"Execution output rules (override description templates):
+Print bounded search results, not the whole catalogue."#;
+const EXECUTION_OUTPUT_GUIDANCE: &str = r#"Execution output rules:
 - `text(value, options?: {metadata?: boolean})` and `notify(value, options?: {metadata?: boolean})` print compatible directly returned native `exec_command`/`write_stdin` objects as literal output plus necessary execution state. Nonempty dense arrays containing only such objects get ordinal headers; only default mode coalesces consecutive empty successful entries. `{metadata: true}` includes each result's metadata. JavaScript result fields are unchanged.
 - `text(result)` is compact. Strings, including `result.output` and explicit `JSON.stringify(result)`, remain literal. All other values retain generic serialization."#;
 const LEGACY_IMAGE_HELPER_DESCRIPTION: &str = r#"`image(imageUrlOrItem: string | { image_url: string; detail?: "auto" | "low" | "high" | "original" | null } | ImageContent, detail?: "auto" | "low" | "high" | "original" | null)`: Appends an image item. `image_url` should be a base64-encoded `data:` URL. To forward an MCP tool image, pass an individual `ImageContent` block from `result.content`, for example `image(result.content[0])`. MCP image blocks may request detail with `_meta: { "codex/imageDetail": "original" }`. When provided, the second `detail` argument overrides any detail embedded in the first argument."#;
 const UNIFIED_IMAGE_HELPER_DESCRIPTION: &str = r#"`image(imageUrlOrItem: string | { image_url: string } | ImageContent)`: Appends an image item. `image_url` should be a base64-encoded `data:` URL. To forward an MCP tool image, pass an individual `ImageContent` block from `result.content`, for example `image(result.content[0])`."#;
+const AUDIO_HELPER_DESCRIPTION: &str = r#"`audio(audioUrlOrItem: string | { audio_url: string } | AudioContent)`: Appends an audio item. `audio_url` should be a base64-encoded `data:` URL. To forward an MCP tool audio block, pass an individual `AudioContent` block from `result.content`, for example `audio(result.content[0])`."#;
+const GENERATED_IMAGE_HELPER_DESCRIPTION: &str = r#"`generatedImage(result: { image_url: string; output_hint?: string })`: Appends an image-generation result and its optional output hint. HTTP(S) URLs are not supported."#;
 const EXEC_DESCRIPTION_TEMPLATE: &str = r#"Run JavaScript code to orchestrate/compose tool calls
 - Evaluates the provided JavaScript code in a fresh V8 isolate as an async module.
 - All nested tools are available on the global `tools` object, for example `await tools.exec_command(...)`. Tool names are exposed as normalized JavaScript identifiers, for example `await tools.mcp__ologs__get_profile(...)`.
@@ -50,9 +48,7 @@ const EXEC_DESCRIPTION_TEMPLATE: &str = r#"Run JavaScript code to orchestrate/co
 - Global helpers:
 - `exit()`: Immediately ends the current script successfully (like an early return from the top level).
 - `text(value, options?: {metadata?: boolean})`: Appends a text item; see Execution output rules below for native execution results and generic serialization.
-- {{ image_helper }}
-- `audio(audioUrlOrItem: string | { audio_url: string } | AudioContent)`: Appends an audio item. `audio_url` should be a base64-encoded `data:` URL. To forward an MCP tool audio block, pass an individual `AudioContent` block from `result.content`, for example `audio(result.content[0])`.
-- `generatedImage(result: { image_url: string; output_hint?: string })`: Appends an image-generation result and its optional output hint. HTTP(S) URLs are not supported.
+{{ media_helpers }}
 - `store(key: string, value: any)`: stores a serializable value under a string key for later `exec` calls in the same session.
 - `load(key: string)`: returns the stored value for a string key, or `undefined` if it is missing.
 - `notify(value, options?: {metadata?: boolean})`: immediately injects an extra `custom_tool_call_output` for the current `exec` call. Values are rendered like `text(...)`.
@@ -67,81 +63,20 @@ const WAIT_DESCRIPTION_TEMPLATE: &str = r#"- Use `wait` only after `exec` return
 - `wait` returns only the new output since the last yield, or the final completion or termination result for that cell.
 - If the cell is still running, `wait` may yield again with the same `cell_id`.
 - If the cell has already finished, `wait` returns the completed result and closes the cell."#;
-// Based off of https://modelcontextprotocol.io/specification/draft/schema#calltoolresult
-const MCP_TYPESCRIPT_PREAMBLE: &str = r#"type Role = "user" | "assistant";
-type MetaObject = Record<string, unknown>;
-type Annotations = {
-  audience?: Role[];
-  priority?: number;
-  lastModified?: string;
-};
-type Icon = {
-  src: string;
-  mimeType?: string;
-  sizes?: string[];
-  theme?: "light" | "dark";
-};
-type TextResourceContents = {
-  uri: string;
-  mimeType?: string;
-  _meta?: MetaObject;
-  text: string;
-};
-type BlobResourceContents = {
-  uri: string;
-  mimeType?: string;
-  _meta?: MetaObject;
-  blob: string;
-};
-type TextContent = {
-  type: "text";
-  text: string;
-  annotations?: Annotations;
-  _meta?: MetaObject;
-};
-type ImageContent = {
-  type: "image";
-  data: string;
-  mimeType: string;
-  annotations?: Annotations;
-  _meta?: MetaObject;
-};
-type AudioContent = {
-  type: "audio";
-  data: string;
-  mimeType: string;
-  annotations?: Annotations;
-  _meta?: MetaObject;
-};
-type ResourceLink = {
-  icons?: Icon[];
-  name: string;
-  title?: string;
-  uri: string;
-  description?: string;
-  mimeType?: string;
-  annotations?: Annotations;
-  size?: number;
-  _meta?: MetaObject;
-  type: "resource_link";
-};
-type EmbeddedResource = {
-  type: "resource";
-  resource: TextResourceContents | BlobResourceContents;
-  annotations?: Annotations;
-  _meta?: MetaObject;
-};
-type ContentBlock =
-  | TextContent
-  | ImageContent
-  | AudioContent
-  | ResourceLink
-  | EmbeddedResource;
+// Abridged from https://modelcontextprotocol.io/specification/draft/schema#calltoolresult to the
+// fields a script reads; annotations, icons and resource metadata are omitted.
+const MCP_TYPESCRIPT_PREAMBLE: &str = r#"type MetaObject = Record<string, unknown>;
+type TextContent = { type: "text"; text: string; _meta?: MetaObject };
+type ImageContent = { type: "image"; data: string; mimeType: string; _meta?: MetaObject };
+type AudioContent = { type: "audio"; data: string; mimeType: string; _meta?: MetaObject };
+type ResourceLink = { type: "resource_link"; uri: string; name: string; mimeType?: string; description?: string };
+type EmbeddedResource = { type: "resource"; resource: { uri: string; mimeType?: string; text?: string; blob?: string } };
+type ContentBlock = TextContent | ImageContent | AudioContent | ResourceLink | EmbeddedResource;
 type CallToolResult<TStructured = { [key: string]: unknown }> = {
-  _meta?: MetaObject;
   content: ContentBlock[];
-  isError?: boolean;
   structuredContent?: TStructured;
+  isError?: boolean;
+  _meta?: MetaObject;
   [key: string]: unknown;
 };"#;
 
@@ -285,20 +220,50 @@ pub enum ImageDetailVisibility {
     Hidden,
 }
 
+/// The media helpers `exec` documents: what the model accepts and what the turn can produce.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MediaHelpers {
+    pub image_detail: ImageDetailVisibility,
+    /// The model accepts audio input, so what `audio()` appends reaches it.
+    pub audio: bool,
+    /// The turn can generate images, so `generatedImage()` has results to forward.
+    pub generated_image: bool,
+}
+
+impl MediaHelpers {
+    fn image_helper(self) -> &'static str {
+        match self.image_detail {
+            ImageDetailVisibility::Visible => LEGACY_IMAGE_HELPER_DESCRIPTION,
+            ImageDetailVisibility::Hidden => UNIFIED_IMAGE_HELPER_DESCRIPTION,
+        }
+    }
+
+    /// One helper bullet per supported medium, so an unsupported one is never mentioned.
+    fn render(self) -> String {
+        [
+            Some(self.image_helper()),
+            self.audio.then_some(AUDIO_HELPER_DESCRIPTION),
+            self.generated_image
+                .then_some(GENERATED_IMAGE_HELPER_DESCRIPTION),
+        ]
+        .into_iter()
+        .flatten()
+        .map(|helper| format!("- {helper}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+    }
+}
+
 pub fn build_exec_tool_description(
     enabled_tools: &[ToolDefinition],
     undeclared_tools: &[UndeclaredTool],
     namespace_descriptions: &BTreeMap<String, ToolNamespaceDescription>,
     default_exec_yield_time_ms: u64,
     code_mode_only: bool,
-    image_detail_visibility: ImageDetailVisibility,
+    media_helpers: MediaHelpers,
     messages: Option<&CodeModeToolMessages>,
 ) -> String {
     let mut sections = Vec::new();
-    let image_helper = match image_detail_visibility {
-        ImageDetailVisibility::Visible => LEGACY_IMAGE_HELPER_DESCRIPTION,
-        ImageDetailVisibility::Hidden => UNIFIED_IMAGE_HELPER_DESCRIPTION,
-    };
     let description = messages
         .and_then(|messages| messages.exec.as_ref())
         .and_then(|exec| exec.description.as_deref())
@@ -307,7 +272,8 @@ pub fn build_exec_tool_description(
             "{{ default_exec_yield_time_ms }}",
             &default_exec_yield_time_ms.to_string(),
         )
-        .replace("{{ image_helper }}", image_helper);
+        .replace("{{ media_helpers }}", &media_helpers.render())
+        .replace("{{ image_helper }}", media_helpers.image_helper());
     if !description.is_empty() {
         sections.push(description);
     }
@@ -507,6 +473,7 @@ mod description_override_tests;
 mod tests {
     use super::CodeModeToolKind;
     use super::ImageDetailVisibility;
+    use super::MediaHelpers;
     use super::ParsedExecSource;
     use super::ToolDefinition;
     use super::ToolNamespaceDescription;
@@ -521,6 +488,12 @@ mod tests {
     use serde_json::Value as JsonValue;
     use serde_json::json;
     use std::collections::BTreeMap;
+
+    const ALL_MEDIA: MediaHelpers = MediaHelpers {
+        image_detail: ImageDetailVisibility::Visible,
+        audio: true,
+        generated_image: true,
+    };
 
     fn mcp_call_tool_result_schema(structured_content_schema: JsonValue) -> JsonValue {
         json!({
@@ -780,7 +753,7 @@ mod tests {
             &BTreeMap::new(),
             crate::DEFAULT_EXEC_YIELD_TIME_MS,
             /*code_mode_only*/ true,
-            ImageDetailVisibility::Visible,
+            ALL_MEDIA,
             /*messages*/ None,
         );
         assert!(description.contains(
@@ -791,19 +764,31 @@ bar"
     }
 
     #[test]
-    fn exec_description_mentions_timeout_helpers() {
-        let description = build_exec_tool_description(
-            &[],
-            &[],
-            &BTreeMap::new(),
-            crate::DEFAULT_EXEC_YIELD_TIME_MS,
-            /*code_mode_only*/ false,
-            ImageDetailVisibility::Visible,
-            /*messages*/ None,
+    fn exec_description_mentions_only_media_helpers_the_turn_supports() {
+        let describe = |media_helpers| {
+            build_exec_tool_description(
+                &[],
+                &[],
+                &BTreeMap::new(),
+                crate::DEFAULT_EXEC_YIELD_TIME_MS,
+                /*code_mode_only*/ false,
+                media_helpers,
+                /*messages*/ None,
+            )
+        };
+        let mentions = |description: String| {
+            ["`image(", "`audio(", "`generatedImage(", "`setTimeout("]
+                .map(|helper| description.contains(helper))
+        };
+        assert_eq!(mentions(describe(ALL_MEDIA)), [true; 4]);
+        assert_eq!(
+            mentions(describe(MediaHelpers {
+                audio: false,
+                generated_image: false,
+                ..ALL_MEDIA
+            })),
+            [true, false, false, true]
         );
-        assert!(description.contains("`audio(audioUrlOrItem:"));
-        assert!(description.contains("`setTimeout(callback: () => void, delayMs?: number)`"));
-        assert!(description.contains("`clearTimeout(timeoutId?: number)`"));
     }
 
     #[test]
@@ -858,7 +843,7 @@ bar"
             &namespace_descriptions,
             crate::DEFAULT_EXEC_YIELD_TIME_MS,
             /*code_mode_only*/ true,
-            ImageDetailVisibility::Visible,
+            ALL_MEDIA,
             /*messages*/ None,
         );
         assert_eq!(description.matches("## mcp__sample").count(), 1);
@@ -903,7 +888,7 @@ bar"
             &namespace_descriptions,
             crate::DEFAULT_EXEC_YIELD_TIME_MS,
             /*code_mode_only*/ true,
-            ImageDetailVisibility::Visible,
+            ALL_MEDIA,
             /*messages*/ None,
         );
 
@@ -1013,7 +998,7 @@ bar"
             &BTreeMap::new(),
             crate::DEFAULT_EXEC_YIELD_TIME_MS,
             /*code_mode_only*/ true,
-            ImageDetailVisibility::Visible,
+            ALL_MEDIA,
             /*messages*/ None,
         );
 
@@ -1053,7 +1038,7 @@ bar"
             &BTreeMap::new(),
             crate::DEFAULT_EXEC_YIELD_TIME_MS,
             /*code_mode_only*/ true,
-            ImageDetailVisibility::Visible,
+            ALL_MEDIA,
             /*messages*/ None,
         );
 
@@ -1079,7 +1064,7 @@ bar"
             &BTreeMap::new(),
             crate::DEFAULT_EXEC_YIELD_TIME_MS,
             /*code_mode_only*/ false,
-            ImageDetailVisibility::Visible,
+            ALL_MEDIA,
             /*messages*/ None,
         );
 

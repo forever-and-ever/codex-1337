@@ -48,7 +48,7 @@ fn builds_permissions_from_profile() {
         &FileSystemSandboxPolicy::restricted(vec![
             FileSystemSandboxEntry {
                 path: FileSystemPath::Path {
-                    path: writable_root.clone().into(),
+                    path: writable_root.into(),
                 },
                 access: FileSystemAccessMode::Write,
                 missing_path_behavior: None,
@@ -82,7 +82,6 @@ fn builds_permissions_from_profile() {
     let text = instructions.body();
     assert!(text.contains("`sandbox_mode` is `workspace-write`"));
     assert!(text.contains("Network access is enabled."));
-    assert!(text.contains(writable_root.to_string_lossy().as_ref()));
     assert!(text.contains("Do not request escalation or additional permissions"));
     assert!(text.contains(&format!("path `{}`", denied_root.display())));
     assert!(text.contains(&format!("glob `{denied_glob}`")));

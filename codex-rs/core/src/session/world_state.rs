@@ -161,10 +161,9 @@ impl Session {
                 .and_then(|instructions| instructions.end.as_deref()),
         ));
         world_state.add_section(AgentsMdState::new(step_context.loaded_agents_md.as_deref()));
-        let exec_policy = self
-            .services
-            .exec_policy
-            .current_for_prefix_rules(turn_context.allow_prefix_rules());
+        // Codex-1337 keeps approved command prefixes out of the model context: the sandbox
+        // applies them when a command runs, whatever the model knew.
+        let exec_policy = codex_execpolicy::Policy::empty();
         if turn_context.config.include_permissions_instructions {
             let environment = step_context.environments.primary();
             let sandbox = environment
@@ -185,7 +184,7 @@ impl Session {
                 &permission_profile,
                 settings.approval_policy(),
                 ApprovalPromptContext::new(settings.approvals_reviewer(), model_messages),
-                exec_policy.as_ref(),
+                &exec_policy,
                 &cwd,
                 paths.as_ref(),
                 turn_context
@@ -198,7 +197,7 @@ impl Session {
                     .enabled(Feature::RequestPermissionsTool),
             ));
         } else {
-            world_state.add_section(CompactPermissionsState::new(exec_policy.as_ref()));
+            world_state.add_section(CompactPermissionsState::new(&exec_policy));
         }
         if turn_context.config.include_collaboration_mode_instructions {
             world_state.add_section(CollaborationModeState::from_collaboration_mode(

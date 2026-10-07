@@ -1,6 +1,7 @@
 use super::exec_sections;
 use codex_code_mode::CodeModeToolKind;
 use codex_code_mode::ImageDetailVisibility;
+use codex_code_mode::MediaHelpers;
 use codex_code_mode::ToolDefinition;
 use codex_tools::ToolName;
 use pretty_assertions::assert_eq;
@@ -25,7 +26,11 @@ fn exec_sections_split_the_rendered_nested_tools_losslessly() {
         &BTreeMap::new(),
         codex_code_mode::DEFAULT_EXEC_YIELD_TIME_MS,
         /*code_mode_only*/ true,
-        ImageDetailVisibility::Visible,
+        MediaHelpers {
+            image_detail: ImageDetailVisibility::Visible,
+            audio: true,
+            generated_image: true,
+        },
         /*messages*/ None,
     );
     let (guidance, sections) = exec_sections(&description);

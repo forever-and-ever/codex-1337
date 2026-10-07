@@ -244,7 +244,9 @@ impl PermissionsInstructions {
                 },
                 approval_policy,
                 approved_command_prefixes: &exec_policy.get_allowed_prefixes(),
-                writable_roots: &writable_roots,
+                // Codex-1337: the environment context's filesystem block already lists the
+                // writable roots; restating them here only spends context.
+                writable_roots: &[],
                 denied_read_paths: &denied_read_paths,
                 denied_read_globs: &denied_read_globs,
                 exec_permission_approvals_enabled,

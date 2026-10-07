@@ -15,14 +15,14 @@ Scenario: Resolved local MXC selection preserves workspace-write permissions in 
 
     - Pipes: |
     - Logical operators: &&, ||
-    <OMITTED 45 LINES; ~808 TOKENS; hash=587bea404c7facc4>
+    <OMITTED 43 LINES; ~681 TOKENS; hash=7c97c4aa90607c77>
+    NEVER provide a prefix_rule if your command uses a heredoc or herestring.
 
     ### Examples
     Good examples of prefixes:
     - ["npm", "run", "dev"]
     - ["gh", "pr", "check"]
     - ["cargo", "test"]
-     The writable root is `<WORKSPACE_ROOT 1>`.
     </permissions instructions>
 01:message/user:
     <environment_context>

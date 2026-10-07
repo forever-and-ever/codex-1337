@@ -6,6 +6,7 @@ use super::EXECUTION_OUTPUT_GUIDANCE;
 use super::ImageDetailVisibility;
 use super::LEGACY_IMAGE_HELPER_DESCRIPTION;
 use super::MCP_TYPESCRIPT_PREAMBLE;
+use super::MediaHelpers;
 use super::TOOL_DISCOVERY_GUIDANCE;
 use super::ToolDefinition;
 use super::UNIFIED_IMAGE_HELPER_DESCRIPTION;
@@ -18,9 +19,15 @@ use pretty_assertions::assert_eq;
 use serde_json::json;
 use std::collections::BTreeMap;
 
+const ALL_MEDIA: MediaHelpers = MediaHelpers {
+    image_detail: ImageDetailVisibility::Visible,
+    audio: true,
+    generated_image: true,
+};
+
 #[test]
 fn exec_override_renders_only_known_literal_placeholders() {
-    for (image_detail_visibility, image_helper) in [
+    for (image_detail, image_helper) in [
         (
             ImageDetailVisibility::Visible,
             LEGACY_IMAGE_HELPER_DESCRIPTION,
@@ -36,7 +43,10 @@ fn exec_override_renders_only_known_literal_placeholders() {
             &BTreeMap::new(),
             /*default_exec_yield_time_ms*/ 4567,
             /*code_mode_only*/ false,
-            image_detail_visibility,
+            MediaHelpers {
+                image_detail,
+                ..ALL_MEDIA
+            },
             Some(&CodeModeToolMessages {
                 exec: Some(ToolMessage {
                     description: Some(" \nDefaults to 10000 ms. {{ default_exec_yield_time_ms }} ms.\n{{ image_helper }}\n{{ unknown }} {{default_exec_yield_time_ms}}\t ".to_string()),
@@ -65,7 +75,7 @@ fn exec_override_preserves_empty_and_whitespace_only_text() {
                 &BTreeMap::new(),
                 crate::DEFAULT_EXEC_YIELD_TIME_MS,
                 /*code_mode_only*/ true,
-                ImageDetailVisibility::Visible,
+                ALL_MEDIA,
                 Some(&CodeModeToolMessages {
                     exec: Some(ToolMessage {
                         description: Some(description_override.to_string()),
@@ -155,7 +165,7 @@ fn exec_override_preserves_runtime_sections() {
                 &BTreeMap::new(),
                 crate::DEFAULT_EXEC_YIELD_TIME_MS,
                 code_mode_only,
-                ImageDetailVisibility::Visible,
+                ALL_MEDIA,
                 Some(&CodeModeToolMessages {
                     exec: Some(ToolMessage {
                         description: Some(String::new()),

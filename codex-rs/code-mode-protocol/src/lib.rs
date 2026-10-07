@@ -11,6 +11,7 @@ mod session;
 pub use description::CODE_MODE_PRAGMA_PREFIX;
 pub use description::CodeModeToolKind;
 pub use description::ImageDetailVisibility;
+pub use description::MediaHelpers;
 pub use description::ToolDefinition;
 pub use description::ToolNamespaceDescription;
 pub use description::augment_tool_definition;

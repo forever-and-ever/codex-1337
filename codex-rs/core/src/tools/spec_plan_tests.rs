@@ -2195,8 +2195,10 @@ async fn code_mode_uses_the_first_normalized_tool_identity() {
             panic!("expected code mode exec tool");
         };
         assert!(!exec.description.contains("lookup dynamic tool"));
+        // Code Mode Only names an MCP tool in `exec`'s roster and never declares it.
+        assert!(!exec.description.contains("lookup test tool"));
         assert_eq!(
-            exec.description.contains("lookup test tool"),
+            exec.description.contains("\n- normalized_alias__lookup"),
             code_mode_only && winner_exposure == ToolExposure::Direct,
         );
     }

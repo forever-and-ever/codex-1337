@@ -911,7 +911,6 @@ async fn exec_command_consumes_pushed_remote_process_events(
             .lines()
             .filter(|line| {
                 line.contains("`sandbox_mode`")
-                    || line.starts_with(" The writable root")
                     || line.starts_with("- path `")
                     || line.starts_with("- glob `")
             })
@@ -920,7 +919,6 @@ async fn exec_command_consumes_pushed_remote_process_events(
         insta::allow_duplicates! {
             insta::assert_snapshot!(permissions, @r#"
             Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `workspace-write`: The sandbox permits reading files, and editing files in `cwd` and `writable_roots`. Editing files in other directories requires approval. Network access is restricted.
-             The writable roots are `C:\workspace`, `D:\other-workspace`.
             - path `C:\workspace\blocked`
             - glob `C:\workspace\private\**`
             "#);

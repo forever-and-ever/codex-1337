@@ -322,7 +322,7 @@ fn portable_tool_schema_keeps_non_platform_changes_visible() {
     let mut unix = json!({
         "type": "function",
         "name": "exec_command",
-        "description": "Runs a command in a PTY, returning output or a session ID for ongoing interaction.",
+        "description": "Runs a command, returning output or a session ID for ongoing interaction.",
         "parameters": { "properties": {
             "cmd": { "description": "Shell command to execute." },
             "yield_time_ms": { "description": "Wait before yielding output. Defaults to 10000 ms; effective range is 250-30000 ms." }
@@ -347,7 +347,7 @@ fn portable_tool_schema_keeps_non_platform_changes_visible() {
 
 #[test]
 fn portable_tool_schema_normalizes_embedded_code_mode_shell_guidance() {
-    let base = "Runs a command in a PTY, returning output or a session ID for ongoing interaction.";
+    let base = "Runs a command, returning output or a session ID for ongoing interaction.";
     let windows_guidance = r#"Windows safety rules:
 - Do not compose destructive filesystem commands across shells. Do not enumerate paths in PowerShell and then pass them to `cmd /c`, batch builtins, or another shell for deletion or moving. Use one shell end-to-end, prefer native PowerShell cmdlets such as `Remove-Item` / `Move-Item` with `-LiteralPath`, and avoid string-built shell commands for file operations.
 - Before any recursive delete or move on Windows, verify the resolved absolute target paths stay within the intended workspace or explicitly named target directory. Never issue a recursive delete or move against a computed path if the final target has not been checked.

@@ -16,8 +16,8 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (turn) --
-00:additional_tools/developer (3; hash=c732f2ef9f51b20d):
-        - namespace/functions; hash=686c31427169ac93
+00:additional_tools/developer (3; hash=a4e0a2ce342e1527):
+        - namespace/functions; hash=c93c93be18e255cd
           - custom/exec
           - function/wait
           - function/update_work_status
@@ -73,7 +73,7 @@ Settings:
 
         - Pipes: |
         - Logical operators: &&, ||
-        <OMITTED 44 LINES; ~790 TOKENS; hash=3a8900343e968d61>
+        <OMITTED 43 LINES; ~681 TOKENS; hash=7c97c4aa90607c77>
         NEVER provide a prefix_rule if your command uses a heredoc or herestring.
 
         ### Examples
@@ -117,7 +117,7 @@ Settings:
 
     Full-history forks (`fork_turns` omitted or `"all"`) inherit the parent model and reasoning effort and d...ne"` or a positive integer string.</multi_agent_role> [hash=c7f52e90688299ce]
 04:message/developer:
-    <multi_agent_mode>Any earlier instruction enabling proactive multi-agent delegation no longer applies. D...elegation, or parallel agent work.</multi_agent_mode> [hash=2b6e037067b4390c]
+    <multi_agent_mode>Do not spawn sub-agents unless the user or applicable AGENTS.md/skill instructions exp...elegation, or parallel agent work.</multi_agent_mode> [hash=b214ebf2933cfe62]
 05:message/user[2]:
     [01] # AGENTS.md instructions for <AGENTS_DIRECTORY>
 
@@ -190,8 +190,8 @@ Settings:
 ## Window 2 (after request 3: input diverged at item 02)
 Settings: same as window 1
 -- request 4 (turn) --
-00:additional_tools/developer (3; hash=c732f2ef9f51b20d):
-        - namespace/functions; hash=686c31427169ac93
+00:additional_tools/developer (3; hash=a4e0a2ce342e1527):
+        - namespace/functions; hash=c93c93be18e255cd
           - custom/exec
           - function/wait
           - function/update_work_status
@@ -252,7 +252,7 @@ Settings: same as window 1
 
         - Pipes: |
         - Logical operators: &&, ||
-        <OMITTED 44 LINES; ~790 TOKENS; hash=3a8900343e968d61>
+        <OMITTED 43 LINES; ~681 TOKENS; hash=7c97c4aa90607c77>
         NEVER provide a prefix_rule if your command uses a heredoc or herestring.
 
         ### Examples
@@ -296,7 +296,7 @@ Settings: same as window 1
 
     Full-history forks (`fork_turns` omitted or `"all"`) inherit the parent model and reasoning effort and d...ne"` or a positive integer string.</multi_agent_role> [hash=c7f52e90688299ce]
 07:message/developer:
-    <multi_agent_mode>Any earlier instruction enabling proactive multi-agent delegation no longer applies. D...elegation, or parallel agent work.</multi_agent_mode> [hash=2b6e037067b4390c]
+    <multi_agent_mode>Do not spawn sub-agents unless the user or applicable AGENTS.md/skill instructions exp...elegation, or parallel agent work.</multi_agent_mode> [hash=b214ebf2933cfe62]
 08:message/user[2]:
     [01] # AGENTS.md instructions for <AGENTS_DIRECTORY>
 

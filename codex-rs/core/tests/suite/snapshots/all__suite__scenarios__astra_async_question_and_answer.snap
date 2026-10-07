@@ -6,8 +6,8 @@ Scenario: Astra uses the catalog question schema to ask who a launch update is f
 
 ## Window 1
 -- request 1 (request) --
-00:additional_tools/developer (3; hash=ab51a8e178540d9d):
-        - namespace/functions; hash=1f9e6134627beba9
+00:additional_tools/developer (3; hash=9a77314c2406d043):
+        - namespace/functions; hash=f49b705d2040a69f
           - custom/exec
           - function/wait
           - function/update_work_status

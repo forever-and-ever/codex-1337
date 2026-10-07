@@ -13,7 +13,7 @@ Scenario: A parent spawns a child before the selected environment is configured.
     You are `/root`, the primary agent in a team of agents collaborating to fulfill the user's goals.
     <STANDARD_MULTI_AGENT_INSTRUCTIONS>
 02:message/developer:
-    <multi_agent_mode>Any earlier instruction enabling proactive multi-agent delegation no longer applies. D...elegation, or parallel agent work.</multi_agent_mode> [hash=2b6e037067b4390c]
+    <multi_agent_mode>Do not spawn sub-agents unless the user or applicable AGENTS.md/skill instructions exp...elegation, or parallel agent work.</multi_agent_mode> [hash=b214ebf2933cfe62]
 03:message/user:
     <environment_context>
       <environments>
@@ -40,7 +40,7 @@ Scenario: A parent spawns a child before the selected environment is configured.
     You are an agent in a team of agents collaborating to complete a task.
     <STANDARD_MULTI_AGENT_INSTRUCTIONS>
 02:message/developer:
-    <multi_agent_mode>Any earlier instruction enabling proactive multi-agent delegation no longer applies. D...elegation, or parallel agent work.</multi_agent_mode> [hash=2b6e037067b4390c]
+    <multi_agent_mode>Do not spawn sub-agents unless the user or applicable AGENTS.md/skill instructions exp...elegation, or parallel agent work.</multi_agent_mode> [hash=b214ebf2933cfe62]
 03:message/user:
     <environment_context>
       <environments>
@@ -63,7 +63,7 @@ Scenario: A parent spawns a child before the selected environment is configured.
     You are an agent in a team of agents collaborating to complete a task.
     <STANDARD_MULTI_AGENT_INSTRUCTIONS>
 02:message/developer:
-    <multi_agent_mode>Any earlier instruction enabling proactive multi-agent delegation no longer applies. D...elegation, or parallel agent work.</multi_agent_mode> [hash=2b6e037067b4390c]
+    <multi_agent_mode>Do not spawn sub-agents unless the user or applicable AGENTS.md/skill instructions exp...elegation, or parallel agent work.</multi_agent_mode> [hash=b214ebf2933cfe62]
 03:message/user:
     <environment_context>
       <environments>
@@ -96,7 +96,7 @@ Scenario: A parent spawns a child before the selected environment is configured.
     You are `/root`, the primary agent in a team of agents collaborating to fulfill the user's goals.
     <STANDARD_MULTI_AGENT_INSTRUCTIONS>
 02:message/developer:
-    <multi_agent_mode>Any earlier instruction enabling proactive multi-agent delegation no longer applies. D...elegation, or parallel agent work.</multi_agent_mode> [hash=2b6e037067b4390c]
+    <multi_agent_mode>Do not spawn sub-agents unless the user or applicable AGENTS.md/skill instructions exp...elegation, or parallel agent work.</multi_agent_mode> [hash=b214ebf2933cfe62]
 03:message/user:
     <environment_context>
       <environments>

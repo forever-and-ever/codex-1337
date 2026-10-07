@@ -1,5 +1,4 @@
 use anyhow::Result;
-use codex_config::ConfigLayerStack;
 use codex_core::ForkSnapshot;
 use codex_core::TurnInputRequest;
 use codex_core::config::Constrained;
@@ -9,12 +8,10 @@ use codex_protocol::openai_models::ApprovalMessages;
 use codex_protocol::openai_models::ModelMessages;
 use codex_protocol::openai_models::ModelsResponse;
 use codex_protocol::openai_models::PermissionMessages;
-use codex_protocol::permissions::NetworkSandboxPolicy;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::user_input::UserInput;
-use codex_utils_absolute_path::AbsolutePathBuf;
 use core_test_support::responses::ResponsesRequest;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_response_created;
@@ -26,7 +23,6 @@ use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event;
 use pretty_assertions::assert_eq;
 use std::collections::HashSet;
-use tempfile::TempDir;
 
 fn permissions_texts(request: &ResponsesRequest) -> Vec<String> {
     request
@@ -731,69 +727,6 @@ async fn resume_and_fork_append_permissions_messages() -> Result<()> {
     assert_eq!(new_permissions.len(), 1);
     assert_eq!(permissions_fork, permissions_resume);
     assert!(!permissions_base.contains(&new_permissions[0]));
-
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn permissions_message_includes_writable_roots() -> Result<()> {
-    skip_if_no_network!(Ok(()));
-
-    let server = start_mock_server().await;
-    let req = mount_sse_once(
-        &server,
-        sse(vec![ev_response_created("resp-1"), ev_completed("resp-1")]),
-    )
-    .await;
-    let writable = TempDir::new()?;
-    let writable_root = AbsolutePathBuf::try_from(writable.path().canonicalize()?)?;
-    let writable_root_for_config = writable_root.clone();
-    let permission_profile = PermissionProfile::workspace_write_with(
-        std::slice::from_ref(&writable_root),
-        NetworkSandboxPolicy::Restricted,
-        /*exclude_tmpdir_env_var*/ true,
-        /*exclude_slash_tmp*/ true,
-    );
-
-    let mut builder = test_codex().with_config(move |config| {
-        config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
-        config
-            .permissions
-            .set_permission_profile(permission_profile)
-            .expect("test permission profile should be allowed");
-        let workspace_roots = vec![config.cwd.clone(), writable_root_for_config];
-        config.workspace_roots = workspace_roots.clone();
-        config.permissions.set_workspace_roots(workspace_roots);
-        config.config_layer_stack = ConfigLayerStack::default();
-    });
-    let test = builder.build(&server).await?;
-
-    test.codex
-        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-            text: "hello".into(),
-            text_elements: Vec::new(),
-        }]))
-        .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
-
-    let permissions = permissions_texts(&req.single_request());
-    assert_eq!(permissions.len(), 1);
-    let mut writable_roots = [
-        AbsolutePathBuf::try_from(test.config.cwd.as_path().canonicalize()?)?,
-        writable_root,
-    ];
-    writable_roots.sort();
-    let writable_roots = writable_roots
-        .iter()
-        .map(|root| format!("`{}`", root.to_string_lossy()))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let expected = format!(" The writable roots are {writable_roots}.");
-    let actual = permissions[0]
-        .lines()
-        .filter(|line| line.starts_with(" The writable root"))
-        .collect::<Vec<_>>();
-    assert_eq!(actual, vec![expected.as_str()]);
 
     Ok(())
 }

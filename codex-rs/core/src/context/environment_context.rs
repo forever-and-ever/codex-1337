@@ -7,6 +7,8 @@ use codex_protocol::permissions::FileSystemSpecialPath;
 use codex_utils_path_uri::PathUri;
 use std::collections::HashSet;
 
+mod workspace_root_folding;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FileSystemContext {
     workspace_roots: Vec<String>,
@@ -37,19 +39,20 @@ impl FileSystemContext {
         let permission_profile = permission_profile
             .clone()
             .materialize_project_roots_with_path_uris(workspace_roots);
-        let workspace_roots = workspace_roots
-            .iter()
-            .map(PathUri::inferred_native_path_string)
-            .collect();
         let permission_profile = match permission_profile {
             PermissionProfile::Managed { file_system, .. } => {
-                FileSystemPermissionProfileContext::Managed(ManagedFileSystemContext::from(
-                    file_system,
-                ))
+                FileSystemPermissionProfileContext::Managed(
+                    ManagedFileSystemContext::from(file_system)
+                        .fold_workspace_roots(workspace_roots),
+                )
             }
             PermissionProfile::Disabled => FileSystemPermissionProfileContext::Disabled,
             PermissionProfile::External { .. } => FileSystemPermissionProfileContext::External,
         };
+        let workspace_roots = workspace_roots
+            .iter()
+            .map(PathUri::inferred_native_path_string)
+            .collect();
         Self {
             workspace_roots,
             permission_profile,

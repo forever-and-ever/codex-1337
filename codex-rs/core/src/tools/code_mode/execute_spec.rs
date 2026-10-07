@@ -1,4 +1,4 @@
-use codex_code_mode::ImageDetailVisibility;
+use codex_code_mode::MediaHelpers;
 use codex_code_mode::ToolDefinition as CodeModeToolDefinition;
 use codex_code_mode::UndeclaredTool;
 use codex_protocol::openai_models::CodeModeToolMessages;
@@ -13,7 +13,7 @@ pub(crate) fn create_code_mode_tool(
     namespace_descriptions: &BTreeMap<String, codex_code_mode::ToolNamespaceDescription>,
     default_exec_yield_time_ms: u64,
     code_mode_only: bool,
-    image_detail_visibility: ImageDetailVisibility,
+    media_helpers: MediaHelpers,
     messages: Option<&CodeModeToolMessages>,
 ) -> ToolSpec {
     const CODE_MODE_FREEFORM_GRAMMAR: &str = r#"
@@ -34,7 +34,7 @@ SOURCE: /[\s\S]+/
             namespace_descriptions,
             default_exec_yield_time_ms,
             code_mode_only,
-            image_detail_visibility,
+            media_helpers,
             messages,
         ),
         defer_loading: None,
@@ -49,11 +49,17 @@ SOURCE: /[\s\S]+/
 #[cfg(test)]
 mod tests {
     use super::*;
+    use codex_code_mode::ImageDetailVisibility;
     use codex_tools::ToolName;
     use pretty_assertions::assert_eq;
 
     #[test]
     fn create_code_mode_tool_matches_expected_spec() {
+        let media_helpers = MediaHelpers {
+            image_detail: ImageDetailVisibility::Visible,
+            audio: false,
+            generated_image: false,
+        };
         let enabled_tools = vec![codex_code_mode::ToolDefinition {
             summary: String::new(),
             name: "update_plan".to_string(),
@@ -72,7 +78,7 @@ mod tests {
                 &BTreeMap::new(),
                 codex_code_mode::DEFAULT_EXEC_YIELD_TIME_MS,
                 /*code_mode_only*/ true,
-                ImageDetailVisibility::Visible,
+                media_helpers,
                 /*messages*/ None,
             ),
             ToolSpec::Freeform(FreeformTool {
@@ -83,7 +89,7 @@ mod tests {
                     &BTreeMap::new(),
                     codex_code_mode::DEFAULT_EXEC_YIELD_TIME_MS,
                     /*code_mode_only*/ true,
-                    ImageDetailVisibility::Visible,
+                    media_helpers,
                     /*messages*/ None,
                 ),
                 defer_loading: None,

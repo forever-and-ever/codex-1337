@@ -2444,7 +2444,11 @@ async fn tool_messages_follow_mid_turn_model_changes() -> Result<()> {
                     test.config.model_catalog.as_ref().unwrap().models.iter()
                         .find(|info| info.slug == model).unwrap().tool_mode
                         == Some(codex_protocol::openai_models::ToolMode::CodeModeOnly),
-                    codex_code_mode::ImageDetailVisibility::Visible,
+                    codex_code_mode::MediaHelpers {
+                        image_detail: codex_code_mode::ImageDetailVisibility::Visible,
+                        audio: false,
+                        generated_image: false,
+                    },
                     Some(&CodeModeToolMessages {
                         exec: Some(ToolMessage {
                             description: Some(format!("Exec description for {model}.")),

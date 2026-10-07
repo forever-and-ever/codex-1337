@@ -873,6 +873,19 @@ impl McpConnectionSet {
         !self.servers.is_empty()
     }
 
+    /// Whether an initialized server advertises resources, so the resource tools can reach any.
+    pub fn offers_resources(&self) -> bool {
+        self.servers.values().any(|view| {
+            view.connection
+                .client
+                .server_capabilities
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_ref()
+                .is_some_and(|capabilities| capabilities.get("resources").is_some())
+        })
+    }
+
     pub(crate) fn contains_server(&self, server_name: &str) -> bool {
         self.servers.contains_key(server_name)
     }

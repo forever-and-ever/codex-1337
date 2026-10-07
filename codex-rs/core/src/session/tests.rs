@@ -9029,13 +9029,11 @@ async fn record_context_updates_use_environment_permission_profile_and_workspace
 
     let update_items =
         record_context_update_items(&session, previous_context, current_context).await;
-    let permissions_update = developer_input_texts(&update_items)
-        .into_iter()
-        .find(|text| text.contains("<permissions instructions>"))
-        .expect("permissions update should be emitted");
     assert!(
-        permissions_update.contains(workspace_root.to_string_lossy().as_ref()),
-        "selected workspace root should be visible in permissions: {permissions_update}"
+        developer_input_texts(&update_items)
+            .iter()
+            .any(|text| text.contains("<permissions instructions>")),
+        "permissions update should be emitted"
     );
     let environment_update = user_input_texts(&update_items)
         .into_iter()

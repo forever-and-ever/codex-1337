@@ -845,7 +845,7 @@ fn register_code_mode_executors(
     let mut rostered_exec_prompt_tool_specs = Vec::new();
     let mut deferred_exec_prompt_tool_specs = Vec::new();
     let mut included_deferred_mcp_output_schema = false;
-    let deferred_tools_guidance_enabled = search_tool_enabled(turn_context, model_info);
+    let tool_search_enabled = search_tool_enabled(turn_context, model_info);
     for tool in registry.entries() {
         let exposure = tool.exposure;
         if !exposure.is_available_in_code_mode() {
@@ -893,18 +893,19 @@ fn register_code_mode_executors(
             }
         }
 
-        if exposure == ToolExposure::Deferred {
-            if deferred_tools_guidance_enabled
-                && (cached_runtime.is_none() || !included_deferred_mcp_output_schema)
-            {
+        if exposure == ToolExposure::Deferred && tool_search_enabled {
+            if cached_runtime.is_none() || !included_deferred_mcp_output_schema {
                 if cached_runtime.is_some() {
                     included_deferred_mcp_output_schema = true;
                 }
                 deferred_exec_prompt_tool_specs.push(Arc::clone(&spec));
             }
-        } else if tool_mode == ToolMode::CodeModeOnly && tool.runtime.mcp_server_name().is_some() {
-            // Code Mode Only never declares an MCP tool: `exec`'s roster names it and
-            // `describe_tool` supplies its contract on demand.
+        } else if exposure == ToolExposure::Deferred
+            || (tool_mode == ToolMode::CodeModeOnly && tool.runtime.mcp_server_name().is_some())
+        {
+            // Without tool search, Code Mode is a deferred tool's only discovery surface; and
+            // Code Mode Only never declares an MCP tool. `exec`'s roster names both, and
+            // `describe_tool` supplies the contract on demand.
             rostered_exec_prompt_tool_specs.push(Arc::clone(&spec));
         } else {
             exec_prompt_tool_specs.push(spec.as_ref().clone());
@@ -947,10 +948,17 @@ fn register_code_mode_executors(
             &namespace_descriptions,
             turn_context.config.code_mode.default_exec_yield_time_ms,
             tool_mode == ToolMode::CodeModeOnly,
-            if unified_image_budget_enabled(&turn_context.config.features, model_info) {
-                codex_code_mode::ImageDetailVisibility::Hidden
-            } else {
-                codex_code_mode::ImageDetailVisibility::Visible
+            codex_code_mode::MediaHelpers {
+                image_detail: if unified_image_budget_enabled(
+                    &turn_context.config.features,
+                    model_info,
+                ) {
+                    codex_code_mode::ImageDetailVisibility::Hidden
+                } else {
+                    codex_code_mode::ImageDetailVisibility::Visible
+                },
+                audio: model_info.input_modalities.contains(&InputModality::Audio),
+                generated_image: image_generation_available(turn_context, model_info),
             },
             model_messages.code_mode(),
         ),
@@ -1158,7 +1166,7 @@ fn unified_exec_should_include_shell_parameter(
 
 #[instrument(level = "trace", skip_all)]
 fn add_mcp_resource_tools(context: &CoreToolPlanContext<'_>, registry: &mut ToolRegistry) {
-    if context.mcp.has_servers() {
+    if context.mcp.offers_resources() {
         let messages = ResolvedModelMessages::from_model(context.model_info).mcp_resources();
         registry.add(ListMcpResourcesHandler::new(
             messages.and_then(|messages| messages.list_mcp_resources.as_ref()),

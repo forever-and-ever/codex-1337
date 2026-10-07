@@ -15,7 +15,7 @@ Scenario: A host replaces the provider after the parent restarts, then updates a
 
     - Pipes: |
     - Logical operators: &&, ||
-    <OMITTED 44 LINES; ~790 TOKENS; hash=3a8900343e968d61>
+    <OMITTED 43 LINES; ~681 TOKENS; hash=7c97c4aa90607c77>
     NEVER provide a prefix_rule if your command uses a heredoc or herestring.
 
     ### Examples
@@ -77,7 +77,7 @@ Scenario: A host replaces the provider after the parent restarts, then updates a
 
     - Pipes: |
     - Logical operators: &&, ||
-    <OMITTED 44 LINES; ~790 TOKENS; hash=3a8900343e968d61>
+    <OMITTED 43 LINES; ~681 TOKENS; hash=7c97c4aa90607c77>
     NEVER provide a prefix_rule if your command uses a heredoc or herestring.
 
     ### Examples
