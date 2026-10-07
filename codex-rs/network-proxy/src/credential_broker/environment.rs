@@ -13,12 +13,14 @@ use crate::PreparedManagedNetwork;
 use std::collections::HashMap;
 
 #[derive(Clone, Default, Eq, PartialEq)]
-pub struct CredentialBrokerContext;
+pub struct CredentialBrokerContext {
+    _private: (),
+}
 
 impl From<HashMap<String, String>> for CredentialBrokerContext {
     fn from(env: HashMap<String, String>) -> Self {
         let _ = env;
-        Self
+        Self::default()
     }
 }
 
@@ -46,7 +48,7 @@ impl CredentialBrokerContext {
         overrides: &HashMap<String, String>,
     ) -> Self {
         let _ = (config, overrides);
-        Self
+        Self::default()
     }
 }
 

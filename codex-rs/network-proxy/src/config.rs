@@ -195,7 +195,7 @@ impl Default for NetworkProxyConfig {
             credential_broker_enabled_mitm: false,
             credential_providers: BTreeMap::new(),
             credential_broker_openai_host: None,
-            credential_broker_context: crate::CredentialBrokerContext,
+            credential_broker_context: crate::CredentialBrokerContext::default(),
             dangerously_allow_plaintext_credential_injection: false,
             mitm_hooks: Vec::new(),
         }
@@ -241,7 +241,7 @@ impl NetworkProxyConfig {
         self.credential_broker_context = if self.credential_broker {
             crate::CredentialBrokerContext::capture(self, environment)
         } else {
-            crate::CredentialBrokerContext
+            crate::CredentialBrokerContext::default()
         };
     }
 
@@ -704,7 +704,7 @@ mod tests {
                 credential_broker_enabled_mitm: false,
                 credential_providers: BTreeMap::new(),
                 credential_broker_openai_host: None,
-                credential_broker_context: crate::CredentialBrokerContext,
+                credential_broker_context: crate::CredentialBrokerContext::default(),
                 dangerously_allow_plaintext_credential_injection: false,
                 mitm_hooks: Vec::new(),
             }
