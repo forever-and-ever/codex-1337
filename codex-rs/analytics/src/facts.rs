@@ -459,6 +459,8 @@ pub enum CompactionReason {
     ContextLimit,
     ModelDownshift,
     CompHashChanged,
+    /// The provider rejected the history itself; compaction replaces it.
+    HistoryRejected,
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]

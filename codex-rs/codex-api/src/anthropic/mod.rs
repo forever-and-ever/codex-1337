@@ -2,6 +2,7 @@ mod cache;
 mod history;
 pub(crate) mod limits;
 mod request;
+mod salvage;
 mod tool_alias;
 mod tool_schema;
 
@@ -10,6 +11,9 @@ mod tool_schema;
 mod history_tests;
 
 pub use request::encode_anthropic_request;
+pub use salvage::AnthropicRepair;
+pub use salvage::AnthropicSalvage;
+pub use salvage::salvage_anthropic_history;
 pub use tool_schema::anthropic_function_input_schema;
 
 use crate::ApiError;

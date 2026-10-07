@@ -15,8 +15,10 @@ use codex_protocol::openai_models::InputModality;
 use serde::Serialize;
 use serde_json::Value;
 use serde_json::json;
-use std::collections::HashMap;
 use std::collections::HashSet;
+
+const USER: &str = "user";
+const ASSISTANT: &str = "assistant";
 
 #[derive(Serialize)]
 pub(super) struct Message {
@@ -29,11 +31,37 @@ pub(super) struct History {
     pub messages: Vec<Message>,
 }
 
-#[derive(PartialEq)]
-enum ResultKind {
+#[derive(Clone, Copy)]
+pub(super) enum CallKind {
     Function,
     Custom,
     Rejected,
+}
+
+#[derive(Clone, Copy)]
+enum ResultKind {
+    Function,
+    Custom,
+}
+
+/// One canonical item encoded, with its role in tool pairing.
+enum Entry {
+    /// Leading instructions, hoisted into the system prompt.
+    System(Vec<Value>),
+    Free {
+        role: &'static str,
+        content: Vec<Value>,
+    },
+    Call {
+        id: String,
+        kind: CallKind,
+        tool_use: Value,
+    },
+    Result {
+        id: String,
+        kind: ResultKind,
+        result: Value,
+    },
 }
 
 pub(super) fn invalid(message: impl Into<String>) -> ApiError {
@@ -48,22 +76,154 @@ pub(super) fn encode_history(
     tools: &[AnthropicTool],
     modalities: &[InputModality],
 ) -> Result<History, ApiError> {
-    let mut history = History {
-        system: Vec::new(),
-        messages: Vec::new(),
-    };
-    if !instructions.is_empty() {
-        history
-            .system
-            .push(json!({"type":"text", "text":instructions}));
-    }
-    // A result belongs to the immediately preceding assistant tool batch. Reordering
-    // results or inventing missing results would change both semantics and cache keys.
-    let mut calls = HashSet::new();
-    let mut pending = HashMap::new();
+    let mut encoder = Encoder::new(instructions, tools, modalities);
     for item in input {
-        let had_pending = !pending.is_empty();
-        let (role, content) = match item {
+        encoder.push(item)?;
+    }
+    encoder.finish()
+}
+
+/// Incremental encoding: `push` either accepts an item or leaves the encoder unchanged.
+///
+/// A result belongs to the immediately preceding assistant tool batch. The encoder never
+/// reorders or invents results: that would change both semantics and cache keys.
+pub(super) struct Encoder<'a> {
+    tools: &'a [AnthropicTool],
+    modalities: &'a [InputModality],
+    history: History,
+    calls: HashSet<String>,
+    /// The open batch's calls that await results, in call order.
+    pending: Vec<(String, CallKind)>,
+    /// Content recorded while the open batch awaited results. Canonical history is
+    /// chronological, and hosts record goal updates and delegation receipts the moment they
+    /// are accepted, even during a long tool call. A tool_result must directly answer its
+    /// tool_use, so this content follows the completed batch, where the model could first
+    /// have observed it.
+    deferred: Vec<Message>,
+}
+
+impl<'a> Encoder<'a> {
+    pub(super) fn new(
+        instructions: &str,
+        tools: &'a [AnthropicTool],
+        modalities: &'a [InputModality],
+    ) -> Self {
+        let mut system = Vec::new();
+        if !instructions.is_empty() {
+            system.push(json!({"type":"text", "text":instructions}));
+        }
+        Self {
+            tools,
+            modalities,
+            history: History {
+                system,
+                messages: Vec::new(),
+            },
+            calls: HashSet::new(),
+            pending: Vec::new(),
+            deferred: Vec::new(),
+        }
+    }
+
+    fn last_role(&self) -> Option<&'static str> {
+        self.history.messages.last().map(|message| message.role)
+    }
+
+    /// The open batch's calls that await results, in call order.
+    pub(super) fn pending(&self) -> &[(String, CallKind)] {
+        &self.pending
+    }
+
+    /// Some results of the open batch are encoded and others are outstanding.
+    pub(super) fn awaits_partial_results(&self) -> bool {
+        !self.pending.is_empty() && self.last_role() == Some(USER)
+    }
+
+    pub(super) fn push(&mut self, item: &ResponseItem) -> Result<(), ApiError> {
+        match self.entry(item)? {
+            Entry::System(blocks) => self.history.system.extend(blocks),
+            Entry::Free { content, .. } if content.is_empty() => {
+                return Err(invalid("empty Anthropic message"));
+            }
+            Entry::Free { role, content } => {
+                if self.pending.is_empty()
+                    || (role == ASSISTANT && self.last_role() == Some(ASSISTANT))
+                {
+                    self.append(role, content);
+                } else {
+                    self.deferred.push(Message { role, content });
+                }
+            }
+            Entry::Call { id, kind, tool_use } => {
+                if self.calls.contains(&id) {
+                    return Err(invalid("duplicate Anthropic tool call ID"));
+                }
+                if self.awaits_partial_results() {
+                    return Err(invalid(
+                        "Anthropic assistant interrupts incomplete tool result batch",
+                    ));
+                }
+                self.calls.insert(id.clone());
+                self.pending.push((id, kind));
+                self.append(ASSISTANT, vec![tool_use]);
+            }
+            Entry::Result {
+                id,
+                kind,
+                mut result,
+            } => {
+                let Some(index) = self.pending.iter().position(|(call, _)| *call == id) else {
+                    return Err(invalid(match kind {
+                        ResultKind::Function => "unpaired Anthropic tool result",
+                        ResultKind::Custom => "unpaired Anthropic custom tool result",
+                    }));
+                };
+                match (kind, self.pending[index].1) {
+                    (ResultKind::Function, CallKind::Custom) => {
+                        return Err(invalid("function result paired with custom Anthropic tool"));
+                    }
+                    (ResultKind::Custom, CallKind::Function | CallKind::Rejected) => {
+                        return Err(invalid("custom result paired with function Anthropic tool"));
+                    }
+                    // FunctionCallOutputPayload's success hint is not serialized.
+                    // The durable rejected call remains authoritative on resume.
+                    (ResultKind::Function, CallKind::Rejected) => result["is_error"] = json!(true),
+                    (ResultKind::Function, CallKind::Function)
+                    | (ResultKind::Custom, CallKind::Custom) => {}
+                }
+                self.pending.remove(index);
+                self.append(USER, vec![result]);
+                if self.pending.is_empty() {
+                    for Message { role, content } in std::mem::take(&mut self.deferred) {
+                        self.append(role, content);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn append(&mut self, role: &'static str, content: Vec<Value>) {
+        match self.history.messages.last_mut() {
+            Some(message) if message.role == role => message.content.extend(content),
+            Some(_) | None => self.history.messages.push(Message { role, content }),
+        }
+    }
+
+    fn finish(self) -> Result<History, ApiError> {
+        if !self.pending.is_empty() {
+            return Err(invalid("Anthropic history ends with unresolved tool calls"));
+        }
+        if self.history.messages.is_empty() {
+            return Err(invalid(
+                "Anthropic history contains no conversation messages",
+            ));
+        }
+        Ok(self.history)
+    }
+
+    fn entry(&self, item: &ResponseItem) -> Result<Entry, ApiError> {
+        Ok(match item {
             ResponseItem::AgentMessage {
                 author,
                 recipient,
@@ -80,12 +240,12 @@ pub(super) fn encode_history(
                 let recipient = serde_json::to_string(recipient).map_err(|err| {
                     invalid(format!("cannot encode agent-message recipient: {err}"))
                 })?;
-                (
-                    "user",
-                    vec![
+                Entry::Free {
+                    role: USER,
+                    content: vec![
                         json!({"type":"text", "text":format!("[Agent message from {author} to {recipient}]\n{text}")}),
                     ],
-                )
+                }
             }
             ResponseItem::Message { role, content, .. } => {
                 let blocks = content
@@ -94,27 +254,23 @@ pub(super) fn encode_history(
                         ContentItem::InputText { text } | ContentItem::OutputText { text } => {
                             Ok(json!({"type":"text", "text":text}))
                         }
-                        ContentItem::InputImage { image, .. } => encode_image(image, modalities),
+                        ContentItem::InputImage { image, .. } => {
+                            encode_image(image, self.modalities)
+                        }
                         ContentItem::InputAudio { .. } => {
                             Err(invalid("Anthropic audio input is unsupported"))
                         }
                     })
                     .collect::<Result<Vec<_>, _>>()?;
                 match role.as_str() {
-                    "system" | "developer" if history.messages.is_empty() => {
-                        if blocks.iter().any(|block| block["type"] != "text") {
-                            return Err(invalid(
-                                "Anthropic system instructions must contain only text",
-                            ));
-                        }
-                        history.system.extend(blocks);
-                        continue;
-                    }
                     "system" | "developer" => {
                         if blocks.iter().any(|block| block["type"] != "text") {
                             return Err(invalid(
                                 "Anthropic system instructions must contain only text",
                             ));
+                        }
+                        if self.history.messages.is_empty() {
+                            return Ok(Entry::System(blocks));
                         }
                         // Native system-message placement cannot represent arbitrary
                         // canonical updates. Keep every update at its original position
@@ -123,10 +279,19 @@ pub(super) fn encode_history(
                             let text = block["text"].as_str().ok_or_else(|| invalid("Anthropic instruction block must contain text"))?;
                             Ok(json!({"type":"text", "text":format!("<system-reminder>\n{text}\n</system-reminder>")}))
                         }).collect::<Result<Vec<_>, ApiError>>()?;
-                        ("user", reminders)
+                        Entry::Free {
+                            role: USER,
+                            content: reminders,
+                        }
                     }
-                    "user" => ("user", blocks),
-                    "assistant" => ("assistant", blocks),
+                    "user" => Entry::Free {
+                        role: USER,
+                        content: blocks,
+                    },
+                    "assistant" => Entry::Free {
+                        role: ASSISTANT,
+                        content: blocks,
+                    },
                     _ => {
                         return Err(invalid(format!(
                             "unsupported Anthropic message role: {role}"
@@ -159,17 +324,12 @@ pub(super) fn encode_history(
                         "Anthropic tool {name} requires object arguments"
                     )));
                 }
-                let alias = history_alias(tools, &identity)?;
-                if !calls.insert(call_id.as_str()) {
-                    return Err(invalid("duplicate Anthropic tool call ID"));
+                let alias = history_alias(self.tools, &identity)?;
+                Entry::Call {
+                    id: call_id.clone(),
+                    kind: CallKind::Function,
+                    tool_use: json!({"type":"tool_use", "id":call_id, "name":alias, "input":{"arguments":input}}),
                 }
-                pending.insert(call_id.as_str(), ResultKind::Function);
-                (
-                    "assistant",
-                    vec![
-                        json!({"type":"tool_use", "id":call_id, "name":alias, "input":{"arguments":input}}),
-                    ],
-                )
             }
             ResponseItem::CustomToolCall {
                 name,
@@ -182,17 +342,12 @@ pub(super) fn encode_history(
                     name: name.clone(),
                     namespace: namespace.clone(),
                 };
-                let alias = history_alias(tools, &identity)?;
-                if !calls.insert(call_id.as_str()) {
-                    return Err(invalid("duplicate Anthropic tool call ID"));
+                let alias = history_alias(self.tools, &identity)?;
+                Entry::Call {
+                    id: call_id.clone(),
+                    kind: CallKind::Custom,
+                    tool_use: json!({"type":"tool_use", "id":call_id, "name":alias, "input":{"input":input}}),
                 }
-                pending.insert(call_id.as_str(), ResultKind::Custom);
-                (
-                    "assistant",
-                    vec![
-                        json!({"type":"tool_use", "id":call_id, "name":alias, "input":{"input":input}}),
-                    ],
-                )
             }
             ResponseItem::RejectedToolCall {
                 call:
@@ -206,14 +361,11 @@ pub(super) fn encode_history(
                 if call_id.is_empty() || name.is_empty() || !input.is_object() {
                     return Err(invalid("invalid rejected Anthropic tool call"));
                 }
-                if !calls.insert(call_id.as_str()) {
-                    return Err(invalid("duplicate Anthropic tool call ID"));
+                Entry::Call {
+                    id: call_id.clone(),
+                    kind: CallKind::Rejected,
+                    tool_use: json!({"type":"tool_use", "id":call_id, "name":name, "input":input}),
                 }
-                pending.insert(call_id.as_str(), ResultKind::Rejected);
-                (
-                    "assistant",
-                    vec![json!({"type":"tool_use", "id":call_id, "name":name, "input":input})],
-                )
             }
             ResponseItem::FunctionCallOutput {
                 call_id: None,
@@ -242,8 +394,11 @@ pub(super) fn encode_history(
                 let mut content = vec![
                     json!({"type":"text", "text":format!("[{label} from {}]", json!(source))}),
                 ];
-                content.extend(encode_result_blocks(output, modalities)?);
-                ("user", content)
+                content.extend(encode_result_blocks(output, self.modalities)?);
+                Entry::Free {
+                    role: USER,
+                    content,
+                }
             }
             ResponseItem::FunctionCallOutput {
                 call_id, output, ..
@@ -251,31 +406,19 @@ pub(super) fn encode_history(
                 let call_id = call_id
                     .as_deref()
                     .ok_or_else(|| invalid("Anthropic tool result has no call ID"))?;
-                let kind = pending
-                    .remove(call_id)
-                    .ok_or_else(|| invalid("unpaired Anthropic tool result"))?;
-                if kind == ResultKind::Custom {
-                    return Err(invalid("function result paired with custom Anthropic tool"));
+                Entry::Result {
+                    id: call_id.to_owned(),
+                    kind: ResultKind::Function,
+                    result: encode_result(call_id, output, self.modalities)?,
                 }
-                let mut result = encode_result(call_id, output, modalities)?;
-                if kind == ResultKind::Rejected {
-                    // FunctionCallOutputPayload's success hint is not serialized.
-                    // The durable rejected call remains authoritative on resume.
-                    result["is_error"] = json!(true);
-                }
-                ("user", vec![result])
             }
             ResponseItem::CustomToolCallOutput {
                 call_id, output, ..
-            } => {
-                let kind = pending
-                    .remove(call_id.as_str())
-                    .ok_or_else(|| invalid("unpaired Anthropic custom tool result"))?;
-                if kind != ResultKind::Custom {
-                    return Err(invalid("custom result paired with function Anthropic tool"));
-                }
-                ("user", vec![encode_result(call_id, output, modalities)?])
-            }
+            } => Entry::Result {
+                id: call_id.clone(),
+                kind: ResultKind::Custom,
+                result: encode_result(call_id, output, self.modalities)?,
+            },
             ResponseItem::Reasoning {
                 summary,
                 content,
@@ -310,17 +453,20 @@ pub(super) fn encode_history(
                         .collect::<String>();
                     json!({"type":"thinking", "thinking":thinking, "signature":signature})
                 };
-                ("assistant", vec![block])
+                Entry::Free {
+                    role: ASSISTANT,
+                    content: vec![block],
+                }
             }
             ResponseItem::NativeCompaction {
                 compaction: NativeCompaction::Anthropic(compaction),
                 ..
-            } => (
-                "assistant",
-                vec![
+            } => Entry::Free {
+                role: ASSISTANT,
+                content: vec![
                     json!({"type":"compaction", "content":compaction.content(), "signature":compaction.signature()}),
                 ],
-            ),
+            },
             ResponseItem::AdditionalTools { .. }
             | ResponseItem::LocalShellCall { .. }
             | ResponseItem::ToolSearchCall { .. }
@@ -336,41 +482,8 @@ pub(super) fn encode_history(
                     "history item has no supported native Anthropic representation",
                 ));
             }
-        };
-        if content.is_empty() {
-            return Err(invalid("empty Anthropic message"));
-        }
-        let is_result = content
-            .first()
-            .is_some_and(|block| block["type"] == "tool_result");
-        let last_role = history.messages.last().map(|message| message.role);
-        if had_pending && role != "assistant" && !is_result {
-            return Err(invalid(
-                "Anthropic user message interrupts unresolved tool calls",
-            ));
-        }
-        if had_pending && role == "assistant" && last_role == Some("user") {
-            return Err(invalid(
-                "Anthropic assistant interrupts incomplete tool result batch",
-            ));
-        }
-        if let Some(message) = history.messages.last_mut()
-            && message.role == role
-        {
-            message.content.extend(content);
-        } else {
-            history.messages.push(Message { role, content });
-        }
+        })
     }
-    if !pending.is_empty() {
-        return Err(invalid("Anthropic history ends with unresolved tool calls"));
-    }
-    if history.messages.is_empty() {
-        return Err(invalid(
-            "Anthropic history contains no conversation messages",
-        ));
-    }
-    Ok(history)
 }
 
 fn history_alias(

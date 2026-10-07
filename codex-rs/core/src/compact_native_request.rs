@@ -1,0 +1,234 @@
+//! One native compaction request: transport retries, and the provider's verdict on the input.
+
+use std::time::Duration;
+
+use crate::Prompt;
+use crate::client::ModelClientSession;
+use crate::client_common::ResponseEvent;
+use crate::client_common::ResponseStream;
+use crate::responses_metadata::CodexResponsesMetadata;
+use crate::responses_retry::ResponsesStreamRequest;
+use crate::responses_retry::ResponsesStreamRetryState;
+use crate::responses_retry::handle_response_stream_error;
+use crate::session::RequestEffortUsage;
+use crate::session::session::Session;
+use crate::session::step_context::StepContext;
+use crate::session::turn_context::TurnContext;
+use codex_api::AnthropicStopReason;
+use codex_api::anthropic_stop_reason;
+use codex_protocol::error::CodexErr;
+use codex_protocol::error::CodexErrorDetails;
+use codex_protocol::models::ResponseItem;
+use codex_protocol::protocol::TokenUsage;
+use codex_rollout_trace::InferenceTraceContext;
+use futures::StreamExt;
+use http::StatusCode;
+use serde_json::Value;
+
+/// Includes connection and header wait as well as streaming. Summarizing a large Claude context
+/// may take minutes; cancellation still drops the attempt early.
+const ATTEMPT_TIMEOUT: Duration = Duration::from_secs(600);
+/// A compaction runs far longer than a sampling request, so it retries transport failures less.
+const MAX_STREAM_RETRIES: u64 = 2;
+
+/// Why an attempt produced no checkpoint.
+pub(super) enum Miss {
+    /// The provider refused the request outright, as invalid or oversized.
+    Refused(CodexErr),
+    /// The provider accepted the request but returned no usable checkpoint.
+    Unfinished(CodexErr),
+    /// Transport, account, quota, configuration or cancellation: a later retry may succeed.
+    Failed(CodexErr),
+}
+
+impl Miss {
+    fn of(error: CodexErr) -> Self {
+        if refused(&error) {
+            Self::Refused(error)
+        } else {
+            Self::Failed(error)
+        }
+    }
+
+    pub(super) fn error(&self) -> &CodexErr {
+        match self {
+            Self::Refused(error) | Self::Unfinished(error) | Self::Failed(error) => error,
+        }
+    }
+}
+
+/// Whether the provider rejected the request itself rather than failed to serve it. Local
+/// preconditions surface as prose `InvalidRequest`s; only the provider answers with an error body.
+pub(super) fn refused(error: &CodexErr) -> bool {
+    match error.details() {
+        CodexErrorDetails::ContextWindowExceeded => true,
+        CodexErrorDetails::InvalidRequest(body) => provider_error_message(body).is_some(),
+        CodexErrorDetails::UnexpectedStatus(response) => matches!(
+            response.status,
+            StatusCode::BAD_REQUEST
+                | StatusCode::PAYLOAD_TOO_LARGE
+                | StatusCode::UNPROCESSABLE_ENTITY
+        ),
+        _ => false,
+    }
+}
+
+/// The message of an Anthropic error body: `{"type":"error","error":{"type":..,"message":..}}`.
+pub(super) fn provider_error_message(body: &str) -> Option<String> {
+    let body = serde_json::from_str::<Value>(body).ok()?;
+    if body["type"] != "error" {
+        return None;
+    }
+    body["error"]["message"].as_str().map(str::to_owned)
+}
+
+pub(super) async fn request(
+    sess: &Session,
+    step_context: &StepContext,
+    client_session: &mut ModelClientSession,
+    prompt: &Prompt,
+    responses_metadata: &CodexResponsesMetadata,
+) -> Result<(ResponseItem, String, Option<TokenUsage>), Miss> {
+    let turn_context = &step_context.turn;
+    let max_retries = turn_context
+        .provider
+        .info()
+        .stream_max_retries()
+        .min(MAX_STREAM_RETRIES);
+    let mut retry_state = ResponsesStreamRetryState::default();
+    loop {
+        sess.apply_pending_account().await.map_err(|error| {
+            Miss::Failed(
+                CodexErrorDetails::InvalidRequest(format!(
+                    "Cannot apply account selection: {error}"
+                ))
+                .into(),
+            )
+        })?;
+        let exchange = async {
+            let stream = client_session
+                .stream(
+                    prompt,
+                    turn_context.model_info(),
+                    &turn_context.session_telemetry,
+                    sess.reasoning_effort_for_request(
+                        &turn_context.initial_settings,
+                        RequestEffortUsage::Compaction,
+                    )
+                    .await,
+                    turn_context.reasoning_summary(),
+                    step_context.settings.service_tier.clone(),
+                    responses_metadata,
+                    &InferenceTraceContext::disabled(),
+                )
+                .await
+                .map_err(Miss::of)?;
+            collect(sess, turn_context, stream).await
+        };
+        let error = match tokio::time::timeout(ATTEMPT_TIMEOUT, exchange).await {
+            Ok(Ok(output)) => return Ok(output),
+            Ok(Err(Miss::Failed(error))) => error,
+            Ok(Err(miss)) => return Err(miss),
+            // The request may still finish upstream; it is not replayed at this size.
+            Err(_) => {
+                return Err(Miss::Unfinished(
+                    CodexErrorDetails::Fatal(format!(
+                        "Anthropic compaction returned no checkpoint within {} seconds",
+                        ATTEMPT_TIMEOUT.as_secs()
+                    ))
+                    .into(),
+                ));
+            }
+        };
+        if sess.can_retry_after_account_handoff(&error) {
+            continue;
+        }
+        handle_response_stream_error(
+            &mut retry_state,
+            max_retries,
+            error,
+            client_session,
+            sess,
+            step_context,
+            ResponsesStreamRequest::RemoteCompactionV2,
+        )
+        .await
+        .map_err(Miss::Failed)?;
+    }
+}
+
+async fn collect(
+    sess: &Session,
+    turn_context: &TurnContext,
+    mut stream: ResponseStream,
+) -> Result<(ResponseItem, String, Option<TokenUsage>), Miss> {
+    let mut checkpoints = Vec::new();
+    while let Some(event) = stream.next().await {
+        match event.map_err(Miss::of)? {
+            ResponseEvent::OutputItemDone(item @ ResponseItem::NativeCompaction { .. }) => {
+                checkpoints.push(item);
+            }
+            ResponseEvent::Completed {
+                response_id,
+                token_usage,
+                usage_metadata,
+                ..
+            } => {
+                sess.record_observed_response_completed(
+                    turn_context,
+                    &response_id,
+                    token_usage.as_ref(),
+                    usage_metadata.as_ref(),
+                    /*thought*/ None,
+                    /*preamble*/ None,
+                )
+                .await;
+                // Compaction is charged inference too. Record it at the completion boundary,
+                // even when its checkpoint is rejected below; installing a checkpoint later
+                // recomputes context occupancy, not cumulative usage.
+                sess.record_token_usage_info(
+                    turn_context,
+                    &turn_context.initial_settings,
+                    token_usage.as_ref(),
+                )
+                .await
+                .map_err(Miss::Failed)?;
+                match usage_metadata.as_ref().and_then(anthropic_stop_reason) {
+                    Some(AnthropicStopReason::ModelContextWindowExceeded) => {
+                        return Err(Miss::Refused(
+                            CodexErrorDetails::ContextWindowExceeded.into(),
+                        ));
+                    }
+                    Some(AnthropicStopReason::MaxTokens) => {
+                        return Err(Miss::Unfinished(
+                            CodexErrorDetails::Fatal(
+                                "Anthropic compaction reached its output limit before completing a checkpoint".into(),
+                            )
+                            .into(),
+                        ));
+                    }
+                    Some(_) | None => {}
+                }
+                return match <[ResponseItem; 1]>::try_from(checkpoints) {
+                    Ok([item]) => Ok((item, response_id, token_usage)),
+                    Err(checkpoints) => Err(Miss::Unfinished(
+                        CodexErrorDetails::Fatal(format!(
+                            "Anthropic compaction returned {} checkpoints instead of one",
+                            checkpoints.len()
+                        ))
+                        .into(),
+                    )),
+                };
+            }
+            _ => {}
+        }
+    }
+    Err(Miss::Failed(
+        CodexErrorDetails::Stream("Anthropic compaction stream closed before completion".into())
+            .into(),
+    ))
+}
+
+#[cfg(test)]
+#[path = "compact_native_request_tests.rs"]
+mod tests;

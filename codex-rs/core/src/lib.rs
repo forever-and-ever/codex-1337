@@ -33,6 +33,7 @@ pub use responses_metadata::CodexResponsesMetadata;
 pub use turn_metadata::detached_memory_responses_metadata;
 mod codex_thread;
 mod compact_model_fallback;
+mod compact_native;
 mod compact_remote_history;
 mod compact_remote_v2;
 mod compact_token_budget;

@@ -436,6 +436,7 @@ pub(crate) async fn run_turn(
 
     let mut next_step_context = Some(first_step_context);
     let mut guardian_budget_compacted = false;
+    let mut history_rescued = false;
     loop {
         // Note that pending_input would be something like a message the user
         // submitted through the UI while the model was running. Though the UI
@@ -551,6 +552,13 @@ pub(crate) async fn run_turn(
         sess.apply_pending_account().await.map_err(|error| {
             CodexErr::InvalidRequest(format!("Cannot apply account selection: {error}"))
         })?;
+        // Match guards cannot await the history this verdict inspects.
+        let history_rejected = match &sampling_request_result {
+            Err(err) if !history_rescued => {
+                crate::compact_native::history_rejected(&sess, turn_context.as_ref(), err).await
+            }
+            Ok(_) | Err(_) => false,
+        };
         match sampling_request_result {
             Ok(SamplingRequestOutcome::AccountHandoff) => {
                 next_step_context = None;
@@ -561,6 +569,7 @@ pub(crate) async fn run_turn(
                 sampling_request_input,
             )) => {
                 guardian_budget_compacted = false;
+                history_rescued = false;
                 let SamplingRequestResult {
                     needs_follow_up: model_needs_follow_up,
                     last_agent_message: sampling_request_last_agent_message,
@@ -821,6 +830,40 @@ pub(crate) async fn run_turn(
             }
             Err(err) if matches!(err.details(), CodexErrorDetails::TurnAborted) => {
                 return Err(err);
+            }
+            Err(err) if history_rejected => {
+                // The provider refused the history itself, so every retry would fail alike.
+                // Compaction replaces that history; retry once per model step so that a
+                // futile repair cannot loop.
+                history_rescued = true;
+                warn!(error = %err, "native history rejected; compacting before retrying the step");
+                if let Err(err) = run_auto_compact(
+                    &sess,
+                    Arc::clone(&step_context),
+                    /*fallback_step_context*/ None,
+                    &mut client_session,
+                    InitialContextInjection::BeforeLastUserMessage {
+                        world_state: Arc::clone(&world_state),
+                        step_context: Arc::clone(&step_context),
+                    },
+                    CompactionReason::HistoryRejected,
+                    CompactionPhase::MidTurn,
+                )
+                .await
+                {
+                    if matches!(err.details(), CodexErrorDetails::TurnAborted) {
+                        return Err(err);
+                    }
+                    sess.emit_turn_error_lifecycle(
+                        turn_context.as_ref(),
+                        err.to_codex_protocol_error(),
+                        err.details(),
+                    )
+                    .await;
+                    return Ok(None);
+                }
+                can_drain_pending_input = false;
+                continue;
             }
             Err(codex_error)
                 if matches!(

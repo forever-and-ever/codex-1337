@@ -1,9 +1,11 @@
 use super::AnthropicCachePolicy;
 use super::AnthropicCacheTtl;
+use super::AnthropicRepair;
 use super::AnthropicTool;
 use super::AnthropicToolIdentity;
 use super::cache::mark_prefixes;
 use super::history::encode_history;
+use super::salvage_anthropic_history;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::InputModality;
 use pretty_assertions::assert_eq;
@@ -124,4 +126,71 @@ fn positional_instruction_updates_do_not_rewrite_earlier_prefixes() {
             ]
         })
     );
+}
+
+#[test]
+fn content_recorded_during_a_tool_call_follows_its_batch() {
+    // Hosts record into history while a tool runs: a farm receipt landed between a
+    // long Code Mode call and its result, and every later request, including
+    // compaction, was rejected. Such content follows the completed batch.
+    let input: Vec<ResponseItem> = serde_json::from_value(json!([
+        {"type":"message","role":"user","content":[{"type":"input_text","text":"Go."}]},
+        {"type":"custom_tool_call","call_id":"exec1","name":"exec","input":"run()"},
+        {"type":"function_call","call_id":"msg1","name":"send_message","arguments":"{}"},
+        {"type":"message","role":"user","content":[{"type":"input_text","text":"Receipt."}]},
+        {"type":"custom_tool_call_output","call_id":"exec1","output":"first"},
+        {"type":"message","role":"assistant","content":[{"type":"output_text","text":"Note."}]},
+        {"type":"function_call_output","call_id":"msg1","output":"second"},
+        {"type":"message","role":"assistant","content":[{"type":"output_text","text":"Done."}]}
+    ]))
+    .unwrap();
+    let history = encode_history(&input, "", &[], &[InputModality::Text]).unwrap();
+    assert_eq!(
+        json!(history.messages),
+        json!([
+            {"role":"user","content":[{"type":"text","text":"Go."}]},
+            {"role":"assistant","content":[
+                {"type":"tool_use","id":"exec1","name":"exec","input":{"input":"run()"}},
+                {"type":"tool_use","id":"msg1","name":"send_message","input":{"arguments":{}}}]},
+            {"role":"user","content":[
+                {"type":"tool_result","tool_use_id":"exec1","content":"first","is_error":false},
+                {"type":"tool_result","tool_use_id":"msg1","content":"second","is_error":false},
+                {"type":"text","text":"Receipt."}]},
+            {"role":"assistant","content":[{"type":"text","text":"Note."},{"type":"text","text":"Done."}]}
+        ])
+    );
+}
+
+#[test]
+fn salvage_always_yields_an_encodable_history() {
+    let input: Vec<ResponseItem> = serde_json::from_value(json!([
+        {"type":"message","role":"user","content":[{"type":"input_text","text":"Go."}]},
+        {"type":"function_call","call_id":"a","name":"f","arguments":"{}"},
+        {"type":"function_call","call_id":"b","name":"f","arguments":"{}"},
+        {"type":"function_call_output","call_id":"a","output":"A"},
+        // A new batch after partial results closes the open one; b's result arrives too late.
+        {"type":"custom_tool_call","call_id":"c","name":"exec","input":""},
+        {"type":"function_call_output","call_id":"b","output":"B"},
+        {"type":"custom_tool_call_output","call_id":"c","output":"C"},
+        {"type":"message","role":"user","content":[{"type":"input_text","text":"Hear."},{"type":"input_audio","audio_url":"data:audio/wav;base64,AA=="}]},
+        {"type":"function_call_output","output":"anonymous"},
+        {"type":"compaction","encrypted_content":"opaque"},
+        {"type":"function_call","call_id":"d","name":"f","arguments":"{}"}
+    ]))
+    .unwrap();
+    let salvage = salvage_anthropic_history(input, &[InputModality::Text]);
+    assert_eq!(
+        salvage.repairs,
+        vec![
+            AnthropicRepair::Closed(1),
+            AnthropicRepair::Omitted("unpaired Anthropic tool result".into()),
+            AnthropicRepair::Degraded("Anthropic audio input is unsupported".into()),
+            AnthropicRepair::Omitted("Anthropic tool result has no call ID".into()),
+            AnthropicRepair::Omitted(
+                "history item has no supported native Anthropic representation".into()
+            ),
+            AnthropicRepair::Closed(1),
+        ]
+    );
+    encode_history(&salvage.items, "", &[], &[InputModality::Text]).unwrap();
 }
