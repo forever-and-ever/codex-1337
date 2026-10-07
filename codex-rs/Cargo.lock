@@ -1879,27 +1879,6 @@ name = "codex-app-server-protocol-noop-macros"
 version = "0.160.0"
 
 [[package]]
-name = "codex-app-server-test-client"
-version = "0.160.0"
-dependencies = [
- "anyhow",
- "clap",
- "codex-app-server-protocol",
- "codex-core",
- "codex-otel",
- "codex-protocol",
- "codex-utils-cli",
- "pretty_assertions",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "tungstenite",
- "url",
- "uuid",
-]
-
-[[package]]
 name = "codex-app-server-transport"
 version = "0.160.0"
 dependencies = [
@@ -2093,7 +2072,6 @@ dependencies = [
  "codex-app-server-client",
  "codex-app-server-daemon",
  "codex-app-server-protocol",
- "codex-app-server-test-client",
  "codex-arg0",
  "codex-backend-client",
  "codex-build-info",
