@@ -542,7 +542,7 @@ async fn parent_response(
             assert!(
                 output
                     .to_string()
-                    .contains("This action was rejected due to unacceptable risk."),
+                    .contains("Tool execution was declined by Guardian."),
                 "the refreshed review must deny the first tool after revocation: {output}"
             );
         }
