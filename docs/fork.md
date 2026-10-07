@@ -39,6 +39,11 @@ on pinned Cargo without changing rustc's channel. Do not set `RUSTFLAGS`,
 Our root Cargo config owns clang+mold and sccache; fix that configuration instead
 of creating another dependency graph. Linked worktrees share these settings.
 
+A dev-dependency must not change the features of any normal build unit, or
+`cargo test` compiles a second copy of everything above it.
+`scripts/check_feature_parity.py` fails on such a divergence; raise the feature in
+`codex-rs/feature-floor` unless that would change shipped behavior.
+
 The wrapper invokes `.cargo/launch` for builds.
 It uses the packaging resolver for the V8 version in `Cargo.lock`, paired bindings
 and trusted checksums. Metadata/configuration probes do not fetch artifacts.

@@ -1,0 +1,23 @@
+[package]
+name = "codex-feature-floor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+# Workspace feature unification resolves these with every member, so ordinary
+# builds already carry each feature that a dev-dependency enables and test
+# builds reuse their units instead of compiling a second graph. Nothing depends
+# on this crate. `scripts/check_feature_parity.py` names any package that diverges.
+[dependencies]
+env_logger = { version = "0.11.9", default-features = false, features = ["auto-color"] }
+petgraph = { version = "0.8.3", default-features = false, features = ["std"] }
+predicates = { workspace = true }
+rmcp = { workspace = true, features = ["elicitation"] }
+scopeguard = { workspace = true }
+similar = { workspace = true, features = ["inline"] }
+
+[package.metadata.cargo-shear]
+ignored = ["env_logger", "petgraph", "predicates", "rmcp", "scopeguard", "similar"]

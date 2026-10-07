@@ -62,6 +62,7 @@ members = [
     "ext/agent",
     "ext/agent-message-board",
     "ext/connectors",
+    "feature-floor",
     "ext/extension-api",
     "ext/goal",
     "ext/git-attribution",
@@ -432,10 +433,8 @@ ratatui = { version = "0.30.2", default-features = false, features = [
     "underline-color",
 ] }
 ratatui-macros = "0.7.2"
-rcgen = { version = "0.14.7", default-features = false, features = [
-    "aws_lc_rs",
-    "pem",
-] }
+# Tests sign with ring, as rtc does in shipped builds; aws_lc_rs would take precedence.
+rcgen = { version = "0.14.7", default-features = false, features = ["crypto", "pem", "ring"] }
 regex = "1.12.3"
 regex-automata = { version = "0.4.13", default-features = false, features = ["std", "syntax", "unicode", "nfa-pikevm"] }
 regex-lite = "0.1.8"
