@@ -22,8 +22,4 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "ti
 tracing = { workspace = true }
 
 [dev-dependencies]
-ctor = { workspace = true }
 pretty_assertions = { workspace = true }
-
-[target.'cfg(unix)'.dev-dependencies]
-libc = { workspace = true }

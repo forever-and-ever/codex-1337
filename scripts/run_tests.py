@@ -199,7 +199,6 @@ FIXTURE_BINARIES = (
         ),
     ),
     ("codex-stdio-to-uds", "codex-stdio-to-uds", ("codex-stdio-to-uds",)),
-    ("codex-voice-host", "codex-voice-host", ("codex-voice-host",)),
 )
 
 

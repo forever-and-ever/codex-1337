@@ -92,7 +92,6 @@ members = [
     "ollama",
     "process-hardening",
     "realtime-webrtc",
-    "voice-host",
     "protocol",
     "prompts",
     "rollout",
