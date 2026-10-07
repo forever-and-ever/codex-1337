@@ -1,7 +1,9 @@
 use std::path::Path;
+use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 
 use anyhow::Context;
 use anyhow::Result;
@@ -17,6 +19,8 @@ use pretty_assertions::assert_eq;
 use serde_json::Value;
 use serde_json::json;
 use tempfile::TempDir;
+use tokio::io::AsyncBufReadExt;
+use tokio::io::BufReader;
 use wiremock::Mock;
 use wiremock::MockServer;
 use wiremock::ResponseTemplate;
@@ -118,6 +122,37 @@ async fn quota_keeps_accounts_independent_without_switching_login() -> Result<()
         .expect(1)
         .mount(&server)
         .await;
+    let mut app_server = tokio::process::Command::new(codex_utils_cargo_bin::cargo_bin("codex")?)
+        .env("CODEX_HOME", home.path())
+        .env_remove(CODEX_ACCESS_TOKEN_ENV_VAR)
+        .env_remove("OPENAI_API_KEY")
+        .env("NO_PROXY", "127.0.0.1,localhost")
+        .env("no_proxy", "127.0.0.1,localhost")
+        .env("RUST_LOG", "info")
+        .args(["app-server", "--listen", "unix://"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()?;
+    let mut startup = BufReader::new(app_server.stderr.take().unwrap()).lines();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let line = startup
+                .next_line()
+                .await?
+                .context("app-server exited before its control socket was listening")?;
+            if line.contains("app-server control socket listening") {
+                return Ok::<_, anyhow::Error>(());
+            }
+        }
+    })
+    .await
+    .context("app-server control socket did not start listening within 5 s")??;
+    let startup = tokio::spawn(async move {
+        while startup.next_line().await?.is_some() {}
+        Ok::<_, std::io::Error>(())
+    });
     let output = codex_command(home.path())?
         .env_remove(CODEX_ACCESS_TOKEN_ENV_VAR)
         .env_remove("OPENAI_API_KEY")
@@ -137,6 +172,8 @@ async fn quota_keeps_accounts_independent_without_switching_login() -> Result<()
     assert_eq!(result["accounts"][1]["remainingPercent"], Value::Null);
     assert!(result["accounts"][1]["error"].is_string());
     assert_eq!(read_auth_json(home.path())?, before);
+    app_server.kill().await?;
+    startup.await??;
     Ok(())
 }
 

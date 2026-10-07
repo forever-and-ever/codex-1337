@@ -100,8 +100,8 @@ Options:
           registration
 
       --aws-sigv4
-          Sign Direct registration and WebSocket handshake requests with AWS
-          SigV4
+          Sign Direct requests with AWS SigV4 (requires the aws-sigv4 build
+          feature)
 
       --aws-profile <PROFILE>
           AWS profile used for SigV4 authentication

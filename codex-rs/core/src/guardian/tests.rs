@@ -3494,16 +3494,7 @@ async fn guardian_review_routes_required_actions(
 #[tokio::test]
 async fn guardian_ephemeral_retry_preserves_parallel_trunk_and_fork_history() -> anyhow::Result<()>
 {
-    const TEST_STACK_SIZE_BYTES: usize = 4 * 1024 * 1024;
-
-    let handle = std::thread::Builder::new()
-        .name("guardian_ephemeral_retry_preserves_parallel_trunk_and_fork_history".to_string())
-        .stack_size(TEST_STACK_SIZE_BYTES)
-        .spawn(|| -> anyhow::Result<()> {
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()?;
-            runtime.block_on(Box::pin(async {
+    Box::pin(async {
         let first_assessment = serde_json::json!({
             "risk_level": "low",
             "user_authorization": "high",
@@ -3610,7 +3601,8 @@ async fn guardian_ephemeral_retry_preserves_parallel_trunk_and_fork_history() ->
         );
         session
             .record_conversation_items(
-                turn.as_ref(), turn.model_info(),
+                turn.as_ref(),
+                turn.model_info(),
                 &[
                     ResponseItem::Message {
                         id: None,
@@ -3619,7 +3611,8 @@ async fn guardian_ephemeral_retry_preserves_parallel_trunk_and_fork_history() ->
                             text: "Please inspect pending changes before pushing.".to_string(),
                         }],
                         phase: None,
-                        internal_chat_message_metadata_passthrough: None,},
+                        internal_chat_message_metadata_passthrough: None,
+                    },
                     ResponseItem::Message {
                         id: None,
                         role: "assistant".to_string(),
@@ -3627,7 +3620,8 @@ async fn guardian_ephemeral_retry_preserves_parallel_trunk_and_fork_history() ->
                             text: "I need approval to run git diff.".to_string(),
                         }],
                         phase: None,
-                        internal_chat_message_metadata_passthrough: None,},
+                        internal_chat_message_metadata_passthrough: None,
+                    },
                 ],
             )
             .await;
@@ -3655,7 +3649,8 @@ async fn guardian_ephemeral_retry_preserves_parallel_trunk_and_fork_history() ->
             tty: false,
         };
 
-        let second_action = super::approval_request::format_guardian_action_pretty(&second_request)?;
+        let second_action =
+            super::approval_request::format_guardian_action_pretty(&second_request)?;
         let session_for_second = Arc::clone(&session);
         let turn_for_second = Arc::clone(&turn);
         let mut second_review = tokio::spawn(async move {
@@ -3687,7 +3682,8 @@ async fn guardian_ephemeral_retry_preserves_parallel_trunk_and_fork_history() ->
         );
         session
             .record_conversation_items(
-                turn.as_ref(), turn.model_info(),
+                turn.as_ref(),
+                turn.model_info(),
                 &[
                     ResponseItem::Message {
                         id: None,
@@ -3696,7 +3692,8 @@ async fn guardian_ephemeral_retry_preserves_parallel_trunk_and_fork_history() ->
                             text: "Now inspect whether pushing is safe.".to_string(),
                         }],
                         phase: None,
-                        internal_chat_message_metadata_passthrough: None,},
+                        internal_chat_message_metadata_passthrough: None,
+                    },
                     ResponseItem::Message {
                         id: None,
                         role: "assistant".to_string(),
@@ -3704,7 +3701,8 @@ async fn guardian_ephemeral_retry_preserves_parallel_trunk_and_fork_history() ->
                             text: "I need approval to push after the diff check.".to_string(),
                         }],
                         phase: None,
-                        internal_chat_message_metadata_passthrough: None,},
+                        internal_chat_message_metadata_passthrough: None,
+                    },
                 ],
             )
             .await;
@@ -3740,7 +3738,9 @@ async fn guardian_ephemeral_retry_preserves_parallel_trunk_and_fork_history() ->
             assert_root_turn(body, expected_root)?;
             assert_ne!(body["client_metadata"]["turn_id"], turn.sub_id);
             reviewer_turn_ids.insert(
-                body["client_metadata"]["turn_id"].as_str().expect("reviewer turn id")
+                body["client_metadata"]["turn_id"]
+                    .as_str()
+                    .expect("reviewer turn id"),
             );
         }
         assert_eq!(reviewer_turn_ids.len(), 4);
@@ -3817,15 +3817,8 @@ async fn guardian_ephemeral_retry_preserves_parallel_trunk_and_fork_history() ->
         server.shutdown().await;
 
         Ok(())
-                }))
-        })?;
-
-    match handle.join() {
-        Ok(result) => result,
-        Err(_) => Err(anyhow::anyhow!(
-            "guardian_ephemeral_retry_preserves_parallel_trunk_and_fork_history thread panicked"
-        )),
-    }
+    })
+    .await
 }
 
 #[tokio::test]
