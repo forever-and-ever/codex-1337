@@ -144,6 +144,9 @@ pub(super) struct Decoder<'a> {
     usage: Usage,
     raw_usage: Map<String, Value>,
     finished: bool,
+    /// A completed item may already be recorded, rendered or dispatched as a tool call, so a
+    /// failure after it cannot be replayed.
+    committed: bool,
 }
 
 impl<'a> Decoder<'a> {
@@ -158,6 +161,7 @@ impl<'a> Decoder<'a> {
             usage: Usage::default(),
             raw_usage: Map::new(),
             finished: false,
+            committed: false,
         }
     }
 
@@ -182,10 +186,33 @@ impl<'a> Decoder<'a> {
         let mut events = Vec::new();
         match frame {
             Frame::Error { error } => {
+                // Before any item completes, a retry replays nothing the client acted on, so
+                // errors that invite one stay typed for the retry policy.
+                let message = error.message.chars().take(1024).collect::<String>();
+                if !self.committed {
+                    match error.r#type.as_str() {
+                        "overloaded_error" => {
+                            return Err(ApiError::ServerOverloaded { retry_after: None });
+                        }
+                        "rate_limit_error" => {
+                            return Err(ApiError::RateLimitExceeded {
+                                message,
+                                retry_after: None,
+                            });
+                        }
+                        "api_error" => {
+                            return Err(ApiError::Retryable {
+                                message: format!("Anthropic api_error: {message}"),
+                                retry_after: None,
+                            });
+                        }
+                        _ => {}
+                    }
+                }
                 return Err(ApiError::NativeStream(format!(
                     "Anthropic {}: {}",
                     error.r#type.chars().take(80).collect::<String>(),
-                    error.message.chars().take(1024).collect::<String>()
+                    message
                 )));
             }
             Frame::Ping => {}
@@ -347,6 +374,7 @@ impl<'a> Decoder<'a> {
                         delta: input.clone(),
                     });
                 }
+                self.committed = true;
                 events.push(ResponseEvent::OutputItemDone(item));
             }
             Frame::MessageDelta { delta, usage } => {

@@ -94,6 +94,12 @@ impl<T: HttpTransport> AnthropicClient<T> {
         .await
         .map_err(|_| ApiError::NativeStream("Anthropic request handshake timeout".into()))?
         .map_err(|error| match error {
+            // 529 is Anthropic's overload status, unknown to the shared HTTP error bridge.
+            ApiError::Transport(codex_client::TransportError::Http {
+                status,
+                retry_after,
+                ..
+            }) if status.as_u16() == 529 => ApiError::ServerOverloaded { retry_after },
             ApiError::Transport(codex_client::TransportError::Http { .. }) => error,
             error => ApiError::NativeStream(format!("Anthropic request outcome unknown: {error}")),
         })?;

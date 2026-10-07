@@ -3,6 +3,7 @@
 
 use std::time::Duration;
 
+use crate::backpressure::Backpressure;
 use crate::client::ModelClientSession;
 use crate::context::ContentFilterGuidance;
 use crate::context::ContextualUserFragment;
@@ -14,62 +15,13 @@ use codex_features::Feature;
 use codex_http_client::RetryAfter;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::CodexErrorDetails;
-use codex_protocol::protocol::CodexErrorInfo;
 use codex_protocol::protocol::EventMsg;
-use codex_protocol::protocol::StreamErrorEvent;
 use codex_protocol::protocol::WarningEvent;
 use tokio::time::Instant;
 use tracing::warn;
 
 const INITIAL_CONNECTION_RETRY_DELAY: Duration = Duration::from_secs(5);
 const MAX_CONNECTION_RETRY_DELAY: Duration = Duration::from_secs(60);
-const CAPACITY_RETRY_DELAY: Duration = Duration::from_secs(5);
-
-#[derive(Default)]
-pub(crate) struct CapacityRetry {
-    attempts: u64,
-}
-
-impl CapacityRetry {
-    /// Waits for capacity, or returns an error that this policy does not own.
-    pub(crate) async fn retry(
-        &mut self,
-        err: CodexErr,
-        sess: &Session,
-        turn_context: &TurnContext,
-        operation: RetryOperation,
-    ) -> Result<(), CodexErr> {
-        // Internal adjudication must retain its failure path, not wait indefinitely.
-        if !matches!(err.details(), CodexErrorDetails::ServerOverloaded)
-            || turn_context.session_source.is_internal()
-            || crate::guardian::is_basic_session_source(&turn_context.session_source)
-        {
-            return Err(err);
-        }
-
-        let delay = err
-            .retry_delay(/*retry_count*/ 1)
-            .unwrap_or_default()
-            .max(CAPACITY_RETRY_DELAY);
-        self.attempts = self.attempts.saturating_add(1);
-        warn!(turn_id = %turn_context.sub_id, error = %err, ?delay, "model at capacity; waiting to retry");
-        sess.send_event(
-            turn_context,
-            EventMsg::StreamError(StreamErrorEvent {
-                message: format!(
-                    "Selected model is at capacity. Retrying in {}s...",
-                    delay.as_secs()
-                ),
-                codex_error_info: Some(CodexErrorInfo::ServerOverloaded),
-                additional_details: None,
-            }),
-        )
-        .await;
-        codex_client::record_retry!(self.attempts, delay, operation);
-        tokio::time::sleep(delay).await;
-        Ok(())
-    }
-}
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ResponsesStreamRequest {
@@ -79,7 +31,7 @@ pub(crate) enum ResponsesStreamRequest {
 
 pub(crate) struct ResponsesStreamRetryState {
     retries: u64,
-    capacity: CapacityRetry,
+    backpressure: Backpressure,
     connection_retries: u64,
     connection_retry_delay: Duration,
 }
@@ -88,7 +40,7 @@ impl Default for ResponsesStreamRetryState {
     fn default() -> Self {
         Self {
             retries: 0,
-            capacity: CapacityRetry::default(),
+            backpressure: Backpressure::default(),
             connection_retries: 0,
             connection_retry_delay: INITIAL_CONNECTION_RETRY_DELAY,
         }
@@ -135,10 +87,10 @@ pub(crate) async fn handle_response_stream_error(
         ResponsesStreamRequest::RemoteCompactionV2 => RetryOperation::RemoteCompactionV2,
     };
     let retry_count = retry_state.retries.saturating_add(1);
-    // Capacity is not a transport failure and consumes neither retry budget nor fallback.
+    // Backpressure is not a transport failure and consumes neither retry budget nor fallback.
     let err = match retry_state
-        .capacity
-        .retry(err, sess, turn_context, operation)
+        .backpressure
+        .wait(err, sess, turn_context, operation)
         .await
     {
         Ok(()) => return Ok(()),

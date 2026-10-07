@@ -8,6 +8,7 @@ use bytes::Bytes;
 use codex_client::HttpTransport;
 use codex_client::Request;
 use codex_client::Response;
+use codex_protocol::error::CodexErrKind;
 use codex_protocol::error::CodexErrorDetails;
 use futures::stream;
 use http::HeaderMap;
@@ -177,4 +178,45 @@ async fn uncertain_post_attempts_once_despite_provider_retry_policy() {
         Err(ApiError::NativeStream(_))
     ));
     assert_eq!(count.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn errors_before_any_completed_item_stay_typed_for_retry() {
+    // Streamed deltas of an unfinished block commit nothing: no item was recorded or
+    // dispatched, so a retry replays nothing. After a completed item the same frames stay
+    // fatal, as the test above shows.
+    let start = "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg\",\"usage\":{\"input_tokens\":13,\"output_tokens\":1,\"cache_read_input_tokens\":100,\"cache_creation_input_tokens\":7}}}\n\n";
+    let partial = "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"partial\"}}\n\n";
+    let mut kinds = Vec::new();
+    for error_type in [
+        "overloaded_error",
+        "rate_limit_error",
+        "api_error",
+        "invalid_request_error",
+    ] {
+        let error = format!(
+            "data: {{\"type\":\"error\",\"error\":{{\"type\":\"{error_type}\",\"message\":\"synthetic\"}}}}\n\n"
+        );
+        let wire = format!("{start}{partial}{error}").into_bytes();
+        let mut stream = spawn_stream(
+            response(vec![wire]),
+            request(),
+            Duration::from_secs(1),
+            None,
+        );
+        while let Some(event) = stream.next().await {
+            if let Err(error) = event {
+                kinds.push(CodexErrKind::from(crate::map_api_error(error).details()));
+            }
+        }
+    }
+    assert_eq!(
+        kinds,
+        vec![
+            CodexErrKind::ServerOverloaded,
+            CodexErrKind::RateLimitExceeded,
+            CodexErrKind::Stream,
+            CodexErrKind::Fatal,
+        ]
+    );
 }
