@@ -6,6 +6,7 @@ fn project_identity_matches_plain_linked_and_non_dot_git_store_layout() -> std::
     let fixture = tempfile::tempdir()?;
     let plain = fixture.path().join("plain");
     fs::create_dir(&plain)?;
+    fs::create_dir(plain.join(".git"))?;
     assert_eq!(project_identity(&plain)?, plain.canonicalize()?);
     let primary = fixture.path().join("primary");
     let admin = primary.join(".git");
