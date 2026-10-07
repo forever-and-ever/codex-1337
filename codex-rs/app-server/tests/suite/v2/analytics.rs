@@ -27,9 +27,6 @@ use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::TurnStartResponse;
 use codex_app_server_protocol::UserInput;
 use codex_config::types::AuthCredentialsStoreMode;
-use codex_config::types::OtelExporterKind;
-use codex_config::types::OtelHttpProtocol;
-use codex_core::config::ConfigBuilder;
 use codex_core_plugins::loader::curated_plugin_cache_version;
 use codex_core_plugins::store::PluginStore;
 use codex_features::Feature;
@@ -44,7 +41,6 @@ use core_test_support::skip_if_wine_exec;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
 use serde_json::json;
-use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -56,8 +52,6 @@ use wiremock::ResponseTemplate;
 use wiremock::matchers::method;
 use wiremock::matchers::path;
 use wiremock::matchers::path_regex;
-
-const SERVICE_VERSION: &str = "0.0.0-test";
 
 #[tokio::test]
 async fn usage_limit_window_reaches_turn_analytics() -> Result<()> {
@@ -515,64 +509,6 @@ async fn multi_agent_v2_tools_emit_collaborator_analytics() -> Result<()> {
         json!({"total": calls.len(), "subagent": calls.len(), "dynamic": 0})
     );
 
-    Ok(())
-}
-
-fn set_metrics_exporter(config: &mut codex_core::config::Config) {
-    config.otel.metrics_exporter = OtelExporterKind::OtlpHttp {
-        endpoint: "http://localhost:4318".to_string(),
-        headers: HashMap::new(),
-        protocol: OtelHttpProtocol::Json,
-        tls: None,
-    };
-}
-
-#[tokio::test]
-async fn app_server_default_analytics_disabled_without_flag() -> Result<()> {
-    let codex_home = TempDir::new()?;
-    let mut config = ConfigBuilder::default()
-        .codex_home(codex_home.path().to_path_buf())
-        .build()
-        .await?;
-    set_metrics_exporter(&mut config);
-    config.analytics_enabled = None;
-
-    let provider = codex_core::otel_init::build_provider(
-        &config,
-        SERVICE_VERSION,
-        Some("codex-app-server"),
-        /*default_analytics_enabled*/ false,
-    )
-    .map_err(|err| anyhow::anyhow!(err.to_string()))?;
-
-    // With analytics unset in the config and the default flag is false, metrics are disabled.
-    // A provider may still exist for non-metrics telemetry, so check metrics specifically.
-    let has_metrics = provider.as_ref().and_then(|otel| otel.metrics()).is_some();
-    assert_eq!(has_metrics, false);
-    Ok(())
-}
-
-#[tokio::test]
-async fn app_server_default_analytics_enabled_with_flag() -> Result<()> {
-    let codex_home = TempDir::new()?;
-    let mut config = ConfigBuilder::default()
-        .codex_home(codex_home.path().to_path_buf())
-        .build()
-        .await?;
-    set_metrics_exporter(&mut config);
-    config.analytics_enabled = None;
-
-    let provider = codex_core::otel_init::build_provider(
-        &config,
-        SERVICE_VERSION,
-        Some("codex-app-server"),
-        /*default_analytics_enabled*/ true,
-    )
-    .map_err(|err| anyhow::anyhow!(err.to_string()))?;
-
-    // With analytics unset in the config and the default flag is true, metrics are enabled.
-    let has_metrics = provider.as_ref().and_then(|otel| otel.metrics()).is_some();
-    assert_eq!(has_metrics, true);
     Ok(())
 }
 

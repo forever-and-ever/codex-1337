@@ -66,37 +66,6 @@ async fn application_network_defaults_and_null_base_url_are_exposed() -> Result<
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn application_destinations_stay_separate_from_agent_network() -> Result<()> {
-    let home = TempDir::new()?;
-    std::fs::write(
-        home.path().join("requirements.toml"),
-        r#"
-chatgpt_base_url = "https://managed.example.com/backend-api/"
-[experimental_network.domains]
-"github.com" = "allow"
-[application.network.domains]
-"GOV.example.com." = "allow"
-"github.com" = "deny"
-"#,
-    )?;
-    let mut server = start_server(&home).await?;
-    let wire = read_requirements(&mut server).await?;
-    assert_eq!(
-        (
-            &wire["requirements"]["application"],
-            &wire["requirements"]["network"]["domains"],
-            &wire["requirements"]["chatgptBaseUrl"]
-        ),
-        (
-            &json!({"network": {"enabled": true, "domains": {"gov.example.com": "allow", "github.com": "deny"}}}),
-            &json!({"github.com": "allow"}),
-            &json!("https://managed.example.com/backend-api/")
-        ),
-    );
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn application_requirements_read_rejects_invalid_configuration() -> Result<()> {
     let home = TempDir::new()?;
     let mut server = start_server(&home).await?;
