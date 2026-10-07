@@ -749,6 +749,18 @@ pub(crate) enum AppEvent {
         origin: RateLimitRefreshOrigin,
     },
 
+    /// Read the Claude subscription quota for a pending /status card.
+    RefreshClaudeQuota {
+        request_id: u64,
+        account: Option<String>,
+    },
+
+    /// Deliver a Claude subscription quota read to its /status card.
+    ClaudeQuotaLoaded {
+        request_id: u64,
+        result: Result<Option<codex_app_server_protocol::AccountQuota>, String>,
+    },
+
     /// Reconcile inherited account usage with an attached task before its queued input runs.
     ApplyBackendBannerFallback {
         thread_id: ThreadId,

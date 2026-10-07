@@ -53,6 +53,10 @@ use std::sync::RwLock;
 
 const CHATGPT_USAGE_URL: &str = "https://chatgpt.com/codex/settings/usage";
 
+#[path = "claude_quota.rs"]
+mod claude_quota;
+pub(crate) use claude_quota::claude_quota_data;
+
 #[derive(Debug, Clone)]
 struct StatusContextWindowData {
     percent_remaining: i64,

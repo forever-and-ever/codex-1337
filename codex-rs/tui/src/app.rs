@@ -215,6 +215,7 @@ mod app_server_events;
 pub(crate) mod app_server_requests;
 mod backend_banner_fallback;
 mod background_requests;
+mod claude_quota;
 mod composer_hints;
 mod config_persistence;
 mod connector_mentions;

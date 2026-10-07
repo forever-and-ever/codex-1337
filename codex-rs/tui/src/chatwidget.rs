@@ -385,6 +385,7 @@ mod review;
 mod review_popups;
 use self::review::ReviewState;
 mod account_picker;
+mod claude_quota;
 mod safety_buffering;
 mod service_tiers;
 mod settings;

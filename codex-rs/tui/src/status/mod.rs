@@ -16,6 +16,7 @@ mod thread_usage;
 
 pub(crate) use account::StatusAccountDisplay;
 pub(crate) use card::StatusHistoryHandle;
+pub(crate) use card::claude_quota_data;
 #[cfg(test)]
 pub(crate) use card::new_status_output;
 #[cfg(test)]
