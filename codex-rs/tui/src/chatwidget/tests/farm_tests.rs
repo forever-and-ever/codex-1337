@@ -72,10 +72,7 @@ async fn immediate_farm_preserves_rich_draft_and_rejects_unrepresentable_remote_
         assert_no_submit_op(&mut ops);
 
         if command == SlashCommand::Farm {
-            chat.open_farm_recovery(
-                "retained-request".into(),
-                crate::chatwidget::FarmRecovery::MissingReceipt,
-            );
+            chat.open_farm_recovery("retained-request".into());
             assert_chatwidget_snapshot!(
                 "farm_receipt_recovery",
                 render_bottom_popup(&chat, /*width*/ 80)
@@ -89,10 +86,7 @@ async fn immediate_farm_preserves_rich_draft_and_rejects_unrepresentable_remote_
                 }
             }
             assert!(reconciled);
-            chat.open_farm_recovery(
-                "retained-request".into(),
-                crate::chatwidget::FarmRecovery::MissingReceipt,
-            );
+            chat.open_farm_recovery("retained-request".into());
             chat.handle_key_event(KeyCode::Down.into());
             chat.handle_key_event(KeyCode::Enter.into());
             let mut discarded = false;
@@ -103,15 +97,6 @@ async fn immediate_farm_preserves_rich_draft_and_rejects_unrepresentable_remote_
                 }
             }
             assert!(discarded);
-            chat.open_farm_recovery(
-                "retained-request".into(),
-                crate::chatwidget::FarmRecovery::SavedDraft,
-            );
-            assert_chatwidget_snapshot!(
-                "farm_saved_draft_recovery",
-                render_bottom_popup(&chat, /*width*/ 80)
-            );
-            chat.handle_key_event(KeyCode::Esc.into());
             assert_no_submit_op(&mut ops);
         }
 

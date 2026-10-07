@@ -44,17 +44,7 @@ async fn farm_draft_edits_survive_rejection_view_change_and_discard() {
     )
     .await;
     assert_eq!(app.chat_widget.composer_text_with_pending(), edited);
-    assert_eq!(
-        match &app.farm.state {
-            FarmRequestState::Rejected(saved) => Some(&saved.submission),
-            FarmRequestState::Idle
-            | FarmRequestState::Waiting(_)
-            | FarmRequestState::Uncertain(_) => None,
-        },
-        Some(&submission)
-    );
-    app.restore_farm_draft(&id);
-    assert_eq!(app.chat_widget.composer_text_with_pending(), edited);
+    assert!(matches!(app.farm.state, FarmRequestState::Idle));
     app.farm.state = FarmRequestState::Uncertain(retained.clone());
     app.discard_farm(&mut tui, &id).await;
     assert_eq!(app.chat_widget.composer_text_with_pending(), edited);
@@ -195,9 +185,7 @@ async fn farm_receipt_reconciles_identity_and_draft_without_steering_or_navigati
     assert_eq!(
         match &app.farm.state {
             FarmRequestState::Uncertain(pending) => Some(&pending.request_id),
-            FarmRequestState::Idle
-            | FarmRequestState::Waiting(_)
-            | FarmRequestState::Rejected(_) => None,
+            FarmRequestState::Idle | FarmRequestState::Waiting(_) => None,
         },
         Some(&id)
     );
@@ -224,7 +212,7 @@ async fn farm_receipt_reconciles_identity_and_draft_without_steering_or_navigati
             match &app.farm.state {
                 FarmRequestState::Waiting(pending) | FarmRequestState::Uncertain(pending) =>
                     Some(&pending.request_id),
-                FarmRequestState::Idle | FarmRequestState::Rejected(_) => None,
+                FarmRequestState::Idle => None,
             },
             Some(&id)
         );

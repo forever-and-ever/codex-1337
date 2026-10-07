@@ -1,5 +1,6 @@
-//! Farm is a root-thread RPC, never a queued turn or steer. Refuse UI replacement
-//! while its identity or saved draft remains; loss of a response is not a failed spawn.
+//! Farm is a root-thread RPC, never a queued turn or steer. Refuse new farms and UI
+//! replacement while a request awaits its receipt or its outcome is unknown; loss of a
+//! response is not a failed spawn. A rejection spawned nothing, so it retains nothing.
 
 use super::*;
 use crate::chatwidget::FarmSubmission;
@@ -29,15 +30,12 @@ pub(super) enum FarmRequestState {
     Idle,
     Waiting(RetainedFarm),
     Uncertain(RetainedFarm),
-    Rejected(RetainedFarm),
 }
 
 impl FarmRequestState {
     fn retained(&self) -> Option<&RetainedFarm> {
         match self {
-            Self::Waiting(retained) | Self::Uncertain(retained) | Self::Rejected(retained) => {
-                Some(retained)
-            }
+            Self::Waiting(retained) | Self::Uncertain(retained) => Some(retained),
             Self::Idle => None,
         }
     }
@@ -84,12 +82,6 @@ impl App {
             return;
         }
         match &self.farm.state {
-            FarmRequestState::Rejected(_) => {
-                self.chat_widget.add_error_message(
-                    "Restore/discard the saved farm draft before delegating another task.".into(),
-                );
-                return;
-            }
             FarmRequestState::Uncertain(pending) => {
                 self.chat_widget.add_error_message(format!("Farm outcome is unknown; use /farm to check or discard. Request {} is retained.", pending.request_id));
                 return;
@@ -114,10 +106,7 @@ impl App {
     async fn send_pending_farm(&mut self, tui: &mut tui::Tui, server: &mut AppServerSession) {
         let pending = match std::mem::take(&mut self.farm.state) {
             FarmRequestState::Waiting(pending) | FarmRequestState::Uncertain(pending) => pending,
-            state @ (FarmRequestState::Idle | FarmRequestState::Rejected(_)) => {
-                self.farm.state = state;
-                return;
-            }
+            FarmRequestState::Idle => return,
         };
         let request_id = pending.request_id.clone();
         let origin = pending.thread_id;
@@ -176,18 +165,12 @@ impl App {
         }
         match &self.farm.state {
             FarmRequestState::Uncertain(pending) => {
-                self.chat_widget.open_farm_recovery(
-                    pending.request_id.clone(),
-                    crate::chatwidget::FarmRecovery::MissingReceipt,
-                );
+                self.chat_widget
+                    .open_farm_recovery(pending.request_id.clone());
             }
             FarmRequestState::Waiting(_) => self
                 .chat_widget
                 .add_error_message("A farm request is still waiting for its receipt.".into()),
-            FarmRequestState::Rejected(saved) => self.chat_widget.open_farm_recovery(
-                saved.request_id.clone(),
-                crate::chatwidget::FarmRecovery::SavedDraft,
-            ),
             FarmRequestState::Idle => self
                 .chat_widget
                 .add_error_message("Usage: /farm <task> or /farm_fresh <task>".into()),
@@ -217,11 +200,7 @@ impl App {
             return;
         }
         let pending = match std::mem::take(&mut self.farm.state) {
-            FarmRequestState::Uncertain(pending) | FarmRequestState::Rejected(pending)
-                if pending.request_id == request_id =>
-            {
-                pending
-            }
+            FarmRequestState::Uncertain(pending) if pending.request_id == request_id => pending,
             state => {
                 self.farm.state = state;
                 return;
@@ -257,10 +236,10 @@ impl App {
             && self.primary_thread_id == Some(saved.thread_id)
             && !self.chat_widget.is_parent_owned_thread()
         {
-            if self.chat_widget.restore_farm_draft(&saved.submission.draft)
-                && matches!(self.farm.state, FarmRequestState::Rejected(_))
-            {
-                self.farm.state = FarmRequestState::Idle;
+            if !self.chat_widget.restore_farm_draft(&saved.submission.draft) {
+                self.chat_widget.add_error_message(
+                    "Clear the current draft before restoring the submitted farm task.".into(),
+                );
             }
         } else {
             self.chat_widget.add_error_message(
@@ -306,8 +285,13 @@ impl App {
                 )
             }
             Err(FarmFailure::Rejected(error)) => {
-                self.farm.state = FarmRequestState::Rejected(pending);
-                format!("Farm rejected: {error}. Submitted draft retained; use /farm to restore.")
+                // Nothing holds a rejected draft: it returns only to a composer that newer
+                // input does not occupy.
+                if displayed == Some(origin) {
+                    self.chat_widget
+                        .restore_farm_draft(&pending.submission.draft);
+                }
+                format!("Farm rejected: {error}.")
             }
             Err(FarmFailure::Uncertain(error)) => {
                 self.farm.state = FarmRequestState::Uncertain(pending);

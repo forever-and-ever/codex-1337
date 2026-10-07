@@ -1,5 +1,6 @@
 //! Farm input is prepared without consuming the rich composer draft. Acceptance or
-//! explicit discard clears only the unchanged draft; later edits are never overwritten.
+//! explicit discard clears only the unchanged draft, and a restore fills only a composer
+//! that newer input does not occupy; later edits are never overwritten.
 
 use super::*;
 use codex_app_server_protocol::ThreadFarmMode;
@@ -42,11 +43,6 @@ impl FarmSubmission {
             task_name: Some(task_name),
         }
     }
-}
-
-pub(crate) enum FarmRecovery {
-    MissingReceipt,
-    SavedDraft,
 }
 
 impl ThreadInputState {
@@ -101,15 +97,13 @@ impl ChatWidget {
         self.request_redraw();
     }
 
+    /// Returns whether `draft` now fills the composer; newer input is never replaced.
     pub(crate) fn restore_farm_draft(&mut self, draft: &FarmDraft) -> bool {
         let mut current = self.farm_draft().composer;
         if matches!(current.text.trim(), "/farm" | "/farm_fresh") {
             current.text.clear();
         }
         if current.has_content() && current != draft.composer {
-            self.add_error_message(
-                "Clear the current draft before restoring the submitted farm task.".into(),
-            );
             return false;
         }
         self.restore_composer_state(draft.composer.clone());
@@ -215,62 +209,51 @@ impl ChatWidget {
         });
     }
 
-    pub(crate) fn open_farm_recovery(&mut self, request_id: String, recovery: FarmRecovery) {
+    pub(crate) fn open_farm_recovery(&mut self, request_id: String) {
         let reconcile_id = request_id.clone();
         let restore_id = request_id.clone();
-        let (title, items) = match recovery {
-            FarmRecovery::MissingReceipt => ("Farm receipt missing", vec![
-                SelectionItem {
-                    name: "Check receipt".into(),
-                    description: Some(
-                        "Ask about the same request; never create a second task.".into(),
-                    ),
-                    actions: vec![Box::new(move |tx| {
-                        tx.send(AppEvent::ReconcileFarm {
-                            request_id: reconcile_id.clone(),
-                        })
-                    })],
-                    dismiss_on_select: true,
-                    ..Default::default()
-                },
-                SelectionItem {
-                    name: "Discard pending request".into(),
-                    description: Some(
-                        "A child may still be running. Allow new tasks without resending this one."
-                            .into(),
-                    ),
-                    actions: vec![Box::new(move |tx| {
-                        tx.send(AppEvent::DiscardFarm {
-                            request_id: request_id.clone(),
-                        })
-                    })],
-                    dismiss_on_select: true,
-                    ..Default::default()
-                },
-                SelectionItem {
-                    name: "Restore submitted draft".into(),
-                    description: Some("Restore into an empty composer; keep the same pending request.".into()),
-                    actions: vec![Box::new(move |tx| tx.send(AppEvent::RestoreFarmDraft { request_id: restore_id.clone() }))],
-                    dismiss_on_select: true,
-                    ..Default::default()
-                },
-            ]),
-            FarmRecovery::SavedDraft => ("Submitted farm draft", vec![SelectionItem {
+        let items = vec![
+            SelectionItem {
+                name: "Check receipt".into(),
+                description: Some("Ask about the same request; never create a second task.".into()),
+                actions: vec![Box::new(move |tx| {
+                    tx.send(AppEvent::ReconcileFarm {
+                        request_id: reconcile_id.clone(),
+                    })
+                })],
+                dismiss_on_select: true,
+                ..Default::default()
+            },
+            SelectionItem {
+                name: "Discard pending request".into(),
+                description: Some(
+                    "A child may still be running. Allow new tasks without resending this one."
+                        .into(),
+                ),
+                actions: vec![Box::new(move |tx| {
+                    tx.send(AppEvent::DiscardFarm {
+                        request_id: request_id.clone(),
+                    })
+                })],
+                dismiss_on_select: true,
+                ..Default::default()
+            },
+            SelectionItem {
                 name: "Restore submitted draft".into(),
-                description: Some("Restore into an empty composer. Nothing resent; a new submission may create another child.".into()),
-                actions: vec![Box::new(move |tx| tx.send(AppEvent::RestoreFarmDraft { request_id: restore_id.clone() }))],
+                description: Some(
+                    "Restore into an empty composer; keep the same pending request.".into(),
+                ),
+                actions: vec![Box::new(move |tx| {
+                    tx.send(AppEvent::RestoreFarmDraft {
+                        request_id: restore_id.clone(),
+                    })
+                })],
                 dismiss_on_select: true,
                 ..Default::default()
-            }, SelectionItem {
-                name: "Discard saved draft".into(),
-                description: Some("Release the saved farm request without resending it.".into()),
-                actions: vec![Box::new(move |tx| tx.send(AppEvent::DiscardFarm { request_id: request_id.clone() }))],
-                dismiss_on_select: true,
-                ..Default::default()
-            }]),
-        };
+            },
+        ];
         self.bottom_pane.show_selection_view(SelectionViewParams {
-            title: Some(title.into()),
+            title: Some("Farm receipt missing".into()),
             items,
             ..Default::default()
         });

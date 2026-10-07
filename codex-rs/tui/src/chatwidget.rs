@@ -287,7 +287,6 @@ pub(crate) use server_queue::queued_message_text;
 mod reconnect;
 use self::input_queue::InputQueueState;
 mod farm;
-pub(crate) use farm::FarmRecovery;
 mod idle_restart;
 mod input_flow;
 pub(crate) use farm::FarmSubmission;
