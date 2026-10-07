@@ -21,6 +21,15 @@ use crate::mcp::sanitize_responses_api_tool_name;
 
 const LEGACY_MCP_TOOL_NAME_PREFIX: &str = "mcp__";
 
+/// Whether a listed declaration's annotations come from its live server.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AnnotationSource {
+    #[default]
+    Live,
+    /// A catalog cache or a server that has not started withheld some or all annotations.
+    Withheld,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolInfo {
     /// Raw MCP server name used for routing the tool call.
@@ -43,6 +52,8 @@ pub struct ToolInfo {
     pub namespace_description: Option<String>,
     /// Raw MCP tool definition; `tool.name` is sent back to the MCP server.
     pub tool: Tool,
+    #[serde(default)]
+    pub annotation_source: AnnotationSource,
     /// Optional provided-file fields accepted by each declared `openai/fileParams`
     /// argument. This is derived from the raw MCP schema before file arguments are
     /// masked as local paths for the model.

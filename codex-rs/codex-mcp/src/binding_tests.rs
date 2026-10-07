@@ -43,6 +43,7 @@ async fn test_step(
     let tool = ToolInfo {
         server_name: SERVER_NAME.to_string(),
         supports_parallel_tool_calls: false,
+        annotation_source: Default::default(),
         server_origin: None,
         callable_name: TOOL_NAME.to_string(),
         callable_namespace: SERVER_NAME.to_string(),

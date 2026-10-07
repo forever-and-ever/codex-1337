@@ -19,6 +19,7 @@ use tracing::trace_span;
 use super::McpConnectionSet;
 use super::McpServerMetadata;
 use super::McpServerView;
+use crate::AnnotationSource;
 use crate::binding::McpBinding;
 use crate::binding::PreparedMcpCall;
 use crate::binding_clients::McpBindingClients;
@@ -428,6 +429,7 @@ impl McpConnectionSet {
                 .map(|mut tool| {
                     if client.is_none() {
                         withhold_read_only_hint(&mut tool.tool);
+                        tool.annotation_source = AnnotationSource::Withheld;
                     }
                     Self::with_server_metadata(tool, &view.metadata)
                 })
@@ -543,9 +545,12 @@ impl McpConnectionSet {
         if !tool_is_model_visible(&tool_info) {
             return None;
         }
-        // Cached and dormant listings withhold annotations; a call made from such a
-        // listing keeps that lesser authority instead of failing as a changed definition.
+        // A declaration advertised from a cache or a dormant server lacks annotations
+        // the live server now supplies; those are authoritative. Any other change rejects.
         if tool_info.tool != advertised_tool.tool {
+            if advertised_tool.annotation_source != AnnotationSource::Withheld {
+                return None;
+            }
             let mut withheld = tool_info.tool.clone();
             if advertised_tool.tool.annotations.is_none() {
                 withheld.annotations = None;
@@ -555,7 +560,6 @@ impl McpConnectionSet {
             if withheld != advertised_tool.tool {
                 return None;
             }
-            tool_info.tool = withheld;
         }
         if tool_info.openai_file_input_optional_fields
             != advertised_tool.openai_file_input_optional_fields

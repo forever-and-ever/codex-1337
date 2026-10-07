@@ -956,7 +956,10 @@ url = "{mcp_server_url}/mcp"
     assert_eq!(thread_response.data.len(), 1);
     let status = &thread_response.data[0];
     assert_eq!(status.name, "project-server");
-    assert_eq!(status.runtime_status, Some(McpServerConnectionStatus::Connected));
+    assert_eq!(
+        status.runtime_status,
+        Some(McpServerConnectionStatus::Connected)
+    );
     assert_eq!(
         status.tools.keys().cloned().collect::<BTreeSet<_>>(),
         BTreeSet::from(["project_lookup".to_string()])

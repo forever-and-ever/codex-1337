@@ -188,6 +188,7 @@ fn create_test_tool(server_name: &str, tool_name: &str) -> ToolInfo {
     ToolInfo {
         server_name: server_name.to_string(),
         supports_parallel_tool_calls: false,
+        annotation_source: Default::default(),
         server_origin: None,
         callable_name: tool_name.to_string(),
         callable_namespace: server_name.to_string(),

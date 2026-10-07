@@ -23,6 +23,7 @@ use sha1::Digest;
 use sha1::Sha1;
 use tokio::time::Instant;
 
+use crate::AnnotationSource;
 use crate::McpProtocolMode;
 use crate::McpRuntimeContext;
 use crate::ToolInfo;
@@ -213,6 +214,7 @@ impl McpToolCatalogCacheContext {
             // Tool annotations affect approval and parallelism decisions, so only the live
             // connection may supply them.
             tool.tool.annotations = None;
+            tool.annotation_source = AnnotationSource::Withheld;
         }
         state.last_accepted_generation = ticket.generation;
         state.optional_startup_deadline = None;
