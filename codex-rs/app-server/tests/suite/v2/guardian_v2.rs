@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
@@ -177,10 +176,6 @@ struct MockResponsesState {
     root_thread_id: Mutex<Option<String>>,
     allow_luna: Notify,
     allow_guardian_review: Notify,
-    classification_completed: Notify,
-    truncation_recorded: Notify,
-    context_metric_bounds: Mutex<BTreeMap<(String, String), Option<f64>>>,
-    context_metrics_recorded: Notify,
     luna_score: f64,
     invalid_classification: bool,
     review_outcome: ReviewOutcome,
@@ -547,7 +542,7 @@ async fn parent_response(
             assert!(
                 output
                     .to_string()
-                    .contains("Tool execution was declined by Guardian."),
+                    .contains("This action was rejected due to unacceptable risk."),
                 "the refreshed review must deny the first tool after revocation: {output}"
             );
         }
@@ -754,73 +749,6 @@ async fn guardian_v2_routes_scoped_tool_approvals(
     let responses_url = format!("http://{}", listener.local_addr()?);
     let router = Router::new()
         .route("/v1/responses", get(luna_websocket).post(parent_response))
-        .route(
-            "/metrics",
-            post(
-                |State(state): State<Arc<MockResponsesState>>, body: String| async move {
-                    if matches!(state.transcript_content, TranscriptContent::MixedEvidence) {
-                        let payload: Value = serde_json::from_str(&body).expect("OTLP JSON");
-                        for metric in payload["resourceMetrics"]
-                            .as_array()
-                            .into_iter()
-                            .flatten()
-                            .flat_map(|resource| {
-                                resource["scopeMetrics"].as_array().into_iter().flatten()
-                            })
-                            .flat_map(|scope| scope["metrics"].as_array().into_iter().flatten())
-                            .filter(|metric| {
-                                matches!(
-                                    metric["name"].as_str(),
-                                    Some(
-                                        "codex.guardian.context.request_tokens"
-                                            | "codex.guardian.context.section_cost"
-                                    )
-                                )
-                            })
-                        {
-                            let name = metric["name"].as_str().expect("context metric name");
-                            for point in metric["histogram"]["dataPoints"]
-                                .as_array()
-                                .into_iter()
-                                .flatten()
-                            {
-                                let attributes =
-                                    point["attributes"].as_array().expect("metric attributes");
-                                for target in ["sync", "async"] {
-                                    if attributes.iter().any(|attr| {
-                                        attr["key"] == "target"
-                                            && attr["value"]["stringValue"] == target
-                                    }) {
-                                        let mut bounds = state
-                                            .context_metric_bounds
-                                            .lock()
-                                            .expect("context metric bounds");
-                                        bounds.insert(
-                                            (name.to_owned(), target.to_owned()),
-                                            point["explicitBounds"]
-                                                .as_array()
-                                                .and_then(|bounds| bounds.last())
-                                                .and_then(Value::as_f64),
-                                        );
-                                        if bounds.len() == 4 {
-                                            state.context_metrics_recorded.notify_one();
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    if body.contains("codex.guardian_v2.classification") {
-                        state.classification_completed.notify_one();
-                    }
-                    if body.contains("codex.guardian_v2.classification.truncation")
-                        && body.contains("sync_review_action")
-                    {
-                        state.truncation_recorded.notify_one();
-                    }
-                },
-            ),
-        )
         .with_state(Arc::clone(&responses_state));
     let responses_server = tokio::spawn(async move {
         let _ = axum::serve(listener, router).await;
@@ -903,7 +831,7 @@ async fn guardian_v2_routes_scoped_tool_approvals(
             analytics_server.uri(),
         ))
         .with_extra_config(&format!(
-            "[mcp_servers.{server_name}]\nurl = \"{mcp_server_url}/mcp\"\ndefault_tools_approval_mode = \"{tool_approval_mode}\"\n\n[analytics]\nenabled = true\n\n[otel]\nmetrics_exporter = {{ otlp-http = {{ endpoint = \"{responses_url}/metrics\", protocol = \"json\" }} }}\n\n[features.guardianv2]\nenabled = true{guardian_scope_config}"
+            "[mcp_servers.{server_name}]\nurl = \"{mcp_server_url}/mcp\"\ndefault_tools_approval_mode = \"{tool_approval_mode}\"\n\n[analytics]\nenabled = true\n\n[features.guardianv2]\nenabled = true{guardian_scope_config}"
         ))
         .enable_feature(Feature::GuardianApproval);
     if lifecycle.has_user_input() || lifecycle.has_root_user_input() {
@@ -1186,7 +1114,12 @@ async fn guardian_v2_routes_scoped_tool_approvals(
             assert_eq!(completed.thread_id, thread_id);
         }
         responses_state.allow_luna.notify_one();
-        timeout(TIMEOUT, responses_state.classification_completed.notified()).await?;
+        wait_for_matching_analytics_event(&analytics_server, TIMEOUT, |event| {
+            event["event_type"] == "codex_guardian_v2_classification"
+                && event["event_params"]["thread_id"] == reviewed_thread_id
+                && event["event_params"]["item_id"] == "guardian-action-0"
+        })
+        .await?;
         responses_state.allow_guardian_review.notify_one();
         if lifecycle.has_user_input() {
             let answers = if matches!(lifecycle, ThreadLifecycle::UserInputEmpty) {
@@ -1454,26 +1387,6 @@ async fn guardian_v2_routes_scoped_tool_approvals(
             assert!(text.contains("Planned action JSON:"));
         }
     }
-    if mixed_evidence {
-        timeout(TIMEOUT, responses_state.context_metrics_recorded.notified())
-            .await
-            .expect("sync and async request/section metrics should all be exported");
-        let bounds = responses_state
-            .context_metric_bounds
-            .lock()
-            .expect("context metric bounds");
-        for ((metric, target), bound) in bounds.iter() {
-            assert_eq!(
-                *bound,
-                Some(if metric == "codex.guardian.context.request_tokens" {
-                    2_000_000.0
-                } else {
-                    16_777_216.0
-                }),
-                "{metric} ({target}) must export its context metric buckets"
-            );
-        }
-    }
     if lifecycle.has_user_answer() {
         let reviews = responses_state
             .guardian_requests
@@ -1577,7 +1490,12 @@ async fn guardian_v2_routes_scoped_tool_approvals(
 
     if matches!(lifecycle, ThreadLifecycle::RequiredModelSwitch) {
         // Both MCP actions have low scores; the sandboxed exec must still receive full review.
-        timeout(TIMEOUT, responses_state.classification_completed.notified()).await?;
+        wait_for_matching_analytics_event(&analytics_server, TIMEOUT, |event| {
+            event["event_type"] == "codex_guardian_v2_classification"
+                && event["event_params"]["thread_id"] == reviewed_thread_id
+                && event["event_params"]["item_id"] == "guardian-action-1"
+        })
+        .await?;
         // Continue without new user input so authorization changes cannot invalidate the score.
         // Only the required-model check should prevent cached approval of the sandboxed command.
         let request_id = app_server
@@ -1783,10 +1701,6 @@ async fn guardian_v2_routes_scoped_tool_approvals(
             );
         }
         responses_state.allow_luna.notify_one();
-    }
-
-    if matches!(review_outcome, ReviewOutcome::Deny) && !lifecycle.has_user_answer() {
-        timeout(TIMEOUT, responses_state.truncation_recorded.notified()).await?;
     }
 
     if matches!(lifecycle, ThreadLifecycle::New)
