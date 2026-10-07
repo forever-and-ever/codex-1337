@@ -13,6 +13,7 @@ workspace = true
 # on this crate. `scripts/check_feature_parity.py` names any package that diverges.
 [dependencies]
 env_logger = { version = "0.11.9", default-features = false, features = ["auto-color"] }
+p256 = { version = "0.13", features = ["ecdsa"] }
 petgraph = { version = "0.8.3", default-features = false, features = ["std"] }
 predicates = { workspace = true }
 rmcp = { workspace = true, features = ["elicitation"] }
@@ -20,4 +21,4 @@ scopeguard = { workspace = true }
 similar = { workspace = true, features = ["inline"] }
 
 [package.metadata.cargo-shear]
-ignored = ["env_logger", "petgraph", "predicates", "rmcp", "scopeguard", "similar"]
+ignored = ["env_logger", "p256", "petgraph", "predicates", "rmcp", "scopeguard", "similar"]

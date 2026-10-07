@@ -26,7 +26,8 @@ doctest = false
 workspace = true
 
 [features]
-aws-sigv4 = ["dep:codex-aws-auth"]
+# SigV4 signing left with codex-aws-auth; the empty feature keeps upstream's refusal paths compiling.
+aws-sigv4 = []
 
 [dependencies]
 codex-utils-process = { workspace = true }
@@ -43,7 +44,6 @@ codex-arg0 = { workspace = true }
 codex-build-info = { workspace = true }
 codex-api = { workspace = true }
 codex-backend-client = { workspace = true }
-codex-aws-auth = { workspace = true, optional = true }
 codex-chatgpt = { workspace = true }
 codex-cloud-config = { workspace = true }
 codex-cloud-tasks = { path = "../cloud-tasks" }
