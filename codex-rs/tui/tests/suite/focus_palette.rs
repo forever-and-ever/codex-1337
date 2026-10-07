@@ -267,8 +267,7 @@ impl PtyCodex {
         codex_home: TempDir,
         extra_args: &[&str],
     ) -> Result<Self> {
-        let codex = codex_utils_cargo_bin::cargo_bin("codex-tui")
-            .or_else(|_| codex_utils_cargo_bin::cargo_bin("codex"))?;
+        let codex = codex_utils_cargo_bin::cargo_bin("codex")?;
         Self::start_binary(
             &codex, repo_root, codex_home, extra_args, /*editor*/ None,
         )

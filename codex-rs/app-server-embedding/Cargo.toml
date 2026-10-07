@@ -1,0 +1,28 @@
+[package]
+name = "codex-app-server-embedding"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+codex-app-server-protocol = { workspace = true }
+codex-app-server-transport = { workspace = true }
+codex-arg0 = { workspace = true }
+codex-backend-client = { workspace = true }
+codex-config = { workspace = true }
+codex-core = { workspace = true }
+codex-exec-server = { workspace = true }
+codex-feedback = { workspace = true }
+codex-http-client = { workspace = true }
+codex-login = { workspace = true }
+codex-protocol = { workspace = true }
+codex-rollout = { workspace = true }
+codex-state = { workspace = true }
+futures = { workspace = true }
+toml = { workspace = true }

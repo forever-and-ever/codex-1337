@@ -6,10 +6,6 @@ license.workspace = true
 autobins = false
 
 [[bin]]
-name = "codex-tui"
-path = "src/main.rs"
-
-[[bin]]
 name = "md-events"
 path = "src/bin/md-events.rs"
 
@@ -175,6 +171,8 @@ arboard = { workspace = true }
 
 
 [dev-dependencies]
+codex-app-server = { workspace = true }
+ctor = { workspace = true }
 app_test_support = { workspace = true }
 codex-mcp = { workspace = true }
 core_test_support = { workspace = true }

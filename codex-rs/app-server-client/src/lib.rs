@@ -1,7 +1,8 @@
 //! Shared in-process app-server client facade for CLI surfaces.
 //!
-//! This crate wraps [`codex_app_server::in_process`] behind a single async API
-//! used by surfaces like TUI and exec. It centralizes:
+//! This crate wraps an in-process app-server, started through
+//! [`codex_app_server_embedding`], behind a single async API used by surfaces
+//! like TUI and exec. It centralizes:
 //!
 //! - Runtime startup and initialize-capabilities handshake.
 //! - Typed caller-provided startup identity (`SessionSource` + client name).
@@ -11,8 +12,8 @@
 //! - Bounded graceful shutdown with abort fallback.
 //!
 //! The facade interposes a worker task between the caller and the underlying
-//! [`InProcessClientHandle`](codex_app_server::in_process::InProcessClientHandle),
-//! bridging async `mpsc` channels on both sides. Commands and the underlying
+//! [`EmbeddedServer`](codex_app_server_embedding::EmbeddedServer), bridging
+//! async `mpsc` channels on both sides. Commands and the underlying
 //! runtime remain bounded; the local consumer event queue is unbounded so
 //! unread notifications cannot prevent request responses from being delivered.
 
@@ -24,43 +25,30 @@ use std::fmt;
 use std::io::Error as IoError;
 use std::io::ErrorKind;
 use std::io::Result as IoResult;
-use std::sync::Arc;
 use std::time::Duration;
 
-pub use codex_app_server::app_server_control_socket_path;
-pub use codex_app_server::in_process::DEFAULT_IN_PROCESS_CHANNEL_CAPACITY;
-pub use codex_app_server::in_process::EmbeddedNetworkPolicy;
-pub use codex_app_server::in_process::InProcessServerEvent;
-use codex_app_server::in_process::InProcessStartArgs;
-use codex_app_server::in_process::LogDbLayer;
-pub use codex_app_server::in_process::StateDbHandle;
-use codex_app_server_protocol::ClientInfo;
+pub use codex_app_server_embedding::DEFAULT_IN_PROCESS_CHANNEL_CAPACITY;
+pub use codex_app_server_embedding::EmbeddedNetworkPolicy;
+pub use codex_app_server_embedding::InProcessClientStartArgs;
+pub use codex_app_server_embedding::InProcessServerEvent;
+pub use codex_app_server_embedding::RequestResult;
+pub use codex_app_server_embedding::StateDbHandle;
 use codex_app_server_protocol::ClientNotification;
 use codex_app_server_protocol::ClientRequest;
-use codex_app_server_protocol::ConfigWarningNotification;
-use codex_app_server_protocol::InitializeCapabilities;
-use codex_app_server_protocol::InitializeParams;
 use codex_app_server_protocol::JSONRPCErrorError;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::Result as JsonRpcResult;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ServerRequest;
-use codex_arg0::Arg0DispatchPaths;
-use codex_config::CloudConfigBundleLoader;
-use codex_config::LoaderOverrides;
-use codex_config::NoopThreadConfigLoader;
-use codex_core::config::Config;
+pub use codex_app_server_transport::app_server_control_socket_path;
 pub use codex_core::otel_init::build_provider as build_otel_provider;
 pub use codex_exec_server::EnvironmentManager;
 pub use codex_exec_server::ExecServerRuntimeOptions;
-use codex_feedback::CodexFeedback;
-use codex_protocol::protocol::SessionSource;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use serde::de::DeserializeOwned;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::time::timeout;
-use toml::Value as TomlValue;
 use tracing::warn;
 
 pub use crate::path::AppServerPath;
@@ -86,13 +74,6 @@ pub mod legacy_core {
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 // Covers the embedded drain, its analytics flush, and final task join.
 const IN_PROCESS_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(45);
-
-/// Raw app-server request result for typed in-process requests.
-///
-/// Even on the in-process path, successful responses still travel back through
-/// the same JSON-RPC result envelope used by socket/stdio transports because
-/// `MessageProcessor` continues to produce that shape internally.
-pub type RequestResult = std::result::Result<JsonRpcResult, JSONRPCErrorError>;
 
 #[derive(Debug, Clone)]
 pub enum AppServerEvent {
@@ -192,100 +173,6 @@ where
     })
 }
 
-#[derive(Clone)]
-pub struct InProcessClientStartArgs {
-    /// Resolved argv0 dispatch paths used by command execution internals.
-    pub arg0_paths: Arg0DispatchPaths,
-    /// Shared config used to initialize app-server runtime.
-    pub config: Arc<Config>,
-    /// CLI config overrides that are already parsed into TOML values.
-    pub cli_overrides: Vec<(String, TomlValue)>,
-    /// Loader override knobs used by config API paths.
-    pub loader_overrides: LoaderOverrides,
-    /// Whether config API paths should reject unknown config fields.
-    pub strict_config: bool,
-    /// Preloaded cloud config bundle provider.
-    pub cloud_config_bundle: CloudConfigBundleLoader,
-    /// Policy shared with transports created by the embedder before startup.
-    pub embedded_network_policy: EmbeddedNetworkPolicy,
-    /// Feedback sink used by app-server/core telemetry and logs.
-    pub feedback: CodexFeedback,
-    /// SQLite tracing layer used to flush recently emitted logs before feedback upload.
-    pub log_db: Option<LogDbLayer>,
-    /// Process-wide SQLite state handle shared with the embedded app-server.
-    pub state_db: Option<StateDbHandle>,
-    /// Environment manager used by core execution and filesystem operations.
-    pub environment_manager: Arc<EnvironmentManager>,
-    /// Startup warnings emitted after initialize succeeds.
-    pub config_warnings: Vec<ConfigWarningNotification>,
-    /// Session source recorded in app-server thread metadata.
-    pub session_source: SessionSource,
-    /// Whether auth loading should honor the `CODEX_API_KEY` environment variable.
-    pub enable_codex_api_key_env: bool,
-    /// Client name reported during initialize.
-    pub client_name: String,
-    /// Client version reported during initialize.
-    pub client_version: String,
-    /// Whether experimental APIs are requested at initialize time.
-    pub experimental_api: bool,
-    /// Whether MCP servers may send `openai/form` elicitation requests.
-    pub mcp_server_openai_form_elicitation: bool,
-    /// Notification methods this client opts out of receiving.
-    pub opt_out_notification_methods: Vec<String>,
-    /// Queue capacity for command and embedded-runtime channels (clamped to at least 1).
-    pub channel_capacity: usize,
-}
-
-impl InProcessClientStartArgs {
-    /// Builds initialize params from caller-provided metadata.
-    pub fn initialize_params(&self) -> InitializeParams {
-        let capabilities = InitializeCapabilities {
-            explicit_gateway_oauth: false,
-            experimental_api: self.experimental_api,
-            request_attestation: false,
-            extensions: None,
-            opt_out_notification_methods: if self.opt_out_notification_methods.is_empty() {
-                None
-            } else {
-                Some(self.opt_out_notification_methods.clone())
-            },
-            mcp_server_openai_form_elicitation: self.mcp_server_openai_form_elicitation,
-        };
-
-        InitializeParams {
-            client_info: ClientInfo {
-                name: self.client_name.clone(),
-                title: None,
-                version: self.client_version.clone(),
-            },
-            capabilities: Some(capabilities),
-        }
-    }
-
-    fn into_runtime_start_args(self) -> InProcessStartArgs {
-        let initialize = self.initialize_params();
-        InProcessStartArgs {
-            arg0_paths: self.arg0_paths,
-            config: self.config,
-            cli_overrides: self.cli_overrides,
-            loader_overrides: self.loader_overrides,
-            strict_config: self.strict_config,
-            cloud_config_bundle: self.cloud_config_bundle,
-            embedded_network_policy: self.embedded_network_policy,
-            thread_config_loader: Arc::new(NoopThreadConfigLoader),
-            feedback: self.feedback,
-            log_db: self.log_db,
-            state_db: self.state_db,
-            environment_manager: self.environment_manager,
-            config_warnings: self.config_warnings,
-            session_source: self.session_source,
-            enable_codex_api_key_env: self.enable_codex_api_key_env,
-            initialize,
-            channel_capacity: self.channel_capacity,
-        }
-    }
-}
-
 /// Internal command sent from public facade methods to the worker task.
 ///
 /// Each variant carries a oneshot sender so the caller can `await` the
@@ -318,7 +205,7 @@ enum ClientCommand {
 ///
 /// This type owns a worker task that bridges between:
 /// - caller-facing async `mpsc` channels used by TUI/exec
-/// - [`codex_app_server::in_process::InProcessClientHandle`], which speaks to
+/// - the [`EmbeddedServer`](codex_app_server_embedding::EmbeddedServer), which speaks to
 ///   the embedded `MessageProcessor`
 ///
 /// The facade intentionally preserves the server's request/notification/event
@@ -354,9 +241,8 @@ impl InProcessAppServerClient {
     /// Request queues remain bounded without blocking on unread notifications.
     pub async fn start(args: InProcessClientStartArgs) -> IoResult<Self> {
         let channel_capacity = args.channel_capacity.max(1);
-        let mut handle =
-            codex_app_server::in_process::start(args.into_runtime_start_args()).await?;
-        let request_sender = handle.sender();
+        let mut handle = codex_app_server_embedding::start(args).await?;
+        let request_sender = handle.connection();
         let (command_tx, mut command_rx) = mpsc::channel::<ClientCommand>(channel_capacity);
         // e9996ec62a preserved transcript events by awaiting a bounded queue, but that can
         // deadlock a foreground request whose response is behind unread notifications.
@@ -814,9 +700,15 @@ mod tests {
     use codex_app_server_protocol::ThreadStartResponse;
     use codex_app_server_protocol::ToolRequestUserInputParams;
     use codex_app_server_protocol::ToolRequestUserInputQuestion;
+    use codex_arg0::Arg0DispatchPaths;
+    use codex_config::CloudConfigBundleLoader;
+    use codex_config::LoaderOverrides;
+    use codex_core::config::Config;
     use codex_core::config::ConfigBuilder;
     use codex_core::init_state_db;
+    use codex_feedback::CodexFeedback;
     use codex_protocol::config_types::Personality;
+    use codex_protocol::protocol::SessionSource;
     use codex_uds::UnixListener;
     use codex_utils_absolute_path::AbsolutePathBuf;
     use futures::SinkExt;
@@ -825,6 +717,7 @@ mod tests {
     use pretty_assertions::assert_eq;
     use std::ops::Deref;
     use std::path::Path;
+    use std::sync::Arc;
     use tempfile::TempDir;
     use tokio::net::TcpListener;
     use tokio::time::Duration;
@@ -835,15 +728,6 @@ mod tests {
     use tokio_tungstenite::tungstenite::handshake::server::Request as WebSocketRequest;
     use tokio_tungstenite::tungstenite::handshake::server::Response as WebSocketResponse;
     use tokio_tungstenite::tungstenite::http::header::AUTHORIZATION;
-
-    async fn build_test_config() -> Config {
-        match ConfigBuilder::default().build().await {
-            Ok(config) => config,
-            Err(_) => Config::load_default_with_cli_overrides(Vec::new())
-                .await
-                .expect("default config should load"),
-        }
-    }
 
     async fn build_test_config_for_codex_home(codex_home: &Path) -> Config {
         match ConfigBuilder::default()
@@ -889,6 +773,7 @@ mod tests {
         let state_db = init_state_db(config.as_ref())
             .await
             .expect("state db should initialize for in-process test");
+        codex_app_server::install_embedded_runtime();
         let client = InProcessAppServerClient::start(InProcessClientStartArgs {
             arg0_paths: Arg0DispatchPaths::default(),
             config,
@@ -2121,68 +2006,6 @@ mod tests {
         ));
 
         client.shutdown().await.expect("shutdown should complete");
-    }
-
-    #[tokio::test]
-    async fn runtime_start_args_forward_environment_manager_and_openai_form_capability() {
-        let config = Arc::new(build_test_config().await);
-        let environment_manager = Arc::new(
-            EnvironmentManager::create_for_tests(
-                Some("ws://127.0.0.1:8765".to_string()),
-                Some(
-                    ExecServerRuntimeOptions::new(
-                        std::env::current_exe().expect("current exe"),
-                        /*codex_linux_sandbox_exe*/ None,
-                    )
-                    .expect("runtime paths"),
-                ),
-            )
-            .await,
-        );
-
-        let runtime_args = InProcessClientStartArgs {
-            arg0_paths: Arg0DispatchPaths::default(),
-            config: config.clone(),
-            cli_overrides: Vec::new(),
-            loader_overrides: LoaderOverrides::default(),
-            strict_config: false,
-            cloud_config_bundle: CloudConfigBundleLoader::default(),
-            embedded_network_policy: Default::default(),
-            feedback: CodexFeedback::new(),
-            log_db: None,
-            state_db: None,
-            environment_manager: environment_manager.clone(),
-            config_warnings: Vec::new(),
-            session_source: SessionSource::Exec,
-            enable_codex_api_key_env: false,
-            client_name: "codex-app-server-client-test".to_string(),
-            client_version: "0.0.0-test".to_string(),
-            experimental_api: true,
-            mcp_server_openai_form_elicitation: true,
-            opt_out_notification_methods: Vec::new(),
-            channel_capacity: DEFAULT_IN_PROCESS_CHANNEL_CAPACITY,
-        }
-        .into_runtime_start_args();
-
-        assert_eq!(runtime_args.config, config);
-        assert!(
-            runtime_args
-                .initialize
-                .capabilities
-                .expect("initialize capabilities")
-                .mcp_server_openai_form_elicitation
-        );
-        assert!(Arc::ptr_eq(
-            &runtime_args.environment_manager,
-            &environment_manager
-        ));
-        assert!(
-            runtime_args
-                .environment_manager
-                .default_environment()
-                .expect("default environment")
-                .is_remote()
-        );
     }
 
     #[tokio::test]

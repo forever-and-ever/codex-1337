@@ -67,8 +67,9 @@ use crate::plugin_config_reload::PluginStartupConfig;
 use crate::transport::CHANNEL_CAPACITY;
 use crate::transport::OutboundConnectionState;
 use crate::transport::route_outgoing_envelope;
-pub use bootstrap::EmbeddedNetworkPolicy;
 use codex_analytics::AppServerRpcTransport;
+pub use codex_app_server_embedding::EmbeddedNetworkPolicy;
+pub use codex_app_server_embedding::InProcessServerEvent;
 use codex_app_server_protocol::AgentMessageDelivery;
 use codex_app_server_protocol::ClientNotification;
 use codex_app_server_protocol::ClientRequest;
@@ -79,7 +80,6 @@ use codex_app_server_protocol::JSONRPCErrorError;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::Result;
 use codex_app_server_protocol::ServerNotification;
-use codex_app_server_protocol::ServerRequest;
 use codex_app_server_protocol::ThreadItem;
 use codex_arg0::Arg0DispatchPaths;
 use codex_config::CloudConfigBundleLoader;
@@ -170,20 +170,6 @@ pub struct InProcessStartArgs {
     pub initialize: InitializeParams,
     /// Capacity used for all runtime queues (clamped to at least 1).
     pub channel_capacity: usize,
-}
-
-/// Event emitted from the app-server to the in-process client.
-///
-/// [`Lagged`](Self::Lagged) is a transport health marker, not an application
-/// event — it signals that the consumer fell behind and some events were dropped.
-#[derive(Debug, Clone)]
-pub enum InProcessServerEvent {
-    /// Server request that requires client response/rejection.
-    ServerRequest(Box<ServerRequest>),
-    /// App-server notification directed to the embedded client.
-    ServerNotification(Box<ServerNotification>),
-    /// Indicates one or more events were dropped due to backpressure.
-    Lagged { skipped: usize },
 }
 
 /// Internal message sent from [`InProcessClientHandle`] methods to the runtime task.

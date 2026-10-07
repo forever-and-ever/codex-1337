@@ -114,6 +114,7 @@ mod current_time;
 mod daemon_thread_recovery;
 mod dynamic_tools;
 mod effective_plugin_change;
+mod embedding;
 mod error_code;
 mod extensions;
 mod external_agent_migration;
@@ -151,6 +152,7 @@ mod user_verification_response;
 
 pub use crate::code_mode_host::AppServerCodeModeHostArgs;
 pub use crate::code_mode_host::CodeModeHostTransport;
+pub use crate::embedding::install_embedded_runtime;
 pub use crate::error_code::INPUT_TOO_LARGE_ERROR_CODE;
 pub use crate::error_code::INVALID_PARAMS_ERROR_CODE;
 pub use crate::transport::AppServerTransport;

@@ -132,6 +132,8 @@ mod color;
 mod config_update;
 pub(crate) mod custom_terminal;
 mod daybreak;
+#[cfg(test)]
+mod embedded_runtime_for_tests;
 mod experimental_features;
 mod markdown_copy;
 mod permission_discovery;

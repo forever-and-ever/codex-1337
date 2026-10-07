@@ -26,6 +26,7 @@ struct TopCli {
 }
 
 fn main() -> anyhow::Result<()> {
+    codex_app_server::install_embedded_runtime();
     arg0_dispatch_or_else(|arg0_paths: Arg0DispatchPaths| async move {
         let top_cli = TopCli::parse();
         // Merge root-level overrides into inner CLI struct so downstream logic remains unchanged.

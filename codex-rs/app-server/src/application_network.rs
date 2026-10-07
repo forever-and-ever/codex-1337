@@ -4,29 +4,11 @@
 use super::ApplicationPolicyLoad;
 use super::ApplicationPolicySnapshot;
 use super::ConfigManager;
-use codex_config::ApplicationRequirementsToml;
+use codex_app_server_embedding::destination_policy;
 use codex_config::CloudConfigBundleLoader;
-use codex_config::NetworkDomainPermissionToml;
-use codex_http_client::DestinationPolicy;
 use codex_http_client::NetworkPolicyDenied;
 use std::io;
 use std::sync::Arc;
-
-pub(crate) fn destination_policy(
-    application: Option<&ApplicationRequirementsToml>,
-) -> DestinationPolicy {
-    match application.and_then(|application| application.network.as_ref()) {
-        Some(network) if network.enabled => DestinationPolicy::Restricted {
-            allowed_hosts: network
-                .domains
-                .iter()
-                .filter(|&(_host, permission)| *permission == NetworkDomainPermissionToml::Allow)
-                .map(|(host, _permission)| host.clone())
-                .collect(),
-        },
-        Some(_) | None => DestinationPolicy::Unrestricted,
-    }
-}
 
 impl ConfigManager {
     pub(super) async fn refresh_local_network_policy(
