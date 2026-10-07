@@ -1,0 +1,75 @@
+# Codex-1337 fork reference
+
+Sections routed from `AGENTS.override.md`.
+
+## Glossary
+
+These terms have several meanings in the code or name fork concepts. Use the
+qualified forms.
+
+- native: never used alone. Native history
+  (`codex-rs/tui/src/app/native_history.rs`) is output written to the terminal's own
+  scrollback. Provider-native items are a model provider's own wire format and
+  state (`NativeToolCall`, `NativeCompaction`), and native Claude is the provider
+  that calls the Anthropic Messages API directly. A native execution result is the
+  structured result of Codex's own `exec_command` and `write_stdin` tools.
+- owned: the owned screen is the fullscreen renderer, which owns the terminal
+  screen. A Code Mode owner (`CodeModeOwner`) identifies the Code Mode execution
+  that issued a nested item.
+- receipt: a record that an operation took place, with its outcome, named after
+  the operation (`FileChangeReceipt`, `DeliveryReceipt`). A status that may still be
+  pending or may have failed is not a receipt; the TUI's `FarmReceipt` is misnamed.
+- family: a root conversation and its subagent descendants.
+- farm: the user's direct delegation of a task to a new subagent, started fresh or
+  forked with full history, without a turn of the parent agent.
+- retire, unload, close: retiring removes an idle subagent subtree from its family
+  permanently and keeps its saved history. Unloading drops a thread's in-memory
+  runtime and keeps it in its family. `ThreadClosed` reports that a runtime
+  stopped, not a change of membership.
+- reload, idle restart: `/reload` replaces the TUI process through the reload host
+  without detaching its server connection. An idle restart replaces it after five
+  quiet minutes when a newer installation exists, through the reload host when one
+  is present (hosted) and by `exec` otherwise (unhosted).
+
+## Build inputs
+
+Use the maintained PATH `cargo` wrapper. It enables workspace feature unification
+on pinned Cargo without changing rustc's channel. Do not set `RUSTFLAGS`,
+`CARGO_ENCODED_RUSTFLAGS`, per-call linker/profile overrides, or `RUSTC_BOOTSTRAP`.
+Our root Cargo config owns clang+mold and sccache; fix that configuration instead
+of creating another dependency graph. Linked worktrees share these settings.
+
+The wrapper invokes `.cargo/launch` for builds.
+It uses the packaging resolver for the V8 version in `Cargo.lock`, paired bindings
+and trusted checksums. Metadata/configuration probes do not fetch artifacts.
+Keep V8 artifact policy in `scripts/codex_package/v8.py`.
+
+Use the default dev/test profiles for focused checks and `scripts/install-local`
+for installs (`local` profile). Do not alternate ad hoc profiles. Keep `-p`/test
+filters narrow: workspace feature unification stabilizes dependencies without
+building or running the whole workspace. Shared compiler cache and Cargo targets
+are disposable; durable release bundles and evidence belong outside them.
+
+## Snapshots
+
+For snapshot changes, iterate with the relevant snapshot test or a narrow filter,
+such as `just test -p codex-tui <filter>`. Of the `cargo insta`
+subcommands, only `test` accepts `-p`; the others select the crate with
+`--manifest-path`. From `codex-rs`:
+
+- `cargo insta pending-snapshots --manifest-path tui/Cargo.toml` lists pending snapshots.
+- `cargo insta show path/to/file.snap.new` previews one.
+- `cargo insta accept --manifest-path tui/Cargo.toml --snapshot <snapshot-file-name>`
+  accepts one reviewed snapshot; without `--snapshot` it accepts every pending
+  snapshot in the crate.
+
+## Local TUI releases
+
+Install through `scripts/install-local`. Each new installed binary receives the next
+`tui-N`, starting at zero; builds and tests do not increment it. Reinstalling identical
+binary bytes reuses the number. The allocator is durable XDG state at
+`codex-1337/tui-builds.sqlite`, never Cargo scratch. Do not reset it during cleanup.
+The immutable bundle's `distribution` manifest carries `tui_revision`; preserve that
+manifest when copying a release. The status line pairs the connected server version
+with the running executable's revision, never the latest installation's revision.
+Uninstalled development binaries display `tui-dev`.
