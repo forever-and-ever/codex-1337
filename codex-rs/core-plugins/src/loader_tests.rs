@@ -654,6 +654,33 @@ fn curated_plugin_cache_version_preserves_non_git_sha_versions() {
     assert_eq!(curated_plugin_cache_version("0123456"), "0123456");
 }
 
+/// The account can install plugins by default and refuse to uninstall them; the user's
+/// config still has the last word on whether one loads.
+#[test]
+fn configured_disable_vetoes_a_remote_installed_plugin() {
+    let temp_dir = TempDir::new().expect("temp dir");
+    let store = PluginStore::new(temp_dir.path().to_path_buf());
+    let key = "pages@openai-curated-remote".to_string();
+    let config = |enabled| {
+        HashMap::from([(
+            key.clone(),
+            PluginConfig {
+                enabled,
+                mcp_servers: HashMap::new(),
+            },
+        )])
+    };
+    for remote_global_catalog_active in [false, true] {
+        let merged = merge_configured_plugins_with_remote_installed(
+            config(false),
+            config(true),
+            &store,
+            remote_global_catalog_active,
+        );
+        assert_eq!(merged[&key].enabled, false);
+    }
+}
+
 fn plugin_id() -> PluginId {
     PluginId::parse("demo-plugin@test-marketplace").expect("plugin id")
 }

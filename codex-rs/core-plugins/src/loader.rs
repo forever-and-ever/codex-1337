@@ -320,6 +320,9 @@ fn merge_remote_plugin_config(
         remote_plugin_config
             .mcp_servers
             .clone_from(&configured_plugin.mcp_servers);
+        // Codex-1337: a plugin the user's config disables stays disabled, including one the
+        // account installs by default and refuses to uninstall.
+        remote_plugin_config.enabled &= configured_plugin.enabled;
     }
     configured_plugins.insert(plugin_key, remote_plugin_config);
 }
