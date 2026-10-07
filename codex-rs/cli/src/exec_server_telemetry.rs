@@ -39,8 +39,8 @@ pub(crate) fn init(
     let provider = otel.as_ref();
     codex_core::otel_init::record_process_start(provider, OTEL_SERVICE_NAME);
 
-    let otel_logger_layer = provider.and_then(|otel| otel.logger_layer());
-    let otel_tracing_layer = provider.and_then(|otel| otel.tracing_layer());
+    let otel_logger_layer = provider.and_then(codex_otel::OtelProvider::logger_layer);
+    let otel_tracing_layer = provider.and_then(codex_otel::OtelProvider::tracing_layer);
     let telemetry = provider
         .and_then(|otel| otel.metrics())
         .cloned()
