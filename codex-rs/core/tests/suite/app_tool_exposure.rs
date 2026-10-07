@@ -219,11 +219,18 @@ pub(super) async fn connector_exposure_requests(
         .find(|tool| tool["name"] == "exec")
         .and_then(|tool| tool["description"].as_str())
         .unwrap_or_default();
+    // Code Mode Only names an MCP tool in `exec`'s roster and never declares it there.
     assert_eq!(
-        exec_description.contains(&format!("{namespace}__lookup(")),
-        case.expect_exec && case.mode == ToolMode::CodeModeOnly
+        (
+            exec_description.contains(&format!("{namespace}__lookup(")),
+            exec_description.contains(&format!("\n- {namespace}__lookup")),
+        ),
+        (
+            false,
+            case.expect_exec && case.mode == ToolMode::CodeModeOnly
+        )
     );
-    assert!(!exec_description.contains("mcp__codex_apps__notes__read("));
+    assert!(!exec_description.contains("mcp__codex_apps__notes__read"));
     if calls_tool {
         assert!(requests[1].body_contains_text("calendar-lookup-ok"));
     }

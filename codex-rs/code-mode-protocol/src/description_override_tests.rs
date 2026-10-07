@@ -9,6 +9,7 @@ use super::MCP_TYPESCRIPT_PREAMBLE;
 use super::TOOL_DISCOVERY_GUIDANCE;
 use super::ToolDefinition;
 use super::UNIFIED_IMAGE_HELPER_DESCRIPTION;
+use super::UndeclaredTool;
 use super::build_exec_tool_description;
 use codex_protocol::ToolName;
 use codex_protocol::openai_models::CodeModeToolMessages;
@@ -100,7 +101,7 @@ fn exec_override_preserves_runtime_sections() {
         input_schema_max_bytes: None,
         output_schema: None,
     }];
-    let deferred_tools = [ToolDefinition {
+    let deferred_tools = [UndeclaredTool::Deferred(ToolDefinition {
         summary: String::new(),
         name: "mcp__sample__beta".to_string(),
         tool_name: ToolName::namespaced("mcp__sample__", "beta"),
@@ -116,7 +117,7 @@ fn exec_override_preserves_runtime_sections() {
                 "_meta": { "type": "object" }
             }
         })),
-    }];
+    })];
     let declaration = "### `alpha`\nFirst tool\n\nexec tool declaration:\n```ts\ndeclare const tools: { alpha(args: unknown): Promise<unknown>; };\n```";
     for (code_mode_only, guidance, preamble, expected) in [
         (true, Some(""), Some(""), declaration.to_string()),

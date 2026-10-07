@@ -1043,41 +1043,6 @@ text(JSON.stringify(results));"#;
     test.submit_turn("inspect the search tool declarations")
         .await?;
     let requests = responses.requests();
-    let body = requests[0].body_json();
-    let exec_description = body["tools"]
-        .as_array()
-        .expect("request tools")
-        .iter()
-        .find(|tool| tool["name"] == "exec")
-        .and_then(|tool| tool["description"].as_str())
-        .expect("exec description");
-    for (name, preserves_description) in [("default_schema", false), ("expanded_schema", true)] {
-        let declaration = exec_description
-            .split_once(&format!("### `mcp__{name}__search`"))
-            .expect("MCP tool declaration")
-            .1
-            .split("\n### `")
-            .next()
-            .expect("tool section");
-        assert_eq!(
-            declaration.contains("budget_description_marker"),
-            preserves_description,
-            "{name}"
-        );
-        assert!(
-            declaration.contains("query: string;"),
-            "{name}: argument type should remain available"
-        );
-    }
-    let shared_declaration = exec_description
-        .split_once("### `mcp__default_schema__shared`")
-        .expect("shared MCP tool declaration")
-        .1
-        .split("\n### `")
-        .next()
-        .expect("tool section");
-    assert!(shared_declaration.contains("code_mode_description_marker"));
-    assert!(shared_declaration.contains("term: string;"));
     let (output, success) = custom_tool_output_body_and_success(&requests[1], "lookup");
     assert_ne!(success, Some(false), "ALL_TOOLS lookup failed: {output}");
     let output =
@@ -1240,9 +1205,16 @@ async fn code_mode_excludes_mcp_servers_using_their_configured_identity() -> Res
             let nested_tool_name = format!("{namespace}__echo");
             if code_mode_only {
                 assert_eq!(
-                    exec_description.contains(&nested_tool_name),
-                    !omit_code_mode && (!supports_search_tool || omit_deferred),
-                    "the Code Mode declaration must agree with MCP tool exposure; \
+                    (
+                        exec_description.contains(&format!("### `{nested_tool_name}`")),
+                        exec_description.contains(&format!("\n- {nested_tool_name}")),
+                    ),
+                    (
+                        false,
+                        !omit_code_mode && (!supports_search_tool || omit_deferred)
+                    ),
+                    "Code Mode Only must never declare an MCP tool and must name it in its \
+                 roster unless search defers it; \
                  omit_tools_from={omit_tools_from:?}, \
                  supports_search_tool={supports_search_tool}, \
                  nested_tool_name={nested_tool_name}"

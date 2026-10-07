@@ -842,6 +842,7 @@ fn register_code_mode_executors(
     let mut code_mode_tool_names = BTreeMap::new();
     let mut code_mode_nested_tool_specs = Vec::new();
     let mut exec_prompt_tool_specs = Vec::new();
+    let mut rostered_exec_prompt_tool_specs = Vec::new();
     let mut deferred_exec_prompt_tool_specs = Vec::new();
     let mut included_deferred_mcp_output_schema = false;
     let deferred_tools_guidance_enabled = search_tool_enabled(turn_context, model_info);
@@ -901,6 +902,10 @@ fn register_code_mode_executors(
                 }
                 deferred_exec_prompt_tool_specs.push(Arc::clone(&spec));
             }
+        } else if tool_mode == ToolMode::CodeModeOnly && tool.runtime.mcp_server_name().is_some() {
+            // Code Mode Only never declares an MCP tool: `exec`'s roster names it and
+            // `describe_tool` supplies its contract on demand.
+            rostered_exec_prompt_tool_specs.push(Arc::clone(&spec));
         } else {
             exec_prompt_tool_specs.push(spec.as_ref().clone());
         }
@@ -914,10 +919,21 @@ fn register_code_mode_executors(
         exec_prompt_tool_specs.iter(),
         code_mode_input_schema_max_bytes,
     );
-    let deferred_tools = collect_code_mode_exec_prompt_tool_definitions(
-        deferred_exec_prompt_tool_specs.iter().map(Arc::as_ref),
+    let undeclared_tools = collect_code_mode_exec_prompt_tool_definitions(
+        rostered_exec_prompt_tool_specs.iter().map(Arc::as_ref),
         code_mode_input_schema_max_bytes,
-    );
+    )
+    .into_iter()
+    .map(codex_code_mode::UndeclaredTool::Rostered)
+    .chain(
+        collect_code_mode_exec_prompt_tool_definitions(
+            deferred_exec_prompt_tool_specs.iter().map(Arc::as_ref),
+            code_mode_input_schema_max_bytes,
+        )
+        .into_iter()
+        .map(codex_code_mode::UndeclaredTool::Deferred),
+    )
+    .collect::<Vec<_>>();
     let model_messages = ResolvedModelMessages::from_model(model_info);
     if tool_mode == ToolMode::CodeModeOnly {
         indirect_prefixes.apply_exec_prompt(&mut enabled_tools, &mut namespace_descriptions);
@@ -927,7 +943,7 @@ fn register_code_mode_executors(
     let execute_handler = CodeModeExecuteHandler::new(
         create_code_mode_tool(
             &enabled_tools,
-            &deferred_tools,
+            &undeclared_tools,
             &namespace_descriptions,
             turn_context.config.code_mode.default_exec_yield_time_ms,
             tool_mode == ToolMode::CodeModeOnly,

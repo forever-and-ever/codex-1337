@@ -254,7 +254,7 @@ async fn code_mode_mcp_schema_limits_preserve_explicit_overrides() -> Result<()>
     insta::assert_snapshot!(
         "code_mode_mcp_schema_limits",
         context_snapshot::format_request_history_snapshot(
-            "Code Mode exposes explicit MCP schema limits in its prompt and runtime tool catalog.",
+            "Code Mode applies explicit MCP schema limits to its runtime tool catalog.",
             &requests,
             &ContextSnapshotOptions::default()
                 .rewrite_known_segments()

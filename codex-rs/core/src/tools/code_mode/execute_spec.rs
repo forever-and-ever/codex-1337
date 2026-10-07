@@ -1,5 +1,6 @@
 use codex_code_mode::ImageDetailVisibility;
 use codex_code_mode::ToolDefinition as CodeModeToolDefinition;
+use codex_code_mode::UndeclaredTool;
 use codex_protocol::openai_models::CodeModeToolMessages;
 use codex_tools::FreeformTool;
 use codex_tools::FreeformToolFormat;
@@ -8,7 +9,7 @@ use std::collections::BTreeMap;
 
 pub(crate) fn create_code_mode_tool(
     enabled_tools: &[CodeModeToolDefinition],
-    deferred_tools: &[CodeModeToolDefinition],
+    undeclared_tools: &[UndeclaredTool],
     namespace_descriptions: &BTreeMap<String, codex_code_mode::ToolNamespaceDescription>,
     default_exec_yield_time_ms: u64,
     code_mode_only: bool,
@@ -29,7 +30,7 @@ SOURCE: /[\s\S]+/
         name: codex_code_mode::PUBLIC_TOOL_NAME.to_string(),
         description: codex_code_mode::build_exec_tool_description(
             enabled_tools,
-            deferred_tools,
+            undeclared_tools,
             namespace_descriptions,
             default_exec_yield_time_ms,
             code_mode_only,

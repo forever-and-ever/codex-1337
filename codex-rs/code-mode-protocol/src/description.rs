@@ -9,6 +9,7 @@ use serde_json::Value as JsonValue;
 use std::collections::BTreeMap;
 
 use crate::PUBLIC_TOOL_NAME;
+use crate::UndeclaredTool;
 use crate::discovery::COMPACT_OUTPUT_SCHEMA_MAX_BYTES;
 use crate::discovery::compact_tool_summary;
 use crate::discovery::mcp_structured_content_schema;
@@ -286,7 +287,7 @@ pub enum ImageDetailVisibility {
 
 pub fn build_exec_tool_description(
     enabled_tools: &[ToolDefinition],
-    deferred_tools: &[ToolDefinition],
+    undeclared_tools: &[UndeclaredTool],
     namespace_descriptions: &BTreeMap<String, ToolNamespaceDescription>,
     default_exec_yield_time_ms: u64,
     code_mode_only: bool,
@@ -312,7 +313,10 @@ pub fn build_exec_tool_description(
     }
     sections.push(TOOL_DISCOVERY_GUIDANCE.to_string());
     sections.push(EXECUTION_OUTPUT_GUIDANCE.to_string());
-    if !deferred_tools.is_empty() {
+    if undeclared_tools
+        .iter()
+        .any(|tool| matches!(tool, UndeclaredTool::Deferred(_)))
+    {
         let guidance = messages
             .and_then(|messages| messages.deferred_nested_tools_guidance.as_deref())
             .unwrap_or(DEFERRED_NESTED_TOOLS_GUIDANCE);
@@ -320,13 +324,14 @@ pub fn build_exec_tool_description(
             sections.push(guidance.to_string());
         }
     }
+    sections.extend(crate::roster::render_roster(undeclared_tools));
     if !code_mode_only {
         return sections.join("\n\n");
     }
 
     let has_mcp_tools = enabled_tools
         .iter()
-        .chain(deferred_tools)
+        .chain(undeclared_tools.iter().map(UndeclaredTool::definition))
         .any(|tool| mcp_structured_content_schema(tool.output_schema.as_ref()).is_some());
     if has_mcp_tools {
         let preamble = messages
@@ -505,6 +510,7 @@ mod tests {
     use super::ParsedExecSource;
     use super::ToolDefinition;
     use super::ToolNamespaceDescription;
+    use super::UndeclaredTool;
     use super::augment_tool_definition;
     use super::build_exec_tool_description;
     use super::normalize_code_mode_identifier;
@@ -1043,7 +1049,7 @@ bar"
 
         let description = build_exec_tool_description(
             &[],
-            &[deferred_tool],
+            &[UndeclaredTool::Deferred(deferred_tool)],
             &BTreeMap::new(),
             crate::DEFAULT_EXEC_YIELD_TIME_MS,
             /*code_mode_only*/ true,
@@ -1060,7 +1066,7 @@ bar"
     fn exec_description_mentions_deferred_nested_tools_when_available() {
         let description = build_exec_tool_description(
             &[],
-            &[ToolDefinition {
+            &[UndeclaredTool::Deferred(ToolDefinition {
                 summary: String::new(),
                 name: "deferred_tool".to_string(),
                 tool_name: ToolName::plain("deferred_tool"),
@@ -1069,7 +1075,7 @@ bar"
                 input_schema: None,
                 input_schema_max_bytes: None,
                 output_schema: None,
-            }],
+            })],
             &BTreeMap::new(),
             crate::DEFAULT_EXEC_YIELD_TIME_MS,
             /*code_mode_only*/ false,
