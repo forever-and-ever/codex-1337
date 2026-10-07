@@ -389,7 +389,6 @@ async fn selected_capability_stack_tracks_environment_availability_and_resume() 
     let mut exec_server =
         spawn_exec_server(fixture.codex_home.path(), &fixture.exec_server_url).await?;
     add_environment(&mut app_server, &fixture.exec_server_url).await?;
-    wait_for_selected_mcp_server(&mut app_server, &thread_id).await?;
 
     // A skill mention alone does not wait for MCP startup.
     run_turn(
@@ -399,6 +398,7 @@ async fn selected_capability_stack_tracks_environment_availability_and_resume() 
         fixture.environment_cwd.clone(),
     )
     .await?;
+    wait_for_selected_mcp_server(&mut app_server, &thread_id).await?;
     let first_mcp_pid = wait_for_pid_file(&fixture.pid_file).await?;
 
     run_turn(
@@ -452,7 +452,6 @@ async fn selected_capability_stack_tracks_environment_availability_and_resume() 
 
     exec_server = spawn_exec_server(fixture.codex_home.path(), &fixture.exec_server_url).await?;
     add_environment(&mut app_server, &fixture.exec_server_url).await?;
-    wait_for_selected_mcp_server(&mut app_server, &thread_id).await?;
 
     run_turn(
         &mut app_server,
@@ -463,6 +462,7 @@ async fn selected_capability_stack_tracks_environment_availability_and_resume() 
         fixture.environment_cwd,
     )
     .await?;
+    wait_for_selected_mcp_server(&mut app_server, &thread_id).await?;
     let resumed_mcp_pid = wait_for_pid_file(&fixture.pid_file).await?;
     assert_ne!(first_mcp_pid, resumed_mcp_pid);
 

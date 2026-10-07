@@ -39,8 +39,6 @@ enum TimingOutput {
     WithOverhead,
 }
 
-/// Responses with overhead use the same host and handler measurements as Bridge,
-/// including app-server waiting. The default shows only host duration.
 #[test_case("exec", "grpc", TimingOutput::HostOnly; "exec_grpc_host_only")]
 #[test_case("wait", "grpc", TimingOutput::HostOnly; "wait_grpc_host_only")]
 #[test_case("exec", "stdio", TimingOutput::HostOnly; "exec_stdio_host_only")]
@@ -228,9 +226,7 @@ async fn code_mode_model_output_uses_structured_host_timing(
             "{status}\nWall time {total_seconds:.3} seconds (code-mode {host_seconds:.3} seconds; overhead {overhead_seconds:.3} seconds)\nOutput:\n"
         )
     } else {
-        let seconds = Duration::from_nanos(code_mode_host_duration_ns).as_secs_f32();
-        let seconds = (seconds * 10.0).round() / 10.0;
-        format!("{status}\nWall time {seconds:.1} seconds\nOutput:\n")
+        format!("{status}\nOutput:\n")
     };
     assert_eq!(output["output"][0]["text"], expected_header);
     Ok(())

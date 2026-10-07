@@ -569,9 +569,8 @@ async fn oauth_login_automatically_selects_callback_specific_cimd_without_metada
 
     let codex_home = TempDir::new()?;
     mock_responses_config(&responses_server.uri())
-        .with_extra_config(&format!(
-            "mcp_oauth_credentials_store = \"file\"\n[mcp_servers.cimd]\nurl = \"{base_url}/mcp\""
-        ))
+        .with_root_config("mcp_oauth_credentials_store = \"file\"")
+        .with_extra_config(&format!("[mcp_servers.cimd]\nurl = \"{base_url}/mcp\""))
         .write(codex_home.path())?;
     let mut app_server = TestAppServer::builder()
         .with_codex_home(codex_home.path())
@@ -903,17 +902,6 @@ async fn mcp_server_status_list_uses_thread_project_local_config() -> Result<()>
     std::fs::create_dir_all(workspace.path().join(".git"))?;
     set_project_trust_level(codex_home.path(), workspace.path(), TrustLevel::Trusted)?;
 
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .build_initialized()
-        .await?;
-    let ThreadStartResponse { thread, .. } = mcp
-        .start_thread(ThreadStartParams {
-            cwd: Some(workspace.path().to_string_lossy().into_owned()),
-            ..Default::default()
-        })
-        .await?;
-
     let project_config_dir = workspace.path().join(".codex");
     std::fs::create_dir_all(&project_config_dir)?;
     std::fs::write(
@@ -925,6 +913,17 @@ url = "{mcp_server_url}/mcp"
 "#
         ),
     )?;
+
+    let mut mcp = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let ThreadStartResponse { thread, .. } = mcp
+        .start_thread(ThreadStartParams {
+            cwd: Some(workspace.path().to_string_lossy().into_owned()),
+            ..Default::default()
+        })
+        .await?;
 
     let threadless_response: ListMcpServerStatusResponse = mcp
         .request(|request_id| ClientRequest::McpServerStatusList {
@@ -957,7 +956,7 @@ url = "{mcp_server_url}/mcp"
     assert_eq!(thread_response.data.len(), 1);
     let status = &thread_response.data[0];
     assert_eq!(status.name, "project-server");
-    assert_eq!(status.runtime_status, None);
+    assert_eq!(status.runtime_status, Some(McpServerConnectionStatus::Connected));
     assert_eq!(
         status.tools.keys().cloned().collect::<BTreeSet<_>>(),
         BTreeSet::from(["project_lookup".to_string()])
@@ -1025,8 +1024,6 @@ async fn mcp_server_status_list_reports_thread_runtime_connections() -> Result<(
             ),
         ]
     );
-    // Inventory uses the latest config, but a same-name replacement is not the
-    // connection that this thread started. Unchanged registrations retain status.
     let (replacement_url, replacement_handle) =
         start_mcp_server("replacement_lookup", /*tools_error*/ None).await?;
     mock_responses_config(&server.uri())
@@ -1060,8 +1057,8 @@ async fn mcp_server_status_list_reports_thread_runtime_connections() -> Result<(
         vec![
             (
                 "connected".to_string(),
-                None,
-                BTreeSet::from(["replacement_lookup".to_string()])
+                Some(McpServerConnectionStatus::Connected),
+                BTreeSet::from(["lookup".to_string()])
             ),
             (
                 "disabled".to_string(),

@@ -367,7 +367,7 @@ async fn installed_apps_thread_refresh_updates_live_tools_and_retains_them_on_fa
                 .is_none()
         );
         assert_eq!(
-            requests[1].function_call_output(call_id)["output"][1],
+            requests[1].function_call_output(call_id)["output"][0],
             json!({"type": "input_text", "text": "called connector_beta"})
         );
         assert_eq!(fixture.list_tools_calls(), list_tools_calls + 1);

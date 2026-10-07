@@ -4070,7 +4070,7 @@ async fn turn_start_emits_spawn_agent_item_with_model_metadata_v2() -> Result<()
     let server = responses::start_mock_server().await;
     let spawn_args = serde_json::to_string(&json!({
         "message": CHILD_PROMPT,
-        "model": REQUESTED_MODEL,
+        "model": format!("mock_provider/{REQUESTED_MODEL}"),
         "reasoning_effort": REQUESTED_REASONING_EFFORT,
     }))?;
     let _parent_turn = responses::mount_sse_once_match(
@@ -4182,7 +4182,7 @@ async fn turn_start_emits_spawn_agent_item_with_model_metadata_v2() -> Result<()
             sender_thread_id: thread.id.clone(),
             receiver_thread_ids: Vec::new(),
             prompt: Some(CHILD_PROMPT.to_string()),
-            model: Some(REQUESTED_MODEL.to_string()),
+            model: Some(format!("mock_provider/{REQUESTED_MODEL}")),
             reasoning_effort: Some(REQUESTED_REASONING_EFFORT),
             agents_states: HashMap::new(),
         }
@@ -4914,7 +4914,7 @@ async fn turn_start_emits_spawn_agent_item_with_effective_role_model_metadata_v2
     let spawn_args = serde_json::to_string(&json!({
         "message": CHILD_PROMPT,
         "agent_type": "custom",
-        "model": REQUESTED_MODEL,
+        "model": format!("mock_provider/{REQUESTED_MODEL}"),
         "reasoning_effort": REQUESTED_REASONING_EFFORT,
     }))?;
     let _parent_turn = responses::mount_sse_once_match(

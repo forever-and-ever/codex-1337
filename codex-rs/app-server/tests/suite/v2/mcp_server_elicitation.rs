@@ -43,7 +43,6 @@ use codex_config::types::AuthCredentialsStoreMode;
 use codex_mcp::MCP_TOOL_CODEX_APPS_META_KEY;
 use codex_protocol::mcp::OPENAI_STANDARD_FORM_INPUT_EXTENSION_ID;
 use codex_protocol::mcp_approval_meta as approval_meta;
-use core_test_support::assert_regex_match;
 use core_test_support::responses;
 use core_test_support::responses::ResponseMock;
 use pretty_assertions::assert_eq;
@@ -960,17 +959,9 @@ impl ElicitationRoundTripFixture {
             function_call_output.get("call_id"),
             Some(&Value::String(call_id.to_string()))
         );
-        let header = function_call_output["output"][0]["text"]
-            .as_str()
-            .expect("first content item should contain the wall-time header");
-        assert_regex_match(
-            r#"^Wall time: [0-9]+(?:\.[0-9]+)? seconds\nOutput:$"#,
-            header,
-        );
         assert_eq!(
             function_call_output["output"],
             json!([
-                { "type": "input_text", "text": header },
                 { "type": "input_text", "text": expected_text },
             ])
         );

@@ -414,6 +414,32 @@ async fn legacy_executor_blocks_plugin_host_credentials_and_keeps_host_owned_mcp
         }]),
     )
     .await?;
+    let response = responses::mount_sse_once(
+        &responses_server,
+        responses::sse(vec![
+            responses::ev_response_created("legacy-executor-turn"),
+            responses::ev_assistant_message("legacy-executor-message", "Still works"),
+            responses::ev_completed("legacy-executor-turn"),
+        ]),
+    )
+    .await;
+    let request_id = app_server
+        .send_turn_start_request(TurnStartParams {
+            thread_id: thread_id.clone(),
+            input: vec![UserInput::Text {
+                text: "Check legacy executor compatibility".to_string(),
+                text_elements: Vec::new(),
+            }],
+            ..Default::default()
+        })
+        .await?;
+    let _: TurnStartResponse =
+        timeout(DEFAULT_READ_TIMEOUT, app_server.read_response(request_id)).await??;
+    timeout(
+        DEFAULT_READ_TIMEOUT,
+        app_server.read_stream_until_notification_message("turn/completed"),
+    )
+    .await??;
     let servers = mcp_server_statuses(&mut app_server, thread_id.clone()).await?;
     assert!(servers.iter().any(|server| server.name == "host_remote"));
     assert!(
@@ -445,32 +471,6 @@ async fn legacy_executor_blocks_plugin_host_credentials_and_keeps_host_owned_mcp
         sensitive_plugin.tools_error
     );
 
-    let response = responses::mount_sse_once(
-        &responses_server,
-        responses::sse(vec![
-            responses::ev_response_created("legacy-executor-turn"),
-            responses::ev_assistant_message("legacy-executor-message", "Still works"),
-            responses::ev_completed("legacy-executor-turn"),
-        ]),
-    )
-    .await;
-    let request_id = app_server
-        .send_turn_start_request(TurnStartParams {
-            thread_id,
-            input: vec![UserInput::Text {
-                text: "Check legacy executor compatibility".to_string(),
-                text_elements: Vec::new(),
-            }],
-            ..Default::default()
-        })
-        .await?;
-    let _: TurnStartResponse =
-        timeout(DEFAULT_READ_TIMEOUT, app_server.read_response(request_id)).await??;
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        app_server.read_stream_until_notification_message("turn/completed"),
-    )
-    .await??;
     assert!(
         response
             .single_request()
@@ -792,11 +792,7 @@ async fn cached_executor_mcp_cannot_read_host_token_after_capability_downgrade()
         .expect("reconnect barrier should have an output");
     let barrier_output = barrier_output.expect("reconnect barrier output should contain text");
     assert_ne!(barrier_success, Some(false));
-    assert!(
-        barrier_output.contains("Process exited with code 0")
-            && barrier_output.contains("credential-boundary-ready"),
-        "reconnect barrier did not complete successfully: {barrier_output}"
-    );
+    assert_eq!(barrier_output.trim(), "credential-boundary-ready");
     let mut http_requests = Vec::new();
     while let Ok(request) = http_requests_rx.try_recv() {
         http_requests.push(request);
@@ -819,7 +815,7 @@ async fn cached_executor_mcp_cannot_read_host_token_after_capability_downgrade()
             .is_some_and(|items| items.iter().any(|item| {
                 item["type"] == "input_text"
                     && item["text"]
-                        == "MCP tool `cached_executor/echo` is not available to the model"
+                        == "MCP tool `cached_executor/echo` is unavailable or its definition changed. No call was dispatched. Inspect the current catalog on the next model step before retrying."
             })),
         "expected the failed MCP server to be unavailable: {output}"
     );
