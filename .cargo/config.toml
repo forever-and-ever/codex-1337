@@ -15,6 +15,13 @@ rustflags = "-C linker-features=-lld -C link-arg=-fuse-ld=mold"
 
 [unstable]
 feature-unification = true
+build-analysis = true
+
+[build.analysis]
+# Per-unit timings and rebuild causes for every build, appended under
+# $CARGO_HOME/log; read them with `cargo -Zbuild-analysis report`. Logging
+# alone never changes a unit's fingerprint.
+enabled = true
 
 [resolver]
 # The maintained PATH cargo wrapper enables this on our pinned stable Cargo.
