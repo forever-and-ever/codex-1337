@@ -3,6 +3,7 @@ use crate::app::safety_buffering::SafetyBufferedRetry;
 use crate::app::session_lifecycle::ThreadAttachPresentation;
 use crate::chatwidget::UserMessage;
 use crate::chatwidget::tests::helpers::normalize_completion_timestamps;
+use crate::history_cell::PreambleCell;
 use codex_app_server_client::AppServerEvent;
 use codex_app_server_protocol::ModelSafetyBufferingUpdatedNotification;
 use codex_model_provider_info::ModelProviderInfo;
@@ -925,7 +926,10 @@ goals = true
     wait_for_turn_completed(&mut app, &mut app_server, retry_thread_id).await;
     let mut replayed_history = String::new();
     while let Ok(event) = app_event_rx.try_recv() {
-        if let AppEvent::InsertHistoryCell(cell) = event {
+        // Retry/steer replay must not depend on provider prompt-accounting details.
+        if let AppEvent::InsertHistoryCell(cell) = event
+            && !cell.as_any().is::<PreambleCell>()
+        {
             let rendered = lines_to_single_string(&cell.transcript_lines(/*width*/ 80));
             if cell
                 .as_any()
