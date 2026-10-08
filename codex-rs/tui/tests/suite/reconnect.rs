@@ -1,7 +1,7 @@
 //! Drives automatic reconnect through the real binary and terminal event loop.
 
-use super::focus_palette::socket_home;
 use super::focus_palette::PtyCodex;
+use super::focus_palette::socket_home;
 use super::focus_palette::write_test_config;
 use anyhow::Result;
 use anyhow::ensure;
@@ -18,7 +18,6 @@ use tokio_tungstenite::tungstenite::Message;
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn automatic_reconnect_restores_draft_and_routes_new_notifications() -> Result<()> {
     let repo_root = codex_utils_cargo_bin::repo_root()?;
-    // The test runner supplies short, disk-backed scratch for control sockets.
     let codex_home = socket_home()?;
     write_test_config(codex_home.path(), &repo_root)?;
     let config_path = codex_home.path().join("config.toml");
@@ -153,7 +152,7 @@ async fn automatic_reconnect_restores_draft_and_routes_new_notifications() -> Re
         }
         Ok::<_, anyhow::Error>(methods)
     });
-    let mut terminal = PtyCodex::start(&repo_root, codex_home, &[])?;
+    let mut terminal = PtyCodex::start(&repo_root, codex_home, &["resume", id])?;
     terminal.wait_for_startup()?;
     let mut disconnect_tx = Some(disconnect_tx);
     let mut restore_tx = Some(restore_tx);
@@ -207,7 +206,7 @@ async fn automatic_reconnect_restores_draft_and_routes_new_notifications() -> Re
             .iter()
             .filter(|method| *method == "thread/resume")
             .count(),
-        6
+        7 // Initial resume plus six reconnect attempts.
     );
     assert!(!methods.iter().any(|method| method == "turn/start"));
     Ok(())
