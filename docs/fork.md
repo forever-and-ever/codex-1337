@@ -79,6 +79,15 @@ manifest when copying a release. The status line pairs the connected server vers
 with the running executable's revision, never the latest installation's revision.
 Uninstalled development binaries display `tui-dev`.
 
+`scripts/install-local --staging` installs a trial build beside production: a
+`-staging` bundle whose `distribution` manifest carries `channel=staging`, the
+`codex-staging` launcher, and `codex-app-server-staging.service`, which every staging
+install restarts. The executable reads its channel only from that manifest. Staging
+keeps its daemon's socket, startup lock and recovery record under `~/.codex/staging`,
+runs without remote control, and refuses daemon and remote-control subcommands.
+Configuration, credentials, sessions and SQLite state stay shared: never open one
+thread in both installations. `scripts/uninstall-local --staging` removes staging alone.
+
 ## Provider data
 
 OpenAI and Anthropic are equally trusted with conversation data. A privacy or

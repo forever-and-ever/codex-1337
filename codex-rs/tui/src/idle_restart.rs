@@ -189,14 +189,8 @@ impl IdleRestart {
 }
 
 fn installed_entrypoint(running: &Path) -> Option<PathBuf> {
-    let bin = running.parent()?;
-    let bundle = bin.parent()?;
-    let distributions = bundle.parent()?;
-    (running.file_name()? == "codex"
-        && bin.file_name()? == "bin"
-        && distributions.file_name()? == "distributions"
-        && bundle.join("distribution").is_file())
-    .then(|| distributions.join("current/bin/codex"))
+    let distribution = codex_install_context::Distribution::of(running).ok()??;
+    Some(distribution.entrypoint())
 }
 
 pub(crate) fn reexec(executable: &Path, thread: ThreadId, cwd: AbsolutePathBuf) -> io::Error {

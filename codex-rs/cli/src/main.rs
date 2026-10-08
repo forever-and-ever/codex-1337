@@ -87,6 +87,7 @@ mod reload_probe;
 mod remote_control_cmd;
 #[cfg(target_os = "windows")]
 mod sandbox_setup;
+mod staging;
 mod state_db_recovery;
 #[cfg(not(windows))]
 mod wsl_paths;
@@ -975,6 +976,7 @@ async fn cli_main(
         mut interactive,
         subcommand,
     } = MultitoolCli::parse();
+    staging::admit(subcommand.as_ref())?;
     if matches!(
         subcommand,
         Some(Subcommand::Debug(DebugCommand {
@@ -2389,11 +2391,13 @@ async fn run_interactive_tui(
         cloud_config::load_config(&interactive.config_overrides, LoaderOverrides::default())
             .await
             .map_err(std::io::Error::other)?;
-        codex_app_server_daemon::run(AppServerLifecycleCommand::Start)
-            .await
-            .map_err(|err| std::io::Error::other(format!(
-                "{err:#}\nThe agents overview requires the shared service. Start or repair it, then retry."
-            )))?;
+        if codex_install_context::Channel::current() == codex_install_context::Channel::Production {
+            codex_app_server_daemon::run(AppServerLifecycleCommand::Start)
+                .await
+                .map_err(|err| std::io::Error::other(format!(
+                    "{err:#}\nThe agents overview requires the shared service. Start or repair it, then retry."
+                )))?;
+        }
     }
 
     let remote_endpoint = match resolve_remote_endpoint(remote, remote_auth_token_env.clone()) {

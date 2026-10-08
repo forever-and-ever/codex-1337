@@ -12,6 +12,8 @@ UNITS = (
     "codex-app-server-refresh.service",
     "codex-app-server-refresh.path",
 )
+STAGING_UNIT = "codex-app-server-staging.service"
+STAGING_LAUNCHER = "codex-staging"
 
 
 def xdg(name: str, fallback: str) -> Path:
@@ -42,31 +44,37 @@ def write_unit(unit_dir: Path, name: str, contents: str) -> None:
             temporary.unlink(missing_ok=True)
 
 
-def launcher_contents(distributions: Path) -> str:
-    command = shlex.quote(str(distributions / "current/bin/codex"))
-    return f'#!/bin/sh\n# codex-1337 launcher\nexec {command} "$@"\n'
+def launcher_marker(channel: str) -> bytes:
+    label = "launcher" if channel == "current" else f"{channel} launcher"
+    return f"# codex-1337 {label}\n".encode()
 
 
-def check_launcher_ownership(distributions: Path, launcher: Path) -> None:
+def launcher_contents(distributions: Path, channel: str) -> str:
+    command = shlex.quote(str(distributions / channel / "bin/codex"))
+    marker = launcher_marker(channel).decode()
+    return f'#!/bin/sh\n{marker}exec {command} "$@"\n'
+
+
+def check_launcher_ownership(distributions: Path, launcher: Path, channel: str) -> None:
     if not distributions.is_absolute() or not launcher.is_absolute():
         raise ValueError("launcher and distributions paths must be absolute")
     if launcher.is_symlink():
-        if launcher.readlink() != distributions / "current/bin/codex":
+        if launcher.readlink() != distributions / channel / "bin/codex":
             raise FileExistsError(
                 f"refusing to replace an unowned launcher: {launcher}"
             )
     elif launcher.exists():
         with launcher.open("rb") as existing:
             existing.readline()
-            if existing.readline() != b"# codex-1337 launcher\n":
+            if existing.readline() != launcher_marker(channel):
                 raise FileExistsError(
                     f"refusing to replace an unowned launcher: {launcher}"
                 )
 
 
-def install_launcher(distributions: Path, launcher: Path) -> None:
-    check_launcher_ownership(distributions, launcher)
-    contents = launcher_contents(distributions)
+def install_launcher(distributions: Path, launcher: Path, channel: str) -> None:
+    check_launcher_ownership(distributions, launcher, channel)
+    contents = launcher_contents(distributions, channel)
     with tempfile.NamedTemporaryFile(
         mode="w", dir=launcher.parent, delete=False
     ) as output:
@@ -79,6 +87,32 @@ def install_launcher(distributions: Path, launcher: Path) -> None:
             temporary.replace(launcher)
         finally:
             temporary.unlink(missing_ok=True)
+
+
+def integrate_staging(action: str, install_root: Path) -> None:
+    """A trial daemon beside production: its own launcher and unit, nothing else."""
+    unit_dir = xdg("XDG_CONFIG_HOME", ".config") / "systemd/user"
+    distributions = xdg("XDG_DATA_HOME", ".local/share") / "codex-1337/distributions"
+    launcher = install_root / "bin" / STAGING_LAUNCHER
+    if action == "uninstall-staging":
+        if (unit_dir / STAGING_UNIT).exists():
+            systemctl("disable", "--now", STAGING_UNIT)
+            (unit_dir / STAGING_UNIT).unlink()
+            systemctl("daemon-reload")
+        check_launcher_ownership(distributions, launcher, "staging")
+        launcher.unlink(missing_ok=True)
+        return
+    install_launcher(distributions, launcher, "staging")
+    unit_dir.mkdir(parents=True, exist_ok=True)
+    template = (Path(__file__).parent / "systemd" / STAGING_UNIT).read_text()
+    contents = template.replace(
+        "@CODEX@", unit_path(distributions / "staging/bin/codex")
+    )
+    write_unit(unit_dir, STAGING_UNIT, contents)
+    systemctl("daemon-reload")
+    systemctl("enable", STAGING_UNIT)
+    # A trial build replaces its predecessor at once; staging turns may be cut short.
+    systemctl("restart", STAGING_UNIT)
 
 
 def integrate(action: str, install_root: Path) -> None:
@@ -130,6 +164,8 @@ if __name__ == "__main__":
             "install-launcher",
             "check-launcher-ownership",
             "uninstall",
+            "install-staging",
+            "uninstall-staging",
         ),
     )
     parser.add_argument("install_root", type=Path)
@@ -141,8 +177,10 @@ if __name__ == "__main__":
         if args.launcher is None:
             parser.error("launcher action requires a destination")
         if args.action == "check-launcher-ownership":
-            check_launcher_ownership(args.install_root, args.launcher)
+            check_launcher_ownership(args.install_root, args.launcher, "current")
         else:
-            install_launcher(args.install_root, args.launcher)
+            install_launcher(args.install_root, args.launcher, "current")
+    elif args.action in ("install-staging", "uninstall-staging"):
+        integrate_staging(args.action, args.install_root)
     else:
         integrate(args.action, args.install_root)

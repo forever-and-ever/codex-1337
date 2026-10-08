@@ -17,7 +17,6 @@ use super::worker_process::Worker;
 use std::collections::VecDeque;
 use std::io;
 use std::os::fd::AsRawFd;
-use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
 use std::time::Instant;
@@ -478,16 +477,8 @@ impl Host {
 }
 
 fn installed_entrypoint() -> io::Result<PathBuf> {
-    let executable = std::env::current_exe()?;
-    let Some(bundle) = executable.parent().and_then(Path::parent) else {
-        return Ok(executable);
-    };
-    let Some(distributions) = bundle.parent().filter(|parent| {
-        parent
-            .file_name()
-            .is_some_and(|name| name == "distributions")
-    }) else {
-        return Ok(executable);
-    };
-    Ok(distributions.join("current/bin/codex"))
+    match codex_install_context::Distribution::running() {
+        Some(distribution) => Ok(distribution.entrypoint()),
+        None => std::env::current_exe(),
+    }
 }
