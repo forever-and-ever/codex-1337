@@ -137,11 +137,14 @@ impl App {
                 }
                 tui.frame_requester().schedule_frame();
             }
-            TuiEvent::Key(key) if key.kind == KeyEventKind::Press => {
+            TuiEvent::Key(key)
+                if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) =>
+            {
                 // Preview reads never hold the action lease: navigation can pass
                 // them, and an explicit action supersedes their response token.
                 if browser.busy() {
-                    if key.code == KeyCode::Esc
+                    if key.kind == KeyEventKind::Press
+                        && key.code == KeyCode::Esc
                         && browser.form.is_none()
                         && matches!(
                             browser.pending,
@@ -174,11 +177,15 @@ impl App {
                     }
                 } else {
                     match (key.modifiers, key.code) {
-                        (KeyModifiers::NONE, KeyCode::Esc) if browser.full_body => {
+                        (KeyModifiers::NONE, KeyCode::Esc)
+                            if key.kind == KeyEventKind::Press && browser.full_body =>
+                        {
                             browser.full_body = false;
                             browser.reveal_selection = true;
                         }
-                        (KeyModifiers::NONE, KeyCode::Esc) => self.jira = None,
+                        (KeyModifiers::NONE, KeyCode::Esc) if key.kind == KeyEventKind::Press => {
+                            self.jira = None
+                        }
                         (KeyModifiers::NONE, KeyCode::Up) => {
                             browser.select_neighbor(/*delta*/ -1)
                         }
@@ -191,18 +198,22 @@ impl App {
                         (KeyModifiers::NONE, KeyCode::PageDown) => {
                             browser.scroll_body(/*delta*/ 10)
                         }
-                        (KeyModifiers::CONTROL, KeyCode::Char('n')) => {
+                        (KeyModifiers::CONTROL, KeyCode::Char('n'))
+                            if key.kind == KeyEventKind::Press =>
+                        {
                             browser.form = Some(JiraForm::new(/*previous*/ None));
                             browser.error = None;
                         }
-                        (KeyModifiers::NONE, KeyCode::Enter) if browser.selected.is_some() => {
+                        (KeyModifiers::NONE, KeyCode::Enter)
+                            if key.kind == KeyEventKind::Press && browser.selected.is_some() =>
+                        {
                             browser.full_body = !browser.full_body;
                             browser.reveal_selection = true;
                             if matches!(browser.preview.result, Some(Err(_))) {
                                 browser.preview.result = None;
                             }
                         }
-                        (_, code) => {
+                        (_, code) if key.kind == KeyEventKind::Press => {
                             let purpose = match (key.modifiers, code) {
                                 (KeyModifiers::CONTROL, KeyCode::Char('e')) => {
                                     Some(ReadPurpose::Edit)
@@ -232,6 +243,7 @@ impl App {
                                 browser.filter_key(*key);
                             }
                         }
+                        _ => browser.filter_key(*key),
                     }
                 }
                 tui.frame_requester().schedule_frame();

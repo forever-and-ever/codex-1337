@@ -126,6 +126,16 @@ impl JiraForm {
 
     // Returns true only when the form may be discarded. Save is handled by the owner.
     pub(super) fn input(&mut self, key: KeyEvent) -> bool {
+        if key.kind == KeyEventKind::Repeat
+            && (self.discard
+                || self.field == 0
+                || matches!(
+                    key.code,
+                    KeyCode::Esc | KeyCode::Enter | KeyCode::Tab | KeyCode::BackTab
+                ))
+        {
+            return false;
+        }
         if self.discard {
             match key.code {
                 KeyCode::Enter => return true,
