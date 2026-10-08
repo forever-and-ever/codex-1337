@@ -37,6 +37,8 @@ fn detects_proc_mount_invalid_argument_failure() {
 fn detects_proc_mount_operation_not_permitted_failure() {
     let stderr = "bwrap: Can't mount proc on /newroot/proc: Operation not permitted";
     assert!(is_proc_mount_failure(stderr));
+    let stderr = "bwrap: Can't mount proc on /proc: Operation not permitted";
+    assert!(is_proc_mount_failure(stderr));
 }
 
 #[test]
