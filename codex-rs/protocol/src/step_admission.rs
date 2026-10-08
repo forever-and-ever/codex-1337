@@ -29,6 +29,8 @@ pub struct StepAdmissionItem {
     /// Provider-reported output, less any reported reasoning.
     #[ts(type = "number")]
     pub output_tokens: u64,
+    /// The calls the response made, in order; the step admits their results.
+    pub call_ids: Vec<String>,
     pub admission: Admission,
 }
 
@@ -48,8 +50,6 @@ pub enum Admission {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct SealedAdmission {
-    /// The calls whose results the step admitted.
-    pub call_ids: Vec<String>,
     /// The step's own results, with the framing of its items.
     #[ts(type = "number")]
     pub self_tokens: u64,

@@ -46,9 +46,26 @@ pub(crate) struct StepMark {
 /// The items a step admitted, before the delta is split among them.
 #[derive(Debug, Default)]
 struct Admitted {
-    call_ids: Vec<String>,
     results: Vec<FunctionCallOutputBody>,
     arrivals: Vec<Incoming>,
+}
+
+/// The calls one response made, observed as its items complete.
+#[derive(Debug, Default)]
+pub(super) struct ResponseCalls(Vec<String>);
+
+impl ResponseCalls {
+    pub(super) fn observe(&mut self, item: &ResponseItem) {
+        match item {
+            ResponseItem::FunctionCall { call_id, .. }
+            | ResponseItem::CustomToolCall { call_id, .. } => self.0.push(call_id.clone()),
+            ResponseItem::LocalShellCall { call_id, .. }
+            | ResponseItem::ToolSearchCall { call_id, .. } => {
+                self.0.extend(call_id.iter().cloned())
+            }
+            _ => {}
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -75,6 +92,7 @@ impl Session {
         step_context: &StepContext,
         prompt: &Prompt,
         response_id: &str,
+        calls: ResponseCalls,
         usage: Option<&TokenUsage>,
         reported_reasoning_tokens: Option<u64>,
     ) {
@@ -96,6 +114,7 @@ impl Session {
                         read_tokens,
                         thinking_tokens,
                         output_tokens: output_tokens - thinking_tokens.unwrap_or(0),
+                        call_ids: calls.0,
                         admission: Admission::Pending,
                     },
                     turn_id: turn_context.sub_id.clone(),
@@ -169,8 +188,8 @@ impl Session {
     }
 }
 
-/// Sorts the items between two prompts into the step's calls, its results and its arrivals.
-/// The response's own items count as its re-sent output.
+/// Sorts the items between two prompts into the step's results and its arrivals. The
+/// response's own items count as its re-sent output.
 fn admit(items: &[ResponseItem]) -> Admitted {
     let mut admitted = Admitted::default();
     for item in items {
@@ -223,14 +242,6 @@ fn admit(items: &[ResponseItem]) -> Admitted {
                 label: "Compaction".to_string(),
                 text: None,
             }),
-            ResponseItem::FunctionCall { call_id, .. }
-            | ResponseItem::CustomToolCall { call_id, .. } => {
-                admitted.call_ids.push(call_id.clone());
-            }
-            ResponseItem::LocalShellCall { call_id, .. }
-            | ResponseItem::ToolSearchCall { call_id, .. } => {
-                admitted.call_ids.extend(call_id.iter().cloned());
-            }
             ResponseItem::FunctionCallOutput { output, .. }
             | ResponseItem::CustomToolCallOutput { output, .. } => {
                 admitted.results.push(output.body.clone());
@@ -241,6 +252,10 @@ fn admit(items: &[ResponseItem]) -> Admitted {
                 ));
             }
             ResponseItem::Reasoning { .. }
+            | ResponseItem::FunctionCall { .. }
+            | ResponseItem::CustomToolCall { .. }
+            | ResponseItem::LocalShellCall { .. }
+            | ResponseItem::ToolSearchCall { .. }
             | ResponseItem::WebSearchCall { .. }
             | ResponseItem::ImageGenerationCall { .. }
             | ResponseItem::RejectedToolCall { .. }
@@ -268,7 +283,6 @@ fn seal(mut mark: StepMark, received: i128, admitted: Admitted) -> (String, Step
         precision,
     } = apportion(received, &local);
     mark.item.admission = Admission::Sealed(SealedAdmission {
-        call_ids: admitted.call_ids,
         self_tokens: shares[0],
         arrivals: admitted
             .arrivals

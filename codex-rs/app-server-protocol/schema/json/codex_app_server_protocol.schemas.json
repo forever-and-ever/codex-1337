@@ -7690,13 +7690,6 @@
                 },
                 "type": "array"
               },
-              "callIds": {
-                "description": "The calls whose results the step admitted.",
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
               "precision": {
                 "$ref": "#/definitions/v2/AdmissionPrecision"
               },
@@ -7721,7 +7714,6 @@
             },
             "required": [
               "arrivals",
-              "callIds",
               "precision",
               "releasedTokens",
               "selfTokens",
@@ -23791,6 +23783,13 @@
               "admission": {
                 "$ref": "#/definitions/v2/Admission"
               },
+              "callIds": {
+                "description": "The calls the response made, in order; the step admits their results.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
               "completedAtMs": {
                 "format": "int64",
                 "type": "integer"
@@ -23832,6 +23831,7 @@
             },
             "required": [
               "admission",
+              "callIds",
               "completedAtMs",
               "id",
               "outputTokens",

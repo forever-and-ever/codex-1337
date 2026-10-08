@@ -6,10 +6,6 @@ import type { Arrival } from "./Arrival";
 
 export type SealedAdmission = {
 /**
- * The calls whose results the step admitted.
- */
-callIds: Array<string>,
-/**
  * The step's own results, with the framing of its items.
  */
 selfTokens: number,

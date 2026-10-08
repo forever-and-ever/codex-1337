@@ -219,6 +219,7 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
                     header: output.activity_header(),
                     auxiliary: Vec::new(),
                     header_tokens: None,
+                    header_bill: None,
                     disclosure: output.activity_disclosure(width),
                     controls: Vec::new(),
                 })
@@ -486,6 +487,7 @@ fn mixed_feed_keeps_its_grid_through_live_commit_resize_and_details() {
                         tail.transcript_timestamp(),
                     ),
                     header_tokens: None,
+                    header_bill: None,
                     disclosure: None,
                     controls: Vec::new(),
                 })
@@ -711,6 +713,7 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
                 activity: tail.compact_hyperlink_lines(width),
                 auxiliary: Vec::new(),
                 header_tokens: None,
+                header_bill: None,
                 disclosure: tail.activity_disclosure(width),
                 controls: Vec::new(),
             })

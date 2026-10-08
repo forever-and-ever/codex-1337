@@ -1,9 +1,17 @@
 //! What each model request cost and what its step admitted, as measured by the server.
-//! A pending step shows only what its response reported; a sealed one adds its own results.
+//!
+//! A step's bill heads the row of its first call, or its Thought when it made none; a row
+//! holding several steps' first calls, such as a Code Mode block with waits, sums them. A
+//! pending step shows only what its response reported; a sealed one adds its own results.
 
 use super::TranscriptView;
 use super::text::token_label;
+use crate::history_cell::CodeModeCell;
+use crate::history_cell::CodeModeWaitCell;
+use crate::history_cell::HistoryCell;
+use crate::history_cell::ThoughtCell;
 use codex_app_server_protocol::StepAdmissionItem;
+use codex_protocol::code_mode::CodeModeEvent;
 use codex_protocol::step_admission::Admission;
 use codex_protocol::step_admission::AdmissionPrecision;
 use std::collections::HashMap;
@@ -11,10 +19,11 @@ use std::collections::HashMap;
 #[derive(Default)]
 pub(super) struct StepBills {
     by_response: HashMap<String, StepAdmissionItem>,
+    response_by_call: HashMap<String, String>,
 }
 
-/// A step's bill as the heading shows it: the total in the gutter, then
-/// `(thinking output self)` and any arrivals or releases after the title.
+/// The heading's share of a row's steps: the total in the gutter, then
+/// `(thinking output self)` and what else the steps admitted or released after the title.
 pub(super) struct StepBill {
     pub(super) total: u64,
     pub(super) decoration: String,
@@ -22,58 +31,135 @@ pub(super) struct StepBill {
 
 impl TranscriptView {
     pub(crate) fn record_step_admission(&mut self, item: StepAdmissionItem) {
-        let bills = &mut self.step_bills.by_response;
+        let bills = &mut self.step_bills;
         // A live pending record must not overwrite the record that sealed it.
-        if item.admission == Admission::Pending && bills.contains_key(&item.response_id) {
+        if item.admission == Admission::Pending && bills.by_response.contains_key(&item.response_id)
+        {
             return;
         }
-        if bills.get(&item.response_id) != Some(&item) {
-            bills.insert(item.response_id.clone(), item);
-            self.cache.clear();
-            self.live_key = None;
+        if bills.by_response.get(&item.response_id) == Some(&item) {
+            return;
         }
+        for call_id in &item.call_ids {
+            bills
+                .response_by_call
+                .insert(call_id.clone(), item.response_id.clone());
+        }
+        bills.by_response.insert(item.response_id.clone(), item);
+        self.cache.clear();
+        self.live_key = None;
     }
 
-    pub(super) fn step_bill(&self, response_id: &str) -> Option<StepBill> {
-        let item = self.step_bills.by_response.get(response_id)?;
-        let produced = item.thinking_tokens.unwrap_or(0) + item.output_tokens;
-        let thinking = item
-            .thinking_tokens
-            .map_or_else(|| "—".to_string(), token_label);
-        let output = token_label(item.output_tokens);
-        Some(match &item.admission {
-            Admission::Pending => StepBill {
-                total: produced,
-                decoration: format!("  ({thinking} {output} …)"),
-            },
-            Admission::Severed => StepBill {
-                total: produced,
-                decoration: format!("  ({thinking} {output} —) severed"),
-            },
-            Admission::Sealed(sealed) => {
-                let approx = match sealed.precision {
-                    AdmissionPrecision::Exact => "",
-                    AdmissionPrecision::Apportioned | AdmissionPrecision::Disturbed => "≈",
-                };
-                let mut decoration = format!(
-                    "  ({thinking} {output} {approx}{})",
-                    token_label(sealed.self_tokens)
-                );
-                let arrived = sealed.arrivals.iter().map(|arrival| arrival.tokens).sum();
-                if !sealed.arrivals.is_empty() {
-                    decoration.push_str(&format!(" · arrivals {approx}{}", token_label(arrived)));
+    /// The bill of the steps this row heads, if any.
+    pub(super) fn step_bill(&self, cell: &dyn HistoryCell) -> Option<StepBill> {
+        let bills = &self.step_bills;
+        let steps: Vec<&StepAdmissionItem> = match cell.as_any().downcast_ref::<ThoughtCell>() {
+            // A Thought heads only a step that made no calls.
+            Some(thought) => bills
+                .by_response
+                .get(thought.response_id())
+                .filter(|step| step.call_ids.is_empty())
+                .into_iter()
+                .collect(),
+            None => {
+                let mut steps = Vec::new();
+                for call_id in call_ids(cell) {
+                    let Some(step) = bills
+                        .response_by_call
+                        .get(call_id)
+                        .and_then(|response| bills.by_response.get(response))
+                    else {
+                        continue;
+                    };
+                    if step.call_ids.first().map(String::as_str) == Some(call_id)
+                        && !steps
+                            .iter()
+                            .any(|known: &&StepAdmissionItem| known.id == step.id)
+                    {
+                        steps.push(step);
+                    }
                 }
-                if sealed.released_tokens > 0 {
-                    decoration.push_str(&format!(
-                        " · released {}",
-                        token_label(sealed.released_tokens)
-                    ));
-                }
-                StepBill {
-                    total: produced + sealed.self_tokens,
-                    decoration,
-                }
+                steps
             }
-        })
+        };
+        compose(&steps)
     }
+}
+
+/// The model calls a row presents, including a Code Mode block's exec and its waits.
+fn call_ids(cell: &dyn HistoryCell) -> Vec<&str> {
+    if let Some(block) = cell.as_any().downcast_ref::<CodeModeCell>() {
+        return std::iter::once(block.exec_call_id.as_str())
+            .chain(block.facts().iter().filter_map(|fact| match &fact.event {
+                CodeModeEvent::WaitStarted { call_id } => Some(call_id.as_str()),
+                _ => None,
+            }))
+            .collect();
+    }
+    if let Some(wait) = cell.as_any().downcast_ref::<CodeModeWaitCell>()
+        && let CodeModeEvent::WaitStarted { call_id } | CodeModeEvent::WaitCompleted { call_id } =
+            &wait.0.0.event
+    {
+        return vec![call_id.as_str()];
+    }
+    cell.tool_call_ids()
+}
+
+fn compose(steps: &[&StepAdmissionItem]) -> Option<StepBill> {
+    if steps.is_empty() {
+        return None;
+    }
+    let thinking = steps
+        .iter()
+        .map(|step| step.thinking_tokens)
+        .sum::<Option<u64>>();
+    let output = steps.iter().map(|step| step.output_tokens).sum::<u64>();
+    let mut own = 0;
+    let mut arrived = 0;
+    let mut released = 0;
+    let mut approximate = false;
+    let mut unsealed = 0;
+    let mut severed = 0;
+    for step in steps {
+        match &step.admission {
+            Admission::Pending => unsealed += 1,
+            Admission::Severed => severed += 1,
+            Admission::Sealed(sealed) => {
+                own += sealed.self_tokens;
+                arrived += sealed
+                    .arrivals
+                    .iter()
+                    .map(|arrival| arrival.tokens)
+                    .sum::<u64>();
+                released += sealed.released_tokens;
+                approximate |= sealed.precision != AdmissionPrecision::Exact;
+            }
+        }
+    }
+    let approx = if approximate { "≈" } else { "" };
+    let measured = steps.len() - unsealed - severed;
+    let own_label = match (measured, unsealed) {
+        (0, 0) => "—".to_string(),
+        (0, _) => "…".to_string(),
+        (_, 0) => format!("{approx}{}", token_label(own)),
+        (_, _) => format!("{approx}{}+…", token_label(own)),
+    };
+    let thinking_label = thinking.map_or_else(|| "—".to_string(), token_label);
+    let mut decoration = format!("  ({thinking_label} {} {own_label})", token_label(output));
+    if steps.len() > 1 {
+        decoration.push_str(&format!(" ×{}", steps.len()));
+    }
+    if arrived > 0 {
+        decoration.push_str(&format!(" · arrivals {approx}{}", token_label(arrived)));
+    }
+    if released > 0 {
+        decoration.push_str(&format!(" · released {}", token_label(released)));
+    }
+    if severed > 0 {
+        decoration.push_str(" · severed");
+    }
+    Some(StepBill {
+        total: thinking.unwrap_or(0) + output + own,
+        decoration,
+    })
 }

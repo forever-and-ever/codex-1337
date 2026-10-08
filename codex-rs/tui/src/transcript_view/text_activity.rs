@@ -18,24 +18,31 @@ impl TextLayout {
         self
     }
 
-    pub(in crate::transcript_view) fn with_output_controls(
+    /// Display-only text after the heading: a step's bill, then output controls when shown.
+    pub(in crate::transcript_view) fn with_heading_extras(
         mut self,
         offset: usize,
-        mode: OutputMode,
+        bill: Option<String>,
+        mode: Option<OutputMode>,
     ) -> Self {
-        let mut decoration = String::new();
+        let mut decoration = bill.unwrap_or_default();
         let mut controls = Vec::new();
-        for (mode, label) in [(OutputMode::Raw, "[Raw]"), (OutputMode::Fmt, "[Fmt]")] {
-            decoration.push(' ');
-            let start = display_width(&decoration);
-            decoration.push_str(label);
-            controls.push((mode, label, start..display_width(&decoration)));
+        if mode.is_some() {
+            for (mode, label) in [(OutputMode::Raw, "[Raw]"), (OutputMode::Fmt, "[Fmt]")] {
+                decoration.push(' ');
+                let start = display_width(&decoration);
+                decoration.push_str(label);
+                controls.push((mode, label, start..display_width(&decoration)));
+            }
+        }
+        if decoration.is_empty() {
+            return self;
         }
         self = self.with_inline_decoration_at(offset, decoration);
         for (mode, label, columns) in controls {
             self = self.with_output_target(label.into(), offset, mode, columns);
         }
-        self.output_mode = Some(mode);
+        self.output_mode = mode;
         self
     }
 

@@ -18,4 +18,8 @@ thinkingTokens: number | null,
 /**
  * Provider-reported output, less any reported reasoning.
  */
-outputTokens: number, admission: Admission, };
+outputTokens: number,
+/**
+ * The calls the response made, in order; the step admits their results.
+ */
+callIds: Array<string>, admission: Admission, };

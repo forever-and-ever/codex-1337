@@ -1783,14 +1783,15 @@ async fn exec_command_clamps_model_requested_max_output_tokens_to_policy() -> Re
             sealed.read_tokens,
             sealed.thinking_tokens,
             sealed.output_tokens,
+            sealed.call_ids,
             sealed.admission
         ),
         (
             1_000,
             Some(10),
             30,
+            vec![call_id.to_string()],
             Admission::Sealed(SealedAdmission {
-                call_ids: vec![call_id.to_string()],
                 self_tokens: 1_960,
                 arrivals: Vec::new(),
                 released_tokens: 0,

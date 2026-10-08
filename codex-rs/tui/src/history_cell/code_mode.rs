@@ -179,6 +179,11 @@ impl CodeModeCell {
         self.status().is_some()
     }
 
+    /// The block's lifecycle facts, including the model's waits on it.
+    pub(crate) fn facts(&self) -> &[CodeModeItem] {
+        &self.facts
+    }
+
     pub(crate) fn identity(&self) -> String {
         self.owner.as_ref().map_or_else(
             || format!("code-mode:{}", self.exec_call_id),

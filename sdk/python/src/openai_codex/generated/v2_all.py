@@ -11469,9 +11469,6 @@ class SealedAdmission(BaseModel):
             description="Context written after the step's results by neither the step nor its model."
         ),
     ]
-    call_ids: Annotated[
-        list[str], Field(alias="callIds", description="The calls whose results the step admitted.")
-    ]
     precision: AdmissionPrecision
     released_tokens: Annotated[
         int,
@@ -12577,6 +12574,13 @@ class StepAdmissionThreadItem(BaseModel):
         populate_by_name=True,
     )
     admission: Admission
+    call_ids: Annotated[
+        list[str],
+        Field(
+            alias="callIds",
+            description="The calls the response made, in order; the step admits their results.",
+        ),
+    ]
     completed_at_ms: Annotated[int, Field(alias="completedAtMs")]
     id: str
     output_tokens: Annotated[

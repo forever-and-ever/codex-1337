@@ -24,6 +24,8 @@ pub(crate) struct ActivityTranscriptLines {
     pub(crate) header: Option<crate::history_cell::activity_parts::ActivityHeader>,
     pub(crate) auxiliary: Vec<HyperlinkLine>,
     pub(crate) header_tokens: Option<u64>,
+    /// The bill of the steps the row heads, shown after its header.
+    pub(crate) header_bill: Option<String>,
     pub(crate) disclosure: Option<ActivityDisclosure>,
     pub(crate) controls: Vec<crate::history_cell::activity_parts::PartControl>,
 }
@@ -95,8 +97,12 @@ pub(super) fn activity_layout(
     for part in lines.controls {
         layout = layout.with_part_control(part);
     }
-    if expanded && let (Some(mode), Some(header)) = (lines.output_mode, lines.header) {
-        layout = layout.with_output_controls(header.source_offset, mode);
+    if let Some(header) = lines.header {
+        layout = layout.with_heading_extras(
+            header.source_offset,
+            lines.header_bill,
+            lines.output_mode.filter(|_| expanded),
+        );
     }
     layout
 }
@@ -227,16 +233,13 @@ impl TranscriptView {
         let disclosure = !detailed && mode == HistoryRenderMode::Rich && !ids.is_empty();
         let expanded = disclosure && self.disclosure.is_expanded(&ids);
         let output_mode = self.disclosure.output_mode(&ids);
-        // A Thought heads its step until steps have their own rows.
-        let bill = cell
-            .as_any()
-            .downcast_ref::<crate::history_cell::ThoughtCell>()
-            .and_then(|thought| self.step_bill(thought.response_id()));
+        let bill = self.step_bill(cell.as_ref());
         let header_tokens = bill
             .as_ref()
             .map(|bill| bill.total)
             .or_else(|| cell.activity_header_tokens())
             .or_else(|| self.activity_output_tokens(&ids));
+        let header_bill = bill.map(|bill| bill.decoration);
         let continued_edit = disclosure
             && !cell.is_stream_continuation()
             && ToolOutputGroup::is_patch(cell.as_ref())
@@ -282,6 +285,7 @@ impl TranscriptView {
                             header: parts.header,
                             auxiliary: Vec::new(),
                             header_tokens,
+                            header_bill,
                             disclosure: parts.output,
                             controls: parts.controls,
                         },
@@ -301,12 +305,7 @@ impl TranscriptView {
                 } else {
                     cell.activity_disclosure(content_width)
                 };
-                let header = if expanded {
-                    cell.expanded_activity_header()
-                } else {
-                    cell.activity_header()
-                };
-                let layout = activity_layout(
+                activity_layout(
                     ActivityTranscriptLines {
                         output_mode: (expanded && cell.has_formatted_output())
                             .then_some(output_mode),
@@ -315,21 +314,21 @@ impl TranscriptView {
                             activity,
                             cell.transcript_timestamp(),
                         ),
-                        header,
+                        header: if expanded {
+                            cell.expanded_activity_header()
+                        } else {
+                            cell.activity_header()
+                        },
                         auxiliary: Vec::new(),
                         header_tokens,
+                        header_bill,
                         disclosure,
                         controls: Vec::new(),
                     },
                     width,
                     expanded,
                     shortcut,
-                );
-                match (header, &bill) {
-                    (Some(header), Some(bill)) => layout
-                        .with_inline_decoration_at(header.source_offset, bill.decoration.clone()),
-                    _ => layout,
-                }
+                )
             } else {
                 let lines = crate::history_cell::fullscreen_session_lines(
                     cell.as_ref(),
