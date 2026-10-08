@@ -1031,7 +1031,8 @@ fn register_protected_create_targets(
                     )
                 });
                 let marker_file = marker_dir.join(std::process::id().to_string());
-                let contents = mountpoint_reaper::marker(PROTECTED_CREATE_MARKER, None);
+                let contents =
+                    mountpoint_reaper::marker(PROTECTED_CREATE_MARKER, /*mountpoint*/ None);
                 fs::write(&marker_file, contents).unwrap_or_else(|err| {
                     panic!(
                         "failed to register protected create target {}: {err}",

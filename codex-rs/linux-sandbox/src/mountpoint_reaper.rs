@@ -502,7 +502,7 @@ pub(super) fn enlist(registrations: &[SyntheticMountTargetRegistration], child: 
     let incarnation = Incarnation::of(&child.to_string());
     super::with_synthetic_mount_registry_lock(|| {
         for registration in registrations {
-            let own = Marker::read(0, &registration.marker_file);
+            let own = Marker::read(/*pid*/ 0, &registration.marker_file);
             let stake_line = synthetic_mount_marker_contents(&registration.target);
             let path = registration.marker_dir.join(child.to_string());
             fs::write(
