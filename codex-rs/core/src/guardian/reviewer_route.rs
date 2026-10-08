@@ -276,3 +276,7 @@ fn uses_chatgpt_login(provider: &ModelProviderInfo) -> bool {
         && provider.experimental_bearer_token.is_none()
         && provider.auth.is_none()
 }
+
+#[cfg(test)]
+#[path = "reviewer_route_tests.rs"]
+mod tests;
