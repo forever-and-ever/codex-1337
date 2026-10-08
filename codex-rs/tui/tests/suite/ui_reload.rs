@@ -1,7 +1,7 @@
 //! Exercise the real CLI host, worker replacement, and recovery screen over a PTY.
 
-use super::focus_palette::socket_home;
 use super::focus_palette::PtyCodex;
+use super::focus_palette::socket_home;
 use super::focus_palette::write_test_config;
 use anyhow::Result;
 use anyhow::ensure;
@@ -107,7 +107,14 @@ async fn live_reload_retains_steering_and_times_out_without_replaying_input() ->
     let mut terminal = PtyCodex::start_cli(
         &root,
         home,
-        &["--remote", &endpoint, "-c", "tui.disable_paste_burst=true"],
+        &[
+            "--remote",
+            &endpoint,
+            "-c",
+            "tui.disable_paste_burst=true",
+            "resume",
+            THREAD,
+        ],
     )?;
     terminal.wait_for_startup()?;
     terminal.wait_for_screen("Working")?;
@@ -128,7 +135,7 @@ async fn live_reload_retains_steering_and_times_out_without_replaying_input() ->
         .iter()
         .filter(|(_, method)| method == "thread/resume")
         .count()
-        == 0
+        < 2
         && Instant::now() < until
     {
         terminal.read_output(Duration::from_millis(/*millis*/ 20))?;
@@ -137,7 +144,8 @@ async fn live_reload_retains_steering_and_times_out_without_replaying_input() ->
         .lock()
         .unwrap()
         .iter()
-        .any(|(_, method)| method == "thread/resume");
+        .filter(|(_, method)| method == "thread/resume")
+        .count() >= 2;
     ensure!(
         resumed,
         "reload never resumed: {:?}; screen: {}",
