@@ -250,7 +250,13 @@ enum Audience {
 }
 
 fn send(ui: &mut HashMap<u64, Connection>, audience: Audience, value: &impl serde::Serialize) {
-    let text = serde_json::to_string(value).expect("serialize UI broker message");
+    let text = match serde_json::to_string(value) {
+        Ok(text) => text,
+        Err(error) => {
+            tracing::warn!(%error, "Failed to serialize UI broker message");
+            return;
+        }
+    };
     let message = Message::Text(text.into());
     ui.retain(|connection, peer| {
         if matches!(audience, Audience::Connection(target) if *connection != target) {
