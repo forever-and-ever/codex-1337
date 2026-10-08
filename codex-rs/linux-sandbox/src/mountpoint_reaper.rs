@@ -33,6 +33,7 @@ use std::fs;
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::Read;
+use std::os::fd::AsFd;
 use std::os::fd::AsRawFd;
 use std::os::fd::OwnedFd;
 use std::os::unix::ffi::OsStrExt;
@@ -47,8 +48,9 @@ use rustix::fs::FileType;
 use rustix::fs::Mode;
 use rustix::fs::OFlags;
 use rustix::fs::ResolveFlags;
-use rustix::fs::Stat;
+use rustix::fs::StatxFlags;
 use rustix::fs::XattrFlags;
+use rustix::io::Errno;
 
 use super::PROTECTED_CREATE_MARKER;
 use super::SYNTHETIC_MOUNT_MARKER_EXISTING;
@@ -68,15 +70,28 @@ const SWEPT_PATHS_MAX: usize = 512;
 const MARKERS_PER_PATH_MAX: usize = 64;
 const MARKER_MAX_BYTES: u64 = 8192;
 
-/// The process-lifetime directory that holds the registry. Unit tests get a
-/// private one in the test runner's scratch tree.
+/// The process-lifetime directory that holds the registry. Each unit test
+/// process gets a private one, removed when it exits.
 pub(super) fn runtime_directory() -> std::io::Result<PathBuf> {
     #[cfg(test)]
     {
-        let directory =
-            std::env::temp_dir().join(format!("codex-sandbox-runtime-{}", std::process::id()));
-        fs::create_dir_all(&directory)?;
-        Ok(directory)
+        static DIRECTORY: OnceLock<PathBuf> = OnceLock::new();
+        extern "C" fn remove_directory() {
+            if let Some(directory) = DIRECTORY.get() {
+                let _ = fs::remove_dir_all(directory);
+            }
+        }
+        if let Some(directory) = DIRECTORY.get() {
+            return Ok(directory.clone());
+        }
+        let directory = tempfile::Builder::new()
+            .prefix("codex-sandbox-runtime-")
+            .tempdir()?
+            .keep();
+        if DIRECTORY.set(directory).is_ok() {
+            unsafe { libc::atexit(remove_directory) };
+        }
+        Ok(DIRECTORY.get().cloned().unwrap_or_default())
     }
     #[cfg(not(test))]
     codex_uds::prepare_user_runtime_directory()
@@ -123,13 +138,67 @@ impl Incarnation {
     }
 }
 
-/// A mountpoint the wrapper found or created, as it stood when registered.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// What tells an entry apart from a later one at the same place. The birth
+/// time, where the filesystem keeps one, catches a recycled inode.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Identity {
+    device: u64,
+    inode: u64,
+    birth: Option<(i64, u32)>,
+}
+
+impl Identity {
+    fn is(&self, other: &Self) -> bool {
+        self.device == other.device
+            && self.inode == other.inode
+            && match (self.birth, other.birth) {
+                (Some(birth), Some(other)) => birth == other,
+                _ => true,
+            }
+    }
+}
+
+/// An entry as `statx` reports it, never through a symlink.
+struct Status {
+    file_type: FileType,
+    size: u64,
+    identity: Identity,
+}
+
+impl Status {
+    fn of<Fd: AsFd, P: rustix::path::Arg>(
+        dirfd: Fd,
+        path: P,
+        flags: AtFlags,
+    ) -> rustix::io::Result<Self> {
+        let statx = rustix::fs::statx(
+            dirfd,
+            path,
+            flags | AtFlags::SYMLINK_NOFOLLOW,
+            StatxFlags::BASIC_STATS | StatxFlags::BTIME,
+        )?;
+        let birth = StatxFlags::from_bits_retain(statx.stx_mask)
+            .contains(StatxFlags::BTIME)
+            .then_some((statx.stx_btime.tv_sec, statx.stx_btime.tv_nsec));
+        Ok(Self {
+            file_type: FileType::from_raw_mode(statx.stx_mode.into()),
+            size: statx.stx_size,
+            identity: Identity {
+                device: rustix::fs::makedev(statx.stx_dev_major, statx.stx_dev_minor),
+                inode: statx.stx_ino,
+                birth,
+            },
+        })
+    }
+}
+
+/// A mountpoint the wrapper created, as it stood when registered. The path
+/// has no symlink components.
+#[derive(Clone, Debug)]
 pub(super) struct Mountpoint {
     path: PathBuf,
     kind: SyntheticMountTargetKind,
-    device: u64,
-    inode: u64,
+    identity: Identity,
 }
 
 impl Mountpoint {
@@ -140,16 +209,15 @@ impl Mountpoint {
         }
     }
 
-    fn matches(&self, stat: &Stat) -> bool {
-        stat.st_dev == self.device
-            && stat.st_ino == self.inode
-            && is_empty_mountpoint(self.kind, stat)
+    fn matches(&self, status: &Status) -> bool {
+        self.identity.is(&status.identity) && is_empty_mountpoint(self.kind, status)
     }
 }
 
 /// A registry marker. The file name is the registrant's pid; the contents are
 /// the stake line, then `<start time> <pid namespace>`, then
-/// `<d|f> <device> <inode> <path>` when the marker records a mountpoint.
+/// `<d|f> <device> <inode> <birth|-> <path>` when the marker records a
+/// mountpoint, with the birth time as `<seconds>.<nanoseconds>`.
 /// Markers of older wrappers hold only the stake line.
 struct Marker {
     pid: libc::pid_t,
@@ -204,21 +272,31 @@ impl Marker {
 }
 
 fn parse_mountpoint(record: &[u8]) -> Option<Mountpoint> {
-    let mut fields = record.splitn(4, |byte| *byte == b' ');
+    let mut fields = record.splitn(5, |byte| *byte == b' ');
     let kind = match fields.next()? {
         b"d" => SyntheticMountTargetKind::EmptyDirectory,
         b"f" => SyntheticMountTargetKind::EmptyFile,
         _ => return None,
     };
-    let mut number = || std::str::from_utf8(fields.next()?).ok()?.parse().ok();
-    let device = number()?;
-    let inode = number()?;
+    let mut word = || std::str::from_utf8(fields.next()?).ok();
+    let device = word()?.parse().ok()?;
+    let inode = word()?.parse().ok()?;
+    let birth = match word()? {
+        "-" => None,
+        birth => {
+            let (seconds, nanoseconds) = birth.split_once('.')?;
+            Some((seconds.parse().ok()?, nanoseconds.parse().ok()?))
+        }
+    };
     let path = PathBuf::from(OsStr::from_bytes(fields.next()?));
     path.is_absolute().then_some(Mountpoint {
         path,
         kind,
-        device,
-        inode,
+        identity: Identity {
+            device,
+            inode,
+            birth,
+        },
     })
 }
 
@@ -243,10 +321,17 @@ fn encode(
     }
     bytes.push(b'\n');
     if let Some(mountpoint) = mountpoint {
-        let tag = mountpoint.tag();
-        bytes.extend_from_slice(
-            format!("{tag} {} {} ", mountpoint.device, mountpoint.inode).as_bytes(),
+        let Identity {
+            device,
+            inode,
+            birth,
+        } = mountpoint.identity;
+        let birth = birth.map_or_else(
+            || "-".to_string(),
+            |(seconds, nanoseconds)| format!("{seconds}.{nanoseconds}"),
         );
+        let tag = mountpoint.tag();
+        bytes.extend_from_slice(format!("{tag} {device} {inode} {birth} ").as_bytes());
         bytes.extend_from_slice(mountpoint.path.as_os_str().as_bytes());
     }
     bytes
@@ -313,15 +398,10 @@ pub(super) fn sweep(registry: &Path) {
         if markers.iter().any(Marker::is_live) {
             continue;
         }
-        for mountpoint in markers.iter().filter_map(Marker::synthetic) {
-            let disputed = markers.iter().any(|marker| {
-                marker.stake == Some(Stake::Existing)
-                    && marker.mountpoint.as_ref() == Some(mountpoint)
-            });
-            if !disputed {
-                remove(mountpoint);
-            }
-        }
+        markers
+            .iter()
+            .filter_map(Marker::synthetic)
+            .for_each(remove);
         let _ = fs::remove_dir_all(&marker_dir);
     }
 }
@@ -352,31 +432,37 @@ pub(super) fn sweep_unregistered() {
     }
 }
 
-/// Whether the existing empty `target` is a mountpoint some run created: it
-/// carries the brand, or a marker in `marker_dir` records it.
+/// Whether the existing empty `target` is a mountpoint some run created: a
+/// live registrant calls it synthetic, it carries the brand, or a marker in
+/// `marker_dir` records it. A target swept since bubblewrap arguments were
+/// built is absent, and this run creates it.
 pub(super) fn vouches(target: &SyntheticMountTarget, marker_dir: &Path) -> bool {
-    let Some(site) = Site::open(target.path()) else {
-        return false;
-    };
-    let Some(stat) = site.stat() else {
-        return false;
-    };
-    if !is_empty_mountpoint(target.kind(), &stat) {
-        return false;
-    }
-    if site.is_branded(&stat) {
+    let markers = census(marker_dir).unwrap_or_default();
+    if markers
+        .iter()
+        .any(|marker| marker.stake == Some(Stake::Synthetic) && marker.is_live())
+    {
         return true;
     }
-    census(marker_dir).is_some_and(|markers| {
-        markers
-            .iter()
-            .filter_map(Marker::synthetic)
-            .any(|mountpoint| {
-                mountpoint.path == target.path()
-                    && mountpoint.kind == target.kind()
-                    && mountpoint.matches(&stat)
-            })
-    })
+    let Some(site) = Site::resolve(target.path()) else {
+        return false;
+    };
+    match site.status() {
+        Err(Errno::NOENT) => true,
+        Err(_) => false,
+        Ok(status) => {
+            is_empty_mountpoint(target.kind(), &status)
+                && (site.is_branded(&status)
+                    || markers
+                        .iter()
+                        .filter_map(Marker::synthetic)
+                        .any(|mountpoint| {
+                            mountpoint.path == site.path
+                                && mountpoint.kind == target.kind()
+                                && mountpoint.matches(&status)
+                        }))
+        }
+    }
 }
 
 /// Creates a synthetic target's missing mountpoint, branded, so bubblewrap
@@ -386,14 +472,13 @@ pub(super) fn forge(target: &SyntheticMountTarget) -> Option<Mountpoint> {
     if target.preserves_pre_existing_path() {
         return None;
     }
-    let site = Site::open(target.path())?;
+    let site = Site::resolve(target.path())?;
     site.forge(target.kind());
-    let stat = site.stat()?;
-    is_empty_mountpoint(target.kind(), &stat).then(|| Mountpoint {
-        path: target.path().to_path_buf(),
+    let status = site.status().ok()?;
+    is_empty_mountpoint(target.kind(), &status).then(|| Mountpoint {
         kind: target.kind(),
-        device: stat.st_dev,
-        inode: stat.st_ino,
+        identity: status.identity,
+        path: site.path,
     })
 }
 
@@ -429,17 +514,17 @@ pub(crate) fn is_branded_path(path: &Path) -> bool {
     rustix::fs::lgetxattr(path, BRAND, &mut [0_u8; 0]).is_ok()
 }
 
-fn is_empty_mountpoint(kind: SyntheticMountTargetKind, stat: &Stat) -> bool {
-    let file_type = FileType::from_raw_mode(stat.st_mode);
+fn is_empty_mountpoint(kind: SyntheticMountTargetKind, status: &Status) -> bool {
     match kind {
-        SyntheticMountTargetKind::EmptyDirectory => file_type == FileType::Directory,
+        SyntheticMountTargetKind::EmptyDirectory => status.file_type == FileType::Directory,
         SyntheticMountTargetKind::EmptyFile => {
-            file_type == FileType::RegularFile && stat.st_size == 0
+            status.file_type == FileType::RegularFile && status.size == 0
         }
     }
 }
 
-/// Removes `mountpoint` if it still stands as recorded.
+/// Removes `mountpoint` if it still stands as recorded, reached without
+/// following any symlink.
 fn remove(mountpoint: &Mountpoint) {
     let Some(site) = Site::open(&mountpoint.path) else {
         return;
@@ -449,19 +534,25 @@ fn remove(mountpoint: &Mountpoint) {
         SyntheticMountTargetKind::EmptyFile => AtFlags::empty(),
     };
     // rmdir refuses a directory filled since the check.
-    if site.stat().is_some_and(|stat| mountpoint.matches(&stat)) {
+    if site
+        .status()
+        .is_ok_and(|status| mountpoint.matches(&status))
+    {
         let _ = rustix::fs::unlinkat(&site.parent, &site.name, flags);
     }
 }
 
-/// A path pinned by a descriptor of its parent, resolved without symlinks.
+/// A path pinned by a descriptor of its parent, which was reached without
+/// following any symlink.
 struct Site {
+    path: PathBuf,
     parent: OwnedFd,
     name: OsString,
 }
 
 impl Site {
     fn open(path: &Path) -> Option<Self> {
+        let name = path.file_name()?.to_os_string();
         let parent = rustix::fs::openat2(
             CWD,
             path.parent()?,
@@ -471,26 +562,37 @@ impl Site {
         )
         .ok()?;
         Some(Self {
+            path: path.to_path_buf(),
             parent,
-            name: path.file_name()?.to_os_string(),
+            name,
         })
     }
 
-    /// The entry itself, never a symlink's target.
-    fn stat(&self) -> Option<Stat> {
-        rustix::fs::statat(&self.parent, &self.name, AtFlags::SYMLINK_NOFOLLOW).ok()
+    /// The site at the real path of `path`'s parent, as bubblewrap resolves
+    /// it. bwrap.rs refuses symlinks under writable roots, so this follows only
+    /// symlinks that sandboxes cannot plant, such as `/home -> /var/home`.
+    fn resolve(path: &Path) -> Option<Self> {
+        Self::open(
+            &fs::canonicalize(path.parent()?)
+                .ok()?
+                .join(path.file_name()?),
+        )
     }
 
-    /// Whether the entry described by `stat`, an empty mountpoint, still
+    fn status(&self) -> rustix::io::Result<Status> {
+        Status::of(&self.parent, self.name.as_os_str(), AtFlags::empty())
+    }
+
+    /// Whether the entry described by `status`, an empty mountpoint, still
     /// stands and carries the brand.
-    fn is_branded(&self, stat: &Stat) -> bool {
+    fn is_branded(&self, status: &Status) -> bool {
         let flags =
             OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::NOCTTY | OFlags::CLOEXEC;
         let Ok(entry) = rustix::fs::openat(&self.parent, &self.name, flags, Mode::empty()) else {
             return false;
         };
-        rustix::fs::fstat(&entry)
-            .is_ok_and(|opened| opened.st_dev == stat.st_dev && opened.st_ino == stat.st_ino)
+        Status::of(&entry, "", AtFlags::EMPTY_PATH)
+            .is_ok_and(|opened| opened.identity.is(&status.identity))
             && rustix::fs::fgetxattr(&entry, BRAND, &mut [0_u8; 0]).is_ok()
     }
 
