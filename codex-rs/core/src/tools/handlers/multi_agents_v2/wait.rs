@@ -8,6 +8,9 @@ use std::time::Duration;
 use tokio::time::Instant;
 use tokio::time::timeout_at;
 
+#[path = "wake_batch.rs"]
+mod wake_batch;
+
 #[derive(Default)]
 pub(crate) struct Handler {
     options: WaitAgentTimeoutOptions,
@@ -93,6 +96,14 @@ impl Handler {
 
         let deadline = Instant::now() + Duration::from_millis(timeout_ms as u64);
         let outcome = wait_for_activity(&mut activity_rx, pending_activity, deadline).await;
+        let outcome = wake_batch::after_activity(
+            outcome,
+            &session,
+            turn.config.multi_agent_v2.wait_agent_batch_window_ms,
+            &mut activity_rx,
+            deadline,
+        )
+        .await;
         let result = WaitAgentResult::from_outcome(outcome, requested_timeout_ms, timeout_ms);
 
         session

@@ -3750,37 +3750,26 @@ async fn multi_agent_v2_wait_agent_returns_summary_for_mailbox_activity() {
         .features
         .enable(Feature::MultiAgentV2)
         .expect("test config should allow feature update");
+    config.multi_agent_v2.wait_agent_batch_window_ms = std::num::NonZeroU64::new(500);
     set_turn_config(&mut turn, config);
 
     let session = Arc::new(session);
     let turn = Arc::new(turn);
-    let spawn_output = SpawnAgentHandlerV2::default()
-        .handle(invocation(
-            session.clone(),
-            turn.clone(),
-            "spawn_agent",
-            function_payload(json!({
-                "message": "inspect this repo",
-                "task_name": "test_process"
+    let worker_path = AgentPath::root().join("test_process").expect("worker path");
+    let child = manager
+        .start_thread(StartThreadOptions {
+            session_source: Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+                parent_thread_id: session.thread_id,
+                depth: 1,
+                agent_path: Some(worker_path.clone()),
+                agent_nickname: None,
+                agent_role: None,
             })),
-        ))
+            ..StartThreadOptions::new((*turn.config).clone())
+        })
         .await
-        .expect("spawn_agent should succeed");
-    let _ = expect_text_output(spawn_output);
-
-    let agent_id = session
-        .services
-        .local_agent_runtime
-        .resolve_agent_reference(session.thread_id, &turn.session_source, "test_process")
-        .await
-        .expect("relative path should resolve");
-    let worker_path = session
-        .services
-        .local_agent_runtime
-        .ensure_agent_known(agent_id)
-        .expect("worker metadata")
-        .agent_path
-        .expect("worker path");
+        .expect("child thread should start");
+    assert_eq!(child.thread.agent_status().await, AgentStatus::PendingInit);
     let wait_task = tokio::spawn({
         let session = session.clone();
         let turn = turn.clone();
@@ -3811,8 +3800,9 @@ async fn multi_agent_v2_wait_agent_returns_summary_for_mailbox_activity() {
         )
         .await;
 
-    let wait_output = wait_task
+    let wait_output = tokio::time::timeout(Duration::from_millis(100), wait_task)
         .await
+        .expect("one child must not incur a batching window")
         .expect("wait task should join")
         .expect("wait_agent should succeed");
     let (content, success) = expect_text_output(wait_output);

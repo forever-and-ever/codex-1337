@@ -775,6 +775,7 @@ non_code_mode_only = true
             disable_direct_message: Some(true),
             message_board_in_memory: Some(true),
             non_code_mode_only: Some(true),
+            wait_agent_batch_window_ms: None,
         }))
     );
 }

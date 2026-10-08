@@ -1,5 +1,7 @@
 use core_test_support::test_codex::local_selections;
+use std::num::NonZeroU64;
 use std::sync::Arc;
+use std::time::Duration;
 
 use codex_core::CodexThread;
 use codex_core::StartIfIdleSubmission;
@@ -27,11 +29,14 @@ use codex_protocol::models::AgentMessageInputContent;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::models::ResponseItem;
+use codex_protocol::protocol::AgentStatus;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::CodexErrorInfo;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::InterAgentCommunication;
 use codex_protocol::protocol::Op;
+use codex_protocol::protocol::SessionSource;
+use codex_protocol::protocol::SubAgentSource;
 use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::turn_input::CyberAccessProgram;
 use codex_protocol::user_input::UserInput;
@@ -588,8 +593,22 @@ async fn queue_only_agent_mail_wakes_sleeping_root_with_previous_turn_context() 
     }));
 }
 
+#[derive(Clone, Copy)]
+enum WaitWake {
+    Batch,
+    Steer,
+    ChildCompletion,
+    WaitDeadline,
+    Disabled,
+}
+
+#[test_case(WaitWake::Batch; "batches_mail")]
+#[test_case(WaitWake::Steer; "steer_interrupts_hold")]
+#[test_case(WaitWake::ChildCompletion; "completion_ends_hold")]
+#[test_case(WaitWake::WaitDeadline; "wait_deadline_caps_hold")]
+#[test_case(WaitWake::Disabled; "zero_window_returns_immediately")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn steer_interrupts_wait_agent_and_is_sent_in_follow_up_request() {
+async fn wait_agent_wake_preserves_mail_and_steers(wake: WaitWake) {
     const WAIT_CALL_ID: &str = "wait-call";
     const INITIAL_PROMPT: &str = "wait for an agent";
     const STEER_PROMPT: &str = "stop waiting and continue";
@@ -601,54 +620,166 @@ async fn steer_interrupts_wait_agent_and_is_sent_in_follow_up_request() {
             WAIT_CALL_ID,
             MULTI_AGENT_V2_NAMESPACE,
             "wait_agent",
-            r#"{"timeout_ms":10000}"#,
+            if matches!(wake, WaitWake::WaitDeadline) {
+                r#"{"timeout_ms":100}"#
+            } else {
+                r#"{"timeout_ms":10000}"#
+            },
         )),
         chunk(ev_completed("resp-1")),
     ];
-    let (server, _completions) =
-        start_streaming_sse_server(vec![first_chunks, response_completed_chunks("resp-2")]).await;
-    let codex = test_codex()
+    let mut streams = vec![first_chunks];
+    if matches!(wake, WaitWake::ChildCompletion) {
+        streams.push(response_completed_chunks("child-completed"));
+    }
+    streams.push(response_completed_chunks("resp-2"));
+    let (server, _completions) = start_streaming_sse_server(streams).await;
+    let test = test_codex()
         .with_model("gpt-5.4")
-        .with_config(|config| {
+        .with_config(move |config| {
             config
                 .features
                 .enable(Feature::MultiAgentV2)
                 .expect("test config should allow feature update");
+            config.multi_agent_v2.min_wait_timeout_ms = 0;
+            config.multi_agent_v2.wait_agent_batch_window_ms = if matches!(wake, WaitWake::Disabled)
+            {
+                None
+            } else {
+                NonZeroU64::new(500)
+            };
         })
         .build_with_streaming_server(&server)
         .await
-        .expect("build Codex test session")
-        .codex;
+        .expect("build Codex test session");
 
-    submit_user_input(&codex, INITIAL_PROMPT).await;
-    wait_for_event(&codex, |event| {
+    // PendingInit counts as running. These children stay there until explicitly
+    // submitted below, so the test does not race a real provider response.
+    let mut children = Vec::new();
+    for name in ["worker", "other"] {
+        let child = test
+            .thread_manager
+            .start_thread(StartThreadOptions {
+                session_source: Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+                    parent_thread_id: test.session_configured.thread_id,
+                    depth: 1,
+                    agent_path: Some(AgentPath::root().join(name).expect("child path")),
+                    agent_nickname: None,
+                    agent_role: None,
+                })),
+                environments: Some(test.codex.environment_selections().await),
+                ..StartThreadOptions::new(test.config.clone())
+            })
+            .await
+            .expect("start child")
+            .thread;
+        assert_eq!(child.agent_status().await, AgentStatus::PendingInit);
+        children.push(child);
+    }
+    let codex = &test.codex;
+    submit_user_input(codex, INITIAL_PROMPT).await;
+    wait_for_event(codex, |event| {
         matches!(event, EventMsg::CollabWaitingBegin(_))
     })
     .await;
 
-    steer_user_input(&codex, STEER_PROMPT).await;
-    wait_for_turn_complete(&codex).await;
+    enqueue_queue_only_agent_mail(codex, "first child message").await;
+    if !matches!(wake, WaitWake::Disabled) {
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), server.wait_for_request_count(2))
+                .await
+                .is_err(),
+            "mail must start a hold while two children run",
+        );
+    }
+    match wake {
+        WaitWake::Batch => {
+            codex
+                .submit(Op::InterAgentCommunication {
+                    communication: InterAgentCommunication::new(
+                        AgentPath::root().join("other").expect("second child path"),
+                        AgentPath::root(),
+                        Vec::new(),
+                        "second child message".to_string(),
+                        /*trigger_turn*/ false,
+                    ),
+                    start_options: Default::default(),
+                })
+                .await
+                .expect("second child mail");
+        }
+        WaitWake::Steer => steer_user_input(codex, STEER_PROMPT).await,
+        WaitWake::ChildCompletion => {
+            submit_user_input(&children[1], "finish").await;
+            wait_for_turn_complete(&children[1]).await;
+        }
+        WaitWake::WaitDeadline | WaitWake::Disabled => {}
+    }
+    let wake_budget_ms = if matches!(wake, WaitWake::Batch) {
+        750
+    } else {
+        250
+    };
+    tokio::time::timeout(
+        Duration::from_millis(wake_budget_ms),
+        wait_for_turn_complete(codex),
+    )
+    .await
+    .expect("hold must obey its wake deadline");
 
     let requests = server.requests().await;
-    assert_eq!(requests.len(), 2);
-    let second: Value = from_slice(&requests[1]).expect("parse second request");
+    let expected_requests = if matches!(wake, WaitWake::ChildCompletion) {
+        3
+    } else {
+        2
+    };
+    assert_eq!(requests.len(), expected_requests);
+    let second: Value =
+        from_slice(requests.last().expect("follow-up request")).expect("parse follow-up request");
     let relevant_user_input = message_input_texts(&second, "user")
         .into_iter()
         .filter(|text| text == INITIAL_PROMPT || text == STEER_PROMPT)
         .collect::<Vec<_>>();
-    assert_eq!(
-        relevant_user_input,
-        vec![INITIAL_PROMPT.to_string(), STEER_PROMPT.to_string()]
-    );
+    let mut expected_user_input = vec![INITIAL_PROMPT.to_string()];
+    if matches!(wake, WaitWake::Steer) {
+        expected_user_input.push(STEER_PROMPT.to_string());
+    }
+    assert_eq!(relevant_user_input, expected_user_input);
+    let mail = second["input"]
+        .as_array()
+        .expect("input array")
+        .iter()
+        .filter(|item| item["type"] == "agent_message")
+        .flat_map(|item| item["content"].as_array().expect("message content"))
+        .filter_map(|content| content["text"].as_str())
+        .filter(|text| text.contains("child message"))
+        .collect::<Vec<_>>();
+    let mut expected_mail = vec!["first child message"];
+    if matches!(wake, WaitWake::Batch) {
+        expected_mail.push("second child message");
+    }
+    assert_eq!(mail.len(), expected_mail.len());
+    for (mail, expected) in mail.iter().zip(expected_mail) {
+        assert!(
+            mail.contains(expected),
+            "mail must remain ordered and intact"
+        );
+    }
     let wait_output = function_call_output_text(&second, WAIT_CALL_ID).expect("wait_agent output");
     assert_eq!(
         serde_json::from_str::<Value>(wait_output).expect("parse wait_agent output"),
         json!({
-            "message": "Wait interrupted by new input.",
+            "message": if matches!(wake, WaitWake::Steer) {
+                "Wait interrupted by new input."
+            } else {
+                "Wait completed."
+            },
             "timed_out": false,
         })
     );
-
+    for child in children {
+        child.submit(Op::Shutdown).await.expect("shut down child");
+    }
     server.shutdown().await;
 }
 
