@@ -1,3 +1,6 @@
+#[path = "codex_thread_prompt_cache.rs"]
+mod prompt_cache;
+
 use crate::agent::AgentStatus;
 use crate::agent::api::AgentControl;
 use crate::config::ConstraintResult;

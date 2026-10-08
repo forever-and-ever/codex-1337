@@ -294,6 +294,7 @@ async fn start_or_steer(
         ..
     } = request;
     let origin = UserInputOrigin::from_turn_trigger(start.turn_trigger.as_deref());
+    let human = crate::client::prompt_cache::is_human_message(&input, &start);
     let has_explicit_input = match &input {
         SubmittedTurnInput::UserInput { content, .. } => !content.is_empty(),
         SubmittedTurnInput::ResponseItem(ResponseItem::FunctionCallOutput {
@@ -321,6 +322,7 @@ async fn start_or_steer(
     {
         Ok(turn_id) => {
             settings.apply_steered(session, submission_id).await?;
+            session.observe_human_turn(human);
             Ok(TurnInputSubmission::Steered { turn_id })
         }
         Err(NotSubmittedReason::NoActiveTurn) => {
@@ -352,6 +354,7 @@ async fn start_or_steer(
             else {
                 unreachable!("explicit user input can enter Plan mode");
             };
+            session.observe_human_turn(human);
             if let Some(responsesapi_client_metadata) = responsesapi_client_metadata {
                 turn_context
                     .turn_metadata_state
@@ -399,6 +402,8 @@ async fn start_if_idle(
         ..
     } = request;
     let origin = UserInputOrigin::from_turn_trigger(start.turn_trigger.as_deref());
+    let human = kind == TurnStartKind::User
+        && crate::client::prompt_cache::is_human_message(&input, &start);
     if session.input_queue.has_trigger_turn_mailbox_items().await {
         return Ok(TurnInputSubmission::NotSubmitted {
             reason: NotSubmittedReason::PendingTriggerTurn,
@@ -490,6 +495,7 @@ async fn start_if_idle(
             return Err(error);
         }
     };
+    session.observe_human_turn(human);
     if let Some(responsesapi_client_metadata) = responsesapi_client_metadata {
         turn_context
             .turn_metadata_state

@@ -84,6 +84,7 @@ pub(crate) async fn run_codex_thread_interactive(
     let mut thread_extension_init = codex_extension_api::ExtensionDataInit::default();
     thread_extension_init.insert(isolation);
     let (session, io) = Session::spawn(SessionSpawnArgs {
+        prompt_cache_observer: None,
         startup: None,
         config,
         allow_provider_model_fallback: false,

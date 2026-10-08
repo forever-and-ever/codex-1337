@@ -100,7 +100,7 @@ impl ModelClient {
         let mut input = prompt.get_formatted_input_for_request(model);
         self.prepare_response_items_for_request(&mut input);
         let effort = effort.or(model.default_reasoning_level.as_ref());
-        let ttl = self.anthropic_prompt_cache.resolve(&model.slug, effort);
+        let ttl = self.anthropic_cache_ttl(model, effort);
         let max_output_tokens = match operation {
             AnthropicOperation::Inference => capabilities.max_output_tokens,
             AnthropicOperation::Compact => capabilities
@@ -166,6 +166,7 @@ impl ModelClientSession {
         metadata: &CodexResponsesMetadata,
         trace: &InferenceTraceContext,
     ) -> Result<ResponseStream> {
+        let warm_account = self.client.provider_account_id();
         let mut captured = self.client.capture_anthropic_auth().await?;
         let operation = match metadata.request_kind {
             Some(CodexResponsesRequestKind::Compaction(compaction))
@@ -224,6 +225,19 @@ impl ModelClientSession {
                 "/messages",
                 ClientRedirectPolicy::Reject,
             )?;
+            let dispatch = matches!(metadata.request_kind, Some(CodexResponsesRequestKind::Turn))
+                .then(|| {
+                    self.client
+                        .prompt_cache_dispatch(model, effort.as_ref(), || {
+                            self.client.seal_warm_replay(
+                                &request,
+                                transport.clone(),
+                                provider.clone(),
+                                warm_account.clone(),
+                            )
+                        })
+                })
+                .flatten();
             let client = AnthropicClient::new(transport, provider.clone(), auth)
                 .with_telemetry(Some(http_telemetry), Some(sse_telemetry));
             let attempt = trace.start_attempt();
@@ -239,7 +253,7 @@ impl ModelClientSession {
                         Arc::clone(&self.client.state.provider),
                         interceptors,
                     );
-                    return Ok(stream);
+                    return Ok(self.client.observe_prompt_cache_stream(stream, dispatch));
                 }
                 Err(
                     error @ ApiError::Transport(TransportError::Http {

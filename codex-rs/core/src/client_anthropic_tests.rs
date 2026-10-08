@@ -9,6 +9,7 @@ use codex_login::anthropic::SubscriptionGrant;
 use codex_model_provider::AnthropicAuthContext;
 use codex_model_provider::create_model_provider_with_anthropic_account;
 use codex_model_provider_info::ModelProviderAdapter;
+use codex_protocol::openai_models::AnthropicCacheTtl;
 use codex_protocol::openai_models::AnthropicModelCapabilities;
 use codex_protocol::openai_models::AnthropicThinkingMode;
 use codex_protocol::openai_models::ReasoningEffortPreset;
@@ -95,7 +96,7 @@ impl ModelProvider for NativeBoundary {
 }
 
 #[tokio::test]
-async fn native_request_pins_recovery_then_switches_with_exact_custom_tool_replay()
+async fn native_request_pins_recovery_then_switches_with_exact_custom_tool_replay_and_cache_warm()
 -> anyhow::Result<()> {
     let home = TempDir::new()?;
     let store = AccountStore::new(home.path().to_path_buf());
@@ -125,8 +126,8 @@ async fn native_request_pins_recovery_then_switches_with_exact_custom_tool_repla
     Mock::given(method("POST"))
         .and(path("/v1/messages"))
         .and(header("authorization", "Bearer original-a"))
-        .respond_with(ResponseTemplate::new(/*status*/ 401))
-        .expect(/*requests*/ 1)
+        .respond_with(ResponseTemplate::new(/*s*/ 401))
+        .expect(/*r*/ 1)
         .mount(&server)
         .await;
     let custom_input = "text('λ <&>');\n";
@@ -139,7 +140,7 @@ async fn native_request_pins_recovery_then_switches_with_exact_custom_tool_repla
         json!({"type":"message_stop"}),
     ];
     let done_frames = [
-        json!({"type":"message_start","message":{"id":"msg-b","usage":{"input_tokens":5,"output_tokens":0}}}),
+        json!({"type":"message_start","message":{"id":"msg-b","usage":{"input_tokens":5,"output_tokens":0,"cache_read_input_tokens":100}}}),
         json!({"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":0}}),
         json!({"type":"message_stop"}),
     ];
@@ -150,8 +151,11 @@ async fn native_request_pins_recovery_then_switches_with_exact_custom_tool_repla
         Mock::given(method("POST"))
             .and(path("/v1/messages"))
             .and(header("authorization", bearer))
+            .and(wiremock::matchers::body_partial_json(
+                json!({"stream":true}),
+            ))
             .respond_with(
-                ResponseTemplate::new(/*status*/ 200)
+                ResponseTemplate::new(/*s*/ 200)
                     .insert_header("content-type", "text/event-stream")
                     .set_body_string(
                         frames
@@ -160,7 +164,7 @@ async fn native_request_pins_recovery_then_switches_with_exact_custom_tool_repla
                             .collect::<String>(),
                     ),
             )
-            .expect(/*requests*/ 1)
+            .expect(/*r*/ 1)
             .mount(&server)
             .await;
     }
@@ -196,6 +200,10 @@ async fn native_request_pins_recovery_then_switches_with_exact_custom_tool_repla
         client: Mutex::new(Weak::new()),
     });
     Arc::get_mut(&mut client.state).unwrap().provider = boundary.clone();
+    let warmer = Arc::new(WarmCapture::default());
+    client.bind_prompt_cache_observer(Some(warmer.clone()));
+    let (events_tx, events_rx) = async_channel::unbounded();
+    client.event_sender = Some(events_tx);
     let client = Arc::new(client);
     *boundary.client.lock().unwrap() = Arc::downgrade(&client);
     client.commit_provider_account(ProviderAccountSelection::ClaudeSubscription {
@@ -334,5 +342,90 @@ async fn native_request_pins_recovery_then_switches_with_exact_custom_tool_repla
             {"role":"user","content":[{"type":"tool_result","tool_use_id":"exec-call","content":"result λ","is_error":false}]}]}),
         ]
     );
+    // Each completed request reports the TTL its own model and effort resolved.
+    assert_eq!(
+        *warmer.lore.lock().unwrap(),
+        [
+            crate::WarmingLore::Claude {
+                ttl: AnthropicCacheTtl::FiveMinutes
+            },
+            crate::WarmingLore::Claude {
+                ttl: AnthropicCacheTtl::OneHour
+            },
+        ]
+    );
+    let replay = warmer
+        .replay
+        .lock()
+        .unwrap()
+        .take()
+        .expect("cached inference sealed");
+    let history_before = prompt.input.clone();
+    while events_rx.try_recv().is_ok() {}
+    Mock::given(method("POST"))
+        .and(path("/v1/messages"))
+        .and(header("authorization", "Bearer bearer-b"))
+        .and(wiremock::matchers::body_partial_json(
+            json!({"max_tokens":0,"stream":false}),
+        ))
+        .respond_with(ResponseTemplate::new(/*s*/ 200).set_body_json(json!({
+            "usage":{"input_tokens":5,"output_tokens":0,"cache_read_input_tokens":100,
+            "cache_creation_input_tokens":0}
+        })))
+        .expect(/*r*/ 1)
+        .mount(&server)
+        .await;
+    let (_, usage) = replay.send(|| true).await?.expect("wanted replay sent");
+    assert_eq!(
+        usage,
+        codex_protocol::protocol::TokenUsage {
+            input_tokens: 105,
+            cached_input_tokens: 100,
+            total_tokens: 105,
+            ..Default::default()
+        }
+    );
+    let requests = server.received_requests().await.unwrap();
+    let mut expected: serde_json::Value = serde_json::from_slice(&requests[2].body)?;
+    expected["max_tokens"] = json!(0);
+    expected["stream"] = json!(false);
+    let warm = requests.last().unwrap();
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&warm.body)?,
+        expected
+    );
+    for name in ["anthropic-beta", "anthropic-version", "authorization"] {
+        assert_eq!(warm.headers[name], requests[2].headers[name]);
+    }
+    assert_eq!(prompt.input, history_before);
+    assert!(
+        events_rx.try_recv().is_err(),
+        "side replay emitted a protocol event"
+    );
     Ok(())
+}
+
+#[derive(Default)]
+struct WarmCapture {
+    lore: Mutex<Vec<crate::WarmingLore>>,
+    replay: Mutex<Option<crate::WarmReplay>>,
+}
+
+impl crate::PromptCacheObserver for WarmCapture {
+    fn epoch(&self, _thread: ThreadId) -> u64 {
+        0
+    }
+    fn fact(&self, _thread: ThreadId, _fact: crate::PromptCacheFact) {}
+    fn completed(&self, _thread: ThreadId, request: crate::CompletedRequest) {
+        self.lore.lock().unwrap().push(request.lore);
+        if let Ok(replay) = request.replay {
+            *self.replay.lock().unwrap() = Some(replay);
+        }
+    }
+}
+
+impl std::fmt::Debug for WarmCapture {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WarmCapture").finish_non_exhaustive()
+    }
 }

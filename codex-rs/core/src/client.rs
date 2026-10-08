@@ -38,6 +38,8 @@ mod tool_metadata;
 
 #[path = "client_anthropic_tools.rs"]
 pub(crate) mod anthropic_tools;
+#[path = "client_prompt_cache.rs"]
+pub(crate) mod prompt_cache;
 
 #[path = "client_anthropic.rs"]
 mod anthropic;
@@ -140,6 +142,7 @@ use crate::context::ContextualUserFragment;
 use crate::cyber_access_program;
 use crate::feedback_tags;
 use crate::responses_metadata::CodexResponsesMetadata;
+use crate::responses_metadata::CodexResponsesRequestKind;
 use crate::responses_metadata::subagent_header_value;
 use crate::util::emit_feedback_auth_recovery_tags;
 use codex_feedback::FeedbackRequestTags;
@@ -291,6 +294,7 @@ pub struct ModelClient {
     restored_history: bool,
     request_contributors: Vec<Arc<dyn codex_extension_api::ModelRequestContributor>>,
     executed_tool_calls: Option<ExecutedToolCalls>,
+    prompt_cache_observer: Arc<OnceLock<Arc<dyn crate::PromptCacheObserver>>>,
 }
 
 /// A turn-scoped streaming session created from a [`ModelClient`].
@@ -563,6 +567,7 @@ impl ModelClient {
             anthropic_prompt_cache: Default::default(),
             request_contributors,
             executed_tool_calls: None,
+            prompt_cache_observer: Arc::default(),
         }
     }
 
@@ -717,6 +722,9 @@ impl ModelClient {
     }
 
     pub(crate) fn commit_provider_account(&self, selection: ProviderAccountSelection) {
+        if self.provider_account_id().as_deref() != Some(selection.id()) {
+            self.observe_prompt_cache(crate::PromptCacheFact::Invalidated);
+        }
         let generation = self
             .state
             .provider_account
@@ -2370,8 +2378,19 @@ impl ModelClientSession {
             self.websocket_session.auth_owner_generation = owner;
             self.turn_state = Arc::new(OnceLock::new());
         }
+        let dispatch = matches!(
+            responses_metadata.request_kind,
+            Some(CodexResponsesRequestKind::Turn)
+        )
+        .then(|| {
+            self.client
+                .prompt_cache_dispatch(model_info, effort.as_ref(), || {
+                    Err(crate::Unreplayable::Provider)
+                })
+        })
+        .flatten();
         let wire_api = self.client.state.provider.info().wire_api;
-        match wire_api {
+        let stream = match wire_api {
             WireApi::Responses => {
                 if self.client.responses_websocket_enabled() {
                     let request_trace = current_span_w3c_trace_context();
@@ -2390,7 +2409,9 @@ impl ModelClientSession {
                         )
                         .await?
                     {
-                        WebsocketStreamOutcome::Stream(stream) => return Ok(stream),
+                        WebsocketStreamOutcome::Stream(stream) => {
+                            return Ok(self.client.observe_prompt_cache_stream(stream, dispatch));
+                        }
                         WebsocketStreamOutcome::FallbackToHttp => {
                             self.try_switch_fallback_transport(session_telemetry, model_info);
                         }
@@ -2407,9 +2428,10 @@ impl ModelClientSession {
                     responses_metadata,
                     inference_trace,
                 )
-                .await
+                .await?
             }
-        }
+        };
+        Ok(self.client.observe_prompt_cache_stream(stream, dispatch))
     }
 
     /// Permanently disables WebSockets for this Codex session and resets WebSocket state.

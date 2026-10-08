@@ -1,4 +1,5 @@
 mod managed;
+mod prompt_cache;
 mod shared_instructions;
 
 use crate::CodexAppsToolsCache;
@@ -109,6 +110,7 @@ use std::collections::HashSet;
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -404,6 +406,7 @@ pub(crate) struct ResumeThreadWithHistoryOptions {
 /// `Arc` reference that can be downgraded to by `LocalAgentControl` while preventing every single
 /// function to require an `Arc<&Self>`.
 pub(crate) struct ThreadManagerState {
+    prompt_cache_observer: OnceLock<Arc<dyn crate::PromptCacheObserver>>,
     // Eviction updates this registry and residency together, locking the registry first.
     pub(crate) threads: Arc<RwLock<HashMap<ThreadId, Arc<CodexThread>>>>,
     shared_thread_instructions: shared_instructions::SharedThreadInstructionsProviders,
@@ -586,6 +589,7 @@ impl ThreadManager {
             };
         Self {
             state: Arc::new(ThreadManagerState {
+                prompt_cache_observer: Default::default(),
                 threads: Arc::new(RwLock::new(HashMap::new())),
                 shared_thread_instructions: Default::default(),
                 thread_created_tx,
@@ -761,6 +765,7 @@ impl ThreadManager {
         let agent_graph_store = local_agent_graph_store_from_state_db(state_db.as_ref());
         Self {
             state: Arc::new(ThreadManagerState {
+                prompt_cache_observer: Default::default(),
                 threads: Arc::new(RwLock::new(HashMap::new())),
                 shared_thread_instructions: Default::default(),
                 thread_created_tx,
@@ -2401,6 +2406,7 @@ impl ThreadManagerState {
         let attachment_source =
             forked_from_thread_id.filter(|_| matches!(&initial_history, InitialHistory::Forked(_)));
         let (session, io) = Session::spawn(SessionSpawnArgs {
+            prompt_cache_observer: self.prompt_cache_observer.get().cloned(),
             startup,
             config,
             allow_provider_model_fallback,

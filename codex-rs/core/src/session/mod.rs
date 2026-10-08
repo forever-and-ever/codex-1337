@@ -256,6 +256,7 @@ mod model_catalog;
 pub(crate) mod multi_agents;
 mod plugin_selection;
 pub(crate) mod preamble;
+mod prompt_cache;
 mod realtime_history;
 mod retained_context;
 mod review;
@@ -442,6 +443,7 @@ pub(crate) enum ForkPersistence {
 }
 
 pub(crate) struct SessionSpawnArgs {
+    pub(crate) prompt_cache_observer: Option<Arc<dyn crate::PromptCacheObserver>>,
     pub(crate) startup: Option<Arc<startup::SessionStartup>>,
     pub(crate) config: Config,
     pub(crate) allow_provider_model_fallback: bool,
@@ -549,6 +551,7 @@ impl Session {
 
     async fn spawn_internal(args: SessionSpawnArgs) -> CodexResult<(Arc<Self>, SessionIo)> {
         let SessionSpawnArgs {
+            prompt_cache_observer,
             startup,
             config,
             allow_provider_model_fallback,
@@ -956,6 +959,10 @@ impl Session {
                 Err(error) => map_session_init_error(&error, &config.codex_home),
             }
         })?;
+        session
+            .services
+            .model_client
+            .bind_prompt_cache_observer(prompt_cache_observer);
         if let Some(message) = initial_service_tier_warning {
             session
                 .send_event_raw(Event {
@@ -1916,6 +1923,7 @@ impl Session {
             if mcp_inputs_changed {
                 self.mark_mcp_runtime_dirty();
             }
+            self.observe_prompt_cache_settings(&state.session_configuration, &updated);
             // Save new environment defaults for future turns. The running turn keeps its own.
             state.session_configuration = updated;
             if root_service_tier_changed {
@@ -4144,6 +4152,9 @@ impl Session {
         world_state_baseline: Option<Arc<WorldState>>,
         metadata: CompactedHistoryMetadata,
     ) -> CodexResult<()> {
+        self.services
+            .model_client
+            .observe_prompt_cache(crate::PromptCacheFact::Invalidated);
         for envelope in &mut items {
             Self::assign_missing_response_item_id(&mut envelope.item);
         }
