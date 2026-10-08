@@ -3103,6 +3103,14 @@ async fn try_run_sampling_request(
                         "Anthropic response reached its output limit; partial output was retained, but automatic continuation is unsafe".into(),
                     ));
                 }
+                if turn_context.provider.info().adapter
+                    == codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription
+                    && usage_metadata
+                        .as_ref()
+                        .is_some_and(codex_api::anthropic_refused)
+                {
+                    break Err(CodexErr::Fatal("The model refused the request".into()));
+                }
                 if let Some(false) = end_turn {
                     needs_follow_up = true;
                 }

@@ -37,6 +37,13 @@ pub fn anthropic_output_limit_exceeded(metadata: &ResponseUsageMetadata) -> bool
         Some(AnthropicStopReason::MaxTokens)
     )
 }
+/// Reports a native refusal after upstream usage is recorded.
+pub fn anthropic_refused(metadata: &ResponseUsageMetadata) -> bool {
+    matches!(
+        anthropic_stop_reason(metadata),
+        Some(AnthropicStopReason::Refusal)
+    )
+}
 
 /// Returns native termination only for valid Anthropic completion metadata.
 pub fn anthropic_stop_reason(metadata: &ResponseUsageMetadata) -> Option<AnthropicStopReason> {

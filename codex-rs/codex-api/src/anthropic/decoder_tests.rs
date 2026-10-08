@@ -285,8 +285,9 @@ fn interleaved_tools_signed_blocks_and_cumulative_usage() {
     // A truncated response still reports incurred usage. The runtime
     // adapter must classify failure only after accounting for these counts.
     for (reason, expected) in [
-        ("model_context_window_exceeded", (true, false)),
-        ("max_tokens", (false, true)),
+        ("model_context_window_exceeded", (true, false, false)),
+        ("max_tokens", (false, true, false)),
+        ("refusal", (false, false, true)),
     ] {
         let mut decoder = Decoder::new(&[]);
         decoder.decode(&json!({"type":"message_start","message":{"id":"limited","usage":{"input_tokens":45,"output_tokens":0}}}).to_string()).unwrap();
@@ -308,7 +309,8 @@ fn interleaved_tools_signed_blocks_and_cumulative_usage() {
         assert_eq!(
             (
                 anthropic_context_window_exceeded(metadata),
-                anthropic_output_limit_exceeded(metadata)
+                anthropic_output_limit_exceeded(metadata),
+                anthropic_refused(metadata)
             ),
             expected
         );
