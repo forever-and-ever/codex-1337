@@ -211,18 +211,22 @@ async fn request_at(
     generation: u64,
     request: control::Request,
 ) -> io::Result<control::Response> {
-    tokio::time::timeout(
-        std::time::Duration::from_secs(/*secs*/ 6),
-        control::request(
-            directory,
-            control::Envelope {
-                generation,
-                request,
-            },
-        ),
-    )
-    .await
-    .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "UI host did not respond"))?
+    let supervisor_owns_wait = request.supervisor_owns_wait();
+    let response = control::request(
+        directory,
+        control::Envelope {
+            generation,
+            request,
+        },
+    );
+    if supervisor_owns_wait {
+        // A local timeout cannot prove that the host has not committed this checkpoint.
+        response.await
+    } else {
+        tokio::time::timeout(std::time::Duration::from_secs(/*secs*/ 6), response)
+            .await
+            .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "UI host did not respond"))?
+    }
 }
 
 pub(crate) async fn proxy(

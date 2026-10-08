@@ -83,6 +83,7 @@ mod mcp_login;
 mod migrate_rollouts;
 mod plugin_cmd;
 mod queue_cmd;
+mod reload_probe;
 mod remote_control_cmd;
 #[cfg(target_os = "windows")]
 mod sandbox_setup;
@@ -268,7 +269,10 @@ enum DebugSubcommand {
     TuiRestartProbe,
     /// Internal persistent-host protocol negotiation.
     #[clap(hide = true)]
-    TuiReloadProbe,
+    TuiReloadProbe {
+        #[arg(long)]
+        checkpoint_versions: bool,
+    },
     /// Render the raw model catalog as JSON.
     Models(DebugModelsCommand),
 
@@ -1007,13 +1011,13 @@ async fn cli_main(
         println!("{}", codex_tui::IDLE_RESTART_PROTOCOL);
         return Ok(());
     }
-    if matches!(
-        subcommand,
-        Some(Subcommand::Debug(DebugCommand {
-            subcommand: DebugSubcommand::TuiReloadProbe,
-        }))
-    ) {
-        println!("{}", codex_tui::UI_RELOAD_PROTOCOL);
+    if let Some(Subcommand::Debug(DebugCommand {
+        subcommand: DebugSubcommand::TuiReloadProbe {
+            checkpoint_versions,
+        },
+    })) = &subcommand
+    {
+        reload_probe::run(*checkpoint_versions)?;
         return Ok(());
     }
     reject_unsupported_worktree_for_subcommand(interactive.shared.worktree, &subcommand)?;
@@ -1699,7 +1703,7 @@ async fn cli_main(
             }
         }
         Some(Subcommand::Debug(DebugCommand { subcommand })) => match subcommand {
-            DebugSubcommand::TuiRestartProbe | DebugSubcommand::TuiReloadProbe => {
+            DebugSubcommand::TuiRestartProbe | DebugSubcommand::TuiReloadProbe { .. } => {
                 unreachable!(
                     "the restart probe is handled before configuration and authentication"
                 );

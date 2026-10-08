@@ -40,5 +40,64 @@ async fn incompatible_or_stalled_probe_never_runs_launch_input() -> io::Result<(
             expected
         );
     }
+    // The v1 transport marker predates `unstarted`: it cannot establish that a
+    // strict legacy reader accepts that field, even when its value is null.
+    for (versions, checkpoint, expected) in [
+        ("exit 2", serde_json::json!({}), None),
+        (
+            "exit 2",
+            serde_json::json!({"unstarted": null}),
+            Some(io::ErrorKind::Other),
+        ),
+        (
+            "printf '[1,2]\\n'",
+            serde_json::json!({"unstarted": null}),
+            None,
+        ),
+        ("printf '[1,2,3]\\n'", serde_json::json!({}), None),
+        (
+            "printf '[1]\\n'",
+            serde_json::json!({"unstarted": null}),
+            Some(io::ErrorKind::Other),
+        ),
+        (
+            "printf '[2,1]\\n'",
+            serde_json::json!({}),
+            Some(io::ErrorKind::Other),
+        ),
+        (
+            "printf '[1,2]\\nnoise'",
+            serde_json::json!({}),
+            Some(io::ErrorKind::Other),
+        ),
+        (
+            "head -c 257 /dev/zero",
+            serde_json::json!({}),
+            Some(io::ErrorKind::Other),
+        ),
+        (
+            "exec sleep 30",
+            serde_json::json!({}),
+            Some(io::ErrorKind::TimedOut),
+        ),
+    ] {
+        std::fs::write(
+            &executable,
+            format!(
+                "#!/bin/sh\n[ \"$1\" = debug ] && [ \"$2\" = tui-reload-probe ] || exit 77\nif [ \"$3\" = --checkpoint-versions ]; then\n{versions}\nelse\nprintf '%s\\n' '{}'\nfi\n",
+                super::super::retained::PROTOCOL,
+            ),
+        )?;
+        assert_eq!(
+            super::super::probe::admit(
+                &executable,
+                super::super::retained::checkpoint_version(&checkpoint)?
+            )
+            .await
+            .err()
+            .map(|error| error.kind()),
+            expected,
+        );
+    }
     Ok(())
 }

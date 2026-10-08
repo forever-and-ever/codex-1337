@@ -72,6 +72,12 @@ pub(super) enum Request {
     Suspend,
 }
 
+impl Request {
+    pub(super) fn supervisor_owns_wait(&self) -> bool {
+        matches!(self, Self::Reload(_) | Self::Suspend)
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 pub(super) struct State {
     pub(super) checkpoint: Value,
@@ -126,7 +132,7 @@ pub(super) async fn listen(
             else {
                 return;
             };
-            let suspended = matches!(envelope.request, Request::Suspend);
+            let supervisor_owns_wait = envelope.request.supervisor_owns_wait();
             let operation = async {
                 let (reply, response) = oneshot::channel();
                 events
@@ -136,8 +142,9 @@ pub(super) async fn listen(
                 let response = response.await.map_err(io::Error::other)?;
                 write(&mut stream, &response).await
             };
-            if suspended {
-                // Explicit suspension is not a reload wait. Keep idle hosts asleep.
+            if supervisor_owns_wait {
+                // Only the supervisor can release a reload's input ownership or
+                // resume job control. A second timer could release the writer early.
                 let _ = operation.await;
             } else {
                 let _ =

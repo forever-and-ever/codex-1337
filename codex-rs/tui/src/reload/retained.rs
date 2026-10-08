@@ -9,6 +9,23 @@ use std::collections::HashMap;
 
 pub const PROTOCOL: &str = "codex-ui-reload-v1";
 
+pub(super) const LEGACY_CHECKPOINT: u32 = 1;
+const UNSTARTED_CHECKPOINT: u32 = 2;
+pub const READABLE_CHECKPOINT_VERSIONS: &[u32] = &[LEGACY_CHECKPOINT, UNSTARTED_CHECKPOINT];
+
+pub(super) fn checkpoint_version(checkpoint: &serde_json::Value) -> std::io::Result<u32> {
+    let object = checkpoint
+        .as_object()
+        .ok_or_else(|| std::io::Error::other("UI checkpoint must be an object"))?;
+    // New serialized extensions need distinct versions, not a transport bump.
+    // Even a null extension is an unknown field to the original strict v1 reader.
+    Ok(if object.contains_key("unstarted") {
+        UNSTARTED_CHECKPOINT
+    } else {
+        LEGACY_CHECKPOINT
+    })
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct RetainedSessionDraft {
     pub(crate) provider: String,

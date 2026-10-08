@@ -1,6 +1,9 @@
 //! The terminal owner. No worker, network operation, or reaper is awaited here.
 //! All output is gated by generation; stale workers only own private PTYs.
 
+use super::admission::Admission;
+use super::admission::Origin;
+use super::admission::Reload;
 use super::broker;
 use super::control;
 use super::deadline::Deadline;
@@ -46,10 +49,8 @@ pub(super) async fn run() -> io::Result<i32> {
         worker: None,
         generation: 0,
         checkpoint: None,
-        idle_candidate: None,
         rejected_candidate: None,
-        deadline: None,
-        failed: false,
+        reload: Reload::Idle,
         size: crossterm::terminal::size()?,
         output: VecDeque::new(),
         pending_output: VecDeque::new(),
@@ -115,8 +116,20 @@ async fn supervise(
             break code;
         }
         // This always precedes input/output work, even under a continuous event flood.
-        let mut wake_after = if let Some(deadline) = &mut host.deadline {
-            match deadline.poll(Instant::now()) {
+        let mut wake_after = match &mut host.reload {
+            Reload::Checking(admission) => {
+                let now = Instant::now();
+                if now >= admission.expires {
+                    host.reject_admission(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "UI checkpoint probe timed out",
+                    ));
+                    None
+                } else {
+                    Some(admission.expires.saturating_duration_since(now))
+                }
+            }
+            Reload::Replacing { deadline, .. } => match deadline.poll(Instant::now()) {
                 Transition::Wait(duration) => Some(duration),
                 Transition::Rollback => {
                     host.rollback(&launched);
@@ -126,9 +139,8 @@ async fn supervise(
                     host.fail();
                     None
                 }
-            }
-        } else {
-            None
+            },
+            Reload::Idle | Reload::Failed => None,
         };
         if let Some((_, deadline)) = exiting {
             wake_after = Some(deadline.saturating_duration_since(Instant::now()));
@@ -146,10 +158,35 @@ async fn supervise(
                 if let Some(worker) = &mut host.worker
                     && let Some(code) = worker.exit_code()?
                 {
-                    if host.deadline.is_none() && !host.failed {
+                    if !host.reload.replacing() && !host.reload.failed() {
                         if code != 0 && host.checkpoint.is_some() { host.fail(); }
                         else { exiting = Some((code, Instant::now() + Duration::from_millis(/*millis*/ 200))); }
                     } else { host.reject(&launched); }
+                }
+            }
+            result = async {
+                match &mut host.reload {
+                    Reload::Checking(admission) => (&mut admission.result).await,
+                    _ => std::future::pending().await,
+                }
+            } => {
+                match result.unwrap_or_else(|_| Err(io::Error::other("UI probe task stopped"))) {
+                    Ok(candidate) if exiting.is_none() => {
+                        let Reload::Checking(admission) = std::mem::replace(&mut host.reload, Reload::Idle) else { unreachable!() };
+                        let (idle_candidate, reply) = match admission.origin {
+                            Origin::Worker { idle_candidate, reply } => (idle_candidate, Some(reply)),
+                            Origin::Recovery => (None, None),
+                        };
+                        host.checkpoint = Some(admission.checkpoint);
+                        if let Some(worker) = &host.worker { host.previous = worker.executable.clone(); }
+                        host.reload = Reload::Replacing { deadline: Deadline::new(Instant::now()), idle_candidate };
+                        host.launch(candidate, &launched);
+                        // Releasing the old call before retiring its worker could let it
+                        // consume queued input that is also present in the checkpoint.
+                        drop(reply);
+                    }
+                    Ok(_) => host.reject_admission(io::Error::other("UI exited during reload admission")),
+                    Err(error) => host.reject_admission(error),
                 }
             }
             Some((generation, result)) = launches.recv() => {
@@ -157,17 +194,17 @@ async fn supervise(
                     match result {
                         Ok(mut worker) => {
                             if let Err(error) = worker.resize(host.size) {
-                                if host.deadline.is_some() { host.reject(&launched); continue; }
+                                if host.reload.replacing() { host.reject(&launched); continue; }
                                 return Err(error);
                             }
                             if let Some(code) = worker.exit_code()? {
-                                if host.deadline.is_none() && !host.failed {
+                                if !host.reload.replacing() && !host.reload.failed() {
                                     exiting = Some((code, Instant::now() + Duration::from_millis(/*millis*/ 200)));
                                     host.worker = Some(worker);
                                 } else { host.reject(&launched); }
                             } else { host.worker = Some(worker); }
                         },
-                        Err(_) if host.deadline.is_some() => host.reject(&launched),
+                        Err(_) if host.reload.replacing() => host.reject(&launched),
                         Err(error) => return Err(error),
                     }
                 }
@@ -202,25 +239,20 @@ async fn supervise(
                         });
                         continue;
                     }
-                    control::Request::Reload(checkpoint) if host.deadline.is_none() => {
+                    control::Request::Reload(checkpoint) if host.reload.idle() => {
                         let (checkpoint, candidate) = match checkpoint {
                             control::ReloadPayload::Idle(reload) => (reload.checkpoint, Some(reload.idle_candidate)),
                             control::ReloadPayload::Manual(checkpoint) => (checkpoint, None),
                         };
-                        host.idle_candidate = candidate;
-                        host.checkpoint = Some(checkpoint);
-                        if let Some(worker) = &host.worker { host.previous = worker.executable.clone(); }
-                        host.deadline = Some(Deadline::new(Instant::now()));
-                        host.failed = false;
-                        host.launch(host.idle_candidate.clone().unwrap_or_else(|| host.installed.clone()), &launched);
-                        // The retired worker must not enter an ordinary exit/shutdown path.
+                        let executable = candidate.clone().unwrap_or_else(|| host.installed.clone());
+                        host.reload = Reload::Checking(Admission::new(checkpoint, executable,
+                            Origin::Worker { reply, idle_candidate: candidate }, &host.slots));
+                        // The writer remains live until the checkpoint reader is admitted.
                         continue;
                     }
                     control::Request::Reload(_) => control::Response::Error("UI reload already in progress".into()),
                     control::Request::Ready => {
-                        host.idle_candidate = None;
-                        host.deadline = None;
-                        host.failed = false;
+                        host.reload = Reload::Idle;
                         // Input ownership has transferred. Never recover a later crash
                         // from this now-stale snapshot and resend already-used queues.
                         host.checkpoint = None;
@@ -229,7 +261,7 @@ async fn supervise(
                         host.output.append(&mut host.pending_output);
                         control::Response::Ok
                     }
-                    control::Request::Suspend if host.deadline.is_none() => {
+                    control::Request::Suspend if host.reload.idle() => {
                         host.output.clear();
                         host.input.clear();
                         terminal.suspend()?;
@@ -239,14 +271,14 @@ async fn supervise(
                 };
                 let _ = reply.send(response);
             }
-            ready = terminal.input.readable(), if host.deadline.is_some() || host.failed || host.input.len() <= 65536 - 4096 => {
+            ready = terminal.input.readable(), if host.reload.replacing() || host.reload.failed() || host.input.len() <= 65536 - 4096 => {
                 let mut ready = ready?;
                 let mut bytes = [0; 4096];
                 if let Ok(result) = ready.try_io(|fd| worker_process::read(fd.get_ref().as_raw_fd(), &mut bytes)) {
                     if result.as_ref().is_err_and(|error| error.kind() == io::ErrorKind::Interrupted) { continue; }
                     let count = result?;
                     if count == 0 { break 0 }
-                    if host.failed {
+                    if host.reload.failed() {
                         if confirm_exit {
                             if bytes[..count].iter().any(|key| matches!(key, b'y' | b'Y')) { break 0 }
                             confirm_exit = false;
@@ -258,14 +290,20 @@ async fn supervise(
                             host.paint(CONFIRM_EXIT);
                             continue;
                         }
-                        if let Some(key) = bytes[..count].iter().find(|key| matches!(key, b'r' | b'R' | b'b' | b'B')) {
+                        if matches!(host.reload, Reload::Failed) && let Some(key) = bytes[..count].iter().find(|key| matches!(key, b'r' | b'R' | b'b' | b'B')) {
                             let executable = if matches!(key, b'b' | b'B') { &host.previous } else { &host.installed };
                             let executable = executable.clone();
-                            host.failed = false;
-                            host.deadline = Some(Deadline::new(Instant::now()));
-                            host.launch(executable, &launched);
+                            if matches!(key, b'r' | b'R') {
+                                if let Some(checkpoint) = host.checkpoint.clone() {
+                                    host.reload = Reload::Checking(Admission::new(checkpoint, executable, Origin::Recovery, &host.slots));
+                                }
+                            } else {
+                                // The previous writer can read its own checkpoint.
+                                host.reload = Reload::Replacing { deadline: Deadline::new(Instant::now()), idle_candidate: None };
+                                host.launch(executable, &launched);
+                            }
                         }
-                    } else if host.deadline.is_none() && host.input.len() + count <= 65536 {
+                    } else if !host.reload.replacing() && host.input.len() + count <= 65536 {
                         host.input.extend(&bytes[..count]);
                     }
                 }
@@ -284,7 +322,7 @@ async fn supervise(
                     None => std::future::pending().await,
                 }
             }, if host.output_open && (
-                    if host.deadline.is_some() { host.pending_output.len() < 1024 * 1024 }
+                    if host.reload.replacing() { host.pending_output.len() < 1024 * 1024 }
                     else { host.output.len() < 65536 }
                 ) => {
                 let mut ready = ready?;
@@ -293,7 +331,7 @@ async fn supervise(
                     Ok(Err(error)) if error.kind() == io::ErrorKind::Interrupted => {},
                     Ok(Ok(0)) | Ok(Err(_)) => host.output_open = false,
                     Ok(Ok(count)) => {
-                        if host.deadline.is_some() { host.pending_output.extend(&bytes[..count]); }
+                        if host.reload.replacing() { host.pending_output.extend(&bytes[..count]); }
                         else { host.output.extend(&bytes[..count]); }
                     }
                     Err(_) => {},
@@ -332,10 +370,8 @@ struct Host {
     worker: Option<Worker>,
     generation: u64,
     checkpoint: Option<serde_json::Value>,
-    idle_candidate: Option<PathBuf>,
     rejected_candidate: Option<PathBuf>,
-    deadline: Option<Deadline>,
-    failed: bool,
+    reload: Reload,
     size: (u16, u16),
     output: VecDeque<u8>,
     pending_output: VecDeque<u8>,
@@ -356,7 +392,7 @@ impl Host {
         self.worker = None;
         self.pending_output.clear();
         self.output_open = true;
-        if self.deadline.is_some() {
+        if self.reload.replacing() {
             self.paint(RESTARTING);
         }
         self.input.clear();
@@ -393,11 +429,11 @@ impl Host {
     }
 
     fn reject(&mut self, launched: &Launched) {
-        match self
-            .deadline
-            .as_mut()
-            .map(|deadline| deadline.reject(Instant::now()))
-        {
+        let transition = match &mut self.reload {
+            Reload::Replacing { deadline, .. } => Some(deadline.reject(Instant::now())),
+            _ => None,
+        };
+        match transition {
             Some(Transition::Rollback) => {
                 self.rollback(launched);
             }
@@ -406,18 +442,36 @@ impl Host {
     }
 
     fn rollback(&mut self, launched: &Launched) {
-        if let Some(candidate) = self.idle_candidate.take() {
+        if let Reload::Replacing { idle_candidate, .. } = &mut self.reload
+            && let Some(candidate) = idle_candidate.take()
+        {
             self.rejected_candidate = Some(candidate);
         }
         self.launch(self.previous.clone(), launched);
+    }
+
+    fn reject_admission(&mut self, error: io::Error) {
+        if let Reload::Checking(admission) = std::mem::replace(&mut self.reload, Reload::Idle) {
+            match admission.origin {
+                Origin::Worker {
+                    reply,
+                    idle_candidate,
+                } => {
+                    if let Some(candidate) = idle_candidate {
+                        self.rejected_candidate = Some(candidate);
+                    }
+                    let _ = reply.send(control::Response::Error(error.to_string()));
+                }
+                Origin::Recovery => self.reload = Reload::Failed,
+            }
+        }
     }
 
     fn fail(&mut self) {
         self.worker = None;
         self.pending_output.clear();
         self.generation += 1;
-        self.deadline = None;
-        self.failed = true;
+        self.reload = Reload::Failed;
         self.input.clear();
         self.paint(FAILED);
     }

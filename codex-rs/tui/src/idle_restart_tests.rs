@@ -62,7 +62,8 @@ async fn quiet_interval_and_installed_generation_gate_replacement() -> anyhow::R
     // Input arriving during the probe postpones, rather than blacklisting, a build.
     restart.reject(replacement.clone(), &io::ErrorKind::WouldBlock.into());
     assert_eq!(restart.replacement().await, Some(replacement.clone()));
-    restart.reject(replacement.clone(), &io::ErrorKind::PermissionDenied.into());
+    // Hosted admission timeouts are rejections, not retries on each quiet interval.
+    restart.reject(replacement.clone(), &io::ErrorKind::TimedOut.into());
     assert_eq!(restart.replacement().await, None);
     Ok(())
 }

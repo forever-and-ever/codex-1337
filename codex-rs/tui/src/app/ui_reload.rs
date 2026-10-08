@@ -7,7 +7,10 @@
 use super::*;
 
 impl App {
-    pub(super) async fn reload_ui(&mut self, idle_candidate: Option<PathBuf>) {
+    pub(super) async fn reload_ui(
+        &mut self,
+        idle_candidate: Option<PathBuf>,
+    ) -> std::io::Result<()> {
         #[cfg(target_os = "linux")]
         {
             let result =
@@ -17,23 +20,25 @@ impl App {
                 Ok(Ok(state)) => state,
                 Ok(Err(message)) => {
                     self.chat_widget.add_error_message(message);
-                    return;
+                    return Err(std::io::ErrorKind::WouldBlock.into());
                 }
                 Err(_) => {
                     self.chat_widget.add_error_message(
                         "UI reload preparation timed out; nothing was replaced.".into(),
                     );
-                    return;
+                    return Err(std::io::ErrorKind::WouldBlock.into());
                 }
             };
             if let Err(error) = crate::reload::worker::reload(state, idle_candidate).await {
                 self.chat_widget
                     .add_error_message(format!("UI reload failed: {error}"));
+                return Err(error);
             }
         }
         #[cfg(not(target_os = "linux"))]
         self.chat_widget
             .add_error_message("UI reload is currently Linux-only.".into());
+        Ok(())
     }
 
     #[cfg(target_os = "linux")]

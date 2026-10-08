@@ -195,7 +195,7 @@ async fn farm_receipt_reconciles_identity_and_draft_without_steering_or_navigati
         // Refuse replacement before checkpoint capture: no UUID is lost or recreated.
         while events.try_recv().is_ok() {}
         assert!(!app.ready_for_idle_restart());
-        app.reload_ui(/*idle_candidate*/ None).await;
+        let _ = app.reload_ui(/*idle_candidate*/ None).await;
         let error = loop {
             if let AppEvent::InsertHistoryCell(cell) = events.try_recv().expect("reload error") {
                 break cell

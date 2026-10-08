@@ -1184,7 +1184,7 @@ See the Codex keymap documentation for supported actions and examples."
                         if pending_startup_draft.is_some() {
                             app.chat_widget.add_error_message("Finish the startup dialog before reloading; your draft is still held there.".into());
                         } else {
-                            app.reload_ui(/*idle_candidate*/ None).await;
+                            let _ = app.reload_ui(/*idle_candidate*/ None).await;
                         }
                     }
                     #[cfg(target_os = "linux")]
