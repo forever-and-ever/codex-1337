@@ -97,3 +97,5 @@ __pycache__/
 # Local external-source corpus; never ship research artifacts.
 /references/
 /.worktrees/
+# Owner's local plan of work.
+/roadmap.md
