@@ -9,7 +9,7 @@ const DEFAULT_MULTI_AGENT_V2_MODEL_OVERRIDE_USAGE_HINT_TEXT: &str = "Full-histor
 const DEFAULT_MULTI_AGENT_V2_WAIT_AGENT_USAGE_HINT_TEXT: &str =
     "When calling `wait_agent`, prefer longer waits (minutes) to avoid busy polling.";
 const DEFAULT_MULTI_AGENT_V2_DIRECT_USAGE_HINT_TEXT: &str = "Agent-control tools cannot be called from inside `exec`. Call `spawn_agent`, `send_message`, `followup_task`, `wait_agent`, `interrupt_agent`, and `list_agents` directly using the exact exposed names in their tool definitions. They are intentionally absent from the JavaScript `tools.*` namespace. Tools available inside `exec` are listed in `ALL_TOOLS` and accessed through `tools.*`.";
-const DEFAULT_MULTI_AGENT_V2_CODE_MODE_USAGE_HINT_TEXT: &str = "Non-blocking agent-control tools are available inside `exec` via `tools.*`, listed in `ALL_TOOLS`. Batch them with other calls when possible.";
+const DEFAULT_MULTI_AGENT_V2_CODE_MODE_USAGE_HINT_TEXT: &str = "When `exec` is available, non-blocking agent-control tools can also be called inside it through `tools.*` (listed in `ALL_TOOLS`); batch them with other calls.";
 const DEFAULT_MULTI_AGENT_V2_SHARED_USAGE_HINT_TEXT: &str = r#"All agents share the same directory. In detail:
 - All agents have access to the same container and filesystem as you.
 - All agents use the same current working directory.
