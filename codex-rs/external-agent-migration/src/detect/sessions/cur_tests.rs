@@ -192,9 +192,11 @@ fn resolves_cur_project_names_with_common_separators() {
         ("my-awesome-cool-project", "my-awesome-cool-project"),
     ] {
         let root = TempDir::new().expect("tempdir");
-        let project = root.path().join(project_name);
+        // Repairs must compose across ancestors and the leaf, regardless of TMPDIR spelling.
+        let ancestors = root.path().join("first-ancestor").join("second-ancestor");
+        let project = ancestors.join(project_name);
         fs::create_dir_all(&project).expect("project root");
-        let encoded = format!("{}-{encoded_name}", encode_project_path(root.path()));
+        let encoded = format!("{}-{encoded_name}", encode_project_path(&ancestors));
 
         assert_eq!(decode_cur_project_path(&encoded), Some(project));
     }

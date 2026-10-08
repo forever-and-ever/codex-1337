@@ -99,111 +99,82 @@ fn cur_project_cwd(project_storage: &Path, external_agent_home: &Path) -> Option
 
 fn decode_cur_project_path(encoded: &str) -> Option<PathBuf> {
     #[cfg(not(windows))]
-    let mut path = PathBuf::from("/");
+    let root = PathBuf::from("/");
 
     #[cfg(windows)]
-    let (encoded, mut path) = {
+    let (encoded, root) = {
         let (drive, encoded) = decode_cur_windows_project_drive(encoded)?;
         (encoded, PathBuf::from(format!("{drive}:\\")))
     };
 
     let encoded = encoded.strip_prefix('-').unwrap_or(encoded);
-    for component in encoded.split('-') {
-        if component.is_empty()
-            || matches!(component, "." | "..")
+    let components: Vec<_> = encoded.split('-').collect();
+    if components.iter().any(|component| {
+        component.is_empty()
+            || matches!(*component, "." | "..")
             || component.contains(['/', '\\', ':'])
-        {
-            return None;
-        }
-        path.push(component);
+    }) {
+        return None;
     }
 
+    let mut pending = vec![(root, 0)];
     let mut matched_path = None;
     let mut probes = 0;
-    let mut inspect = |candidate: PathBuf| {
+    while let Some((parent, offset)) = pending.pop() {
         if probes >= MAX_CUR_PROJECT_PATH_PROBES {
             return None;
         }
         probes += 1;
-        if candidate.is_dir() {
-            if matched_path
-                .as_ref()
-                .is_some_and(|matched_path| matched_path != &candidate)
-            {
-                return None;
-            }
-            matched_path = Some(candidate);
-        }
-        Some(())
-    };
-    inspect(path.clone())?;
-
-    for suffix_length in 2..=4 {
-        let mut parent = path.as_path();
-        let mut suffix = Vec::with_capacity(suffix_length);
-        for _ in 0..suffix_length {
-            let Some(component) = parent.file_name().and_then(|name| name.to_str()) else {
-                break;
+        // Enumerate existing names rather than probing every separator combination.
+        // Each surviving prefix can then compose with repairs further down the path.
+        let Ok(entries) = fs::read_dir(&parent) else {
+            continue;
+        };
+        for entry in entries {
+            let Ok(entry) = entry else {
+                continue;
             };
-            suffix.push(component);
-            let Some(ancestor) = parent.parent() else {
-                break;
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else {
+                continue;
             };
-            parent = ancestor;
-        }
-        if suffix.len() != suffix_length {
-            break;
-        }
-        suffix.reverse();
-
-        for separator in CUR_PROJECT_SEPARATORS {
-            inspect(parent.join(suffix.join(separator)))?;
-        }
-    }
-
-    let mut ancestor = path.parent();
-    while let Some(right) = ancestor {
-        let Some(right_name) = right.file_name().and_then(|name| name.to_str()) else {
-            break;
-        };
-        let Some(left) = right.parent() else {
-            break;
-        };
-        let Some(left_name) = left.file_name().and_then(|name| name.to_str()) else {
-            break;
-        };
-        let Some(prefix) = left.parent() else {
-            break;
-        };
-        let Ok(trailing) = path.strip_prefix(right) else {
-            return None;
-        };
-
-        for separator in CUR_PROJECT_SEPARATORS {
-            let merged_prefix = prefix.join(format!("{left_name}{separator}{right_name}"));
-            if probes >= MAX_CUR_PROJECT_PATH_PROBES {
-                return None;
-            }
-            probes += 1;
-            if !merged_prefix.is_dir() {
+            if !name.starts_with(components[offset]) {
                 continue;
             }
-
+            let consumed = (1..=components.len() - offset).find(|length| {
+                let suffix = &components[offset..offset + length];
+                if *length == 1 {
+                    name == suffix[0]
+                } else {
+                    CUR_PROJECT_SEPARATORS
+                        .iter()
+                        .any(|separator| name == suffix.join(separator))
+                }
+            });
+            let Some(consumed) = consumed else {
+                continue;
+            };
             if probes >= MAX_CUR_PROJECT_PATH_PROBES {
                 return None;
             }
             probes += 1;
-            let candidate = merged_prefix.join(trailing);
-            if !candidate.is_dir()
-                || matched_path
-                    .as_ref()
-                    .is_some_and(|matched_path| matched_path != &candidate)
-            {
-                return None;
+            let candidate = entry.path();
+            if !candidate.is_dir() {
+                continue;
             }
-            matched_path = Some(candidate);
+            let next = offset + consumed;
+            if next == components.len() {
+                if matched_path
+                    .as_ref()
+                    .is_some_and(|matched| matched != &candidate)
+                {
+                    return None;
+                }
+                matched_path = Some(candidate);
+            } else {
+                pending.push((candidate, next));
+            }
         }
-        ancestor = Some(left);
     }
 
     matched_path
