@@ -146,11 +146,13 @@ impl ThreadCoordinationService {
     ) -> Result<(), JSONRPCErrorError> {
         let id = ThreadId::from_string(thread_id)
             .map_err(|err| invalid_request(format!("invalid thread id: {err}")))?;
+        // Metadata-only authoritative read never restores an unloaded runtime.
+        let destination = self.read(thread_id).await?;
+        super::super::comms_gate::ensure_recipient(&destination)?;
         if self.threads.thread_state_manager.has_subscribers(id).await {
             return Ok(());
         }
-        // Metadata-only authoritative read does not restore an unloaded runtime.
-        let destination = self.read(thread_id).await?;
+
         let cutoff = chrono::Utc::now().timestamp().saturating_sub(24 * 60 * 60);
         if matches!(destination.status, ThreadStatus::Active { .. })
             || destination.updated_at >= cutoff

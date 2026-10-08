@@ -234,6 +234,7 @@ async fn daybreak_thread_metadata_persists_independently_across_restart_and_fork
                     project_id: None,
                     git_info: None,
                     daybreak_enabled: Some(enabled),
+                    comms: None,
                 },
             })
             .await?;
@@ -301,6 +302,7 @@ async fn daybreak_thread_metadata_persists_independently_across_restart_and_fork
                 project_id: None,
                 git_info: None,
                 daybreak_enabled: Some(false),
+                comms: None,
             },
         })
         .await?;

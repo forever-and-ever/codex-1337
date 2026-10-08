@@ -67,6 +67,8 @@ pub struct ThreadItem {
     pub project_id: Option<String>,
     /// Saved Daybreak choice in SQLite-owned metadata, when available.
     pub daybreak_enabled: Option<bool>,
+    /// Cross-context message admission in SQLite-owned metadata.
+    pub comms: codex_protocol::CommsGate,
     /// Working directory from session metadata.
     pub cwd: Option<PathBuf>,
     /// Git branch from session metadata.
@@ -863,6 +865,7 @@ async fn build_thread_item(
             section: None,
             project_id: None,
             daybreak_enabled: None,
+            comms: Default::default(),
             cwd,
             git_branch,
             git_sha,

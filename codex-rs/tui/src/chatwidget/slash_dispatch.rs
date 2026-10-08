@@ -198,6 +198,7 @@ impl ChatWidget {
         }
 
         match cmd {
+            SlashCommand::Comms => self.dispatch_comms(""),
             SlashCommand::Feedback => {
                 if !self.config.feedback_enabled {
                     let params = crate::bottom_pane::feedback_disabled_params();
@@ -792,6 +793,7 @@ impl ChatWidget {
         } = prepared;
         let trimmed = args.trim();
         match cmd {
+            SlashCommand::Comms => self.dispatch_comms(trimmed),
             SlashCommand::Account => {
                 if let Some(thread_id) = self.thread_id {
                     self.app_event_tx.send(AppEvent::SelectAccount {
@@ -1256,6 +1258,7 @@ impl ChatWidget {
         match cmd {
             SlashCommand::Ide
             | SlashCommand::Status
+            | SlashCommand::Comms
             | SlashCommand::Daemon
             | SlashCommand::Reload
             | SlashCommand::Jira

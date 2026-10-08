@@ -1,4 +1,5 @@
 use super::CodexErrorInfo;
+use super::CommsGate;
 use super::ThreadEnvironment;
 use super::ThreadItem;
 use super::ThreadStatus;
@@ -290,6 +291,8 @@ pub struct Thread {
     /// Saved Daybreak choice, independent of turn execution. Null if unset.
     #[experimental("thread.daybreakEnabled")]
     pub daybreak_enabled: Option<bool>,
+    /// Cross-context message admission, independent of user input.
+    pub comms: CommsGate,
     /// Only populated on `thread/resume`, `thread/fork`, and `thread/read`
     /// (when `includeTurns` is true) responses.
     /// For all other responses and notifications returning a Thread,
@@ -339,6 +342,8 @@ struct ThreadCompatibility {
     git_info: Option<GitInfo>,
     name: Option<String>,
     daybreak_enabled: Option<bool>,
+    #[serde(default)]
+    comms: CommsGate,
     turns: Vec<Turn>,
 }
 
@@ -381,6 +386,7 @@ impl<'de> Deserialize<'de> for Thread {
             git_info: thread.git_info,
             name: thread.name,
             daybreak_enabled: thread.daybreak_enabled,
+            comms: thread.comms,
             turns: thread.turns,
         })
     }

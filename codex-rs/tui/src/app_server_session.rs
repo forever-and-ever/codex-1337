@@ -4,6 +4,7 @@
 //! request/response plumbing out of `App` and `ChatWidget`.
 
 mod account;
+mod comms;
 mod external_agent_config;
 pub(crate) mod fs;
 mod history;
@@ -1142,6 +1143,7 @@ impl AppServerSession {
                     thread_id: thread_id.to_string(),
                     project_id: None,
                     daybreak_enabled: None,
+                    comms: None,
                     git_info: Some(ThreadMetadataGitInfoUpdateParams {
                         sha: None,
                         branch: Some(Some(branch)),
@@ -4042,6 +4044,7 @@ mod tests {
                 section_entered_at: None,
                 project_id: None,
                 daybreak_enabled: None,
+                comms: Default::default(),
                 history_mode: Default::default(),
                 model_provider: "openai".to_string(),
                 model: None,

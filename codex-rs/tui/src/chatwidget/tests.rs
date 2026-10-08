@@ -233,6 +233,8 @@ mod approval_requests;
 mod backend_banners_tests;
 #[path = "tests/collaboration_catalog_tests.rs"]
 mod collaboration_catalog_tests;
+#[path = "tests/comms_tests.rs"]
+mod comms_tests;
 #[path = "tests/compaction_tests.rs"]
 mod compaction_tests;
 #[path = "tests/completion_styling_tests.rs"]

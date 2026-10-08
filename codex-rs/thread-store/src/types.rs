@@ -5,6 +5,7 @@ use chrono::DateTime;
 use chrono::Utc;
 use codex_app_server_protocol::CodexErrorInfo;
 use codex_app_server_protocol::ThreadTimelineEntry;
+use codex_protocol::CommsGate;
 use codex_protocol::SanitizedGitUrl;
 use codex_protocol::SessionId;
 use codex_protocol::ThreadId;
@@ -641,6 +642,8 @@ pub struct StoredThread {
     /// User-selected Daybreak preference, absent until explicitly set.
     #[serde(default)]
     pub daybreak_enabled: Option<bool>,
+    #[serde(default)]
+    pub comms: CommsGate,
     /// Working directory captured for the thread.
     pub cwd: PathBuf,
     /// CLI version captured for the thread.
@@ -816,6 +819,7 @@ pub struct ThreadMetadataPatch {
     pub project_id: ClearableField<String>,
     /// User-selected Daybreak preference; omission leaves it unchanged.
     pub daybreak_enabled: Option<bool>,
+    pub comms: Option<CommsGate>,
 }
 
 impl ThreadMetadataPatch {
@@ -908,6 +912,9 @@ impl ThreadMetadataPatch {
         if next.project_id.is_some() {
             self.project_id = next.project_id;
         }
+        if next.comms.is_some() {
+            self.comms = next.comms;
+        }
         if next.daybreak_enabled.is_some() {
             self.daybreak_enabled = next.daybreak_enabled;
         }
@@ -945,6 +952,7 @@ impl ThreadMetadataPatch {
             && self.memory_mode.is_none()
             && self.project_id.is_none()
             && self.daybreak_enabled.is_none()
+            && self.comms.is_none()
     }
 }
 

@@ -1,6 +1,14 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "CommsGate": {
+      "enum": [
+        "open",
+        "closed",
+        "blocked"
+      ],
+      "type": "string"
+    },
     "ThreadMetadataGitInfoUpdateParams": {
       "properties": {
         "branch": {
@@ -29,6 +37,17 @@
     }
   },
   "properties": {
+    "comms": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/CommsGate"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Cross-context message admission; omission leaves it unchanged."
+    },
     "gitInfo": {
       "anyOf": [
         {

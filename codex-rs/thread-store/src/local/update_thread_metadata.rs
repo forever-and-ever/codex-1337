@@ -514,6 +514,9 @@ async fn apply_metadata_update(
             if let Some(project_id) = project_id.as_ref() {
                 metadata.project_id = project_id.clone();
             }
+            if let Some(comms) = patch.comms {
+                metadata.comms = comms;
+            }
             if let Some(daybreak_enabled) = patch.daybreak_enabled {
                 metadata.daybreak_enabled = Some(daybreak_enabled);
             }
@@ -589,6 +592,15 @@ async fn apply_metadata_update(
                     .map_err(|err| ThreadStoreError::Internal {
                         message: format!("failed to update memory mode for {thread_id}: {err}"),
                     })?;
+            }
+            if let Some(comms) = patch.comms
+                && !state_db.set_thread_comms(thread_id, comms).await.map_err(|err| ThreadStoreError::Internal {
+                    message: format!("failed to update comms gate for {thread_id}: {err}"),
+                })?
+            {
+                return Err(ThreadStoreError::Internal {
+                    message: format!("thread metadata unavailable before comms update: {thread_id}"),
+                });
             }
             if let Some(daybreak_enabled) = patch.daybreak_enabled
                 && !state_db
@@ -721,12 +733,13 @@ fn sqlite_write_failure_should_block(patch: &ThreadMetadataPatch) -> bool {
     // transcript-derived metadata and memory-mode indexing were log-only. Keep that
     // failure isolation so a corrupted optional state DB does not make JSONL transcript durability
     // look broken. Explicit git-only updates still require SQLite because partial git patches need
-    // the existing SQLite value to preserve unspecified fields. Project and Daybreak updates
+    // the existing SQLite value to preserve unspecified fields. Project, Daybreak, and comms updates
     // require SQLite because those preferences only exist in the state database. Names require
     // the canonical SQLite claim before writing the legacy compatibility projection.
     patch.name.is_some()
         || patch.project_id.is_some()
         || patch.daybreak_enabled.is_some()
+        || patch.comms.is_some()
         || (patch.git_info.is_some() && !has_observed_metadata_facts(patch))
 }
 

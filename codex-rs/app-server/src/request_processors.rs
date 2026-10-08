@@ -546,6 +546,7 @@ mod apps_processor;
 mod catalog_processor;
 mod claude_account_controller;
 mod command_exec_processor;
+mod comms_gate;
 mod config_processor;
 mod diagnostics;
 mod environment_processor;

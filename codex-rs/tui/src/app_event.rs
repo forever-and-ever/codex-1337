@@ -38,6 +38,7 @@ use codex_app_server_protocol::ThreadItemsListResponse;
 use codex_connectors::AppInfo;
 use codex_file_search::FileMatch;
 use codex_message_history::HistoryBatchCursor;
+use codex_protocol::CommsGate;
 use codex_protocol::ThreadId;
 use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::openai_models::ReasoningEffort;
@@ -556,6 +557,11 @@ pub(crate) enum AppEvent {
     },
 
     /// Persist a branch discovered from an App git-action directive into thread metadata.
+    Comms {
+        thread_id: ThreadId,
+        comms: Option<CommsGate>,
+    },
+
     SyncThreadGitBranch {
         thread_id: ThreadId,
         branch: String,

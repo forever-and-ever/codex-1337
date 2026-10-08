@@ -1,0 +1,14 @@
+---
+source: tui/src/chatwidget/tests/comms_tests.rs
+expression: output
+---
+• Comms: open.
+
+
+• Comms: closed.
+
+
+• Comms: blocked.
+
+
+■ Usage: /comms [open|close|block]

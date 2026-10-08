@@ -5605,6 +5605,14 @@
       ],
       "type": "object"
     },
+    "CommsGate": {
+      "enum": [
+        "open",
+        "closed",
+        "blocked"
+      ],
+      "type": "string"
+    },
     "ComputerUseConfig": {
       "properties": {
         "default_app_access": {
@@ -19802,6 +19810,14 @@
           "description": "Version of the CLI that created the thread.",
           "type": "string"
         },
+        "comms": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/CommsGate"
+            }
+          ],
+          "description": "Cross-context message admission, independent of user input."
+        },
         "createdAt": {
           "description": "Unix timestamp (in seconds) when the thread was created.",
           "format": "int64",
@@ -19986,6 +20002,7 @@
       },
       "required": [
         "cliVersion",
+        "comms",
         "createdAt",
         "cwd",
         "ephemeral",
@@ -22504,6 +22521,17 @@
     "ThreadMetadataUpdateParams": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
+        "comms": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CommsGate"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Cross-context message admission; omission leaves it unchanged."
+        },
         "gitInfo": {
           "anyOf": [
             {

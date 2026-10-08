@@ -730,6 +730,7 @@ async fn turn_start_steers_active_turn_and_returns_active_turn_id() -> Result<()
                 project_id: None,
                 git_info: None,
                 daybreak_enabled: Some(false),
+                comms: None,
             },
         })
         .await?;

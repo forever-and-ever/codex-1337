@@ -332,6 +332,7 @@ def test_thread_resume_response_accepts_auto_review_reviewer() -> None:
             "sandbox": {"type": "dangerFullAccess"},
             "thread": {
                 "cliVersion": "1.0.0",
+                "comms": "open",
                 "createdAt": 1,
                 "cwd": "/tmp",
                 "ephemeral": False,

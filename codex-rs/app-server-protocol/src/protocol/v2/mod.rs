@@ -1,3 +1,4 @@
+pub use codex_protocol::CommsGate;
 mod shared;
 
 mod account;

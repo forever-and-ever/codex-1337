@@ -589,6 +589,7 @@ async fn thread_metadata_update_patches_git_branch_and_returns_updated_thread() 
             thread_id: thread.id.clone(),
             project_id: None,
             daybreak_enabled: None,
+            comms: None,
             git_info: Some(ThreadMetadataGitInfoUpdateParams {
                 sha: None,
                 branch: Some(Some("feature/sidebar-pr".to_string())),
@@ -692,6 +693,7 @@ async fn thread_metadata_update_sanitizes_git_origin_before_persisting() -> Resu
             thread_id: thread.id.clone(),
             project_id: None,
             daybreak_enabled: None,
+            comms: None,
             git_info: Some(ThreadMetadataGitInfoUpdateParams {
                 sha: None,
                 branch: None,
@@ -774,6 +776,7 @@ async fn thread_metadata_update_rejects_empty_git_info_patch() -> Result<()> {
             thread_id: thread.id,
             project_id: None,
             daybreak_enabled: None,
+            comms: None,
             git_info: Some(ThreadMetadataGitInfoUpdateParams {
                 sha: None,
                 branch: None,
@@ -826,6 +829,7 @@ async fn thread_metadata_update_rejects_ephemeral_thread() -> Result<()> {
             thread_id: thread.id.clone(),
             project_id: None,
             daybreak_enabled: None,
+            comms: None,
             git_info: Some(ThreadMetadataGitInfoUpdateParams {
                 sha: None,
                 branch: Some(Some("feature/ephemeral".to_string())),
@@ -902,6 +906,7 @@ async fn thread_metadata_update_repairs_missing_sqlite_row_for_stored_thread() -
             thread_id: thread_id.clone(),
             project_id: None,
             daybreak_enabled: None,
+            comms: None,
             git_info: Some(ThreadMetadataGitInfoUpdateParams {
                 sha: None,
                 branch: Some(Some("feature/stored-thread".to_string())),
@@ -990,6 +995,7 @@ async fn thread_metadata_update_repairs_loaded_thread_without_resetting_summary(
             thread_id: thread_id.clone(),
             project_id: None,
             daybreak_enabled: None,
+            comms: None,
             git_info: Some(ThreadMetadataGitInfoUpdateParams {
                 sha: None,
                 branch: Some(Some("feature/loaded-thread".to_string())),
@@ -1063,6 +1069,7 @@ async fn thread_metadata_update_repairs_missing_sqlite_row_for_archived_thread()
             thread_id: thread_id.clone(),
             project_id: None,
             daybreak_enabled: None,
+            comms: None,
             git_info: Some(ThreadMetadataGitInfoUpdateParams {
                 sha: None,
                 branch: Some(Some("feature/archived-thread".to_string())),
@@ -1128,6 +1135,7 @@ async fn thread_metadata_update_can_clear_stored_git_fields() -> Result<()> {
             thread_id: thread_id.clone(),
             project_id: None,
             daybreak_enabled: None,
+            comms: None,
             git_info: Some(ThreadMetadataGitInfoUpdateParams {
                 sha: Some(None),
                 branch: Some(None),

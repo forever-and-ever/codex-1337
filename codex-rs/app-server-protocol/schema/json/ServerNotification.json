@@ -1272,6 +1272,14 @@
       ],
       "type": "string"
     },
+    "CommsGate": {
+      "enum": [
+        "open",
+        "closed",
+        "blocked"
+      ],
+      "type": "string"
+    },
     "ConfigWarningNotification": {
       "properties": {
         "details": {
@@ -7543,6 +7551,14 @@
           "description": "Version of the CLI that created the thread.",
           "type": "string"
         },
+        "comms": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/CommsGate"
+            }
+          ],
+          "description": "Cross-context message admission, independent of user input."
+        },
         "createdAt": {
           "description": "Unix timestamp (in seconds) when the thread was created.",
           "format": "int64",
@@ -7727,6 +7743,7 @@
       },
       "required": [
         "cliVersion",
+        "comms",
         "createdAt",
         "cwd",
         "ephemeral",

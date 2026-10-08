@@ -211,6 +211,9 @@ async fn model_response(State(gate): State<Arc<ModelGate>>, Json(body): Json<Val
 #[path = "server_coordination_steering_tests.rs"]
 mod steering;
 
+#[path = "server_coordination_comms_tests.rs"]
+mod comms;
+
 #[path = "server_coordination_policy_tests.rs"]
 mod policy;
 

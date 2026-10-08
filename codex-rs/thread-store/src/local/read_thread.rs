@@ -36,6 +36,10 @@ pub(super) async fn read_thread(
     let persisted_model_settings = sqlite_metadata
         .as_ref()
         .map(|metadata| (metadata.model.clone(), metadata.reasoning_effort.clone()));
+    let comms = sqlite_metadata
+        .as_ref()
+        .map(|metadata| metadata.comms)
+        .unwrap_or_default();
     let daybreak_enabled = sqlite_metadata
         .as_ref()
         .and_then(|metadata| metadata.daybreak_enabled);
@@ -72,6 +76,7 @@ pub(super) async fn read_thread(
             rollout_thread.name = thread.name;
             rollout_thread.project_id = thread.project_id;
             rollout_thread.daybreak_enabled = thread.daybreak_enabled;
+            rollout_thread.comms = thread.comms;
             rollout_thread.model = thread.model;
             rollout_thread.reasoning_effort = thread.reasoning_effort;
             rollout_thread.git_info = thread.git_info;
@@ -100,6 +105,7 @@ pub(super) async fn read_thread(
 
     let mut thread = read_thread_from_rollout_path(store, path).await?;
     thread.daybreak_enabled = daybreak_enabled;
+    thread.comms = comms;
     if let Some((model, reasoning_effort)) = persisted_model_settings {
         thread.model = model;
         thread.reasoning_effort = reasoning_effort;
@@ -157,6 +163,7 @@ pub(super) async fn read_thread_by_rollout_path(
             thread.section_entered_at = metadata.section_entered_at;
             thread.project_id = metadata.project_id;
             thread.daybreak_enabled = metadata.daybreak_enabled;
+            thread.comms = metadata.comms;
             thread.model = metadata.model;
             thread.reasoning_effort = metadata.reasoning_effort;
             if !metadata.cwd.as_os_str().is_empty()
@@ -411,6 +418,7 @@ pub(super) fn stored_thread_from_state_metadata(
         section_entered_at: metadata.section_entered_at,
         project_id: metadata.project_id,
         daybreak_enabled: metadata.daybreak_enabled,
+        comms: metadata.comms,
         cwd: metadata.cwd,
         cli_version: metadata.cli_version,
         originator: metadata.originator,
@@ -491,6 +499,7 @@ fn stored_thread_from_meta_line(
         section_entered_at: None,
         project_id: None,
         daybreak_enabled: None,
+        comms: Default::default(),
         cwd: meta_line.meta.cwd,
         cli_version: meta_line.meta.cli_version,
         originator: (!meta_line.meta.originator.is_empty()).then_some(meta_line.meta.originator),

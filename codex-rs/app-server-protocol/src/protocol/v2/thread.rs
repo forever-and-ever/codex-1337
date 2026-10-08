@@ -1,6 +1,7 @@
 use super::ActivePermissionProfile;
 use super::ApprovalsReviewer;
 use super::AskForApproval;
+use super::CommsGate;
 use super::SandboxMode;
 use super::SandboxPolicy;
 use super::Thread;
@@ -1139,6 +1140,9 @@ pub struct ThreadMetadataUpdateParams {
     #[experimental("thread/metadata/update.daybreakEnabled")]
     #[ts(optional = nullable)]
     pub daybreak_enabled: Option<bool>,
+    /// Cross-context message admission; omission leaves it unchanged.
+    #[ts(optional = nullable)]
+    pub comms: Option<CommsGate>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]

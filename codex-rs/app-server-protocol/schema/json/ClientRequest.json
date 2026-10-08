@@ -562,6 +562,14 @@
       ],
       "type": "object"
     },
+    "CommsGate": {
+      "enum": [
+        "open",
+        "closed",
+        "blocked"
+      ],
+      "type": "string"
+    },
     "ConfigBatchWriteParams": {
       "properties": {
         "edits": {
@@ -5287,6 +5295,17 @@
     },
     "ThreadMetadataUpdateParams": {
       "properties": {
+        "comms": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CommsGate"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Cross-context message admission; omission leaves it unchanged."
+        },
         "gitInfo": {
           "anyOf": [
             {

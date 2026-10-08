@@ -1054,6 +1054,9 @@ impl App {
             AppEvent::AppendMessageHistoryEntry { thread_id, text } => {
                 self.append_message_history_entry(thread_id, text);
             }
+            AppEvent::Comms { thread_id, comms } => {
+                self.comms(app_server, thread_id, comms).await;
+            }
             AppEvent::SyncThreadGitBranch {
                 thread_id,
                 branch,

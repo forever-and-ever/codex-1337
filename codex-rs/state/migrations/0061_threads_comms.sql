@@ -1,0 +1,1 @@
+ALTER TABLE threads ADD COLUMN comms TEXT NOT NULL DEFAULT 'open';

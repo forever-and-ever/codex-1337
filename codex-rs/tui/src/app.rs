@@ -260,6 +260,7 @@ pub(crate) use provider_models::ProviderModelEvent;
 mod queued_messages;
 mod rate_limit_refresh;
 pub(crate) use queued_messages::QueueEvent;
+mod comms;
 mod mouse_paste;
 mod realtime_delivery;
 mod realtime_settings;

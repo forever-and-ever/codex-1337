@@ -3278,6 +3278,7 @@ mod tests {
                     git_info: None,
                     name: None,
                     daybreak_enabled: None,
+                    comms: Default::default(),
                     turns: Vec::new(),
                 },
                 model: "gpt-5".to_string(),

@@ -878,6 +878,12 @@ class CommandMigration(BaseModel):
     name: str
 
 
+class CommsGate(Enum):
+    open = "open"
+    closed = "closed"
+    blocked = "blocked"
+
+
 class ComputerUseMacosConfig(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -5836,6 +5842,10 @@ class ThreadMetadataUpdateParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
+    comms: Annotated[
+        CommsGate | None,
+        Field(description="Cross-context message admission; omission leaves it unchanged."),
+    ] = None
     git_info: Annotated[
         ThreadMetadataGitInfoUpdateParams | None,
         Field(
@@ -13510,6 +13520,9 @@ class Thread(BaseModel):
     ] = None
     cli_version: Annotated[
         str, Field(alias="cliVersion", description="Version of the CLI that created the thread.")
+    ]
+    comms: Annotated[
+        CommsGate, Field(description="Cross-context message admission, independent of user input.")
     ]
     created_at: Annotated[
         int,

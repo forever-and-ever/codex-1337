@@ -1,3 +1,5 @@
+mod comms_gate;
+pub use comms_gate::CommsGate;
 pub mod account;
 mod agent_path;
 pub mod auth;

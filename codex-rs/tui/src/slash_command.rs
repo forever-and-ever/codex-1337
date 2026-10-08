@@ -55,6 +55,7 @@ pub enum SlashCommand {
     Diff,
     Mention,
     Status,
+    Comms,
     Daemon,
     Reload,
     Warnings,
@@ -123,6 +124,7 @@ impl SlashCommand {
             SlashCommand::Daemon => "Manage the local background server.",
             SlashCommand::Reload => "reload the UI without interrupting your agents",
             SlashCommand::Warnings => "view retained warnings and diagnostic details",
+            SlashCommand::Comms => "show or change cross-context message access",
             SlashCommand::Status => "show current session configuration and token usage",
             SlashCommand::Cd => "change the current working directory",
             SlashCommand::Pwd => "show the current working directory",
@@ -178,6 +180,7 @@ impl SlashCommand {
         matches!(
             self,
             SlashCommand::Review
+                | SlashCommand::Comms
                 | SlashCommand::Account
                 | SlashCommand::Rename
                 | SlashCommand::New
@@ -290,6 +293,7 @@ impl SlashCommand {
             | SlashCommand::Skills
             | SlashCommand::Hooks
             | SlashCommand::Status
+            | SlashCommand::Comms
             | SlashCommand::Daemon
             | SlashCommand::Reload
             | SlashCommand::Warnings
