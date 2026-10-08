@@ -121,6 +121,26 @@ class AdditionalNetworkPermissions(BaseModel):
     enabled: bool | None = None
 
 
+class PendingAdmission(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    state: Annotated[Literal["pending"], Field(title="PendingAdmissionState")]
+
+
+class SeveredAdmission(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    state: Annotated[Literal["severed"], Field(title="SeveredAdmissionState")]
+
+
+class AdmissionPrecision(Enum):
+    exact = "exact"
+    apportioned = "apportioned"
+    disturbed = "disturbed"
+
+
 class AgentMessageDelivery(RootModel[Literal["async"]]):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -359,6 +379,12 @@ class AppsReadParams(BaseModel):
             description="Optional loaded thread id used to evaluate effective app configuration.",
         ),
     ] = None
+
+
+class ArrivalKind(Enum):
+    injection = "injection"
+    inter_agent = "interAgent"
+    user = "user"
 
 
 class AskForApprovalValue(Enum):
@@ -7293,6 +7319,21 @@ class AppsReadResponse(BaseModel):
     missing_app_ids: Annotated[list[str], Field(alias="missingAppIds")]
 
 
+class Arrival(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    kind: ArrivalKind
+    label: str
+    text: Annotated[
+        str | None,
+        Field(
+            description="The readable content of an injection or of a plaintext message from another agent."
+        ),
+    ] = None
+    tokens: Annotated[int, Field(ge=0)]
+
+
 class BrowserUseConfig(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -11418,6 +11459,49 @@ class AccountRateLimitsUpdatedNotification(BaseModel):
     thread_id: Annotated[str | None, Field(alias="threadId")] = None
 
 
+class SealedAdmission(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    arrivals: Annotated[
+        list[Arrival],
+        Field(
+            description="Context written after the step's results by neither the step nor its model."
+        ),
+    ]
+    call_ids: Annotated[
+        list[str], Field(alias="callIds", description="The calls whose results the step admitted.")
+    ]
+    precision: AdmissionPrecision
+    released_tokens: Annotated[
+        int,
+        Field(
+            alias="releasedTokens",
+            description="Tokens that left the context during the step.",
+            ge=0,
+        ),
+    ]
+    self_tokens: Annotated[
+        int,
+        Field(
+            alias="selfTokens",
+            description="The step's own results, with the framing of its items.",
+            ge=0,
+        ),
+    ]
+    state: Annotated[Literal["sealed"], Field(title="SealedAdmissionState")]
+
+
+class Admission(RootModel[PendingAdmission | SeveredAdmission | SealedAdmission]):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: Annotated[
+        PendingAdmission | SeveredAdmission | SealedAdmission,
+        Field(description="The step's admission, known once the next request completes."),
+    ]
+
+
 class AppInfo(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -12486,6 +12570,41 @@ class SessionSource(RootModel[SessionSourceValue | CustomSessionSource | SubAgen
         populate_by_name=True,
     )
     root: SessionSourceValue | CustomSessionSource | SubAgentSessionSource
+
+
+class StepAdmissionThreadItem(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    admission: Admission
+    completed_at_ms: Annotated[int, Field(alias="completedAtMs")]
+    id: str
+    output_tokens: Annotated[
+        int,
+        Field(
+            alias="outputTokens",
+            description="Provider-reported output, less any reported reasoning.",
+            ge=0,
+        ),
+    ]
+    read_tokens: Annotated[
+        int,
+        Field(
+            alias="readTokens",
+            description="Provider-reported input the request read, cached or not.",
+            ge=0,
+        ),
+    ]
+    response_id: Annotated[str, Field(alias="responseId")]
+    thinking_tokens: Annotated[
+        int | None,
+        Field(
+            alias="thinkingTokens",
+            description="Provider-reported reasoning, when the provider breaks it out of the output.",
+            ge=0,
+        ),
+    ] = None
+    type: Annotated[Literal["stepAdmission"], Field(title="StepAdmissionThreadItemType")]
 
 
 class FunctionCallOutputThreadItem(BaseModel):
@@ -13936,6 +14055,7 @@ class ThreadItem(
     RootModel[
         CodeModeOwnedThreadItem
         | CodeModeThreadItem
+        | StepAdmissionThreadItem
         | UserMessageThreadItem
         | HookPromptThreadItem
         | AgentMessageThreadItem
@@ -13966,6 +14086,7 @@ class ThreadItem(
     root: (
         CodeModeOwnedThreadItem
         | CodeModeThreadItem
+        | StepAdmissionThreadItem
         | UserMessageThreadItem
         | HookPromptThreadItem
         | AgentMessageThreadItem

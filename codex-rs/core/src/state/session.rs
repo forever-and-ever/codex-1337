@@ -99,6 +99,8 @@ pub(crate) struct SessionState {
     pub(crate) shell_snapshot_prewarm: Option<AbortOnDropHandle<()>>,
     /// The standing model context the runtime last censused.
     pub(crate) preamble_mark: Option<crate::session::preamble::PreambleMark>,
+    /// The latest completed request, whose step the next one seals.
+    pub(crate) step_mark: Option<crate::session::step_admission::StepMark>,
     pub(crate) current_time_reminder: CurrentTimeReminderState,
     pub(crate) active_connector_selection: HashSet<String>,
     pub(crate) pending_session_start_sources: VecDeque<codex_hooks::SessionStartSource>,
@@ -141,6 +143,7 @@ impl SessionState {
             startup_prewarm: None,
             shell_snapshot_prewarm: None,
             preamble_mark: None,
+            step_mark: None,
             current_time_reminder: CurrentTimeReminderState::default(),
             active_connector_selection: HashSet::new(),
             pending_session_start_sources: VecDeque::new(),

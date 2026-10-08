@@ -31,6 +31,9 @@ use codex_protocol::protocol::ExecCommandSource;
 use codex_protocol::protocol::Op;
 use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::shell_environment::CODEX_EXEC_SERVER_NOISE_AUTH_TOKEN_ENV_VAR;
+use codex_protocol::step_admission::Admission;
+use codex_protocol::step_admission::AdmissionPrecision;
+use codex_protocol::step_admission::SealedAdmission;
 use codex_protocol::user_input::UserInput;
 use codex_utils_output_truncation::approx_tokens_from_byte_count;
 use codex_utils_path_uri::PathUri;
@@ -1699,17 +1702,29 @@ async fn exec_command_clamps_model_requested_max_output_tokens_to_policy() -> Re
         "yield_time_ms": 3_000,
         "max_output_tokens": 70_000,
     });
+    let completed_with_usage = |id: &str, input: u64| {
+        serde_json::json!({
+            "type": "response.completed",
+            "response": {"id": id, "usage": {
+                "input_tokens": input,
+                "input_tokens_details": null,
+                "output_tokens": 40,
+                "output_tokens_details": {"reasoning_tokens": 10},
+                "total_tokens": input + 40,
+            }},
+        })
+    };
 
     let responses = vec![
         sse(vec![
             ev_response_created("resp-1"),
             ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
-            ev_completed("resp-1"),
+            completed_with_usage("resp-1", 1_000),
         ]),
         sse(vec![
             ev_response_created("resp-2"),
             ev_assistant_message("msg-1", "done"),
-            ev_completed("resp-2"),
+            completed_with_usage("resp-2", 3_000),
         ]),
     ];
     let response_mock = mount_sse_sequence(&server, responses).await;
@@ -1733,8 +1748,9 @@ async fn exec_command_clamps_model_requested_max_output_tokens_to_policy() -> Re
     // Measurement runs off-thread and may arrive after turn completion.
     let mut measured = None;
     let mut captured = None;
+    let mut sealed = None;
     let mut completed = false;
-    while measured.is_none() || captured.is_none() || !completed {
+    while measured.is_none() || captured.is_none() || sealed.is_none() || !completed {
         match wait_for_event(&test.codex, |_| true).await {
             EventMsg::ItemCompleted(event) => {
                 if let codex_protocol::items::TurnItem::ToolOutputTokens(item) = &event.item
@@ -1747,12 +1763,41 @@ async fn exec_command_clamps_model_requested_max_output_tokens_to_policy() -> Re
                 {
                     captured = Some(item.output.clone());
                 }
+                if let codex_protocol::items::TurnItem::StepAdmission(item) = &event.item
+                    && item.response_id == "resp-1"
+                    && item.admission != Admission::Pending
+                {
+                    sealed = Some(item.clone());
+                }
             }
             EventMsg::TurnComplete(_) => completed = true,
             _ => {}
         }
     }
     let measured = measured.expect("measurement received");
+    // The second request's input, less the first request's input and re-sent output, is
+    // what the call's step admitted; with no arrivals the delta alone measures it.
+    let sealed = sealed.expect("step sealed");
+    assert_eq!(
+        (
+            sealed.read_tokens,
+            sealed.thinking_tokens,
+            sealed.output_tokens,
+            sealed.admission
+        ),
+        (
+            1_000,
+            Some(10),
+            30,
+            Admission::Sealed(SealedAdmission {
+                call_ids: vec![call_id.to_string()],
+                self_tokens: 1_960,
+                arrivals: Vec::new(),
+                released_tokens: 0,
+                precision: AdmissionPrecision::Exact,
+            })
+        )
+    );
 
     // The count must describe the actual next model input, not the raw exec event or preview.
     let delivered = response_mock.requests()[1]

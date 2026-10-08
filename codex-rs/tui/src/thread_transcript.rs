@@ -42,7 +42,9 @@ pub(crate) type TranscriptCells = Vec<Arc<dyn HistoryCell>>;
 fn is_activity_metadata(item: &ThreadItem) -> bool {
     matches!(
         item,
-        ThreadItem::Reasoning { .. } | ThreadItem::ToolOutputTokens { .. }
+        ThreadItem::Reasoning { .. }
+            | ThreadItem::ToolOutputTokens { .. }
+            | ThreadItem::StepAdmission(_)
     ) || crate::history_cell::ToolOutputCell::is_item(item)
 }
 

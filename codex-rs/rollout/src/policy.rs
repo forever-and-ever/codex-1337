@@ -3,8 +3,10 @@ use crate::protocol::EventMsg;
 use codex_extension_items::ExtensionItem;
 use codex_protocol::items::TurnItem;
 use codex_protocol::models::ResponseItem;
+use codex_protocol::protocol::ItemCompletedEvent;
 use codex_protocol::protocol::SubAgentActivityKind;
 use codex_protocol::protocol::ThreadHistoryMode;
+use codex_protocol::step_admission::Admission;
 
 /// Whether a rollout `item` should be persisted in rollout files.
 pub fn is_persisted_rollout_item(item: &RolloutItem, history_mode: ThreadHistoryMode) -> bool {
@@ -98,6 +100,11 @@ pub fn should_persist_response_item_for_memories(item: &ResponseItem) -> bool {
 pub fn should_persist_event_msg(ev: &EventMsg, history_mode: ThreadHistoryMode) -> bool {
     match ev.native_event() {
         EventMsg::CodeModeOwned(_) => unreachable!("ownership ingress rejects nested scopes"),
+        // A pending step is live-only: its sealed or severed record replaces it.
+        EventMsg::ItemCompleted(ItemCompletedEvent {
+            item: TurnItem::StepAdmission(item),
+            ..
+        }) => item.admission != Admission::Pending,
         EventMsg::ItemCompleted(event) => {
             // Paginated rollouts store TurnItems.
             // Legacy rollouts keep only items with no lossless raw ResponseItem or legacy

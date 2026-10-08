@@ -5,11 +5,174 @@
       "description": "A path that is guaranteed to be absolute and normalized (though it is not guaranteed to be canonicalized or exist on the filesystem).\n\nIMPORTANT: When deserializing an `AbsolutePathBuf`, a base path must be set using [AbsolutePathBufGuard::new]. If no base path is set, the deserialization will fail unless the path being deserialized is already absolute.",
       "type": "string"
     },
+    "Admission": {
+      "description": "The step's admission, known once the next request completes.",
+      "oneOf": [
+        {
+          "description": "The next request has not completed.",
+          "properties": {
+            "state": {
+              "enum": [
+                "pending"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "title": "PendingAdmission",
+          "type": "object"
+        },
+        {
+          "description": "The context was rewritten or the model changed before the next request completed.",
+          "properties": {
+            "state": {
+              "enum": [
+                "severed"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "title": "SeveredAdmission",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "arrivals": {
+              "description": "Context written after the step's results by neither the step nor its model.",
+              "items": {
+                "$ref": "#/definitions/Arrival"
+              },
+              "type": "array"
+            },
+            "callIds": {
+              "description": "The calls whose results the step admitted.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "precision": {
+              "$ref": "#/definitions/AdmissionPrecision"
+            },
+            "releasedTokens": {
+              "description": "Tokens that left the context during the step.",
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "selfTokens": {
+              "description": "The step's own results, with the framing of its items.",
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "state": {
+              "enum": [
+                "sealed"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "arrivals",
+            "callIds",
+            "precision",
+            "releasedTokens",
+            "selfTokens",
+            "state"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "AdmissionPrecision": {
+      "oneOf": [
+        {
+          "description": "The provider's delta alone measured every share.",
+          "enum": [
+            "exact"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Local o200k counts split the provider's delta among the shares.",
+          "enum": [
+            "apportioned"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The delta fell short of the local counts: the shares are local estimates and the shortfall left the context.",
+          "enum": [
+            "disturbed"
+          ],
+          "type": "string"
+        }
+      ]
+    },
     "AgentMessageDelivery": {
       "enum": [
         "async"
       ],
       "type": "string"
+    },
+    "Arrival": {
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/ArrivalKind"
+        },
+        "label": {
+          "type": "string"
+        },
+        "text": {
+          "description": "The readable content of an injection or of a plaintext message from another agent.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tokens": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "label",
+        "tokens"
+      ],
+      "type": "object"
+    },
+    "ArrivalKind": {
+      "oneOf": [
+        {
+          "description": "Context the harness wrote: world-state updates, interrupt markers, receipts, reminders.",
+          "enum": [
+            "injection"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "A message from another agent.",
+          "enum": [
+            "interAgent"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "User input, steered into a running turn or starting the next one.",
+          "enum": [
+            "user"
+          ],
+          "type": "string"
+        }
+      ]
     },
     "AsyncUserInputQuestion": {
       "additionalProperties": false,
@@ -1257,6 +1420,63 @@
             "type"
           ],
           "title": "CodeModeThreadItem",
+          "type": "object"
+        },
+        {
+          "description": "Human-only bill of one model request and what its step admitted, not model input.",
+          "properties": {
+            "admission": {
+              "$ref": "#/definitions/Admission"
+            },
+            "completedAtMs": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "id": {
+              "type": "string"
+            },
+            "outputTokens": {
+              "description": "Provider-reported output, less any reported reasoning.",
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "readTokens": {
+              "description": "Provider-reported input the request read, cached or not.",
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "responseId": {
+              "type": "string"
+            },
+            "thinkingTokens": {
+              "description": "Provider-reported reasoning, when the provider breaks it out of the output.",
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "type": {
+              "enum": [
+                "stepAdmission"
+              ],
+              "title": "StepAdmissionThreadItemType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "admission",
+            "completedAtMs",
+            "id",
+            "outputTokens",
+            "readTokens",
+            "responseId",
+            "type"
+          ],
+          "title": "StepAdmissionThreadItem",
           "type": "object"
         },
         {

@@ -555,6 +555,7 @@ impl TurnItem {
             | TurnItem::FunctionCallOutput(_)
             | TurnItem::ToolOutputTokens(_)
             | TurnItem::Preamble(_)
+            | TurnItem::StepAdmission(_)
             | TurnItem::HookPrompt(_) => Vec::new(),
             TurnItem::AgentMessage(item) => item.as_legacy_events(),
             TurnItem::Plan(_) => Vec::new(),

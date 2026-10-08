@@ -1,0 +1,356 @@
+//! The bill of each main-model request and what its step admitted into the context.
+//!
+//! A completed response leaves its step pending. The next completed request seals it: that
+//! request's provider-reported input, less the marked request's input and the marked
+//! response's re-sent output, is what the step's results and the arrivals after them added.
+//! Membership is exact, the items between the two prompts. Local o200k counts only split the
+//! delta among several shares, and run off the completion path.
+
+use std::sync::Arc;
+
+use codex_protocol::items::TurnItem;
+use codex_protocol::models::ContentItem;
+use codex_protocol::models::FunctionCallOutputBody;
+use codex_protocol::models::ResponseItem;
+use codex_protocol::models::plaintext_agent_message_content;
+use codex_protocol::protocol::EventMsg;
+use codex_protocol::protocol::ItemCompletedEvent;
+use codex_protocol::protocol::TokenUsage;
+use codex_protocol::step_admission::Admission;
+use codex_protocol::step_admission::AdmissionPrecision;
+use codex_protocol::step_admission::Arrival;
+use codex_protocol::step_admission::ArrivalKind;
+use codex_protocol::step_admission::SealedAdmission;
+use codex_protocol::step_admission::StepAdmissionItem;
+use codex_utils_output_truncation::count_o200k_text;
+use codex_utils_output_truncation::count_o200k_text_tokens;
+
+use super::Session;
+use super::TurnContext;
+use super::preamble::context_label;
+use super::step_context::StepContext;
+use crate::client_common::Prompt;
+use crate::context::is_contextual_user_fragment;
+
+/// The latest completed request, awaiting the next request's input to seal its step.
+pub(crate) struct StepMark {
+    item: StepAdmissionItem,
+    turn_id: String,
+    model: String,
+    history_version: u64,
+    prompt_len: usize,
+    /// The response's whole output, which the next request re-sends.
+    output_tokens: u64,
+}
+
+/// The items a step admitted, before the delta is split among them.
+#[derive(Debug, Default)]
+struct Admitted {
+    call_ids: Vec<String>,
+    results: Vec<FunctionCallOutputBody>,
+    arrivals: Vec<Incoming>,
+}
+
+#[derive(Debug)]
+struct Incoming {
+    kind: ArrivalKind,
+    label: String,
+    /// Counted when present; an encrypted or opaque arrival takes a share of the remainder.
+    text: Option<String>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct Apportionment {
+    shares: Vec<u64>,
+    released: u64,
+    precision: AdmissionPrecision,
+}
+
+impl Session {
+    /// Leaves this response's step pending and seals the previous step with this request's
+    /// input. The previous step is severed when the context was rewritten, the model changed
+    /// or this request reported no usage.
+    pub(super) async fn record_step_admission(
+        self: &Arc<Self>,
+        step_context: &StepContext,
+        prompt: &Prompt,
+        response_id: &str,
+        usage: Option<&TokenUsage>,
+        reported_reasoning_tokens: Option<u64>,
+    ) {
+        let turn_context = &step_context.turn;
+        let model = step_context.settings.model_info.slug.as_str();
+        let read_tokens = usage.map(|usage| u64::try_from(usage.input_tokens).unwrap_or(0));
+        let (previous, pending, history_version) = {
+            let mut state = self.state.lock().await;
+            let history_version = state.history.history_version();
+            let mark = usage.zip(read_tokens).map(|(usage, read_tokens)| {
+                let output_tokens = u64::try_from(usage.output_tokens).unwrap_or(0);
+                let thinking_tokens =
+                    reported_reasoning_tokens.filter(|thinking| *thinking <= output_tokens);
+                StepMark {
+                    item: StepAdmissionItem {
+                        id: format!("step:{response_id}"),
+                        response_id: response_id.to_string(),
+                        completed_at_ms: crate::turn_timing::now_unix_timestamp_ms(),
+                        read_tokens,
+                        thinking_tokens,
+                        output_tokens: output_tokens - thinking_tokens.unwrap_or(0),
+                        admission: Admission::Pending,
+                    },
+                    turn_id: turn_context.sub_id.clone(),
+                    model: model.to_string(),
+                    history_version,
+                    prompt_len: prompt.input.len(),
+                    output_tokens,
+                }
+            });
+            let pending = mark.as_ref().map(|mark| mark.item.clone());
+            (
+                std::mem::replace(&mut state.step_mark, mark),
+                pending,
+                history_version,
+            )
+        };
+        if let Some(item) = pending {
+            self.complete_step_admission(turn_context, &turn_context.sub_id, item)
+                .await;
+        }
+        let Some(mut previous) = previous else {
+            return;
+        };
+        let received = read_tokens.filter(|_| {
+            previous.history_version == history_version
+                && previous.model == model
+                && previous.prompt_len <= prompt.input.len()
+        });
+        let Some(read_tokens) = received else {
+            previous.item.admission = Admission::Severed;
+            self.complete_step_admission(turn_context, &previous.turn_id, previous.item)
+                .await;
+            return;
+        };
+        let received = i128::from(read_tokens)
+            - i128::from(previous.item.read_tokens)
+            - i128::from(previous.output_tokens);
+        let admitted = admit(&prompt.input[previous.prompt_len..]);
+        let session = Arc::clone(self);
+        let turn_context = Arc::clone(turn_context);
+        // Tokenizing large or pathological text must not hold up the turn.
+        tokio::spawn(async move {
+            match tokio::task::spawn_blocking(move || seal(previous, received, admitted)).await {
+                Ok((turn_id, item)) => {
+                    session
+                        .complete_step_admission(&turn_context, &turn_id, item)
+                        .await;
+                }
+                Err(error) => tracing::warn!(%error, "step admission measurement failed"),
+            }
+        });
+    }
+
+    async fn complete_step_admission(
+        &self,
+        turn_context: &TurnContext,
+        turn_id: &str,
+        item: StepAdmissionItem,
+    ) {
+        self.send_event(
+            turn_context,
+            EventMsg::ItemCompleted(ItemCompletedEvent {
+                thread_id: self.thread_id,
+                turn_id: turn_id.to_string(),
+                item: TurnItem::StepAdmission(item),
+                started_at_ms: None,
+                completed_at_ms: crate::turn_timing::now_unix_timestamp_ms(),
+            }),
+        )
+        .await;
+    }
+}
+
+/// Sorts the items between two prompts into the step's calls, its results and its arrivals.
+/// The response's own items count as its re-sent output.
+fn admit(items: &[ResponseItem]) -> Admitted {
+    let mut admitted = Admitted::default();
+    for item in items {
+        match item {
+            ResponseItem::Message { role, .. } if role == "assistant" => {}
+            ResponseItem::Message { role, content, .. } => {
+                let text = content
+                    .iter()
+                    .filter_map(|content| match content {
+                        ContentItem::InputText { text } | ContentItem::OutputText { text } => {
+                            Some(text.as_str())
+                        }
+                        ContentItem::InputImage { .. } | ContentItem::InputAudio { .. } => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let kind = if role == "user" && !content.iter().all(is_contextual_user_fragment) {
+                    ArrivalKind::User
+                } else {
+                    ArrivalKind::Injection
+                };
+                admitted.arrivals.push(Incoming {
+                    kind,
+                    label: context_label(&text),
+                    text: Some(text),
+                });
+            }
+            ResponseItem::AgentMessage {
+                author, content, ..
+            } => admitted.arrivals.push(Incoming {
+                kind: ArrivalKind::InterAgent,
+                label: author.clone(),
+                text: plaintext_agent_message_content(content),
+            }),
+            ResponseItem::AdditionalTools { tools, .. } => admitted.arrivals.push(Incoming {
+                kind: ArrivalKind::Injection,
+                label: "Additional tools".to_string(),
+                text: serde_json::to_string(tools).ok(),
+            }),
+            ResponseItem::ConfigurationUpdate { .. } => admitted.arrivals.push(Incoming {
+                kind: ArrivalKind::Injection,
+                label: "Configuration update".to_string(),
+                text: None,
+            }),
+            ResponseItem::Compaction { .. }
+            | ResponseItem::NativeCompaction { .. }
+            | ResponseItem::ContextCompaction { .. }
+            | ResponseItem::CompactionTrigger {} => admitted.arrivals.push(Incoming {
+                kind: ArrivalKind::Injection,
+                label: "Compaction".to_string(),
+                text: None,
+            }),
+            ResponseItem::FunctionCall { call_id, .. }
+            | ResponseItem::CustomToolCall { call_id, .. } => {
+                admitted.call_ids.push(call_id.clone());
+            }
+            ResponseItem::LocalShellCall { call_id, .. }
+            | ResponseItem::ToolSearchCall { call_id, .. } => {
+                admitted.call_ids.extend(call_id.iter().cloned());
+            }
+            ResponseItem::FunctionCallOutput { output, .. }
+            | ResponseItem::CustomToolCallOutput { output, .. } => {
+                admitted.results.push(output.body.clone());
+            }
+            ResponseItem::ToolSearchOutput { tools, .. } => {
+                admitted.results.push(FunctionCallOutputBody::Text(
+                    serde_json::to_string(tools).unwrap_or_default(),
+                ));
+            }
+            ResponseItem::Reasoning { .. }
+            | ResponseItem::WebSearchCall { .. }
+            | ResponseItem::ImageGenerationCall { .. }
+            | ResponseItem::RejectedToolCall { .. }
+            | ResponseItem::Other => {}
+        }
+    }
+    admitted
+}
+
+/// Counts the step's shares and splits what it received among them.
+fn seal(mut mark: StepMark, received: i128, admitted: Admitted) -> (String, StepAdmissionItem) {
+    let local = std::iter::once(admitted.results.iter().try_fold(0u64, |total, body| {
+        Some(total + count_o200k_text_tokens(body)?)
+    }))
+    .chain(
+        admitted
+            .arrivals
+            .iter()
+            .map(|arrival| arrival.text.as_deref().map(count_o200k_text)),
+    )
+    .collect::<Vec<_>>();
+    let Apportionment {
+        shares,
+        released,
+        precision,
+    } = apportion(received, &local);
+    mark.item.admission = Admission::Sealed(SealedAdmission {
+        call_ids: admitted.call_ids,
+        self_tokens: shares[0],
+        arrivals: admitted
+            .arrivals
+            .into_iter()
+            .zip(&shares[1..])
+            .map(|(incoming, tokens)| Arrival {
+                kind: incoming.kind,
+                label: incoming.label,
+                tokens: *tokens,
+                // A user's words already have their own row.
+                text: incoming.text.filter(|_| incoming.kind != ArrivalKind::User),
+            })
+            .collect(),
+        released_tokens: released,
+        precision,
+    });
+    (mark.turn_id, mark.item)
+}
+
+/// Splits `received` among shares whose local counts are `local`; the first share is the
+/// step's own results. A delta below the local lower bound means context left during the step.
+fn apportion(received: i128, local: &[Option<u64>]) -> Apportionment {
+    let known = local.iter().flatten().sum::<u64>();
+    let Ok(received) = u64::try_from(received) else {
+        return disturbed(received, known, local);
+    };
+    if received < known {
+        return disturbed(i128::from(received), known, local);
+    }
+    let mut shares = vec![0; local.len()];
+    let contributors = local.iter().filter(|share| **share != Some(0)).count();
+    if contributors <= 1 {
+        let index = local
+            .iter()
+            .position(|share| *share != Some(0))
+            .unwrap_or(0);
+        shares[index] = received;
+        return Apportionment {
+            shares,
+            released: 0,
+            precision: AdmissionPrecision::Exact,
+        };
+    }
+    let unknown = local.iter().filter(|share| share.is_none()).count() as u64;
+    if unknown > 0 {
+        // Measured shares keep their counts; the opaque ones split what remains.
+        let rest = received - known;
+        let mut extra = rest % unknown;
+        for (share, count) in shares.iter_mut().zip(local) {
+            *share = count.unwrap_or_else(|| {
+                let bonus = u64::from(extra > 0);
+                extra -= bonus;
+                rest / unknown + bonus
+            });
+        }
+    } else {
+        for (share, count) in shares.iter_mut().zip(local) {
+            let count = count.unwrap_or(0);
+            *share = u64::try_from(u128::from(count) * u128::from(received) / u128::from(known))
+                .unwrap_or(u64::MAX);
+        }
+        let first = local
+            .iter()
+            .position(|share| *share != Some(0))
+            .unwrap_or(0);
+        shares[first] += received - shares.iter().sum::<u64>();
+    }
+    Apportionment {
+        shares,
+        released: 0,
+        precision: AdmissionPrecision::Apportioned,
+    }
+}
+
+fn disturbed(received: i128, known: u64, local: &[Option<u64>]) -> Apportionment {
+    Apportionment {
+        shares: local.iter().map(|share| share.unwrap_or(0)).collect(),
+        released: u64::try_from(i128::from(known) - received).unwrap_or(u64::MAX),
+        precision: AdmissionPrecision::Disturbed,
+    }
+}
+
+#[cfg(test)]
+#[path = "step_admission_tests.rs"]
+mod tests;

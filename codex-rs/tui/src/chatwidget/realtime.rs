@@ -221,7 +221,10 @@ pub(crate) fn realtime_delegation_input(items: &[UserInput]) -> Option<&str> {
 pub(crate) fn is_private_realtime_agent_item(item: &ThreadItem) -> bool {
     if matches!(
         item,
-        ThreadItem::Reasoning { .. } | ThreadItem::Thought { .. } | ThreadItem::Preamble { .. }
+        ThreadItem::Reasoning { .. }
+            | ThreadItem::Thought { .. }
+            | ThreadItem::Preamble { .. }
+            | ThreadItem::StepAdmission(_)
     ) {
         return true;
     }

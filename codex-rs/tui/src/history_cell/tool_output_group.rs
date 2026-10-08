@@ -218,7 +218,9 @@ impl ToolOutputGroup {
                     ids.contains(item.id())
                         || matches!(
                             item,
-                            ThreadItem::Reasoning { .. } | ThreadItem::ToolOutputTokens { .. }
+                            ThreadItem::Reasoning { .. }
+                                | ThreadItem::ToolOutputTokens { .. }
+                                | ThreadItem::StepAdmission(_)
                         )
                 }))
             .then(|| Self::from_cells([Arc::clone(older), Arc::clone(newer)]))

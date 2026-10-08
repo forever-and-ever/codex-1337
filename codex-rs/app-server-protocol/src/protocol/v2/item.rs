@@ -53,6 +53,7 @@ use codex_protocol::protocol::GuardianUserAuthorization as CoreGuardianUserAutho
 use codex_protocol::protocol::PatchApplyStatus as CorePatchApplyStatus;
 use codex_protocol::protocol::ReviewDecision as CoreReviewDecision;
 use codex_protocol::protocol::SubAgentActivityKind as CoreSubAgentActivityKind;
+pub use codex_protocol::step_admission::StepAdmissionItem;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_path_uri::LegacyAppPathString;
 use serde::Deserialize;
@@ -239,6 +240,8 @@ impl CommandAction {
 pub enum ThreadItem {
     CodeModeOwned(codex_protocol::code_mode::CodeModeOwned<Box<ThreadItem>>),
     CodeMode(CodeModeItem),
+    /// Human-only bill of one model request and what its step admitted, not model input.
+    StepAdmission(StepAdmissionItem),
     #[serde(rename_all = "camelCase")]
     #[ts(rename_all = "camelCase")]
     UserMessage {
@@ -500,6 +503,7 @@ impl ThreadItem {
         match self {
             ThreadItem::CodeModeOwned(owned) => owned.payload().id(),
             ThreadItem::CodeMode(item) => &item.id,
+            ThreadItem::StepAdmission(item) => &item.id,
             ThreadItem::UserMessage { id, .. }
             | ThreadItem::HookPrompt { id, .. }
             | ThreadItem::AgentMessage { id, .. }
@@ -923,6 +927,7 @@ impl From<CoreTurnItem> for ThreadItem {
     fn from(value: CoreTurnItem) -> Self {
         match value {
             CoreTurnItem::CodeMode(item) => ThreadItem::CodeMode(item),
+            CoreTurnItem::StepAdmission(item) => ThreadItem::StepAdmission(item),
             CoreTurnItem::UserMessage(user) => ThreadItem::UserMessage {
                 id: user.id,
                 client_id: user.client_id,

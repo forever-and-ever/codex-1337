@@ -496,6 +496,7 @@ impl ChatWidget {
                 }
             }
             ThreadItem::HookPrompt { .. } => {}
+            ThreadItem::StepAdmission(_) => {}
             ThreadItem::ToolOutputTokens {
                 id,
                 call_id,

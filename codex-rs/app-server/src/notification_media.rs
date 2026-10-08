@@ -219,6 +219,7 @@ fn without_thread_item_media(mut item: ThreadItem) -> ThreadItem {
         | ThreadItem::Reasoning { .. }
         | ThreadItem::Thought { .. }
         | ThreadItem::Preamble { .. }
+        | ThreadItem::StepAdmission(_)
         | ThreadItem::FunctionCallOutput {
             output: FunctionCallOutputBody::Text(_),
             ..

@@ -3072,6 +3072,16 @@ async fn try_run_sampling_request(
                     ),
                 )
                 .await;
+                sess.record_step_admission(
+                    &step_context,
+                    prompt,
+                    &response_id,
+                    token_usage.as_ref(),
+                    usage_metadata
+                        .as_ref()
+                        .and_then(|metadata| metadata.reported_reasoning_tokens),
+                )
+                .await;
                 let budget_result = sess
                     .record_token_usage_info(
                         &turn_context,

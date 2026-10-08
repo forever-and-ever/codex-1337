@@ -332,6 +332,7 @@ pub(super) async fn wait(
                                     | ThreadItem::Reasoning { .. }
                                     | ThreadItem::Thought { .. }
                                     | ThreadItem::Preamble { .. }
+                                    | ThreadItem::StepAdmission(_)
                                     | ThreadItem::SubAgentActivity { .. }
                                     | ThreadItem::ImageView { .. }
                                     | ThreadItem::EnteredReviewMode { .. }
