@@ -277,16 +277,7 @@ async fn apply_requested_spawn_agent_model_overrides(
             if fork_mode.is_some() {
                 return Err("History-forked agents must retain the parent model provider; use fork_turns=none for a different provider.".to_owned());
             }
-            config.model_provider_id.clone_from(&catalog.provider_id);
-            config.model_provider = config.model_providers[&catalog.provider_id].clone();
-            config.model_catalog = None;
-            if matches!(
-                config.base_instructions_provenance,
-                Some(BaseInstructionsProvenance::Model { .. })
-            ) {
-                config.base_instructions = None;
-                config.base_instructions_provenance = None;
-            }
+            switch_agent_provider(config, &catalog.provider_id);
         }
         let selected_model_info = catalog
             .manager
@@ -433,4 +424,18 @@ fn validate_spawn_agent_reasoning_effort(
     Err(format!(
         "Reasoning effort `{requested_reasoning_effort}` is not supported for model `{model}`. Supported reasoning efforts: {supported}"
     ))
+}
+
+/// Applies the same provider boundary to standalone children and internal reviewers.
+pub(crate) fn switch_agent_provider(config: &mut Config, provider_id: &str) {
+    config.model_provider_id = provider_id.to_owned();
+    config.model_provider = config.model_providers[provider_id].clone();
+    config.model_catalog = None;
+    if matches!(
+        config.base_instructions_provenance,
+        Some(BaseInstructionsProvenance::Model { .. })
+    ) {
+        config.base_instructions = None;
+        config.base_instructions_provenance = None;
+    }
 }

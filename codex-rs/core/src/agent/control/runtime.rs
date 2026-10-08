@@ -34,6 +34,8 @@ pub(crate) struct LocalAgentRuntime {
     pub(super) lifecycle: Arc<tokio::sync::RwLock<()>>,
     pub(super) service_tiers: Arc<ArcSwap<super::service_tier::TierTree>>,
     pub(crate) account_selection: Arc<ProviderAccountSelections>,
+    pub(crate) reviewer_route_quarantine:
+        Arc<crate::guardian::reviewer_route::ReviewerRouteQuarantine>,
     /// Retains the root's opt-in instruction provider even when the root is unloaded.
     pub(super) shared_thread_instructions_provider:
         Arc<OnceLock<Arc<dyn ThreadInstructionsProvider>>>,
@@ -57,6 +59,7 @@ impl LocalAgentRuntime {
             lifecycle: Arc::default(),
             service_tiers: Arc::default(),
             account_selection: Arc::default(),
+            reviewer_route_quarantine: Arc::default(),
             shared_thread_instructions_provider: Arc::default(),
         };
         if let Some(rollout_budget) = rollout_budget {

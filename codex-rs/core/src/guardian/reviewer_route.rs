@@ -1,0 +1,278 @@
+//! Routes Claude approval reviews through a ChatGPT account without permitting API-key billing.
+
+use super::GuardianReviewContext;
+use crate::agent::child_config::switch_agent_provider;
+use crate::config::Config;
+use crate::session::session::Session;
+use crate::thread_manager::accounts::AccountInheritance;
+use crate::thread_manager::accounts::account_auth_for_provider;
+use codex_guardian_reviewer::GuardianReviewError;
+use codex_guardian_reviewer::GuardianReviewOutcome;
+use codex_guardian_reviewer::ReviewModel;
+use codex_model_provider::DEFAULT_APPROVAL_REVIEW_PREFERRED_MODEL;
+use codex_model_provider_info::ModelProviderAdapter;
+use codex_model_provider_info::ModelProviderInfo;
+use codex_model_provider_info::OPENAI_PROVIDER_ID;
+use codex_models_manager::manager::RefreshStrategy;
+use codex_protocol::ThreadId;
+use codex_protocol::openai_models::ModelInfo;
+use codex_protocol::protocol::CodexErrorInfo;
+use codex_protocol::protocol::EventMsg;
+use codex_protocol::protocol::WarningEvent;
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::Mutex;
+use tokio::time::Instant;
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) enum ReviewerRoute {
+    #[default]
+    ParentProvider,
+    ChatgptAutoReview {
+        account_id: String,
+    },
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum QuarantineCause {
+    Ineligible,
+    Unavailable,
+}
+
+#[derive(Default)]
+pub(crate) struct ReviewerRouteQuarantine {
+    accounts: Mutex<HashMap<String, Instant>>,
+    warned: Mutex<HashSet<ThreadId>>,
+}
+
+impl ReviewerRouteQuarantine {
+    async fn contains(&self, account_id: &str) -> bool {
+        let mut accounts = self.accounts.lock().await;
+        accounts.retain(|_, until| *until > Instant::now());
+        accounts.contains_key(account_id)
+    }
+
+    async fn insert(&self, account_id: &str, cause: QuarantineCause) {
+        let duration = match cause {
+            QuarantineCause::Ineligible => Duration::from_secs(/*secs*/ 3600),
+            QuarantineCause::Unavailable => Duration::from_secs(/*secs*/ 600),
+        };
+        self.accounts
+            .lock()
+            .await
+            .insert(account_id.to_owned(), Instant::now() + duration);
+    }
+}
+
+impl ReviewerRoute {
+    pub(crate) async fn resolve(session: &Session, context: &GuardianReviewContext) -> Self {
+        let config = &context.turn().config;
+        if config.model_provider.adapter != ModelProviderAdapter::ClaudeSubscription
+            || !config.model_providers.contains_key(OPENAI_PROVIDER_ID)
+        {
+            return Self::ParentProvider;
+        }
+        tokio::time::timeout(Duration::from_secs(/*secs*/ 5), async {
+            let mut candidate = config.as_ref().clone();
+            switch_agent_provider(&mut candidate, OPENAI_PROVIDER_ID);
+            if !uses_chatgpt_login(&candidate.model_provider) {
+                return None;
+            }
+            let auth = account_auth_for_provider(
+                &candidate,
+                &session.services.local_agent_runtime.account_selection,
+                &session.services.auth_manager,
+                /*persisted*/ None,
+                &AccountInheritance::OtherProvider,
+            )
+            .await
+            .ok()??;
+            if !auth
+                .auth_cached()
+                .is_some_and(|auth| auth.is_chatgpt_auth())
+            {
+                return None;
+            }
+            let account_id = auth.selected_account_id()?;
+            if session
+                .services
+                .local_agent_runtime
+                .reviewer_route_quarantine
+                .contains(&account_id)
+                .await
+            {
+                return None;
+            }
+            let manager = session.agent_models_manager(&candidate).await.ok()?;
+            let models = manager
+                .list_models(
+                    RefreshStrategy::OnlineIfUncached,
+                    candidate.http_client_factory(),
+                )
+                .await;
+            models
+                .iter()
+                .any(|model| model.model == DEFAULT_APPROVAL_REVIEW_PREFERRED_MODEL)
+                .then_some(Self::ChatgptAutoReview { account_id })
+        })
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or(Self::ParentProvider)
+    }
+
+    pub(crate) fn apply(&self, config: &mut Config) {
+        if matches!(self, Self::ChatgptAutoReview { .. }) {
+            switch_agent_provider(config, OPENAI_PROVIDER_ID);
+        }
+    }
+
+    pub(crate) async fn resolve_chatgpt_model(
+        session: &Session,
+        context: &GuardianReviewContext,
+    ) -> anyhow::Result<(ReviewModel, Arc<ModelInfo>)> {
+        let mut config = context.turn().config.as_ref().clone();
+        switch_agent_provider(&mut config, OPENAI_PROVIDER_ID);
+        let manager = session
+            .agent_models_manager(&config)
+            .await
+            .map_err(|error| anyhow::Error::new(ReviewerRouteUnavailable(error)))?;
+        let available_models = manager
+            .list_models(RefreshStrategy::Offline, config.http_client_factory())
+            .await;
+        let mut model = manager
+            .get_model_info(
+                DEFAULT_APPROVAL_REVIEW_PREFERRED_MODEL,
+                &config.to_models_manager_config(),
+            )
+            .await;
+        model.auto_review_model_override = None;
+        let review_model = codex_guardian_reviewer::select_review_model(
+            &model,
+            context.reasoning_effort.as_ref(),
+            DEFAULT_APPROVAL_REVIEW_PREFERRED_MODEL,
+            &available_models,
+        );
+        Ok((review_model, Arc::new(model)))
+    }
+
+    pub(crate) fn guard(
+        &self,
+        session: &Session,
+        provider: &ModelProviderInfo,
+    ) -> anyhow::Result<()> {
+        if let Self::ChatgptAutoReview { account_id } = self
+            && (!uses_chatgpt_login(provider)
+                || session.provider_id != OPENAI_PROVIDER_ID
+                || session.services.auth_manager.selected_account_id().as_ref() != Some(account_id)
+                || !session
+                    .services
+                    .auth_manager
+                    .auth_cached()
+                    .is_some_and(|auth| auth.is_chatgpt_auth()))
+        {
+            anyhow::bail!("OpenAI auto-review login changed before reviewer startup");
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn fallback(
+        &mut self,
+        session: &Session,
+        outcome: &GuardianReviewOutcome,
+    ) -> Option<&'static str> {
+        let Self::ChatgptAutoReview { account_id } = self else {
+            return None;
+        };
+        let GuardianReviewOutcome::Error(error) = outcome else {
+            return None;
+        };
+        let (cause, reason) = match error {
+            GuardianReviewError::Cancelled | GuardianReviewError::StaleAuthorization => {
+                return None;
+            }
+            GuardianReviewError::Session {
+                error_info: Some(CodexErrorInfo::Unauthorized),
+                ..
+            } => (Some(QuarantineCause::Ineligible), "unauthorized"),
+            GuardianReviewError::Session {
+                error_info: Some(CodexErrorInfo::UsageLimitExceeded),
+                ..
+            } => (Some(QuarantineCause::Ineligible), "usage limit"),
+            GuardianReviewError::Session { .. } => {
+                (Some(QuarantineCause::Unavailable), "session error")
+            }
+            GuardianReviewError::Timeout => (Some(QuarantineCause::Unavailable), "timeout"),
+            GuardianReviewError::PromptBuild { .. }
+            | GuardianReviewError::Parse { .. }
+            | GuardianReviewError::InputBudgetExceeded => (None, "review failed"),
+        };
+        let quarantine = &session
+            .services
+            .local_agent_runtime
+            .reviewer_route_quarantine;
+        if let Some(cause) = cause {
+            quarantine.insert(account_id, cause).await;
+        }
+        *self = Self::ParentProvider;
+        Some(reason)
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("OpenAI reviewer route unavailable: {0}")]
+pub(super) struct ReviewerRouteUnavailable(String);
+
+pub(super) async fn run_review_attempt<Run, Attempt>(
+    session: &Session,
+    context: &GuardianReviewContext,
+    deadline: Instant,
+    route_state: &Mutex<ReviewerRoute>,
+    mut run: Run,
+) -> (
+    GuardianReviewOutcome,
+    codex_analytics::GuardianReviewAnalyticsResult,
+)
+where
+    Run: FnMut(ReviewerRoute) -> Attempt,
+    Attempt: std::future::Future<
+            Output = (
+                GuardianReviewOutcome,
+                codex_analytics::GuardianReviewAnalyticsResult,
+            ),
+        >,
+{
+    let mut route = route_state.lock().await.clone();
+    let mut result = run(route.clone()).await;
+    if let Some(reason) = route.fallback(session, &result.0).await {
+        *route_state.lock().await = route.clone();
+        if Instant::now() >= deadline {
+            return result;
+        }
+        let warn = session
+            .services
+            .local_agent_runtime
+            .reviewer_route_quarantine
+            .warned
+            .lock()
+            .await
+            .insert(session.thread_id);
+        if warn {
+            session.send_event(context.turn(), EventMsg::GuardianWarning(WarningEvent {
+                message: format!("Auto-review: OpenAI reviewer unavailable ({reason}); using the Claude reviewer."),
+            })).await;
+        }
+        result = run(route).await;
+    }
+    result
+}
+
+fn uses_chatgpt_login(provider: &ModelProviderInfo) -> bool {
+    provider.requires_openai_auth
+        && provider.adapter == ModelProviderAdapter::OpenaiCompatible
+        && provider.env_key.is_none()
+        && provider.experimental_bearer_token.is_none()
+        && provider.auth.is_none()
+}

@@ -21,6 +21,7 @@ pub(crate) use request_budget::prepare_prompt as prepare_guardian_prompt;
 mod review;
 mod review_session;
 mod reviewer_config;
+pub(crate) mod reviewer_route;
 pub(crate) use reviewer_config::resolve_review_model;
 mod runtime;
 #[cfg(test)]

@@ -10,6 +10,7 @@ use codex_protocol::protocol::ErrorEvent;
 
 pub(in crate::guardian) struct PreparedApproval {
     request: GuardianApprovalRequest,
+    route: tokio::sync::Mutex<super::super::reviewer_route::ReviewerRoute>,
     // Unlike authorization, the original history lifetime cannot advance on retry.
     root_history: Option<(codex_protocol::ThreadId, u64)>,
     formatted_action: Option<String>,
@@ -128,6 +129,9 @@ impl ReviewHost for super::super::runtime::ReviewRuntime {
             .map(|snapshot| (snapshot.root_thread_id, snapshot.history_reset_version));
         Ok((
             PreparedApproval {
+                route: tokio::sync::Mutex::new(
+                    super::super::reviewer_route::ReviewerRoute::resolve(&session, &context).await,
+                ),
                 formatted_action: format_guardian_action_pretty(&request).ok(),
                 request,
                 root_history,
@@ -193,14 +197,24 @@ impl ReviewHost for super::super::runtime::ReviewRuntime {
                 root_review_context_revision,
             });
         drop(history);
-        let (mut outcome, analytics) = run_guardian_review_session_before_deadline(
-            Arc::clone(&self.session),
-            self.context.clone(),
-            prepared.request.clone(),
-            self.request.category,
-            self.reasons.clone(),
-            Some(cancellation.clone()),
+        let (mut outcome, analytics) = super::super::reviewer_route::run_review_attempt(
+            session,
+            &self.context,
             deadline,
+            &prepared.route,
+            |route| async move {
+                run_guardian_review_session_before_deadline(
+                    Arc::clone(&self.session),
+                    self.context.clone(),
+                    prepared.request.clone(),
+                    self.request.category,
+                    self.reasons.clone(),
+                    Some(cancellation.clone()),
+                    deadline,
+                    &route,
+                )
+                .await
+            },
         )
         .await;
         if matches!(&outcome, GuardianReviewOutcome::Completed(assessment) if assessment.outcome == GuardianAssessmentOutcome::Allow)

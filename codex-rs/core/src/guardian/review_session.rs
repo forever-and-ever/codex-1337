@@ -101,6 +101,7 @@ const GUARDIAN_MAX_IMAGE_ITEM_TOKENS: i64 = 10_000;
 pub(crate) use codex_guardian_reviewer::GuardianReviewSessionOutcome;
 
 pub(crate) struct GuardianReviewSessionParams {
+    pub(crate) reviewer_route: super::reviewer_route::ReviewerRoute,
     pub(crate) parent_session: Arc<Session>,
     pub(crate) parent_context: GuardianReviewContext,
     // Checkpoint selection and thread-owned prompt evidence must use the same history.
@@ -321,11 +322,30 @@ async fn run_review_on_session(
     guardian_session_kind: GuardianReviewSessionKind,
     deadline: tokio::time::Instant,
 ) -> ReviewSessionResult {
+    if let Err(error) = params
+        .reviewer_route
+        .guard(&review_session.session, &params.spawn_config.model_provider)
+    {
+        return ReviewSessionResult {
+            outcome: GuardianReviewSessionOutcome::SessionFailed {
+                error,
+                error_info: None,
+                retry_at: None,
+            },
+            disposition: SessionDisposition::Discard,
+            analytics: GuardianReviewAnalyticsResult::without_session(),
+        };
+    }
     let review_model = &params.review_model;
-    let model_info = params
-        .parent_session
-        .services
-        .models_manager
+    let models_manager = match &params.reviewer_route {
+        super::reviewer_route::ReviewerRoute::ParentProvider => {
+            &params.parent_session.services.models_manager
+        }
+        super::reviewer_route::ReviewerRoute::ChatgptAutoReview { .. } => {
+            &review_session.session.services.models_manager
+        }
+    };
+    let model_info = models_manager
         .get_model_info(
             review_model.model.as_str(),
             &params.spawn_config.to_models_manager_config(),

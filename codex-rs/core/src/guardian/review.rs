@@ -128,14 +128,29 @@ pub(super) async fn guardian_review_session_config(
     session: &Session,
     context: &GuardianReviewContext,
 ) -> anyhow::Result<GuardianReviewSessionConfig> {
+    let route = super::reviewer_route::ReviewerRoute::resolve(session, context).await;
+    guardian_review_session_config_for_route(session, context, &route).await
+}
+
+pub(super) async fn guardian_review_session_config_for_route(
+    session: &Session,
+    context: &GuardianReviewContext,
+    route: &super::reviewer_route::ReviewerRoute,
+) -> anyhow::Result<GuardianReviewSessionConfig> {
     let turn = context.turn();
     let network_proxy = session.services.network_proxy.load_full();
     let live_network_config = match network_proxy.as_ref() {
         Some(network_proxy) => Some(network_proxy.proxy().current_cfg().await?),
         None => None,
     };
-    let (review_model, guardian_model_info) =
-        super::reviewer_config::resolve_review_model(session, context).await;
+    let (review_model, guardian_model_info) = match route {
+        super::reviewer_route::ReviewerRoute::ParentProvider => {
+            super::reviewer_config::resolve_review_model(session, context).await
+        }
+        super::reviewer_route::ReviewerRoute::ChatgptAutoReview { .. } => {
+            super::reviewer_route::ReviewerRoute::resolve_chatgpt_model(session, context).await?
+        }
+    };
     let reviewer_config = session
         .services
         .thread_extension_data
@@ -151,6 +166,7 @@ pub(super) async fn guardian_review_session_config(
         context.personality,
         model_messages,
     )?;
+    route.apply(&mut spawn_config);
     if context.model_info.computer_use_review_required() {
         spawn_config
             .features
@@ -186,7 +202,11 @@ pub(super) async fn guardian_review_session_config(
 /// context. It may still reuse the parent's managed-network allowlist for
 /// read-only checks, but it intentionally runs without inherited exec-policy
 /// rules.
-async fn run_guardian_review_session_before_deadline(
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Adds the reviewer route without changing captured action inputs."
+)]
+pub(super) async fn run_guardian_review_session_before_deadline(
     session: Arc<Session>,
     context: GuardianReviewContext,
     request: GuardianApprovalRequest,
@@ -194,6 +214,7 @@ async fn run_guardian_review_session_before_deadline(
     reasons: ApprovalRequestReasons,
     external_cancel: Option<CancellationToken>,
     deadline: Instant,
+    route: &super::reviewer_route::ReviewerRoute,
 ) -> (GuardianReviewOutcome, GuardianReviewAnalyticsResult) {
     let Some(pool) = session.guardian_review_session() else {
         return (
@@ -203,19 +224,27 @@ async fn run_guardian_review_session_before_deadline(
             GuardianReviewAnalyticsResult::without_session(),
         );
     };
-    let session_config = match guardian_review_session_config(session.as_ref(), &context).await {
-        Ok(session_config) => session_config,
-        Err(err) => {
-            return (
-                GuardianReviewOutcome::Error(GuardianReviewError::prompt_build(err)),
-                GuardianReviewAnalyticsResult::without_session(),
-            );
-        }
-    };
+    let session_config =
+        match guardian_review_session_config_for_route(session.as_ref(), &context, route).await {
+            Ok(session_config) => session_config,
+            Err(err) => {
+                return (
+                    GuardianReviewOutcome::Error(
+                        if err.is::<super::reviewer_route::ReviewerRouteUnavailable>() {
+                            GuardianReviewError::session(err)
+                        } else {
+                            GuardianReviewError::prompt_build(err)
+                        },
+                    ),
+                    GuardianReviewAnalyticsResult::without_session(),
+                );
+            }
+        };
     let (session_outcome, session_analytics_result) =
         Box::pin(super::review_session::run_guardian_review_session(
             pool,
             GuardianReviewSessionParams {
+                reviewer_route: route.clone(),
                 parent_session: Arc::clone(&session),
                 parent_context: context.clone(),
                 parent_history: session.clone_history().await,
@@ -280,6 +309,7 @@ async fn run_guardian_review_session_with_retry_before_deadline(
                 reasons.clone(),
                 external_cancel.clone(),
                 deadline,
+                &super::reviewer_route::ReviewerRoute::ParentProvider,
             );
             async move {
                 let (outcome, analytics) = attempt.await;
