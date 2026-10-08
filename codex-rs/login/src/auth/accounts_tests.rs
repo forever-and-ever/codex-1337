@@ -37,10 +37,10 @@ fn account_transactions_preserve_other_logins_and_reject_stale_writers() -> anyh
     let home = tempfile::tempdir()?;
     let backend: Arc<dyn AuthStorageBackend> =
         Arc::new(FileAuthStorage::new(home.path().to_owned()));
-    let mut alice = account("alice", 0);
+    let mut alice = account("alice", /*revision*/ 0);
     // Browser login can include an exchanged API key alongside explicit ChatGPT auth.
     alice.openai_api_key = Some("exchanged-key".into());
-    let bob = account("bob", 0);
+    let bob = account("bob", /*revision*/ 0);
     backend.save(&alice)?;
     backend.save(&bob)?;
     let scoped = AccountStorage {
@@ -50,18 +50,18 @@ fn account_transactions_preserve_other_logins_and_reject_stale_writers() -> anyh
     assert_eq!(scoped.load()?, Some(alice.clone()));
     assert_eq!(backend.load()?, Some(bob.clone()));
 
-    let refreshed = account("alice", 1);
+    let refreshed = account("alice", /*revision*/ 1);
     assert!(scoped.compare_exchange(&alice, &refreshed)?);
     assert_eq!(backend.load()?, Some(bob));
-    let relogged = account("alice", 2);
+    let relogged = account("alice", /*revision*/ 2);
     backend.save(&relogged)?;
-    assert!(!scoped.compare_exchange(&refreshed, &account("alice", 3))?);
+    assert!(!scoped.compare_exchange(&refreshed, &account("alice", /*revision*/ 3))?);
     assert_eq!(scoped.load()?, Some(relogged.clone()));
     assert!(scoped.delete()?);
-    assert!(!scoped.compare_exchange(&relogged, &account("alice", 4))?);
+    assert!(!scoped.compare_exchange(&relogged, &account("alice", /*revision*/ 4))?);
     assert!(scoped.save(&relogged).is_err());
     assert_eq!(scoped.load()?, None);
-    assert_eq!(backend.load()?, Some(account("bob", 0)));
+    assert_eq!(backend.load()?, Some(account("bob", /*revision*/ 0)));
     Ok(())
 }
 
@@ -69,18 +69,18 @@ fn account_transactions_preserve_other_logins_and_reject_stale_writers() -> anyh
 async fn conversation_selectors_do_not_follow_global_login_or_each_other() -> anyhow::Result<()> {
     let home = tempfile::tempdir()?;
     let backend = FileAuthStorage::new(home.path().to_owned());
-    backend.save(&account("alice", 0))?;
-    backend.save(&account("bob", 0))?;
+    backend.save(&account("alice", /*revision*/ 0))?;
+    backend.save(&account("bob", /*revision*/ 0))?;
     let root = AuthManager::from_auth_for_testing_with_home(
         CodexAuth::from_api_key("test"),
         home.path().to_owned(),
     );
-    let alice_id = identity(&account("alice", 0)).unwrap();
-    let bob_id = identity(&account("bob", 0)).unwrap();
+    let alice_id = identity(&account("alice", /*revision*/ 0)).unwrap();
+    let bob_id = identity(&account("bob", /*revision*/ 0)).unwrap();
     let first = root.for_account(&alice_id).await?;
     let second = first.for_account(&alice_id).await?;
     first.select_account(&bob_id).await?;
-    backend.save(&account("alice", 1))?;
+    backend.save(&account("alice", /*revision*/ 1))?;
     first.reload().await;
     second.reload().await;
     assert_eq!(
@@ -117,8 +117,8 @@ async fn conversation_selectors_do_not_follow_global_login_or_each_other() -> an
     assert_eq!(missing.selected_account_id(), Some(alice_id));
     assert!(missing.auth_cached().is_none());
     assert!(!missing.logout_with_revoke().await?);
-    assert_eq!(backend.load()?, Some(account("bob", 0)));
-    backend.save(&account("alice", 2))?;
+    assert_eq!(backend.load()?, Some(account("bob", /*revision*/ 0)));
+    backend.save(&account("alice", /*revision*/ 2))?;
     assert_eq!(
         missing.auth().await.unwrap().get_account_id().as_deref(),
         Some("alice")

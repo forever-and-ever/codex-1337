@@ -2674,7 +2674,7 @@ impl AuthManager {
     }
 
     fn set_cached_auth(&self, new_auth: Option<CodexAuth>) -> bool {
-        self.set_cached_auth_at_revision(new_auth, None)
+        self.set_cached_auth_at_revision(new_auth, /*revision*/ None)
             .unwrap_or(false)
     }
 
