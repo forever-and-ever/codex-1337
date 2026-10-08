@@ -47,7 +47,7 @@ impl ChatWidget {
     /// that staged entry after dispatch so slash-command recall follows the same "submitted input"
     /// rule as normal text.
     pub(super) fn handle_slash_command_dispatch(&mut self, cmd: SlashCommand) {
-        if self.defer_draft_command(cmd, "", &[]) {
+        if self.defer_draft_command(cmd) {
             return;
         }
         self.dispatch_command(cmd);
@@ -83,7 +83,7 @@ impl ChatWidget {
         args: String,
         text_elements: Vec<TextElement>,
     ) {
-        if self.defer_draft_command(cmd, &args, &text_elements) {
+        if self.defer_draft_command(cmd) {
             return;
         }
         self.dispatch_command_with_args(cmd, args, text_elements);

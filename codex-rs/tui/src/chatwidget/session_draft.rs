@@ -9,36 +9,18 @@ pub(crate) enum SessionDraft {
 }
 
 impl ChatWidget {
-    pub(super) fn defer_draft_command(
-        &mut self,
-        command: SlashCommand,
-        args: &str,
-        elements: &[TextElement],
-    ) -> bool {
+    pub(super) fn defer_draft_command(&mut self, command: SlashCommand) -> bool {
         if self.session_draft.is_none()
             || command.available_when_thread_unavailable()
             || matches!(command, SlashCommand::Model | SlashCommand::Reload)
         {
             return false;
         }
-        // Validation-sensitive commands leave their full draft in the composer. Others have
-        // already extracted arguments and attachments; restore them before confirming startup.
-        if !command.requires_dispatch_validation() {
-            let prefix = format!(
-                "/{}{}",
-                command.command(),
-                if args.is_empty() { "" } else { " " }
-            );
-            let elements = elements
-                .iter()
-                .map(|element| {
-                    element.map_range(|range| ByteRange {
-                        start: range.start + prefix.len(),
-                        end: range.end + prefix.len(),
-                    })
-                })
-                .collect();
-            let message = self.user_message_from_submission(format!("{prefix}{args}"), elements);
+        // Inline-argument and validation-sensitive commands leave their full draft in the
+        // composer. Only a consumed bare command must be restored before confirming startup.
+        if self.bottom_pane.composer_text().is_empty() {
+            let message =
+                self.user_message_from_submission(format!("/{}", command.command()), Vec::new());
             self.restore_user_message_to_composer(message);
         }
         self.input_queue.startup_submission = Some(self.bottom_pane.composer_draft_snapshot());

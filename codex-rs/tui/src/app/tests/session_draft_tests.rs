@@ -43,14 +43,17 @@ async fn session_draft_switches_provider_without_creating_threads_or_losing_inpu
         app.chat_widget.status_account_display(),
         selected_account.as_ref()
     );
-    app.chat_widget.insert_str("/account");
-    app.chat_widget
-        .handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    assert_eq!(app.chat_widget.session_draft, Some(SessionDraft::Starting));
-    app.chat_widget.restore_session_draft();
-    assert_eq!(app.chat_widget.composer_text_with_pending(), "/account");
-    app.chat_widget
-        .handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+    // A deferred command leaves exactly its own draft for startup to replay.
+    for draft in ["/account", "/rename Fix login"] {
+        app.chat_widget.insert_str(draft);
+        app.chat_widget
+            .handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(app.chat_widget.session_draft, Some(SessionDraft::Starting));
+        app.chat_widget.restore_session_draft();
+        assert_eq!(app.chat_widget.composer_text_with_pending(), draft);
+        app.chat_widget
+            .handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+    }
     let original_model = app
         .model_catalog
         .models
