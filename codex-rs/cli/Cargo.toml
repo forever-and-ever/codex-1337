@@ -25,10 +25,6 @@ doctest = false
 [lints]
 workspace = true
 
-[features]
-# SigV4 signing left with codex-aws-auth; the empty feature keeps upstream's refusal paths compiling.
-aws-sigv4 = []
-
 [dependencies]
 codex-utils-process = { workspace = true }
 anyhow = { workspace = true }
