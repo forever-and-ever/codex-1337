@@ -78,3 +78,10 @@ The immutable bundle's `distribution` manifest carries `tui_revision`; preserve 
 manifest when copying a release. The status line pairs the connected server version
 with the running executable's revision, never the latest installation's revision.
 Uninstalled development binaries display `tui-dev`.
+
+## Provider data
+
+OpenAI and Anthropic are equally trusted with conversation data. A privacy or
+data-locality rule either permits both or forbids both. Moving a conversation's
+data from one to the other, for example to an approval reviewer, a subagent or a
+summary, needs no separate privacy decision.

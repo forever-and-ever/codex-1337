@@ -35,3 +35,4 @@ codex-1337: private downstream fork of openai/codex; Linux and fullscreen TUI on
 - Changing Cargo inputs, V8 artifacts, or profiles → `docs/fork.md` Build inputs
 - Snapshot changes → `docs/fork.md` Snapshots
 - Installing or numbering TUI builds → `docs/fork.md` Local TUI releases
+- Deciding which providers may receive conversation data → `docs/fork.md` Provider data
