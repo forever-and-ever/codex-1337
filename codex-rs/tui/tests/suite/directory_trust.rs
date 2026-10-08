@@ -5,18 +5,22 @@ use super::focus_palette::socket_home;
 use super::focus_palette::write_test_config;
 use anyhow::Result;
 use codex_app_server_protocol::JSONRPCMessage;
-use codex_app_server_protocol::RequestId;
 use futures::SinkExt;
 use futures::StreamExt;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::atomic::AtomicUsize;
-use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tokio::net::UnixListener;
 use tokio_tungstenite::tungstenite::Message;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ConsentPhase {
+    Launch,
+    Resume,
+    Moved,
+}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn connected_trust_cancellation_and_acceptance_control_task_creation() -> Result<()> {
@@ -40,9 +44,10 @@ async fn connected_trust_cancellation_and_acceptance_control_task_creation() -> 
         let cwd = repo_root.clone();
         let methods = Arc::new(Mutex::new(Vec::new()));
         let requests = Arc::clone(&methods);
+        let phase = Arc::new(Mutex::new(ConsentPhase::Launch));
+        let server_phase = Arc::clone(&phase);
         let server = tokio::spawn(async move {
             let mut clients = tokio::task::JoinSet::new();
-            let trust_reads = Arc::new(AtomicUsize::new(0));
             loop {
                 let (stream, _) = listener
                     .accept()
@@ -50,7 +55,7 @@ async fn connected_trust_cancellation_and_acceptance_control_task_creation() -> 
                     .expect("accept fake app-server client");
                 let cwd = cwd.clone();
                 let methods = Arc::clone(&requests);
-                let trust_reads = Arc::clone(&trust_reads);
+                let phase = Arc::clone(&server_phase);
                 clients.spawn(async move {
                     let Ok(mut socket) = tokio_tungstenite::accept_async(stream).await else {
                         return Ok::<_, anyhow::Error>(());
@@ -85,11 +90,8 @@ async fn connected_trust_cancellation_and_acceptance_control_task_creation() -> 
                                 json!({"account": {"type": "apiKey"}, "requiresOpenaiAuth": false})
                             }
                             "config/read" => {
-                                if matches!(&request.id, RequestId::String(id) if id.starts_with("tui-project-trust-read-")) {
-                                    trust_reads.fetch_add(1, Ordering::SeqCst);
-                                }
                                 json!({"config": {"model": "gpt-5.6-terra", "projects": {
-                                    cwd.to_string_lossy(): {"trust_level": if trust_reads.load(Ordering::SeqCst) == 4 { Some("trusted") } else { trust_level }},
+                                    cwd.to_string_lossy(): {"trust_level": if *phase.lock().unwrap() == ConsentPhase::Resume { Some("trusted") } else { trust_level }},
                                     other_cwd.to_string_lossy(): {"trust_level": "untrusted"},
                                     cwd.join("moved-folder").to_string_lossy(): {"trust_level": "untrusted"}
                                 }}, "origins": {}, "layers": []})
@@ -116,7 +118,7 @@ async fn connected_trust_cancellation_and_acceptance_control_task_creation() -> 
                                 } else {
                                     thread.clone()
                                 };
-                                if thread["id"] == id && trust_reads.load(Ordering::SeqCst) >= 5 {
+                                if thread["id"] == id && *phase.lock().unwrap() == ConsentPhase::Moved {
                                     thread["cwd"] = json!(cwd.join("moved-folder"));
                                 }
                                 json!({"thread": thread})
@@ -199,6 +201,13 @@ async fn connected_trust_cancellation_and_acceptance_control_task_creation() -> 
             }
             // Confirmations must be fresh input after the protected-screen transition.
             tokio::time::sleep(Duration::from_millis(/*millis*/ 200)).await;
+            // Host routing rewrites request IDs; server state follows the user interaction,
+            // not private request-ID prefixes or incidental configuration read counts.
+            match expected {
+                "Untrusted saved task" => *phase.lock().unwrap() = ConsentPhase::Resume,
+                "Open existing task" => *phase.lock().unwrap() = ConsentPhase::Moved,
+                _ => {}
+            }
             terminal.write_input(input)?;
             terminal.read_output(Duration::from_millis(/*millis*/ 100))?;
         }
