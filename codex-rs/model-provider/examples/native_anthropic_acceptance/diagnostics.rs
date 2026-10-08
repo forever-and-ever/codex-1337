@@ -102,6 +102,7 @@ impl Diagnostics {
                 json!({"kind":"uncertain_transport","message":self.text(&error.to_string())})
             }
             ApiError::ContextWindowExceeded
+            | ApiError::ContentFilter
             | ApiError::QuotaExceeded
             | ApiError::UsageNotIncluded
             | ApiError::Retryable { .. }
