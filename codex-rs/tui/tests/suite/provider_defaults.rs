@@ -1,5 +1,6 @@
 //! Resume and fork picker and --last provider defaults through the real CLI and app server.
 
+use super::focus_palette::socket_home;
 use super::focus_palette::PtyCodex;
 use super::focus_palette::write_test_config;
 use anyhow::Result;
@@ -21,7 +22,7 @@ async fn history_lookup_uses_server_provider_with_local_and_embedded_servers() -
             (false, true, true),
             (false, false, true),
         ] {
-            let home = tempfile::tempdir_in("/tmp")?;
+            let home = socket_home()?;
             write_test_config(home.path(), &cwd)?;
             let config_path = home.path().join("config.toml");
             let config = std::fs::read_to_string(&config_path)?;

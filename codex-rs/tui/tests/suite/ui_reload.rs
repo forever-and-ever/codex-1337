@@ -1,5 +1,6 @@
 //! Exercise the real CLI host, worker replacement, and recovery screen over a PTY.
 
+use super::focus_palette::socket_home;
 use super::focus_palette::PtyCodex;
 use super::focus_palette::write_test_config;
 use anyhow::Result;
@@ -19,7 +20,7 @@ use tokio_tungstenite::tungstenite::Message;
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn live_reload_retains_steering_and_times_out_without_replaying_input() -> Result<()> {
     let root = codex_utils_cargo_bin::repo_root()?;
-    let home = tempfile::tempdir()?;
+    let home = socket_home()?;
     write_test_config(home.path(), &root)?;
     let socket = home.path().join("server.sock");
     let listener = UnixListener::bind(&socket)?;

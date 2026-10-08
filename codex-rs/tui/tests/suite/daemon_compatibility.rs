@@ -1,5 +1,6 @@
 //! Exercises daemon compatibility fallback through real TUI startup.
 
+use super::focus_palette::socket_home;
 use super::focus_palette::PtyCodex;
 use super::focus_palette::write_test_config;
 use anyhow::Context;
@@ -17,7 +18,7 @@ use tokio_tungstenite::tungstenite::Message;
 async fn incompatible_daemon_falls_back_for_default_and_explicit_features() -> Result<()> {
     for scenario in ["default", "explicit", "host policy"] {
         let cwd = codex_utils_cargo_bin::repo_root()?;
-        let home = tempfile::tempdir()?;
+        let home = socket_home()?;
         write_test_config(home.path(), &cwd)?;
         if scenario == "host policy" {
             let path = home.path().join("config.toml");

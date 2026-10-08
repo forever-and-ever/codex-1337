@@ -540,6 +540,12 @@ fn contains_bytes(buffer: &[u8], needle: &[u8]) -> bool {
     buffer.windows(needle.len()).any(|window| window == needle)
 }
 
+pub(super) fn socket_home() -> Result<TempDir> {
+    // IPC must stay short and session-owned, regardless of the runner's scratch root.
+    Ok(tempfile::Builder::new()
+        .prefix("pty-")
+        .tempdir_in(codex_uds::prepare_shared_daemon_socket_directory()?)?)
+}
 pub(super) fn write_test_config(codex_home: &Path, repo_root: &Path) -> Result<()> {
     let repo_root = repo_root.display();
     let config = format!(
@@ -562,7 +568,7 @@ pub(super) fn write_test_config(codex_home: &Path, repo_root: &Path) -> Result<(
 fn no_daemon_skips_startup_and_discovery() -> Result<()> {
     for running in [false, true] {
         let workspace = tempfile::tempdir()?;
-        let home = tempfile::tempdir()?;
+        let home = socket_home()?;
         write_test_config(home.path(), workspace.path())?;
         let config = home.path().join("config.toml");
         let contents = std::fs::read_to_string(&config)?;

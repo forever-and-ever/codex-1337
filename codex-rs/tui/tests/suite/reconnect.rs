@@ -1,5 +1,6 @@
 //! Drives automatic reconnect through the real binary and terminal event loop.
 
+use super::focus_palette::socket_home;
 use super::focus_palette::PtyCodex;
 use super::focus_palette::write_test_config;
 use anyhow::Result;
@@ -18,7 +19,7 @@ use tokio_tungstenite::tungstenite::Message;
 async fn automatic_reconnect_restores_draft_and_routes_new_notifications() -> Result<()> {
     let repo_root = codex_utils_cargo_bin::repo_root()?;
     // The test runner supplies short, disk-backed scratch for control sockets.
-    let codex_home = tempfile::tempdir()?;
+    let codex_home = socket_home()?;
     write_test_config(codex_home.path(), &repo_root)?;
     let config_path = codex_home.path().join("config.toml");
     let config = std::fs::read_to_string(&config_path)?;
