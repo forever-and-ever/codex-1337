@@ -50,6 +50,12 @@ impl HistoryCell for CodeModeWaitCell {
     fn display_lines(&self, _width: u16) -> Vec<Line<'static>> {
         self.0.lines(owner_label(&self.1))
     }
+    /// The wait's step bill follows its fixed label.
+    fn activity_header(&self) -> Option<ActivityHeader> {
+        let mut header = ActivityHeader::at_end(self.display_lines(u16::MAX).first()?);
+        header.expand_on_truncation = false;
+        Some(header)
+    }
     fn raw_lines(&self) -> Vec<Line<'static>> {
         self.display_lines(u16::MAX)
     }
@@ -177,11 +183,6 @@ impl CodeModeCell {
 
     pub(crate) fn terminal(&self) -> bool {
         self.status().is_some()
-    }
-
-    /// The block's lifecycle facts, including the model's waits on it.
-    pub(crate) fn facts(&self) -> &[CodeModeItem] {
-        &self.facts
     }
 
     pub(crate) fn identity(&self) -> String {

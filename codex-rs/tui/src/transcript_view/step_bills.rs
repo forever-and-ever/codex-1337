@@ -1,8 +1,9 @@
 //! What each model request cost and what its step admitted, as measured by the server.
 //!
 //! A step's bill heads the row of its first call, or its Thought when it made none; a row
-//! holding several steps' first calls, such as a Code Mode block with waits, sums them. A
-//! pending step shows only what its response reported; a sealed one adds its own results.
+//! holding several steps' first calls, such as a group of calls, sums them. A Code Mode block
+//! heads its exec's step and each of its wait rows heads its wait's. A pending step shows
+//! only what its response reported; a sealed one adds its own results.
 //! Each arrival heads its own row with its share of the seal; user input, which has no
 //! arrival row, is summed on the step's bill.
 
@@ -97,15 +98,10 @@ impl TranscriptView {
     }
 }
 
-/// The model calls a row presents, including a Code Mode block's exec and its waits.
+/// The model calls whose steps a row heads. A Code Mode block's waits have rows of their own.
 fn call_ids(cell: &dyn HistoryCell) -> Vec<&str> {
     if let Some(block) = cell.as_any().downcast_ref::<CodeModeCell>() {
-        return std::iter::once(block.exec_call_id.as_str())
-            .chain(block.facts().iter().filter_map(|fact| match &fact.event {
-                CodeModeEvent::WaitStarted { call_id } => Some(call_id.as_str()),
-                _ => None,
-            }))
-            .collect();
+        return vec![block.exec_call_id.as_str()];
     }
     if let Some(wait) = cell.as_any().downcast_ref::<CodeModeWaitCell>()
         && let CodeModeEvent::WaitStarted { call_id } | CodeModeEvent::WaitCompleted { call_id } =
