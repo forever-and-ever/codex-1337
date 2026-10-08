@@ -146,6 +146,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::io::ErrorKind;
+use std::num::NonZeroU64;
 use std::num::NonZeroUsize;
 use std::path::Path;
 use std::path::PathBuf;
@@ -1359,6 +1360,8 @@ pub struct MultiAgentV2Config {
     pub disable_direct_message: bool,
     pub message_board_in_memory: bool,
     pub non_code_mode_only: bool,
+    /// None disables batching; TOML 0 resolves to None.
+    pub wait_agent_batch_window_ms: Option<NonZeroU64>,
 }
 
 impl MultiAgentV2Config {
@@ -1380,6 +1383,7 @@ impl MultiAgentV2Config {
             disable_direct_message: false,
             message_board_in_memory: false,
             non_code_mode_only: false,
+            wait_agent_batch_window_ms: NonZeroU64::new(60_000),
         }
     }
 }
@@ -2868,6 +2872,9 @@ fn resolve_multi_agent_v2_config(config_toml: &ConfigToml) -> MultiAgentV2Config
         disable_direct_message,
         message_board_in_memory,
         non_code_mode_only,
+        wait_agent_batch_window_ms: base
+            .and_then(|config| config.wait_agent_batch_window_ms)
+            .map_or(default.wait_agent_batch_window_ms, NonZeroU64::new),
     }
 }
 

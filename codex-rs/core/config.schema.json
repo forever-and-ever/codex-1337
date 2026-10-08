@@ -2784,6 +2784,12 @@
         "usage_hint_text": {
           "type": "string"
         },
+        "wait_agent_batch_window_ms": {
+          "description": "Maximum mailbox batching window; zero disables batching.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "wait_agent_enabled": {
           "description": "Expose the multi-agent v2 `wait_agent` tool.",
           "type": "boolean"
