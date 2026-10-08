@@ -1,4 +1,4 @@
-//! Account reads select a conversation or fresh-root scope without retargeting the global login.
+//! Account requests select a conversation or fresh-root scope without retargeting the global login.
 
 use super::*;
 use codex_app_server_protocol::NewThreadAccountParams;

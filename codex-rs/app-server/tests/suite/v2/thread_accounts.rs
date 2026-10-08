@@ -1,4 +1,6 @@
 use super::*;
+use codex_app_server_protocol::ConsumeAccountRateLimitResetCreditOutcome;
+use codex_app_server_protocol::ConsumeAccountRateLimitResetCreditResponse;
 use codex_app_server_protocol::GetAccountRateLimitsResponse;
 use codex_app_server_protocol::JSONRPCErrorError;
 use codex_app_server_protocol::RequestId;
@@ -12,6 +14,8 @@ use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::TurnStartResponse;
 use codex_app_server_protocol::UserInput;
 use pretty_assertions::assert_eq;
+use wiremock::matchers::body_json;
+use wiremock::matchers::header;
 
 // A stale OpenAI default must never become a prerequisite for a provider that
 // does not use OpenAI authentication, including an installation with no login.
@@ -319,6 +323,20 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
         })
         .mount(&server)
         .await;
+    for id in ["alice", "bob"] {
+        Mock::given(method("POST"))
+            .and(path("/api/codex/rate-limit-reset-credits/consume"))
+            .and(header("chatgpt-account-id", id))
+            .and(header("authorization", format!("Bearer access-{id}")))
+            .and(body_json(
+                json!({"redeem_request_id": format!("reset-{id}")}),
+            ))
+            .respond_with(ResponseTemplate::new(/*s*/ 200).set_body_json(json!({
+                "code": "reset", "windows_reset": 1
+            })))
+            .mount(&server)
+            .await;
+    }
     let mut threads = Vec::new();
     for _ in 0..2 {
         let request = app
@@ -349,11 +367,15 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
             default_saved: true
         }
     );
-    for method in ["account/read", "account/rateLimits/read"] {
+    for method in [
+        "account/read",
+        "account/rateLimits/read",
+        "account/rateLimitResetCredit/consume",
+    ] {
         let request = app
             .send_request(
                 method,
-                Some(json!({"threadId": threads[0], "newThread": {}})),
+                Some(json!({"threadId": threads[0], "newThread": {}, "idempotencyKey": "ambiguous-scope"})),
             )
             .await?;
         let error = timeout(
@@ -371,7 +393,7 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
         );
     }
     // A draft previews the saved default while login detection still sees the
-    // global active login. Neither read may retarget either source of credentials.
+    // global active login. No scoped operation may retarget that global login.
     for (new_thread, id, account_id) in [
         (None, "alice", None),
         (
@@ -385,7 +407,7 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
         ),
         (None, "alice", None),
     ] {
-        // Identity and quota must resolve the same payer without changing the global login.
+        // Identity, quota and spending must resolve one payer without changing the global login.
         let request = app
             .send_request(
                 "account/rateLimits/read",
@@ -397,6 +419,22 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
         let quota: GetAccountRateLimitsResponse =
             timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
         assert_eq!(quota.account_id.as_deref(), Some(id));
+        let request = app
+            .send_request(
+                "account/rateLimitResetCredit/consume",
+                Some(json!({
+                    "newThread": new_thread, "idempotencyKey": format!("reset-{id}")
+                })),
+            )
+            .await?;
+        let consumed: ConsumeAccountRateLimitResetCreditResponse =
+            timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
+        assert_eq!(
+            consumed,
+            ConsumeAccountRateLimitResetCreditResponse {
+                outcome: ConsumeAccountRateLimitResetCreditOutcome::Reset,
+            }
+        );
         let request = app
             .send_get_account_request(GetAccountParams {
                 new_thread,

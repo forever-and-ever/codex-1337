@@ -1,5 +1,41 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "LegacyAppPathString": {
+      "type": "string"
+    },
+    "NewThreadAccountParams": {
+      "properties": {
+        "config": {
+          "additionalProperties": true,
+          "description": "Configuration overrides, as in `thread/start`.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "cwd": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LegacyAppPathString"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Absolute working directory used to resolve the new conversation's configuration."
+        },
+        "modelProvider": {
+          "description": "Provider override, as in `thread/start`; omission uses the server default.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    }
+  },
   "properties": {
     "creditId": {
       "description": "Opaque reset-credit identifier to redeem. When omitted, the backend selects the next available credit.",
@@ -11,6 +47,17 @@
     "idempotencyKey": {
       "description": "Identifies one logical reset attempt. A UUID is recommended; reuse the same value when retrying that attempt.",
       "type": "string"
+    },
+    "newThread": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/NewThreadAccountParams"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Spend a fresh root conversation's reset credit instead of the global login's. Cannot be combined with `threadId`."
     },
     "threadId": {
       "type": [

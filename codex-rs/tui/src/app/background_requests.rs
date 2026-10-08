@@ -166,17 +166,20 @@ impl App {
         credit_id: Option<String>,
     ) {
         let thread_id = self.current_displayed_thread_id();
+        let params = ConsumeAccountRateLimitResetCreditParams {
+            thread_id: thread_id.map(|id| id.to_string()),
+            new_thread: thread_id
+                .is_none()
+                .then(|| app_server.new_thread_account_params(&self.config)),
+            idempotency_key: idempotency_key.clone(),
+            credit_id: credit_id.clone(),
+        };
         let request_handle = app_server.request_handle();
         let app_event_tx = self.app_event_tx.clone();
         tokio::spawn(async move {
             let result = tokio::time::timeout(
                 RATE_LIMIT_RESET_REQUEST_TIMEOUT,
-                consume_rate_limit_reset_credit_request(
-                    request_handle,
-                    thread_id,
-                    idempotency_key.clone(),
-                    credit_id.clone(),
-                ),
+                consume_rate_limit_reset_credit_request(request_handle, params),
             )
             .await
             .map_err(|_| "account/rateLimitResetCredit/consume timed out in TUI".to_string())
@@ -821,20 +824,11 @@ pub(super) async fn fetch_thread_usage(
 
 pub(super) async fn consume_rate_limit_reset_credit_request(
     request_handle: AppServerRequestHandle,
-    thread_id: Option<ThreadId>,
-    idempotency_key: String,
-    credit_id: Option<String>,
+    params: ConsumeAccountRateLimitResetCreditParams,
 ) -> Result<ConsumeAccountRateLimitResetCreditResponse> {
     let request_id = RequestId::String(format!("consume-rate-limit-reset-{}", Uuid::new_v4()));
     request_handle
-        .request_typed(ClientRequest::ConsumeAccountRateLimitResetCredit {
-            request_id,
-            params: ConsumeAccountRateLimitResetCreditParams {
-                thread_id: thread_id.map(|id| id.to_string()),
-                idempotency_key,
-                credit_id,
-            },
-        })
+        .request_typed(ClientRequest::ConsumeAccountRateLimitResetCredit { request_id, params })
         .await
         .wrap_err("account/rateLimitResetCredit/consume failed in TUI")
 }

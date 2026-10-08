@@ -1868,7 +1868,7 @@ impl MessageProcessor {
             }
             ClientRequest::ConsumeAccountRateLimitResetCredit { params, .. } => {
                 self.account_processor
-                    .for_thread(params.thread_id.as_deref())
+                    .for_account_scope(params.thread_id.as_deref(), params.new_thread.as_ref())
                     .await?
                     .consume_account_rate_limit_reset_credit(params)
                     .await

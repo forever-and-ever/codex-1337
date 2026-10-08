@@ -680,6 +680,17 @@
           "description": "Identifies one logical reset attempt. A UUID is recommended; reuse the same value when retrying that attempt.",
           "type": "string"
         },
+        "newThread": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/NewThreadAccountParams"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Spend a fresh root conversation's reset credit instead of the global login's. Cannot be combined with `threadId`."
+        },
         "threadId": {
           "type": [
             "string",

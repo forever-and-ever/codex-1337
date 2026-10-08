@@ -426,12 +426,16 @@ pub enum RateLimitResetCreditStatus {
     Unknown,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct ConsumeAccountRateLimitResetCreditParams {
     #[ts(optional = nullable)]
     pub thread_id: Option<String>,
+    /// Spend a fresh root conversation's reset credit instead of the global login's.
+    /// Cannot be combined with `threadId`.
+    #[ts(optional = nullable)]
+    pub new_thread: Option<NewThreadAccountParams>,
     /// Identifies one logical reset attempt. A UUID is recommended; reuse the same value when
     /// retrying that attempt.
     pub idempotency_key: String,

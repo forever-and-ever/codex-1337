@@ -1162,27 +1162,6 @@ class ConsumeAccountRateLimitResetCreditOutcome(Enum):
     already_redeemed = "alreadyRedeemed"
 
 
-class ConsumeAccountRateLimitResetCreditParams(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    credit_id: Annotated[
-        str | None,
-        Field(
-            alias="creditId",
-            description="Opaque reset-credit identifier to redeem. When omitted, the backend selects the next available credit.",
-        ),
-    ] = None
-    idempotency_key: Annotated[
-        str,
-        Field(
-            alias="idempotencyKey",
-            description="Identifies one logical reset attempt. A UUID is recommended; reuse the same value when retrying that attempt.",
-        ),
-    ]
-    thread_id: Annotated[str | None, Field(alias="threadId")] = None
-
-
 class ConsumeAccountRateLimitResetCreditResponse(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -7961,18 +7940,6 @@ class AccountQuotaReadRequest(BaseModel):
     params: AccountQuotaReadParams
 
 
-class AccountRateLimitResetCreditConsumeRequest(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    id: RequestId
-    method: Annotated[
-        Literal["account/rateLimitResetCredit/consume"],
-        Field(title="Account/rateLimitResetCredit/consumeRequestMethod"),
-    ]
-    params: ConsumeAccountRateLimitResetCreditParams
-
-
 class AccountUsageReadRequest(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -8432,6 +8399,34 @@ class ConfigurationReasoning(BaseModel):
         populate_by_name=True,
     )
     effort: ReasoningEffort
+
+
+class ConsumeAccountRateLimitResetCreditParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    credit_id: Annotated[
+        str | None,
+        Field(
+            alias="creditId",
+            description="Opaque reset-credit identifier to redeem. When omitted, the backend selects the next available credit.",
+        ),
+    ] = None
+    idempotency_key: Annotated[
+        str,
+        Field(
+            alias="idempotencyKey",
+            description="Identifies one logical reset attempt. A UUID is recommended; reuse the same value when retrying that attempt.",
+        ),
+    ]
+    new_thread: Annotated[
+        NewThreadAccountParams | None,
+        Field(
+            alias="newThread",
+            description="Spend a fresh root conversation's reset credit instead of the global login's. Cannot be combined with `threadId`.",
+        ),
+    ] = None
+    thread_id: Annotated[str | None, Field(alias="threadId")] = None
 
 
 class InputImageContentItem(BaseModel):
@@ -11380,6 +11375,18 @@ class AccountRateLimitsReadRequest(BaseModel):
         Literal["account/rateLimits/read"], Field(title="Account/rateLimits/readRequestMethod")
     ]
     params: GetAccountRateLimitsParams | None = None
+
+
+class AccountRateLimitResetCreditConsumeRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[
+        Literal["account/rateLimitResetCredit/consume"],
+        Field(title="Account/rateLimitResetCredit/consumeRequestMethod"),
+    ]
+    params: ConsumeAccountRateLimitResetCreditParams
 
 
 class CommandExecRequest(BaseModel):
