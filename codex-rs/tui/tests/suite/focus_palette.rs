@@ -352,7 +352,9 @@ impl PtyCodex {
             master,
             child,
             parser: vt100::Parser::new(
-                window_size.ws_row, window_size.ws_col, /*scrollback_len*/ 0,
+                window_size.ws_row,
+                window_size.ws_col,
+                /*scrollback_len*/ 0,
             ),
             output: Vec::new(),
             cursor_answered: false,

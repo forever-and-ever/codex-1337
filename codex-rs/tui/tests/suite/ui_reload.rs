@@ -145,7 +145,8 @@ async fn live_reload_retains_steering_and_times_out_without_replaying_input() ->
         .unwrap()
         .iter()
         .filter(|(_, method)| method == "thread/resume")
-        .count() >= 2;
+        .count()
+        >= 2;
     ensure!(
         resumed,
         "reload never resumed: {:?}; screen: {}",

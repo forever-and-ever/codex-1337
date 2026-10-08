@@ -1,7 +1,7 @@
 //! Exercises folder consent against a connected server through the real terminal event loop.
 
-use super::focus_palette::socket_home;
 use super::focus_palette::PtyCodex;
+use super::focus_palette::socket_home;
 use super::focus_palette::write_test_config;
 use anyhow::Result;
 use codex_app_server_protocol::JSONRPCMessage;
