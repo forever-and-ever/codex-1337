@@ -90,7 +90,9 @@ impl<'a> JsonSchemaTypeRenderer<'a> {
     }
 
     fn render(&mut self, schema: &JsonValue) -> String {
-        if self.schema_depth >= MAX_SCHEMA_DEPTH || !self.consume_render_work(1) {
+        if self.schema_depth >= MAX_SCHEMA_DEPTH
+            || !self.consume_render_work(/*rendered_bytes*/ 1)
+        {
             self.render_work_budget_exhausted = true;
             return "unknown".to_string();
         }

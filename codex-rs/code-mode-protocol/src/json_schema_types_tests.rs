@@ -118,7 +118,7 @@ fn rendered_schema_has_a_hard_size_cap() {
     let mut names = BTreeSet::new();
     let schema = json!({ "$ref": "#/$defs/Value", "$defs": { "Value": { "type": "string" } } });
     assert_eq!(
-        render_json_schema_to_typescript_with_budget(&schema, 1, &mut names),
+        render_json_schema_to_typescript_with_budget(&schema, /*max_bytes*/ 1, &mut names),
         RenderedJsonSchema::inline("unknown")
     );
     assert!(names.is_empty());
