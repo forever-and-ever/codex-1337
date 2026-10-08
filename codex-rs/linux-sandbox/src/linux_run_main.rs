@@ -41,6 +41,9 @@ use codex_protocol::protocol::FileSystemSpecialPath;
 use codex_protocol::protocol::NetworkSandboxPolicy;
 use codex_sandboxing::landlock::CODEX_LINUX_SANDBOX_ARG0;
 
+#[path = "mountpoint_reaper.rs"]
+pub(crate) mod mountpoint_reaper;
+
 static BWRAP_CHILD_PID: AtomicI32 = AtomicI32::new(0);
 static PENDING_FORWARDED_SIGNAL: AtomicI32 = AtomicI32::new(0);
 
@@ -575,6 +578,7 @@ fn run_or_exec_bwrap(bwrap_args: crate::bwrap::BwrapArgs) -> ! {
     if bwrap_args.synthetic_mount_targets.is_empty()
         && bwrap_args.protected_create_targets.is_empty()
     {
+        mountpoint_reaper::sweep_unregistered();
         exec_bwrap(bwrap_args.args, bwrap_args.preserved_files);
     }
     run_bwrap_in_child_with_synthetic_mount_cleanup(bwrap_args);
@@ -612,6 +616,7 @@ fn run_bwrap_in_child_with_synthetic_mount_cleanup(bwrap_args: crate::bwrap::Bwr
         exec_bwrap(args, preserved_files);
     }
 
+    mountpoint_reaper::enlist(&synthetic_mount_registrations, pid);
     drop(preserved_files);
     close_child_exec_start_read(exec_start_pipe[0]);
     let protected_create_monitor = ProtectedCreateMonitor::start(&protected_create_targets);
@@ -962,6 +967,7 @@ fn register_synthetic_mount_targets(
     targets: &[crate::bwrap::SyntheticMountTarget],
 ) -> Vec<SyntheticMountTargetRegistration> {
     with_synthetic_mount_registry_lock(|| {
+        mountpoint_reaper::sweep(&synthetic_mount_registry_root());
         targets
             .iter()
             .map(|target| {
@@ -973,7 +979,8 @@ fn register_synthetic_mount_targets(
                     )
                 });
                 let target = if target.preserves_pre_existing_path()
-                    && synthetic_mount_marker_dir_has_active_synthetic_owner(&marker_dir)
+                    && (mountpoint_reaper::vouches(target, &marker_dir)
+                        || synthetic_mount_marker_dir_has_active_synthetic_owner(&marker_dir))
                 {
                     match target.kind() {
                         crate::bwrap::SyntheticMountTargetKind::EmptyFile => {
@@ -989,14 +996,16 @@ fn register_synthetic_mount_targets(
                     target.clone()
                 };
                 let marker_file = marker_dir.join(std::process::id().to_string());
-                fs::write(&marker_file, synthetic_mount_marker_contents(&target)).unwrap_or_else(
-                    |err| {
-                        panic!(
-                            "failed to register synthetic bubblewrap mount target {}: {err}",
-                            target.path().display()
-                        )
-                    },
+                let contents = mountpoint_reaper::marker(
+                    synthetic_mount_marker_contents(&target),
+                    mountpoint_reaper::forge(&target),
                 );
+                fs::write(&marker_file, contents).unwrap_or_else(|err| {
+                    panic!(
+                        "failed to register synthetic bubblewrap mount target {}: {err}",
+                        target.path().display()
+                    )
+                });
                 SyntheticMountTargetRegistration {
                     target,
                     marker_file,
@@ -1022,7 +1031,8 @@ fn register_protected_create_targets(
                     )
                 });
                 let marker_file = marker_dir.join(std::process::id().to_string());
-                fs::write(&marker_file, PROTECTED_CREATE_MARKER).unwrap_or_else(|err| {
+                let contents = mountpoint_reaper::marker(PROTECTED_CREATE_MARKER, None);
+                fs::write(&marker_file, contents).unwrap_or_else(|err| {
                     panic!(
                         "failed to register protected create target {}: {err}",
                         target.path().display()
@@ -1090,7 +1100,7 @@ fn synthetic_mount_marker_dir_has_active_process_matching(
         else {
             continue;
         };
-        if !process_is_active(pid) {
+        if !mountpoint_reaper::registrant_is_live(pid, &path) {
             match fs::remove_file(&path) {
                 Ok(()) => {}
                 Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
@@ -1354,9 +1364,9 @@ pub(crate) fn synthetic_mount_registry_root() -> PathBuf {
 
     REGISTRY_ROOT
         .get_or_init(|| {
-            let runtime = codex_uds::prepare_user_runtime_directory()
+            let runtime = mountpoint_reaper::runtime_directory()
                 .unwrap_or_else(|err| panic!("failed to prepare synthetic mount runtime: {err}"));
-            let registry_root = runtime.join("sandbox-mounts");
+            let registry_root = runtime.join(mountpoint_reaper::REGISTRY);
             // A registry symlink can redirect bookkeeping into a writable root
             // that does not overlap the runtime directory, bypassing its read-only mount.
             assert!(
@@ -1461,6 +1471,7 @@ fn run_bwrap_in_child_capture_stderr(bwrap_args: crate::bwrap::BwrapArgs) -> Str
         exec_bwrap(args, preserved_files);
     }
 
+    mountpoint_reaper::enlist(&synthetic_mount_registrations, pid);
     let signal_forwarders = install_bwrap_signal_forwarders(pid);
     setup_signal_mask.restore();
     // Parent: close the write end and read stderr while the child runs.

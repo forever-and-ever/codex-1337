@@ -1409,7 +1409,9 @@ enum EmptyProtectedMetadataPath {
 }
 
 fn transient_empty_metadata_path(path: &Path) -> Option<EmptyProtectedMetadataPath> {
-    if !path.file_name().is_some_and(is_protected_metadata_name) {
+    if !path.file_name().is_some_and(is_protected_metadata_name)
+        && !crate::linux_run_main::mountpoint_reaper::is_branded_path(path)
+    {
         return None;
     }
 

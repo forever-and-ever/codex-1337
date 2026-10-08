@@ -1,4 +1,5 @@
-//! Approved root metadata writes must not remount targets hidden by executor-side denials.
+//! Root metadata protections, driven through a hermetic outer bubblewrap root
+//! whose fresh runtime directory stands in for a new boot.
 
 use super::codex_linux_sandbox_exe;
 use super::should_skip_bwrap_tests;
@@ -11,7 +12,44 @@ use codex_protocol::permissions::NetworkSandboxPolicy;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use pretty_assertions::assert_eq;
 use std::fs;
+use std::os::unix::fs::MetadataExt;
+use std::path::Path;
 use std::process::Command;
+
+/// A user-namespace root, running as `uid`, with system binaries and an empty
+/// runtime directory.
+fn hermetic_root(bwrap: &Path, uid: u32) -> Command {
+    let mut command = Command::new(bwrap);
+    command.args(
+        format!("--unshare-user --unshare-pid --uid {uid} --gid {uid} --die-with-parent --tmpfs /")
+            .split_whitespace(),
+    );
+    command
+        .args("--ro-bind /usr /usr --ro-bind /etc /etc --proc /proc --dev /dev".split_whitespace());
+    command.args(
+        format!("--dir /tmp --dir /run --dir /run/user --perms 0700 --dir /run/user/{uid}")
+            .split_whitespace(),
+    );
+    for path in ["/bin", "/sbin", "/lib", "/lib64"] {
+        if let Ok(metadata) = fs::symlink_metadata(path) {
+            if metadata.file_type().is_symlink() {
+                command
+                    .arg("--symlink")
+                    .arg(fs::read_link(path).unwrap())
+                    .arg(path);
+            } else {
+                command.args(["--ro-bind", path, path]);
+            }
+        }
+    }
+    command
+}
+
+fn is_namespace_failure(stderr: &str) -> bool {
+    stderr.starts_with("bwrap: Creating new namespace failed")
+        || stderr.contains("No permissions to create a new namespace")
+        || stderr.contains("setting up uid map")
+}
 
 #[tokio::test]
 async fn root_metadata_symlinks_cannot_reopen_approved_denials() {
@@ -58,27 +96,10 @@ async fn root_metadata_symlinks_cannot_reopen_approved_denials() {
                script: &str| {
         let profile =
             PermissionProfile::from_runtime_permissions(policy, NetworkSandboxPolicy::Enabled);
-        let mut command = Command::new(&bwrap);
-        command
-            .args("--unshare-user --uid 0 --gid 0 --die-with-parent --tmpfs /".split_whitespace());
-        command.args(
-            "--ro-bind /usr /usr --ro-bind /etc /etc --proc /proc --dev /dev".split_whitespace(),
-        );
-        command.args("--dir /run --dir /run/user --perms 0700 --dir /run/user/0 --dir /.agents --symlink /private-link /.git".split_whitespace());
+        let mut command = hermetic_root(&bwrap, /*uid*/ 0);
+        command.args("--dir /.agents --symlink /private-link /.git".split_whitespace());
         command.args(["--symlink", codex_target, "/.codex"]);
         command.args(["--symlink", "/private/reopened", "/private-link"]);
-        for path in ["/bin", "/sbin", "/lib", "/lib64"] {
-            if let Ok(metadata) = fs::symlink_metadata(path) {
-                if metadata.file_type().is_symlink() {
-                    command
-                        .arg("--symlink")
-                        .arg(fs::read_link(path).unwrap())
-                        .arg(path);
-                } else {
-                    command.args(["--ro-bind", path, path]);
-                }
-            }
-        }
         command.arg("--bind").arg(&work).arg("/tmp");
         command.arg("--bind").arg(&private).arg(private_mount);
         if private_mount != "/private" {
@@ -107,10 +128,7 @@ async fn root_metadata_symlinks_cannot_reopen_approved_denials() {
     "#;
     let output = run(&private_denied, "/private", "/private/reopened", script);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    if stderr.starts_with("bwrap: Creating new namespace failed")
-        || stderr.contains("No permissions to create a new namespace")
-        || stderr.contains("setting up uid map")
-    {
+    if is_namespace_failure(&stderr) {
         eprintln!("skipping root metadata test: {stderr}");
         return;
     }
@@ -168,3 +186,96 @@ async fn root_metadata_symlinks_cannot_reopen_approved_denials() {
     ), "{output:?}");
     assert!(output.stdout.is_empty(), "{output:?}");
 }
+
+/// Cleanup of a missing metadata path's mountpoint runs only when the wrapper
+/// exits normally. Any later run of the boot must reap it, even in a root it
+/// does not use; after a reboot erases the registry, a run that reuses the root
+/// must reap it.
+#[tokio::test]
+async fn mountpoints_of_killed_sandboxes_are_reaped_by_later_runs() {
+    if should_skip_bwrap_tests().await {
+        return;
+    }
+    let Some(bwrap) = codex_sandboxing::find_system_bwrap_in_path() else {
+        eprintln!("skipping mountpoint reaping test: system bubblewrap is unavailable");
+        return;
+    };
+    let fixture = tempfile::tempdir_in("/tmp").unwrap();
+    for dir in ["first", "second"] {
+        fs::create_dir(fixture.path().join(dir)).unwrap();
+    }
+    fs::copy(codex_linux_sandbox_exe(), fixture.path().join("sandbox")).unwrap();
+    let profile = |root: &str| {
+        let root = AbsolutePathBuf::from_absolute_path(root).unwrap();
+        serde_json::to_string(&PermissionProfile::workspace_write_with(
+            &[root],
+            NetworkSandboxPolicy::Enabled,
+            /*exclude_tmpdir_env_var*/ true,
+            /*exclude_slash_tmp*/ true,
+        ))
+        .unwrap()
+    };
+    // Each boot gets a fresh runtime registry. Keeping the caller's uid lets
+    // the test run inside an outer sandbox.
+    let uid = fs::metadata(fixture.path()).unwrap().uid();
+    let boot = |script: &str| {
+        let output = hermetic_root(&bwrap, uid)
+            .arg("--bind")
+            .arg(fixture.path())
+            .arg("/fx")
+            .args(["--setenv", "PATH", "/usr/bin:/bin"])
+            .args(["--", "/bin/bash", "-c"])
+            .arg(format!("{KILL_AND_REAP}{script}"))
+            .args(["boot", &profile("/fx/first"), &profile("/fx/second")])
+            .output()
+            .unwrap();
+        (
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        )
+    };
+
+    let (status, stderr) = boot("kill_mid_run; reap; kill_mid_run");
+    if is_namespace_failure(&stderr) {
+        eprintln!("skipping mountpoint reaping test: {stderr}");
+        return;
+    }
+    assert_eq!(status, Some(0), "{stderr}");
+    let probe = fixture.path().join("probe");
+    fs::write(&probe, "").unwrap();
+    if rustix::fs::setxattr(&probe, "user.probe", b"", rustix::fs::XattrFlags::empty()).is_err() {
+        eprintln!("skipping reboot reaping: the fixture filesystem lacks user xattrs");
+        return;
+    }
+    let (status, stderr) = boot("reuse");
+    assert_eq!(status, Some(0), "{stderr}");
+}
+
+const KILL_AND_REAP: &str = r#"
+set -eu
+first=$1 second=$2
+# SIGKILL a wrapper mid-run, as a timeout or interrupt does, and wait for its
+# sandbox to die; the mountpoints it created stay behind.
+kill_mid_run() {
+    rm -f /fx/pipe
+    mkfifo /fx/pipe
+    /fx/sandbox --sandbox-policy-cwd /fx/first --permission-profile "$first" \
+        -- /bin/sh -c 'echo ready; exec sleep 60' > /fx/pipe &
+    wrapper=$!
+    exec 3< /fx/pipe
+    read -r _ <&3
+    kill -KILL "$wrapper"
+    cat <&3 > /dev/null
+    exec 3<&-
+    test -d /fx/first/.git || exit 21
+}
+reap() {
+    /fx/sandbox --sandbox-policy-cwd /fx/second --permission-profile "$second" -- /bin/true
+    test -z "$(ls -A /fx/first)" || exit 22
+    test -z "$(ls -A /fx/second)" || exit 23
+}
+reuse() {
+    /fx/sandbox --sandbox-policy-cwd /fx/first --permission-profile "$first" -- /bin/true
+    test -z "$(ls -A /fx/first)" || exit 24
+}
+"#;
