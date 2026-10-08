@@ -225,6 +225,11 @@ async fn start_only_rejects_active_turn_without_injecting() {
         )
         .await;
 
+    assert_eq!(
+        session.new_inject_items_context().await.sub_id,
+        turn_context.sub_id,
+    );
+
     let input = SubmittedTurnInput::ResponseItem(user_message("synthetic idle input"));
     let submission = submit_start_only(&session, input).await;
 
@@ -244,6 +249,9 @@ async fn start_only_rejects_active_turn_without_injecting() {
     );
 
     session.abort_all_tasks(TurnAbortReason::Interrupted).await;
+    assert_eq!(session.new_inject_items_context().await.sub_id, "inject-0");
+    assert_eq!(session.new_inject_items_context().await.sub_id, "inject-1");
+    assert_eq!(session.new_default_turn().await.sub_id, "auto-compact-0");
 }
 
 #[tokio::test]

@@ -481,6 +481,13 @@ async fn local_preparation_is_durable_before_first_input_and_survives_restart(
         .into_iter()
         .filter_map(|item| match item {
             RolloutItem::ResponseItem(envelope) if envelope.item.id() == prepared.id() => {
+                assert!(
+                    envelope
+                        .item
+                        .turn_id()
+                        .is_some_and(|id| id.starts_with("inject-")),
+                    "pre-turn preparation must not consume a compaction identity",
+                );
                 // Core preserves this ID and adds runtime turn/creation-time metadata.
                 Some(responses::strip_metadata(envelope.item))
             }

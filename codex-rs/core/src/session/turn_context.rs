@@ -1346,21 +1346,49 @@ impl Session {
 
     /// Builds a context without starting work or changing the current environments.
     pub(crate) async fn new_default_turn(&self) -> Arc<TurnContext> {
-        self.new_default_turn_for(TurnContextBuildMode::Full).await
+        self.new_default_turn_for(self.next_internal_sub_id(), TurnContextBuildMode::Full)
+            .await
     }
 
     /// Captures current recording settings without discovering skills.
     /// This context must not be used to capture or execute a step.
     pub(crate) async fn new_inject_items_context(&self) -> Arc<TurnContext> {
-        self.new_default_turn_for(TurnContextBuildMode::InjectItems)
+        self.new_default_turn_for(
+            self.inject_items_sub_id().await,
+            TurnContextBuildMode::InjectItems,
+        )
+        .await
+    }
+
+    pub(crate) async fn new_initial_inject_items_context(&self) -> Arc<TurnContext> {
+        self.new_default_turn_for(self.inject_items_sub_id().await, TurnContextBuildMode::Full)
             .await
     }
 
-    async fn new_default_turn_for(&self, build_mode: TurnContextBuildMode) -> Arc<TurnContext> {
+    async fn inject_items_sub_id(&self) -> String {
+        self.active_turn
+            .lock()
+            .await
+            .as_ref()
+            .and_then(|turn| turn.task.as_ref())
+            .map(|task| task.turn_context.sub_id.clone())
+            .unwrap_or_else(|| {
+                let id = self
+                    .next_inject_sub_id
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                format!("inject-{id}")
+            })
+    }
+
+    async fn new_default_turn_for(
+        &self,
+        sub_id: String,
+        build_mode: TurnContextBuildMode,
+    ) -> Arc<TurnContext> {
         let session_configuration = self.default_turn_configuration().await;
         let turn_environments = self.services.turn_environments.snapshot().await;
         self.new_turn_context_from_configuration(
-            self.next_internal_sub_id(),
+            sub_id,
             session_configuration,
             turn_environments,
             NewTurnContextOptions::default(),
