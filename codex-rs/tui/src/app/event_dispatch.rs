@@ -848,19 +848,21 @@ impl App {
                             .add_error_message(format!("Failed to pause task goal: {error}"));
                         return Ok(AppRunControl::Continue);
                     }
-                    let turn_id = self
-                        .active_turn_id_for_thread(thread_id)
-                        .await
-                        .unwrap_or_default();
-                    match app_server.turn_interrupt(thread_id, turn_id).await {
-                        Ok(()) => {
-                            self.app_event_tx
-                                .send(AppEvent::Exit(ExitMode::ShutdownAfterInterrupt));
-                        }
-                        Err(error) => {
-                            self.chat_widget
-                                .add_error_message(format!("Failed to interrupt task: {error}"));
-                        }
+                    let interrupt = if let Some(turn_id) =
+                        self.active_turn_id_for_thread(thread_id).await
+                    {
+                        app_server.turn_interrupt(thread_id, turn_id).await
+                    } else {
+                        Ok(())
+                    };
+                    if let Err(error) = interrupt
+                        && self.active_turn_id_for_thread(thread_id).await.is_some()
+                    {
+                        self.chat_widget
+                            .add_error_message(format!("Failed to interrupt task: {error}"));
+                    } else {
+                        self.app_event_tx
+                            .send(AppEvent::Exit(ExitMode::ShutdownAfterInterrupt));
                     }
                 }
             },
