@@ -1575,6 +1575,13 @@
           ],
           "description": "Cross-context message admission, independent of user input."
         },
+        "contextRole": {
+          "description": "Explicit description of this context for other agents; never inferred.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "createdAt": {
           "description": "Unix timestamp (in seconds) when the thread was created.",
           "format": "int64",

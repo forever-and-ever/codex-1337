@@ -1651,6 +1651,7 @@ fn fill_missing_thread_item_metadata_preserves_identity_and_prefers_state_git_fi
         project_id: None,
         daybreak_enabled: None,
         comms: Default::default(),
+        context_role: None,
         section: None,
         cwd: None,
         git_branch: Some("filesystem-branch".to_string()),
@@ -1681,6 +1682,7 @@ fn fill_missing_thread_item_metadata_preserves_identity_and_prefers_state_git_fi
         project_id: None,
         daybreak_enabled: Some(true),
         comms: Default::default(),
+        context_role: None,
         section: Some(codex_state::ThreadSection {
             id: codex_state::PINNED_THREAD_SECTION_ID.to_string(),
             name: codex_state::PINNED_THREAD_SECTION_NAME.to_string(),

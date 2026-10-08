@@ -5778,6 +5778,23 @@
       ],
       "type": "object"
     },
+    "ThreadSetContextRoleParams": {
+      "properties": {
+        "contextRole": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "threadId"
+      ],
+      "type": "object"
+    },
     "ThreadSetNameParams": {
       "properties": {
         "conflictThreadIds": {
@@ -6858,6 +6875,30 @@
         "params"
       ],
       "title": "Thread/farmRequest",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "enum": [
+            "thread/contextRole/set"
+          ],
+          "title": "Thread/contextRole/setRequestMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ThreadSetContextRoleParams"
+        }
+      },
+      "required": [
+        "id",
+        "method",
+        "params"
+      ],
+      "title": "Thread/contextRole/setRequest",
       "type": "object"
     },
     {

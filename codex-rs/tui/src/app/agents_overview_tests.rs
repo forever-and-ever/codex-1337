@@ -259,6 +259,7 @@ fn overview_thread(
         project_id: None,
         daybreak_enabled: None,
         comms: Default::default(),
+        context_role: None,
         session_id: parent_thread_id.unwrap_or(thread_id).to_string(),
         forked_from_id: None,
         parent_thread_id: None,

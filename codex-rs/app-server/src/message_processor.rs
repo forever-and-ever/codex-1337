@@ -1373,6 +1373,9 @@ impl MessageProcessor {
                     .thread_decrement_elicitation(params)
                     .await
             }
+            ClientRequest::ThreadSetContextRole { params, .. } => {
+                self.thread_processor.thread_set_context_role(params).await
+            }
             ClientRequest::ThreadSetName { params, .. } => {
                 self.thread_processor
                     .thread_set_name(request_id.clone(), params)

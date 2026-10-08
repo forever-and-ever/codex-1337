@@ -235,6 +235,7 @@ mod tests {
             project_id: None,
             daybreak_enabled: None,
             comms: Default::default(),
+            context_role: None,
             history_mode: Default::default(),
             model_provider: "mock_provider".to_string(),
             model: None,

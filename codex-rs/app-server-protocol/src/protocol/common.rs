@@ -602,6 +602,11 @@ client_request_definitions! {
         serialization: None,
         response: v2::ThreadFarmResponse,
     },
+    ThreadSetContextRole => "thread/contextRole/set" {
+        params: v2::ThreadSetContextRoleParams,
+        serialization: thread_id(params.thread_id),
+        response: v2::ThreadSetContextRoleResponse,
+    },
     ThreadSetName => "thread/name/set" {
         params: v2::ThreadSetNameParams,
         serialization: thread_id(params.thread_id),
@@ -3279,6 +3284,7 @@ mod tests {
                     name: None,
                     daybreak_enabled: None,
                     comms: Default::default(),
+                    context_role: None,
                     turns: Vec::new(),
                 },
                 model: "gpt-5".to_string(),

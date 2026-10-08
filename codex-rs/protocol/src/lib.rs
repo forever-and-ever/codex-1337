@@ -1,3 +1,5 @@
+mod context_role;
+pub use context_role::ContextRole;
 mod comms_gate;
 pub use comms_gate::CommsGate;
 pub mod account;

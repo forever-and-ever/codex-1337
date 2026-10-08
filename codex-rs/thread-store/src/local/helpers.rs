@@ -177,6 +177,7 @@ pub(super) fn stored_thread_from_rollout_item(
         project_id: item.project_id,
         daybreak_enabled: item.daybreak_enabled,
         comms: item.comms,
+        context_role: item.context_role,
         cwd: item.cwd.unwrap_or_default(),
         cli_version: item.cli_version.unwrap_or_default(),
         originator: item.originator,

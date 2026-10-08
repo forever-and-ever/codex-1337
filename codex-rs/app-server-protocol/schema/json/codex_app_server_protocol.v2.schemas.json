@@ -2205,6 +2205,30 @@
             },
             "method": {
               "enum": [
+                "thread/contextRole/set"
+              ],
+              "title": "Thread/contextRole/setRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ThreadSetContextRoleParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Thread/contextRole/setRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "enum": [
                 "thread/name/set"
               ],
               "title": "Thread/name/setRequestMethod",
@@ -19818,6 +19842,13 @@
           ],
           "description": "Cross-context message admission, independent of user input."
         },
+        "contextRole": {
+          "description": "Explicit description of this context for other agents; never inferred.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "createdAt": {
           "description": "Unix timestamp (in seconds) when the thread was created.",
           "format": "int64",
@@ -23847,6 +23878,38 @@
         "section"
       ],
       "title": "ThreadSectionUpdateResponse",
+      "type": "object"
+    },
+    "ThreadSetContextRoleParams": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "contextRole": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "threadId"
+      ],
+      "title": "ThreadSetContextRoleParams",
+      "type": "object"
+    },
+    "ThreadSetContextRoleResponse": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "contextRole": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "title": "ThreadSetContextRoleResponse",
       "type": "object"
     },
     "ThreadSetNameParams": {

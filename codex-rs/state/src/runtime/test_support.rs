@@ -78,6 +78,7 @@ pub(super) fn test_thread_metadata(
         project_id: None,
         daybreak_enabled: None,
         comms: Default::default(),
+        context_role: None,
         git_sha: None,
         git_branch: None,
         git_origin_url: None,

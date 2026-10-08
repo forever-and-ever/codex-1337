@@ -213,6 +213,8 @@ mod steering;
 
 #[path = "server_coordination_comms_tests.rs"]
 mod comms;
+#[path = "server_coordination_context_role_tests.rs"]
+mod context_role;
 
 #[path = "server_coordination_policy_tests.rs"]
 mod policy;

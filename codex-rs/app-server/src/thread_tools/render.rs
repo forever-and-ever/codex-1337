@@ -11,7 +11,7 @@ use serde_json::Value;
 use serde_json::json;
 
 pub(super) fn thread_summary(thread: &Thread) -> Value {
-    json!({
+    let mut summary = json!({
         "id": thread.id,
         "kind": "codex",
         "projectId": thread.project_id,
@@ -25,7 +25,11 @@ pub(super) fn thread_summary(thread: &Thread) -> Value {
         },
         "cwd": thread.cwd,
         "updatedAt": thread.updated_at
-    })
+    });
+    if let Some(role) = &thread.context_role {
+        summary["contextRole"] = json!(role);
+    }
+    summary
 }
 
 pub(super) fn turn_summary(turn: &Turn, include_outputs: bool, output_chars: usize) -> Value {

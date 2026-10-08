@@ -56,6 +56,8 @@ pub enum SlashCommand {
     Mention,
     Status,
     Comms,
+    #[strum(serialize = "contextrole")]
+    ContextRole,
     Daemon,
     Reload,
     Warnings,
@@ -125,6 +127,7 @@ impl SlashCommand {
             SlashCommand::Reload => "reload the UI without interrupting your agents",
             SlashCommand::Warnings => "view retained warnings and diagnostic details",
             SlashCommand::Comms => "show or change cross-context message access",
+            SlashCommand::ContextRole => "show or set this context's role for other agents",
             SlashCommand::Status => "show current session configuration and token usage",
             SlashCommand::Cd => "change the current working directory",
             SlashCommand::Pwd => "show the current working directory",
@@ -181,6 +184,7 @@ impl SlashCommand {
             self,
             SlashCommand::Review
                 | SlashCommand::Comms
+                | SlashCommand::ContextRole
                 | SlashCommand::Account
                 | SlashCommand::Rename
                 | SlashCommand::New
@@ -294,6 +298,7 @@ impl SlashCommand {
             | SlashCommand::Hooks
             | SlashCommand::Status
             | SlashCommand::Comms
+            | SlashCommand::ContextRole
             | SlashCommand::Daemon
             | SlashCommand::Reload
             | SlashCommand::Warnings

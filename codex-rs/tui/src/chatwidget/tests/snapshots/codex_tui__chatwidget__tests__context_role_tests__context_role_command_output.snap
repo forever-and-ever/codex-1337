@@ -1,0 +1,13 @@
+---
+source: tui/src/chatwidget/tests/context_role_tests.rs
+expression: "output.join(\"\\n\")"
+---
+• No context role.
+
+• Context role: Review agent boundaries.
+
+• Context role: Review agent boundaries.
+
+• Context role cleared.
+
+■ context role must be a single line without control characters

@@ -609,6 +609,8 @@ export type { ThreadSectionMoveParams } from "./ThreadSectionMoveParams";
 export type { ThreadSectionMoveResponse } from "./ThreadSectionMoveResponse";
 export type { ThreadSectionUpdateParams } from "./ThreadSectionUpdateParams";
 export type { ThreadSectionUpdateResponse } from "./ThreadSectionUpdateResponse";
+export type { ThreadSetContextRoleParams } from "./ThreadSetContextRoleParams";
+export type { ThreadSetContextRoleResponse } from "./ThreadSetContextRoleResponse";
 export type { ThreadSetNameParams } from "./ThreadSetNameParams";
 export type { ThreadSetNameResponse } from "./ThreadSetNameResponse";
 export type { ThreadSettings } from "./ThreadSettings";

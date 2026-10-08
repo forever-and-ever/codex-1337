@@ -53,6 +53,7 @@ SELECT
     threads.project_id,
     threads.daybreak_enabled,
     threads.comms,
+    threads.context_role,
     threads.git_sha,
     threads.git_branch,
     threads.git_origin_url
@@ -654,8 +655,9 @@ INSERT INTO threads (
     memory_mode,
     project_id,
     daybreak_enabled,
-    comms
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    comms,
+    context_role
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO NOTHING
             "#,
         )
@@ -710,6 +712,7 @@ ON CONFLICT(id) DO NOTHING
         .bind(metadata.project_id.as_deref())
         .bind(metadata.daybreak_enabled)
         .bind(metadata.comms.as_str())
+        .bind(metadata.context_role.as_ref().map(codex_protocol::ContextRole::as_str))
         .execute(self.pool.as_ref())
         .await?;
         self.insert_thread_spawn_edge_from_source_if_absent(metadata.id, metadata.source.as_str())
@@ -960,8 +963,9 @@ INSERT INTO threads (
     memory_mode,
     project_id,
     daybreak_enabled,
-    comms
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    comms,
+    context_role
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
     rollout_path = excluded.rollout_path,
     created_at = excluded.created_at,
@@ -1052,6 +1056,7 @@ ON CONFLICT(id) DO UPDATE SET
         .bind(metadata.project_id.as_deref())
         .bind(metadata.daybreak_enabled)
         .bind(metadata.comms.as_str())
+        .bind(metadata.context_role.as_ref().map(codex_protocol::ContextRole::as_str))
         .execute(self.pool.as_ref())
         .await?;
         self.insert_thread_spawn_edge_from_source_if_absent(metadata.id, metadata.source.as_str())
@@ -1345,6 +1350,7 @@ SELECT
     threads.project_id,
     threads.daybreak_enabled,
     threads.comms,
+    threads.context_role,
     threads.git_sha,
     threads.git_branch,
     threads.git_origin_url

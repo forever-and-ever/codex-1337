@@ -556,12 +556,17 @@ pub(crate) enum AppEvent {
         text: String,
     },
 
-    /// Persist a branch discovered from an App git-action directive into thread metadata.
+    ContextRole {
+        thread_id: ThreadId,
+        command: crate::chatwidget::ContextRoleCommand,
+    },
+
     Comms {
         thread_id: ThreadId,
         comms: Option<CommsGate>,
     },
 
+    /// Persist a branch discovered from an App git-action directive into thread metadata.
     SyncThreadGitBranch {
         thread_id: ThreadId,
         branch: String,

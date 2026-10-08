@@ -317,6 +317,8 @@ mod hooks;
 mod interaction;
 pub(crate) use interaction::KeyEventAction;
 mod comms;
+mod context_role;
+pub(crate) use context_role::ContextRoleCommand;
 mod skills;
 mod slash_dispatch;
 mod worktree_picker;

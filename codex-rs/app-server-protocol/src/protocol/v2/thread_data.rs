@@ -293,6 +293,8 @@ pub struct Thread {
     pub daybreak_enabled: Option<bool>,
     /// Cross-context message admission, independent of user input.
     pub comms: CommsGate,
+    /// Explicit description of this context for other agents; never inferred.
+    pub context_role: Option<String>,
     /// Only populated on `thread/resume`, `thread/fork`, and `thread/read`
     /// (when `includeTurns` is true) responses.
     /// For all other responses and notifications returning a Thread,
@@ -344,6 +346,7 @@ struct ThreadCompatibility {
     daybreak_enabled: Option<bool>,
     #[serde(default)]
     comms: CommsGate,
+    context_role: Option<String>,
     turns: Vec<Turn>,
 }
 
@@ -387,6 +390,7 @@ impl<'de> Deserialize<'de> for Thread {
             name: thread.name,
             daybreak_enabled: thread.daybreak_enabled,
             comms: thread.comms,
+            context_role: thread.context_role,
             turns: thread.turns,
         })
     }

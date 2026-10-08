@@ -217,6 +217,7 @@ SELECT
     threads.project_id,
     threads.daybreak_enabled,
     threads.comms,
+    threads.context_role,
     threads.git_sha,
     threads.git_branch,
     threads.git_origin_url
@@ -612,6 +613,7 @@ SELECT
     threads.project_id,
     threads.daybreak_enabled,
     threads.comms,
+    threads.context_role,
     threads.git_sha,
     threads.git_branch,
     threads.git_origin_url

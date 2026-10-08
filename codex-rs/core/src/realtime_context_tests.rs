@@ -56,6 +56,7 @@ fn stored_thread(cwd: &str, title: &str, first_user_message: &str) -> StoredThre
         project_id: None,
         daybreak_enabled: None,
         comms: Default::default(),
+        context_role: None,
         section: None,
         section_position: None,
         section_entered_at: None,

@@ -635,6 +635,7 @@ fn sample_thread(thread_id: &str) -> Thread {
         project_id: None,
         daybreak_enabled: None,
         comms: Default::default(),
+        context_role: None,
         history_mode: Default::default(),
         model_provider: "openai".to_string(),
         model: None,

@@ -5,6 +5,7 @@
 
 mod account;
 mod comms;
+mod context_role;
 mod external_agent_config;
 pub(crate) mod fs;
 mod history;
@@ -4045,6 +4046,7 @@ mod tests {
                 project_id: None,
                 daybreak_enabled: None,
                 comms: Default::default(),
+                context_role: None,
                 history_mode: Default::default(),
                 model_provider: "openai".to_string(),
                 model: None,

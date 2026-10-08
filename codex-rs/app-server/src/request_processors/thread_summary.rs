@@ -293,6 +293,7 @@ pub(crate) fn summary_to_thread(
         name: None,
         daybreak_enabled: None,
         comms: Default::default(),
+        context_role: None,
         turns: Vec::new(),
     }
 }

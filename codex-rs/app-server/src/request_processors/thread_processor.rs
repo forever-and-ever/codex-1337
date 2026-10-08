@@ -14,6 +14,9 @@ pub(crate) use coordination::ThreadCoordinationService;
 #[path = "thread_naming.rs"]
 mod thread_naming;
 
+#[path = "context_role.rs"]
+mod context_role;
+
 #[path = "jira.rs"]
 mod jira;
 
@@ -6289,6 +6292,7 @@ pub(crate) fn thread_from_stored_thread(
         name: thread.name,
         daybreak_enabled: thread.daybreak_enabled,
         comms: thread.comms,
+        context_role: thread.context_role.map(|role| role.as_str().to_owned()),
         turns: Vec::new(),
     };
     (thread, history)
@@ -6477,6 +6481,7 @@ fn build_thread_from_snapshot(
         name: None,
         daybreak_enabled: None,
         comms: Default::default(),
+        context_role: None,
         turns: Vec::new(),
     }
 }

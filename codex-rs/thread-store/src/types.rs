@@ -644,6 +644,7 @@ pub struct StoredThread {
     pub daybreak_enabled: Option<bool>,
     #[serde(default)]
     pub comms: CommsGate,
+    pub context_role: Option<codex_protocol::ContextRole>,
     /// Working directory captured for the thread.
     pub cwd: PathBuf,
     /// CLI version captured for the thread.
@@ -820,6 +821,12 @@ pub struct ThreadMetadataPatch {
     /// User-selected Daybreak preference; omission leaves it unchanged.
     pub daybreak_enabled: Option<bool>,
     pub comms: Option<CommsGate>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "optional_option"
+    )]
+    pub context_role: ClearableField<codex_protocol::ContextRole>,
 }
 
 impl ThreadMetadataPatch {
@@ -912,6 +919,9 @@ impl ThreadMetadataPatch {
         if next.project_id.is_some() {
             self.project_id = next.project_id;
         }
+        if next.context_role.is_some() {
+            self.context_role = next.context_role;
+        }
         if next.comms.is_some() {
             self.comms = next.comms;
         }
@@ -953,6 +963,7 @@ impl ThreadMetadataPatch {
             && self.project_id.is_none()
             && self.daybreak_enabled.is_none()
             && self.comms.is_none()
+            && self.context_role.is_none()
     }
 }
 

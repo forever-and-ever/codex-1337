@@ -480,6 +480,7 @@ mod thread_processor_behavior_tests {
             project_id: None,
             daybreak_enabled: None,
             comms: Default::default(),
+            context_role: None,
             cwd: PathBuf::from("/tmp"),
             cli_version: "0.0.0".to_string(),
             source: SessionSource::Cli,

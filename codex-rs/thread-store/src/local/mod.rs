@@ -1,4 +1,5 @@
 mod archive_thread;
+mod context_role;
 mod create_thread;
 mod delete_thread;
 mod helpers;

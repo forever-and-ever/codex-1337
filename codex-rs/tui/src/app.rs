@@ -261,6 +261,7 @@ mod queued_messages;
 mod rate_limit_refresh;
 pub(crate) use queued_messages::QueueEvent;
 mod comms;
+mod context_role;
 mod mouse_paste;
 mod realtime_delivery;
 mod realtime_settings;

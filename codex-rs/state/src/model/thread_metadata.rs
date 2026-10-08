@@ -189,6 +189,7 @@ pub struct ThreadMetadata {
     /// User-selected Daybreak preference, absent until explicitly set.
     pub daybreak_enabled: Option<bool>,
     pub comms: CommsGate,
+    pub context_role: Option<codex_protocol::ContextRole>,
     /// The git commit SHA, if known.
     pub git_sha: Option<String>,
     /// The git branch name, if known.
@@ -343,6 +344,7 @@ impl ThreadMetadataBuilder {
             project_id: None,
             daybreak_enabled: None,
             comms: Default::default(),
+            context_role: None,
             git_sha: self.git_sha.clone(),
             git_branch: self.git_branch.clone(),
             git_origin_url: self.git_origin_url.clone(),
@@ -482,6 +484,9 @@ impl ThreadMetadata {
         if self.project_id != other.project_id {
             diffs.push("project_id");
         }
+        if self.context_role != other.context_role {
+            diffs.push("context_role");
+        }
         if self.comms != other.comms {
             diffs.push("comms");
         }
@@ -542,6 +547,7 @@ pub(crate) struct ThreadRow {
     project_id: Option<String>,
     daybreak_enabled: Option<bool>,
     comms: String,
+    context_role: Option<String>,
     git_sha: Option<String>,
     git_branch: Option<String>,
     git_origin_url: Option<String>,
@@ -585,6 +591,7 @@ impl ThreadRow {
             project_id: row.try_get("project_id")?,
             daybreak_enabled: row.try_get("daybreak_enabled")?,
             comms: row.try_get("comms")?,
+            context_role: row.try_get("context_role")?,
             git_sha: row.try_get("git_sha")?,
             git_branch: row.try_get("git_branch")?,
             git_origin_url: row.try_get("git_origin_url")?,
@@ -632,6 +639,7 @@ impl TryFrom<ThreadRow> for ThreadMetadata {
             project_id,
             daybreak_enabled,
             comms,
+            context_role,
             git_sha,
             git_branch,
             git_origin_url,
@@ -694,6 +702,11 @@ impl TryFrom<ThreadRow> for ThreadMetadata {
             project_id,
             daybreak_enabled,
             comms: comms.parse().map_err(anyhow::Error::msg)?,
+            context_role: context_role
+                .as_deref()
+                .map(codex_protocol::ContextRole::new)
+                .transpose()
+                .map_err(anyhow::Error::msg)?,
             git_sha,
             git_branch,
             git_origin_url: git_origin_url
@@ -808,6 +821,7 @@ mod tests {
             project_id: None,
             daybreak_enabled: None,
             comms: "open".to_string(),
+            context_role: None,
             git_sha: None,
             git_branch: None,
             git_origin_url: None,
@@ -850,6 +864,7 @@ mod tests {
             project_id: None,
             daybreak_enabled: None,
             comms: Default::default(),
+            context_role: None,
             git_sha: None,
             git_branch: None,
             git_origin_url: None,

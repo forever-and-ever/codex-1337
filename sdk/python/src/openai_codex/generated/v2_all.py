@@ -6319,6 +6319,21 @@ class ThreadSectionUpdateParams(BaseModel):
     ]
 
 
+class ThreadSetContextRoleParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    context_role: Annotated[str | None, Field(alias="contextRole")] = None
+    thread_id: Annotated[str, Field(alias="threadId")]
+
+
+class ThreadSetContextRoleResponse(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    context_role: Annotated[str | None, Field(alias="contextRole")] = None
+
+
 class ThreadSetNameParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -7229,6 +7244,17 @@ class ThreadUnsubscribeRequest(BaseModel):
     id: RequestId
     method: Annotated[Literal["thread/unsubscribe"], Field(title="Thread/unsubscribeRequestMethod")]
     params: ThreadUnsubscribeParams
+
+
+class ThreadContextRoleSetRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[
+        Literal["thread/contextRole/set"], Field(title="Thread/contextRole/setRequestMethod")
+    ]
+    params: ThreadSetContextRoleParams
 
 
 class ThreadNameSetRequest(BaseModel):
@@ -12785,6 +12811,7 @@ class ClientRequest(
         | ThreadUnsubscribeRequest
         | ThreadJiraRequest
         | ThreadFarmRequest
+        | ThreadContextRoleSetRequest
         | ThreadNameSetRequest
         | ThreadGoalSetRequest
         | ThreadGoalGetRequest
@@ -12905,6 +12932,7 @@ class ClientRequest(
         | ThreadUnsubscribeRequest
         | ThreadJiraRequest
         | ThreadFarmRequest
+        | ThreadContextRoleSetRequest
         | ThreadNameSetRequest
         | ThreadGoalSetRequest
         | ThreadGoalGetRequest
@@ -13524,6 +13552,13 @@ class Thread(BaseModel):
     comms: Annotated[
         CommsGate, Field(description="Cross-context message admission, independent of user input.")
     ]
+    context_role: Annotated[
+        str | None,
+        Field(
+            alias="contextRole",
+            description="Explicit description of this context for other agents; never inferred.",
+        ),
+    ] = None
     created_at: Annotated[
         int,
         Field(

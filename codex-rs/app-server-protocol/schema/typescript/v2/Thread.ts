@@ -100,6 +100,9 @@ name: string | null, /**
  * Cross-context message admission, independent of user input.
  */
 comms: CommsGate, /**
+ * Explicit description of this context for other agents; never inferred.
+ */
+contextRole: string | null, /**
  * Only populated on `thread/resume`, `thread/fork`, and `thread/read`
  * (when `includeTurns` is true) responses.
  * For all other responses and notifications returning a Thread,

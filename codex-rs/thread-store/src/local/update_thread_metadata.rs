@@ -593,6 +593,11 @@ async fn apply_metadata_update(
                         message: format!("failed to update memory mode for {thread_id}: {err}"),
                     })?;
             }
+            super::context_role::apply_context_role(
+                state_db.as_ref(),
+                thread_id,
+                &patch.context_role,
+            ).await?;
             if let Some(comms) = patch.comms
                 && !state_db.set_thread_comms(thread_id, comms).await.map_err(|err| ThreadStoreError::Internal {
                     message: format!("failed to update comms gate for {thread_id}: {err}"),
@@ -733,13 +738,14 @@ fn sqlite_write_failure_should_block(patch: &ThreadMetadataPatch) -> bool {
     // transcript-derived metadata and memory-mode indexing were log-only. Keep that
     // failure isolation so a corrupted optional state DB does not make JSONL transcript durability
     // look broken. Explicit git-only updates still require SQLite because partial git patches need
-    // the existing SQLite value to preserve unspecified fields. Project, Daybreak, and comms updates
-    // require SQLite because those preferences only exist in the state database. Names require
+    // the existing SQLite value to preserve unspecified fields. Project, Daybreak, comms, and
+    // context-role updates require SQLite because they only exist in the state database. Names require
     // the canonical SQLite claim before writing the legacy compatibility projection.
     patch.name.is_some()
         || patch.project_id.is_some()
         || patch.daybreak_enabled.is_some()
         || patch.comms.is_some()
+        || patch.context_role.is_some()
         || (patch.git_info.is_some() && !has_observed_metadata_facts(patch))
 }
 
