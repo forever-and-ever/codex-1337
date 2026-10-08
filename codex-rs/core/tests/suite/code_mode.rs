@@ -4661,14 +4661,21 @@ async fn code_mode_wait_timeout_reconnects_on_next_exec() -> Result<()> {
     .await;
 
     tokio::time::pause();
-    for _ in 0..130 {
+    // The wait-start event precedes deadline registration across several awaits.
+    // Give blocking work and host I/O real runtime ticks between simulated steps;
+    // yield_now alone can exhaust the bound before those operations finish.
+    for _ in 0..300 {
         tokio::time::advance(Duration::from_secs(1)).await;
+        tokio::task::yield_now().await;
         if timeout_completion
             .function_call_output_text("call-2")
             .is_some()
         {
             break;
         }
+        tokio::time::resume();
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        tokio::time::pause();
     }
     tokio::time::resume();
     wait_for_event(&test.codex, |event| {
