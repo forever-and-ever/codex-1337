@@ -1,31 +1,35 @@
-//! Draft identity is the server's fresh-root selection, not its global login.
+//! Bootstrap identity follows the conversation, previewing the fresh-root selection only for drafts.
 
 use super::*;
 use codex_app_server_protocol::NewThreadAccountParams;
 use codex_utils_path_uri::LegacyAppPathString;
 
 impl AppServerSession {
-    pub(super) async fn read_new_thread_account(
+    pub(super) async fn read_bootstrap_account(
         &mut self,
         config: &Config,
+        thread_id: Option<ThreadId>,
     ) -> Result<GetAccountResponse> {
-        let params = thread_start_params_from_config(
-            config,
-            self.thread_params_mode(),
-            self.remote_cwd_override.as_deref(),
-            /*session_start_source*/ None,
-        );
+        let new_thread = thread_id.is_none().then(|| {
+            let params = thread_start_params_from_config(
+                config,
+                self.thread_params_mode(),
+                self.remote_cwd_override.as_deref(),
+                /*session_start_source*/ None,
+            );
+            NewThreadAccountParams {
+                model_provider: self.explicit_model_provider(config),
+                cwd: params.cwd.map(LegacyAppPathString::from_string),
+                config: params.config,
+            }
+        });
         let request_id = self.next_request_id();
         self.client
             .request_typed(ClientRequest::GetAccount {
                 request_id,
                 params: GetAccountParams {
-                    thread_id: None,
-                    new_thread: Some(NewThreadAccountParams {
-                        model_provider: self.explicit_model_provider(config),
-                        cwd: params.cwd.map(LegacyAppPathString::from_string),
-                        config: params.config,
-                    }),
+                    thread_id: thread_id.map(|id| id.to_string()),
+                    new_thread,
                     refresh_token: false,
                 },
             })

@@ -29,7 +29,7 @@ async fn collaboration_catalog_is_optional_and_refetched_on_bootstrap() -> Resul
             .build()
             .await?;
         config.model = Some("task-model".into());
-        let expected_account_params = json!({
+        let mut expected_account_params = json!({
             "threadId": null,
             "newThread": {
                 "modelProvider": null,
@@ -65,6 +65,7 @@ async fn collaboration_catalog_is_optional_and_refetched_on_bootstrap() -> Resul
                     }
                     "thread/read" => {
                         expected_provider = json!("saved-provider");
+                        expected_account_params = json!({"threadId": thread_id, "newThread": null});
                         assert_eq!(
                             request.params,
                             Some(json!({"threadId": thread_id, "includeTurns": false}))

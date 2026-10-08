@@ -72,7 +72,7 @@ impl AppServerSession {
             ),
             None => self.explicit_model_provider(config),
         };
-        let account = self.read_new_thread_account(config).await?;
+        let account = self.read_bootstrap_account(config, thread_id).await?;
         let mut bootstrap = self
             .bootstrap_with_account(config, account, model_provider)
             .await?;
