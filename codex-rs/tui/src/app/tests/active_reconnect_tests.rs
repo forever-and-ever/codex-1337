@@ -605,16 +605,28 @@ async fn reconnect_allows_slow_hydration_but_bounds_a_stalled_server() -> Result
             auth_token: None,
         };
         let id = ThreadId::new();
+        let thread = json!({
+            "id": id, "sessionId": id, "preview": "", "ephemeral": false,
+            "modelProvider": "test-provider", "createdAt": 1, "updatedAt": 2,
+            "status": {"type": "idle"}, "cwd": app.config.cwd,
+            "cliVersion": "test", "source": "cli", "turns": []
+        });
         let server = tokio::spawn(async move {
             let (stream, _) = listener.accept().await?;
             serve_reconnect_requests(
                 tokio_tungstenite::accept_async(stream).await?,
-                move |request| async move {
-                    assert_eq!(request.method, "thread/resume");
-                    tokio::time::pause();
-                    tokio::time::sleep(Duration::from_secs(delay)).await;
-                    tokio::time::resume();
-                    Some(json!({"error": {"code": -32600, "message": "thread no longer exists"}}))
+                move |request| {
+                    let thread = thread.clone();
+                    async move {
+                        if request.method == "thread/read" {
+                            return Some(json!({"result": {"thread": thread}}));
+                        }
+                        assert_eq!(request.method, "thread/resume");
+                        tokio::time::pause();
+                        tokio::time::sleep(Duration::from_secs(delay)).await;
+                        tokio::time::resume();
+                        Some(json!({"error": {"code": -32600, "message": "thread no longer exists"}}))
+                    }
                 },
             )
             .await

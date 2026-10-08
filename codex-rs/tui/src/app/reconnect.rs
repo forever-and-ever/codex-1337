@@ -56,7 +56,20 @@ pub(super) async fn reconnect(
             if presentation == ReconnectPresentation::Draft {
                 session.model_provider_override = Some(config.model_provider_id.clone());
             }
-            let bootstrap = session.bootstrap_for_thread(&config, thread_id).await?;
+            let bootstrap = match session.bootstrap_for_thread(&config, thread_id).await {
+                // A vanished previous conversation must not strand navigation. Preserve the
+                // ordinary resume path below, which marks unavailable conversations explicitly.
+                Err(error)
+                    if matches!(
+                        error.downcast_ref::<TypedRequestError>(),
+                        Some(TypedRequestError::Server { method, source })
+                            if method == "thread/read" && source.code == -32600
+                    ) =>
+                {
+                    session.bootstrap(&config).await?
+                }
+                result => result?,
+            };
             let thread = if let Some(thread_id) = thread_id {
                 match session
                     .resume_thread(

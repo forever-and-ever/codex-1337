@@ -66,10 +66,7 @@ async fn collaboration_catalog_is_optional_and_refetched_on_bootstrap() -> Resul
                     "thread/read" => {
                         expected_provider = json!("saved-provider");
                         expected_account_params = json!({"threadId": thread_id, "newThread": null});
-                        assert_eq!(
-                            request.params,
-                            Some(json!({"threadId": thread_id, "includeTurns": false}))
-                        );
+                        assert_eq!(request.params, Some(json!({"threadId": thread_id})));
                         json!({"result": {"thread": saved_thread}})
                     }
                     "model/list" => {
