@@ -1,14 +1,27 @@
 use std::path::Path;
+use std::sync::Mutex;
+use std::sync::PoisonError;
 
 use codex_arg0::Arg0DispatchPaths;
 use codex_arg0::Arg0PathEntryGuard;
 use codex_arg0::arg0_dispatch;
 use tempfile::TempDir;
 
+static TEST_CODEX_HOMES: Mutex<Vec<TempDir>> = Mutex::new(Vec::new());
+
+unsafe extern "C" {
+    fn atexit(callback: extern "C" fn()) -> std::ffi::c_int;
+}
+
+extern "C" fn cleanup_test_codex_homes() {
+    TEST_CODEX_HOMES
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clear();
+}
+
 pub struct TestBinaryDispatchGuard {
-    _codex_home: TempDir,
     arg0: Arg0PathEntryGuard,
-    _previous_codex_home: Option<std::ffi::OsString>,
 }
 
 impl TestBinaryDispatchGuard {
@@ -67,11 +80,21 @@ where
                 },
             }
 
-            Some(TestBinaryDispatchGuard {
-                _codex_home: codex_home,
-                arg0,
-                _previous_codex_home: previous_codex_home,
-            })
+            // Aliases live under CODEX_HOME/tmp/arg0; the ctor's static guard is
+            // never dropped. Keep the home until tests and their children finish.
+            // SAFETY: this runs in the single-threaded ctor, and the callback has
+            // the C ABI and remains valid until process exit.
+            assert_eq!(
+                unsafe { atexit(cleanup_test_codex_homes) },
+                0,
+                "failed to register test CODEX_HOME cleanup"
+            );
+            TEST_CODEX_HOMES
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(codex_home);
+
+            Some(TestBinaryDispatchGuard { arg0 })
         }
     }
 }
