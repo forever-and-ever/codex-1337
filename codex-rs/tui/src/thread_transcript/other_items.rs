@@ -33,11 +33,11 @@ pub(super) fn cells(
     match item {
         item @ ThreadItem::CodeModeOwned(_) => {
             cells.extend(super::thread_items_to_transcript_cells(
-                None,
+                /*thread_id*/ None,
                 cwd,
                 [item],
                 super::RawReasoningVisibility::Hidden,
-                None,
+                /*config*/ None,
                 metadata,
             ))
         }

@@ -170,7 +170,8 @@ impl App {
                         preserve_in_flight_turn: true,
                     },
                 );
-                self.chat_widget.set_queue_autosend_suppressed(true);
+                self.chat_widget
+                    .set_queue_autosend_suppressed(/*suppressed*/ true);
             } else {
                 self.ensure_thread_channel(id)
                     .store

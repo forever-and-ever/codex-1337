@@ -54,8 +54,8 @@ impl RealTerminal {
                 Ok(unsafe { OwnedFd::from_raw_fd(fd) })
             }
         }
-        let input = AsyncFd::new(duplicate(0)?)?;
-        let output = AsyncFd::new(duplicate(1)?)?;
+        let input = AsyncFd::new(duplicate(/*fd*/ 0)?)?;
+        let output = AsyncFd::new(duplicate(/*fd*/ 1)?)?;
         // stdin/stdout may share one open-file description. Read both original
         // flag sets before changing either, or restoration can leave the shell nonblocking.
         // SAFETY: both descriptors are owned and live.

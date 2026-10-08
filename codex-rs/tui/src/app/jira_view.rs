@@ -281,7 +281,7 @@ impl JiraBrowser {
     pub(super) fn select_neighbor(&mut self, delta: isize) {
         let keys = self.filtered();
         if keys.is_empty() {
-            self.select(None);
+            self.select(/*key*/ None);
             return;
         }
         let old = keys

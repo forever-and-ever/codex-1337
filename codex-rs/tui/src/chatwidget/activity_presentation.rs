@@ -36,12 +36,7 @@ impl ChatWidget {
         let has_activity = mode == HistoryRenderMode::Rich
             && active.is_some_and(|cell| !cell.activity_ids().is_empty());
         let parts = active.filter(|_| has_activity).and_then(|cell| {
-            cell.output_parts(
-                width,
-                /*header_reserve*/ 0,
-                expanded_parts,
-                output_mode,
-            )
+            cell.output_parts(width, /*reserve*/ 0, expanded_parts, output_mode)
         });
         let (activity, header, disclosure, controls) = if let Some(parts) = parts {
             (

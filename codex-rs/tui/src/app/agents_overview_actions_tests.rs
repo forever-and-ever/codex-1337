@@ -170,7 +170,7 @@ async fn hiding_tasks_keeps_selection_adjacent_in_display_order() -> Result<()> 
             }
             assert_eq!(
                 view.rows[view.selected_index().unwrap()].thread_id,
-                ThreadId::from_u128(3)
+                ThreadId::from_u128(/*value*/ 3)
             );
             app.agents_overview.visible_thread_ids = view.thread_ids();
             app.chat_widget.show_bottom_pane_view(Box::new(view));

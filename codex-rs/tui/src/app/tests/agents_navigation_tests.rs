@@ -8,9 +8,19 @@ async fn agents_navigation_roster_tracks_background_metadata_without_replaying_a
     let child = ThreadId::new();
     app.primary_thread_id = Some(root);
     app.active_thread_id = Some(root);
-    app.upsert_agent_picker_thread(child, Some("worker".into()), None, false);
+    app.upsert_agent_picker_thread(
+        child,
+        Some("worker".into()),
+        /*agent_role*/ None,
+        /*is_closed*/ false,
+    );
     let other = ThreadId::new();
-    app.upsert_agent_picker_thread(other, Some("alpha".into()), None, false);
+    app.upsert_agent_picker_thread(
+        other,
+        Some("alpha".into()),
+        /*agent_role*/ None,
+        /*is_closed*/ false,
+    );
     let mut settings = codex_app_server_protocol::ThreadSettingsUpdatedNotification {
         thread_id: child.to_string(),
         thread_settings: codex_app_server_protocol::ThreadSettings {
@@ -34,7 +44,12 @@ async fn agents_navigation_roster_tracks_background_metadata_without_replaying_a
     };
     app.track_subagent_panel(&ServerNotification::ThreadSettingsUpdated(settings.clone()));
     // A label-only navigation upsert must preserve the server's model selection.
-    app.upsert_agent_picker_thread(child, Some("worker".into()), None, false);
+    app.upsert_agent_picker_thread(
+        child,
+        Some("worker".into()),
+        /*agent_role*/ None,
+        /*is_closed*/ false,
+    );
     let status = |status| {
         ServerNotification::ThreadStatusChanged(
             codex_app_server_protocol::ThreadStatusChangedNotification {
@@ -57,7 +72,7 @@ async fn agents_navigation_roster_tracks_background_metadata_without_replaying_a
         },
     );
     app.track_subagent_panel(&activity);
-    let mut usage = token_usage_notification(child, "turn", None);
+    let mut usage = token_usage_notification(child, "turn", /*model_context_window*/ None);
     if let ServerNotification::ThreadTokenUsageUpdated(event) = &mut usage {
         // Match the status line: session totals, excluding cached input, with
         // reasoning already included in output (not counted a second time).
@@ -162,7 +177,12 @@ async fn agents_navigation_roster_tracks_background_metadata_without_replaying_a
     app.agent_navigation.roster.lock().unwrap().retiring = None;
     app.agent_navigation.retire(child);
     // A response issued before retirement cannot resurrect the retired row.
-    app.upsert_agent_picker_thread(child, Some("worker".into()), None, false);
+    app.upsert_agent_picker_thread(
+        child,
+        Some("worker".into()),
+        /*agent_role*/ None,
+        /*is_closed*/ false,
+    );
     app.sync_subagent_roster();
     assert!(app.agent_navigation.roster.lock().unwrap().rows.is_empty());
 }
@@ -271,7 +291,12 @@ async fn agents_navigation_escape_returns_to_main_but_preserves_drafts_and_popup
     app.handle_key_event(&mut tui, &mut app_server, KeyCode::Esc.into())
         .await;
     assert_eq!(app.current_displayed_thread_id(), Some(root_id));
-    app.upsert_agent_picker_thread(child_id, Some("child".into()), None, false);
+    app.upsert_agent_picker_thread(
+        child_id,
+        Some("child".into()),
+        /*agent_role*/ None,
+        /*is_closed*/ false,
+    );
     app.agent_navigation.mark_parent_owned(child_id);
     // The inline roster must not swallow the first character or leave arrow keys
     // navigating agents after typing has resumed in the composer.

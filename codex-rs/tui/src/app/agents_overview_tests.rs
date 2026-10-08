@@ -539,9 +539,16 @@ async fn agents_navigation_status_notifications_survive_discovery_and_roster_ref
     let unknown = ThreadId::new();
     app.primary_thread_id = Some(root);
     app.active_thread_id = Some(root);
-    app.upsert_agent_picker_thread(root, None, None, false);
+    app.upsert_agent_picker_thread(
+        root, /*agent_nickname*/ None, /*agent_role*/ None, /*is_closed*/ false,
+    );
     app.agent_navigation.set_status(root, ThreadStatus::Idle);
-    app.upsert_agent_picker_thread(unknown, Some("Unknown".into()), None, false);
+    app.upsert_agent_picker_thread(
+        unknown,
+        Some("Unknown".into()),
+        /*agent_role*/ None,
+        /*is_closed*/ false,
+    );
     let request = app.agent_navigation.begin_picker_refresh(root).unwrap();
     let status = |status| {
         ServerNotification::ThreadStatusChanged(
@@ -557,7 +564,12 @@ async fn agents_navigation_status_notifications_survive_discovery_and_roster_ref
     // Child status broadcasts precede parent spawn metadata; neither an older list
     // reply nor a renderer's attachment can erase the received live status.
     app.track_subagent_panel(&status(active.clone()));
-    app.upsert_agent_picker_thread(child, Some("Worker".into()), None, false);
+    app.upsert_agent_picker_thread(
+        child,
+        Some("Worker".into()),
+        /*agent_role*/ None,
+        /*is_closed*/ false,
+    );
     app.thread_event_channels
         .insert(child, ThreadEventChannel::new(/*capacity*/ 4));
     app.apply_agent_picker_thread_refresh(

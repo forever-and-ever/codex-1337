@@ -89,18 +89,30 @@ impl PreambleCell {
                 PreambleSection::Context => "Context",
             };
             let total = parts.iter().map(|part| part.tokens).sum();
-            lines.push(row(total, 0, title.bold()));
+            lines.push(row(total, /*depth*/ 0, title.bold()));
             for entry in entries(&parts) {
                 match entry {
-                    Entry::Part(part) => lines.push(row(part.tokens, 1, part.label.clone().into())),
+                    Entry::Part(part) => lines.push(row(
+                        part.tokens,
+                        /*depth*/ 1,
+                        part.label.clone().into(),
+                    )),
                     Entry::Group {
                         name,
                         total,
                         members,
                     } => {
-                        lines.push(row(total, 1, format!("{name} ({})", members.len()).into()));
+                        lines.push(row(
+                            total,
+                            /*depth*/ 1,
+                            format!("{name} ({})", members.len()).into(),
+                        ));
                         for member in members {
-                            lines.push(row(member.tokens, 2, member.label.clone().dim()));
+                            lines.push(row(
+                                member.tokens,
+                                /*depth*/ 2,
+                                member.label.clone().dim(),
+                            ));
                         }
                     }
                 }
@@ -109,7 +121,7 @@ impl PreambleCell {
         if let Some(reported) = self.reported_input_tokens {
             lines.push(row(
                 reported,
-                0,
+                /*depth*/ 0,
                 "reported input of the whole request, conversation included".dim(),
             ));
         }

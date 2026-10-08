@@ -44,12 +44,14 @@ fn completed_thought_discloses_only_readable_reasoning() {
         ));
         let cells: Vec<Arc<dyn HistoryCell>> = vec![cell.clone()];
         let mut view = TranscriptView::default();
-        let clock = crate::history_cell::HistoryTimestamp::from_millis(1_700_000_000_000)
-            .unwrap()
-            .span()
-            .content
-            .trim()
-            .to_owned();
+        let clock = crate::history_cell::HistoryTimestamp::from_millis(
+            /*timestamp*/ 1_700_000_000_000,
+        )
+        .unwrap()
+        .span()
+        .content
+        .trim()
+        .to_owned();
         for expanded in [false, true] {
             if expanded && cell.activity_disclosure(80).is_none() {
                 continue;
@@ -358,7 +360,7 @@ fn mixed_feed_keeps_its_grid_through_live_commit_resize_and_details() {
     use std::time::Duration;
 
     let cwd = Path::new(".");
-    let timestamp = HistoryTimestamp::from_millis(1_700_000_000_000);
+    let timestamp = HistoryTimestamp::from_millis(/*timestamp*/ 1_700_000_000_000);
     let prose = |source: &str| {
         let mut cell = AgentMarkdownCell::new(source.into(), cwd);
         cell.timestamp = timestamp;
@@ -504,7 +506,7 @@ fn mixed_feed_keeps_its_grid_through_live_commit_resize_and_details() {
         // offsets remain unchanged through live finalization, wrapping, and expansion.
         let clock = timestamp.unwrap().span().content.trim().to_owned();
         assert!(!layout.text().contains(&clock));
-        let tool_layout = view.current_layout(&cells, 2).unwrap();
+        let tool_layout = view.current_layout(&cells, /*index*/ 2).unwrap();
         let (row, columns, _) = tool_layout.fold_position(&FoldTarget::Activity).unwrap();
         assert_eq!(
             columns,
@@ -512,7 +514,7 @@ fn mixed_feed_keeps_its_grid_through_live_commit_resize_and_details() {
                 ..crate::transcript_geometry::DISCLOSURE_COLUMN
                     + crate::transcript_geometry::DISCLOSURE_COLUMNS
         );
-        assert!(tool_layout.fold_at(row, 0).is_none());
+        assert!(tool_layout.fold_at(row, /*column*/ 0).is_none());
         assert_eq!(
             tool_layout.fold_at(row, crate::transcript_geometry::DISCLOSURE_COLUMN),
             Some(FoldTarget::Activity)

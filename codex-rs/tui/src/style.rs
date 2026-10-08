@@ -76,7 +76,7 @@ pub(crate) fn history_prompt_style() -> Style {
 
 pub(crate) fn formatted_output_style() -> Style {
     let preferred = default_fg().map_or(Color::Cyan, |foreground| {
-        rgb_color(blend((90, 165, 180), foreground, 0.25))
+        rgb_color(blend((90, 165, 180), foreground, /*alpha*/ 0.25))
     });
     Style::default().fg(readable_color_on(preferred, /*background*/ None))
 }

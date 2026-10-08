@@ -72,7 +72,7 @@ impl App {
         if notification.success {
             self.chat_widget.add_info_message(
                 "Claude account added. Reopen /account to select or rename it.".to_owned(),
-                None,
+                /*hint*/ None,
             );
         }
         if let Some(error) = &notification.error {
@@ -140,7 +140,7 @@ impl App {
                         "Account nickname cleared."
                     }
                     .to_owned(),
-                    None,
+                    /*hint*/ None,
                 );
                 self.refresh_conversation_account(server, thread_id);
             }
@@ -209,8 +209,10 @@ impl App {
             Err(error) => {
                 tracing::warn!(%error, "cannot read conversation account");
                 self.account_ui.displayed = None;
-                self.chat_widget
-                    .update_account_state(None, None, false, false);
+                self.chat_widget.update_account_state(
+                    /*status_account_display*/ None, /*plan_type*/ None,
+                    /*has_chatgpt_account*/ false, /*has_codex_backend_auth*/ false,
+                );
                 self.chat_widget.active_account_label = None;
                 self.chat_widget.refresh_status_line();
                 return;
@@ -219,8 +221,10 @@ impl App {
         if self.account_ui.pending.get(&thread_id) == response.account_id.as_ref()
             && self.account_ui.pending.remove(&thread_id).is_some()
         {
-            self.chat_widget
-                .add_info_message("Conversation account changed.".to_owned(), None);
+            self.chat_widget.add_info_message(
+                "Conversation account changed.".to_owned(),
+                /*hint*/ None,
+            );
         }
         use crate::status::StatusAccountDisplay;
         use codex_app_server_protocol::Account;
@@ -526,7 +530,7 @@ impl App {
         }
         self.account_ui.login_request = Some(thread_id);
         self.chat_widget
-            .add_info_message("Starting Claude sign-in…".to_owned(), None);
+            .add_info_message("Starting Claude sign-in…".to_owned(), /*hint*/ None);
         let request_id = server.next_request_id();
         let handle = server.request_handle();
         let tx = self.app_event_tx.clone();

@@ -51,7 +51,7 @@ fn i3_attention_distinguishes_visible_unfocused_tabs_and_floating_focus() {
         ]
     );
     assert_eq!(
-        window_attention(&tree, 102, Some(true), &HashMap::new()),
+        window_attention(&tree, /*window_id*/ 102, Some(true), &HashMap::new()),
         Some(WindowAttention {
             visible: None,
             focused: Some(false)

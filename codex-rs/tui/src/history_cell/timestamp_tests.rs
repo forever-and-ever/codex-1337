@@ -61,7 +61,7 @@ fn timestamp_gutter_survives_stream_finalization_and_reflow() {
     assert_eq!(command.transcript_timestamp(), None);
     command.complete_call(
         "call",
-        CommandOutput::new(0, "hello".into()),
+        CommandOutput::new(/*exit_code*/ 0, "hello".into()),
         Duration::from_secs(1),
     );
 

@@ -924,7 +924,7 @@ See the Codex keymap documentation for supported actions and examples."
         let initial_session_started_at = Instant::now();
         #[cfg(target_os = "linux")]
         if crate::reload::worker::has_unattached_input() {
-            app.restore_reload_input(None).await?;
+            app.restore_reload_input(/*thread*/ None).await?;
         }
         if let Some(started) = initial_started_thread {
             let thread_id = started.session.thread_id;
@@ -1191,7 +1191,8 @@ See the Codex keymap documentation for supported actions and examples."
                     if !ui_host_ready && !waiting_for_initial_session_configured {
                         app.render_startup_frame(tui, &app_event_rx)?;
                         crate::reload::worker::ready().await?;
-                        app.chat_widget.set_queue_autosend_suppressed(false);
+                        app.chat_widget
+                            .set_queue_autosend_suppressed(/*suppressed*/ false);
                         app.chat_widget.maybe_send_next_queued_input();
                         ui_host_ready = true;
                     }

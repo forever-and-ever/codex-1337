@@ -288,7 +288,7 @@ async fn farm_receipt_reconciles_identity_and_draft_without_steering_or_navigati
         let relevant: Vec<_> = app
             .transcript_cells
             .iter()
-            .flat_map(|cell| cell.display_lines(80))
+            .flat_map(|cell| cell.display_lines(/*width*/ 80))
             .map(|line| line.to_string())
             .filter(|line| line.contains("farming") || line.contains("Farmed to"))
             .map(|line| line.trim().to_owned())

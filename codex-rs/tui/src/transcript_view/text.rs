@@ -347,7 +347,7 @@ impl TextLayout {
             HyperlinkParagraph::new(std::slice::from_ref(&row.line), row.line.line.style)
                 .render(row_area, buf);
             if let Some(tokens) = self.heading.tokens
-                && start_row + usize::from(screen_row) == self.row_for_offset(0)
+                && start_row + usize::from(screen_row) == self.row_for_offset(/*offset*/ 0)
                 && area.width
                     >= crate::transcript_geometry::TOKEN_COLUMN
                         + crate::transcript_geometry::TOKEN_COLUMNS

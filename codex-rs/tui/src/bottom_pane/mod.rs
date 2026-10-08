@@ -2186,7 +2186,7 @@ impl BottomPane {
         &'a self,
         options: ComposerRenderOptions<'a>,
     ) -> RenderableItem<'a> {
-        self.as_renderable_with_extension(options, None)
+        self.as_renderable_with_extension(options, /*extension*/ None)
     }
 
     pub(crate) fn hint_renderable<'a>(
@@ -3431,7 +3431,7 @@ mod tests {
         );
         pane.set_pending_input_preview(
             vec!["Queued follow-up question".to_string()],
-            None,
+            /*pending_steer*/ None,
             Vec::new(),
         );
 
@@ -3463,7 +3463,7 @@ mod tests {
         pane.set_task_running(/*running*/ true);
         pane.set_pending_input_preview(
             vec!["Queued follow-up question".to_string()],
-            None,
+            /*pending_steer*/ None,
             Vec::new(),
         );
         pane.hide_status_indicator();
@@ -3496,7 +3496,7 @@ mod tests {
         pane.set_task_running(/*running*/ true);
         pane.set_pending_input_preview(
             vec!["Queued follow-up question".to_string()],
-            None,
+            /*pending_steer*/ None,
             Vec::new(),
         );
 

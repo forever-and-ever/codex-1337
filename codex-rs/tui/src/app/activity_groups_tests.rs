@@ -569,7 +569,7 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
         cells
             .iter()
             .map(|cell| {
-                cell.transcript_hyperlink_lines(90)
+                cell.transcript_hyperlink_lines(/*width*/ 90)
                     .into_iter()
                     .map(|line| line.line.to_string())
                     .collect::<Vec<_>>()
@@ -582,7 +582,7 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
         &app.config.cwd,
         history.clone(),
         RawReasoningVisibility::Hidden,
-        None,
+        /*config*/ None,
         &|_| crate::multi_agents::AgentMetadata::default(),
     ));
     for split in 1..history.len() {
@@ -592,7 +592,7 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
             &app.config.cwd,
             history[split..].iter().cloned(),
             RawReasoningVisibility::Hidden,
-            None,
+            /*config*/ None,
             &|_| crate::multi_agents::AgentMetadata::default(),
         );
         for cell in app.transcript_cells.clone() {
@@ -605,7 +605,7 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
             &app.config.cwd,
             history[..split].iter().cloned(),
             RawReasoningVisibility::Hidden,
-            None,
+            /*config*/ None,
             &|_| crate::multi_agents::AgentMetadata::default(),
         );
         let mut page = Vec::new();
@@ -777,8 +777,8 @@ async fn metadata_only_receipt_keeps_block_disclosure_and_replay_without_a_token
         file_snapshots.push(format!("Independent file {index}\n{}", text(&file.lines)));
     }
     assert_eq!(
-        app.transcript_cells[0].expanded_hyperlink_lines(90),
-        expected[0].expanded_hyperlink_lines(90)
+        app.transcript_cells[0].expanded_hyperlink_lines(/*width*/ 90),
+        expected[0].expanded_hyperlink_lines(/*width*/ 90)
     );
     for split in 1..current.items.len() {
         let older = project(&app, &current.items[..split]);
@@ -789,8 +789,8 @@ async fn metadata_only_receipt_keeps_block_disclosure_and_replay_without_a_token
             .collect();
         app.join_older_activity_group(&mut tui, boundary, std::slice::from_ref(&current));
         assert_eq!(
-            app.transcript_cells[0].expanded_hyperlink_lines(90),
-            expected[0].expanded_hyperlink_lines(90),
+            app.transcript_cells[0].expanded_hyperlink_lines(/*width*/ 90),
+            expected[0].expanded_hyperlink_lines(/*width*/ 90),
             "split={split}"
         );
         assert_eq!(
@@ -860,7 +860,7 @@ async fn metadata_only_receipt_keeps_block_disclosure_and_replay_without_a_token
             text(&closed.lines),
             text(&opened.lines),
             text(&diff.lines),
-            text(&expected[0].transcript_hyperlink_lines(90)),
+            text(&expected[0].transcript_hyperlink_lines(/*width*/ 90)),
             file_snapshots.join("\n")
         )
     );
@@ -1071,8 +1071,8 @@ async fn interleaved_scripts_keep_exact_ownership_after_terminal_wait_and_replay
             .iter()
             .map(|cell| {
                 (
-                    cell.compact_hyperlink_lines(90),
-                    cell.expanded_hyperlink_lines(90),
+                    cell.compact_hyperlink_lines(/*width*/ 90),
+                    cell.expanded_hyperlink_lines(/*width*/ 90),
                     cell.activity_ids(),
                 )
             })
@@ -1096,7 +1096,7 @@ async fn interleaved_scripts_keep_exact_ownership_after_terminal_wait_and_replay
     );
     assert_eq!(expected.len(), 4);
     let text = |cell: &Arc<dyn HistoryCell>| {
-        cell.display_lines(90)
+        cell.display_lines(/*width*/ 90)
             .iter()
             .map(Line::to_string)
             .collect::<Vec<_>>()
@@ -1111,7 +1111,7 @@ async fn interleaved_scripts_keep_exact_ownership_after_terminal_wait_and_replay
     assert!(!text(&expected[3]).contains("visible notify-a"));
     assert!(
         expected[3]
-            .expanded_hyperlink_lines(90)
+            .expanded_hyperlink_lines(/*width*/ 90)
             .iter()
             .any(|line| line.line.to_string().contains("visible wait-output-a"))
     );
@@ -1123,7 +1123,7 @@ async fn interleaved_scripts_keep_exact_ownership_after_terminal_wait_and_replay
             .map(|(index, cell)| {
                 let collapsed = text(cell);
                 let expanded = cell
-                    .expanded_hyperlink_lines(90)
+                    .expanded_hyperlink_lines(/*width*/ 90)
                     .iter()
                     .map(|line| line.line.to_string())
                     .collect::<Vec<_>>()
@@ -1202,8 +1202,8 @@ async fn returned_batches_keep_one_disclosure_and_bill_across_live_replay_and_pa
             .iter()
             .map(|cell| {
                 (
-                    cell.compact_hyperlink_lines(80),
-                    cell.expanded_hyperlink_lines(80),
+                    cell.compact_hyperlink_lines(/*width*/ 80),
+                    cell.expanded_hyperlink_lines(/*width*/ 80),
                     cell.activity_ids(),
                 )
             })

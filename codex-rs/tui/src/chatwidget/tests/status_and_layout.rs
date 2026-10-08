@@ -407,7 +407,8 @@ async fn flush_answer_stream_requests_scrollback_reflow_for_live_table_tail() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     let cwd = chat.config.cwd.to_path_buf();
     chat.local_settings.transcript_mode = crate::transcript_mode::TranscriptMode::Owned;
-    let timestamp = history_cell::HistoryTimestamp::from_millis(1_700_000_000_000);
+    let timestamp =
+        history_cell::HistoryTimestamp::from_millis(/*timestamp*/ 1_700_000_000_000);
     chat.on_terminal_resize(/*width*/ 80);
 
     let mut controller = crate::streaming::controller::StreamController::new(

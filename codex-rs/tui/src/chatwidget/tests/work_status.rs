@@ -188,7 +188,7 @@ async fn work_status_below_composer_clears_with_activity_transcript_entries() {
                 .enumerate()
                 .map(|(n, id)| (*id, format!("worker-{n}")))
                 .collect(),
-            None,
+            /*watched*/ None,
         );
         for (index, row) in roster.rows.iter_mut().enumerate() {
             row.status = Some(codex_app_server_protocol::ThreadStatus::Idle);

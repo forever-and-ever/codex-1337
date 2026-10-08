@@ -314,7 +314,7 @@ async fn replayed_delegated_tool_output_is_attributed_without_seeding_composer_h
             bg: (20, 20, 20),
         },
         || {
-            let lines = projected[0].display_lines(24);
+            let lines = projected[0].display_lines(/*width*/ 24);
             let area = Rect::new(0, 0, 24, lines.len() as u16);
             let mut buffer = Buffer::empty(area);
             let cells: Vec<std::sync::Arc<dyn history_cell::HistoryCell>> =
@@ -1419,7 +1419,8 @@ async fn deferred_mcp_lifecycle_events_keep_fifo_after_stream_finishes() {
     assert!(!chat.interrupts.is_empty());
 
     chat.stream_controller = None;
-    let timestamp = history_cell::HistoryTimestamp::from_millis(1_777_777_777_000).unwrap();
+    let timestamp =
+        history_cell::HistoryTimestamp::from_millis(/*timestamp*/ 1_777_777_777_000).unwrap();
     chat.on_mcp_tool_call_completed(CompletedItem {
         timestamp: Some(timestamp),
         item: AppServerThreadItem::McpToolCall {

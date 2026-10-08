@@ -259,7 +259,7 @@ impl TranscriptView {
             if disclosure {
                 if let Some(parts) = cell.output_parts(
                     content_width,
-                    /*header_reserve*/ 0,
+                    /*reserve*/ 0,
                     expanded_parts,
                     output_mode,
                 ) {
