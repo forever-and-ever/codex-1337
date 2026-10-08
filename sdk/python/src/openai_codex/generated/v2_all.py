@@ -7949,18 +7949,6 @@ class AccountUsageReadRequest(BaseModel):
     params: GetAccountTokenUsageParams | None = None
 
 
-class AccountWorkspaceMessagesReadRequest(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    id: RequestId
-    method: Annotated[
-        Literal["account/workspaceMessages/read"],
-        Field(title="Account/workspaceMessages/readRequestMethod"),
-    ]
-    params: AccountScopeParams | None = None
-
-
 class AccountSendAddCreditsNudgeEmailRequest(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -8806,6 +8794,20 @@ class GetAccountResponse(BaseModel):
     requires_openai_auth: Annotated[bool, Field(alias="requiresOpenaiAuth")]
 
 
+class GetWorkspaceMessagesParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    new_thread: Annotated[
+        NewThreadAccountParams | None,
+        Field(
+            alias="newThread",
+            description="Preview a fresh root conversation's messages instead of the global login's. Cannot be combined with `threadId`.",
+        ),
+    ] = None
+    thread_id: Annotated[str | None, Field(alias="threadId")] = None
+
+
 class GuardianApprovalReview(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -9367,6 +9369,15 @@ class NullableGetAccountRateLimitsParams(RootModel[GetAccountRateLimitsParams | 
     )
     root: Annotated[
         GetAccountRateLimitsParams | None, Field(title="Nullable_GetAccountRateLimitsParams")
+    ]
+
+
+class NullableGetWorkspaceMessagesParams(RootModel[GetWorkspaceMessagesParams | None]):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: Annotated[
+        GetWorkspaceMessagesParams | None, Field(title="Nullable_GetWorkspaceMessagesParams")
     ]
 
 
@@ -11387,6 +11398,18 @@ class AccountRateLimitResetCreditConsumeRequest(BaseModel):
         Field(title="Account/rateLimitResetCredit/consumeRequestMethod"),
     ]
     params: ConsumeAccountRateLimitResetCreditParams
+
+
+class AccountWorkspaceMessagesReadRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[
+        Literal["account/workspaceMessages/read"],
+        Field(title="Account/workspaceMessages/readRequestMethod"),
+    ]
+    params: GetWorkspaceMessagesParams | None = None
 
 
 class CommandExecRequest(BaseModel):

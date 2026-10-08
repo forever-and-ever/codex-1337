@@ -2,6 +2,7 @@ use super::*;
 use codex_app_server_protocol::ConsumeAccountRateLimitResetCreditOutcome;
 use codex_app_server_protocol::ConsumeAccountRateLimitResetCreditResponse;
 use codex_app_server_protocol::GetAccountRateLimitsResponse;
+use codex_app_server_protocol::GetWorkspaceMessagesResponse;
 use codex_app_server_protocol::JSONRPCErrorError;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ThreadAccountListResponse;
@@ -323,6 +324,18 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
         })
         .mount(&server)
         .await;
+    Mock::given(method("GET"))
+        .and(path("/api/codex/workspace-messages"))
+        .respond_with(|request: &wiremock::Request| {
+            let id = request.headers["chatgpt-account-id"]
+                .to_str()
+                .expect("message account header");
+            ResponseTemplate::new(/*s*/ 200).set_body_json(json!({"messages": [{
+                "message_id": id, "message_type": "headline", "message_body": id
+            }]}))
+        })
+        .mount(&server)
+        .await;
     for id in ["alice", "bob"] {
         Mock::given(method("POST"))
             .and(path("/api/codex/rate-limit-reset-credits/consume"))
@@ -371,6 +384,7 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
         "account/read",
         "account/rateLimits/read",
         "account/rateLimitResetCredit/consume",
+        "account/workspaceMessages/read",
     ] {
         let request = app
             .send_request(
@@ -407,7 +421,7 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
         ),
         (None, "alice", None),
     ] {
-        // Identity, quota and spending must resolve one payer without changing the global login.
+        // Identity, quota, spending and messages must share an account without changing global login.
         let request = app
             .send_request(
                 "account/rateLimits/read",
@@ -419,6 +433,17 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
         let quota: GetAccountRateLimitsResponse =
             timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
         assert_eq!(quota.account_id.as_deref(), Some(id));
+        let request = app
+            .send_request(
+                "account/workspaceMessages/read",
+                Some(json!({"newThread": new_thread})),
+            )
+            .await?;
+        let messages: GetWorkspaceMessagesResponse =
+            timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
+        assert!(messages.feature_enabled);
+        assert_eq!(messages.messages.len(), 1);
+        assert_eq!(messages.messages[0].message_body, id);
         let request = app
             .send_request(
                 "account/rateLimitResetCredit/consume",

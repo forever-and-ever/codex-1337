@@ -492,6 +492,20 @@ pub struct GetAccountTokenUsageResponse {
     pub thread_usage: Option<ThreadUsage>,
 }
 
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct GetWorkspaceMessagesParams {
+    #[ts(optional = nullable)]
+    pub thread_id: Option<String>,
+    /// Preview a fresh root conversation's messages instead of the global login's.
+    /// Cannot be combined with `threadId`.
+    #[ts(optional = nullable)]
+    pub new_thread: Option<NewThreadAccountParams>,
+}
+
+pub type NullableGetWorkspaceMessagesParams = Option<GetWorkspaceMessagesParams>;
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]

@@ -2561,7 +2561,7 @@
             "params": {
               "anyOf": [
                 {
-                  "$ref": "#/definitions/v2/AccountScopeParams"
+                  "$ref": "#/definitions/v2/GetWorkspaceMessagesParams"
                 },
                 {
                   "type": "null"
@@ -13574,6 +13574,28 @@
         "title": "GetAccountTokenUsageResponse",
         "type": "object"
       },
+      "GetWorkspaceMessagesParams": {
+        "properties": {
+          "newThread": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/NewThreadAccountParams"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Preview a fresh root conversation's messages instead of the global login's. Cannot be combined with `threadId`."
+          },
+          "threadId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
       "GetWorkspaceMessagesResponse": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "properties": {
@@ -17122,6 +17144,18 @@
           }
         ],
         "title": "Nullable_GetAccountTokenUsageParams"
+      },
+      "NullableGetWorkspaceMessagesParams": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "anyOf": [
+          {
+            "$ref": "#/definitions/v2/GetWorkspaceMessagesParams"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Nullable_GetWorkspaceMessagesParams"
       },
       "OverriddenMetadata": {
         "properties": {

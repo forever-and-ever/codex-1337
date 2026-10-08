@@ -1363,7 +1363,7 @@ client_request_definitions! {
     },
 
     GetWorkspaceMessages => "account/workspaceMessages/read" {
-        params: #[ts(optional, as = "Option<v2::AccountScopeParams>")] #[serde(default, skip_serializing_if = "Option::is_none")] v2::NullableAccountScopeParams,
+        params: #[ts(optional, as = "Option<v2::GetWorkspaceMessagesParams>")] #[serde(default, skip_serializing_if = "Option::is_none")] v2::NullableGetWorkspaceMessagesParams,
         serialization: None,
         response: v2::GetWorkspaceMessagesResponse,
     },

@@ -1886,10 +1886,13 @@ impl MessageProcessor {
             }
             ClientRequest::GetWorkspaceMessages { params, .. } => {
                 self.account_processor
-                    .for_thread(
+                    .for_account_scope(
                         params
                             .as_ref()
                             .and_then(|params| params.thread_id.as_deref()),
+                        params
+                            .as_ref()
+                            .and_then(|params| params.new_thread.as_ref()),
                     )
                     .await?
                     .get_workspace_messages()

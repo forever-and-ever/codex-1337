@@ -218,6 +218,7 @@ export type { GetAccountRateLimitsResponse } from "./GetAccountRateLimitsRespons
 export type { GetAccountResponse } from "./GetAccountResponse";
 export type { GetAccountTokenUsageParams } from "./GetAccountTokenUsageParams";
 export type { GetAccountTokenUsageResponse } from "./GetAccountTokenUsageResponse";
+export type { GetWorkspaceMessagesParams } from "./GetWorkspaceMessagesParams";
 export type { GetWorkspaceMessagesResponse } from "./GetWorkspaceMessagesResponse";
 export type { GitInfo } from "./GitInfo";
 export type { GrantedPermissionProfile } from "./GrantedPermissionProfile";

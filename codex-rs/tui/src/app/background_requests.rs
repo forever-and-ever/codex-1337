@@ -19,6 +19,7 @@ use codex_app_server_protocol::ConsumeAccountRateLimitResetCreditResponse;
 use codex_app_server_protocol::GetAccountRateLimitsParams;
 use codex_app_server_protocol::GetAccountTokenUsageParams;
 use codex_app_server_protocol::GetAccountTokenUsageResponse;
+use codex_app_server_protocol::GetWorkspaceMessagesParams;
 use codex_app_server_protocol::MarketplaceAddParams;
 use codex_app_server_protocol::MarketplaceAddResponse;
 use codex_app_server_protocol::MarketplaceRemoveParams;
@@ -199,12 +200,18 @@ impl App {
         request_id: u64,
     ) {
         let thread_id = self.current_displayed_thread_id();
+        let params = GetWorkspaceMessagesParams {
+            thread_id: thread_id.map(|id| id.to_string()),
+            new_thread: thread_id
+                .is_none()
+                .then(|| app_server.new_thread_account_params(&self.config)),
+        };
         let request_handle = app_server.request_handle();
         let app_event_tx = self.app_event_tx.clone();
         tokio::spawn(async move {
             let result = tokio::time::timeout(
                 WORKSPACE_HEADLINE_FETCH_TIMEOUT,
-                fetch_workspace_messages(request_handle, thread_id),
+                fetch_workspace_messages(request_handle, params),
             )
             .await
             .map_err(|_| "account/workspaceMessages/read timed out in TUI".to_string())
@@ -835,15 +842,13 @@ pub(super) async fn consume_rate_limit_reset_credit_request(
 
 pub(super) async fn fetch_workspace_messages(
     request_handle: AppServerRequestHandle,
-    thread_id: Option<ThreadId>,
+    params: GetWorkspaceMessagesParams,
 ) -> Result<codex_app_server_protocol::GetWorkspaceMessagesResponse> {
     let request_id = RequestId::String(format!("workspace-messages-{}", Uuid::new_v4()));
     request_handle
         .request_typed(ClientRequest::GetWorkspaceMessages {
             request_id,
-            params: thread_id.map(|id| codex_app_server_protocol::AccountScopeParams {
-                thread_id: Some(id.to_string()),
-            }),
+            params: Some(params),
         })
         .await
         .wrap_err("account/workspaceMessages/read failed in TUI")
