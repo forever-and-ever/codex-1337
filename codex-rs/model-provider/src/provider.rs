@@ -556,7 +556,7 @@ impl ModelProvider for ConfiguredModelProvider {
     fn approval_review_preferred_model(&self) -> &'static str {
         if self.info.adapter == codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription
         {
-            return "claude-haiku-4-5-20251001";
+            return "claude-haiku-5-5";
         }
         if self
             .auth_manager
@@ -573,7 +573,7 @@ impl ModelProvider for ConfiguredModelProvider {
     fn memory_extraction_preferred_model(&self) -> &'static str {
         match self.info.adapter {
             codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription => {
-                "claude-haiku-4-5-20251001"
+                "claude-haiku-5-5"
             }
             codex_model_provider_info::ModelProviderAdapter::OpenaiCompatible => {
                 DEFAULT_MEMORY_EXTRACTION_PREFERRED_MODEL
