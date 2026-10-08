@@ -24,6 +24,19 @@ struct Worker {
     primary: Option<ThreadId>,
     retained: Mutex<Option<RetainedInput>>,
     activating: AtomicBool,
+    rejection_handoff: RejectionHandoff,
+}
+
+enum RejectionHandoff {
+    Legacy,
+    Supported(Option<PathBuf>),
+}
+
+pub(crate) fn rejected_candidate() -> Option<PathBuf> {
+    match &WORKER.get()?.rejection_handoff {
+        RejectionHandoff::Legacy => None,
+        RejectionHandoff::Supported(candidate) => candidate.clone(),
+    }
 }
 
 pub fn is_hosted() -> bool {
@@ -66,19 +79,28 @@ pub async fn initialize(cli: &mut Cli) -> io::Result<()> {
         generation,
         control::Request::Hello {
             protocol: PROTOCOL.into(),
+            rejection_handoff: true,
         },
     )
     .await?;
-    let retained = match response {
-        control::Response::State(state) => state
-            .map(serde_json::from_value::<RetainedInput>)
-            .transpose()
-            .map_err(io::Error::other)?,
+    let (state, rejection_handoff) = match response {
+        control::Response::State(Some(control::StatePayload::Handoff(state))) => (
+            (!state.checkpoint.is_null()).then_some(state.checkpoint),
+            RejectionHandoff::Supported(state.rejected_candidate),
+        ),
+        control::Response::State(Some(control::StatePayload::Legacy(state))) => {
+            (Some(state), RejectionHandoff::Legacy)
+        }
+        control::Response::State(None) => (None, RejectionHandoff::Legacy),
         control::Response::Error(message) => return Err(io::Error::other(message)),
         control::Response::Ok => {
             return Err(io::Error::other("Missing UI checkpoint"));
         }
     };
+    let retained = state
+        .map(serde_json::from_value::<RetainedInput>)
+        .transpose()
+        .map_err(io::Error::other)?;
     if let Some(state) = &retained {
         if let Some(terminal) = state.terminal {
             let _ = TERMINAL.set(terminal);
@@ -94,6 +116,7 @@ pub async fn initialize(cli: &mut Cli) -> io::Result<()> {
             primary,
             retained: Mutex::new(retained),
             activating,
+            rejection_handoff,
         })
         .map_err(|_| io::Error::other("UI worker already initialized"))
 }
@@ -217,9 +240,24 @@ pub(crate) async fn proxy(
     }
 }
 
-pub(crate) async fn reload(state: RetainedInput) -> io::Result<()> {
+pub(crate) async fn reload(
+    state: RetainedInput,
+    idle_candidate: Option<PathBuf>,
+) -> io::Result<()> {
     let state = serde_json::to_value(state).map_err(io::Error::other)?;
-    match request(control::Request::Reload(state)).await? {
+    let payload = if let Some(idle_candidate) = idle_candidate
+        && matches!(
+            WORKER.get().map(|worker| &worker.rejection_handoff),
+            Some(RejectionHandoff::Supported(_))
+        ) {
+        control::ReloadPayload::Idle(control::IdleReload {
+            checkpoint: state,
+            idle_candidate,
+        })
+    } else {
+        control::ReloadPayload::Manual(state)
+    };
+    match request(control::Request::Reload(payload)).await? {
         control::Response::Error(message) => Err(io::Error::other(message)),
         _ => Err(io::Error::other("UI replacement returned unexpectedly")),
     }

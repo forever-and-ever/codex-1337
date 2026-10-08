@@ -43,8 +43,8 @@ impl App {
         }
         #[cfg(target_os = "linux")]
         if crate::reload::worker::is_hosted() {
-            if restart.replacement().await.is_some() {
-                self.reload_ui().await;
+            if let Some(candidate) = restart.replacement().await {
+                self.reload_ui(Some(candidate)).await;
             }
             return;
         }

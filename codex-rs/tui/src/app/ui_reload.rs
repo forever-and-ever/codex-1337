@@ -7,7 +7,7 @@
 use super::*;
 
 impl App {
-    pub(super) async fn reload_ui(&mut self) {
+    pub(super) async fn reload_ui(&mut self, idle_candidate: Option<PathBuf>) {
         #[cfg(target_os = "linux")]
         {
             let result =
@@ -26,7 +26,7 @@ impl App {
                     return;
                 }
             };
-            if let Err(error) = crate::reload::worker::reload(state).await {
+            if let Err(error) = crate::reload::worker::reload(state, idle_candidate).await {
                 self.chat_widget
                     .add_error_message(format!("UI reload failed: {error}"));
             }

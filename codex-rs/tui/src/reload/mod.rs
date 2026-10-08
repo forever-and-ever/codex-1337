@@ -6,6 +6,13 @@
 //! worker owns its input again; the host discards the old snapshot rather than replaying
 //! stale queues after a later crash. Bump `PROTOCOL` when retained-state semantics
 //! or the host capabilities required by a worker change.
+//!
+//! Idle rejection handoff is opt-in on Hello, without changing checkpoint semantics.
+//! A supporting host wraps State with the last rejected canonical candidate; only
+//! then may a worker wrap an automatic Reload with the exact candidate it observed.
+//! Legacy peers still exchange bare checkpoints. Directional wrappers keep attempted
+//! and rejected installations distinct, and avoid leaking host state to shell tools
+//! through the environment. Rollback records rejection before launching the old UI.
 
 mod deadline;
 mod retained;

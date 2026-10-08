@@ -7,6 +7,7 @@ use serde::Serialize;
 use serde_json::Value;
 use std::io;
 use std::path::Path;
+use std::path::PathBuf;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::net::UnixListener;
@@ -60,16 +61,46 @@ pub(super) struct Envelope {
 
 #[derive(Serialize, Deserialize)]
 pub(super) enum Request {
-    Hello { protocol: String },
+    Hello {
+        protocol: String,
+        #[serde(default)]
+        rejection_handoff: bool,
+    },
     Connect(Endpoint),
-    Reload(Value),
+    Reload(ReloadPayload),
     Ready,
     Suspend,
 }
 
 #[derive(Serialize, Deserialize)]
+pub(super) struct State {
+    pub(super) checkpoint: Value,
+    pub(super) rejected_candidate: Option<PathBuf>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub(super) struct IdleReload {
+    pub(super) checkpoint: Value,
+    pub(super) idle_candidate: PathBuf,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(untagged)]
+pub(super) enum ReloadPayload {
+    Idle(IdleReload),
+    Manual(Value),
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(untagged)]
+pub(super) enum StatePayload {
+    Handoff(State),
+    Legacy(Value),
+}
+
+#[derive(Serialize, Deserialize)]
 pub(super) enum Response {
-    State(Option<Value>),
+    State(Option<StatePayload>),
     Ok,
     Error(String),
 }
@@ -180,4 +211,80 @@ async fn write(stream: &mut UnixStream, value: &impl Serialize) -> io::Result<()
     }
     stream.write_u32(bytes.len() as u32).await?;
     stream.write_all(&bytes).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
+    use serde_json::json;
+
+    #[test]
+    fn rejection_handoff_is_opt_in_and_distinct_from_legacy_checkpoints() -> serde_json::Result<()>
+    {
+        let Request::Hello {
+            rejection_handoff, ..
+        } = serde_json::from_value::<Request>(
+            json!({"Hello": {"protocol": super::super::PROTOCOL}}),
+        )?
+        else {
+            panic!("expected Hello")
+        };
+        assert!(!rejection_handoff);
+
+        // Bare v1 checkpoints must never be mistaken for either directional wrapper.
+        let checkpoint = json!({"primary": null, "session_draft": null});
+        let Request::Reload(ReloadPayload::Manual(legacy)) =
+            serde_json::from_value::<Request>(json!({"Reload": checkpoint}))?
+        else {
+            panic!("expected manual reload")
+        };
+        assert_eq!(legacy, checkpoint);
+        assert_eq!(
+            serde_json::to_value(Response::State(Some(StatePayload::Legacy(legacy))))?,
+            json!({"State": checkpoint}),
+        );
+        let Response::State(Some(StatePayload::Legacy(legacy))) =
+            serde_json::from_value::<Response>(json!({"State": checkpoint}))?
+        else {
+            panic!("expected legacy state")
+        };
+        assert_eq!(legacy, checkpoint);
+
+        let candidate = PathBuf::from("/install/distributions/rejected/bin/codex");
+        let Request::Reload(ReloadPayload::Idle(attempt)) = serde_json::from_value::<Request>(
+            json!({"Reload": {"checkpoint": checkpoint, "idle_candidate": candidate}}),
+        )?
+        else {
+            panic!("expected idle reload")
+        };
+        assert_eq!(attempt.checkpoint, checkpoint);
+        assert_eq!(attempt.idle_candidate, candidate);
+        let response = serde_json::to_value(Response::State(Some(StatePayload::Handoff(State {
+            checkpoint: attempt.checkpoint,
+            rejected_candidate: Some(attempt.idle_candidate),
+        }))))?;
+        assert_eq!(
+            response,
+            json!({"State": {
+                "checkpoint": checkpoint, "rejected_candidate": candidate,
+            }})
+        );
+        let Response::State(Some(StatePayload::Handoff(response))) =
+            serde_json::from_value::<Response>(response)?
+        else {
+            panic!("expected rejection handoff")
+        };
+        assert_eq!(response.rejected_candidate, Some(candidate));
+
+        // An initial Hello can advertise support without claiming a retained draft.
+        let Response::State(Some(StatePayload::Handoff(initial))) =
+            serde_json::from_value::<Response>(json!({"State": {"checkpoint": null}}))?
+        else {
+            panic!("expected initial handoff")
+        };
+        assert!(initial.checkpoint.is_null());
+        assert_eq!(initial.rejected_candidate, None);
+        Ok(())
+    }
 }

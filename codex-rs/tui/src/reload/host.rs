@@ -46,6 +46,8 @@ pub(super) async fn run() -> io::Result<i32> {
         worker: None,
         generation: 0,
         checkpoint: None,
+        idle_candidate: None,
+        rejected_candidate: None,
         deadline: None,
         failed: false,
         size: crossterm::terminal::size()?,
@@ -117,7 +119,7 @@ async fn supervise(
             match deadline.poll(Instant::now()) {
                 Transition::Wait(duration) => Some(duration),
                 Transition::Rollback => {
-                    host.launch(host.previous.clone(), &launched);
+                    host.rollback(&launched);
                     Some(Duration::ZERO)
                 }
                 Transition::Failed => {
@@ -176,8 +178,15 @@ async fn supervise(
                     continue;
                 }
                 let response = match envelope.request {
-                    control::Request::Hello { protocol } if protocol == PROTOCOL => {
-                        control::Response::State(host.checkpoint.clone())
+                    control::Request::Hello { protocol, rejection_handoff } if protocol == PROTOCOL => {
+                        if rejection_handoff {
+                            control::Response::State(Some(control::StatePayload::Handoff(control::State {
+                                checkpoint: host.checkpoint.clone().unwrap_or(serde_json::Value::Null),
+                                rejected_candidate: host.rejected_candidate.clone(),
+                            })))
+                        } else {
+                            control::Response::State(host.checkpoint.clone().map(control::StatePayload::Legacy))
+                        }
                     }
                     control::Request::Hello { .. } => control::Response::Error("Incompatible UI reload protocol".into()),
                     control::Request::Connect(endpoint) => {
@@ -194,16 +203,22 @@ async fn supervise(
                         continue;
                     }
                     control::Request::Reload(checkpoint) if host.deadline.is_none() => {
+                        let (checkpoint, candidate) = match checkpoint {
+                            control::ReloadPayload::Idle(reload) => (reload.checkpoint, Some(reload.idle_candidate)),
+                            control::ReloadPayload::Manual(checkpoint) => (checkpoint, None),
+                        };
+                        host.idle_candidate = candidate;
                         host.checkpoint = Some(checkpoint);
                         if let Some(worker) = &host.worker { host.previous = worker.executable.clone(); }
                         host.deadline = Some(Deadline::new(Instant::now()));
                         host.failed = false;
-                        host.launch(host.installed.clone(), &launched);
+                        host.launch(host.idle_candidate.clone().unwrap_or_else(|| host.installed.clone()), &launched);
                         // The retired worker must not enter an ordinary exit/shutdown path.
                         continue;
                     }
                     control::Request::Reload(_) => control::Response::Error("UI reload already in progress".into()),
                     control::Request::Ready => {
+                        host.idle_candidate = None;
                         host.deadline = None;
                         host.failed = false;
                         // Input ownership has transferred. Never recover a later crash
@@ -317,6 +332,8 @@ struct Host {
     worker: Option<Worker>,
     generation: u64,
     checkpoint: Option<serde_json::Value>,
+    idle_candidate: Option<PathBuf>,
+    rejected_candidate: Option<PathBuf>,
     deadline: Option<Deadline>,
     failed: bool,
     size: (u16, u16),
@@ -381,9 +398,18 @@ impl Host {
             .as_mut()
             .map(|deadline| deadline.reject(Instant::now()))
         {
-            Some(Transition::Rollback) => self.launch(self.previous.clone(), launched),
+            Some(Transition::Rollback) => {
+                self.rollback(launched);
+            }
             _ => self.fail(),
         }
+    }
+
+    fn rollback(&mut self, launched: &Launched) {
+        if let Some(candidate) = self.idle_candidate.take() {
+            self.rejected_candidate = Some(candidate);
+        }
+        self.launch(self.previous.clone(), launched);
     }
 
     fn fail(&mut self) {

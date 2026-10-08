@@ -88,7 +88,16 @@ impl IdleRestart {
             installed,
             running,
             deadline: None,
-            rejected: None,
+            rejected: {
+                #[cfg(target_os = "linux")]
+                {
+                    crate::reload::worker::rejected_candidate()
+                }
+                #[cfg(not(target_os = "linux"))]
+                {
+                    None
+                }
+            },
         }
     }
 
