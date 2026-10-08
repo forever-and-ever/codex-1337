@@ -90,6 +90,7 @@ fn reexec_keeps_pid_and_resumes_once_without_replaying_launch_input() -> anyhow:
             "--model",
             "retained-model",
             "--worktree",
+            "--prompt",
             "original prompt",
         ]);
         cli.fork_session_id = Some("original-fork".into());
@@ -123,7 +124,7 @@ fn reexec_keeps_pid_and_resumes_once_without_replaying_launch_input() -> anyhow:
                 )
             );
             assert_eq!(cli.cwd, Some(std::env::current_dir()?));
-            let mut second = Cli::parse_from(["codex", "a new launch"]);
+            let mut second = Cli::parse_from(["codex", "--prompt", "a new launch"]);
             apply_handoff(&mut second)?;
             assert_eq!(second.resume_session_id, None);
             assert_eq!(second.prompt.as_deref(), Some("a new launch"));

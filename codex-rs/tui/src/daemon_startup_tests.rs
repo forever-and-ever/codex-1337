@@ -343,7 +343,7 @@ fn daemon_eligibility_preserves_launch_options_and_explains_exclusions() {
             Some("--dangerously-bypass-hook-trust"),
         ),
         (
-            "-m test --cd /tmp -i image.png -a never -s workspace-write --add-dir /tmp --no-alt-screen hello",
+            "-m test --cd /tmp -i image.png -a never -s workspace-write --add-dir /tmp --no-alt-screen --prompt hello",
             None,
         ),
     ] {

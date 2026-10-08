@@ -8,8 +8,8 @@ use codex_utils_cli::SharedCliOptions;
 #[derive(Parser, Clone, Debug)]
 #[command(version)]
 pub struct Cli {
-    /// Optional user prompt to start the session.
-    #[arg(value_name = "PROMPT", value_hint = clap::ValueHint::Other)]
+    /// Seed the session with this prompt.
+    #[arg(long = "prompt", value_name = "PROMPT", value_hint = clap::ValueHint::Other)]
     pub prompt: Option<String>,
 
     /// Error out when config.toml contains fields that are not recognized by this version of Codex.

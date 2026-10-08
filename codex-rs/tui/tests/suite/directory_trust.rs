@@ -152,7 +152,7 @@ async fn connected_trust_cancellation_and_acceptance_control_task_creation() -> 
         let mut terminal = PtyCodex::start(
             &repo_root,
             codex_home,
-            &["do not submit this launch prompt"],
+            &["--prompt", "do not submit this launch prompt"],
         )?;
         let prompt = if trust_level.is_some() {
             "Open restricted"

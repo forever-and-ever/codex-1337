@@ -124,7 +124,12 @@ async fn interactive_startup_honors_codex_home_symlink_opt_out() -> Result<()> {
     let mut terminal = PtyCodex::start(
         &workspace_path,
         codex_home,
-        &["-c", "model_provider=\"test\"", "Write ready.txt"],
+        &[
+            "-c",
+            "model_provider=\"test\"",
+            "--prompt",
+            "Write ready.txt",
+        ],
     )?;
     terminal.wait_for_startup()?;
     let deadline = Instant::now() + STARTUP_TIMEOUT;

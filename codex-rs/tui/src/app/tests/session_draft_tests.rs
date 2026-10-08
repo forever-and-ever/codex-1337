@@ -120,7 +120,7 @@ async fn session_draft_switches_provider_without_creating_threads_or_losing_inpu
         };
         let retained: crate::reload::RetainedInput =
             serde_json::from_slice(&serde_json::to_vec(&retained)?)?;
-        let mut cli = crate::cli::Cli::try_parse_from(["codex", "must not replay"])?;
+        let mut cli = crate::cli::Cli::try_parse_from(["codex", "--prompt", "must not replay"])?;
         retained.prepare_cli(&mut cli);
         assert_eq!(
             (
