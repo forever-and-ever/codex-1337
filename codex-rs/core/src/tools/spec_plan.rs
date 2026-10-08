@@ -1290,7 +1290,7 @@ fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, registry: &mut Tool
             }
         }
     {
-        registry.add(SleepHandler);
+        registry.add_with_exposure(SleepHandler, ToolExposure::Direct);
     }
 
     if tool_suggest_enabled(turn_context)

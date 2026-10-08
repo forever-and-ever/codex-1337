@@ -1395,7 +1395,7 @@ async fn sleep_tool_follows_current_time_config() {
 }
 
 #[tokio::test]
-async fn sleep_tool_stays_direct_and_outside_code_mode() {
+async fn sleep_tool_is_batchable_and_direct_unless_code_mode_only() {
     for code_mode_only in [false, true] {
         let plan = probe(|turn| {
             set_features(
@@ -1419,18 +1419,16 @@ async fn sleep_tool_stays_direct_and_outside_code_mode() {
         })
         .await;
 
-        assert!(
+        assert_eq!(
             plan.namespace_function_names("clock")
                 .iter()
-                .any(|name| name == "sleep")
+                .any(|name| name == "sleep"),
+            !code_mode_only
         );
         let sleep_tool_name = ToolName::namespaced("clock", "sleep").to_string();
         let wait_agent_tool_name =
             ToolName::namespaced(MULTI_AGENT_V2_NAMESPACE, "wait_agent").to_string();
-        assert_eq!(
-            plan.exposure(&sleep_tool_name),
-            ToolExposure::DirectModelOnly
-        );
+        assert_eq!(plan.exposure(&sleep_tool_name), ToolExposure::Direct);
         plan.assert_registered_lacks(&[wait_agent_tool_name.as_str()]);
 
         let ToolSpec::Freeform(exec) = plan.visible_spec(codex_code_mode::PUBLIC_TOOL_NAME) else {
@@ -1439,7 +1437,13 @@ async fn sleep_tool_stays_direct_and_outside_code_mode() {
         if code_mode_only {
             assert!(exec.description.contains("clock__curr_time"));
         }
-        assert!(!exec.description.contains("clock__sleep"));
+        assert_eq!(
+            plan.code_mode_tool_names.get("clock__sleep"),
+            Some(&ToolName::namespaced("clock", "sleep"))
+        );
+        if code_mode_only {
+            assert!(exec.description.contains("clock__sleep"));
+        }
     }
 }
 

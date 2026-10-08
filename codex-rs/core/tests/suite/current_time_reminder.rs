@@ -18,11 +18,13 @@ use codex_core::TimeFuture;
 use codex_core::TimeProvider;
 use codex_core::TurnInputRequest;
 use codex_core::config::CurrentTimeReminderConfig;
+use codex_extension_items::ExtensionItem;
 use codex_features::CurrentTimeReminderDeliveryMode;
 use codex_features::CurrentTimeSource;
 use codex_features::Feature;
 use codex_model_provider_info::built_in_model_providers;
 use codex_protocol::ThreadId;
+use codex_protocol::items::TurnItem;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::CodexErrorInfo;
@@ -34,6 +36,7 @@ use core_test_support::responses::ResponsesRequest;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_completed_with_tokens;
+use core_test_support::responses::ev_custom_tool_call;
 use core_test_support::responses::ev_function_call;
 use core_test_support::responses::ev_function_call_with_namespace;
 use core_test_support::responses::ev_response_created;
@@ -864,8 +867,10 @@ async fn current_time_tool_returns_the_latest_time() -> Result<()> {
     Ok(())
 }
 
+#[test_case(false; "direct")]
+#[test_case(true; "inside_exec")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn sleep_tool_uses_configured_time_provider() -> Result<()> {
+async fn sleep_tool_uses_configured_time_provider(inside_exec: bool) -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     const CALL_ID: &str = "sleep";
@@ -877,12 +882,23 @@ async fn sleep_tool_uses_configured_time_provider() -> Result<()> {
         vec![
             sse(vec![
                 ev_response_created("resp-1"),
-                ev_function_call_with_namespace(
-                    CALL_ID,
-                    "clock",
-                    "sleep",
-                    &json!({ "duration_ms": DURATION_MS }).to_string(),
-                ),
+                if inside_exec {
+                    ev_custom_tool_call(
+                        CALL_ID,
+                        "exec",
+                        &format!(
+                            r#"text(await tools.clock__sleep({{duration_ms: {DURATION_MS}}}));
+await tools.update_work_status({{activity: "Sleep finished"}});"#
+                        ),
+                    )
+                } else {
+                    ev_function_call_with_namespace(
+                        CALL_ID,
+                        "clock",
+                        "sleep",
+                        &json!({ "duration_ms": DURATION_MS }).to_string(),
+                    )
+                },
                 ev_completed("resp-1"),
             ]),
             sse(vec![
@@ -895,7 +911,13 @@ async fn sleep_tool_uses_configured_time_provider() -> Result<()> {
     .await;
     let time_provider = Arc::new(TestTimeProvider::default());
     let test = test_codex()
-        .with_config(|config| {
+        .with_config(move |config| {
+            if inside_exec {
+                config
+                    .features
+                    .enable(Feature::CodeModeOnly)
+                    .expect("test config should allow Code Mode");
+            }
             enable_current_time_reminder(
                 config,
                 /*interval*/ 3_000,
@@ -911,7 +933,50 @@ async fn sleep_tool_uses_configured_time_provider() -> Result<()> {
         .build(&server)
         .await?;
 
-    test.submit_turn("sleep").await?;
+    test.codex
+        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+            text: "sleep".into(),
+            text_elements: Vec::new(),
+        }]))
+        .await?;
+    let mut sleep_events = Vec::new();
+    let mut activities = Vec::new();
+    wait_for_event(&test.codex, |event| {
+        let native = match event {
+            EventMsg::CodeModeOwned(owned) => {
+                assert!(inside_exec);
+                owned.payload().as_ref()
+            }
+            event => event,
+        };
+        let item = match native {
+            EventMsg::ItemStarted(started) => Some((false, &started.item)),
+            EventMsg::ItemCompleted(completed) => Some((true, &completed.item)),
+            _ => None,
+        };
+        if let Some((completed, TurnItem::Extension(ExtensionItem::Sleep(item)))) = item {
+            assert_eq!(matches!(event, EventMsg::CodeModeOwned(_)), inside_exec);
+            sleep_events.push((completed, item.clone()));
+        }
+        if let EventMsg::WorkStatusUpdated(status) = native {
+            activities.push(status.activity.clone());
+        }
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+    assert_eq!(sleep_events.len(), 2);
+    assert!(!sleep_events[0].0);
+    assert!(sleep_events[1].0);
+    assert_eq!(sleep_events[0].1, sleep_events[1].1);
+    assert_eq!(sleep_events[0].1.duration_ms, DURATION_MS);
+    assert_eq!(
+        activities,
+        if inside_exec {
+            vec!["Sleep finished".to_string()]
+        } else {
+            Vec::new()
+        }
+    );
 
     assert_eq!(
         time_provider.sleep_seconds.load(Ordering::Relaxed),
@@ -919,11 +984,15 @@ async fn sleep_tool_uses_configured_time_provider() -> Result<()> {
     );
     let requests = responses.requests();
     assert_eq!(requests.len(), 2);
-    assert!(
+    let output = if inside_exec {
+        super::code_mode::custom_tool_output_last_non_empty_text(&requests[1], CALL_ID)
+            .expect("exec output")
+    } else {
         requests[1]
             .function_call_output_text(CALL_ID)
-            .is_some_and(|output| output.ends_with("Sleep completed."))
-    );
+            .expect("sleep output")
+    };
+    assert!(output.contains("Sleep completed."), "{output}");
 
     Ok(())
 }
