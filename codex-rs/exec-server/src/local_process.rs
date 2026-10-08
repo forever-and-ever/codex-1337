@@ -1240,10 +1240,6 @@ mod tests {
     use codex_utils_path_uri::PathUri;
     use codex_utils_pty::ProcessDriver;
     use pretty_assertions::assert_eq;
-    #[cfg(not(target_os = "windows"))]
-    use tokio::io::AsyncReadExt;
-    #[cfg(not(target_os = "windows"))]
-    use tokio::io::AsyncWriteExt;
     use tokio::sync::oneshot;
     use tokio::time::timeout;
 
