@@ -43,6 +43,9 @@ use indexmap::IndexMap;
 use indexmap::map::Entry;
 use serde_json::Value;
 
+#[path = "registry_input_kind.rs"]
+mod input_kind;
+
 pub(crate) type ToolTelemetryTags = Vec<(&'static str, String)>;
 
 pub use codex_tools::ToolExecutor;
@@ -581,7 +584,8 @@ impl ToolRegistry {
             }
         }
         if !tool.matches_kind(&invocation.payload) {
-            let message = format!("tool {tool_name} invoked with incompatible payload");
+            let message =
+                input_kind::mismatch_message(&tool.spec(), &tool_name, &invocation.payload)?;
             let log_payload = tool_log_payload(&invocation.payload, &invocation.source);
             otel.tool_result_with_tags(
                 &tool_name,
@@ -593,7 +597,7 @@ impl ToolRegistry {
                 &tool_result_tags,
                 &extra_trace_fields,
             );
-            let err = FunctionCallError::Fatal(message);
+            let err = FunctionCallError::RespondToModel(message);
             dispatch_trace.record_failed(&err);
             return Err(err);
         }

@@ -325,6 +325,61 @@ async fn turn_environment_selection_keeps_environment_backed_tools() -> Result<(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn wrong_tool_input_kind_returns_feedback_and_continues_turn() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = start_mock_server().await;
+    let mut builder = test_codex().with_config(|config| {
+        config.update_plan_enabled = true;
+    });
+    let test = builder.build_with_auto_env(&server).await?;
+
+    // Direct model calls can contradict the advertised tool kind; this is model input,
+    // not an internal failure that should abort the turn before feedback.
+    mount_sse_once(
+        &server,
+        sse(vec![
+            ev_response_created("resp-1"),
+            ev_function_call(
+                "wrong-patch",
+                "apply_patch",
+                r#"{"patch":"*** Begin Patch\n*** End Patch"}"#,
+            ),
+            ev_custom_tool_call("wrong-plan", "update_plan", r#"{"plan":[]}"#),
+            ev_completed("resp-1"),
+        ]),
+    )
+    .await;
+    let follow_up = mount_sse_once(
+        &server,
+        sse(vec![
+            ev_assistant_message("msg-1", "done"),
+            ev_completed("resp-2"),
+        ]),
+    )
+    .await;
+
+    test.submit_turn_with_approval_and_permission_profile(
+        "invoke tools",
+        AskForApproval::Never,
+        PermissionProfile::Disabled,
+    )
+    .await?;
+
+    let request = follow_up.single_request();
+    assert_eq!(
+        request.function_call_output("wrong-patch")["output"],
+        json!("apply_patch expects freeform text input, not JSON arguments"),
+    );
+    assert_eq!(
+        request.custom_tool_call_output("wrong-plan")["output"],
+        json!("update_plan expects JSON arguments, not freeform text input"),
+    );
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn custom_tool_unknown_returns_custom_output_error() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
