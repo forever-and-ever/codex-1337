@@ -17,7 +17,7 @@ use std::time::Duration;
 use tokio::time::timeout;
 
 pub struct AnthropicClient<T: HttpTransport> {
-    session: EndpointSession<T>,
+    pub(super) session: EndpointSession<T>,
     sse_telemetry: Option<Arc<dyn SseTelemetry>>,
 }
 
@@ -64,18 +64,7 @@ impl<T: HttpTransport> AnthropicClient<T> {
             EncodedJsonBody::encode(request.body()).map_err(|e| ApiError::InvalidRequest {
                 message: format!("failed to encode Anthropic request: {e}"),
             })?;
-        let mut headers = options.extra_headers;
-        headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
-        let betas = std::iter::once("oauth-2025-04-20")
-            .chain(request.required_betas().iter().copied())
-            .collect::<Vec<_>>()
-            .join(",");
-        headers.insert(
-            "anthropic-beta",
-            HeaderValue::from_str(&betas).map_err(|e| ApiError::InvalidRequest {
-                message: format!("invalid Anthropic beta header: {e}"),
-            })?,
-        );
+        let headers = request.api_headers(options.extra_headers)?;
         let response = timeout(
             idle_timeout,
             self.session.stream_encoded_json_with(
