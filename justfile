@@ -22,7 +22,7 @@ codex *args:
 exec *args:
     cargo run --bin codex -- exec {args}
 
-# Start `codex exec-server` and run codex-tui.
+# Start `codex exec-server` and run the TUI against it.
 [no-cd]
 [positional-arguments]
 [unix]
