@@ -352,7 +352,12 @@ impl Reducers {
                     });
                 if !interaction.stdin.is_empty() || command.is_some() {
                     block.cell.admit_children(
-                        format!("terminal-interaction:{}", interaction.item_id),
+                        // Replay starts with a fresh reducer; page hydration preserves child IDs.
+                        format!(
+                            "terminal-interaction:{}:{}",
+                            interaction.item_id,
+                            block.cell.children.len()
+                        ),
                         vec![Arc::new(crate::history_cell::new_unified_exec_interaction(
                             command,
                             interaction.stdin,

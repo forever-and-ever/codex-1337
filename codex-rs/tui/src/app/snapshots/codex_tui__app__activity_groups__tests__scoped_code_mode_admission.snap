@@ -19,6 +19,11 @@ Return to live
                         Read child-a.rs (whole file)
             [+] • Waited on ρξωζ
 
+Terminal interactions
+↳ Interacted with background terminal · cat child-a.rs
+  └ hello
+• Waited for background terminal · cat child-a.rs
+
 Exact captures
 • Called (Code Mode ρξωζ)
     • Explored

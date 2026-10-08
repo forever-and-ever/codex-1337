@@ -191,7 +191,13 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
                 },
             ),
         ),
-        (&a, call("child-a", ActivityKind::Exploration, "inProgress")),
+        (&a, {
+            let mut item = call("child-a", ActivityKind::Exploration, "inProgress");
+            if let ThreadItem::CommandExecution { process_id, .. } = &mut item {
+                *process_id = Some("proc-a".into());
+            }
+            item
+        }),
         (&b, call("child-b", ActivityKind::Computer, "inProgress")),
     ] {
         app.handle_thread_event_now(ThreadBufferedEvent::Notification(Box::new(notification(
@@ -205,6 +211,21 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
                 .count(),
             2
         );
+    }
+    for stdin in ["hello\n", ""] {
+        app.handle_thread_event_now(ThreadBufferedEvent::Notification(Box::new(
+            ServerNotification::TerminalInteraction(
+                codex_app_server_protocol::TerminalInteractionNotification {
+                    thread_id: thread.to_string(),
+                    turn_id: "turn".into(),
+                    item_id: "child-a".into(),
+                    process_id: "proc-a".into(),
+                    stdin: stdin.into(),
+                },
+            )
+            .with_code_mode_owner(&a),
+        )));
+        drain(&mut app, &mut rx, &mut tui);
     }
     let render = |view: &mut crate::transcript_view::TranscriptView,
                   cells: &[Arc<dyn HistoryCell>]| {
@@ -339,6 +360,7 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
         after.child_versions.get("child-a"),
         Some(&(Source::Live, true))
     );
+    assert_eq!(before_child.len(), after.children.len());
     assert!(
         before_child
             .iter()
@@ -386,6 +408,10 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
             .is_active()
     );
     let hydrated_fork = banks.hydrate(fork, &terminal).unwrap();
+    assert_eq!(
+        banks.hydrate(fork, &terminal).unwrap().raw_lines(),
+        hydrated_fork.raw_lines(),
+    );
     let unchanged_sibling = banks
         .admit(
             sibling,
@@ -448,6 +474,17 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
             .is_err()
     );
     let mut examples = vec![format!("Held reading\n{held}\n\nReturn to live\n{current}")];
+    // Terminal bookkeeping is intentionally absent from normal chat paint, but
+    // both interactions must survive in detailed transcript history.
+    let interactions = before_child
+        .iter()
+        .filter(|(id, _)| id.starts_with("terminal-interaction:"))
+        .flat_map(|(_, cells)| cells)
+        .flat_map(|cell| cell.transcript_hyperlink_lines(90))
+        .map(|line| line.line.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    examples.push(format!("Terminal interactions\n{interactions}"));
     for (heading, cell) in [
         ("Exact captures", Arc::new(terminal) as Arc<dyn HistoryCell>),
         ("Historical suffix", partial_fork.block),
