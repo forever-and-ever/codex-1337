@@ -1,7 +1,7 @@
-//! Resume and fork picker and --last provider defaults through the real CLI and app server.
+//! Resume and fork discover history across providers through the real CLI and app server.
 
-use super::focus_palette::socket_home;
 use super::focus_palette::PtyCodex;
+use super::focus_palette::socket_home;
 use super::focus_palette::write_test_config;
 use anyhow::Result;
 use anyhow::ensure;
@@ -10,7 +10,7 @@ use std::process::Stdio;
 use std::time::Duration;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn history_lookup_uses_server_provider_with_local_and_embedded_servers() -> Result<()> {
+async fn history_lookup_spans_providers_with_local_and_embedded_servers() -> Result<()> {
     let codex = codex_utils_cargo_bin::cargo_bin("codex")?;
     let cwd = codex_utils_cargo_bin::repo_root()?;
     for action in ["resume", "fork"] {
@@ -93,16 +93,16 @@ async fn history_lookup_uses_server_provider_with_local_and_embedded_servers() -
                 ]);
             }
             let mut terminal = PtyCodex::start_cli(&cwd, home, &args)?;
-            let (expected, excluded) = if embedded || explicit {
-                ("Client provider history", "Server provider history")
+            terminal.wait_for_screen("Server provider history")?;
+            if last {
+                ensure!(
+                    !terminal.screen_contains("Client provider history"),
+                    "{args:?}: --last did not select the newest conversation; screen:\n{}",
+                    terminal.screen_contents()
+                );
             } else {
-                ("Server provider history", "Client provider history")
-            };
-            terminal.wait_for_screen(expected)?;
-            ensure!(
-                !terminal.screen_contains(excluded),
-                "{action}: unexpected provider history"
-            );
+                terminal.wait_for_screen("Client provider history")?;
+            }
             drop(terminal);
             daemon.kill().await?;
             daemon.wait().await?;
