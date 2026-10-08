@@ -41,7 +41,7 @@ async fn cancelled_clients_cannot_erase_refreshes_or_failure_cooldowns() {
                     attempts.fetch_add(1, Ordering::SeqCst);
                     started.notify_one();
                     finish.notified().await;
-                    Ok(usage(25.0))
+                    Ok(usage(/*used_percent*/ 25.0))
                 })
                 .await
         }
@@ -60,7 +60,7 @@ async fn cancelled_clients_cannot_erase_refreshes_or_failure_cooldowns() {
     assert_eq!(
         first,
         QuotaRead {
-            usage: Some(usage(25.0)),
+            usage: Some(usage(/*used_percent*/ 25.0)),
             captured_at: first.captured_at,
             error: None,
             retry_after_sec: 60,
@@ -75,11 +75,13 @@ async fn cancelled_clients_cannot_erase_refreshes_or_failure_cooldowns() {
                 ..key.clone()
             },
             QuotaFreshness::Cached,
-            || async { Ok(usage(90.0)) },
+            || async {
+                Ok(usage(/*used_percent*/ 90.0))
+            },
         )
         .await
         .unwrap();
-    assert_eq!(other.usage, Some(usage(90.0)));
+    assert_eq!(other.usage, Some(usage(/*used_percent*/ 90.0)));
 
     tokio::time::advance(Duration::from_secs(/*secs*/ 61)).await;
     let failed = cache
@@ -109,13 +111,15 @@ async fn cancelled_clients_cannot_erase_refreshes_or_failure_cooldowns() {
 
     tokio::time::advance(Duration::from_secs(/*secs*/ 301)).await;
     let recovered = cache
-        .read(key, QuotaFreshness::Cached, || async { Ok(usage(30.0)) })
+        .read(key, QuotaFreshness::Cached, || async {
+            Ok(usage(/*used_percent*/ 30.0))
+        })
         .await
         .unwrap();
     assert_eq!(
         recovered,
         QuotaRead {
-            usage: Some(usage(30.0)),
+            usage: Some(usage(/*used_percent*/ 30.0)),
             captured_at: recovered.captured_at,
             error: None,
             retry_after_sec: 60,
