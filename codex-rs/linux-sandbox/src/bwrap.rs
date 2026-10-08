@@ -153,6 +153,9 @@ pub(crate) struct SyntheticMountTarget {
     // If an empty metadata path was already present, remember its inode so
     // cleanup does not delete a real pre-existing file or directory.
     pre_existing_path: Option<FileIdentity>,
+    /// The real path of the parent when the target was described; the reaper
+    /// creates or claims the mountpoint only while it still resolves there.
+    pub(crate) real_parent: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -178,6 +181,7 @@ impl SyntheticMountTarget {
             path: path.to_path_buf(),
             kind: SyntheticMountTargetKind::EmptyFile,
             pre_existing_path: None,
+            real_parent: crate::linux_run_main::mountpoint_reaper::real_parent(path),
         }
     }
 
@@ -186,6 +190,7 @@ impl SyntheticMountTarget {
             path: path.to_path_buf(),
             kind: SyntheticMountTargetKind::EmptyDirectory,
             pre_existing_path: None,
+            real_parent: crate::linux_run_main::mountpoint_reaper::real_parent(path),
         }
     }
 
@@ -194,6 +199,7 @@ impl SyntheticMountTarget {
             path: path.to_path_buf(),
             kind: SyntheticMountTargetKind::EmptyFile,
             pre_existing_path: Some(FileIdentity::from_metadata(metadata)),
+            real_parent: crate::linux_run_main::mountpoint_reaper::real_parent(path),
         }
     }
 
@@ -202,6 +208,7 @@ impl SyntheticMountTarget {
             path: path.to_path_buf(),
             kind: SyntheticMountTargetKind::EmptyDirectory,
             pre_existing_path: Some(FileIdentity::from_metadata(metadata)),
+            real_parent: crate::linux_run_main::mountpoint_reaper::real_parent(path),
         }
     }
 

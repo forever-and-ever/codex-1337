@@ -75,23 +75,27 @@ const MARKER_MAX_BYTES: u64 = 8192;
 pub(super) fn runtime_directory() -> std::io::Result<PathBuf> {
     #[cfg(test)]
     {
-        static DIRECTORY: OnceLock<PathBuf> = OnceLock::new();
+        static DIRECTORY: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
         extern "C" fn remove_directory() {
-            if let Some(directory) = DIRECTORY.get() {
+            if let Ok(directory) = DIRECTORY.try_lock()
+                && let Some(directory) = directory.as_ref()
+            {
                 let _ = fs::remove_dir_all(directory);
             }
         }
-        if let Some(directory) = DIRECTORY.get() {
+        let mut directory = DIRECTORY
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(directory) = directory.as_ref() {
             return Ok(directory.clone());
         }
-        let directory = tempfile::Builder::new()
+        let created = tempfile::Builder::new()
             .prefix("codex-sandbox-runtime-")
             .tempdir()?
             .keep();
-        if DIRECTORY.set(directory).is_ok() {
-            unsafe { libc::atexit(remove_directory) };
-        }
-        Ok(DIRECTORY.get().cloned().unwrap_or_default())
+        *directory = Some(created.clone());
+        unsafe { libc::atexit(remove_directory) };
+        Ok(created)
     }
     #[cfg(not(test))]
     codex_uds::prepare_user_runtime_directory()
@@ -444,7 +448,7 @@ pub(super) fn vouches(target: &SyntheticMountTarget, marker_dir: &Path) -> bool 
     {
         return true;
     }
-    let Some(site) = Site::resolve(target.path()) else {
+    let Some(site) = Site::resolve(target) else {
         return false;
     };
     match site.status() {
@@ -472,9 +476,16 @@ pub(super) fn forge(target: &SyntheticMountTarget) -> Option<Mountpoint> {
     if target.preserves_pre_existing_path() {
         return None;
     }
-    let site = Site::resolve(target.path())?;
-    site.forge(target.kind());
-    let status = site.status().ok()?;
+    let site = Site::resolve(target)?;
+    // An entry this run did not create is recorded only when branded: someone
+    // may have made it between the vouching and now.
+    let status = match site.forge(target.kind()) {
+        Some(created) => created,
+        None => site
+            .status()
+            .ok()
+            .filter(|status| site.is_branded(status))?,
+    };
     is_empty_mountpoint(target.kind(), &status).then(|| Mountpoint {
         kind: target.kind(),
         identity: status.identity,
@@ -568,15 +579,17 @@ impl Site {
         })
     }
 
-    /// The site at the real path of `path`'s parent, as bubblewrap resolves
-    /// it. bwrap.rs refuses symlinks under writable roots, so this follows only
-    /// symlinks that sandboxes cannot plant, such as `/home -> /var/home`.
-    fn resolve(path: &Path) -> Option<Self> {
-        Self::open(
-            &fs::canonicalize(path.parent()?)
-                .ok()?
-                .join(path.file_name()?),
-        )
+    /// The site of `target` at the real path of its parent, as bubblewrap
+    /// resolves it, provided that is still where the parent resolved when the
+    /// target was described. bwrap.rs then refused symlinks under writable
+    /// roots, so a symlink planted since cannot redirect the site.
+    fn resolve(target: &SyntheticMountTarget) -> Option<Self> {
+        let path = target.path();
+        let parent = real_parent(path)?;
+        if target.real_parent.as_ref() != Some(&parent) {
+            return None;
+        }
+        Self::open(&parent.join(path.file_name()?))
     }
 
     fn status(&self) -> rustix::io::Result<Status> {
@@ -596,20 +609,18 @@ impl Site {
             && rustix::fs::fgetxattr(&entry, BRAND, &mut [0_u8; 0]).is_ok()
     }
 
-    /// Creates the mountpoint that bubblewrap would otherwise create, branded.
-    /// On failure bubblewrap creates it, unbranded.
-    fn forge(&self, kind: SyntheticMountTargetKind) {
-        let created = match kind {
+    /// Creates the mountpoint that bubblewrap would otherwise create, branded,
+    /// and returns its status; `None` when this call did not create it, and
+    /// bubblewrap creates it unbranded if it is still missing.
+    fn forge(&self, kind: SyntheticMountTargetKind) -> Option<Status> {
+        let entry = match kind {
             SyntheticMountTargetKind::EmptyDirectory => {
-                rustix::fs::mkdirat(&self.parent, &self.name, Mode::from_raw_mode(0o755)).and_then(
-                    |()| {
-                        rustix::fs::openat(
-                            &self.parent,
-                            &self.name,
-                            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-                            Mode::empty(),
-                        )
-                    },
+                rustix::fs::mkdirat(&self.parent, &self.name, Mode::from_raw_mode(0o755)).ok()?;
+                rustix::fs::openat(
+                    &self.parent,
+                    &self.name,
+                    OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                    Mode::empty(),
                 )
             }
             SyntheticMountTargetKind::EmptyFile => rustix::fs::openat(
@@ -618,9 +629,14 @@ impl Site {
                 OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
                 Mode::from_raw_mode(0o644),
             ),
-        };
-        if let Ok(entry) = created {
-            let _ = rustix::fs::fsetxattr(&entry, BRAND, &[], XattrFlags::empty());
         }
+        .ok()?;
+        let _ = rustix::fs::fsetxattr(&entry, BRAND, &[], XattrFlags::empty());
+        Status::of(&entry, "", AtFlags::EMPTY_PATH).ok()
     }
+}
+
+/// The real path of `path`'s parent.
+pub(crate) fn real_parent(path: &Path) -> Option<PathBuf> {
+    fs::canonicalize(path.parent()?).ok()
 }
