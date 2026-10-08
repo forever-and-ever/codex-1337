@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used)]
 
+use std::num::NonZeroU64;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -35,7 +36,7 @@ use core_test_support::wait_for_event_match;
 use core_test_support::wait_for_event_with_timeout;
 use wiremock::MockServer;
 
-const YIELD_TIME_MS: u64 = 1_000;
+const YIELD_TIME_MS: NonZeroU64 = NonZeroU64::new(1_000).unwrap();
 const TURN_COMPLETE_TIMEOUT: Duration = Duration::from_secs(30);
 
 struct CodeModeElicitationHarness {
@@ -57,6 +58,7 @@ impl CodeModeElicitationHarness {
                 .with_model("test-gpt-5.1-codex")
                 .with_config(move |config| {
                     let _ = config.features.enable(Feature::CodeMode);
+                    config.code_mode.max_yield_time_ms = YIELD_TIME_MS;
                     configure(config);
                 });
         let test = builder.build_with_auto_env(&server).await?;
@@ -71,7 +73,7 @@ impl CodeModeElicitationHarness {
     }
 
     async fn assert_result_held(&self) {
-        tokio::time::sleep(Duration::from_millis(YIELD_TIME_MS + 250)).await;
+        tokio::time::sleep(Duration::from_millis(YIELD_TIME_MS.get() + 250)).await;
         assert!(
             self.follow_up.requests().is_empty(),
             "captured exec result should not return during a user elicitation"
@@ -155,8 +157,7 @@ async fn code_mode_holds_yielded_result_during_command_approval() -> Result<()> 
     skip_if_no_network!(Ok(()));
 
     let harness = CodeModeElicitationHarness::start(
-        r#"// @exec: {"yield_time_ms": 1000}
-await tools.exec_command({
+        r#"await tools.exec_command({
   cmd: "printf code_mode_approval_marker",
   sandbox_permissions: "require_escalated",
   justification: "test command approval",
@@ -190,8 +191,7 @@ async fn code_mode_holds_yielded_result_during_patch_approval() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let harness = CodeModeElicitationHarness::start(
-        r#"// @exec: {"yield_time_ms": 1000}
-await tools.apply_patch("*** Begin Patch\n*** Add File: code_mode_patch_approval.txt\n+held\n*** End Patch\n");"#,
+        r#"await tools.apply_patch("*** Begin Patch\n*** Add File: code_mode_patch_approval.txt\n+held\n*** End Patch\n");"#,
         PermissionProfile::read_only(),
         |_| {},
     )
@@ -224,8 +224,7 @@ async fn code_mode_holds_yielded_result_during_permission_request() -> Result<()
     skip_if_no_network!(Ok(()));
 
     let harness = CodeModeElicitationHarness::start(
-        r#"// @exec: {"yield_time_ms": 1000}
-await tools.request_permissions({
+        r#"await tools.request_permissions({
   reason: "test permission request",
   permissions: { network: { enabled: true } },
 });"#,

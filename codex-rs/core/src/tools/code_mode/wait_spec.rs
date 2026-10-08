@@ -6,17 +6,12 @@ use std::collections::BTreeMap;
 pub(crate) fn create_wait_tool(
     description_override: Option<&str>,
     parameters_override: Option<&str>,
+    max_yield_time_ms: u64,
 ) -> ToolSpec {
     let properties = BTreeMap::from([
         (
             "cell_id".to_string(),
             JsonSchema::string(Some("Identifier of the running exec cell.".to_string())),
-        ),
-        (
-            "yield_time_ms".to_string(),
-            JsonSchema::number(Some(
-                "Wait before yielding more output. Defaults to 10000 ms.".to_string(),
-            )),
         ),
         (
             "max_tokens".to_string(),
@@ -38,7 +33,7 @@ pub(crate) fn create_wait_tool(
             format!(
                 "Waits on a yielded `{}` cell and returns new output or completion.\n{}",
                 codex_code_mode::PUBLIC_TOOL_NAME,
-                codex_code_mode::build_wait_tool_description().trim()
+                codex_code_mode::build_wait_tool_description(max_yield_time_ms).trim()
             )
         }),
         strict: false,
@@ -76,13 +71,18 @@ mod tests {
     #[test]
     fn create_wait_tool_matches_expected_spec() {
         assert_eq!(
-            create_wait_tool(/*description_override*/ None, /*parameters_override*/ None),
+            create_wait_tool(
+                /*description_override*/ None,
+                /*parameters_override*/ None,
+                /*max_yield_time_ms*/ 600_000,
+            ),
             ToolSpec::Function(ResponsesApiTool {
                 name: codex_code_mode::WAIT_TOOL_NAME.to_string(),
                 description: format!(
                     "Waits on a yielded `{}` cell and returns new output or completion.\n{}",
                     codex_code_mode::PUBLIC_TOOL_NAME,
-                    codex_code_mode::build_wait_tool_description().trim()
+                    codex_code_mode::build_wait_tool_description(/*max_yield_time_ms*/ 600_000)
+                        .trim()
                 ),
                 strict: false,
                 defer_loading: None,
@@ -105,13 +105,6 @@ mod tests {
                             "terminate".to_string(),
                             JsonSchema::boolean(Some(
                                 "True stops the running exec cell; false or omitted waits for output."
-                                    .to_string(),
-                            )),
-                        ),
-                        (
-                            "yield_time_ms".to_string(),
-                            JsonSchema::number(Some(
-                                "Wait before yielding more output. Defaults to 10000 ms."
                                     .to_string(),
                             )),
                         ),

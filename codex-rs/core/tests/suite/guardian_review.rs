@@ -2710,7 +2710,7 @@ async fn yielded_code_mode_denials_interrupt_the_servicing_turn() -> Result<()> 
         id: "guardian-origin", participants: 2, timeout_ms: 60000
     }});"#;
     let code = format!(
-        r#"// @exec: {{"yield_time_ms": 1}}
+        r#"yield_control();
 {barrier}
 for (let index = 0; index < 6; index++) {{
     try {{
@@ -2792,7 +2792,7 @@ for (let index = 0; index < 6; index++) {{
                 "wait-a",
                 "wait",
                 &json!({
-                    "cell_id": cell_id, "yield_time_ms": 60000,
+                    "cell_id": cell_id,
                 })
                 .to_string(),
             ),

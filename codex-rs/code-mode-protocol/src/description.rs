@@ -20,6 +20,7 @@ use crate::json_schema_types::render_json_schema_to_typescript_with_budget;
 use std::collections::BTreeSet;
 
 const MAX_JS_SAFE_INTEGER: u64 = (1_u64 << 53) - 1;
+const MAX_YIELD_TIME_PLACEHOLDER: &str = "{{ max_yield_time_ms }}";
 const DEFERRED_NESTED_TOOLS_GUIDANCE: &str = "Some deferred nested tools may be omitted from this description. They are still available on the global `tools` object and listed in `ALL_TOOLS`.";
 const TOOL_DISCOVERY_GUIDANCE: &str = r#"Tool discovery helpers (synchronous):
 - `ALL_TOOLS`: `{ name, description }` catalogue; exact callable names and purpose summaries, not signatures or full instructions.
@@ -40,9 +41,10 @@ const EXEC_DESCRIPTION_TEMPLATE: &str = r#"Run JavaScript code to orchestrate/co
 - Nested tools return either an object or a string, based on the description.
 - Runs raw JavaScript -- no Node, no file system, no network access, no console.
 - Accepts raw JavaScript source text, not JSON, quoted strings, or markdown code fences.
-- You may optionally start the tool input with a first-line pragma like `// @exec: {"yield_time_ms": 10000, "max_output_tokens": 1000}`.
-- `yield_time_ms` asks `exec` to yield early if the script is still running. Defaults to {{ default_exec_yield_time_ms }} ms.
+- You may optionally start the tool input with a first-line pragma like `// @exec: {"max_output_tokens": 1000}`.
 - `max_output_tokens` sets the token budget for direct `exec` results. Defaults to 10000 tokens.
+- `exec` blocks until the script finishes. To keep working while a script runs, call `yield_control()` in it.
+- `exec` returns `Script running with cell ID ...` early when new user or agent input arrives, or after {{ max_yield_time_ms }} ms; the script keeps running.
 - When the JS code is fully evaluated, the isolate's lifetime ends and unawaited promises are silently discarded.
 
 - Global helpers:
@@ -57,7 +59,8 @@ const EXEC_DESCRIPTION_TEMPLATE: &str = r#"Run JavaScript code to orchestrate/co
 - `yield_control()`: yields the accumulated output to the model immediately while the script keeps running."#;
 const WAIT_DESCRIPTION_TEMPLATE: &str = r#"- Use `wait` only after `exec` returns `Script running with cell ID ...`.
 - `cell_id` identifies the running `exec` cell to resume.
-- `yield_time_ms` controls how long to wait for more output before yielding again. Defaults to 10000 ms.
+- `wait` blocks until the script finishes or calls `yield_control()`.
+- `wait` returns early when new user or agent input arrives, or after {{ max_yield_time_ms }} ms; the script keeps running.
 - `max_tokens` limits how much new output this wait call returns. Defaults to 10000 tokens.
 - `terminate: true` stops the running cell; false or omitted waits for output.
 - `wait` returns only the new output since the last yield, or the final completion or termination result for that cell.
@@ -110,11 +113,10 @@ pub struct ToolNamespaceDescription {
     pub description: String,
 }
 
+/// Keys are validated before deserialization. `yield_time_ms` is accepted and ignored: calls
+/// block until there is news, but upstream-trained models still send it.
 #[derive(Debug, Default, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
 struct CodeModeExecPragma {
-    #[serde(default)]
-    yield_time_ms: Option<u64>,
     #[serde(default)]
     max_output_tokens: Option<usize>,
 }
@@ -122,20 +124,18 @@ struct CodeModeExecPragma {
 #[derive(Debug, PartialEq, Eq)]
 pub struct ParsedExecSource {
     pub code: String,
-    pub yield_time_ms: Option<u64>,
     pub max_output_tokens: Option<usize>,
 }
 
 pub fn parse_exec_source(input: &str) -> Result<ParsedExecSource, String> {
     if input.trim().is_empty() {
         return Err(
-            "exec expects raw JavaScript source text (non-empty). Provide JS only, optionally with first-line `// @exec: {\"yield_time_ms\": 10000, \"max_output_tokens\": 1000}`.".to_string(),
+            "exec expects raw JavaScript source text (non-empty). Provide JS only, optionally with first-line `// @exec: {\"max_output_tokens\": 1000}`.".to_string(),
         );
     }
 
     let mut args = ParsedExecSource {
         code: input.to_string(),
-        yield_time_ms: None,
         max_output_tokens: None,
     };
 
@@ -156,44 +156,31 @@ pub fn parse_exec_source(input: &str) -> Result<ParsedExecSource, String> {
     let directive = pragma.trim();
     if directive.is_empty() {
         return Err(
-            "exec pragma must be a JSON object with supported fields `yield_time_ms` and `max_output_tokens`"
+            "exec pragma must be a JSON object with supported field `max_output_tokens`"
                 .to_string(),
         );
     }
 
     let value: serde_json::Value = serde_json::from_str(directive).map_err(|err| {
-        format!(
-            "exec pragma must be valid JSON with supported fields `yield_time_ms` and `max_output_tokens`: {err}"
-        )
+        format!("exec pragma must be valid JSON with supported field `max_output_tokens`: {err}")
     })?;
     let object = value.as_object().ok_or_else(|| {
-        "exec pragma must be a JSON object with supported fields `yield_time_ms` and `max_output_tokens`"
-            .to_string()
+        "exec pragma must be a JSON object with supported field `max_output_tokens`".to_string()
     })?;
     for key in object.keys() {
         match key.as_str() {
             "yield_time_ms" | "max_output_tokens" => {}
             _ => {
                 return Err(format!(
-                    "exec pragma only supports `yield_time_ms` and `max_output_tokens`; got `{key}`"
+                    "exec pragma only supports `max_output_tokens`; got `{key}`"
                 ));
             }
         }
     }
 
     let pragma: CodeModeExecPragma = serde_json::from_value(value).map_err(|err| {
-        format!(
-            "exec pragma fields `yield_time_ms` and `max_output_tokens` must be non-negative safe integers: {err}"
-        )
+        format!("exec pragma field `max_output_tokens` must be a non-negative safe integer: {err}")
     })?;
-    if pragma
-        .yield_time_ms
-        .is_some_and(|yield_time_ms| yield_time_ms > MAX_JS_SAFE_INTEGER)
-    {
-        return Err(
-            "exec pragma field `yield_time_ms` must be a non-negative safe integer".to_string(),
-        );
-    }
     if pragma.max_output_tokens.is_some_and(|max_output_tokens| {
         u64::try_from(max_output_tokens)
             .map(|max_output_tokens| max_output_tokens > MAX_JS_SAFE_INTEGER)
@@ -205,7 +192,6 @@ pub fn parse_exec_source(input: &str) -> Result<ParsedExecSource, String> {
     }
 
     args.code = rest.to_string();
-    args.yield_time_ms = pragma.yield_time_ms;
     args.max_output_tokens = pragma.max_output_tokens;
     Ok(args)
 }
@@ -258,7 +244,7 @@ pub fn build_exec_tool_description(
     enabled_tools: &[ToolDefinition],
     undeclared_tools: &[UndeclaredTool],
     namespace_descriptions: &BTreeMap<String, ToolNamespaceDescription>,
-    default_exec_yield_time_ms: u64,
+    max_yield_time_ms: u64,
     code_mode_only: bool,
     media_helpers: MediaHelpers,
     messages: Option<&CodeModeToolMessages>,
@@ -268,10 +254,7 @@ pub fn build_exec_tool_description(
         .and_then(|messages| messages.exec.as_ref())
         .and_then(|exec| exec.description.as_deref())
         .unwrap_or(EXEC_DESCRIPTION_TEMPLATE)
-        .replace(
-            "{{ default_exec_yield_time_ms }}",
-            &default_exec_yield_time_ms.to_string(),
-        )
+        .replace(MAX_YIELD_TIME_PLACEHOLDER, &max_yield_time_ms.to_string())
         .replace("{{ media_helpers }}", &media_helpers.render())
         .replace("{{ image_helper }}", media_helpers.image_helper());
     if !description.is_empty() {
@@ -353,8 +336,8 @@ pub fn build_exec_tool_description(
     sections.join("\n\n")
 }
 
-pub fn build_wait_tool_description() -> &'static str {
-    WAIT_DESCRIPTION_TEMPLATE
+pub fn build_wait_tool_description(max_yield_time_ms: u64) -> String {
+    WAIT_DESCRIPTION_TEMPLATE.replace(MAX_YIELD_TIME_PLACEHOLDER, &max_yield_time_ms.to_string())
 }
 
 pub fn normalize_code_mode_identifier(tool_key: &str) -> String {
@@ -520,7 +503,6 @@ mod tests {
             parse_exec_source("text('hi')").unwrap(),
             ParsedExecSource {
                 code: "text('hi')".to_string(),
-                yield_time_ms: None,
                 max_output_tokens: None,
             }
         );
@@ -528,12 +510,15 @@ mod tests {
 
     #[test]
     fn parse_exec_source_with_pragma() {
+        // Upstream-trained models still send `yield_time_ms`; rejecting it would cost a round trip.
         assert_eq!(
-            parse_exec_source("// @exec: {\"yield_time_ms\": 10}\ntext('hi')").unwrap(),
+            parse_exec_source(
+                "// @exec: {\"yield_time_ms\": 10, \"max_output_tokens\": 5}\ntext('hi')"
+            )
+            .unwrap(),
             ParsedExecSource {
                 code: "text('hi')".to_string(),
-                yield_time_ms: Some(10),
-                max_output_tokens: None,
+                max_output_tokens: Some(5),
             }
         );
     }
@@ -751,7 +736,7 @@ mod tests {
             }],
             &[],
             &BTreeMap::new(),
-            crate::DEFAULT_EXEC_YIELD_TIME_MS,
+            /*max_yield_time_ms*/ 600_000,
             /*code_mode_only*/ true,
             ALL_MEDIA,
             /*messages*/ None,
@@ -770,7 +755,7 @@ bar"
                 &[],
                 &[],
                 &BTreeMap::new(),
-                crate::DEFAULT_EXEC_YIELD_TIME_MS,
+                /*max_yield_time_ms*/ 600_000,
                 /*code_mode_only*/ false,
                 media_helpers,
                 /*messages*/ None,
@@ -841,7 +826,7 @@ bar"
             ],
             &[],
             &namespace_descriptions,
-            crate::DEFAULT_EXEC_YIELD_TIME_MS,
+            /*max_yield_time_ms*/ 600_000,
             /*code_mode_only*/ true,
             ALL_MEDIA,
             /*messages*/ None,
@@ -886,7 +871,7 @@ bar"
             }],
             &[],
             &namespace_descriptions,
-            crate::DEFAULT_EXEC_YIELD_TIME_MS,
+            /*max_yield_time_ms*/ 600_000,
             /*code_mode_only*/ true,
             ALL_MEDIA,
             /*messages*/ None,
@@ -996,7 +981,7 @@ bar"
             ],
             &[],
             &BTreeMap::new(),
-            crate::DEFAULT_EXEC_YIELD_TIME_MS,
+            /*max_yield_time_ms*/ 600_000,
             /*code_mode_only*/ true,
             ALL_MEDIA,
             /*messages*/ None,
@@ -1036,7 +1021,7 @@ bar"
             &[],
             &[UndeclaredTool::Deferred(deferred_tool)],
             &BTreeMap::new(),
-            crate::DEFAULT_EXEC_YIELD_TIME_MS,
+            /*max_yield_time_ms*/ 600_000,
             /*code_mode_only*/ true,
             ALL_MEDIA,
             /*messages*/ None,
@@ -1062,7 +1047,7 @@ bar"
                 output_schema: None,
             })],
             &BTreeMap::new(),
-            crate::DEFAULT_EXEC_YIELD_TIME_MS,
+            /*max_yield_time_ms*/ 600_000,
             /*code_mode_only*/ false,
             ALL_MEDIA,
             /*messages*/ None,

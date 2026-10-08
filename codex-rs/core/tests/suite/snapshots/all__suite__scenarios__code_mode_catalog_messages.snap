@@ -32,8 +32,8 @@ Settings:
   stream: true
   text: {"verbosity":"low"}
   tool_choice: "auto"
-  tools (10; hash=3fb4520c51936fc5):
-    - custom/exec: Catalog exec instructions. Default yield: 1234 ms. `image(imageUrlOrItem: string | { image_url: s...; hash=5d5e9a7caaab8db8
+  tools (10; hash=ac360461e09648e3):
+    - custom/exec: Catalog exec instructions. Yield ceiling: 1234 ms. `image(imageUrlOrItem: string | { image_url: s...; hash=75b46e258e5ad582
     - function/wait: Catalog wait instructions: resume the yielded cell.; args=[cell_id, max_tokens, terminate, yield_time_ms]; hash=67bc0f04da3505b3
     - function/update_work_status: Show what you are currently working on without posting a chat message. Use at the start of substa...; args=[activity]; hash=4835f56613efa5b8
     - function/request_user_input: Request user input for one to three short questions and wait for the response. This tool is only ...; args=[questions]; hash=64a729b25c424fc6

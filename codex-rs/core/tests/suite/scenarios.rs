@@ -1191,11 +1191,7 @@ async fn astra_continues_after_input_yields_a_code_mode_cell() -> Result<()> {
         vec![
             sse(vec![
                 ev_response_created("exec-response"),
-                ev_custom_tool_call(
-                    "exec-call",
-                    "exec",
-                    "// @exec: {\"yield_time_ms\": 60000}\ntext(await tools.check_release({}));",
-                ),
+                ev_custom_tool_call("exec-call", "exec", "text(await tools.check_release({}));"),
                 ev_completed("exec-response"),
             ]),
             sse(vec![
@@ -1204,7 +1200,7 @@ async fn astra_continues_after_input_yields_a_code_mode_cell() -> Result<()> {
                     "wait-call",
                     "functions",
                     "wait",
-                    r#"{"cell_id":"1","yield_time_ms":60000}"#,
+                    r#"{"cell_id":"1"}"#,
                 ),
                 ev_completed("wait-response"),
             ]),
@@ -1280,7 +1276,7 @@ async fn code_mode_catalog_messages() -> Result<()> {
             config.features.enable(Feature::Apps).expect("enable apps");
             config.workspace_roots = vec![config.cwd.clone()];
             config.code_mode.disable_in_process_fallback = true;
-            config.code_mode.default_exec_yield_time_ms = 1234;
+            config.code_mode.max_yield_time_ms = std::num::NonZeroU64::new(1234).expect("nonzero ceiling");
             config.features.enable(Feature::CodeModeHost).expect("enable the code-mode host");
             let model = config.model_catalog.as_mut().expect("scenario model catalog")
                 .models.iter_mut().find(|model| model.slug == "gpt-6-astra")
@@ -1291,7 +1287,7 @@ async fn code_mode_catalog_messages() -> Result<()> {
             model.model_messages.as_mut().expect("model messages").tools
                 .get_or_insert_with(Default::default).code_mode = Some(CodeModeToolMessages {
                     exec: Some(ToolMessage {
-                        description: Some("Catalog exec instructions. Default yield: {{ default_exec_yield_time_ms }} ms.\n{{ image_helper }}".to_string()),
+                        description: Some("Catalog exec instructions. Yield ceiling: {{ max_yield_time_ms }} ms.\n{{ image_helper }}".to_string()),
                         ..Default::default()
                     }),
                     wait: Some(ToolMessage {

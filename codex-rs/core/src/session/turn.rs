@@ -678,9 +678,9 @@ pub(crate) async fn run_turn(
                     // leaves the estimated context above the token limit.
                     can_drain_pending_input = !model_needs_follow_up
                         || step_context
-                            .preempt
-                            .as_ref()
-                            .is_some_and(CancellationToken::is_cancelled);
+                            .interjection
+                            .cutoff(&turn_context.config.features)
+                            .is_cancelled();
                     continue;
                 }
 
@@ -1706,14 +1706,13 @@ async fn run_sampling_request(
     cancellation_token: CancellationToken,
 ) -> CodexResult<SamplingRequestOutcome> {
     let turn_context = Arc::clone(&step_context.turn);
-    let preempt = step_context.preempt.clone().unwrap_or_default();
-    let _input_watch = if let Some(preempt) = &step_context.preempt {
-        sess.input_queue
-            .watch_user_input(&sess.active_turn, &turn_context.sub_id, preempt.clone())
-            .await
-    } else {
-        None
-    };
+    let preempt = step_context
+        .interjection
+        .cutoff(&turn_context.config.features);
+    let _input_watch = step_context
+        .interjection
+        .watch(&sess, &turn_context.sub_id)
+        .await;
     let base_instructions = sess.get_prompt_base_instructions().await;
 
     let tool_runtime = ToolCallRuntime::new(
@@ -2650,7 +2649,9 @@ async fn try_run_sampling_request(
         .features
         .enabled(Feature::ConcurrentReasoningSummaries)
         && turn_context.provider.info().is_openai();
-    let mut preempt = step_context.preempt.clone().unwrap_or_default();
+    let mut preempt = step_context
+        .interjection
+        .cutoff(&turn_context.config.features);
     let effort = sess
         .reasoning_effort_for_request(&step_context.settings, super::RequestEffortUsage::Sampling)
         .await;

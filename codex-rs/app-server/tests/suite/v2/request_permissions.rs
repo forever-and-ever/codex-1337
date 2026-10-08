@@ -85,8 +85,7 @@ async fn code_mode_uses_permissions_approved_in_the_same_cell(
             "same-cell",
             "exec",
             &format!(
-                r#"// @exec: {{"yield_time_ms": 60000}}
-await tools.request_permissions({{permissions: {{file_system: {{write: ["."]}}}}}});
+                r#"await tools.request_permissions({{permissions: {{file_system: {{write: ["."]}}}}}});
 text(await tools.exec_command({{cmd: "{command}"}}));"#,
             ),
         ),

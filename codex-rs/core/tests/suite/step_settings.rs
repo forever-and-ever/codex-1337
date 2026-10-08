@@ -2441,7 +2441,7 @@ async fn tool_messages_follow_mid_turn_model_changes() -> Result<()> {
                     &[],
                     &[],
                     &Default::default(),
-                    test.config.code_mode.default_exec_yield_time_ms,
+                    test.config.code_mode.max_yield_time_ms.get(),
                     test.config.model_catalog.as_ref().unwrap().models.iter()
                         .find(|info| info.slug == model).unwrap().tool_mode
                         == Some(codex_protocol::openai_models::ToolMode::CodeModeOnly),

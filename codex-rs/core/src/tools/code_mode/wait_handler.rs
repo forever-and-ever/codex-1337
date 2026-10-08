@@ -12,7 +12,6 @@ use crate::tools::registry::ToolExecutor;
 use codex_tools::ToolName;
 use codex_tools::ToolSpec;
 
-use super::DEFAULT_WAIT_YIELD_TIME_MS;
 use super::ExecContext;
 use super::WAIT_TOOL_NAME;
 use super::handle_runtime_response;
@@ -27,16 +26,10 @@ pub struct CodeModeWaitHandler {
 #[derive(Debug, Deserialize)]
 struct ExecWaitArgs {
     cell_id: String,
-    #[serde(default = "default_wait_yield_time_ms")]
-    yield_time_ms: u64,
     #[serde(default)]
     max_tokens: Option<usize>,
     #[serde(default)]
     terminate: bool,
-}
-
-fn default_wait_yield_time_ms() -> u64 {
-    DEFAULT_WAIT_YIELD_TIME_MS
 }
 
 fn parse_arguments<T>(arguments: &str) -> Result<T, FunctionCallError>
@@ -69,9 +62,10 @@ impl CodeModeWaitHandler {
     pub(crate) fn new(
         description_override: Option<&str>,
         parameters_override: Option<&str>,
+        max_yield_time_ms: u64,
     ) -> Self {
         Self {
-            spec: create_wait_tool(description_override, parameters_override),
+            spec: create_wait_tool(description_override, parameters_override, max_yield_time_ms),
         }
     }
 
@@ -153,9 +147,9 @@ impl CodeModeWaitHandler {
                         .wait(
                             codex_code_mode::WaitRequest {
                                 cell_id,
-                                yield_time_ms: args.yield_time_ms,
+                                yield_time_ms: exec.turn.config.code_mode.max_yield_time_ms.get(),
                             },
-                            step_context.preempt.clone(),
+                            step_context.interjection.news().clone(),
                         )
                         .await
                 };

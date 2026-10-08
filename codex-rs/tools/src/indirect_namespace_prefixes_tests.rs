@@ -36,7 +36,7 @@ fn plain_tools_join_an_existing_functions_group_only_with_a_prefix() {
             tools,
             &[],
             namespaces,
-            codex_code_mode::DEFAULT_EXEC_YIELD_TIME_MS,
+            /*max_yield_time_ms*/ 600_000,
             /*code_mode_only*/ true,
             codex_code_mode::MediaHelpers {
                 image_detail: codex_code_mode::ImageDetailVisibility::Visible,

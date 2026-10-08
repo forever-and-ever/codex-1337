@@ -6,6 +6,7 @@ use crate::agents_md::LoadedAgentsMd;
 use crate::config::TokenBudgetConfig;
 use crate::environment_selection::TurnEnvironmentSnapshot;
 use crate::realtime_conversation::RealtimeConversationSnapshot;
+use crate::session::input_queue::Interjection;
 use crate::session::step_settings::ResolvedStepSettings;
 use crate::session::turn_context::TurnContext;
 use crate::tools::router::ToolRouter;
@@ -15,13 +16,12 @@ use codex_mcp::McpBinding;
 use codex_otel::SessionTelemetry;
 use codex_protocol::items::ModelInvocationContext;
 use codex_protocol::protocol::TurnContextItem;
-use tokio_util::sync::CancellationToken;
 
 /// Request-scoped state that may change between model sampling requests.
 pub(crate) struct StepContext {
     pub(crate) turn: Arc<TurnContext>,
-    /// Preempts this request and yields its code-mode observations when user input arrives.
-    pub(crate) preempt: Option<CancellationToken>,
+    /// Input queued during this request: ends blocked Code Mode calls and may cut off its stream.
+    pub(crate) interjection: Interjection,
     /// Realtime call activity and instructions captured for this sampling request.
     pub(crate) realtime: RealtimeConversationSnapshot,
     /// One immutable settings version captured before request preparation.

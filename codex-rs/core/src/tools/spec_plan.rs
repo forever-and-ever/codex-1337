@@ -946,7 +946,7 @@ fn register_code_mode_executors(
             &enabled_tools,
             &undeclared_tools,
             &namespace_descriptions,
-            turn_context.config.code_mode.default_exec_yield_time_ms,
+            turn_context.config.code_mode.max_yield_time_ms.get(),
             tool_mode == ToolMode::CodeModeOnly,
             codex_code_mode::MediaHelpers {
                 image_detail: if unified_image_budget_enabled(
@@ -968,6 +968,7 @@ fn register_code_mode_executors(
     registry.prepend_trusted(Arc::new(CodeModeWaitHandler::new(
         model_messages.code_mode_wait_description_override(),
         model_messages.code_mode_wait_parameters_override(),
+        turn_context.config.code_mode.max_yield_time_ms.get(),
     )));
     registry.prepend_trusted(Arc::new(execute_handler));
 
