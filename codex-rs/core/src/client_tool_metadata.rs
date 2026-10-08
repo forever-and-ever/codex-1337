@@ -13,6 +13,13 @@ pub(super) fn bounded_input<T: Serialize>(
     message: &T,
     input: &[ResponseItem],
 ) -> Option<Vec<ResponseItem>> {
+    bounded_input_with_budget(message, input, MAX_RESPONSE_MESSAGE_BYTES)
+}
+fn bounded_input_with_budget<T: Serialize>(
+    message: &T,
+    input: &[ResponseItem],
+    max_message_bytes: usize,
+) -> Option<Vec<ResponseItem>> {
     if !input.iter().any(|item| {
         item.executed_tool_call_metadata().is_some_and(|metadata| {
             metadata.executed_tool_calls.is_some()
@@ -24,12 +31,12 @@ pub(super) fn bounded_input<T: Serialize>(
     }
     // Serialization errors belong to the transport's existing error path, not this soft budget.
     let message_bytes = serialized_json_bytes(message).ok()?;
-    if message_bytes <= MAX_RESPONSE_MESSAGE_BYTES {
+    if message_bytes <= max_message_bytes {
         return None;
     }
     let before = metadata_metrics::metadata_bytes(input);
     let mut bounded = input.to_vec();
-    let overage = message_bytes - MAX_RESPONSE_MESSAGE_BYTES;
+    let overage = message_bytes - max_message_bytes;
     bound_executed_tool_calls_for_message(&mut bounded, before.saturating_sub(overage));
     let after = metadata_metrics::metadata_bytes(&bounded);
     if before == after {

@@ -138,6 +138,7 @@ fn http_message_budget_preserves_resources_until_the_message_still_exceeds_limit
 
 #[test]
 fn message_budget_removes_residual_values_and_markers_when_ordinary_input_fits() {
+    let max_message_bytes = 4 * 1024;
     for metadata in [
         json!({}),
         json!(null),
@@ -160,7 +161,7 @@ fn message_budget_removes_residual_values_and_markers_when_ordinary_input_fits()
             };
             // The original instructions contain one byte, so leave exactly one
             // byte below the limit after removing only result metadata.
-            ordinary.instructions = "x".repeat(MAX_RESPONSE_MESSAGE_BYTES - ordinary_bytes);
+            ordinary.instructions = "x".repeat(max_message_bytes - ordinary_bytes);
             request.instructions = ordinary.instructions.clone();
             let original_input = request.input.clone();
             let mut expected = ordinary.clone();
@@ -173,13 +174,15 @@ fn message_budget_removes_residual_values_and_markers_when_ordinary_input_fits()
                     ResponsesWsRequest::ResponseCreate(ResponseCreateWsRequest::from(&ordinary));
                 assert_eq!(
                     serialized_json_bytes(&ordinary_message).unwrap(),
-                    MAX_RESPONSE_MESSAGE_BYTES - 1,
+                    max_message_bytes - 1,
                 );
                 let mut message =
                     ResponsesWsRequest::ResponseCreate(ResponseCreateWsRequest::from(&request));
-                assert!(serialized_json_bytes(&message).unwrap() > MAX_RESPONSE_MESSAGE_BYTES);
-                let bounded = bounded_input(&message, &request.input)
-                    .expect("optional result metadata must not keep a fitting message oversized");
+                assert!(serialized_json_bytes(&message).unwrap() > max_message_bytes);
+                let bounded =
+                    bounded_input_with_budget(&message, &request.input, max_message_bytes).expect(
+                        "optional result metadata must not keep a fitting message oversized",
+                    );
                 let ResponsesWsRequest::ResponseCreate(payload) = &mut message;
                 payload.input = &bounded;
                 let expected_message =
@@ -188,20 +191,22 @@ fn message_budget_removes_residual_values_and_markers_when_ordinary_input_fits()
                     serialized_json_bytes(&message).unwrap(),
                     serialized_json_bytes(&expected_message).unwrap(),
                 );
-                assert!(serialized_json_bytes(&message).unwrap() <= MAX_RESPONSE_MESSAGE_BYTES);
+                assert!(serialized_json_bytes(&message).unwrap() <= max_message_bytes);
                 bounded
             } else {
                 assert_eq!(
                     serialized_json_bytes(&ordinary).unwrap(),
-                    MAX_RESPONSE_MESSAGE_BYTES - 1,
+                    max_message_bytes - 1,
                 );
-                assert!(serialized_json_bytes(&request).unwrap() > MAX_RESPONSE_MESSAGE_BYTES);
-                let bounded = bounded_input(&request, &request.input)
-                    .expect("optional result metadata must not keep a fitting message oversized");
+                assert!(serialized_json_bytes(&request).unwrap() > max_message_bytes);
+                let bounded =
+                    bounded_input_with_budget(&request, &request.input, max_message_bytes).expect(
+                        "optional result metadata must not keep a fitting message oversized",
+                    );
                 let mut message = request.clone();
                 message.input = bounded.clone();
                 assert_eq!(message, expected);
-                assert!(serialized_json_bytes(&message).unwrap() <= MAX_RESPONSE_MESSAGE_BYTES);
+                assert!(serialized_json_bytes(&message).unwrap() <= max_message_bytes);
                 bounded
             };
             // Whole-input equality covers sources, calls, completion and ordinary output.
