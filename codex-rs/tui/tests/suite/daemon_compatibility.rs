@@ -100,6 +100,7 @@ async fn incompatible_daemon_falls_back_for_default_and_explicit_features() -> R
             server.abort();
             continue;
         }
+        drop(terminal);
         tokio::time::timeout(std::time::Duration::from_secs(/*secs*/ 5), server).await???;
     }
     Ok(())
