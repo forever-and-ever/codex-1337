@@ -52,6 +52,9 @@ use codex_protocol::models::PermissionProfile;
 use codex_protocol::models::ResponseInputItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::models::SandboxEnforcement;
+use codex_protocol::openai_models::AnthropicModelCapabilities;
+use codex_protocol::openai_models::AnthropicThinkingMode;
+use codex_protocol::openai_models::ModelsResponse;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::AgentStatus;
 use codex_protocol::protocol::AskForApproval;
@@ -1089,7 +1092,8 @@ async fn multi_agent_v2_spawn_returns_path_and_send_message_accepts_relative_pat
         .start_thread(StartThreadOptions::new((*turn.config).clone()))
         .await
         .expect("root thread should start");
-    set_agent_control(&mut session, manager.agent_control());
+    let control = manager.agent_control();
+    set_agent_control(&mut session, control.clone());
     session.thread_id = root.thread_id;
     let mut config = (*turn.config).clone();
     config
@@ -1307,6 +1311,129 @@ async fn multi_agent_v2_spawn_returns_path_and_send_message_accepts_relative_pat
         ))
         .await
         .expect("explicit plaintext followup should cross providers");
+    // Equal provider IDs do not grant native Anthropic a ciphertext decoder.
+    let mut native_config = (*turn.config).clone();
+    native_config.model_provider =
+        codex_model_provider_info::built_in_model_providers(/*openai_base_url*/ None)
+            .remove(codex_model_provider_info::CLAUDE_SUBSCRIPTION_PROVIDER_ID)
+            .unwrap();
+    native_config.model_providers.insert(
+        native_config.model_provider_id.clone(),
+        native_config.model_provider.clone(),
+    );
+    let mut native_model = turn.model_info().as_ref().clone();
+    native_model.slug = "claude-test".into();
+    native_model.anthropic = Some(AnthropicModelCapabilities {
+        thinking: AnthropicThinkingMode::Disabled,
+        max_output_tokens: 1024_u32.try_into().unwrap(),
+        supported_efforts: Vec::new(),
+        supports_structured_outputs: false,
+    });
+    native_config.model = Some(native_model.slug.clone());
+    native_config.model_catalog = Some(ModelsResponse {
+        models: vec![native_model],
+    });
+    let native_source = SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+        parent_thread_id: session.thread_id,
+        depth: 1,
+        agent_path: Some(AgentPath::try_from("/root/native").unwrap()),
+        agent_nickname: None,
+        agent_role: None,
+    });
+    let before = manager.list_thread_ids().await;
+    let error = session
+        .services
+        .agent_control
+        .spawn(SpawnRequest {
+            caller: session.thread_id,
+            config: native_config.clone(),
+            input: AgentInput::Message {
+                message: AgentMessage::Encrypted("unreadable native task".into()),
+                mode: MessageDeliveryMode::TriggerTurn,
+            },
+            source: native_source.clone(),
+            options: SpawnAgentOptions::default(),
+        })
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("retry using plaintext_message"));
+    assert_eq!(manager.list_thread_ids().await.len(), before.len());
+    let (native, _) = session
+        .services
+        .agent_control
+        .spawn(SpawnRequest {
+            caller: session.thread_id,
+            config: native_config,
+            input: AgentInput::Message {
+                message: AgentMessage::Plaintext("readable native task".into()),
+                mode: MessageDeliveryMode::TriggerTurn,
+            },
+            source: native_source,
+            options: SpawnAgentOptions::default(),
+        })
+        .await
+        .expect("plaintext native task must be deliverable");
+    let ops_before = manager.captured_ops().len();
+    for mode in [
+        MessageDeliveryMode::QueueOnly,
+        MessageDeliveryMode::TriggerTurn,
+    ] {
+        let error = session
+            .services
+            .agent_control
+            .send(crate::agent::api::SendRequest {
+                caller: session.thread_id,
+                target: crate::agent::api::AgentTarget::Id(native.thread_id),
+                resume_config: (*turn.config).clone(),
+                input: AgentInput::Message {
+                    message: AgentMessage::Encrypted("unreadable native message".into()),
+                    mode,
+                },
+                start_options: Default::default(),
+            })
+            .await
+            .err()
+            .expect("native encrypted delivery must fail");
+        assert!(error.to_string().contains("retry using plaintext_message"));
+    }
+    assert_eq!(manager.captured_ops().len(), ops_before);
+    // A family account handoff can leave the caller on its earlier credential.
+    // Provider equality must not permit ciphertext to cross that boundary.
+    control.runtime.account_selection.select(
+        &turn.config.model_provider_id,
+        crate::agent::control::ProviderAccountSelection::Chatgpt {
+            id: "different-account".into(),
+        },
+    );
+    let before = manager.list_thread_ids().await.len();
+    let error = session
+        .services
+        .agent_control
+        .spawn(SpawnRequest {
+            caller: session.thread_id,
+            config: (*turn.config).clone(),
+            input: AgentInput::Message {
+                message: AgentMessage::Encrypted("account-bound task".into()),
+                mode: MessageDeliveryMode::TriggerTurn,
+            },
+            source: SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+                parent_thread_id: session.thread_id,
+                depth: 1,
+                agent_path: Some(AgentPath::try_from("/root/other_account").unwrap()),
+                agent_nickname: None,
+                agent_role: None,
+            }),
+            options: SpawnAgentOptions::default(),
+        })
+        .await
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("cannot cross accounts; retry using plaintext_message"),
+        "unexpected account-bound delivery error: {error}",
+    );
+    assert_eq!(manager.list_thread_ids().await.len(), before);
     for (content, trigger_turn) in [
         ("plain foreign message", false),
         ("plain foreign followup", true),

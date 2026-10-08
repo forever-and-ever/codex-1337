@@ -6,6 +6,7 @@ use crate::agent::types::MessageDeliveryMode;
 use crate::context::ContextualUserFragment;
 use crate::context::InterAgentMessage;
 use crate::context::InterAgentMessageType;
+use codex_model_provider_info::ModelProviderAdapter;
 use codex_protocol::AgentPath;
 use codex_protocol::ThreadId;
 use codex_protocol::error::CodexErr;
@@ -17,6 +18,8 @@ impl LocalAgentControl {
         &self,
         caller: ThreadId,
         recipient_provider: &str,
+        recipient_adapter: ModelProviderAdapter,
+        recipient_account_id: Option<&str>,
         message: &AgentMessage,
     ) -> CodexResult<()> {
         if matches!(message, AgentMessage::Encrypted(_)) {
@@ -25,6 +28,19 @@ impl LocalAgentControl {
             if sender.config_snapshot().await.model_provider_id != recipient_provider {
                 return Err(CodexErr::InvalidRequest(
                     "Encrypted agent messages cannot cross providers; retry using plaintext_message".into(),
+                ));
+            }
+            // The native Messages encoder cannot consume provider-owned ciphertext;
+            // history salvage would otherwise omit the task entirely.
+            if recipient_adapter == ModelProviderAdapter::ClaudeSubscription {
+                return Err(CodexErr::InvalidRequest(
+                    "Native Anthropic cannot read encrypted agent messages; retry using plaintext_message".into(),
+                ));
+            }
+            if sender.auth_manager().selected_account_id().as_deref() != recipient_account_id {
+                return Err(CodexErr::InvalidRequest(
+                    "Encrypted agent messages cannot cross accounts; retry using plaintext_message"
+                        .into(),
                 ));
             }
         }
