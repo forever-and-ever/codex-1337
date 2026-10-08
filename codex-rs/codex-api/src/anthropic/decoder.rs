@@ -126,13 +126,18 @@ enum Block {
 }
 
 #[derive(Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type")]
 enum Delta {
-    TextDelta { text: String },
-    InputJsonDelta { partial_json: String },
-    ThinkingDelta { thinking: String },
-    SignatureDelta { signature: String },
-    CompactionDelta { content: String },
+    #[serde(rename = "text_delta")]
+    Text { text: String },
+    #[serde(rename = "input_json_delta")]
+    InputJson { partial_json: String },
+    #[serde(rename = "thinking_delta")]
+    Thinking { thinking: String },
+    #[serde(rename = "signature_delta")]
+    Signature { signature: String },
+    #[serde(rename = "compaction_delta")]
+    Compaction { content: String },
 }
 
 struct OpenBlock {
@@ -298,16 +303,16 @@ impl<'a> Decoder<'a> {
                     ApiError::NativeStream("Anthropic delta without open block".into())
                 })?;
                 match (&mut open.block, delta) {
-                    (Block::Text { text }, Delta::TextDelta { text: part }) => {
+                    (Block::Text { text }, Delta::Text { text: part }) => {
                         text.push_str(&part);
                         events.push(ResponseEvent::OutputTextDelta(part));
                     }
-                    (Block::ToolUse { .. }, Delta::InputJsonDelta { partial_json }) => {
+                    (Block::ToolUse { .. }, Delta::InputJson { partial_json }) => {
                         // Neither function envelopes nor custom string wrappers
                         // are canonical input until the complete JSON is decoded.
                         open.json.push_str(&partial_json);
                     }
-                    (Block::Thinking { thinking, .. }, Delta::ThinkingDelta { thinking: part }) => {
+                    (Block::Thinking { thinking, .. }, Delta::Thinking { thinking: part }) => {
                         thinking.push_str(&part);
                         events.push(ResponseEvent::ReasoningSummaryDelta {
                             delta: part,
@@ -316,12 +321,11 @@ impl<'a> Decoder<'a> {
                     }
                     (
                         Block::Thinking { signature, .. } | Block::Compaction { signature, .. },
-                        Delta::SignatureDelta { signature: part },
+                        Delta::Signature { signature: part },
                     ) => signature.push_str(&part),
-                    (
-                        Block::Compaction { content, .. },
-                        Delta::CompactionDelta { content: part },
-                    ) => content.push_str(&part),
+                    (Block::Compaction { content, .. }, Delta::Compaction { content: part }) => {
+                        content.push_str(&part)
+                    }
                     _ => {
                         return Err(ApiError::NativeStream(
                             "Anthropic delta does not match block".into(),

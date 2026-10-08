@@ -16,13 +16,13 @@ impl Session {
         &self,
         owner: CodeModeOwner,
         item: ResponseItemEnvelope,
-    ) -> Result<(), ResponseItemEnvelope> {
+    ) -> Result<(), Box<ResponseItemEnvelope>> {
         let ResponseItem::CustomToolCallOutput { call_id, .. } = &item.item else {
             panic!("Code Mode notification requires its existing custom output payload");
         };
         let mut active = self.active_turn.lock().await;
         let Some(active) = active.as_mut() else {
-            return Err(item);
+            return Err(Box::new(item));
         };
         // Registry admission is synchronous and does not invoke callbacks. As with
         // inject_if_running, an ActiveTurn with task=None still accepts this input.
