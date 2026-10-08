@@ -8800,19 +8800,26 @@ mod tests {
             /*disable_paste_burst*/ false,
         );
 
-        // Force an active burst so we can deterministically buffer characters without relying on
-        // timing.
+        // Keep all inputs at one instant: scheduling stalls must not expire the burst.
+        let now = Instant::now();
         composer
             .draft
             .paste_burst
-            .begin_with_retro_grabbed(String::new(), Instant::now());
+            .begin_with_retro_grabbed(String::new(), now);
 
-        let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE));
-        let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE));
+        let _ = composer.handle_input_basic_with_time(
+            KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE),
+            now,
+        );
+        let _ = composer.handle_input_basic_with_time(
+            KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE),
+            now,
+        );
         assert!(composer.draft.textarea.text().is_empty());
         assert!(composer.is_in_paste_burst());
 
-        let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+        let _ = composer
+            .handle_input_basic_with_time(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE), now);
         assert_eq!(composer.draft.textarea.text(), "hi");
         assert_eq!(composer.draft.textarea.cursor(), 1);
         assert!(!composer.is_in_paste_burst());
