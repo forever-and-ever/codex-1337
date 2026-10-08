@@ -92,42 +92,71 @@ fn malformed_declared_tool_preserves_later_blocks_and_usage() {
             namespace: None,
         },
     }];
-    let mut decoder = Decoder::new(&tools);
-    let mut items = Vec::new();
-    let mut completed = None;
-    for frame in [
-        json!({"type":"message_start","message":{"id":"msg","usage":{"input_tokens":5,"output_tokens":0}}}),
-        json!({"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"malformed","name":"read","input":{"path":"one"}}}),
-        json!({"type":"content_block_stop","index":0}),
-        json!({"type":"content_block_start","index":1,"content_block":{"type":"text","text":"Still receiving."}}),
-        json!({"type":"content_block_stop","index":1}),
-        json!({"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":7}}),
-        json!({"type":"message_stop"}),
+    // A cutoff can close a tool block before its JSON is complete. Keep the
+    // rejected call answerable without losing later text or the stop disposition.
+    for (input, delta, stop_reason, expected_input, output_limited) in [
+        (
+            json!({"path":"one"}),
+            "",
+            "tool_use",
+            json!({"path":"one"}),
+            false,
+        ),
+        (
+            json!({}),
+            r#"{"arguments":{"path":"#,
+            "max_tokens",
+            json!({}),
+            true,
+        ),
+        (json!({}), "[]", "tool_use", json!({}), false),
+        (json!(null), "", "tool_use", json!({}), false),
     ] {
-        for event in decoder.decode(&frame.to_string()).unwrap() {
-            match event {
-                ResponseEvent::OutputItemDone(item) => items.push(item),
-                ResponseEvent::Completed {
-                    token_usage,
-                    end_turn,
-                    ..
-                } => {
-                    completed = Some((token_usage.unwrap().total_tokens, end_turn));
+        let mut decoder = Decoder::new(&tools);
+        let mut items = Vec::new();
+        let mut completed = None;
+        for frame in [
+            json!({"type":"message_start","message":{"id":"msg","usage":{"input_tokens":5,"output_tokens":0}}}),
+            json!({"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"malformed","name":"read","input":input}}),
+            json!({"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":delta}}),
+            json!({"type":"content_block_stop","index":0}),
+            json!({"type":"content_block_start","index":1,"content_block":{"type":"text","text":"Still receiving."}}),
+            json!({"type":"content_block_stop","index":1}),
+            json!({"type":"message_delta","delta":{"stop_reason":stop_reason},"usage":{"output_tokens":7}}),
+            json!({"type":"message_stop"}),
+        ] {
+            for event in decoder.decode(&frame.to_string()).unwrap() {
+                match event {
+                    ResponseEvent::OutputItemDone(item) => items.push(item),
+                    ResponseEvent::Completed {
+                        token_usage,
+                        end_turn,
+                        usage_metadata,
+                        ..
+                    } => {
+                        completed = Some((
+                            token_usage.unwrap().total_tokens,
+                            end_turn,
+                            usage_metadata
+                                .as_ref()
+                                .is_some_and(anthropic_output_limit_exceeded),
+                        ));
+                    }
+                    _ => {}
                 }
-                _ => {}
             }
         }
+        assert_eq!(
+            (serde_json::to_value(items).unwrap(), completed),
+            (
+                json!([
+                    {"type":"rejected_tool_call","id":"msg_0","reason":"malformed_input","provider":"anthropic","call_id":"malformed","name":"read","input":expected_input},
+                    {"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"Still receiving."}]}
+                ]),
+                Some((12, Some(false), output_limited))
+            )
+        );
     }
-    assert_eq!(
-        (serde_json::to_value(items).unwrap(), completed),
-        (
-            json!([
-                {"type":"rejected_tool_call","id":"msg_0","reason":"malformed_input","provider":"anthropic","call_id":"malformed","name":"read","input":{"path":"one"}},
-                {"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"Still receiving."}]}
-            ]),
-            Some((12, Some(false)))
-        )
-    );
 }
 
 #[test]

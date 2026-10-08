@@ -333,12 +333,19 @@ impl<'a> Decoder<'a> {
                 let mut open = self.blocks.remove(&index).ok_or_else(|| {
                     ApiError::NativeStream("Anthropic stop without open block".into())
                 })?;
-                if let Block::ToolUse { input, .. } = &mut open.block
-                    && !open.json.is_empty()
-                {
-                    *input = serde_json::from_str(&open.json).map_err(|e| {
-                        ApiError::NativeStream(format!("invalid Anthropic tool JSON: {e}"))
-                    })?;
+                if let Block::ToolUse { name, input, .. } = &mut open.block {
+                    let declared = self.tools.iter().any(|tool| tool.name == *name);
+                    if !open.json.is_empty() {
+                        *input = match serde_json::from_str(&open.json) {
+                            Ok(input) => input,
+                            Err(_) if declared => json!({}),
+                            Err(error) => {
+                                return Err(ApiError::NativeStream(format!(
+                                    "invalid Anthropic tool JSON: {error}"
+                                )));
+                            }
+                        };
+                    }
                 }
                 if let Block::Thinking { signature, .. } = &open.block
                     && signature.is_empty()
@@ -455,20 +462,27 @@ impl<'a> Decoder<'a> {
                 name: alias,
                 input,
             } => {
-                if !input.is_object() || call_id.is_empty() {
-                    return Err(ApiError::NativeStream(
-                        "invalid Anthropic tool block".into(),
-                    ));
-                }
                 let rejection = |reason| ResponseItem::RejectedToolCall {
                     id: id.clone(),
                     reason,
                     call: NativeToolCall::Anthropic {
                         call_id: call_id.clone(),
                         name: alias.clone(),
-                        input: input.clone(),
+                        input: if input.is_object() {
+                            input.clone()
+                        } else {
+                            json!({})
+                        },
                     },
                 };
+                if !input.is_object() || call_id.is_empty() {
+                    if !call_id.is_empty() && self.tools.iter().any(|tool| tool.name == *alias) {
+                        return Ok(rejection(ToolCallRejection::MalformedInput));
+                    }
+                    return Err(ApiError::NativeStream(
+                        "invalid Anthropic tool block".into(),
+                    ));
+                }
                 let Some(tool) = self.tools.iter().find(|tool| tool.name == *alias) else {
                     // Preserve the received name and body, but not as an executable
                     // function: the local registry may contain unadvertised tools.
