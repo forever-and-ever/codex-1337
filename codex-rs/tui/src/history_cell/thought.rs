@@ -32,6 +32,7 @@ impl From<&Config> for ThoughtTextVisibility {
 #[derive(Debug)]
 pub(crate) struct ThoughtCell {
     pub(crate) id: String,
+    response_id: String,
     timestamp: Option<HistoryTimestamp>,
     tokens: Option<u64>,
     text: String,
@@ -40,6 +41,11 @@ pub(crate) struct ThoughtCell {
 }
 
 impl ThoughtCell {
+    /// The response whose step this Thought heads.
+    pub(crate) fn response_id(&self) -> &str {
+        &self.response_id
+    }
+
     fn heading(&self) -> Line<'static> {
         let mut heading = Line::default();
         heading.push_span("Thought".bold());
@@ -56,11 +62,11 @@ impl ThoughtCell {
     ) -> Self {
         let ThreadItem::Thought {
             id,
+            response_id,
             completed_at_ms,
             summary,
             content,
             reported_reasoning_tokens,
-            ..
         } = item
         else {
             unreachable!("ThoughtCell requires a Thought item")
@@ -86,6 +92,7 @@ impl ThoughtCell {
         };
         Self {
             id,
+            response_id,
             timestamp: HistoryTimestamp::from_millis(completed_at_ms),
             tokens: reported_reasoning_tokens,
             text,

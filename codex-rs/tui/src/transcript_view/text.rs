@@ -23,6 +23,8 @@ mod activity;
 #[path = "text_gutter.rs"]
 mod gutter;
 
+pub(super) use gutter::token_label;
+
 use ratatui::buffer::Buffer;
 use ratatui::layout::Alignment;
 use ratatui::layout::Rect;
@@ -64,7 +66,8 @@ pub(super) struct TextLayout {
 #[derive(Default)]
 struct HeadingDecorations {
     tokens: Option<u64>,
-    output_controls: Option<(usize, String)>,
+    /// Display-only text after the heading: output controls or a step's bill.
+    decoration: Option<(usize, String)>,
 }
 
 struct DisclosureControl {
@@ -105,7 +108,7 @@ impl TextLayout {
     pub(super) fn rewrap(&self, width: u16) -> Self {
         let mut layout = Self::from_logical(self.logical.clone(), width);
         layout.heading.tokens = self.heading.tokens;
-        if let Some((offset, label)) = &self.heading.output_controls {
+        if let Some((offset, label)) = &self.heading.decoration {
             layout = layout.with_inline_decoration_at(*offset, label.clone());
         }
         for control in &self.disclosure_controls {

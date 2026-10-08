@@ -179,7 +179,7 @@ impl TextLayout {
             }
         }
         row.inline_decoration = Some((column, width));
-        self.heading.output_controls = Some((offset, label));
+        self.heading.decoration = Some((offset, label));
         self
     }
 }

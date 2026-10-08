@@ -1221,6 +1221,10 @@ pub(crate) enum AppEvent {
         call_id: String,
         tokens: Option<u64>,
     },
+    RecordStepAdmission {
+        thread_id: ThreadId,
+        item: codex_app_server_protocol::StepAdmissionItem,
+    },
     /// FIFO barrier after the completed turn's history insertions.
     TurnTipReady {
         thread_id: ThreadId,

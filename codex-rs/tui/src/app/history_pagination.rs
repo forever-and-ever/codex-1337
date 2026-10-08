@@ -234,17 +234,22 @@ impl App {
         visibility: RawReasoningVisibility,
     ) -> Vec<Arc<dyn HistoryCell>> {
         for item in &items {
-            if let ThreadItem::ToolOutputTokens {
-                id,
-                call_id,
-                tokens,
-            } = item.native_item()
-            {
-                self.transcript_view.record_tool_output_tokens(
-                    id.clone(),
-                    call_id.clone(),
-                    *tokens,
-                );
+            match item.native_item() {
+                ThreadItem::ToolOutputTokens {
+                    id,
+                    call_id,
+                    tokens,
+                } => {
+                    self.transcript_view.record_tool_output_tokens(
+                        id.clone(),
+                        call_id.clone(),
+                        *tokens,
+                    );
+                }
+                ThreadItem::StepAdmission(item) => {
+                    self.transcript_view.record_step_admission(item.clone());
+                }
+                _ => {}
             }
         }
         let mut cells = Vec::new();

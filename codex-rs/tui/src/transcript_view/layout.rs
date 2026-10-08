@@ -227,8 +227,15 @@ impl TranscriptView {
         let disclosure = !detailed && mode == HistoryRenderMode::Rich && !ids.is_empty();
         let expanded = disclosure && self.disclosure.is_expanded(&ids);
         let output_mode = self.disclosure.output_mode(&ids);
-        let header_tokens = cell
-            .activity_header_tokens()
+        // A Thought heads its step until steps have their own rows.
+        let bill = cell
+            .as_any()
+            .downcast_ref::<crate::history_cell::ThoughtCell>()
+            .and_then(|thought| self.step_bill(thought.response_id()));
+        let header_tokens = bill
+            .as_ref()
+            .map(|bill| bill.total)
+            .or_else(|| cell.activity_header_tokens())
             .or_else(|| self.activity_output_tokens(&ids));
         let continued_edit = disclosure
             && !cell.is_stream_continuation()
@@ -294,7 +301,12 @@ impl TranscriptView {
                 } else {
                     cell.activity_disclosure(content_width)
                 };
-                activity_layout(
+                let header = if expanded {
+                    cell.expanded_activity_header()
+                } else {
+                    cell.activity_header()
+                };
+                let layout = activity_layout(
                     ActivityTranscriptLines {
                         output_mode: (expanded && cell.has_formatted_output())
                             .then_some(output_mode),
@@ -303,11 +315,7 @@ impl TranscriptView {
                             activity,
                             cell.transcript_timestamp(),
                         ),
-                        header: if expanded {
-                            cell.expanded_activity_header()
-                        } else {
-                            cell.activity_header()
-                        },
+                        header,
                         auxiliary: Vec::new(),
                         header_tokens,
                         disclosure,
@@ -316,7 +324,12 @@ impl TranscriptView {
                     width,
                     expanded,
                     shortcut,
-                )
+                );
+                match (header, &bill) {
+                    (Some(header), Some(bill)) => layout
+                        .with_inline_decoration_at(header.source_offset, bill.decoration.clone()),
+                    _ => layout,
+                }
             } else {
                 let lines = crate::history_cell::fullscreen_session_lines(
                     cell.as_ref(),

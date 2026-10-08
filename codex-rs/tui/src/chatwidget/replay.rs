@@ -496,7 +496,12 @@ impl ChatWidget {
                 }
             }
             ThreadItem::HookPrompt { .. } => {}
-            ThreadItem::StepAdmission(_) => {}
+            ThreadItem::StepAdmission(item) => {
+                if let Some(thread_id) = self.thread_id() {
+                    self.app_event_tx
+                        .send(AppEvent::RecordStepAdmission { thread_id, item });
+                }
+            }
             ThreadItem::ToolOutputTokens {
                 id,
                 call_id,

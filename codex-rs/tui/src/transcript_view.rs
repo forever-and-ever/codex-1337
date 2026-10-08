@@ -20,6 +20,7 @@ mod prompt_header;
 mod search;
 mod selection;
 mod snapshot;
+mod step_bills;
 mod text;
 mod tool_output_tokens;
 mod turn_tip;
@@ -118,6 +119,7 @@ pub(crate) struct TranscriptView {
     last_click: Option<(std::time::Instant, u16, u16, u8)>,
     disclosure: disclosure::Disclosure,
     tool_output_tokens: tool_output_tokens::ToolOutputTokens,
+    step_bills: step_bills::StepBills,
 }
 
 impl Default for TranscriptView {
@@ -153,6 +155,7 @@ impl Default for TranscriptView {
             last_click: None,
             disclosure: disclosure::Disclosure::default(),
             tool_output_tokens: Default::default(),
+            step_bills: Default::default(),
         }
     }
 }
