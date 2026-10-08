@@ -59,8 +59,12 @@ async fn fragmented_utf8_crlf_sse_and_terminal_failures_are_not_replayed() {
                 .chunks(chunk_size)
                 .map(<[u8]>::to_vec)
                 .collect();
-            let mut stream =
-                spawn_stream(response(chunks), request(), Duration::from_secs(1), None);
+            let mut stream = spawn_stream(
+                response(chunks),
+                request(),
+                Duration::from_secs(1),
+                /*telemetry*/ None,
+            );
             let mut observed = Vec::new();
             while let Some(event) = stream.next().await {
                 match event {
@@ -118,7 +122,12 @@ async fn stalled_stream_and_dropped_consumer_release_transport() {
             headers: HeaderMap::new(),
             bytes: Box::pin(bytes),
         };
-        let mut stream = spawn_stream(response, request(), Duration::from_secs(1), None);
+        let mut stream = spawn_stream(
+            response,
+            request(),
+            Duration::from_secs(1),
+            /*telemetry*/ None,
+        );
         if consume {
             assert!(matches!(
                 stream.next().await,
@@ -202,7 +211,7 @@ async fn errors_before_any_completed_item_stay_typed_for_retry() {
             response(vec![wire]),
             request(),
             Duration::from_secs(1),
-            None,
+            /*telemetry*/ None,
         );
         while let Some(event) = stream.next().await {
             if let Err(error) = event {
