@@ -124,6 +124,11 @@ pub struct CodexHarnessMetadata {
     /// Sender context captured by the host when this task message was accepted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sender_user_messages: Option<Box<SenderUserMessages>>,
+
+    /// Persistence-only mark of a failed tool output, whose payload cannot carry it.
+    /// Loading moves it into the payload; it is never set in memory.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub tool_failed: bool,
 }
 
 fn deserialize_mcp_attribution_checkpoint<'de, D>(
@@ -268,6 +273,7 @@ pub use retained_context::RetainedUserMessage;
 pub use retained_context::VerifiedAnswer;
 pub use retained_context::VerifiedQuestionAnswer;
 mod rollout_payload;
+mod tool_failure;
 
 pub use guardian_history::GuardianHistoryCheckpoint;
 

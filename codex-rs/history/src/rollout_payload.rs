@@ -79,7 +79,7 @@ impl<'a> From<&'a RolloutItem> for RolloutItemWire<'a> {
             },
             RolloutItem::ResponseItem(envelope) => Self::ResponseItem {
                 payload: Cow::Borrowed(&envelope.item),
-                metadata: envelope.metadata.as_ref().map(Cow::Borrowed),
+                metadata: crate::tool_failure::mark(&envelope.item, envelope.metadata.as_ref()),
             },
             RolloutItem::InterAgentCommunication(payload) => Self::InterAgentCommunication {
                 payload: Cow::Borrowed(payload),
@@ -199,10 +199,12 @@ impl From<RolloutItemWire<'_>> for RolloutItem {
                         },
                     );
                 }
-                Self::ResponseItem(ResponseItemEnvelope {
+                let mut envelope = ResponseItemEnvelope {
                     item: payload.into_owned(),
                     metadata: metadata.map(Cow::into_owned),
-                })
+                };
+                crate::tool_failure::restore(&mut envelope.item, envelope.metadata.as_mut());
+                Self::ResponseItem(envelope)
             }
             RolloutItemWire::InterAgentCommunication { payload } => {
                 Self::InterAgentCommunication(payload.into_owned())
@@ -267,19 +269,20 @@ pub(super) struct CompactedItemWire<'a> {
 
 impl<'a> From<&'a CompactedItem> for CompactedItemWire<'a> {
     fn from(item: &'a CompactedItem) -> Self {
-        let replacement_history_metadata = item
-            .replacement_history
-            .as_ref()
-            .filter(|items| items.iter().any(|envelope| envelope.metadata.is_some()))
-            .map(|items| {
-                items
-                    .iter()
-                    .map(|envelope| match envelope.metadata.as_ref() {
-                        Some(metadata) => Cow::Borrowed(metadata),
-                        None => Cow::Owned(CodexHarnessMetadata::default()),
-                    })
+        let replacement_history_metadata = item.replacement_history.as_ref().and_then(|items| {
+            let metadata = items
+                .iter()
+                .map(|envelope| {
+                    crate::tool_failure::mark(&envelope.item, envelope.metadata.as_ref())
+                })
+                .collect::<Vec<_>>();
+            metadata.iter().any(Option::is_some).then(|| {
+                metadata
+                    .into_iter()
+                    .map(Option::unwrap_or_default)
                     .collect()
-            });
+            })
+        });
 
         Self {
             message: Cow::Borrowed(&item.message),
@@ -327,9 +330,16 @@ impl TryFrom<CompactedItemWire<'_>> for CompactedItem {
                     items
                         .into_iter()
                         .zip(metadata)
-                        .map(|(item, metadata)| ResponseItemEnvelope {
-                            item: item.into_owned(),
-                            metadata: Some(metadata.into_owned()),
+                        .map(|(item, metadata)| {
+                            let mut envelope = ResponseItemEnvelope {
+                                item: item.into_owned(),
+                                metadata: Some(metadata.into_owned()),
+                            };
+                            crate::tool_failure::restore(
+                                &mut envelope.item,
+                                envelope.metadata.as_mut(),
+                            );
+                            envelope
                         })
                         .collect(),
                 )

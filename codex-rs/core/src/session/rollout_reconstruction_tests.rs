@@ -12,7 +12,12 @@ use codex_history::ResumedHistory;
 use codex_protocol::AgentPath;
 use codex_protocol::ThreadId;
 use codex_protocol::models::ContentItem;
+use codex_protocol::models::FunctionCallOutputBody;
+use codex_protocol::models::FunctionCallOutputPayload;
 use codex_protocol::models::ResponseItem;
+use codex_protocol::openai_models::AnthropicModelCapabilities;
+use codex_protocol::openai_models::AnthropicThinkingMode;
+use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::protocol::InterAgentCommunication;
 use codex_protocol::protocol::SessionContextWindow;
 use codex_protocol::protocol::SessionMeta;
@@ -27,6 +32,7 @@ use core_test_support::responses::strip_metadata_from_items;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 use std::collections::BTreeMap;
+use std::num::NonZeroU32;
 use std::path::PathBuf;
 use test_case::test_case;
 use uuid::Uuid;
@@ -118,6 +124,96 @@ async fn recorded_questions_share_queued_input_order_across_resume() {
         vec![Some(0), Some(2), Some(1), None]
     );
     assert_eq!(session.reserve_user_input_order().await, 3);
+}
+
+#[tokio::test]
+async fn resumed_native_history_replays_tool_failure() {
+    let (session, turn) = make_session_and_context().await;
+    session
+        .record_conversation_items(
+            &turn,
+            turn.model_info(),
+            &[
+                user_message("run"),
+                serde_json::from_value(json!({
+                    "type": "function_call", "call_id": "failed",
+                    "name": "exec_command", "arguments": "{}"
+                }))
+                .unwrap(),
+                ResponseItem::FunctionCallOutput {
+                    id: None,
+                    call_id: Some("failed".to_owned()),
+                    name: None,
+                    namespace: None,
+                    output: FunctionCallOutputPayload {
+                        body: FunctionCallOutputBody::Text("exit 1".to_owned()),
+                        success: Some(false),
+                    },
+                    internal_chat_message_metadata_passthrough: None,
+                },
+            ],
+        )
+        .await;
+    let mut model = ModelInfo::clone(turn.model_info());
+    model.used_fallback_model_metadata = false;
+    model.default_reasoning_level = None;
+    model.anthropic = Some(AnthropicModelCapabilities {
+        thinking: AnthropicThinkingMode::Disabled,
+        max_output_tokens: NonZeroU32::new(/*n*/ 100).unwrap(),
+        supported_efforts: Vec::new(),
+        supports_structured_outputs: false,
+    });
+    let native = |history: ContextManager| {
+        let input = history.for_prompt(&model.input_modalities);
+        let request = codex_api::encode_anthropic_request(
+            &codex_api::AnthropicPrompt {
+                input: &input,
+                instructions: "",
+                tools: &Arc::from([]),
+                parallel_tool_calls: false,
+                output_schema: None,
+            },
+            &codex_api::AnthropicRequestOptions {
+                model: &model,
+                reasoning_effort: None,
+                max_output_tokens: NonZeroU32::new(/*n*/ 100).unwrap(),
+                cache: codex_api::AnthropicCachePolicy::Ephemeral(
+                    codex_api::AnthropicCacheTtl::OneHour,
+                ),
+                operation: codex_api::AnthropicOperation::Inference,
+            },
+        )
+        .unwrap();
+        serde_json::from_str::<serde_json::Value>(request.body().get()).unwrap()
+    };
+    let live = native(session.clone_history().await);
+    let saved = session
+        .clone_history()
+        .await
+        .into_annotated_items()
+        .into_iter()
+        .map(RolloutItem::ResponseItem)
+        .collect::<Vec<_>>();
+    let saved = serde_json::from_value(serde_json::to_value(saved).unwrap()).unwrap();
+    session
+        .record_initial_history(InitialHistory::Resumed(ResumedHistory {
+            conversation_id: session.thread_id,
+            history: Arc::new(saved),
+            rollout_path: None,
+        }))
+        .await;
+
+    // The failure must survive persistence, or the resumed cache prefix diverges.
+    assert_eq!(native(session.clone_history().await), live);
+    let results = live["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|message| message["content"].as_array().unwrap())
+        .filter(|block| block["type"] == "tool_result")
+        .map(|block| (&block["tool_use_id"], &block["is_error"]))
+        .collect::<Vec<_>>();
+    assert_eq!(results, vec![(&json!("failed"), &json!(true))]);
 }
 
 #[tokio::test]
