@@ -1,6 +1,9 @@
-//! The server connection outlives UI generations. Disconnecting a UI is not a server detach.
+//! The server connection outlives UI connections. Disconnecting a UI is not a server detach.
 //!
-//! Requests admitted by an old generation run to completion; they are never replayed.
+//! Requests admitted by an old connection run to completion; they are never replayed.
+//! Replies return to their originating connection; temporary config/history connections
+//! coexist with the main UI. Notifications fan out through bounded, nonblocking queues:
+//! a stalled connection is dropped alone and can reattach to hydrate history.
 //! Pending server requests are retained until explicitly answered. The supervisor, not
 //! this asynchronous transport, owns the reload deadline.
 
@@ -23,12 +26,19 @@ use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio_tungstenite::tungstenite::Message;
+use tokio_util::sync::CancellationToken;
+use tokio_util::sync::DropGuard;
 
 const MAILBOX: usize = 256;
 
+pub(super) struct Connection {
+    writer: mpsc::Sender<Message>,
+    _disconnect: DropGuard,
+}
+
 pub(super) enum Command {
     Connect(RemoteAppServerEndpoint, oneshot::Sender<io::Result<()>>),
-    Attach(u64, mpsc::Sender<Message>),
+    Attach(u64, Connection),
     Input(u64, JSONRPCMessage),
     Detach(u64),
 }
@@ -37,10 +47,10 @@ pub(super) async fn listen(
     listener: UnixListener,
     commands: mpsc::Sender<Command>,
 ) -> io::Result<()> {
-    let mut generation = 0;
+    let mut connection = 0;
     loop {
         let (stream, _) = listener.accept().await?;
-        generation += 1;
+        connection += 1;
         let commands = commands.clone();
         tokio::spawn(async move {
             let Ok(socket) = tokio_tungstenite::accept_async(stream).await else {
@@ -48,35 +58,46 @@ pub(super) async fn listen(
             };
             let (mut sink, mut source) = socket.split();
             let (output, mut writes) = mpsc::channel(MAILBOX);
+            let disconnect = CancellationToken::new();
+            let writer = Connection {
+                writer: output,
+                _disconnect: disconnect.clone().drop_guard(),
+            };
             if commands
-                .send(Command::Attach(generation, output))
+                .send(Command::Attach(connection, writer))
                 .await
                 .is_err()
             {
                 return;
             }
-            loop {
-                tokio::select! {
-                    message = writes.recv() => match message {
-                        Some(message) => { if sink.send(message).await.is_err() { break } },
-                        _ => break,
-                    },
-                    message = source.next() => match message {
-                        Some(Ok(Message::Text(text))) => {
-                            let Ok(message) = serde_json::from_str(&text) else { break };
-                            if commands.send(Command::Input(generation, message)).await.is_err() {
-                                break;
+            let forwarding = async {
+                loop {
+                    tokio::select! {
+                        message = writes.recv() => match message {
+                            Some(message) => { if sink.send(message).await.is_err() { break } },
+                            _ => break,
+                        },
+                        message = source.next() => match message {
+                            Some(Ok(Message::Text(text))) => {
+                                let Ok(message) = serde_json::from_str(&text) else { break };
+                                if commands.send(Command::Input(connection, message)).await.is_err() {
+                                    break;
+                                }
                             }
+                            Some(Ok(Message::Ping(bytes))) => {
+                                if sink.send(Message::Pong(bytes)).await.is_err() { break }
+                            }
+                            Some(Ok(Message::Pong(_))) => {},
+                            _ => break,
                         }
-                        Some(Ok(Message::Ping(bytes))) => {
-                            if sink.send(Message::Pong(bytes)).await.is_err() { break }
-                        }
-                        Some(Ok(Message::Pong(_))) => {},
-                        _ => break,
                     }
                 }
+            };
+            tokio::select! {
+                _ = disconnect.cancelled() => {},
+                _ = forwarding => {},
             }
-            let _ = commands.send(Command::Detach(generation)).await;
+            let _ = commands.send(Command::Detach(connection)).await;
         });
     }
 }
@@ -84,8 +105,7 @@ pub(super) async fn listen(
 pub(super) async fn run(mut commands: mpsc::Receiver<Command>) {
     let mut upstream: Option<RemoteAppServerClient> = None;
     let mut connected_endpoint = None;
-    let mut ui: Option<(u64, mpsc::Sender<Message>)> = None;
-    let mut ui_generation = 0;
+    let mut ui = HashMap::<u64, Connection>::new();
     let mut pending = HashMap::<RequestId, Value>::new();
     let mut request_sequence: u64 = 0;
     let (results, mut replies) = mpsc::channel::<(u64, JSONRPCMessage)>(MAILBOX);
@@ -118,26 +138,20 @@ pub(super) async fn run(mut commands: mpsc::Receiver<Command>) {
                         Err(error) => { let _ = response.send(Err(error)); }
                     }
                 }
-                Some(Command::Attach(generation, writer)) => {
-                    // A handshake begun by a dead worker may finish after its replacement.
-                    if generation > ui_generation {
-                        ui_generation = generation;
-                        ui = Some((generation, writer));
-                    }
+                Some(Command::Attach(connection, writer)) => {
+                    ui.insert(connection, writer);
                 }
-                Some(Command::Detach(generation)) => {
-                    if ui.as_ref().is_some_and(|(current, _)| *current == generation) {
-                        ui = None;
-                    }
+                Some(Command::Detach(connection)) => {
+                    ui.remove(&connection);
                 }
-                Some(Command::Input(generation, message)) => {
-                    if ui.as_ref().is_none_or(|(current, _)| *current != generation) {
+                Some(Command::Input(connection, message)) => {
+                    if !ui.contains_key(&connection) {
                         continue;
                     }
                     let Some(client) = upstream.as_ref() else { continue };
                     match message {
                         JSONRPCMessage::Request(request) if request.method == "initialize" => {
-                            send(&mut ui, &JSONRPCMessage::Response(JSONRPCResponse {
+                            send(&mut ui, Audience::Connection(connection), &JSONRPCMessage::Response(JSONRPCResponse {
                                 id: request.id,
                                 result: serde_json::json!({
                                     "userAgent": "codex-ui-host",
@@ -168,12 +182,12 @@ pub(super) async fn run(mut commands: mpsc::Receiver<Command>) {
                                         },
                                     }),
                                 };
-                                let _ = results.send((generation, message)).await;
+                                let _ = results.send((connection, message)).await;
                             });
                         }
                         JSONRPCMessage::Notification(notification) => {
                             if notification.method == "initialized" {
-                                for request in pending.values() { send(&mut ui, request); }
+                                for request in pending.values() { send(&mut ui, Audience::Connection(connection), request); }
                             } else if let Ok(notification) = serde_json::to_value(notification)
                                 .and_then(serde_json::from_value::<ClientNotification>) {
                                 let _ = client.notify(notification).await;
@@ -207,39 +221,41 @@ pub(super) async fn run(mut commands: mpsc::Receiver<Command>) {
                     if let codex_app_server_protocol::ServerNotification::ServerRequestResolved(value) = notification.as_ref() {
                         pending.remove(&value.request_id);
                     }
-                    send(&mut ui, &notification);
+                    send(&mut ui, Audience::All, &notification);
                 }
                 Some(AppServerEvent::ServerRequest(request)) => {
                     if let Ok(value) = serde_json::to_value(&request)
                         && let Some(id) = value.get("id").and_then(|id| serde_json::from_value(id.clone()).ok()) {
                             pending.insert(id, value.clone());
-                            send(&mut ui, &value);
+                            send(&mut ui, Audience::All, &value);
                         }
                 }
                 Some(AppServerEvent::Lagged { .. } | AppServerEvent::Disconnected { .. }) | None => {
-                    ui = None;
+                    ui.clear();
                     upstream = None;
                     pending.clear();
                 }
             },
-            Some((generation, message)) = replies.recv() => {
-                if ui.as_ref().is_some_and(|(current, _)| *current == generation) {
-                    send(&mut ui, &message);
-                }
+            Some((connection, message)) = replies.recv() => {
+                send(&mut ui, Audience::Connection(connection), &message);
             }
 
         }
     }
 }
 
-fn send(ui: &mut Option<(u64, mpsc::Sender<Message>)>, value: &impl serde::Serialize) {
-    let Some((_, writer)) = ui else { return };
-    let Ok(text) = serde_json::to_string(value) else {
-        *ui = None;
-        return;
-    };
-    // A slow/dead UI cannot stall the persistent transport. Reattachment hydrates history.
-    if writer.try_send(Message::Text(text.into())).is_err() {
-        *ui = None;
-    }
+enum Audience {
+    Connection(u64),
+    All,
+}
+
+fn send(ui: &mut HashMap<u64, Connection>, audience: Audience, value: &impl serde::Serialize) {
+    let text = serde_json::to_string(value).expect("serialize UI broker message");
+    let message = Message::Text(text.into());
+    ui.retain(|connection, peer| {
+        if matches!(audience, Audience::Connection(target) if *connection != target) {
+            return true;
+        }
+        peer.writer.try_send(message.clone()).is_ok()
+    });
 }
