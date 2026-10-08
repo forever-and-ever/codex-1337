@@ -233,7 +233,10 @@ impl App {
         let bootstrap = match startup_bootstrap {
             Some(bootstrap) => bootstrap,
             None => match startup_draft
-                .run_until(tui, app_server.bootstrap(&config))
+                .run_until(
+                    tui,
+                    app_server.bootstrap_for_selection(&config, &session_selection),
+                )
                 .await
             {
                 Ok(bootstrap) => bootstrap?,

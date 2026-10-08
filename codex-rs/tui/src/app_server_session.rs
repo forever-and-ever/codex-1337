@@ -486,11 +486,7 @@ impl AppServerSession {
     }
 
     pub(crate) async fn bootstrap(&mut self, config: &Config) -> Result<AppServerBootstrap> {
-        let started_at = Instant::now();
-        let account = self.read_new_thread_account(config).await?;
-        let mut bootstrap = self.bootstrap_with_account(config, account).await?;
-        bootstrap.duration = started_at.elapsed();
-        Ok(bootstrap)
+        self.bootstrap_for_thread(config, /*thread_id*/ None).await
     }
 
     /// Bootstraps using the server-resolved fresh-root account.
@@ -498,6 +494,7 @@ impl AppServerSession {
         &mut self,
         config: &Config,
         account: GetAccountResponse,
+        model_provider: Option<String>,
     ) -> Result<AppServerBootstrap> {
         let started_at = Instant::now();
         // `hooks/list` holds the global config queue during startup. Submit models and config
@@ -510,7 +507,7 @@ impl AppServerSession {
                     .request_typed::<ModelListResponse>(ClientRequest::ModelList {
                         request_id: model_request_id,
                         params: ModelListParams {
-                            model_provider: self.explicit_model_provider(config),
+                            model_provider,
                             cursor: None,
                             limit: None,
                             include_hidden: Some(true),
@@ -2567,7 +2564,9 @@ mod tests {
             workspace_routing: None,
         };
 
-        let bootstrap = app_server.bootstrap_with_account(&config, account).await?;
+        let bootstrap = app_server
+            .bootstrap_with_account(&config, account, /*model_provider*/ None)
+            .await?;
 
         assert_eq!(app_server.next_request_id, next_request_id + 2);
         assert_eq!(

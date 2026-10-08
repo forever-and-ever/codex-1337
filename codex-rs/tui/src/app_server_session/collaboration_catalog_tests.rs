@@ -37,12 +37,20 @@ async fn collaboration_catalog_is_optional_and_refetched_on_bootstrap() -> Resul
                 "config": config_request_overrides_from_config(&config)
             }
         });
+        let thread_id = ThreadId::new();
+        let saved_thread = json!({
+            "id": thread_id, "sessionId": thread_id, "preview": "", "ephemeral": false,
+            "modelProvider": "saved-provider", "createdAt": 0, "updatedAt": 0,
+            "status": {"type": "idle"}, "cwd": config.cwd, "cliVersion": "test",
+            "source": "cli", "turns": []
+        });
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let endpoint = crate::resolve_remote_addr(&format!("ws://{}", listener.local_addr()?))?;
         let server = tokio::spawn(async move {
             let (stream, _) = listener.accept().await?;
             let mut socket = tokio_tungstenite::accept_async(stream).await?;
             let mut catalog_requests = 0;
+            let mut expected_provider = json!(null);
             while let Some(Ok(Message::Text(text))) = socket.next().await {
                 let JSONRPCMessage::Request(request) = serde_json::from_str(&text)? else {
                     continue;
@@ -55,7 +63,24 @@ async fn collaboration_catalog_is_optional_and_refetched_on_bootstrap() -> Resul
                         assert_eq!(request.params.as_ref(), Some(&expected_account_params));
                         json!({"result": {"account": null, "requiresOpenaiAuth": false}})
                     }
-                    "model/list" => json!({"result": {"data": [], "nextCursor": null}}),
+                    "thread/read" => {
+                        expected_provider = json!("saved-provider");
+                        assert_eq!(
+                            request.params,
+                            Some(json!({"threadId": thread_id, "includeTurns": false}))
+                        );
+                        json!({"result": {"thread": saved_thread}})
+                    }
+                    "model/list" => {
+                        // Reattachment must select the saved provider before discovering models,
+                        // independently of the client's invocation and server defaults.
+                        let provider = request
+                            .params
+                            .as_ref()
+                            .and_then(|params| params.get("modelProvider"));
+                        assert_eq!(provider, Some(&expected_provider));
+                        json!({"result": {"data": [], "nextCursor": null}})
+                    }
                     "configRequirements/read" => json!({"result": {"requirements": null}}),
                     "collaborationMode/list" => {
                         assert_eq!(request.params, Some(json!({})));
@@ -85,7 +110,9 @@ async fn collaboration_catalog_is_optional_and_refetched_on_bootstrap() -> Resul
             (initial.default_model, initial.collaboration_modes),
             ("task-model".into(), vec![])
         );
-        let refreshed = session.bootstrap(&config).await?;
+        let refreshed = session
+            .bootstrap_for_thread(&config, Some(thread_id))
+            .await?;
         assert_eq!(
             refreshed.collaboration_modes,
             vec![CollaborationModeMask {

@@ -56,7 +56,7 @@ pub(super) async fn reconnect(
             if presentation == ReconnectPresentation::Draft {
                 session.model_provider_override = Some(config.model_provider_id.clone());
             }
-            let bootstrap = session.bootstrap(&config).await?;
+            let bootstrap = session.bootstrap_for_thread(&config, thread_id).await?;
             let thread = if let Some(thread_id) = thread_id {
                 match session
                     .resume_thread(

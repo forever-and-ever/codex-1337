@@ -1934,7 +1934,7 @@ async fn run_ratatui_app(
     let startup_prefetch = startup_draft
         .run_until(&mut tui, async {
             tokio::join!(
-                app_server.bootstrap(&config),
+                app_server.bootstrap_for_selection(&config, &session_selection),
                 load_startup_hooks_review_entry(hooks_request_handle, hooks_cwd),
             )
         })
