@@ -5,6 +5,7 @@ use app_test_support::to_response;
 
 use app_test_support::ChatGptAuthFixture;
 use app_test_support::ChatGptIdTokenClaims;
+use app_test_support::create_fake_rollout;
 use app_test_support::encode_id_token;
 use app_test_support::write_chatgpt_auth;
 use app_test_support::write_models_cache;
@@ -2343,6 +2344,67 @@ async fn get_account_with_chatgpt() -> Result<()> {
         workspace_routing: expected_workspace_routing("account-123"),
     };
     assert_eq!(received, expected);
+    Ok(())
+}
+
+#[tokio::test]
+async fn get_account_for_cold_resumed_thread_falls_back_to_default_scope() -> Result<()> {
+    // TUI bootstrap for a resume target reads account/read with that thread's id *before*
+    // thread/resume ever materializes the thread, so the thread is always cold here. Scoping
+    // must fall back to the default account instead of failing with thread-not-found.
+    let codex_home = TempDir::new()?;
+    create_config_toml(
+        codex_home.path(),
+        CreateConfigTomlParams {
+            requires_openai_auth: Some(true),
+            ..Default::default()
+        },
+    )?;
+    write_chatgpt_auth(
+        codex_home.path(),
+        ChatGptAuthFixture::new("access-chatgpt")
+            .account_id("account-123")
+            .email("user@example.com")
+            .plan_type("pro"),
+        AuthCredentialsStoreMode::File,
+    )?;
+    let cold_thread_id = create_fake_rollout(
+        codex_home.path(),
+        "2025-01-05T12-00-00",
+        "2025-01-05T12:00:00Z",
+        "Saved user message",
+        Some("mock_provider"),
+        /*git_info*/ None,
+    )?;
+
+    let mut mcp = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .without_auto_env()
+        .with_env_overrides(&[("OPENAI_API_KEY", None)])
+        .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
+        .await?;
+
+    let unscoped_request_id = mcp
+        .send_get_account_request(GetAccountParams {
+            new_thread: None,
+            thread_id: None,
+            refresh_token: false,
+        })
+        .await?;
+    let unscoped: GetAccountResponse =
+        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(unscoped_request_id)).await??;
+
+    let cold_request_id = mcp
+        .send_get_account_request(GetAccountParams {
+            new_thread: None,
+            thread_id: Some(cold_thread_id),
+            refresh_token: false,
+        })
+        .await?;
+    let for_cold_thread: GetAccountResponse =
+        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(cold_request_id)).await??;
+
+    assert_eq!(for_cold_thread, unscoped);
     Ok(())
 }
 

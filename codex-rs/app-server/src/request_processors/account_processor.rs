@@ -99,6 +99,10 @@ pub(crate) struct AccountRequestProcessor {
 }
 
 impl AccountRequestProcessor {
+    /// Scopes account lookups to a specific thread's committed account, when that thread is
+    /// currently loaded. A valid but not-yet-loaded thread (e.g. a resume target during TUI
+    /// bootstrap, before `thread/resume` materializes it) falls back to the default scope rather
+    /// than failing: there is no committed account to prefer yet.
     pub(crate) async fn for_thread(
         &self,
         thread_id: Option<&str>,
@@ -107,16 +111,13 @@ impl AccountRequestProcessor {
         if let Some(id) = thread_id {
             let id = ThreadId::from_string(id)
                 .map_err(|error| invalid_request(format!("Invalid thread ID: {error}")))?;
-            let thread = self
-                .thread_manager
-                .get_thread(id)
-                .await
-                .map_err(|error| invalid_request(error.to_string()))?;
-            scoped.auth_manager = thread.auth_manager();
-            scoped.scoped_config = Some(thread.config().await);
-            scoped.scoped_provider_account_id = thread.committed_provider_account_id();
-            if scoped.auth_manager.is_account_scoped() {
-                scoped.auth_manager.reload().await;
+            if let Ok(thread) = self.thread_manager.get_thread(id).await {
+                scoped.auth_manager = thread.auth_manager();
+                scoped.scoped_config = Some(thread.config().await);
+                scoped.scoped_provider_account_id = thread.committed_provider_account_id();
+                if scoped.auth_manager.is_account_scoped() {
+                    scoped.auth_manager.reload().await;
+                }
             }
         }
         Ok(scoped)
