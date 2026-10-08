@@ -429,7 +429,7 @@ impl GrpcSession {
                 cell_id: cell_id.to_owned(),
                 outcome: outcome as i32,
             }),
-            None,
+            /*cell_permit*/ None,
         );
     }
 
