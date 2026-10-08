@@ -717,7 +717,7 @@ pub struct McpResourceToolMessages {
 /// Model-owned instructions for Code Mode's exec and wait tools.
 #[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq, TS, JsonSchema)]
 pub struct CodeModeToolMessages {
-    /// Instructional template supporting `{{ default_exec_yield_time_ms }}` and `{{ image_helper }}`.
+    /// Instructional template supporting `{{ max_yield_time_ms }}` and `{{ image_helper }}`.
     /// Runtime tool declarations are appended. Unknown placeholders remain literal.
     /// Exec accepts raw JavaScript; `parameters` is not consumed and its grammar is unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -565,6 +565,7 @@ async fn code_mode_wait_does_not_expose_default_hook_payloads() {
 
     let wait = crate::tools::handlers::CodeModeWaitHandler::new(
         /*description_override*/ None, /*parameters_override*/ None,
+        /*max_yield_time_ms*/ 600_000,
     );
     let wait_invocation = test_invocation(
         Arc::new(session),

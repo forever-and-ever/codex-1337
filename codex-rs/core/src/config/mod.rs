@@ -146,6 +146,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::io::ErrorKind;
+use std::num::NonZeroU64;
 use std::num::NonZeroUsize;
 use std::path::Path;
 use std::path::PathBuf;
@@ -1173,11 +1174,12 @@ pub struct ToolRegistryConfig {
     pub turn_metadata_includes_tool_info: bool,
 }
 
-const DEFAULT_CODE_MODE_EXEC_YIELD_TIME_MS: u64 = 30_000;
+const DEFAULT_CODE_MODE_MAX_YIELD_TIME_MS: NonZeroU64 = NonZeroU64::new(600_000).expect("nonzero");
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CodeModeConfig {
-    pub default_exec_yield_time_ms: u64,
+    /// Longest a code-mode exec or wait call blocks on a running cell, in milliseconds.
+    pub max_yield_time_ms: NonZeroU64,
     /// Show handler duration, code-mode host duration, and harness overhead
     /// in each code-mode cell response.
     /// Experimental: this option and the response format may change or be removed.
@@ -1192,7 +1194,7 @@ pub struct CodeModeConfig {
 impl Default for CodeModeConfig {
     fn default() -> Self {
         Self {
-            default_exec_yield_time_ms: DEFAULT_CODE_MODE_EXEC_YIELD_TIME_MS,
+            max_yield_time_ms: DEFAULT_CODE_MODE_MAX_YIELD_TIME_MS,
             experimental_show_cell_overhead: false,
             tool_input_schema_max_bytes: None,
             excluded_tool_namespaces: Vec::new(),
@@ -2756,9 +2758,9 @@ fn resolve_code_mode_config(config_toml: &ConfigToml) -> CodeModeConfig {
         });
 
     CodeModeConfig {
-        default_exec_yield_time_ms: base
-            .and_then(|config| config.default_exec_yield_time_ms)
-            .unwrap_or(DEFAULT_CODE_MODE_EXEC_YIELD_TIME_MS),
+        max_yield_time_ms: base
+            .and_then(|config| config.max_yield_time_ms)
+            .unwrap_or(DEFAULT_CODE_MODE_MAX_YIELD_TIME_MS),
         experimental_show_cell_overhead: base
             .and_then(|config| config.experimental_show_cell_overhead)
             .unwrap_or_default(),

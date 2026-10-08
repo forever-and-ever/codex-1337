@@ -29,7 +29,6 @@ use serde_json::Value as JsonValue;
 use tokio::sync::OnceCell;
 use tokio_util::sync::CancellationToken;
 
-use crate::config::CodeModeConfig;
 use crate::function_tool::FunctionCallError;
 use crate::original_image_detail::can_request_original_image_detail;
 use crate::original_image_detail::sanitize_original_image_detail as sanitize_image_detail_items;
@@ -62,7 +61,6 @@ pub(crate) use wait_handler::CodeModeWaitHandler;
 
 pub(crate) const PUBLIC_TOOL_NAME: &str = codex_code_mode::PUBLIC_TOOL_NAME;
 pub(crate) const WAIT_TOOL_NAME: &str = codex_code_mode::WAIT_TOOL_NAME;
-pub(crate) const DEFAULT_WAIT_YIELD_TIME_MS: u64 = codex_code_mode::DEFAULT_WAIT_YIELD_TIME_MS;
 
 /// Returns true for the code-mode `exec` tool in the default namespace.
 pub(crate) fn is_exec_tool_name(tool_name: &ToolName) -> bool {
@@ -81,7 +79,6 @@ pub(crate) struct CodeModeService {
     session_provider: Arc<dyn CodeModeSessionProvider>,
     availability: Result<(), String>,
     dispatch_broker: Arc<CodeModeDispatchBroker>,
-    default_exec_yield_time_ms: u64,
     shutdown_token: CancellationToken,
     unavailable_warning_emitted: AtomicBool,
 }
@@ -90,7 +87,6 @@ impl CodeModeService {
     pub(crate) fn new(
         thread_id: ThreadId,
         session_provider: Arc<dyn CodeModeSessionProvider>,
-        config: &CodeModeConfig,
         executed_tool_calls: ExecutedToolCalls,
     ) -> Self {
         let dispatch_broker = Arc::new(CodeModeDispatchBroker::new(thread_id, executed_tool_calls));
@@ -101,7 +97,6 @@ impl CodeModeService {
             session_provider,
             availability,
             dispatch_broker,
-            default_exec_yield_time_ms: config.default_exec_yield_time_ms,
             shutdown_token: CancellationToken::new(),
             unavailable_warning_emitted: AtomicBool::new(false),
         }
@@ -133,14 +128,11 @@ impl CodeModeService {
 
     async fn execute(
         &self,
-        mut request: codex_code_mode::ExecuteRequest,
+        request: codex_code_mode::ExecuteRequest,
         step_context: Arc<StepContext>,
         session: std::sync::Weak<Session>,
     ) -> Result<(codex_code_mode::StartedCell, Arc<lifecycle::ExecutionScope>), String> {
-        request
-            .yield_time_ms
-            .get_or_insert(self.default_exec_yield_time_ms);
-        let preempt = step_context.preempt.clone();
+        let news = step_context.interjection.news().clone();
         let exec_call_id = request.tool_call_id.clone();
         let starting = self
             .transcript
@@ -157,7 +149,7 @@ impl CodeModeService {
             scope: starting.scope(),
         });
         let result = match self.session().await {
-            Ok(runtime) => runtime.execute(request, delegate, preempt).await,
+            Ok(runtime) => runtime.execute(request, delegate, Some(news)).await,
             Err(error) => Err(error),
         };
         match result {
@@ -216,9 +208,9 @@ impl CodeModeService {
     pub(crate) async fn wait(
         &self,
         request: codex_code_mode::WaitRequest,
-        preempt: Option<CancellationToken>,
+        news: CancellationToken,
     ) -> Result<codex_code_mode::WaitOutcome, String> {
-        self.session().await?.wait(request, preempt).await
+        self.session().await?.wait(request, Some(news)).await
     }
 
     pub(crate) async fn terminate(

@@ -2561,13 +2561,14 @@ async fn code_mode_only_exposes_code_executor_and_hides_nested_tools() {
 #[tokio::test]
 async fn code_mode_config_updates_exec_description() {
     for (configured_yield_time_ms, expected_yield_time_ms) in
-        [(None, 30_000), (Some(10_000), 10_000)]
+        [(None, 600_000), (Some(10_000), 10_000)]
     {
         let plan = probe(|turn| {
             set_features(turn, &[Feature::CodeMode]);
             if let Some(yield_time_ms) = configured_yield_time_ms {
                 update_config(turn, |config| {
-                    config.code_mode.default_exec_yield_time_ms = yield_time_ms;
+                    config.code_mode.max_yield_time_ms =
+                        std::num::NonZeroU64::new(yield_time_ms).expect("nonzero ceiling");
                 });
             }
         })
@@ -2576,10 +2577,12 @@ async fn code_mode_config_updates_exec_description() {
         let ToolSpec::Freeform(exec) = plan.visible_spec(codex_code_mode::PUBLIC_TOOL_NAME) else {
             panic!("expected code mode exec tool");
         };
-        assert!(
-            exec.description
-                .contains(&format!("Defaults to {expected_yield_time_ms} ms."))
-        );
+        let ToolSpec::Function(wait) = plan.visible_spec(codex_code_mode::WAIT_TOOL_NAME) else {
+            panic!("expected code mode wait tool");
+        };
+        for description in [&exec.description, &wait.description] {
+            assert!(description.contains(&format!("after {expected_yield_time_ms} ms;")));
+        }
     }
 }
 

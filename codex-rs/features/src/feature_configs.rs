@@ -6,6 +6,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
+use std::num::NonZeroU64;
 use std::num::NonZeroUsize;
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
@@ -24,9 +25,10 @@ pub struct ToolRegistryConfigToml {
 pub struct CodeModeConfigToml {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
-    /// Default yield timeout for code-mode exec calls, in milliseconds.
+    /// Longest a code-mode exec or wait call blocks on a running cell before it
+    /// returns, in milliseconds. The cell keeps running.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub default_exec_yield_time_ms: Option<u64>,
+    pub max_yield_time_ms: Option<NonZeroU64>,
     /// Show handler duration, code-mode host duration, and harness overhead
     /// in each code-mode cell response.
     /// Experimental: this option and the response format may change or be removed.

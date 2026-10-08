@@ -34,7 +34,7 @@ async fn yielded_notifications_keep_originating_budgets_after_model_switch() -> 
                     "call-a",
                     "exec",
                     &format!(
-                        "// @exec: {{\"yield_time_ms\": 1}}\n{barrier}\nnotify({});",
+                        "yield_control();\n{barrier}\nnotify({});",
                         serde_json::to_string(&a_text)?,
                     ),
                 ),
@@ -70,10 +70,7 @@ async fn yielded_notifications_keep_originating_budgets_after_model_switch() -> 
                 ev_custom_tool_call(
                     "call-b",
                     "exec",
-                    &format!(
-                        "// @exec: {{\"yield_time_ms\": 60000}}\n{barrier}\nnotify({});",
-                        serde_json::to_string(&b_text)?,
-                    ),
+                    &format!("{barrier}\nnotify({});", serde_json::to_string(&b_text)?,),
                 ),
                 ev_completed("resp-b"),
             ]),
@@ -83,7 +80,7 @@ async fn yielded_notifications_keep_originating_budgets_after_model_switch() -> 
                     "call-wait-a",
                     "wait",
                     &json!({
-                        "cell_id": cell_id, "yield_time_ms": 60000,
+                        "cell_id": cell_id,
                     })
                     .to_string(),
                 ),

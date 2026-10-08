@@ -24,7 +24,7 @@ fn exec_sections_split_the_rendered_nested_tools_losslessly() {
         &[tool("update_plan"), tool("mcp__depot__consult")],
         &[],
         &BTreeMap::new(),
-        codex_code_mode::DEFAULT_EXEC_YIELD_TIME_MS,
+        /*max_yield_time_ms*/ 600_000,
         /*code_mode_only*/ true,
         MediaHelpers {
             image_detail: ImageDetailVisibility::Visible,

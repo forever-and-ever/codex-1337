@@ -251,11 +251,7 @@ impl StepContext {
         });
         settings.service_tier = turn.config.service_tier.clone();
         Arc::new(Self {
-            preempt: turn
-                .config
-                .features
-                .enabled(Feature::InstantInterrupt)
-                .then(tokio_util::sync::CancellationToken::new),
+            interjection: crate::session::input_queue::Interjection::default(),
             token_budget: token_budget::resolve_token_budget(
                 turn.configured_token_budget.as_ref(),
                 turn.use_model_token_budget_defaults,
@@ -5852,7 +5848,6 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         code_mode_service: crate::tools::code_mode::CodeModeService::new(
             thread_id,
             Arc::new(codex_code_mode::DisabledCodeModeSessionProvider),
-            &config.code_mode,
             executed_tool_calls,
         ),
         tool_search_handler_cache: Default::default(),
@@ -7922,7 +7917,6 @@ where
         code_mode_service: crate::tools::code_mode::CodeModeService::new(
             thread_id,
             Arc::new(codex_code_mode::DisabledCodeModeSessionProvider),
-            &config.code_mode,
             executed_tool_calls,
         ),
         tool_search_handler_cache: Default::default(),

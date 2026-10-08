@@ -976,7 +976,7 @@ async fn yielded_code_mode_elicitation_keeps_live_invocation_metadata() -> Resul
     responses::mount_sse_once(&server, responses::sse(vec![
         responses::ev_response_created("origin-a"),
         responses::ev_custom_tool_call("cell-a", "exec", &format!(
-            "// @exec: {{\"yield_time_ms\": 1}}\n{barrier}\ntext(await tools.mcp__node_repl__js({{code: 'write_record()'}}));"
+            "yield_control();\n{barrier}\ntext(await tools.mcp__node_repl__js({{code: 'write_record()'}}));"
         )),
         responses::ev_completed("origin-a"),
     ])).await;
@@ -1029,7 +1029,7 @@ async fn yielded_code_mode_elicitation_keeps_live_invocation_metadata() -> Resul
                 "wait-a",
                 "wait",
                 &json!({
-                    "cell_id": cell_id, "yield_time_ms": 60000,
+                    "cell_id": cell_id,
                 })
                 .to_string(),
             ),

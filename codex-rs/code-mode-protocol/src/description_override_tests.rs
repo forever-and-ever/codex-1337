@@ -41,7 +41,7 @@ fn exec_override_renders_only_known_literal_placeholders() {
             &[],
             &[],
             &BTreeMap::new(),
-            /*default_exec_yield_time_ms*/ 4567,
+            /*max_yield_time_ms*/ 4567,
             /*code_mode_only*/ false,
             MediaHelpers {
                 image_detail,
@@ -49,7 +49,7 @@ fn exec_override_renders_only_known_literal_placeholders() {
             },
             Some(&CodeModeToolMessages {
                 exec: Some(ToolMessage {
-                    description: Some(" \nDefaults to 10000 ms. {{ default_exec_yield_time_ms }} ms.\n{{ image_helper }}\n{{ unknown }} {{default_exec_yield_time_ms}}\t ".to_string()),
+                    description: Some(" \nDefaults to 10000 ms. {{ max_yield_time_ms }} ms.\n{{ image_helper }}\n{{ unknown }} {{max_yield_time_ms}}\t ".to_string()),
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -59,7 +59,7 @@ fn exec_override_renders_only_known_literal_placeholders() {
         assert_eq!(
             description,
             format!(
-                " \nDefaults to 10000 ms. 4567 ms.\n{image_helper}\n{{{{ unknown }}}} {{{{default_exec_yield_time_ms}}}}\t \n\n{TOOL_DISCOVERY_GUIDANCE}\n\n{EXECUTION_OUTPUT_GUIDANCE}"
+                " \nDefaults to 10000 ms. 4567 ms.\n{image_helper}\n{{{{ unknown }}}} {{{{max_yield_time_ms}}}}\t \n\n{TOOL_DISCOVERY_GUIDANCE}\n\n{EXECUTION_OUTPUT_GUIDANCE}"
             ),
         );
     }
@@ -73,7 +73,7 @@ fn exec_override_preserves_empty_and_whitespace_only_text() {
                 &[],
                 &[],
                 &BTreeMap::new(),
-                crate::DEFAULT_EXEC_YIELD_TIME_MS,
+                /*max_yield_time_ms*/ 600_000,
                 /*code_mode_only*/ true,
                 ALL_MEDIA,
                 Some(&CodeModeToolMessages {
@@ -146,9 +146,9 @@ fn exec_override_preserves_runtime_sections() {
         (
             true,
             Some("  {{ image_helper }}\n"),
-            Some("  {{ default_exec_yield_time_ms }}\n"),
+            Some("  {{ max_yield_time_ms }}\n"),
             format!(
-                "  {{{{ image_helper }}}}\n\n\nShared MCP Types:\n```ts\n  {{{{ default_exec_yield_time_ms }}}}\n\n```\n\n{declaration}"
+                "  {{{{ image_helper }}}}\n\n\nShared MCP Types:\n```ts\n  {{{{ max_yield_time_ms }}}}\n\n```\n\n{declaration}"
             ),
         ),
         (
@@ -163,7 +163,7 @@ fn exec_override_preserves_runtime_sections() {
                 &enabled_tools,
                 &deferred_tools,
                 &BTreeMap::new(),
-                crate::DEFAULT_EXEC_YIELD_TIME_MS,
+                /*max_yield_time_ms*/ 600_000,
                 code_mode_only,
                 ALL_MEDIA,
                 Some(&CodeModeToolMessages {

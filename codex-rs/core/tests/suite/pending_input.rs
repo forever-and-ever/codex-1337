@@ -1401,13 +1401,55 @@ async fn steers_during_tool_drain_preserve_tool_output_and_each_input() {
     server.shutdown().await;
 }
 
-#[test_case(false; "disabled")]
-#[test_case(true; "enabled")]
+/// Input that ends a blocked Code Mode call.
+#[derive(Clone, Copy)]
+enum Interjector {
+    Steer {
+        instant_interrupt: bool,
+    },
+    /// Mail marked `trigger_turn`, preceded by queue-only mail that must not end the call.
+    TriggeringMail,
+}
+
+impl Interjector {
+    async fn interject(self, codex: &CodexThread, text: &str) {
+        match self {
+            Self::Steer { .. } => steer_user_input(codex, text).await,
+            Self::TriggeringMail => {
+                // An early return here would shift every later wait and strand the final one.
+                enqueue_queue_only_agent_mail(codex, "queue-only mail").await;
+                codex
+                    .submit(Op::InterAgentCommunication {
+                        communication: InterAgentCommunication::new(
+                            AgentPath::root().join("worker").expect("valid worker path"),
+                            AgentPath::root(),
+                            Vec::new(),
+                            text.to_string(),
+                            /*trigger_turn*/ true,
+                        ),
+                        start_options: Default::default(),
+                    })
+                    .await
+                    .expect("submit triggering agent mail");
+            }
+        }
+    }
+}
+
+#[test_case(Interjector::Steer { instant_interrupt: false }; "steer")]
+#[test_case(Interjector::Steer { instant_interrupt: true }; "steer_with_instant_interrupt")]
+#[test_case(Interjector::TriggeringMail; "triggering_mail")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn steers_yield_exec_and_wait_without_stopping_the_cell(instant_interrupt: bool) {
+async fn interjections_yield_exec_and_wait_without_stopping_the_cell(interjector: Interjector) {
     const EXEC_ID: &str = "exec-call";
     const WAIT_ONE_ID: &str = "wait-one";
     const WAIT_TWO_ID: &str = "wait-two";
+    let instant_interrupt = matches!(
+        interjector,
+        Interjector::Steer {
+            instant_interrupt: true
+        }
+    );
     let server = responses::start_mock_server().await;
     let test = test_codex()
         .with_model("test-gpt-5.1-codex")
@@ -1467,43 +1509,38 @@ async fn steers_yield_exec_and_wait_without_stopping_the_cell(instant_interrupt:
             ev_custom_tool_call(
                 EXEC_ID,
                 "exec",
-                "// @exec: {\"yield_time_ms\": 60000}\nawait tools.held_tool({}); text('background result');",
+                "await tools.held_tool({}); text('background result');",
             ),
             ev_completed("resp-exec"),
         ]),
     )
     .await;
 
-    if instant_interrupt {
-        for (response_id, call_id) in [
-            ("resp-wait-one", WAIT_ONE_ID),
-            ("resp-wait-two", WAIT_TWO_ID),
-        ] {
-            Mock::given(method("POST"))
-                .and(path_regex(".*/responses$"))
-                .respond_with(move |request: &Request| {
-                    let body: Value = from_slice(&request.body).expect("parse replacement request");
-                    let output = call_output_text(&body, "custom_tool_call_output", EXEC_ID)
-                        .expect("yielded exec output");
-                    // Every follow-up includes the real cell ID in the exec output.
-                    let id = output
-                        .strip_prefix("Script running with cell ID ")
-                        .and_then(|rest| rest.lines().next())
-                        .expect("running cell ID");
-                    responses::sse_response(responses::sse(vec![
-                        ev_response_created(response_id),
-                        ev_function_call(
-                            call_id,
-                            "wait",
-                            &json!({"cell_id": id, "yield_time_ms": 60000}).to_string(),
-                        ),
-                        ev_completed(response_id),
-                    ]))
-                })
-                .up_to_n_times(1)
-                .mount(&server)
-                .await;
-        }
+    // Steers end blocked calls whether or not they also cut off streaming responses.
+    for (response_id, call_id) in [
+        ("resp-wait-one", WAIT_ONE_ID),
+        ("resp-wait-two", WAIT_TWO_ID),
+    ] {
+        Mock::given(method("POST"))
+            .and(path_regex(".*/responses$"))
+            .respond_with(move |request: &Request| {
+                let body: Value = from_slice(&request.body).expect("parse replacement request");
+                let output = call_output_text(&body, "custom_tool_call_output", EXEC_ID)
+                    .expect("yielded exec output");
+                // Every follow-up includes the real cell ID in the exec output.
+                let id = output
+                    .strip_prefix("Script running with cell ID ")
+                    .and_then(|rest| rest.lines().next())
+                    .expect("running cell ID");
+                responses::sse_response(responses::sse(vec![
+                    ev_response_created(response_id),
+                    ev_function_call(call_id, "wait", &json!({"cell_id": id}).to_string()),
+                    ev_completed(response_id),
+                ]))
+            })
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
     }
     let final_response =
         responses::mount_sse_once(&server, responses::sse_completed("resp-done")).await;
@@ -1515,39 +1552,12 @@ async fn steers_yield_exec_and_wait_without_stopping_the_cell(instant_interrupt:
     .await else {
         unreachable!("predicate guarantees tool request");
     };
-    steer_user_input(&codex, "interrupt exec").await;
-    if !instant_interrupt {
-        codex
-            .submit(Op::DynamicToolResponse {
-                id: tool_request.call_id,
-                response: DynamicToolResponse {
-                    content_items: vec![DynamicToolCallOutputContentItem::InputText {
-                        text: "released".into(),
-                    }],
-                    success: true,
-                },
-            })
-            .await
-            .expect("release nested tool");
-        wait_for_turn_complete(&codex).await;
-        let request = final_response.single_request().body_json();
-        assert!(
-            call_output_text(&request, "custom_tool_call_output", EXEC_ID)
-                .expect("exec output")
-                .contains("background result")
-        );
-        assert!(message_input_texts(&request, "user").contains(&"interrupt exec".to_string()));
-        codex
-            .shutdown_and_wait()
-            .await
-            .expect("shut down test session");
-        return;
-    }
+    interjector.interject(&codex, "interrupt exec").await;
     wait_for_event(&codex, |event| {
         matches!(event, EventMsg::RawResponseItem(raw) if matches!(&raw.item, ResponseItem::FunctionCall { call_id, .. } if call_id == WAIT_ONE_ID))
     })
     .await;
-    steer_user_input(&codex, "interrupt wait").await;
+    interjector.interject(&codex, "interrupt wait").await;
     wait_for_event(&codex, |event| {
         matches!(event, EventMsg::RawResponseItem(raw) if matches!(&raw.item, ResponseItem::FunctionCall { call_id, .. } if call_id == WAIT_TWO_ID))
     })
@@ -1589,19 +1599,29 @@ async fn steers_yield_exec_and_wait_without_stopping_the_cell(instant_interrupt:
         completed_output.contains("background result"),
         "{completed_output}"
     );
-    let prompts = message_input_texts(&request, "user")
-        .into_iter()
-        .filter(|text| {
-            matches!(
-                text.as_str(),
-                "start the cell" | "interrupt exec" | "interrupt wait"
-            )
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        prompts,
-        vec!["start the cell", "interrupt exec", "interrupt wait"]
-    );
+    match interjector {
+        Interjector::Steer { .. } => {
+            let prompts = message_input_texts(&request, "user")
+                .into_iter()
+                .filter(|text| {
+                    matches!(
+                        text.as_str(),
+                        "start the cell" | "interrupt exec" | "interrupt wait"
+                    )
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                prompts,
+                vec!["start the cell", "interrupt exec", "interrupt wait"]
+            );
+        }
+        Interjector::TriggeringMail => {
+            let body = request.to_string();
+            for text in ["queue-only mail", "interrupt exec", "interrupt wait"] {
+                assert!(body.contains(text), "missing {text}: {body}");
+            }
+        }
+    }
     codex
         .shutdown_and_wait()
         .await
@@ -1703,17 +1723,13 @@ async fn input_preempts_response_and_yields_running_code_mode_call() {
             chunk(ev_custom_tool_call(
                 "first-exec",
                 "exec",
-                "// @exec: {\"yield_time_ms\": 60000}\nawait tools.held_tool({}); text('first completed');",
+                "await tools.held_tool({}); text('first completed');",
             )),
             // The second call remains unavailable while the steer is processed.
             gated_chunk(
                 release_second_rx,
                 vec![
-                    ev_custom_tool_call(
-                        "second-exec",
-                        "exec",
-                        "// @exec: {\"yield_time_ms\": 60000}\nawait new Promise(() => {});",
-                    ),
+                    ev_custom_tool_call("second-exec", "exec", "await new Promise(() => {});"),
                     ev_completed("resp-calls"),
                 ],
             ),

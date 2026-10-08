@@ -3992,11 +3992,7 @@ impl Session {
         ) = prepared_tools??;
         turn_context.extension_data.insert(selected_plugins);
         Ok(Arc::new(StepContext {
-            preempt: turn_context
-                .config
-                .features
-                .enabled(Feature::InstantInterrupt)
-                .then(CancellationToken::new),
+            interjection: input_queue::Interjection::default(),
             realtime: self.conversation.snapshot().await,
             settings,
             token_budget,

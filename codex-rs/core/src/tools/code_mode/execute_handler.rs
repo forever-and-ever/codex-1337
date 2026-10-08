@@ -90,7 +90,7 @@ impl CodeModeExecuteHandler {
                     tool_call_id: call_id.clone(),
                     enabled_tools,
                     source: args.code.clone(),
-                    yield_time_ms: args.yield_time_ms,
+                    yield_time_ms: Some(step_context.turn.config.code_mode.max_yield_time_ms.get()),
                     max_output_tokens: args.max_output_tokens,
                 },
                 Arc::clone(&step_context),

@@ -18,7 +18,7 @@ Scenario: A root uses Code Mode to send a confirmation and receives a real user 
 
     You can use `spawn_agent` to create a new agent, `followup_task` to give an existing agent a new task an...message to a running agent without triggering a turn. [hash=7d40ff8b58977202]
     Child agents can also spawn their own sub-agents.
-    <OMITTED 16 LINES; ~204 TOKENS; hash=c45c8ce1100fa16e>
+    <OMITTED 16 LINES; ~160 TOKENS; hash=5479739dadb03510>
     - All agents use the same current working directory.
     - As a result, edits made by one agent are immediately visible to all other agents.
 
@@ -63,7 +63,7 @@ Scenario: A root uses Code Mode to send a confirmation and receives a real user 
     Child agents can also spawn their own sub-agents.
 
     When you provide a response in the final channel, that content is immediately delivered back to your parent agent.
-    <OMITTED 15 LINES; ~195 TOKENS; hash=a7a58e7e650ec2a9>
+    <OMITTED 15 LINES; ~151 TOKENS; hash=7831a372c5e12711>
     - All agents use the same current working directory.
     - As a result, edits made by one agent are immediately visible to all other agents.
 
@@ -81,8 +81,8 @@ Scenario: A root uses Code Mode to send a confirmation and receives a real user 
 
 ## Window 3 (after request 6: input diverged at item 00, settings changed (instructions, model, parallel_tool_calls, prompt_cache_key, reasoning, text, tools))
 -- request 7 (turn) --
-00:additional_tools/developer (1; hash=3bea763df2767da2):
-        - namespace/functions; hash=d53f170e287744b6
+00:additional_tools/developer (1; hash=16654a65ef757d85):
+        - namespace/functions; hash=d9c1d534447a9813
           - custom/exec
           - function/wait
 01:message/developer:
@@ -151,8 +151,8 @@ Scenario: A root uses Code Mode to send a confirmation and receives a real user 
 
 ## Window 4 (after request 7: input diverged at item 04, settings changed (prompt_cache_key))
 -- request 8 (turn) --
-00:additional_tools/developer (1; hash=3bea763df2767da2):
-        - namespace/functions; hash=d53f170e287744b6
+00:additional_tools/developer (1; hash=16654a65ef757d85):
+        - namespace/functions; hash=d9c1d534447a9813
           - custom/exec
           - function/wait
 01:message/developer:

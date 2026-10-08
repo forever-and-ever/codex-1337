@@ -115,6 +115,7 @@ use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::fs;
 use std::io::Cursor;
+use std::num::NonZeroU64;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -183,6 +184,11 @@ fn extract_running_cell_id(text: &str) -> String {
         .and_then(|rest| rest.split('\n').next())
         .expect("running header should contain a cell ID")
         .to_string()
+}
+
+/// Caps blocking `exec` and `wait` calls so a test can observe a cell that is still running.
+fn cap_yield(config: &mut Config, ceiling_ms: u64) {
+    config.code_mode.max_yield_time_ms = NonZeroU64::new(ceiling_ms).expect("nonzero ceiling");
 }
 
 fn wait_for_file_source(path: &Path) -> Result<String> {
@@ -1745,6 +1751,7 @@ async fn code_mode_wait_id_stays_known_after_compaction(
             let _ = config.features.enable(Feature::CodeModeHost);
             let _ = config.features.enable(Feature::ExecutedToolCallMetadata);
             config.code_mode.disable_in_process_fallback = true;
+            cap_yield(config, 5_000);
         });
     let test = builder.build_with_auto_env(&server).await?;
     let started = responses::mount_sse_sequence(
@@ -1784,7 +1791,7 @@ async fn code_mode_wait_id_stays_known_after_compaction(
     let yielded = responses::mount_function_call_agent_response(
         &server,
         "call-wait",
-        &serde_json::json!({"cell_id": cell_id, "yield_time_ms": 1}).to_string(),
+        &serde_json::json!({"cell_id": cell_id}).to_string(),
         "wait",
     )
     .await;
@@ -2076,7 +2083,7 @@ text("done");"#,
     let resumed = responses::mount_function_call_agent_response(
         &server,
         "call-wait",
-        &serde_json::json!({"cell_id": cell_id, "yield_time_ms": 10_000}).to_string(),
+        &serde_json::json!({"cell_id": cell_id}).to_string(),
         "wait",
     )
     .await;
@@ -2840,7 +2847,8 @@ async fn code_mode_result_metadata_keeps_prepared_call_binding_across_runtime_re
     extensions.mcp_server_contributor(control.clone());
     extensions.tool_lifecycle_contributor(control.clone());
     let builder = result_metadata_apps_builder(apps_server.chatgpt_base_url, "user@example.com")
-        .with_extensions(Arc::new(extensions.build()));
+        .with_extensions(Arc::new(extensions.build()))
+        .with_config(|config| cap_yield(config, 5_000));
     let arguments = serde_json::json!({
         "query": "launch plan",
         "response_format": "detailed",
@@ -2862,14 +2870,11 @@ async fn code_mode_result_metadata_keeps_prepared_call_binding_across_runtime_re
     tokio::time::timeout(Duration::from_secs(10), reached_rx).await??;
 
     // Yield may precede call admission. Drain inventory after the lifecycle gate is reached;
-    // the short wait is only a poll budget while the gate keeps acceptance blocked.
+    // the yield ceiling is only a poll budget while the gate keeps acceptance blocked.
     let held_wait = responses::mount_function_call_agent_response(
         &server,
         "call-2",
-        &serde_json::to_string(&serde_json::json!({
-            "cell_id": cell_id,
-            "yield_time_ms": 1,
-        }))?,
+        &serde_json::to_string(&serde_json::json!({ "cell_id": cell_id }))?,
         "wait",
     )
     .await;
@@ -2907,10 +2912,7 @@ async fn code_mode_result_metadata_keeps_prepared_call_binding_across_runtime_re
     let wait = responses::mount_function_call_agent_response(
         &server,
         "call-3",
-        &serde_json::to_string(&serde_json::json!({
-            "cell_id": cell_id,
-            "yield_time_ms": 10_000,
-        }))?,
+        &serde_json::to_string(&serde_json::json!({ "cell_id": cell_id }))?,
         "wait",
     )
     .await;
@@ -2991,6 +2993,7 @@ async fn code_mode_late_truncated_result_metadata_survives_waits() -> Result<()>
         .with_config(|config| {
             config.features.enable(Feature::CodeModeHost).unwrap();
             config.code_mode.disable_in_process_fallback = true;
+            cap_yield(config, 5_000);
         });
     let arguments = serde_json::json!({ "query": "x".repeat(9_000) });
     let later_arguments = serde_json::json!({ "query": "later" });
@@ -3017,7 +3020,7 @@ async fn code_mode_late_truncated_result_metadata_survives_waits() -> Result<()>
     let held = responses::mount_function_call_agent_response(
         &server,
         "call-2",
-        &serde_json::json!({"cell_id": cell_id, "yield_time_ms": 1}).to_string(),
+        &serde_json::json!({"cell_id": cell_id}).to_string(),
         "wait",
     )
     .await;
@@ -3044,7 +3047,7 @@ async fn code_mode_late_truncated_result_metadata_survives_waits() -> Result<()>
     let resumed = responses::mount_function_call_agent_response(
         &server,
         "call-3",
-        &serde_json::json!({"cell_id": cell_id, "yield_time_ms": 10_000}).to_string(),
+        &serde_json::json!({"cell_id": cell_id}).to_string(),
         "wait",
     )
     .await;
@@ -3201,8 +3204,7 @@ async fn code_mode_resumed_wait_does_not_certify_a_reused_runtime_cell() -> Resu
                 responses::ev_function_call(
                     "call-stale-wait",
                     "wait",
-                    &serde_json::json!({"cell_id": old_cell_id, "yield_time_ms": 10_000})
-                        .to_string(),
+                    &serde_json::json!({"cell_id": old_cell_id}).to_string(),
                 ),
                 ev_completed("resp-wait"),
             ]),
@@ -3431,8 +3433,7 @@ async fn code_mode_wait_serializes_empty_inventory_under_pending_call_pressure()
                 body: sse(vec![ev_custom_tool_call(
                     "call-pressure",
                     "exec",
-                    r#"// @exec: {"yield_time_ms": 60000}
-for (let index = 0; index < 256; index++) await tools.test_sync_tool({});
+                    r#"for (let index = 0; index < 256; index++) await tools.test_sync_tool({});
 text("pressure ready");"#,
                 )]),
             },
@@ -4601,6 +4602,7 @@ async fn code_mode_wait_timeout_reconnects_on_next_exec() -> Result<()> {
                 .features
                 .enable(Feature::CodeMode)
                 .expect("code mode should be enabled");
+            cap_yield(config, 60_000);
         });
     let test = builder.build_with_auto_env(&server).await?;
 
@@ -4634,10 +4636,7 @@ async fn code_mode_wait_timeout_reconnects_on_next_exec() -> Result<()> {
     let timeout_completion = responses::mount_function_call_agent_response(
         &server,
         "call-2",
-        &serde_json::to_string(&serde_json::json!({
-            "cell_id": cell_id,
-            "yield_time_ms": 60_000,
-        }))?,
+        &serde_json::to_string(&serde_json::json!({ "cell_id": cell_id }))?,
         "wait",
     )
     .await
@@ -4768,6 +4767,7 @@ async fn code_mode_can_yield_and_resume_with_wait() -> Result<()> {
         .with_extensions(Arc::new(extensions.build()))
         .with_config(move |config| {
             let _ = config.features.enable(Feature::CodeMode);
+            cap_yield(config, 1_000);
         });
     let test = builder.build(&server).await?;
     let phase_2_gate = test.workspace_path("code-mode-phase-2.ready");
@@ -4825,10 +4825,7 @@ text((await tools.exec_command({{cmd: "printf 'phase 3'"}})).output);
                 "call-2",
                 "functions",
                 "wait",
-                &serde_json::to_string(&serde_json::json!({
-                    "cell_id": cell_id.clone(),
-                    "yield_time_ms": 1_000,
-                }))?,
+                &serde_json::to_string(&serde_json::json!({ "cell_id": cell_id.clone() }))?,
             ),
             ev_completed("resp-3"),
         ]),
@@ -4870,10 +4867,7 @@ text((await tools.exec_command({{cmd: "printf 'phase 3'"}})).output);
                 "call-3",
                 "",
                 "wait",
-                &serde_json::to_string(&serde_json::json!({
-                    "cell_id": cell_id.clone(),
-                    "yield_time_ms": 1_000,
-                }))?,
+                &serde_json::to_string(&serde_json::json!({ "cell_id": cell_id.clone() }))?,
             ),
             ev_completed("resp-5"),
         ]),
@@ -5008,6 +5002,7 @@ async fn code_mode_yield_and_termination_are_not_starved_by_runtime_output() -> 
     let server = responses::start_mock_server().await;
     let mut builder = test_codex().with_config(move |config| {
         let _ = config.features.enable(Feature::CodeMode);
+        cap_yield(config, 1);
     });
     let test = builder.build(&server).await?;
     let termination_gate = test.workspace_path("code-mode-output-termination.ready");
@@ -5016,7 +5011,7 @@ async fn code_mode_yield_and_termination_are_not_starved_by_runtime_output() -> 
     // Exact controller arbitration is covered by deterministic code-mode contract tests. Keep
     // this end-to-end load bounded while exercising a substantial runtime output backlog.
     let code = format!(
-        r#"// @exec: {{"yield_time_ms": 0, "max_output_tokens": 16}}
+        r#"// @exec: {{"max_output_tokens": 16}}
 for (let index = 0; index < 256; index++) {{
     text(`event ${{index}}`);
 }}
@@ -5046,7 +5041,6 @@ for (let index = 0; index < 256; index++) {{
 
     let first_request = first_completion.single_request();
     let first_items = custom_tool_output_items(&first_request, "call-1");
-    assert_eq!(first_items.len(), 1);
     assert_regex_match(
         concat!(r"(?s)\A", r"Script running with cell ID \d+\nOutput:\n\z"),
         text_item(&first_items, /*index*/ 0),
@@ -5189,7 +5183,6 @@ text("session b done");
                 "wait",
                 &serde_json::to_string(&serde_json::json!({
                     "cell_id": session_a_id.clone(),
-                    "yield_time_ms": 5_000,
                 }))?,
             ),
             ev_completed("resp-5"),
@@ -5226,7 +5219,6 @@ text("session b done");
                 "wait",
                 &serde_json::to_string(&serde_json::json!({
                     "cell_id": session_b_id.clone(),
-                    "yield_time_ms": 5_000,
                 }))?,
             ),
             ev_completed("resp-7"),
@@ -5395,7 +5387,6 @@ yield_control();
                 "wait",
                 &serde_json::to_string(&serde_json::json!({
                     "cell_id": first_cell_id,
-                    "yield_time_ms": 1_000,
                 }))?,
             ),
             ev_completed("resp-7"),
@@ -5587,7 +5578,6 @@ async fn code_mode_wait_returns_error_for_unknown_session() -> Result<()> {
                 "wait",
                 &serde_json::to_string(&serde_json::json!({
                     "cell_id": "999999",
-                    "yield_time_ms": 1_000,
                 }))?,
             ),
             ev_completed("resp-1"),
@@ -5635,6 +5625,7 @@ async fn code_mode_wait_terminate_returns_completed_session_if_it_finished_after
     let mut builder = test_codex().with_config(move |config| {
         let _ = config.features.enable(Feature::CodeMode);
         let _ = config.features.enable(Feature::CodeModeHost);
+        cap_yield(config, 1_000);
     });
     let test = builder.build_with_auto_env(&server).await?;
     let session_a_gate = test.workspace_path("code-mode-session-a-finished.ready");
@@ -5726,7 +5717,6 @@ text("session b done");
                 "wait",
                 &serde_json::to_string(&serde_json::json!({
                     "cell_id": session_b_id.clone(),
-                    "yield_time_ms": 1_000,
                 }))?,
             ),
             ev_completed("resp-5"),
@@ -6100,7 +6090,6 @@ async fn code_mode_interrupt_terminates_active_cells_and_nested_tools() -> Resul
                     "wait",
                     &serde_json::to_string(&serde_json::json!({
                         "cell_id": background_cell_id,
-                        "yield_time_ms": 1,
                     }))?,
                 ),
                 ev_completed("resp-wait-background"),
@@ -6112,7 +6101,6 @@ async fn code_mode_interrupt_terminates_active_cells_and_nested_tools() -> Resul
                     "wait",
                     &serde_json::to_string(&serde_json::json!({
                         "cell_id": active_cell_id,
-                        "yield_time_ms": 1,
                     }))?,
                 ),
                 ev_completed("resp-wait-active"),
@@ -6160,10 +6148,12 @@ async fn code_mode_wait_uses_its_own_max_tokens_budget() -> Result<()> {
     });
     let test = builder.build(&server).await?;
 
-    // An explicit yield separates the output batches without a nested shell call.
+    // An explicit yield separates the output batches without a nested shell call. The wait
+    // blocks past the model's ignored `yield_time_ms` until the script completes.
     let code = r#"// @exec: {"max_output_tokens": 100}
 text("phase 1");
 yield_control();
+await new Promise((resolve) => setTimeout(resolve, 1000));
 text("token one token two token three token four token five token six token seven");
 "#;
 
@@ -6202,7 +6192,7 @@ text("token one token two token three token four token five token six token seve
                 "wait",
                 &serde_json::to_string(&serde_json::json!({
                     "cell_id": cell_id.clone(),
-                    "yield_time_ms": 1_000,
+                    "yield_time_ms": 100,
                     "max_tokens": 6,
                 }))?,
             ),
@@ -6249,14 +6239,19 @@ async fn code_mode_can_resume_after_set_timeout() -> Result<()> {
     let (_test, second_mock) = run_code_mode_turn(
         &server,
         "use exec to wait for a timeout",
-        r#"
-await new Promise((resolve) => setTimeout(resolve, 10));
+        // The model's `yield_time_ms` is ignored: exec returns once, at completion.
+        r#"// @exec: {"yield_time_ms": 100}
+await new Promise((resolve) => setTimeout(resolve, 1000));
 text("timer done");
 "#,
     )
     .await?;
 
     let req = second_mock.single_request();
+    assert!(
+        text_item(&custom_tool_output_items(&req, "call-1"), /*index*/ 0)
+            .starts_with("Script completed"),
+    );
     let (output, success) = custom_tool_output_body_and_success(&req, "call-1");
     assert_ne!(
         success,
@@ -7800,7 +7795,7 @@ async fn yielded_code_mode_tool_callbacks_keep_their_originating_step() -> Resul
     responses::mount_sse_once(&server, sse(vec![
         ev_response_created("resp-a"),
         ev_custom_tool_call("call-a", "exec", &format!(
-            "// @exec: {{\"yield_time_ms\": 1}}\n{barrier}\ntext('A_ORIGIN:' + (await tools.editor__apply_patch('A')).generation);"
+            "yield_control();\n{barrier}\ntext('A_ORIGIN:' + (await tools.editor__apply_patch('A')).generation);"
         )),
         ev_completed("resp-a"),
     ])).await;
@@ -7821,7 +7816,7 @@ async fn yielded_code_mode_tool_callbacks_keep_their_originating_step() -> Resul
     responses::mount_sse_once(&server, sse(vec![
         ev_response_created("resp-b"),
         ev_custom_tool_call("call-b", "exec", &format!(
-            "// @exec: {{\"yield_time_ms\": 60000}}\n{barrier}\ntext('B_ORIGIN:' + (await tools.editor__apply_patch('B')).generation);"
+            "{barrier}\ntext('B_ORIGIN:' + (await tools.editor__apply_patch('B')).generation);"
         )),
         ev_completed("resp-b"),
     ])).await;
@@ -7833,7 +7828,7 @@ async fn yielded_code_mode_tool_callbacks_keep_their_originating_step() -> Resul
                 "call-wait-a",
                 "wait",
                 &serde_json::json!({
-                    "cell_id": cell_id, "yield_time_ms": 60000,
+                    "cell_id": cell_id,
                 })
                 .to_string(),
             ),

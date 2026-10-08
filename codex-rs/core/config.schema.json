@@ -505,12 +505,6 @@
     "CodeModeConfigToml": {
       "additionalProperties": false,
       "properties": {
-        "default_exec_yield_time_ms": {
-          "description": "Default yield timeout for code-mode exec calls, in milliseconds.",
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": "integer"
-        },
         "direct_only_tool_namespaces": {
           "description": "Exact tool namespaces to expose only as direct model tools. These tools bypass deferral, remain top-level in code-mode-only sessions, and are omitted from the nested code-mode tool surface.",
           "items": {
@@ -531,6 +525,12 @@
         "experimental_show_cell_overhead": {
           "description": "Show handler duration, code-mode host duration, and harness overhead in each code-mode cell response. Experimental: this option and the response format may change or be removed.",
           "type": "boolean"
+        },
+        "max_yield_time_ms": {
+          "description": "Longest a code-mode exec or wait call blocks on a running cell before it returns, in milliseconds. The cell keeps running.",
+          "format": "uint64",
+          "minimum": 1.0,
+          "type": "integer"
         },
         "tool_input_schema_max_bytes": {
           "description": "Maximum UTF-8 bytes per rendered tool input type, with a 16,000-byte minimum and default. For ordinary MCP tools, this is also at least their server's explicitly configured input limit.",
