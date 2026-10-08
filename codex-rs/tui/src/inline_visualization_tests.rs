@@ -385,6 +385,10 @@ fn finalized_agent_cell_replays_visualization_link() {
 
 #[test]
 fn transcript_overlay_remeasures_visualization_when_artifact_becomes_available() {
+    #[cfg(unix)]
+    let codex_home =
+        crate::test_support::temp_runtime_dir().expect("short visualization fixture home");
+    #[cfg(not(unix))]
     let codex_home = tempfile::tempdir().expect("temp codex home");
     let context = InlineVisualizationContext::new(codex_home.path(), ThreadId::new())
         .expect("UUIDv7 thread id should provide a timestamp");

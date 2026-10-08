@@ -2817,6 +2817,9 @@ requires_openai_auth = {requires_openai_auth}
     #[tokio::test]
     async fn default_daemon_auto_connect_preserves_affinity_to_unresponsive_socket()
     -> color_eyre::Result<()> {
+        #[cfg(unix)]
+        let codex_home = crate::test_support::temp_runtime_dir()?;
+        #[cfg(not(unix))]
         let codex_home = TempDir::new()?;
         let socket_path =
             codex_app_server_client::app_server_control_socket_path(codex_home.path())?;

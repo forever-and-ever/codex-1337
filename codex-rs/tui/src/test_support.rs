@@ -18,6 +18,12 @@ pub(crate) static TEST_MODEL_PRESETS: LazyLock<Vec<ModelPreset>> = LazyLock::new
     presets
 });
 
+#[cfg(unix)]
+pub(crate) fn temp_runtime_dir() -> std::io::Result<tempfile::TempDir> {
+    tempfile::Builder::new()
+        .prefix("tui-")
+        .tempdir_in(codex_uds::prepare_shared_daemon_socket_directory()?)
+}
 pub(crate) fn test_path_display(path: &str) -> String {
     test_path_buf(path).display().to_string()
 }

@@ -158,7 +158,7 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
         app.agents_overview.refresh_pending = true;
         let refresh = tokio::spawn(std::future::pending::<()>());
         app.agents_overview.refresh_task = Some(refresh.abort_handle());
-        let directory = tempfile::tempdir()?;
+        let directory = crate::test_support::temp_runtime_dir()?;
         let socket_path = directory.path().join("daemon.sock");
         let listener = UnixListener::bind(&socket_path)?;
         let endpoint = crate::RemoteAppServerEndpoint::UnixSocket {
