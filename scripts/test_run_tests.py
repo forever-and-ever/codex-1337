@@ -15,6 +15,8 @@ LAUNCHER = Path(__file__).with_name("run_tests.py")
 PROBE = """import json, os, signal, subprocess, sys
 from pathlib import Path
 
+if sys.argv[1] == 'build':
+    sys.exit(0)  # The runner first builds fixture binaries; only nextest is probed.
 root = Path(os.environ['TMPDIR'])
 leak = root / 'codex-state-runtime-test-leak'
 leak.mkdir()
