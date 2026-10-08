@@ -299,7 +299,15 @@ pub(super) async fn start_recording_app_server_with_realtime_speech(
                     if let codex_app_server_client::InProcessServerEvent::ServerNotification(notification) = event
                         && matches!(*notification, ServerNotification::ThreadSettingsUpdated(_))
                     {
-                        websocket.send(Message::Text(serde_json::to_string(&notification)?.into())).await?;
+                        match websocket.send(Message::Text(serde_json::to_string(&notification)?.into())).await {
+                            Ok(()) => {}
+                            Err(tokio_tungstenite::tungstenite::Error::Protocol(
+                                tokio_tungstenite::tungstenite::error::ProtocolError::ResetWithoutClosingHandshake,
+                            )) => break,
+                            Err(tokio_tungstenite::tungstenite::Error::Io(error))
+                                if matches!(error.kind(), std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::ConnectionReset) => break,
+                            Err(error) => return Err(error.into()),
+                        }
                     }
                     continue;
                 }
