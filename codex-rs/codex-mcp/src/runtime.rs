@@ -433,6 +433,20 @@ impl McpRuntime {
             (!reconnect.claimed).then_some(current.connections.as_ref()),
         )
         .await;
+        // Reconnecting alone can retain the shared Apps catalog. Explicit refreshes
+        // must publish fresh declarations before the next model binding is captured.
+        // Box the refresh to bound the future layout nested inside tool execution.
+        if reconnect.claimed {
+            let connections = self.latest_connections();
+            if connections.contains_server(CODEX_APPS_MCP_SERVER_NAME)
+                && let Err(error) =
+                    Box::pin(connections.refresh_codex_apps_tools_for_discovery()).await
+            {
+                tracing::warn!(
+                    "failed to refresh Codex Apps tools after explicit MCP reconnect: {error:#}"
+                );
+            }
+        }
         reconnect.claimed = false;
     }
 
