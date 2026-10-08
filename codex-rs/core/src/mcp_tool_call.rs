@@ -108,10 +108,12 @@ use url::Url;
 mod account;
 pub(crate) mod conversation_history;
 mod extension_approval;
+mod issuing_authority;
 mod telemetry;
 pub(crate) use extension_approval::approve_extension_tool;
 
 use account::McpToolAccountError;
+use issuing_authority::issuing_permission_profile;
 use telemetry::McpCallMetricOutcome;
 use telemetry::emit_mcp_call_metrics;
 use telemetry::mcp_call_metric_outcome;
@@ -284,7 +286,7 @@ pub(crate) async fn handle_mcp_tool_call(
         &hook_tool_name,
         &metadata,
         prepared_call.config(),
-        prepared_call.permission_profile(),
+        &issuing_permission_profile(step_context, &prepared_call),
         approval_policy,
     )
     .await
@@ -578,7 +580,7 @@ async fn handle_approved_mcp_tool_call(
             Ok(maybe_request_codex_apps_auth_elicitation(
                 sess,
                 turn_context,
-                prepared_call.config().approval_policy.value(),
+                step_context.settings.approval_policy(),
                 call_id,
                 &invocation.server,
                 Some(&metadata),
@@ -875,7 +877,7 @@ async fn augment_mcp_tool_request_meta_with_sandbox_state(
     // TODO(anp): Build this metadata from the server's captured
     // TurnEnvironment::sandbox_context instead of the runtime-wide Landlock value.
     let sandbox_state = serde_json::to_value(SandboxState {
-        permission_profile: prepared_call.permission_profile().clone(),
+        permission_profile: issuing_permission_profile(step_context, prepared_call),
         codex_linux_sandbox_exe: prepared_call.config().codex_linux_sandbox_exe.clone(),
         sandbox_cwd,
         use_legacy_landlock: prepared_call.config().use_legacy_landlock,
@@ -1519,10 +1521,7 @@ async fn maybe_request_mcp_tool_approval(
     };
     let approvals_reviewer = connectors::mcp_approvals_reviewer_from_layers(
         &config.config_layer_stack,
-        step_context
-            .settings
-            .mcp_approvals_reviewer_override
-            .unwrap_or(config.approvals_reviewer),
+        step_context.settings.approvals_reviewer(),
         Some(turn_context.model_info().slug.as_str()),
         &invocation.server,
         metadata.connector_id.as_deref(),
@@ -1530,7 +1529,7 @@ async fn maybe_request_mcp_tool_approval(
     );
     if !strict_auto_review
         && mcp_permission_prompt_is_auto_approved(
-            config.approval_policy.value(),
+            step_context.settings.approval_policy(),
             permission_profile,
             McpPermissionPromptAutoApproveContext {
                 tool_approval_mode: Some(policy.mode),
@@ -1581,7 +1580,7 @@ async fn maybe_request_mcp_tool_approval(
                 read_only_hint: annotations.read_only_hint,
             }),
         hook_tool_name: hook_tool_name.clone(),
-        approval_policy: config.approval_policy.value(),
+        approval_policy: step_context.settings.approval_policy(),
         reviewer: approvals_reviewer,
         approval_mode: policy.mode,
         allow_session_remember: session_approval_key.is_some(),

@@ -11,6 +11,7 @@ pub use auth::resolve_oauth_scopes;
 pub use auth::should_retry_without_scopes;
 
 pub(crate) mod auth;
+mod server_authority;
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -51,7 +52,6 @@ use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
 use crate::McpProtocolMode;
-use crate::McpServerSource;
 use crate::ResolvedMcpCatalog;
 use crate::connection_manager::McpConnectionSet;
 use crate::runtime::McpPublicationGate;
@@ -210,23 +210,11 @@ impl McpConfig {
             .iter()
             .filter(|(_, server)| server.enabled())
             .filter_map(|(server_name, _)| {
-                let server = self.mcp_server_catalog.server(server_name)?;
-                let permission_profile = if server
-                    .source()
-                    .is_host_owned_apps(server_name, server.config())
-                {
-                    &self.permission_profile
-                } else if let Some(permission_profile) =
-                    environment_profiles.get(&server.config().environment_id)
-                {
-                    permission_profile
-                } else if server.config().is_local_environment()
-                    || matches!(server.source(), McpServerSource::SelectedPlugin(_))
-                {
-                    &self.permission_profile
-                } else {
-                    return None;
-                };
+                let permission_profile = self.server_permission_profile(
+                    server_name,
+                    &self.permission_profile,
+                    |environment_id| environment_profiles.get(environment_id),
+                )?;
                 Some((server_name.clone(), permission_profile.clone()))
             })
             .collect();

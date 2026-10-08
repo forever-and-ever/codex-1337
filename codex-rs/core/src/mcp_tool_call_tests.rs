@@ -3241,11 +3241,7 @@ async fn strict_auto_review_forces_guardian_for_mcp_policy_skip() {
         codex_apps_meta: None,
         openai_file_input_optional_fields: None,
     };
-    let mut captured_mcp_config = approval_config(&turn_context);
-    captured_mcp_config
-        .approval_policy
-        .set(AskForApproval::OnRequest)
-        .expect("captured MCP policy should allow updating approval policy");
+    let mcp_config = approval_config(&turn_context);
 
     let decision = maybe_request_mcp_tool_approval(
         &session,
@@ -3256,8 +3252,8 @@ async fn strict_auto_review_forces_guardian_for_mcp_policy_skip() {
         &ToolName::namespaced(&invocation.server, &invocation.tool),
         &HookToolName::new("mcp__test__tool"),
         &metadata,
-        &captured_mcp_config,
-        &captured_mcp_config.permission_profile,
+        &mcp_config,
+        &mcp_config.permission_profile,
         McpToolApprovalPolicy::for_server(AppToolApproval::Approve),
     )
     .await;

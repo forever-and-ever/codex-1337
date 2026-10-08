@@ -48,8 +48,9 @@ pub(crate) struct ResolvedStepSettings {
     pub(crate) reasoning_summary: ReasoningSummary,
     /// Tier sent on requests, filtered by feature and model support.
     pub(crate) service_tier: Option<String>,
-    /// MCP historically follows refreshed thread defaults. Preserve that behavior
+    /// MCP elicitations historically follow refreshed thread defaults. Preserve that
     /// for older clients until this turn receives an explicit live reviewer update.
+    /// MCP tool calls answer to the issuing step instead.
     pub(crate) mcp_approvals_reviewer_override: Option<ApprovalsReviewer>,
 }
 

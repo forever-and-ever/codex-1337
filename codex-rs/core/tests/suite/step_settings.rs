@@ -121,6 +121,7 @@ use super::rmcp_client::remote_aware_stdio_server_bin;
 mod agent_spawn;
 mod code_mode_notifications;
 mod environment_selection;
+mod mcp_approval_authority;
 
 const MODEL_A: &str = "step-settings-a";
 const MODEL_B: &str = "step-settings-b";
