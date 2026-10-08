@@ -13,7 +13,6 @@ use crate::client_common::ResponseStream;
 use crate::responses_metadata::CodexResponsesMetadata;
 use crate::responses_metadata::CodexResponsesRequestKind;
 use codex_api::AnthropicCachePolicy;
-use codex_api::AnthropicCacheTtl;
 use codex_api::AnthropicClient;
 use codex_api::AnthropicOperation;
 use codex_api::AnthropicPrompt;
@@ -23,6 +22,7 @@ use codex_api::AnthropicStreamOptions;
 use codex_api::ApiError;
 use codex_api::TransportError;
 use codex_api::encode_anthropic_request;
+use codex_config::AnthropicPromptCache;
 use codex_login::anthropic::AccountId;
 use codex_login::default_client::ClientRedirectPolicy;
 use codex_model_provider::AnthropicRequestAuth;
@@ -38,6 +38,11 @@ use http::StatusCode;
 use std::sync::Arc;
 
 impl ModelClient {
+    pub fn with_anthropic_prompt_cache(mut self, policy: AnthropicPromptCache) -> Self {
+        self.anthropic_prompt_cache = policy;
+        self
+    }
+
     /// Binds an unshared native client to a captured conversation identity.
     /// The credential registry validates the saved account when a request captures its grant.
     pub fn with_anthropic_account(mut self, account: AccountId) -> Result<Self> {
@@ -94,11 +99,8 @@ impl ModelClient {
             .map_err(|error| self.state.provider.map_api_error(error))?;
         let mut input = prompt.get_formatted_input_for_request(model);
         self.prepare_response_items_for_request(&mut input);
-        let ttl = if self.state.session_source.is_non_root_agent() {
-            AnthropicCacheTtl::FiveMinutes
-        } else {
-            AnthropicCacheTtl::OneHour
-        };
+        let effort = effort.or(model.default_reasoning_level.as_ref());
+        let ttl = self.anthropic_prompt_cache.resolve(&model.slug, effort);
         let max_output_tokens = match operation {
             AnthropicOperation::Inference => capabilities.max_output_tokens,
             AnthropicOperation::Compact => capabilities

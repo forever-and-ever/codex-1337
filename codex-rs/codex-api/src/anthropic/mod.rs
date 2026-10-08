@@ -68,13 +68,7 @@ pub enum AnthropicCachePolicy {
     Ephemeral(AnthropicCacheTtl),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum AnthropicCacheTtl {
-    #[serde(rename = "5m")]
-    FiveMinutes,
-    #[serde(rename = "1h")]
-    OneHour,
-}
+pub use codex_protocol::openai_models::AnthropicCacheTtl;
 
 /// The logical tool address remains independent of its flattened upstream alias.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -195,6 +195,8 @@ pub struct ModelProviderContextDefaults {
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ConfigToml {
+    #[serde(default)]
+    pub anthropic_prompt_cache: crate::AnthropicPromptCache,
     /// Downstream conversation-account preferences.
     #[serde(default)]
     pub wrangler: WranglerConfig,

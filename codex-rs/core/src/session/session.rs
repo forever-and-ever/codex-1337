@@ -1839,6 +1839,7 @@ impl Session {
                     workspace_routing.as_ref().clone(),
                     extensions.model_request_contributors().to_vec(),
                 )
+                .with_anthropic_prompt_cache(config.anthropic_prompt_cache.clone())
                 .with_provider_account(initial_provider_account)
                 .with_executed_tool_calls(executed_tool_calls.clone())
                 .with_restored_history(matches!(

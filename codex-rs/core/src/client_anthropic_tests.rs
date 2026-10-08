@@ -1,5 +1,6 @@
 use super::*;
 use crate::agent::control::ProviderAccountSelection;
+use codex_config::config_toml::ConfigToml;
 use codex_login::AuthHeaders;
 use codex_login::anthropic::AccountIdentity;
 use codex_login::anthropic::AccountInfo;
@@ -10,6 +11,7 @@ use codex_model_provider::create_model_provider_with_anthropic_account;
 use codex_model_provider_info::ModelProviderAdapter;
 use codex_protocol::openai_models::AnthropicModelCapabilities;
 use codex_protocol::openai_models::AnthropicThinkingMode;
+use codex_protocol::openai_models::ReasoningEffortPreset;
 use codex_tools::FreeformTool;
 use codex_tools::FreeformToolFormat;
 use codex_tools::ResponsesApiNamespace;
@@ -167,7 +169,16 @@ async fn native_request_pins_recovery_then_switches_with_exact_custom_tool_repla
         CodexAuth::Headers(AuthHeaders::new(http::HeaderMap::new())),
         home.path().to_path_buf(),
     );
-    let mut client = test_model_client(SessionSource::Cli);
+    let policy: ConfigToml = toml::from_str(
+        r#"
+        [[anthropic_prompt_cache.rules]]
+        model = "claude-sonnet"
+        efforts = ["medium"]
+        ttl = "5m"
+        "#,
+    )?;
+    let mut client = test_model_client(SessionSource::Cli)
+        .with_anthropic_prompt_cache(policy.anthropic_prompt_cache);
     let mut info = client.state.provider.info().clone();
     info.adapter = ModelProviderAdapter::ClaudeSubscription;
     info.base_url = None;
@@ -191,11 +202,17 @@ async fn native_request_pins_recovery_then_switches_with_exact_custom_tool_repla
         id: id_a.to_string(),
     });
     let mut model = test_model_info();
-    model.default_reasoning_level = None;
+    model.slug = "claude-sonnet-5-5".into();
+    model
+        .supported_reasoning_levels
+        .push(ReasoningEffortPreset {
+            effort: ReasoningEffort::High,
+            description: "high".into(),
+        });
     model.anthropic = Some(AnthropicModelCapabilities {
-        thinking: AnthropicThinkingMode::Disabled,
+        thinking: AnthropicThinkingMode::Adaptive,
         max_output_tokens: std::num::NonZeroU32::new(/*n*/ 100).unwrap(),
-        supported_efforts: vec![],
+        supported_efforts: vec![ReasoningEffort::Medium, ReasoningEffort::High],
         supports_structured_outputs: false,
     });
     let mut prompt = Prompt {
@@ -277,7 +294,7 @@ async fn native_request_pins_recovery_then_switches_with_exact_custom_tool_repla
             &prompt,
             &model,
             &telemetry,
-            /*effort*/ None,
+            Some(ReasoningEffort::High),
             codex_protocol::config_types::ReasoningSummary::None,
             /*service_tier*/ None,
             &metadata,
@@ -290,20 +307,29 @@ async fn native_request_pins_recovery_then_switches_with_exact_custom_tool_repla
     let requests = server.received_requests().await.unwrap();
     let observed = requests.iter().map(|request| {
         let mut body: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
+        let markers = body["tools"].as_array().unwrap().iter()
+            .chain(body["system"].as_array().unwrap())
+            .chain(body["messages"].as_array().unwrap().iter()
+                .flat_map(|message| message["content"].as_array().unwrap()))
+            .filter_map(|block| block.get("cache_control"))
+            .cloned()
+            .collect::<Vec<_>>();
         for message in body["messages"].as_array_mut().unwrap() {
             for block in message["content"].as_array_mut().unwrap() {
                 block.as_object_mut().unwrap().remove("cache_control");
             }
         }
-        json!({"bearer":request.headers["authorization"].to_str().unwrap(), "messages":body["messages"]})
+        json!({"bearer":request.headers["authorization"].to_str().unwrap(), "messages":body["messages"], "effort":body["output_config"]["effort"], "markers":markers})
     }).collect::<Vec<_>>();
     let user = json!({"role":"user","content":[{"type":"text","text":"run"}]});
+    let five_minutes = vec![json!({"type":"ephemeral", "ttl":"5m"}); 3];
+    let one_hour = vec![json!({"type":"ephemeral", "ttl":"1h"}); 4];
     assert_eq!(
         observed,
         vec![
-            json!({"bearer":"Bearer original-a","messages":[user]}),
-            json!({"bearer":"Bearer rotated-a","messages":[user]}),
-            json!({"bearer":"Bearer bearer-b","messages":[user,
+            json!({"bearer":"Bearer original-a","messages":[user], "effort":"medium", "markers":five_minutes}),
+            json!({"bearer":"Bearer rotated-a","messages":[user], "effort":"medium", "markers":five_minutes}),
+            json!({"bearer":"Bearer bearer-b", "effort":"high", "markers":one_hour, "messages":[user,
             {"role":"assistant","content":[{"type":"tool_use","id":"exec-call","name":"functions__exec","input":{"input":custom_input}}]},
             {"role":"user","content":[{"type":"tool_result","tool_use_id":"exec-call","content":"result λ","is_error":false}]}]}),
         ]

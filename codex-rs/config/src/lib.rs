@@ -1,4 +1,5 @@
 mod account_preferences;
+mod anthropic_prompt_cache;
 mod application_requirements;
 mod auth_policy;
 mod browser_computer_use_requirements;
@@ -54,6 +55,7 @@ pub const CONFIG_TOML_FILE: &str = "config.toml";
 pub use account_preferences::account_nickname;
 pub use account_preferences::lock_account_preferences;
 pub use account_preferences::read_account_preferences;
+pub use anthropic_prompt_cache::AnthropicPromptCache;
 pub use application_requirements::ApplicationNetworkRequirementsToml;
 pub use application_requirements::ApplicationRequirementsToml;
 pub use auth_policy::ManagedAuthPolicy;

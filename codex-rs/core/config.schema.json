@@ -114,6 +114,34 @@
       },
       "type": "object"
     },
+    "AnthropicCacheTtl": {
+      "enum": [
+        "5m",
+        "1h"
+      ],
+      "type": "string"
+    },
+    "AnthropicPromptCache": {
+      "additionalProperties": false,
+      "properties": {
+        "rules": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/CacheRule"
+          },
+          "type": "array"
+        },
+        "ttl": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/AnthropicCacheTtl"
+            }
+          ],
+          "default": "1h"
+        }
+      },
+      "type": "object"
+    },
     "AppConfig": {
       "additionalProperties": false,
       "description": "Config values for a single app/connector.",
@@ -467,6 +495,25 @@
           "type": "boolean"
         }
       },
+      "type": "object"
+    },
+    "CacheRule": {
+      "additionalProperties": false,
+      "properties": {
+        "efforts": {
+          "$ref": "#/definitions/Efforts"
+        },
+        "model": {
+          "$ref": "#/definitions/ModelPrefix"
+        },
+        "ttl": {
+          "$ref": "#/definitions/AnthropicCacheTtl"
+        }
+      },
+      "required": [
+        "model",
+        "ttl"
+      ],
       "type": "object"
     },
     "CircuitBreakAction": {
@@ -1386,6 +1433,13 @@
         "external"
       ],
       "type": "string"
+    },
+    "Efforts": {
+      "items": {
+        "$ref": "#/definitions/ReasoningEffort"
+      },
+      "minItems": 1,
+      "type": "array"
     },
     "ExperimentalRequestUserInput": {
       "additionalProperties": false,
@@ -2518,6 +2572,10 @@
         "type": "integer"
       },
       "type": "object"
+    },
+    "ModelPrefix": {
+      "minLength": 1,
+      "type": "string"
     },
     "ModelProviderAdapter": {
       "description": "Provider semantics that cannot be inferred from the shared Responses wire format.",
@@ -6682,6 +6740,17 @@
         }
       ],
       "description": "When `false`, disables analytics across Codex product surfaces in this machine. Defaults to `true`."
+    },
+    "anthropic_prompt_cache": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/AnthropicPromptCache"
+        }
+      ],
+      "default": {
+        "rules": [],
+        "ttl": "1h"
+      }
     },
     "approval_policy": {
       "allOf": [
