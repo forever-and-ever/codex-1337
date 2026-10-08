@@ -297,7 +297,7 @@ impl PtyCodex {
         let mut slave_fd = -1;
         let mut window_size = libc::winsize {
             ws_row: 32,
-            ws_col: 120,
+            ws_col: 160,
             ws_xpixel: 0,
             ws_ypixel: 0,
         };
@@ -352,7 +352,7 @@ impl PtyCodex {
             master,
             child,
             parser: vt100::Parser::new(
-                /*rows*/ 32, /*cols*/ 120, /*scrollback_len*/ 0,
+                window_size.ws_row, window_size.ws_col, /*scrollback_len*/ 0,
             ),
             output: Vec::new(),
             cursor_answered: false,

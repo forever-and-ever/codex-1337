@@ -1,7 +1,7 @@
 //! Exercises daemon compatibility fallback through real TUI startup.
 
-use super::focus_palette::socket_home;
 use super::focus_palette::PtyCodex;
+use super::focus_palette::socket_home;
 use super::focus_palette::write_test_config;
 use anyhow::Context;
 use anyhow::Result;
@@ -86,7 +86,8 @@ async fn incompatible_daemon_falls_back_for_default_and_explicit_features() -> R
         let warning = screen
             .lines()
             .find(|line| line.contains("Running without the shared background server"))
-            .context("missing warning line")?;
+            .context("missing warning line")?
+            .trim();
         insta::assert_snapshot!(snapshot, warning);
         terminal.write_input(b"\x14")?;
         terminal.write_input(b"/status")?;
