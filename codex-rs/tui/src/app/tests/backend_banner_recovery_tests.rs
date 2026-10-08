@@ -43,7 +43,8 @@ async fn next_rate_limits_loaded(
 }
 
 #[tokio::test]
-async fn luna_reserve_periodic_refresh_adapts_without_an_experiment_banner() -> Result<()> {
+async fn luna_reserve_periodic_refresh_matches_shared_cache_without_an_experiment_banner()
+-> Result<()> {
     let backend = MockServer::start().await;
     let home = tempdir()?;
     write_chatgpt_auth(
@@ -69,7 +70,7 @@ async fn luna_reserve_periodic_refresh_adapts_without_an_experiment_banner() -> 
     set_chatgpt_auth(&mut app.chat_widget);
     let mut session = Box::pin(crate::start_embedded_app_server_for_picker(&app.config)).await?;
     let mut tui = crate::tui::test_support::make_test_tui()?;
-    for (used, seconds) in [(10, 60), (75, 30), (90, 15), (99, 5), (20, 60)] {
+    for used in [10, 75, 90, 99, 20] {
         backend.reset().await;
         Mock::given(method("GET"))
             .and(path("/api/codex/usage"))
@@ -103,7 +104,7 @@ async fn luna_reserve_periodic_refresh_adapts_without_an_experiment_banner() -> 
         app.handle_event(&mut tui, &mut session, loaded).await?;
         let after = std::time::Instant::now();
         let interval = app.chat_widget.rate_limit_refresh_interval().unwrap();
-        assert_eq!(interval, Duration::from_secs(seconds));
+        assert_eq!(interval, Duration::from_secs(/*secs*/ 60));
         let deadline = app
             .rate_limit_refresh_state
             .poll_deadline(interval)
