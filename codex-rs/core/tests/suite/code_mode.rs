@@ -9261,7 +9261,12 @@ async fn code_mode_oversized_websocket_yield_keeps_later_wait_incomplete() -> Re
 
     // One 7 KiB invocation stays under the recorder's per-output argument
     // budget. It pushes the yielded delta over the message budget only.
-    let instructions = "x".repeat(LIMIT - base_bytes - 4 * 1024);
+    // Keep the exact byte calibration without making the Preamble census tokenize
+    // a single 15 MiB word: this tests wire metadata, not pathological BPE input.
+    let instruction_bytes = LIMIT - base_bytes - 4 * 1024;
+    let padding = " instructions";
+    let mut instructions = padding.repeat(instruction_bytes.div_ceil(padding.len()));
+    instructions.truncate(instruction_bytes);
     let code = r#"
 await tools.test_sync_tool({ barrier: { id: "x".repeat(7000), participants: 1 } });
 text("yielded");
