@@ -979,7 +979,6 @@ fn stage_str(stage: Stage) -> &'static str {
 }
 
 pub fn main() -> anyhow::Result<()> {
-    codex_build_info::initialize!();
     let remote_control_disabled = codex_app_server::take_remote_control_disabled_env();
     arg0_dispatch_or_else(move |arg0_paths: Arg0DispatchPaths| async move {
         // Keep the CLI dispatcher off the runtime's stack while the TUI rebuilds a thread.
