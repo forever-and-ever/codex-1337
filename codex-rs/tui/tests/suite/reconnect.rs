@@ -42,8 +42,9 @@ async fn automatic_reconnect_restores_draft_and_routes_new_notifications() -> Re
             "status": {"type": "active", "activeFlags": []}, "cwd": server_cwd,
             "cliVersion": "0.0.0", "source": "cli", "turns": [{"id": "running", "items": [], "status": "inProgress", "error": null}]
         });
-        // The first connection checks daemon compatibility before TUI startup.
-        for connection in -1..7 {
+        // Startup reuses its compatibility-check connection for the live session.
+        let mut recovery_resumes = 0;
+        for connection in 0..2 {
             let mut socket = loop {
                 let (stream, _) = listener.accept().await?;
                 // Startup probes the default daemon socket before opening its WebSocket.
@@ -70,7 +71,10 @@ async fn automatic_reconnect_restores_draft_and_routes_new_notifications() -> Re
                     restore_rx.take().unwrap().await?;
                 }
                 // Keep failing past the original five-attempt limit.
-                if (1..=5).contains(&connection) && request.method == "thread/resume" {
+                if connection == 1 && request.method == "thread/resume" {
+                    recovery_resumes += 1;
+                }
+                if connection == 1 && recovery_resumes <= 5 && request.method == "thread/resume" {
                     socket
                         .send(Message::Text(
                             json!({"id": request.id, "error": {
@@ -132,7 +136,7 @@ async fn automatic_reconnect_restores_draft_and_routes_new_notifications() -> Re
                             .into(),
                     ))
                     .await?;
-                if connection == 6 && request.method == "thread/resume" {
+                if connection == 1 && request.method == "thread/resume" {
                     // Keep the recovered turn running: its output must appear without waiting
                     // for turn/completed or rebuilding the transcript.
                     socket
