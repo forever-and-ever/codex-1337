@@ -642,11 +642,14 @@ async fn wait_agent_wake_preserves_mail_and_steers(wake: WaitWake) {
                 .enable(Feature::MultiAgentV2)
                 .expect("test config should allow feature update");
             config.multi_agent_v2.min_wait_timeout_ms = 0;
-            config.multi_agent_v2.wait_agent_batch_window_ms = if matches!(wake, WaitWake::Disabled)
-            {
-                None
-            } else {
-                NonZeroU64::new(500)
+            // Only Batch lets the window expire. Elsewhere the window outlasts WAKE_BUDGET, so
+            // a wake within the budget proves which signal ended the hold, even under load.
+            config.multi_agent_v2.wait_agent_batch_window_ms = match wake {
+                WaitWake::Disabled => None,
+                WaitWake::Batch => NonZeroU64::new(500),
+                WaitWake::Steer | WaitWake::ChildCompletion | WaitWake::WaitDeadline => {
+                    NonZeroU64::new(60_000)
+                }
             };
         })
         .build_with_streaming_server(&server)
@@ -715,17 +718,11 @@ async fn wait_agent_wake_preserves_mail_and_steers(wake: WaitWake) {
         }
         WaitWake::WaitDeadline | WaitWake::Disabled => {}
     }
-    let wake_budget_ms = if matches!(wake, WaitWake::Batch) {
-        750
-    } else {
-        250
-    };
-    tokio::time::timeout(
-        Duration::from_millis(wake_budget_ms),
-        wait_for_turn_complete(codex),
-    )
-    .await
-    .expect("hold must obey its wake deadline");
+    // Well under the 10 s wait timeout and the 60 s window; generous for a loaded machine.
+    const WAKE_BUDGET: Duration = Duration::from_secs(5);
+    tokio::time::timeout(WAKE_BUDGET, wait_for_turn_complete(codex))
+        .await
+        .expect("hold must obey its wake deadline");
 
     let requests = server.requests().await;
     let expected_requests = if matches!(wake, WaitWake::ChildCompletion) {

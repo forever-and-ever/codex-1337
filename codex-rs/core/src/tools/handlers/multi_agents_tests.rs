@@ -3917,6 +3917,8 @@ async fn multi_agent_v2_wait_agent_wakes_on_any_mailbox_notification() {
         .features
         .enable(Feature::MultiAgentV2)
         .expect("test config should allow feature update");
+    // Two running workers would otherwise hold this wake for the batching window.
+    config.multi_agent_v2.wait_agent_batch_window_ms = None;
     set_turn_config(&mut turn, config);
     let session = Arc::new(session);
     let turn = Arc::new(turn);
