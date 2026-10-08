@@ -10,10 +10,17 @@ fn role_segment_filters_base_and_appends_bundled_guidance() {
     let shared = DEFAULT_MULTI_AGENT_V2_SHARED_USAGE_HINT_TEXT;
     let wait = DEFAULT_MULTI_AGENT_V2_WAIT_AGENT_USAGE_HINT_TEXT;
     let model_override = DEFAULT_MULTI_AGENT_V2_MODEL_OVERRIDE_USAGE_HINT_TEXT;
-    let expected_body = format!(
-        "Role.\n## Work\nContinue.\n{shared}\n{wait}\n\nThere are 2 available concurrency slots, meaning that up to 2 agents can be active at once, including you.\n\n{model_override}"
-    );
-    for marked in [false, true] {
+    for (marked, agent_tools_in_code_mode) in [(false, false), (true, false), (true, true)] {
+        let exposure = if agent_tools_in_code_mode {
+            format!(
+                "{DEFAULT_MULTI_AGENT_V2_CODE_MODE_USAGE_HINT_TEXT} Call `wait_agent` directly, never inside `exec`."
+            )
+        } else {
+            DEFAULT_MULTI_AGENT_V2_DIRECT_USAGE_HINT_TEXT.to_string()
+        };
+        let expected_body = format!(
+            "Role.\n## Work\nContinue.\n{exposure}\n\n{shared}\n{wait}\n\nThere are 2 available concurrency slots, meaning that up to 2 agents can be active at once, including you.\n\n{model_override}"
+        );
         let instructions = MultiAgentRoleInstructions::Composed {
             base: "Role.\n## Plan tool\nOmit role checklist guidance.\n## Work\nContinue."
                 .to_string(),
@@ -21,6 +28,7 @@ fn role_segment_filters_base_and_appends_bundled_guidance() {
             omit_update_plan_instructions: true,
             max_concurrency: 2,
             wait_agent_enabled: true,
+            agent_tools_in_code_mode,
             expose_model_overrides: true,
         };
         let expected_text = if marked {

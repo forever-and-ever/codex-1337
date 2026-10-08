@@ -1379,7 +1379,7 @@ impl MultiAgentV2Config {
             wait_agent_enabled: true,
             disable_direct_message: false,
             message_board_in_memory: false,
-            non_code_mode_only: true,
+            non_code_mode_only: false,
         }
     }
 }

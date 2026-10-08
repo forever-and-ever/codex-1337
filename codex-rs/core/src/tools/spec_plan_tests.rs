@@ -3095,7 +3095,6 @@ async fn code_mode_only_can_expose_namespaced_multi_agent_v2_as_normal_tools() {
         vec![
             "exec",
             "wait",
-            "update_work_status",
             "request_user_input",
             "agents",
             "set_agent_service_tier",
@@ -3110,6 +3109,69 @@ async fn code_mode_only_can_expose_namespaced_multi_agent_v2_as_normal_tools() {
             .iter()
             .any(|name| name == "assign_task"),
         "expected assign_task to be absent from agents namespace"
+    );
+    let batchable = probe(|turn| {
+        set_features(turn, &[Feature::CodeModeOnly, Feature::MultiAgentV2]);
+        update_config(turn, |config| {
+            config.multi_agent_v2.tool_namespace = Some("agents".to_string());
+        });
+    })
+    .await;
+    assert_eq!(
+        batchable.namespace_function_names("agents"),
+        &["wait_agent".to_string()]
+    );
+    for (javascript_name, tool_name) in [
+        ("update_work_status", ToolName::plain("update_work_status")),
+        (
+            "agents__spawn_agent",
+            ToolName::namespaced("agents", "spawn_agent"),
+        ),
+        (
+            "agents__send_message",
+            ToolName::namespaced("agents", "send_message"),
+        ),
+        (
+            "agents__followup_task",
+            ToolName::namespaced("agents", "followup_task"),
+        ),
+        (
+            "agents__interrupt_agent",
+            ToolName::namespaced("agents", "interrupt_agent"),
+        ),
+        (
+            "agents__list_agents",
+            ToolName::namespaced("agents", "list_agents"),
+        ),
+        (
+            "set_agent_service_tier",
+            ToolName::plain("set_agent_service_tier"),
+        ),
+        ("retire_agent", ToolName::plain("retire_agent")),
+    ] {
+        assert_eq!(
+            batchable.exposure(&tool_name.to_string()),
+            ToolExposure::Direct
+        );
+        assert_eq!(
+            batchable.code_mode_tool_names.get(javascript_name),
+            Some(&tool_name)
+        );
+    }
+    let wait_agent = ToolName::namespaced("agents", "wait_agent");
+    assert_eq!(
+        batchable.exposure(&wait_agent.to_string()),
+        ToolExposure::DirectModelOnly
+    );
+    assert!(
+        !batchable
+            .code_mode_tool_names
+            .contains_key("agents__wait_agent")
+    );
+    assert!(
+        !plan
+            .code_mode_tool_names
+            .contains_key("agents__send_message")
     );
     for tool_name in [
         "spawn_agent",
@@ -3269,12 +3331,9 @@ async fn hosted_web_search_and_standalone_image_generation_follow_runtime_gates(
             // Code-mode entrypoints.
             codex_code_mode::PUBLIC_TOOL_NAME,
             codex_code_mode::WAIT_TOOL_NAME,
-            "update_work_status",
             "request_user_input",
             // Multi-agent v2 tools.
             MULTI_AGENT_V2_NAMESPACE,
-            "set_agent_service_tier",
-            "retire_agent",
             // Hosted Responses tools.
             "web_search",
         ]

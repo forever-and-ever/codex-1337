@@ -1194,7 +1194,7 @@ fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, registry: &mut Tool
         && !turn_context.session_source.is_internal()
         && !crate::guardian::is_basic_session_source(&turn_context.session_source)
     {
-        registry.add_with_exposure(WorkStatusHandler, ToolExposure::DirectModelOnly);
+        registry.add(WorkStatusHandler);
     }
 
     if features.enabled(Feature::DeferredExecutor) {
@@ -1415,7 +1415,7 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
                         model_messages.multi_agent_tool_description_override("wait_agent"),
                         model_messages.multi_agent_tool_parameters_override("wait_agent"),
                     ),
-                    exposure,
+                    ToolExposure::DirectModelOnly,
                 );
             }
             registry.register_trusted_with_exposure(

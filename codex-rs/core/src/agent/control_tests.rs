@@ -2652,6 +2652,7 @@ async fn spawn_agent_fork_strips_parent_usage_hints_from_compacted_history() {
         omit_update_plan_instructions: false,
         max_concurrency: 2,
         wait_agent_enabled: false,
+        agent_tools_in_code_mode: true,
         expose_model_overrides: false,
     };
     let parent_task = InterAgentCommunication::new(

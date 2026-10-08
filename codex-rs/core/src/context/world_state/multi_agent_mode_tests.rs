@@ -97,6 +97,7 @@ fn catalog_role_updates_remain_separate_from_active_mode() {
         omit_update_plan_instructions: false,
         max_concurrency: 2,
         wait_agent_enabled: false,
+        agent_tools_in_code_mode: true,
         expose_model_overrides: false,
     };
     let previous_hint = MultiAgentUsageHintState::new(catalog_role("Previous role."));

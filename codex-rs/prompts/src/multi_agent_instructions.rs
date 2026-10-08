@@ -8,9 +8,9 @@ use codex_protocol::models::ContentItemKind;
 const DEFAULT_MULTI_AGENT_V2_MODEL_OVERRIDE_USAGE_HINT_TEXT: &str = "Full-history forks (`fork_turns` omitted or `\"all\"`) inherit the parent model and reasoning effort and do not accept overrides. Only set `model` or `reasoning_effort` when explicitly requested by the user, applicable `AGENTS.md` instructions, or skill instructions; when doing so, set `fork_turns` to `\"none\"` or a positive integer string.";
 const DEFAULT_MULTI_AGENT_V2_WAIT_AGENT_USAGE_HINT_TEXT: &str =
     "When calling `wait_agent`, prefer longer waits (minutes) to avoid busy polling.";
-const DEFAULT_MULTI_AGENT_V2_SHARED_USAGE_HINT_TEXT: &str = r#"Agent-control tools cannot be called from inside `exec`. Call `spawn_agent`, `send_message`, `followup_task`, `wait_agent`, `interrupt_agent`, and `list_agents` directly using the exact exposed names in their tool definitions. They are intentionally absent from the JavaScript `tools.*` namespace. Tools available inside `exec` are listed in `ALL_TOOLS` and accessed through `tools.*`.
-
-All agents share the same directory. In detail:
+const DEFAULT_MULTI_AGENT_V2_DIRECT_USAGE_HINT_TEXT: &str = "Agent-control tools cannot be called from inside `exec`. Call `spawn_agent`, `send_message`, `followup_task`, `wait_agent`, `interrupt_agent`, and `list_agents` directly using the exact exposed names in their tool definitions. They are intentionally absent from the JavaScript `tools.*` namespace. Tools available inside `exec` are listed in `ALL_TOOLS` and accessed through `tools.*`.";
+const DEFAULT_MULTI_AGENT_V2_CODE_MODE_USAGE_HINT_TEXT: &str = "Non-blocking agent-control tools are available inside `exec` via `tools.*`, listed in `ALL_TOOLS`. Batch them with other calls when possible.";
+const DEFAULT_MULTI_AGENT_V2_SHARED_USAGE_HINT_TEXT: &str = r#"All agents share the same directory. In detail:
 - All agents have access to the same container and filesystem as you.
 - All agents use the same current working directory.
 - As a result, edits made by one agent are immediately visible to all other agents.
@@ -28,6 +28,7 @@ pub enum MultiAgentRoleInstructions {
         omit_update_plan_instructions: bool,
         max_concurrency: usize,
         wait_agent_enabled: bool,
+        agent_tools_in_code_mode: bool,
         expose_model_overrides: bool,
     },
 }
@@ -64,6 +65,7 @@ impl ContextualUserFragment for MultiAgentRoleInstructions {
                 omit_update_plan_instructions,
                 max_concurrency,
                 wait_agent_enabled,
+                agent_tools_in_code_mode,
                 expose_model_overrides,
                 ..
             } => {
@@ -78,8 +80,18 @@ impl ContextualUserFragment for MultiAgentRoleInstructions {
                     String::new()
                 };
                 let shared = DEFAULT_MULTI_AGENT_V2_SHARED_USAGE_HINT_TEXT;
+                let exposure = if *agent_tools_in_code_mode {
+                    DEFAULT_MULTI_AGENT_V2_CODE_MODE_USAGE_HINT_TEXT
+                } else {
+                    DEFAULT_MULTI_AGENT_V2_DIRECT_USAGE_HINT_TEXT
+                };
+                let direct_wait = if *agent_tools_in_code_mode && *wait_agent_enabled {
+                    " Call `wait_agent` directly, never inside `exec`."
+                } else {
+                    ""
+                };
                 let mut text = format!(
-                    "{base}\n{shared}\n{wait_agent_guidance}There are {max_concurrency} available concurrency slots, meaning that up to {max_concurrency} agents can be active at once, including you."
+                    "{base}\n{exposure}{direct_wait}\n\n{shared}\n{wait_agent_guidance}There are {max_concurrency} available concurrency slots, meaning that up to {max_concurrency} agents can be active at once, including you."
                 );
                 if *expose_model_overrides {
                     text.push_str("\n\n");

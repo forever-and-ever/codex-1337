@@ -248,7 +248,7 @@ async fn multi_agent_catalog_messages_change_only_selected_tool_fields(
                     .find("\n\nexec tool declaration:")
                     .map(|index| &bundled[index..])
                     .unwrap_or_default();
-                if matches!(exposure, Exposure::CodeMode) {
+                if matches!(exposure, Exposure::CodeMode) && name != "wait_agent" {
                     assert!(
                         declaration.contains(&format!("delegation__{name}")),
                         "Code Mode description for {name}: {bundled}"
@@ -282,7 +282,7 @@ async fn multi_agent_catalog_messages_change_only_selected_tool_fields(
                 if matches!(name, "spawn_agent" | "send_message" | "followup_task") {
                     expected_tool["parameters"]["properties"]["message"]["encrypted"] = json!(true);
                 }
-                if matches!(exposure, Exposure::CodeMode) {
+                if matches!(exposure, Exposure::CodeMode) && name != "wait_agent" {
                     let description = expected_tool["description"].as_str().expect("description");
                     let (prefix, signature) =
                         description.rsplit_once("(args: ").expect("arguments");
