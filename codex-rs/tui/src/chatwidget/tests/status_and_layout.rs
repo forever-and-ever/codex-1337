@@ -2422,30 +2422,32 @@ async fn final_answer_completion_restores_status_indicator_for_pending_steer() {
 }
 
 #[tokio::test]
-async fn commentary_completion_restores_status_indicator_before_exec_begin() {
-    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+async fn interim_message_completion_restores_status_indicator_before_exec_begin() {
+    // Providers without message phases (Claude, Chat Completions) also speak between tool calls.
+    for phase in [Some(MessagePhase::Commentary), None] {
+        let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
 
-    chat.on_task_started();
-    assert_eq!(chat.bottom_pane.status_indicator_visible(), true);
+        chat.on_task_started();
+        assert_eq!(chat.bottom_pane.status_indicator_visible(), true);
 
-    chat.on_agent_message_delta("Preamble line\n".to_string());
-    chat.on_commit_tick();
-    drain_insert_history(&mut rx);
+        chat.on_agent_message_delta("Preamble line\n".to_string());
+        chat.on_commit_tick();
+        drain_insert_history(&mut rx);
 
-    assert_eq!(chat.bottom_pane.status_indicator_visible(), false);
+        assert_eq!(chat.bottom_pane.status_indicator_visible(), false);
 
-    complete_assistant_message(
-        &mut chat,
-        "msg-commentary",
-        "Preamble line\n",
-        Some(MessagePhase::Commentary),
-    );
+        complete_assistant_message(&mut chat, "msg-interim", "Preamble line\n", phase.clone());
 
-    assert_eq!(chat.bottom_pane.status_indicator_visible(), true);
-    assert_eq!(chat.bottom_pane.is_task_running(), true);
+        assert_eq!(
+            chat.bottom_pane.status_indicator_visible(),
+            true,
+            "{phase:?}"
+        );
+        assert_eq!(chat.bottom_pane.is_task_running(), true);
 
-    begin_exec(&mut chat, "call-1", "echo hi");
-    assert_eq!(chat.bottom_pane.status_indicator_visible(), true);
+        begin_exec(&mut chat, "call-1", "echo hi");
+        assert_eq!(chat.bottom_pane.status_indicator_visible(), true);
+    }
 }
 
 // Snapshot test: ChatWidget at very small heights (idle)

@@ -381,9 +381,9 @@ impl ChatWidget {
 
     /// Handle completion of an `AgentMessage` turn item.
     ///
-    /// Commentary completion sets a deferred restore flag so the status row
-    /// returns once stream queues are idle. Final-answer completion (or absent
-    /// phase for legacy models) clears the flag to preserve historical behavior.
+    /// Completion of a message that may precede more work (commentary or no phase)
+    /// sets a deferred restore flag so the status row returns once stream queues are
+    /// idle. Final-answer completion clears it unless a steer awaits delivery.
     pub(super) fn on_agent_message_item_completed(
         &mut self,
         item: AgentMessageItem,
@@ -450,9 +450,9 @@ impl ChatWidget {
         }
         self.status_state.pending_status_indicator_restore = item.questions.is_some()
             || match item.phase {
-                // Models that don't support preambles only output AgentMessageItems on turn completion.
-                Some(MessagePhase::FinalAnswer) | None => self.input_queue.pending_steer.is_some(),
-                Some(MessagePhase::Commentary) => true,
+                Some(MessagePhase::FinalAnswer) => self.input_queue.pending_steer.is_some(),
+                // Phaseless providers (Claude, Chat Completions) also speak between tool calls.
+                Some(MessagePhase::Commentary) | None => true,
             };
         self.maybe_restore_status_indicator_after_stream_idle();
     }
