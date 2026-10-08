@@ -1841,7 +1841,7 @@ impl MessageProcessor {
             }
             ClientRequest::GetAccount { params, .. } => {
                 self.account_processor
-                    .for_account_read(&params)
+                    .for_account_scope(params.thread_id.as_deref(), params.new_thread.as_ref())
                     .await?
                     .get_account(params)
                     .await
@@ -1854,10 +1854,13 @@ impl MessageProcessor {
             }
             ClientRequest::GetAccountRateLimits { params, .. } => {
                 self.account_processor
-                    .for_thread(
+                    .for_account_scope(
                         params
                             .as_ref()
                             .and_then(|params| params.thread_id.as_deref()),
+                        params
+                            .as_ref()
+                            .and_then(|params| params.new_thread.as_ref()),
                     )
                     .await?
                     .get_account_rate_limits(params)

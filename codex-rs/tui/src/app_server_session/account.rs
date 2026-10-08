@@ -1,28 +1,32 @@
-//! Bootstrap identity follows the conversation, previewing the fresh-root selection only for drafts.
+//! Account requests preview the fresh-root selection only until a conversation owns their scope.
 
 use super::*;
 use codex_app_server_protocol::NewThreadAccountParams;
 use codex_utils_path_uri::LegacyAppPathString;
 
 impl AppServerSession {
+    pub(crate) fn new_thread_account_params(&self, config: &Config) -> NewThreadAccountParams {
+        let params = thread_start_params_from_config(
+            config,
+            self.thread_params_mode(),
+            self.remote_cwd_override.as_deref(),
+            /*session_start_source*/ None,
+        );
+        NewThreadAccountParams {
+            model_provider: self.explicit_model_provider(config),
+            cwd: params.cwd.map(LegacyAppPathString::from_string),
+            config: params.config,
+        }
+    }
+
     pub(super) async fn read_bootstrap_account(
         &mut self,
         config: &Config,
         thread_id: Option<ThreadId>,
     ) -> Result<GetAccountResponse> {
-        let new_thread = thread_id.is_none().then(|| {
-            let params = thread_start_params_from_config(
-                config,
-                self.thread_params_mode(),
-                self.remote_cwd_override.as_deref(),
-                /*session_start_source*/ None,
-            );
-            NewThreadAccountParams {
-                model_provider: self.explicit_model_provider(config),
-                cwd: params.cwd.map(LegacyAppPathString::from_string),
-                config: params.config,
-            }
-        });
+        let new_thread = thread_id
+            .is_none()
+            .then(|| self.new_thread_account_params(config));
         let request_id = self.next_request_id();
         self.client
             .request_typed(ClientRequest::GetAccount {

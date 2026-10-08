@@ -1928,33 +1928,6 @@ class GatewayOAuthStatus(Enum):
     failed = "failed"
 
 
-class GetAccountRateLimitsParams(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    exclude_reset_credit_details: Annotated[
-        bool | None,
-        Field(
-            alias="excludeResetCreditDetails",
-            description="Skip the separate reset-credit detail lookup for background usage polls. The usage response still includes the available count; omitted/false preserves detailed reads.",
-        ),
-    ] = None
-    supports_luna_reserve: Annotated[
-        bool | None,
-        Field(
-            alias="supportsLunaReserve",
-            description="The client supports automatic Luna Reserve fallback. For eligible ChatGPT CLI users, allow the backend to record experiment exposure after ordinary usage is blocked.",
-        ),
-    ] = None
-    thread_id: Annotated[
-        str | None,
-        Field(
-            alias="threadId",
-            description="Use the conversation's saved account rather than the current login.",
-        ),
-    ] = None
-
-
 class GetAccountTokenUsageParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -3114,15 +3087,6 @@ class NullableAccountScopeParams(RootModel[AccountScopeParams | None]):
         populate_by_name=True,
     )
     root: Annotated[AccountScopeParams | None, Field(title="Nullable_AccountScopeParams")]
-
-
-class NullableGetAccountRateLimitsParams(RootModel[GetAccountRateLimitsParams | None]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    root: Annotated[
-        GetAccountRateLimitsParams | None, Field(title="Nullable_GetAccountRateLimitsParams")
-    ]
 
 
 class NullableGetAccountTokenUsageParams(RootModel[GetAccountTokenUsageParams | None]):
@@ -7997,17 +7961,6 @@ class AccountQuotaReadRequest(BaseModel):
     params: AccountQuotaReadParams
 
 
-class AccountRateLimitsReadRequest(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    id: RequestId
-    method: Annotated[
-        Literal["account/rateLimits/read"], Field(title="Account/rateLimits/readRequestMethod")
-    ]
-    params: GetAccountRateLimitsParams | None = None
-
-
 class AccountRateLimitResetCreditConsumeRequest(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -8802,6 +8755,40 @@ class GetAccountParams(BaseModel):
     ] = None
 
 
+class GetAccountRateLimitsParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    exclude_reset_credit_details: Annotated[
+        bool | None,
+        Field(
+            alias="excludeResetCreditDetails",
+            description="Skip the separate reset-credit detail lookup for background usage polls. The usage response still includes the available count; omitted/false preserves detailed reads.",
+        ),
+    ] = None
+    new_thread: Annotated[
+        NewThreadAccountParams | None,
+        Field(
+            alias="newThread",
+            description="Read a fresh root conversation's quota instead of the global login. Cannot be combined with `threadId`.",
+        ),
+    ] = None
+    supports_luna_reserve: Annotated[
+        bool | None,
+        Field(
+            alias="supportsLunaReserve",
+            description="The client supports automatic Luna Reserve fallback. For eligible ChatGPT CLI users, allow the backend to record experiment exposure after ordinary usage is blocked.",
+        ),
+    ] = None
+    thread_id: Annotated[
+        str | None,
+        Field(
+            alias="threadId",
+            description="Use the conversation's saved account rather than the current login.",
+        ),
+    ] = None
+
+
 class GetAccountResponse(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -9377,6 +9364,15 @@ class NewThreadModelDefaults(BaseModel):
         ReasoningEffort | None, Field(alias="modelReasoningEffort")
     ] = None
     service_tier: Annotated[str | None, Field(alias="serviceTier")] = None
+
+
+class NullableGetAccountRateLimitsParams(RootModel[GetAccountRateLimitsParams | None]):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: Annotated[
+        GetAccountRateLimitsParams | None, Field(title="Nullable_GetAccountRateLimitsParams")
+    ]
 
 
 class OverriddenMetadata(BaseModel):
@@ -11373,6 +11369,17 @@ class AccountLoginStartRequest(BaseModel):
         Literal["account/login/start"], Field(title="Account/login/startRequestMethod")
     ]
     params: LoginAccountParams
+
+
+class AccountRateLimitsReadRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[
+        Literal["account/rateLimits/read"], Field(title="Account/rateLimits/readRequestMethod")
+    ]
+    params: GetAccountRateLimitsParams | None = None
 
 
 class CommandExecRequest(BaseModel):

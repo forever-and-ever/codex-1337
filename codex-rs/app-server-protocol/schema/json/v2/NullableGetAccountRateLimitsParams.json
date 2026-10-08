@@ -16,12 +16,57 @@
           "description": "Skip the separate reset-credit detail lookup for background usage polls. The usage response still includes the available count; omitted/false preserves detailed reads.",
           "type": "boolean"
         },
+        "newThread": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/NewThreadAccountParams"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Read a fresh root conversation's quota instead of the global login. Cannot be combined with `threadId`."
+        },
         "supportsLunaReserve": {
           "description": "The client supports automatic Luna Reserve fallback. For eligible ChatGPT CLI users, allow the backend to record experiment exposure after ordinary usage is blocked.",
           "type": "boolean"
         },
         "threadId": {
           "description": "Use the conversation's saved account rather than the current login.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "LegacyAppPathString": {
+      "type": "string"
+    },
+    "NewThreadAccountParams": {
+      "properties": {
+        "config": {
+          "additionalProperties": true,
+          "description": "Configuration overrides, as in `thread/start`.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "cwd": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LegacyAppPathString"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Absolute working directory used to resolve the new conversation's configuration."
+        },
+        "modelProvider": {
+          "description": "Provider override, as in `thread/start`; omission uses the server default.",
           "type": [
             "string",
             "null"

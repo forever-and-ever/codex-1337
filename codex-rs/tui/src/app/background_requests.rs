@@ -97,10 +97,18 @@ impl App {
             return;
         };
         self.chat_widget.start_usage_notice_read(request_id);
+        let params = GetAccountRateLimitsParams {
+            thread_id: thread_id.map(|id| id.to_string()),
+            new_thread: thread_id
+                .is_none()
+                .then(|| app_server.new_thread_account_params(&self.config)),
+            supports_luna_reserve: true,
+            exclude_reset_credit_details: origin == RateLimitRefreshOrigin::Periodic,
+        };
         let request_handle = app_server.request_handle();
         let app_event_tx = self.app_event_tx.clone();
         tokio::spawn(async move {
-            let request = fetch_account_rate_limits(request_handle, thread_id, origin);
+            let request = fetch_account_rate_limits(request_handle, params);
             let result = match origin {
                 RateLimitRefreshOrigin::Recovery
                 | RateLimitRefreshOrigin::Periodic
@@ -778,38 +786,16 @@ pub(super) async fn fetch_all_mcp_server_statuses(
 
 pub(super) async fn fetch_account_rate_limits(
     request_handle: AppServerRequestHandle,
-    thread_id: Option<ThreadId>,
-    origin: RateLimitRefreshOrigin,
+    params: GetAccountRateLimitsParams,
 ) -> Result<GetAccountRateLimitsResponse> {
     let request_id = RequestId::String(format!("account-rate-limits-{}", Uuid::new_v4()));
-    let result = request_handle
+    request_handle
         .request_typed(ClientRequest::GetAccountRateLimits {
-            request_id: request_id.clone(),
-            params: Some(GetAccountRateLimitsParams {
-                thread_id: thread_id.map(|id| id.to_string()),
-                supports_luna_reserve: true,
-                exclude_reset_credit_details: origin == RateLimitRefreshOrigin::Periodic,
-            }),
+            request_id,
+            params: Some(params),
         })
-        .await;
-    // Older remote app servers accept only null params. Keep their usage reads working
-    // without opting them into exposure or pretending that they support the new capability.
-    if thread_id.is_none()
-        && matches!(
-            &result,
-            Err(codex_app_server_client::TypedRequestError::Server { source, .. })
-                if matches!(source.code, -32600 | -32602)
-        )
-    {
-        return request_handle
-            .request_typed(ClientRequest::GetAccountRateLimits {
-                request_id,
-                params: None,
-            })
-            .await
-            .wrap_err("account/rateLimits/read failed in TUI");
-    }
-    result.wrap_err("account/rateLimits/read failed in TUI")
+        .await
+        .wrap_err("account/rateLimits/read failed in TUI")
 }
 
 pub(super) async fn fetch_thread_usage(

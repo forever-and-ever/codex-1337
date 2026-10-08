@@ -1,4 +1,7 @@
 use super::*;
+use codex_app_server_protocol::GetAccountRateLimitsResponse;
+use codex_app_server_protocol::JSONRPCErrorError;
+use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ThreadAccountListResponse;
 use codex_app_server_protocol::ThreadAccountSelectResponse;
 use codex_app_server_protocol::ThreadForkParams;
@@ -301,6 +304,21 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
         })
         .mount(&server)
         .await;
+    Mock::given(method("GET"))
+        .and(path("/api/codex/usage"))
+        .respond_with(|request: &wiremock::Request| {
+            let id = request.headers["chatgpt-account-id"]
+                .to_str()
+                .expect("quota account header");
+            ResponseTemplate::new(/*s*/ 200).set_body_json(json!({
+                "account_id": id, "user_id": id, "plan_type": "pro",
+                "rate_limit": {"allowed": true, "limit_reached": false,
+                    "primary_window": {"used_percent": 10, "limit_window_seconds": 18000,
+                        "reset_after_seconds": 1800, "reset_at": 2000000000}}
+            }))
+        })
+        .mount(&server)
+        .await;
     let mut threads = Vec::new();
     for _ in 0..2 {
         let request = app
@@ -331,6 +349,27 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
             default_saved: true
         }
     );
+    for method in ["account/read", "account/rateLimits/read"] {
+        let request = app
+            .send_request(
+                method,
+                Some(json!({"threadId": threads[0], "newThread": {}})),
+            )
+            .await?;
+        let error = timeout(
+            DEFAULT_READ_TIMEOUT,
+            app.read_stream_until_error_message(RequestId::Integer(request)),
+        )
+        .await??;
+        assert_eq!(
+            error.error,
+            JSONRPCErrorError {
+                code: -32600,
+                message: "newThread cannot be combined with threadId".into(),
+                data: None,
+            }
+        );
+    }
     // A draft previews the saved default while login detection still sees the
     // global active login. Neither read may retarget either source of credentials.
     for (new_thread, id, account_id) in [
@@ -346,6 +385,18 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
         ),
         (None, "alice", None),
     ] {
+        // Identity and quota must resolve the same payer without changing the global login.
+        let request = app
+            .send_request(
+                "account/rateLimits/read",
+                Some(json!({
+                    "newThread": new_thread, "excludeResetCreditDetails": true
+                })),
+            )
+            .await?;
+        let quota: GetAccountRateLimitsResponse =
+            timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
+        assert_eq!(quota.account_id.as_deref(), Some(id));
         let request = app
             .send_get_account_request(GetAccountParams {
                 new_thread,

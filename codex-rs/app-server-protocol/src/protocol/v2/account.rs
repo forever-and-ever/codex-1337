@@ -296,6 +296,10 @@ pub struct GetAccountRateLimitsParams {
     /// Use the conversation's saved account rather than the current login.
     #[ts(optional = nullable)]
     pub thread_id: Option<String>,
+    /// Read a fresh root conversation's quota instead of the global login.
+    /// Cannot be combined with `threadId`.
+    #[ts(optional = nullable)]
+    pub new_thread: Option<NewThreadAccountParams>,
     /// The client supports automatic Luna Reserve fallback. For eligible ChatGPT CLI users,
     /// allow the backend to record experiment exposure after ordinary usage is blocked.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]

@@ -1,19 +1,21 @@
 //! Account reads select a conversation or fresh-root scope without retargeting the global login.
 
 use super::*;
+use codex_app_server_protocol::NewThreadAccountParams;
 use codex_core::config::ConfigOverrides;
 use codex_model_provider_info::ModelProviderAdapter;
 use codex_utils_path_uri::PathConvention;
 
 impl AccountRequestProcessor {
-    pub(crate) async fn for_account_read(
+    pub(crate) async fn for_account_scope(
         &self,
-        params: &GetAccountParams,
+        thread_id: Option<&str>,
+        new_thread: Option<&NewThreadAccountParams>,
     ) -> Result<Self, JSONRPCErrorError> {
-        let Some(new_thread) = &params.new_thread else {
-            return self.for_thread(params.thread_id.as_deref()).await;
+        let Some(new_thread) = new_thread else {
+            return self.for_thread(thread_id).await;
         };
-        if params.thread_id.is_some() {
+        if thread_id.is_some() {
             return Err(invalid_request(
                 "newThread cannot be combined with threadId",
             ));
