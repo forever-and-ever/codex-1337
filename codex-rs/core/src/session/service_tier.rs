@@ -59,7 +59,7 @@ impl Session {
         // Unlike an empty user composer, an explicitly spawned/retiered agent must retain
         // this selection even before its first turn materializes the rollout.
         self.send_event_raw(Event {
-            id: self.next_internal_sub_id(),
+            id: self.next_internal_event_id(),
             msg: EventMsg::ThreadSettingsApplied(
                 codex_protocol::protocol::ThreadSettingsAppliedEvent {
                     thread_id: Some(self.thread_id),

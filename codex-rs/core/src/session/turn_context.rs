@@ -1365,21 +1365,6 @@ impl Session {
             .await
     }
 
-    async fn inject_items_sub_id(&self) -> String {
-        self.active_turn
-            .lock()
-            .await
-            .as_ref()
-            .and_then(|turn| turn.task.as_ref())
-            .map(|task| task.turn_context.sub_id.clone())
-            .unwrap_or_else(|| {
-                let id = self
-                    .next_inject_sub_id
-                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                format!("inject-{id}")
-            })
-    }
-
     async fn new_default_turn_for(
         &self,
         sub_id: String,

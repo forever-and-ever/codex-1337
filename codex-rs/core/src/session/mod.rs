@@ -241,6 +241,7 @@ mod guardian_checkpoint;
 mod handlers;
 mod inject;
 mod reasoning_effort;
+mod recording_ids;
 mod submission;
 pub(crate) use reasoning_effort::RequestEffortUsage;
 pub(crate) use submission::Submission;

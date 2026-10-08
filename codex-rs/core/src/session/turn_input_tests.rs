@@ -249,9 +249,10 @@ async fn start_only_rejects_active_turn_without_injecting() {
     );
 
     session.abort_all_tasks(TurnAbortReason::Interrupted).await;
-    assert_eq!(session.new_inject_items_context().await.sub_id, "inject-0");
-    assert_eq!(session.new_inject_items_context().await.sub_id, "inject-1");
-    assert_eq!(session.new_default_turn().await.sub_id, "auto-compact-0");
+    assert_ne!(
+        session.new_inject_items_context().await.sub_id,
+        session.new_inject_items_context().await.sub_id,
+    );
 }
 
 #[tokio::test]

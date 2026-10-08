@@ -166,7 +166,7 @@ impl Session {
                 .account_selection
                 .select(&self.provider_id, selection);
             self.deliver_event_raw(Event {
-                id: self.next_internal_sub_id(),
+                id: self.next_internal_event_id(),
                 msg,
             })
             .await;
@@ -197,7 +197,7 @@ impl Session {
     pub(crate) async fn settle_idle_account(&self) {
         if let Err(error) = self.apply_pending_account_if_idle().await {
             self.send_event_raw(Event {
-                id: self.next_internal_sub_id(),
+                id: self.next_internal_event_id(),
                 msg: EventMsg::Warning(WarningEvent {
                     message: format!("Account switch remains pending: {error}"),
                 }),
@@ -227,7 +227,7 @@ impl Session {
                 .model_client
                 .commit_provider_account((*selection).clone());
             self.deliver_event_raw(Event {
-                id: self.next_internal_sub_id(),
+                id: self.next_internal_event_id(),
                 msg,
             })
             .await;
@@ -263,7 +263,7 @@ impl Session {
         self.refresh_hooks(self.get_config().await).await;
         self.account_refresh_pending.store(false, Ordering::Release);
         self.deliver_event_raw(Event {
-            id: self.next_internal_sub_id(),
+            id: self.next_internal_event_id(),
             msg,
         })
         .await;

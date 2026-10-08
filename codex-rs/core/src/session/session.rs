@@ -111,7 +111,7 @@ pub(crate) struct Session {
     pub(super) fork_persistence: ForkPersistence,
     pub(super) forked_from_ordinal_exclusive: Option<u64>,
     pub(super) next_internal_sub_id: AtomicU64,
-    pub(super) next_inject_sub_id: AtomicU64,
+    pub(super) next_fork_recording_id: AtomicU64,
 }
 
 #[derive(Clone)]
@@ -1910,7 +1910,7 @@ impl Session {
                 fork_persistence,
                 forked_from_ordinal_exclusive,
                 next_internal_sub_id: AtomicU64::new(0),
-                next_inject_sub_id: AtomicU64::new(0),
+                next_fork_recording_id: AtomicU64::new(0),
             });
             if let Some(startup) = &startup {
                 let _ = startup.session.set(Arc::clone(&sess));
