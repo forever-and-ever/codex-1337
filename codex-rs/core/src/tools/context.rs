@@ -5,6 +5,7 @@ use crate::session::turn_context::TurnContext;
 use crate::turn_diff_tracker::TurnDiffTracker;
 use crate::unified_exec::format_output_omission_marker;
 use crate::unified_exec::resolve_max_tokens;
+use codex_extension_api::ToolCallOutcome;
 use codex_protocol::ExecutionOutputMetadata;
 use codex_protocol::NativeExecutionResult;
 use codex_protocol::ResponseItemId;
@@ -28,7 +29,6 @@ use serde_json::Value as JsonValue;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::sync::OnceLock;
-use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
@@ -49,7 +49,7 @@ pub type SharedTurnDiffTracker = Arc<Mutex<TurnDiffTracker>>;
 /// Delivery does not finish the call: post-tool hooks can still be cancelled.
 #[derive(Default)]
 pub(crate) struct ToolCallState {
-    pub(crate) terminal_outcome_reached: AtomicBool,
+    pub(crate) terminal_outcome: OnceLock<ToolCallOutcome>,
     pub(crate) delivered_assistant_message: OnceLock<String>,
 }
 

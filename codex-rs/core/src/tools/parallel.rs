@@ -1,6 +1,5 @@
 use std::sync::Arc;
 use std::sync::OnceLock;
-use std::sync::atomic::Ordering;
 use std::time::Instant;
 
 use tokio::sync::RwLock;
@@ -26,6 +25,7 @@ use crate::tools::registry::AnyToolResult;
 use crate::tools::registry::ToolArgumentDiffConsumer;
 use crate::tools::router::ToolCall;
 use crate::tools::router::ToolCallSource;
+use codex_extension_api::ToolCallOutcome;
 use codex_history::ResponseItemEnvelope;
 use codex_protocol::error::CodexErr;
 use codex_protocol::models::ResponseInputItem;
@@ -249,7 +249,7 @@ impl ToolCallRuntime {
             let mut result = tokio::select! {
                 res = &mut dispatch_handle => res.map_err(Self::tool_task_join_error)?,
                 _ = cancellation_token.cancelled() => {
-                    if call_state.terminal_outcome_reached.load(Ordering::Acquire) || dispatch_handle.is_finished() {
+                    if call_state.terminal_outcome.get().is_some() || dispatch_handle.is_finished() {
                         dispatch_handle.await.map_err(Self::tool_task_join_error)?
                     } else {
                         let secs = started.elapsed().as_secs_f32().max(0.1);
@@ -281,6 +281,14 @@ impl ToolCallRuntime {
                     }
                 },
             };
+            // A cancellation-aware handler can return before this task observes the token.
+            // Preserve its claimed outcome rather than exposing the cancellation as a failure.
+            if matches!(
+                call_state.terminal_outcome.get(),
+                Some(ToolCallOutcome::Aborted)
+            ) {
+                result = Ok(Self::aborted_response(&call, started.elapsed().as_secs_f32().max(0.1)));
+            }
             // Use one completion measurement for logging and response formatting.
             // Measuring inside a handler would omit routing and output processing.
             if let Some(timing) = tool_call_timing_guard.as_mut()

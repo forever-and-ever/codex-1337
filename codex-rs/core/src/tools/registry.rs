@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use crate::function_tool::FunctionCallError;
@@ -742,6 +741,11 @@ impl ToolRegistry {
         // A PostToolUse block rejects the result, not the already-completed tool execution.
         let lifecycle_outcome = match &result {
             Ok(_) => ToolCallOutcome::Completed { success },
+            Err(FunctionCallError::RespondToModel(_))
+                if invocation.cancellation_token.is_cancelled() =>
+            {
+                ToolCallOutcome::Aborted
+            }
             Err(_) => ToolCallOutcome::Failed {
                 handler_executed: true,
             },
@@ -792,7 +796,7 @@ async fn notify_tool_finish_if_unclaimed(
     call_state: Option<&ToolCallState>,
     outcome: ToolCallOutcome,
 ) -> bool {
-    if call_state.is_some_and(|state| state.terminal_outcome_reached.swap(true, Ordering::AcqRel)) {
+    if call_state.is_some_and(|state| state.terminal_outcome.set(outcome).is_err()) {
         return false;
     }
 
