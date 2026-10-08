@@ -3348,6 +3348,8 @@ mod tests {
                         "gitInfo": null,
                         "name": null,
                         "daybreakEnabled": null,
+                        "comms": "open",
+                        "contextRole": null,
                         "turns": []
                     },
                     "model": "gpt-5",
