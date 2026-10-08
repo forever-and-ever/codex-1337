@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "A request that was expected to read the cache rewrote its prefix instead.",
+  "properties": {
+    "rewrittenTokens": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "threadId": {
+      "type": "string"
+    },
+    "whileWarming": {
+      "description": "The miss came from a warming replay, which therefore stopped.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "rewrittenTokens",
+    "threadId",
+    "whileWarming"
+  ],
+  "title": "ThreadPromptCacheMissedNotification",
+  "type": "object"
+}

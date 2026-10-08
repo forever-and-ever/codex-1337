@@ -80,6 +80,15 @@ pub(super) fn server_notification_thread_target(
         ServerNotification::ThreadWorkStatusUpdated(notification) => {
             Some(notification.thread_id.as_str())
         }
+        ServerNotification::ThreadPromptCacheUpdated(notification) => {
+            Some(notification.thread_id.as_str())
+        }
+        ServerNotification::ThreadPromptCacheMissed(notification) => {
+            Some(notification.thread_id.as_str())
+        }
+        ServerNotification::ThreadWarmingStopped(notification) => {
+            Some(notification.thread_id.as_str())
+        }
         ServerNotification::ThreadQueueChanged(notification) => {
             Some(notification.thread_id.as_str())
         }

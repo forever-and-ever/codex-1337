@@ -17,6 +17,7 @@ mod provider_selection_tests;
 mod realtime;
 mod rollout_history;
 mod thread_list;
+mod warming;
 
 #[cfg(test)]
 #[path = "app_server_session/collaboration_catalog_tests.rs"]

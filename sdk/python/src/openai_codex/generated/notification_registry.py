@@ -62,6 +62,8 @@ from .v2_all import ThreadGoalClearedNotification
 from .v2_all import ThreadGoalUpdatedNotification
 from .v2_all import ThreadNameUpdatedNotification
 from .v2_all import ThreadProjectUpdatedNotification
+from .v2_all import ThreadPromptCacheMissedNotification
+from .v2_all import ThreadPromptCacheUpdatedNotification
 from .v2_all import ThreadQueueChangedNotification
 from .v2_all import ThreadRealtimeClosedNotification
 from .v2_all import ThreadRealtimeErrorNotification
@@ -81,6 +83,7 @@ from .v2_all import ThreadStartedNotification
 from .v2_all import ThreadStatusChangedNotification
 from .v2_all import ThreadTokenUsageUpdatedNotification
 from .v2_all import ThreadUnarchivedNotification
+from .v2_all import ThreadWarmingStoppedNotification
 from .v2_all import ThreadWorkStatusUpdatedNotification
 from .v2_all import TurnCompletedNotification
 from .v2_all import TurnDiffUpdatedNotification
@@ -147,6 +150,8 @@ KnownNotificationPayload: TypeAlias = (
     | ThreadGoalUpdatedNotification
     | ThreadNameUpdatedNotification
     | ThreadProjectUpdatedNotification
+    | ThreadPromptCacheMissedNotification
+    | ThreadPromptCacheUpdatedNotification
     | ThreadQueueChangedNotification
     | ThreadRealtimeClosedNotification
     | ThreadRealtimeErrorNotification
@@ -166,6 +171,7 @@ KnownNotificationPayload: TypeAlias = (
     | ThreadStatusChangedNotification
     | ThreadTokenUsageUpdatedNotification
     | ThreadUnarchivedNotification
+    | ThreadWarmingStoppedNotification
     | ThreadWorkStatusUpdatedNotification
     | TurnCompletedNotification
     | TurnDiffUpdatedNotification
@@ -235,6 +241,8 @@ NOTIFICATION_MODELS: dict[str, type[KnownNotificationPayload]] = {
     "thread/goal/updated": ThreadGoalUpdatedNotification,
     "thread/name/updated": ThreadNameUpdatedNotification,
     "thread/project/updated": ThreadProjectUpdatedNotification,
+    "thread/promptCache/missed": ThreadPromptCacheMissedNotification,
+    "thread/promptCache/updated": ThreadPromptCacheUpdatedNotification,
     "thread/queue/changed": ThreadQueueChangedNotification,
     "thread/realtime/closed": ThreadRealtimeClosedNotification,
     "thread/realtime/error": ThreadRealtimeErrorNotification,
@@ -254,6 +262,7 @@ NOTIFICATION_MODELS: dict[str, type[KnownNotificationPayload]] = {
     "thread/status/changed": ThreadStatusChangedNotification,
     "thread/tokenUsage/updated": ThreadTokenUsageUpdatedNotification,
     "thread/unarchived": ThreadUnarchivedNotification,
+    "thread/warming/stopped": ThreadWarmingStoppedNotification,
     "thread/workStatus/updated": ThreadWorkStatusUpdatedNotification,
     "turn/completed": TurnCompletedNotification,
     "turn/diff/updated": TurnDiffUpdatedNotification,

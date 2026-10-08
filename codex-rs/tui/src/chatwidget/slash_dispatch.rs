@@ -324,6 +324,7 @@ impl ChatWidget {
                 self.input_queue.user_turn_pending_start = true;
                 self.app_event_tx.compact();
             }
+            SlashCommand::Warm => self.toggle_warming(),
             SlashCommand::Recap => {
                 let Some(thread_id) = self.thread_id else {
                     self.add_error_message(
@@ -1284,6 +1285,7 @@ impl ChatWidget {
             | SlashCommand::Rename
             | SlashCommand::Voice
             | SlashCommand::Recap
+            | SlashCommand::Warm
             | SlashCommand::TestApproval => QueueDrain::Continue,
             SlashCommand::Cd => match self.thread_id {
                 Some(thread_id) if self.can_change_working_directory(thread_id) => QueueDrain::Stop,

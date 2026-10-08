@@ -20,6 +20,9 @@ mod context_role;
 #[path = "jira.rs"]
 mod jira;
 
+#[path = "thread_warming.rs"]
+mod thread_warming;
+
 use super::persisted_resume_settings::PersistedResumeSettings;
 use super::persisted_resume_settings::latest_persisted_resume_settings;
 use super::thread_enrichment::enrich_loaded_threads;
@@ -478,6 +481,7 @@ pub(crate) struct ThreadRequestProcessor {
     pub(super) turn_cost_worker: Option<crate::turn_cost_worker::TurnCostWorkerHandle>,
     pub(super) initial_config_warnings: Arc<Vec<ConfigWarningNotification>>,
     extension_leases: Arc<Mutex<HashMap<ThreadId, extension_lease::ExtensionLease>>>,
+    pub(super) prompt_cache: crate::prompt_cache::PromptCache,
 }
 
 /// Whether resume attaches a client or restores a cold runtime during daemon startup.
@@ -519,6 +523,7 @@ impl ThreadRequestProcessor {
         skills_watcher: Arc<SkillsWatcher>,
         turn_cost_worker: Option<crate::turn_cost_worker::TurnCostWorkerHandle>,
         initial_config_warnings: Vec<ConfigWarningNotification>,
+        prompt_cache: crate::prompt_cache::PromptCache,
     ) -> Self {
         Self {
             auth_manager,
@@ -540,6 +545,7 @@ impl ThreadRequestProcessor {
             turn_cost_worker,
             initial_config_warnings: Arc::new(initial_config_warnings),
             extension_leases: Arc::new(Mutex::new(HashMap::new())),
+            prompt_cache,
         }
     }
 
@@ -4291,6 +4297,9 @@ impl ThreadRequestProcessor {
                 self.thread_goal_processor
                     .emit_resume_goal_snapshot(thread_id)
                     .await;
+                self.prompt_cache
+                    .publish_to(connection_id, thread_id, codex_thread.as_ref())
+                    .await;
                 codex_thread
                     .emit_thread_idle_lifecycle_if_idle(ThreadIdleCause::Completed)
                     .await;
@@ -4621,6 +4630,7 @@ impl ThreadRequestProcessor {
                     paginated_initial_turns_page_with_active_slot,
                     resume_cursor_store,
                     redact_resume_payloads,
+                    prompt_cache: self.prompt_cache.clone(),
                 }),
                 completion_tx,
             };

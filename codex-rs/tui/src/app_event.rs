@@ -561,6 +561,12 @@ pub(crate) enum AppEvent {
         command: crate::chatwidget::ContextRoleCommand,
     },
 
+    /// Turn prompt-cache warming on or off for a conversation.
+    SetWarming {
+        thread_id: ThreadId,
+        enabled: bool,
+    },
+
     Comms {
         thread_id: ThreadId,
         comms: Option<CommsGate>,

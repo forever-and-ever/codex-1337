@@ -319,6 +319,7 @@ pub(crate) use interaction::KeyEventAction;
 mod comms;
 mod context_role;
 pub(crate) use context_role::ContextRoleCommand;
+mod prompt_cache;
 mod skills;
 mod slash_dispatch;
 mod worktree_picker;
@@ -791,6 +792,7 @@ pub(crate) struct ChatWidget {
     current_goal_status_indicator: Option<GoalStatusIndicator>,
     current_goal_status: Option<GoalStatusState>,
     current_work_status: Option<codex_protocol::protocol::WorkStatus>,
+    prompt_cache: crate::bottom_pane::PromptCacheGlyphs,
     pub(crate) subagent_roster: crate::subagent_roster::SharedRoster,
     external_editor_state: ExternalEditorState,
     last_rendered_user_message_display: Option<UserMessageDisplay>,

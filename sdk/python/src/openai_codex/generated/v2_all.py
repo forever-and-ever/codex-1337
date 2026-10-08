@@ -3717,6 +3717,75 @@ class ProjectSortKey(Enum):
     recency_at = "recencyAt"
 
 
+class UnknownPromptCacheEstimate(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Annotated[Literal["unknown"], Field(title="UnknownPromptCacheEstimateType")]
+
+
+class WarmPromptCacheEstimate(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    expires_at: Annotated[int, Field(alias="expiresAt")]
+    type: Annotated[Literal["warm"], Field(title="WarmPromptCacheEstimateType")]
+
+
+class ColdPromptCacheEstimate(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Annotated[Literal["cold"], Field(title="ColdPromptCacheEstimateType")]
+
+
+class PromptCacheEstimate(
+    RootModel[UnknownPromptCacheEstimate | WarmPromptCacheEstimate | ColdPromptCacheEstimate]
+):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: Annotated[
+        UnknownPromptCacheEstimate | WarmPromptCacheEstimate | ColdPromptCacheEstimate,
+        Field(description="How warm a thread's provider prompt cache probably is."),
+    ]
+
+
+class OffPromptCacheWarming(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Annotated[Literal["off"], Field(title="OffPromptCacheWarmingType")]
+
+
+class ArmedPromptCacheWarming(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    ends_at: Annotated[int, Field(alias="endsAt")]
+    type: Annotated[Literal["armed"], Field(title="ArmedPromptCacheWarmingType")]
+
+
+class HoldingPromptCacheWarming(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    ends_at: Annotated[int, Field(alias="endsAt")]
+    type: Annotated[Literal["holding"], Field(title="HoldingPromptCacheWarmingType")]
+
+
+class PromptCacheWarming(
+    RootModel[OffPromptCacheWarming | ArmedPromptCacheWarming | HoldingPromptCacheWarming]
+):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: Annotated[
+        OffPromptCacheWarming | ArmedPromptCacheWarming | HoldingPromptCacheWarming,
+        Field(description="Whether the server is keeping a thread's prompt cache warm."),
+    ]
+
+
 class RateLimitReachedType(Enum):
     rate_limit_reached = "rate_limit_reached"
     workspace_owner_credits_depleted = "workspace_owner_credits_depleted"
@@ -5877,6 +5946,30 @@ class ThreadProjectUpdatedNotification(BaseModel):
     thread_id: Annotated[str, Field(alias="threadId")]
 
 
+class ThreadPromptCacheMissedNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    rewritten_tokens: Annotated[int, Field(alias="rewrittenTokens")]
+    thread_id: Annotated[str, Field(alias="threadId")]
+    while_warming: Annotated[
+        bool,
+        Field(
+            alias="whileWarming",
+            description="The miss came from a warming replay, which therefore stopped.",
+        ),
+    ]
+
+
+class ThreadPromptCacheUpdatedNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    estimate: PromptCacheEstimate
+    thread_id: Annotated[str, Field(alias="threadId")]
+    warming: PromptCacheWarming
+
+
 class ThreadQueueChangedNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -6363,6 +6456,22 @@ class ThreadSetNameResponse(BaseModel):
     ] = None
 
 
+class ThreadSetWarmingParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    enabled: bool
+    thread_id: Annotated[str, Field(alias="threadId")]
+
+
+class ThreadSetWarmingResponse(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    estimate: PromptCacheEstimate
+    warming: PromptCacheWarming
+
+
 class ThreadShellCommandParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -6528,6 +6637,14 @@ class ThreadUsageBreakdownGroup(BaseModel):
     reasoning_effort: Annotated[str | None, Field(alias="reasoningEffort")] = None
     speed: str | None = None
     total_tokens: Annotated[int | None, Field(alias="totalTokens")] = None
+
+
+class ThreadWarmingStoppedNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    reason: str
+    thread_id: Annotated[str, Field(alias="threadId")]
 
 
 class TokenUsageBreakdown(BaseModel):
@@ -7255,6 +7372,15 @@ class ThreadContextRoleSetRequest(BaseModel):
         Literal["thread/contextRole/set"], Field(title="Thread/contextRole/setRequestMethod")
     ]
     params: ThreadSetContextRoleParams
+
+
+class ThreadWarmingSetRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[Literal["thread/warming/set"], Field(title="Thread/warming/setRequestMethod")]
+    params: ThreadSetWarmingParams
 
 
 class ThreadNameSetRequest(BaseModel):
@@ -9905,6 +10031,59 @@ class ThreadGoalClearedServerNotification(BaseModel):
         Literal["thread/goal/cleared"], Field(title="Thread/goal/clearedNotificationMethod")
     ]
     params: ThreadGoalClearedNotification
+
+
+class ThreadPromptCacheUpdatedServerNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    emitted_at_ms: Annotated[
+        int | None,
+        Field(
+            alias="emittedAtMs",
+            description="Unix timestamp (in milliseconds) when app-server emitted this notification.",
+        ),
+    ] = None
+    method: Annotated[
+        Literal["thread/promptCache/updated"],
+        Field(title="Thread/promptCache/updatedNotificationMethod"),
+    ]
+    params: ThreadPromptCacheUpdatedNotification
+
+
+class ThreadPromptCacheMissedServerNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    emitted_at_ms: Annotated[
+        int | None,
+        Field(
+            alias="emittedAtMs",
+            description="Unix timestamp (in milliseconds) when app-server emitted this notification.",
+        ),
+    ] = None
+    method: Annotated[
+        Literal["thread/promptCache/missed"],
+        Field(title="Thread/promptCache/missedNotificationMethod"),
+    ]
+    params: ThreadPromptCacheMissedNotification
+
+
+class ThreadWarmingStoppedServerNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    emitted_at_ms: Annotated[
+        int | None,
+        Field(
+            alias="emittedAtMs",
+            description="Unix timestamp (in milliseconds) when app-server emitted this notification.",
+        ),
+    ] = None
+    method: Annotated[
+        Literal["thread/warming/stopped"], Field(title="Thread/warming/stoppedNotificationMethod")
+    ]
+    params: ThreadWarmingStoppedNotification
 
 
 class ThreadQueueChangedServerNotification(BaseModel):
@@ -12812,6 +12991,7 @@ class ClientRequest(
         | ThreadJiraRequest
         | ThreadFarmRequest
         | ThreadContextRoleSetRequest
+        | ThreadWarmingSetRequest
         | ThreadNameSetRequest
         | ThreadGoalSetRequest
         | ThreadGoalGetRequest
@@ -12933,6 +13113,7 @@ class ClientRequest(
         | ThreadJiraRequest
         | ThreadFarmRequest
         | ThreadContextRoleSetRequest
+        | ThreadWarmingSetRequest
         | ThreadNameSetRequest
         | ThreadGoalSetRequest
         | ThreadGoalGetRequest
@@ -13359,6 +13540,9 @@ class ServerNotification(
         | ThreadGoalUpdatedServerNotification
         | ThreadGoalClearedServerNotification
         | ThreadWorkStatusUpdatedServerNotification
+        | ThreadPromptCacheUpdatedServerNotification
+        | ThreadPromptCacheMissedServerNotification
+        | ThreadWarmingStoppedServerNotification
         | ThreadQueueChangedServerNotification
         | ProjectChangedServerNotification
         | ThreadProjectUpdatedServerNotification
@@ -13451,6 +13635,9 @@ class ServerNotification(
         | ThreadGoalUpdatedServerNotification
         | ThreadGoalClearedServerNotification
         | ThreadWorkStatusUpdatedServerNotification
+        | ThreadPromptCacheUpdatedServerNotification
+        | ThreadPromptCacheMissedServerNotification
+        | ThreadWarmingStoppedServerNotification
         | ThreadQueueChangedServerNotification
         | ProjectChangedServerNotification
         | ThreadProjectUpdatedServerNotification

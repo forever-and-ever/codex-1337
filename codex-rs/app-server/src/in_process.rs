@@ -119,6 +119,9 @@ fn server_notification_requires_delivery(notification: &ServerNotification) -> b
             | ServerNotification::ThreadQueueChanged(_)
             | ServerNotification::ThreadSettingsUpdated(_)
             | ServerNotification::ThreadAttachmentUpdated(_)
+            | ServerNotification::ThreadPromptCacheUpdated(_)
+            | ServerNotification::ThreadPromptCacheMissed(_)
+            | ServerNotification::ThreadWarmingStopped(_)
             | ServerNotification::ExternalAgentConfigImportCompleted(_)
             | ServerNotification::ItemCompleted(ItemCompletedNotification {
                 item: ThreadItem::AgentMessage {

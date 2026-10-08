@@ -254,6 +254,7 @@ impl ChatWidget {
                     working_tip,
                     warning_count: self.warning_display_state.count,
                     textarea_right_reserve: right_reserve,
+                    prompt_cache: self.prompt_cache,
                     separate_status_line: command_popup_placement
                         != crate::bottom_pane::CommandPopupPlacement::AboveComposer,
                     command_popup_placement,

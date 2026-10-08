@@ -135,6 +135,7 @@ mod models_refresh_worker;
 mod notification_media;
 mod outgoing_message;
 mod plugin_config_reload;
+mod prompt_cache;
 mod request_processors;
 mod request_serialization;
 mod server_request_error;

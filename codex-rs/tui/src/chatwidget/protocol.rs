@@ -70,6 +70,15 @@ impl ChatWidget {
             ServerNotification::ThreadGoalUpdated(notification) => {
                 self.on_thread_goal_updated(notification.goal, notification.turn_id);
             }
+            ServerNotification::ThreadPromptCacheUpdated(notification) => {
+                self.on_prompt_cache_updated(notification);
+            }
+            ServerNotification::ThreadPromptCacheMissed(notification) => {
+                self.on_prompt_cache_missed(notification);
+            }
+            ServerNotification::ThreadWarmingStopped(notification) => {
+                self.add_warning_message(format!("Warming stopped. {}", notification.reason));
+            }
             ServerNotification::ThreadWorkStatusUpdated(notification) => {
                 // Thread switches reconstruct buffered live updates; resume has no Activity log.
                 if replay_kind != Some(ReplayKind::ResumeInitialMessages)

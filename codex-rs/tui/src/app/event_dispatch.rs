@@ -1057,6 +1057,9 @@ impl App {
             AppEvent::ContextRole { thread_id, command } => {
                 self.context_role(app_server, thread_id, command).await;
             }
+            AppEvent::SetWarming { thread_id, enabled } => {
+                self.set_warming(app_server, thread_id, enabled).await;
+            }
             AppEvent::Comms { thread_id, comms } => {
                 self.comms(app_server, thread_id, comms).await;
             }

@@ -77,6 +77,7 @@ pub(crate) struct ComposerRenderOptions<'a> {
     pub(crate) working_tip: Option<&'a crate::turn_tip::TurnTip>,
     pub(crate) warning_count: usize,
     pub(crate) textarea_right_reserve: u16,
+    pub(crate) prompt_cache: super::PromptCacheGlyphs,
     /// Keep configured status below the composer, separate from hints.
     pub(crate) separate_status_line: bool,
     pub(crate) hint_placement: ComposerHintPlacement,

@@ -5830,6 +5830,21 @@
       ],
       "type": "object"
     },
+    "ThreadSetWarmingParams": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "enabled",
+        "threadId"
+      ],
+      "type": "object"
+    },
     "ThreadShellCommandParams": {
       "properties": {
         "command": {
@@ -6899,6 +6914,30 @@
         "params"
       ],
       "title": "Thread/contextRole/setRequest",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "enum": [
+            "thread/warming/set"
+          ],
+          "title": "Thread/warming/setRequestMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ThreadSetWarmingParams"
+        }
+      },
+      "required": [
+        "id",
+        "method",
+        "params"
+      ],
+      "title": "Thread/warming/setRequest",
       "type": "object"
     },
     {

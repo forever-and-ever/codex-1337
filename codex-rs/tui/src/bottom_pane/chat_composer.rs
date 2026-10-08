@@ -394,6 +394,8 @@ mod inline_input;
 mod mouse;
 mod paste_input;
 mod popup_state;
+mod prompt_cache_glyphs;
+pub(crate) use prompt_cache_glyphs::PromptCacheGlyphs;
 mod reconnect;
 pub(crate) use reconnect::RestrictedInputMode;
 mod slash_input;
@@ -4858,6 +4860,7 @@ impl ChatComposer {
             self.cursor_pos_with_options(area, options),
             buf,
         );
+        self.render_prompt_cache_glyphs(composer_rect, options, buf);
         if options.footer.is_some_and(|footer| footer.is_interactive) {
             buf.set_style(composer_rect, Style::default().dim());
         }

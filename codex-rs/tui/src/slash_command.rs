@@ -43,6 +43,7 @@ pub enum SlashCommand {
     Init,
     Compact,
     Recap,
+    Warm,
     Plan,
     Voice,
     Goal,
@@ -102,6 +103,7 @@ impl SlashCommand {
             SlashCommand::Init => "create an AGENTS.md file with instructions for Codex",
             SlashCommand::Compact => "summarize conversation to prevent hitting the context limit",
             SlashCommand::Recap => "summarize the current conversation now",
+            SlashCommand::Warm => "keep this Claude conversation's cache warm, or stop",
             SlashCommand::Review => "review my current changes and find issues",
             SlashCommand::Rename => "rename the current thread",
             SlashCommand::Resume => "resume a saved chat",
@@ -299,6 +301,7 @@ impl SlashCommand {
             | SlashCommand::Status
             | SlashCommand::Comms
             | SlashCommand::ContextRole
+            | SlashCommand::Warm
             | SlashCommand::Daemon
             | SlashCommand::Reload
             | SlashCommand::Warnings

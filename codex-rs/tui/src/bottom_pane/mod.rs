@@ -20,6 +20,7 @@
 pub(crate) use chat_composer::CommandPopupPlacement;
 pub(crate) use chat_composer::ComposerHintPlacement;
 pub(crate) use chat_composer::ComposerRenderOptions;
+pub(crate) use chat_composer::PromptCacheGlyphs;
 pub(crate) use chat_composer::TranscriptFooter;
 pub(crate) use composer_gap::ComposerGap;
 pub(crate) use footer::footer_hint_items_line;
@@ -2344,6 +2345,7 @@ impl BottomPane {
             let composer: RenderableItem<'_> = if let Some(questions) = question_editor {
                 RenderableItem::Borrowed(questions.as_ref())
             } else if options.textarea_right_reserve == 0
+                && options.prompt_cache == PromptCacheGlyphs::default()
                 && options.warning_count == 0
                 && options.footer.is_none()
                 && extension.is_none()

@@ -1,0 +1,149 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "PromptCacheEstimate": {
+      "description": "How warm a thread's provider prompt cache probably is.",
+      "oneOf": [
+        {
+          "description": "Nothing is cached yet, or the provider gives no lore.",
+          "properties": {
+            "type": {
+              "enum": [
+                "unknown"
+              ],
+              "title": "UnknownPromptCacheEstimateType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "UnknownPromptCacheEstimate",
+          "type": "object"
+        },
+        {
+          "description": "Probably warm; clients treat it as cold from `expiresAt` on.",
+          "properties": {
+            "expiresAt": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "warm"
+              ],
+              "title": "WarmPromptCacheEstimateType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "expiresAt",
+            "type"
+          ],
+          "title": "WarmPromptCacheEstimate",
+          "type": "object"
+        },
+        {
+          "description": "The next request will probably rewrite the cached prefix.",
+          "properties": {
+            "type": {
+              "enum": [
+                "cold"
+              ],
+              "title": "ColdPromptCacheEstimateType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "ColdPromptCacheEstimate",
+          "type": "object"
+        }
+      ]
+    },
+    "PromptCacheWarming": {
+      "description": "Whether the server is keeping a thread's prompt cache warm.",
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "off"
+              ],
+              "title": "OffPromptCacheWarmingType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "OffPromptCacheWarming",
+          "type": "object"
+        },
+        {
+          "description": "Enabled, waiting for a request that can be replayed; lapses at `endsAt`.",
+          "properties": {
+            "endsAt": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "armed"
+              ],
+              "title": "ArmedPromptCacheWarmingType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "endsAt",
+            "type"
+          ],
+          "title": "ArmedPromptCacheWarming",
+          "type": "object"
+        },
+        {
+          "description": "Replaying the last request to keep its cache warm until `endsAt`.",
+          "properties": {
+            "endsAt": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "holding"
+              ],
+              "title": "HoldingPromptCacheWarmingType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "endsAt",
+            "type"
+          ],
+          "title": "HoldingPromptCacheWarming",
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "properties": {
+    "estimate": {
+      "$ref": "#/definitions/PromptCacheEstimate"
+    },
+    "threadId": {
+      "type": "string"
+    },
+    "warming": {
+      "$ref": "#/definitions/PromptCacheWarming"
+    }
+  },
+  "required": [
+    "estimate",
+    "threadId",
+    "warming"
+  ],
+  "title": "ThreadPromptCacheUpdatedNotification",
+  "type": "object"
+}

@@ -145,6 +145,7 @@ pub(crate) struct MessageProcessor {
     outgoing: Arc<OutgoingMessageSender>,
     models_refresh_worker: ModelsRefreshWorker,
     turn_cost_worker: Option<TurnCostWorker>,
+    _prompt_cache_worker: crate::prompt_cache::PromptCacheWorker,
     skills_watcher: Arc<SkillsWatcher>,
     account_processor: Arc<AccountRequestProcessor>,
     apps_processor: AppsRequestProcessor,
@@ -326,6 +327,8 @@ impl MessageProcessor {
             app_server_extension_event_sink(outgoing.clone(), thread_state_manager.clone());
         let mut queue_service = None;
         let coordination = Arc::new(OnceLock::new());
+        let (prompt_cache, prompt_cache_worker) =
+            crate::prompt_cache::PromptCache::spawn(outgoing.clone());
         let thread_manager = Arc::new_cyclic(|thread_manager| {
             queue_service = queue_store.map(|queue| {
                 Arc::new(QueuedItemService::new(
@@ -372,6 +375,10 @@ impl MessageProcessor {
                     outgoing.clone(),
                     thread_state_manager.clone(),
                 )),
+            );
+            let manager = codex_core::PromptCacheManager::with_prompt_cache_observer(
+                manager,
+                prompt_cache.observer(),
             );
             match code_mode_session_provider {
                 Some(provider) => manager.with_code_mode_session_provider(provider),
@@ -527,6 +534,7 @@ impl MessageProcessor {
             Arc::clone(&skills_watcher),
             turn_cost_worker.as_ref().map(TurnCostWorker::handle),
             config_warnings,
+            prompt_cache,
         );
         let thread_coordination = Arc::new(
             crate::request_processors::ThreadCoordinationService::new(thread_processor.clone()),
@@ -596,6 +604,7 @@ impl MessageProcessor {
             outgoing,
             models_refresh_worker,
             turn_cost_worker,
+            _prompt_cache_worker: prompt_cache_worker,
             skills_watcher,
             account_processor,
             apps_processor,
@@ -1375,6 +1384,9 @@ impl MessageProcessor {
             }
             ClientRequest::ThreadSetContextRole { params, .. } => {
                 self.thread_processor.thread_set_context_role(params).await
+            }
+            ClientRequest::ThreadSetWarming { params, .. } => {
+                self.thread_processor.thread_set_warming(params).await
             }
             ClientRequest::ThreadSetName { params, .. } => {
                 self.thread_processor

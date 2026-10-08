@@ -296,6 +296,7 @@ mod user_verification;
 mod user_verification_errors;
 mod user_verification_requests;
 mod voice_owner;
+mod warming;
 #[cfg(test)]
 #[path = "app/warnings_tests.rs"]
 mod warnings_tests;

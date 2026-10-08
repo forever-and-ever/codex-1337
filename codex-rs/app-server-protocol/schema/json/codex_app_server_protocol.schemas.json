@@ -475,6 +475,30 @@
             },
             "method": {
               "enum": [
+                "thread/warming/set"
+              ],
+              "title": "Thread/warming/setRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/ThreadSetWarmingParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Thread/warming/setRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/v2/RequestId"
+            },
+            "method": {
+              "enum": [
                 "thread/name/set"
               ],
               "title": "Thread/name/setRequestMethod",
@@ -5236,6 +5260,66 @@
             "params"
           ],
           "title": "Thread/workStatus/updatedNotification",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "thread/promptCache/updated"
+              ],
+              "title": "Thread/promptCache/updatedNotificationMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/ThreadPromptCacheUpdatedNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "title": "Thread/promptCache/updatedNotification",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "thread/promptCache/missed"
+              ],
+              "title": "Thread/promptCache/missedNotificationMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/ThreadPromptCacheMissedNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "title": "Thread/promptCache/missedNotification",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "thread/warming/stopped"
+              ],
+              "title": "Thread/warming/stoppedNotificationMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/ThreadWarmingStoppedNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "title": "Thread/warming/stoppedNotification",
           "type": "object"
         },
         {
@@ -19055,6 +19139,132 @@
         ],
         "type": "string"
       },
+      "PromptCacheEstimate": {
+        "description": "How warm a thread's provider prompt cache probably is.",
+        "oneOf": [
+          {
+            "description": "Nothing is cached yet, or the provider gives no lore.",
+            "properties": {
+              "type": {
+                "enum": [
+                  "unknown"
+                ],
+                "title": "UnknownPromptCacheEstimateType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "title": "UnknownPromptCacheEstimate",
+            "type": "object"
+          },
+          {
+            "description": "Probably warm; clients treat it as cold from `expiresAt` on.",
+            "properties": {
+              "expiresAt": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "type": {
+                "enum": [
+                  "warm"
+                ],
+                "title": "WarmPromptCacheEstimateType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "expiresAt",
+              "type"
+            ],
+            "title": "WarmPromptCacheEstimate",
+            "type": "object"
+          },
+          {
+            "description": "The next request will probably rewrite the cached prefix.",
+            "properties": {
+              "type": {
+                "enum": [
+                  "cold"
+                ],
+                "title": "ColdPromptCacheEstimateType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "title": "ColdPromptCacheEstimate",
+            "type": "object"
+          }
+        ]
+      },
+      "PromptCacheWarming": {
+        "description": "Whether the server is keeping a thread's prompt cache warm.",
+        "oneOf": [
+          {
+            "properties": {
+              "type": {
+                "enum": [
+                  "off"
+                ],
+                "title": "OffPromptCacheWarmingType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "title": "OffPromptCacheWarming",
+            "type": "object"
+          },
+          {
+            "description": "Enabled, waiting for a request that can be replayed; lapses at `endsAt`.",
+            "properties": {
+              "endsAt": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "type": {
+                "enum": [
+                  "armed"
+                ],
+                "title": "ArmedPromptCacheWarmingType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "endsAt",
+              "type"
+            ],
+            "title": "ArmedPromptCacheWarming",
+            "type": "object"
+          },
+          {
+            "description": "Replaying the last request to keep its cache warm until `endsAt`.",
+            "properties": {
+              "endsAt": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "type": {
+                "enum": [
+                  "holding"
+                ],
+                "title": "HoldingPromptCacheWarmingType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "endsAt",
+              "type"
+            ],
+            "title": "HoldingPromptCacheWarming",
+            "type": "object"
+          }
+        ]
+      },
       "QueuedSubmission": {
         "properties": {
           "clientUserMessageId": {
@@ -25014,6 +25224,51 @@
         "title": "ThreadProjectUpdatedNotification",
         "type": "object"
       },
+      "ThreadPromptCacheMissedNotification": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "A request that was expected to read the cache rewrote its prefix instead.",
+        "properties": {
+          "rewrittenTokens": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "threadId": {
+            "type": "string"
+          },
+          "whileWarming": {
+            "description": "The miss came from a warming replay, which therefore stopped.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "rewrittenTokens",
+          "threadId",
+          "whileWarming"
+        ],
+        "title": "ThreadPromptCacheMissedNotification",
+        "type": "object"
+      },
+      "ThreadPromptCacheUpdatedNotification": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "estimate": {
+            "$ref": "#/definitions/v2/PromptCacheEstimate"
+          },
+          "threadId": {
+            "type": "string"
+          },
+          "warming": {
+            "$ref": "#/definitions/v2/PromptCacheWarming"
+          }
+        },
+        "required": [
+          "estimate",
+          "threadId",
+          "warming"
+        ],
+        "title": "ThreadPromptCacheUpdatedNotification",
+        "type": "object"
+      },
       "ThreadQueueChangedNotification": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "properties": {
@@ -26274,6 +26529,40 @@
         "title": "ThreadSetNameResponse",
         "type": "object"
       },
+      "ThreadSetWarmingParams": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "threadId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled",
+          "threadId"
+        ],
+        "title": "ThreadSetWarmingParams",
+        "type": "object"
+      },
+      "ThreadSetWarmingResponse": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "estimate": {
+            "$ref": "#/definitions/v2/PromptCacheEstimate"
+          },
+          "warming": {
+            "$ref": "#/definitions/v2/PromptCacheWarming"
+          }
+        },
+        "required": [
+          "estimate",
+          "warming"
+        ],
+        "title": "ThreadSetWarmingResponse",
+        "type": "object"
+      },
       "ThreadSettings": {
         "properties": {
           "activePermissionProfile": {
@@ -27200,6 +27489,24 @@
         "required": [
           "estimatedUsageCreditsMicros"
         ],
+        "type": "object"
+      },
+      "ThreadWarmingStoppedNotification": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "Warming stopped before its hold ended.",
+        "properties": {
+          "reason": {
+            "type": "string"
+          },
+          "threadId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason",
+          "threadId"
+        ],
+        "title": "ThreadWarmingStoppedNotification",
         "type": "object"
       },
       "ThreadWorkStatusUpdatedNotification": {
