@@ -355,7 +355,8 @@ impl MemoryStartupContext {
             config.http_client_factory(),
             config.workspace_routing_context(),
             Vec::new(),
-        );
+        )
+        .with_anthropic_prompt_cache(config.anthropic_prompt_cache.clone());
         let model_client = match &context.anthropic_account {
             Some(account) => model_client.with_anthropic_account(account.clone())?,
             None => model_client,

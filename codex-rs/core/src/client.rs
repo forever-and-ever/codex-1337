@@ -281,6 +281,7 @@ impl RequestRouteTelemetry {
 /// call site.
 #[derive(Debug, Clone)]
 pub struct ModelClient {
+    anthropic_prompt_cache: codex_config::AnthropicPromptCache,
     state: Arc<ModelClientState>,
     agent_identity_policy: AgentIdentityAuthPolicy,
     prompt_cache_key_override: Option<String>,
@@ -559,6 +560,7 @@ impl ModelClient {
             event_sender: None,
             http_client_factory,
             restored_history: false,
+            anthropic_prompt_cache: Default::default(),
             request_contributors,
             executed_tool_calls: None,
         }

@@ -615,6 +615,7 @@ pub enum ThreadStoreConfig {
 /// Application configuration loaded from disk and merged with overrides.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
+    pub anthropic_prompt_cache: codex_config::AnthropicPromptCache,
     pub wrangler: codex_config::config_toml::WranglerConfig,
     /// App-server-owned destination policy; other runtimes remain unmanaged.
     pub application_network_policy: codex_http_client::NetworkPolicy,
@@ -4319,6 +4320,7 @@ impl Config {
         }
         let config = Self {
             wrangler: cfg.wrangler,
+            anthropic_prompt_cache: cfg.anthropic_prompt_cache,
             prefer_mxc,
             model,
             service_tier,
