@@ -362,6 +362,9 @@ fn item_to_cells(
         item @ ThreadItem::Preamble { .. } => {
             cells.push(Arc::new(crate::history_cell::PreambleCell::from_item(item)));
         }
+        ThreadItem::Arrival(item) => {
+            cells.push(Arc::new(crate::history_cell::ArrivalCell::new(item)));
+        }
         ThreadItem::UserMessage {
             id,
             client_id,

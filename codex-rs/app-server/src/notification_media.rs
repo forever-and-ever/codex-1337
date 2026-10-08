@@ -220,6 +220,7 @@ fn without_thread_item_media(mut item: ThreadItem) -> ThreadItem {
         | ThreadItem::Thought { .. }
         | ThreadItem::Preamble { .. }
         | ThreadItem::StepAdmission(_)
+        | ThreadItem::Arrival(_)
         | ThreadItem::FunctionCallOutput {
             output: FunctionCallOutputBody::Text(_),
             ..

@@ -5,6 +5,8 @@
 //! input, less this request's input and the response's own re-sent output, is what the step's
 //! results and the arrivals after them added. Counts are gross: tokens that later leave the
 //! context, such as dropped earlier thinking, are reported where they leave.
+//!
+//! The next request announces each arrival as it reads it; the step's seal bills it by id.
 
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -78,10 +80,28 @@ pub enum AdmissionPrecision {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct Arrival {
+    /// The id of the [`ArrivalItem`] that announced it.
+    pub id: String,
     pub kind: ArrivalKind,
     pub label: String,
     #[ts(type = "number")]
     pub tokens: u64,
+}
+
+/// Context written after a step's results by neither the step nor its model, announced when
+/// the next request reads it. User input is not announced: it has its own item.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ArrivalItem {
+    pub id: String,
+    /// The response whose step admits it.
+    pub response_id: String,
+    /// When the request that reads it was dispatched.
+    #[ts(type = "number")]
+    pub announced_at_ms: i64,
+    pub kind: ArrivalKind,
+    pub label: String,
     /// The readable content of an injection or of a plaintext message from another agent.
     pub text: Option<String>,
 }

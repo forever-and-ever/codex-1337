@@ -53,6 +53,7 @@ export type { AppsListResponse } from "./AppsListResponse";
 export type { AppsReadParams } from "./AppsReadParams";
 export type { AppsReadResponse } from "./AppsReadResponse";
 export type { Arrival } from "./Arrival";
+export type { ArrivalItem } from "./ArrivalItem";
 export type { ArrivalKind } from "./ArrivalKind";
 export type { AskForApproval } from "./AskForApproval";
 export type { AsyncUserInputQuestion } from "./AsyncUserInputQuestion";

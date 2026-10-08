@@ -168,6 +168,7 @@ pub(super) fn cells(
         | ThreadItem::Thought { .. }
         | ThreadItem::Preamble { .. }
         | ThreadItem::StepAdmission(_)
+        | ThreadItem::Arrival(_)
         | ThreadItem::CommandExecution { .. }
         | ThreadItem::McpToolCall { .. }
         | ThreadItem::Sleep(_) => {}

@@ -376,6 +376,7 @@ impl ChatWidget {
             item @ ThreadItem::Preamble { .. } => {
                 self.add_to_history(history_cell::PreambleCell::from_item(item));
             }
+            ThreadItem::Arrival(item) => self.add_to_history(history_cell::ArrivalCell::new(item)),
             ThreadItem::Reasoning {
                 id,
                 summary,

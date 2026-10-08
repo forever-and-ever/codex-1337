@@ -12,6 +12,7 @@ import type { SleepItem } from "../SleepItem";
 import type { WebSearchItem } from "../WebSearchItem";
 import type { JsonValue } from "../serde_json/JsonValue";
 import type { AgentMessageDelivery } from "./AgentMessageDelivery";
+import type { ArrivalItem } from "./ArrivalItem";
 import type { AsyncUserInputQuestion } from "./AsyncUserInputQuestion";
 import type { CodeModeItem } from "./CodeModeItem";
 import type { CodeModeOwned } from "./CodeModeOwned";
@@ -36,7 +37,7 @@ import type { StepAdmissionItem } from "./StepAdmissionItem";
 import type { SubAgentActivityKind } from "./SubAgentActivityKind";
 import type { UserInput } from "./UserInput";
 
-export type ThreadItem = { "type": "codeModeOwned" } & CodeModeOwned<ThreadItem> | { "type": "codeMode" } & CodeModeItem | { "type": "stepAdmission" } & StepAdmissionItem | { "type": "userMessage", id: string, clientId: string | null, content: Array<UserInput>, } | { "type": "hookPrompt", id: string, fragments: Array<HookPromptFragment>, } | { "type": "agentMessage", id: string, text: string, phase: MessagePhase | null, memoryCitation: MemoryCitation | null, delivery: AgentMessageDelivery | null, questions: Array<AsyncUserInputQuestion> | null, } | { "type": "functionCallOutput", id: string,
+export type ThreadItem = { "type": "codeModeOwned" } & CodeModeOwned<ThreadItem> | { "type": "codeMode" } & CodeModeItem | { "type": "stepAdmission" } & StepAdmissionItem | { "type": "arrival" } & ArrivalItem | { "type": "userMessage", id: string, clientId: string | null, content: Array<UserInput>, } | { "type": "hookPrompt", id: string, fragments: Array<HookPromptFragment>, } | { "type": "agentMessage", id: string, text: string, phase: MessagePhase | null, memoryCitation: MemoryCitation | null, delivery: AgentMessageDelivery | null, questions: Array<AsyncUserInputQuestion> | null, } | { "type": "functionCallOutput", id: string,
 /**
  * Enclosing invocation; absent in older persisted history.
  */

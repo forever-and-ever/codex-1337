@@ -19,6 +19,7 @@ use codex_protocol::protocol::TokenUsage;
 use codex_protocol::step_admission::Admission;
 use codex_protocol::step_admission::AdmissionPrecision;
 use codex_protocol::step_admission::Arrival;
+use codex_protocol::step_admission::ArrivalItem;
 use codex_protocol::step_admission::ArrivalKind;
 use codex_protocol::step_admission::SealedAdmission;
 use codex_protocol::step_admission::StepAdmissionItem;
@@ -41,6 +42,8 @@ pub(crate) struct StepMark {
     prompt_len: usize,
     /// The response's whole output, which the next request re-sends.
     output_tokens: u64,
+    /// Arrivals already announced, so that a retried request announces only the rest.
+    announced: usize,
 }
 
 /// The items a step admitted, before the delta is split among them.
@@ -122,6 +125,7 @@ impl Session {
                     history_version,
                     prompt_len: prompt.input.len(),
                     output_tokens,
+                    announced: 0,
                 }
             });
             let pending = mark.as_ref().map(|mark| mark.item.clone());
@@ -132,8 +136,12 @@ impl Session {
             )
         };
         if let Some(item) = pending {
-            self.complete_step_admission(turn_context, &turn_context.sub_id, item)
-                .await;
+            self.emit_step_item(
+                turn_context,
+                &turn_context.sub_id,
+                TurnItem::StepAdmission(item),
+            )
+            .await;
         }
         let Some(mut previous) = previous else {
             return;
@@ -145,8 +153,12 @@ impl Session {
         });
         let Some(read_tokens) = received else {
             previous.item.admission = Admission::Severed;
-            self.complete_step_admission(turn_context, &previous.turn_id, previous.item)
-                .await;
+            self.emit_step_item(
+                turn_context,
+                &previous.turn_id,
+                TurnItem::StepAdmission(previous.item),
+            )
+            .await;
             return;
         };
         let received = i128::from(read_tokens)
@@ -160,7 +172,7 @@ impl Session {
             match tokio::task::spawn_blocking(move || seal(previous, received, admitted)).await {
                 Ok((turn_id, item)) => {
                     session
-                        .complete_step_admission(&turn_context, &turn_id, item)
+                        .emit_step_item(&turn_context, &turn_id, TurnItem::StepAdmission(item))
                         .await;
                 }
                 Err(error) => tracing::warn!(%error, "step admission measurement failed"),
@@ -168,24 +180,64 @@ impl Session {
         });
     }
 
-    async fn complete_step_admission(
-        &self,
-        turn_context: &TurnContext,
-        turn_id: &str,
-        item: StepAdmissionItem,
-    ) {
+    /// Announces what arrived after the previous step's results as this request reads it.
+    pub(super) async fn announce_step_arrivals(&self, step_context: &StepContext, prompt: &Prompt) {
+        let (response_id, arrivals) = {
+            let mut state = self.state.lock().await;
+            let history_version = state.history.history_version();
+            let Some(mark) = state.step_mark.as_mut().filter(|mark| {
+                mark.history_version == history_version
+                    && mark.model == step_context.settings.model_info.slug
+                    && mark.prompt_len <= prompt.input.len()
+            }) else {
+                return;
+            };
+            let arrivals = admit(&prompt.input[mark.prompt_len..]).arrivals;
+            let announced = mark.announced;
+            mark.announced = announced.max(arrivals.len());
+            let fresh = arrivals.into_iter().enumerate().skip(announced);
+            (mark.item.response_id.clone(), fresh.collect::<Vec<_>>())
+        };
+        let announced_at_ms = crate::turn_timing::now_unix_timestamp_ms();
+        for (index, incoming) in arrivals {
+            if incoming.kind == ArrivalKind::User {
+                continue;
+            }
+            let item = ArrivalItem {
+                id: arrival_id(&response_id, index),
+                response_id: response_id.clone(),
+                announced_at_ms,
+                kind: incoming.kind,
+                label: incoming.label,
+                text: incoming.text,
+            };
+            self.emit_step_item(
+                &step_context.turn,
+                &step_context.turn.sub_id,
+                TurnItem::Arrival(item),
+            )
+            .await;
+        }
+    }
+
+    async fn emit_step_item(&self, turn_context: &TurnContext, turn_id: &str, item: TurnItem) {
         self.send_event(
             turn_context,
             EventMsg::ItemCompleted(ItemCompletedEvent {
                 thread_id: self.thread_id,
                 turn_id: turn_id.to_string(),
-                item: TurnItem::StepAdmission(item),
+                item,
                 started_at_ms: None,
                 completed_at_ms: crate::turn_timing::now_unix_timestamp_ms(),
             }),
         )
         .await;
     }
+}
+
+/// One arrival's id, shared by its announcement and its step's seal.
+fn arrival_id(response_id: &str, index: usize) -> String {
+    format!("arrival:{response_id}:{index}")
 }
 
 /// Sorts the items between two prompts into the step's results and its arrivals. The
@@ -288,12 +340,12 @@ fn seal(mut mark: StepMark, received: i128, admitted: Admitted) -> (String, Step
             .arrivals
             .into_iter()
             .zip(&shares[1..])
-            .map(|(incoming, tokens)| Arrival {
+            .enumerate()
+            .map(|(index, (incoming, tokens))| Arrival {
+                id: arrival_id(&mark.item.response_id, index),
                 kind: incoming.kind,
                 label: incoming.label,
                 tokens: *tokens,
-                // A user's words already have their own row.
-                text: incoming.text.filter(|_| incoming.kind != ArrivalKind::User),
             })
             .collect(),
         released_tokens: released,

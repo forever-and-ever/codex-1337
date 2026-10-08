@@ -185,6 +185,7 @@ impl GoalAccountingState {
             | TurnItem::ToolOutputTokens(_)
             | TurnItem::Preamble(_)
             | TurnItem::StepAdmission(_)
+            | TurnItem::Arrival(_)
             | TurnItem::CodeMode(_)
             | TurnItem::HookPrompt(_)
             | TurnItem::Plan(_)

@@ -533,6 +533,7 @@ WHERE thread_id = ?
             | ThreadItem::Thought { .. }
             | ThreadItem::Preamble { .. }
             | ThreadItem::StepAdmission(_)
+            | ThreadItem::Arrival(_)
             | ThreadItem::CommandExecution { .. }
             | ThreadItem::FileChange { .. }
             | ThreadItem::McpToolCall { .. }

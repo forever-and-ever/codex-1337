@@ -269,6 +269,7 @@ fn turn_item_type(item: &TurnItem) -> &'static str {
         TurnItem::ToolOutputTokens(_) => "tool_output_tokens",
         TurnItem::Preamble(_) => "preamble",
         TurnItem::StepAdmission(_) => "step_admission",
+        TurnItem::Arrival(_) => "arrival",
         TurnItem::CodeMode(_) => "code_mode",
         TurnItem::HookPrompt(_) => "hook_prompt",
         TurnItem::AgentMessage(_) => "agent_message",

@@ -5620,6 +5620,29 @@ class ThreadInjectItemsResponse(BaseModel):
     )
 
 
+class ArrivalThreadItem(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    announced_at_ms: Annotated[
+        int,
+        Field(alias="announcedAtMs", description="When the request that reads it was dispatched."),
+    ]
+    id: str
+    kind: ArrivalKind
+    label: str
+    response_id: Annotated[
+        str, Field(alias="responseId", description="The response whose step admits it.")
+    ]
+    text: Annotated[
+        str | None,
+        Field(
+            description="The readable content of an injection or of a plaintext message from another agent."
+        ),
+    ] = None
+    type: Annotated[Literal["arrival"], Field(title="ArrivalThreadItemType")]
+
+
 class HookPromptThreadItem(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -7323,14 +7346,9 @@ class Arrival(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
+    id: Annotated[str, Field(description="The id of the [`ArrivalItem`] that announced it.")]
     kind: ArrivalKind
     label: str
-    text: Annotated[
-        str | None,
-        Field(
-            description="The readable content of an injection or of a plaintext message from another agent."
-        ),
-    ] = None
     tokens: Annotated[int, Field(ge=0)]
 
 
@@ -14060,6 +14078,7 @@ class ThreadItem(
         CodeModeOwnedThreadItem
         | CodeModeThreadItem
         | StepAdmissionThreadItem
+        | ArrivalThreadItem
         | UserMessageThreadItem
         | HookPromptThreadItem
         | AgentMessageThreadItem
@@ -14091,6 +14110,7 @@ class ThreadItem(
         CodeModeOwnedThreadItem
         | CodeModeThreadItem
         | StepAdmissionThreadItem
+        | ArrivalThreadItem
         | UserMessageThreadItem
         | HookPromptThreadItem
         | AgentMessageThreadItem

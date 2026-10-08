@@ -236,7 +236,7 @@ impl TranscriptView {
         let bill = self.step_bill(cell.as_ref());
         let header_tokens = bill
             .as_ref()
-            .map(|bill| bill.total)
+            .and_then(|bill| bill.total)
             .or_else(|| cell.activity_header_tokens())
             .or_else(|| self.activity_output_tokens(&ids));
         let header_bill = bill.map(|bill| bill.decoration);

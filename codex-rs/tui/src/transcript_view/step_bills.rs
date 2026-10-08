@@ -3,9 +3,12 @@
 //! A step's bill heads the row of its first call, or its Thought when it made none; a row
 //! holding several steps' first calls, such as a Code Mode block with waits, sums them. A
 //! pending step shows only what its response reported; a sealed one adds its own results.
+//! Each arrival heads its own row with its share of the seal; user input, which has no
+//! arrival row, is summed on the step's bill.
 
 use super::TranscriptView;
 use super::text::token_label;
+use crate::history_cell::ArrivalCell;
 use crate::history_cell::CodeModeCell;
 use crate::history_cell::CodeModeWaitCell;
 use crate::history_cell::HistoryCell;
@@ -14,6 +17,7 @@ use codex_app_server_protocol::StepAdmissionItem;
 use codex_protocol::code_mode::CodeModeEvent;
 use codex_protocol::step_admission::Admission;
 use codex_protocol::step_admission::AdmissionPrecision;
+use codex_protocol::step_admission::ArrivalKind;
 use std::collections::HashMap;
 
 #[derive(Default)]
@@ -24,8 +28,9 @@ pub(super) struct StepBills {
 
 /// The heading's share of a row's steps: the total in the gutter, then
 /// `(thinking output self)` and what else the steps admitted or released after the title.
+/// An arrival's row shows only its own share, once sealed.
 pub(super) struct StepBill {
-    pub(super) total: u64,
+    pub(super) total: Option<u64>,
     pub(super) decoration: String,
 }
 
@@ -53,6 +58,12 @@ impl TranscriptView {
     /// The bill of the steps this row heads, if any.
     pub(super) fn step_bill(&self, cell: &dyn HistoryCell) -> Option<StepBill> {
         let bills = &self.step_bills;
+        if let Some(arrival) = cell.as_any().downcast_ref::<ArrivalCell>() {
+            return Some(arrival_bill(
+                bills.by_response.get(arrival.response_id()),
+                arrival.id(),
+            ));
+        }
         let steps: Vec<&StepAdmissionItem> = match cell.as_any().downcast_ref::<ThoughtCell>() {
             // A Thought heads only a step that made no calls.
             Some(thought) => bills
@@ -105,6 +116,30 @@ fn call_ids(cell: &dyn HistoryCell) -> Vec<&str> {
     cell.tool_call_ids()
 }
 
+fn arrival_bill(step: Option<&StepAdmissionItem>, id: &str) -> StepBill {
+    let unbilled = |label: &str| StepBill {
+        total: None,
+        decoration: format!("  ({label})"),
+    };
+    let sealed = match step.map(|step| &step.admission) {
+        Some(Admission::Sealed(sealed)) => sealed,
+        Some(Admission::Severed) => return unbilled("—"),
+        Some(Admission::Pending) | None => return unbilled("…"),
+    };
+    let Some(arrival) = sealed.arrivals.iter().find(|arrival| arrival.id == id) else {
+        return unbilled("—");
+    };
+    let approx = if sealed.precision == AdmissionPrecision::Exact {
+        ""
+    } else {
+        "≈"
+    };
+    StepBill {
+        total: Some(arrival.tokens),
+        decoration: format!("  ({approx}{})", token_label(arrival.tokens)),
+    }
+}
+
 fn compose(steps: &[&StepAdmissionItem]) -> Option<StepBill> {
     if steps.is_empty() {
         return None;
@@ -115,7 +150,7 @@ fn compose(steps: &[&StepAdmissionItem]) -> Option<StepBill> {
         .sum::<Option<u64>>();
     let output = steps.iter().map(|step| step.output_tokens).sum::<u64>();
     let mut own = 0;
-    let mut arrived = 0;
+    let mut user = 0;
     let mut released = 0;
     let mut approximate = false;
     let mut unsealed = 0;
@@ -126,9 +161,10 @@ fn compose(steps: &[&StepAdmissionItem]) -> Option<StepBill> {
             Admission::Severed => severed += 1,
             Admission::Sealed(sealed) => {
                 own += sealed.self_tokens;
-                arrived += sealed
+                user += sealed
                     .arrivals
                     .iter()
+                    .filter(|arrival| arrival.kind == ArrivalKind::User)
                     .map(|arrival| arrival.tokens)
                     .sum::<u64>();
                 released += sealed.released_tokens;
@@ -149,8 +185,8 @@ fn compose(steps: &[&StepAdmissionItem]) -> Option<StepBill> {
     if steps.len() > 1 {
         decoration.push_str(&format!(" ×{}", steps.len()));
     }
-    if arrived > 0 {
-        decoration.push_str(&format!(" · arrivals {approx}{}", token_label(arrived)));
+    if user > 0 {
+        decoration.push_str(&format!(" · user {approx}{}", token_label(user)));
     }
     if released > 0 {
         decoration.push_str(&format!(" · released {}", token_label(released)));
@@ -159,7 +195,7 @@ fn compose(steps: &[&StepAdmissionItem]) -> Option<StepBill> {
         decoration.push_str(" · severed");
     }
     Some(StepBill {
-        total: thinking.unwrap_or(0) + output + own,
+        total: Some(thinking.unwrap_or(0) + output + own),
         decoration,
     })
 }

@@ -225,6 +225,7 @@ pub(crate) fn is_private_realtime_agent_item(item: &ThreadItem) -> bool {
             | ThreadItem::Thought { .. }
             | ThreadItem::Preamble { .. }
             | ThreadItem::StepAdmission(_)
+            | ThreadItem::Arrival(_)
     ) {
         return true;
     }

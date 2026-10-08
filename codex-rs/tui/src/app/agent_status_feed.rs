@@ -144,7 +144,8 @@ fn activity_summary(item: &ThreadItem) -> Option<String> {
         ThreadItem::CodeMode(_)
         | ThreadItem::Thought { .. }
         | ThreadItem::Preamble { .. }
-        | ThreadItem::StepAdmission(_) => {
+        | ThreadItem::StepAdmission(_)
+        | ThreadItem::Arrival(_) => {
             return None;
         }
         ThreadItem::AgentMessage { text, .. } | ThreadItem::Plan { text, .. } => text,

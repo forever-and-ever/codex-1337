@@ -118,18 +118,15 @@
     },
     "Arrival": {
       "properties": {
+        "id": {
+          "description": "The id of the [`ArrivalItem`] that announced it.",
+          "type": "string"
+        },
         "kind": {
           "$ref": "#/definitions/ArrivalKind"
         },
         "label": {
           "type": "string"
-        },
-        "text": {
-          "description": "The readable content of an injection or of a plaintext message from another agent.",
-          "type": [
-            "string",
-            "null"
-          ]
         },
         "tokens": {
           "format": "uint64",
@@ -138,6 +135,7 @@
         }
       },
       "required": [
+        "id",
         "kind",
         "label",
         "tokens"
@@ -1903,6 +1901,53 @@
             "type"
           ],
           "title": "StepAdmissionThreadItem",
+          "type": "object"
+        },
+        {
+          "description": "Human-only announcement of context a step admitted after its results.",
+          "properties": {
+            "announcedAtMs": {
+              "description": "When the request that reads it was dispatched.",
+              "format": "int64",
+              "type": "integer"
+            },
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "$ref": "#/definitions/ArrivalKind"
+            },
+            "label": {
+              "type": "string"
+            },
+            "responseId": {
+              "description": "The response whose step admits it.",
+              "type": "string"
+            },
+            "text": {
+              "description": "The readable content of an injection or of a plaintext message from another agent.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "enum": [
+                "arrival"
+              ],
+              "title": "ArrivalThreadItemType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "announcedAtMs",
+            "id",
+            "kind",
+            "label",
+            "responseId",
+            "type"
+          ],
+          "title": "ArrivalThreadItem",
           "type": "object"
         },
         {
