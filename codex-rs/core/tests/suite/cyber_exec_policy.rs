@@ -172,9 +172,9 @@ async fn saved_prefix_only_bypasses_guardian_for_general_models(
         .message_input_texts("developer")
         .iter()
         .any(|message| message.contains(SAVED_PREFIX));
-    assert_eq!(
-        advertised_saved_prefix,
-        model_specialty == ModelSpecialty::General,
+    assert!(
+        !advertised_saved_prefix,
+        "approved prefixes stay out of the model context",
     );
     assert!(
         responses
@@ -307,33 +307,6 @@ async fn switching_models_suppresses_and_restores_saved_prefix_approvals() -> Re
         .collect::<Vec<_>>();
     assert_eq!(guardian_requests.len(), 1);
     assert!(guardian_requests[0].body_contains_text(TEST_COMMAND));
-
-    let cyber_request = requests
-        .iter()
-        .find(|request| request.body_json()["model"] == "gpt-5.4")
-        .expect("cyber-model request");
-    let cyber_developer_messages = cyber_request.message_input_texts("developer");
-    let cyber_permissions = cyber_developer_messages
-        .iter()
-        .rev()
-        .find(|message| message.contains("<permissions instructions>"))
-        .expect("refreshed cyber-model permissions instructions");
-    assert!(!cyber_permissions.contains(SAVED_PREFIX));
-
-    let final_parent_request = requests
-        .iter()
-        .rev()
-        .find(|request| request.body_json()["model"] == "gpt-5.2")
-        .expect("final general-model request");
-    assert!(
-        final_parent_request
-            .message_input_texts("developer")
-            .iter()
-            .any(|message| {
-                message.contains("Approved command prefix saved:") && message.contains(SAVED_PREFIX)
-            }),
-        "switching back should restore the original saved-prefix context",
-    );
 
     for call_id in [
         "general-first-command",
