@@ -1143,8 +1143,13 @@ fn add_shell_tools(context: &CoreToolPlanContext<'_>, registry: &mut ToolRegistr
         include_windows_shell_guidance: should_include_windows_shell_guidance(context.environments),
     };
     if features.enabled(Feature::UnifiedExec) {
-        registry.add(ExecCommandHandler::new(options));
-        registry.add(WriteStdinHandler);
+        if effective_tool_mode(turn_context, context.model_info) == ToolMode::CodeModeOnly {
+            registry.add(ExecCommandHandler::cell(options));
+            registry.add(WriteStdinHandler::cell());
+        } else {
+            registry.add(ExecCommandHandler::new(options));
+            registry.add(WriteStdinHandler::default());
+        }
     } else {
         // Managed requirements are the only configuration path that can keep
         // unified exec disabled. Preserve command execution without exposing a

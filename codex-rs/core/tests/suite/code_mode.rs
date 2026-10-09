@@ -786,12 +786,14 @@ async fn run_code_mode_turn_with_rmcp_config(
 }
 
 #[cfg_attr(windows, ignore = "no exec_command on Windows")]
+#[test_case(ToolMode::CodeMode; "code_mode")]
+#[test_case(ToolMode::CodeModeOnly; "code_mode_only")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn code_mode_can_return_exec_command_output() -> Result<()> {
+async fn code_mode_can_return_exec_command_output(tool_mode: ToolMode) -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
-    let (_test, second_mock) = run_code_mode_turn(
+    let (_test, second_mock) = run_code_mode_turn_with_config(
         &server,
         "use exec to run exec_command",
         r#"
@@ -799,15 +801,21 @@ const result = await tools.exec_command({ cmd: "printf code_mode_exec_marker" })
 text(result);
 text(JSON.stringify(result));
 text(await tools.exec_command({cmd: "printf '{\"literal\":true}\\n'; exit 7"}));
-const running = await tools.exec_command({cmd: "stty -echo; printf partial; read -r reply; printf done", tty: true, yield_time_ms: 1, max_output_tokens: 64});
+const running = await tools.exec_command({cmd: "stty -echo; printf partial; read -r reply; printf done", tty: true, yield_time_ms: 1, background: true, max_output_tokens: 64});
 text(running);
 text(await tools.write_stdin({session_id: running.session_id, chars: "continue\n", yield_time_ms: 5000}));
+text(await tools.exec_command({cmd: "sleep 1; printf finished", yield_time_ms: 250}));
 "#,
+        move |config| {
+            if tool_mode == ToolMode::CodeModeOnly {
+                let _ = config.features.enable(Feature::CodeModeOnly);
+            }
+        },
     )
     .await?;
 
     let items = custom_tool_output_items(&second_mock.single_request(), "call-1");
-    assert_eq!(items.len(), 6);
+    assert_eq!(items.len(), 7);
     assert_regex_match(
         concat!(r"(?s)\A", r"Script completed\nOutput:\n\z"),
         text_item(&items, /*index*/ 0),
@@ -824,6 +832,14 @@ text(await tools.write_stdin({session_id: running.session_id, chars: "continue\n
         format!("{partial}{}", text_item(&items, /*index*/ 5)),
         "partialdone"
     );
+    // Code Mode Only cells run commands to exit, ignoring the habitual short yield; plain Code
+    // Mode keeps upstream's yield and hands back a session.
+    match tool_mode {
+        ToolMode::CodeModeOnly => assert_eq!(text_item(&items, /*index*/ 6), "finished"),
+        ToolMode::Direct | ToolMode::CodeMode => {
+            assert_regex_match(r"^Running \(session \d+\)$", text_item(&items, /*index*/ 6));
+        }
+    }
     let parsed: Value = serde_json::from_str(text_item(&items, /*index*/ 2))?;
     assert!(
         parsed

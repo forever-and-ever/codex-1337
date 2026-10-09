@@ -50,6 +50,7 @@ use codex_core_plugins::PluginMetricsSidecar;
 mod async_watcher;
 mod errors;
 mod head_tail_buffer;
+mod initial_wait;
 mod oneshot;
 mod process;
 mod process_manager;
@@ -62,6 +63,7 @@ pub(crate) fn set_deterministic_process_ids_for_tests(enabled: bool) {
 }
 
 pub(crate) use errors::UnifiedExecError;
+pub(crate) use initial_wait::InitialWait;
 pub(crate) use process::NoopSpawnLifecycle;
 #[cfg(unix)]
 pub(crate) use process::SpawnLifecycle;
@@ -116,7 +118,7 @@ pub(crate) struct ExecCommandRequest {
     pub shell_type: ShellType,
     pub hook_command: String,
     pub process_id: i32,
-    pub yield_time_ms: u64,
+    pub initial_wait: InitialWait,
     pub max_output_tokens: Option<usize>,
     pub cwd: PathUri,
     pub sandbox_cwd: PathUri,
