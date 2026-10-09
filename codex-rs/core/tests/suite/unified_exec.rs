@@ -1749,8 +1749,14 @@ async fn exec_command_clamps_model_requested_max_output_tokens_to_policy() -> Re
     let mut measured = None;
     let mut captured = None;
     let mut sealed = None;
+    let mut answered = None;
     let mut completed = false;
-    while measured.is_none() || captured.is_none() || sealed.is_none() || !completed {
+    while measured.is_none()
+        || captured.is_none()
+        || sealed.is_none()
+        || answered.is_none()
+        || !completed
+    {
         match wait_for_event(&test.codex, |_| true).await {
             EventMsg::ItemCompleted(event) => {
                 if let codex_protocol::items::TurnItem::ToolOutputTokens(item) = &event.item
@@ -1769,12 +1775,19 @@ async fn exec_command_clamps_model_requested_max_output_tokens_to_policy() -> Re
                 {
                     sealed = Some(item.clone());
                 }
+                if let codex_protocol::items::TurnItem::StepAdmission(item) = &event.item
+                    && item.response_id == "resp-2"
+                {
+                    answered = Some(item.message_ids.clone());
+                }
             }
             EventMsg::TurnComplete(_) => completed = true,
             _ => {}
         }
     }
     let measured = measured.expect("measurement received");
+    // The answering step names its message, so a frontend can place the reply in its step.
+    assert_eq!(answered, Some(vec!["msg-1".to_string()]));
     // The second request's input, less the first request's input and re-sent output, is
     // what the call's step admitted; with no arrivals the delta alone measures it.
     let sealed = sealed.expect("step sealed");

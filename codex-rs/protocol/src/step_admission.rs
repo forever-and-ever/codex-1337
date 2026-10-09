@@ -33,6 +33,10 @@ pub struct StepAdmissionItem {
     pub output_tokens: u64,
     /// The calls the response made, in order; the step admits their results.
     pub call_ids: Vec<String>,
+    /// The assistant messages the response produced, in order. Absent from records written
+    /// before messages were tracked.
+    #[serde(default)]
+    pub message_ids: Vec<String>,
     pub admission: Admission,
 }
 

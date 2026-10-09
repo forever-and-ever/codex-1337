@@ -22,4 +22,9 @@ outputTokens: number,
 /**
  * The calls the response made, in order; the step admits their results.
  */
-callIds: Array<string>, admission: Admission, };
+callIds: Array<string>,
+/**
+ * The assistant messages the response produced, in order. Absent from records written
+ * before messages were tracked.
+ */
+messageIds: Array<string>, admission: Admission, };

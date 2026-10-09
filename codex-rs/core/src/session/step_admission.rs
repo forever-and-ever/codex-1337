@@ -53,19 +53,25 @@ struct Admitted {
     arrivals: Vec<Incoming>,
 }
 
-/// The calls one response made, observed as its items complete.
+/// The calls and assistant messages one response produced, observed as its items complete.
 #[derive(Debug, Default)]
-pub(super) struct ResponseCalls(Vec<String>);
+pub(super) struct ResponseMembers {
+    calls: Vec<String>,
+    messages: Vec<String>,
+}
 
-impl ResponseCalls {
+impl ResponseMembers {
     pub(super) fn observe(&mut self, item: &ResponseItem) {
         match item {
             ResponseItem::FunctionCall { call_id, .. }
-            | ResponseItem::CustomToolCall { call_id, .. } => self.0.push(call_id.clone()),
+            | ResponseItem::CustomToolCall { call_id, .. } => self.calls.push(call_id.clone()),
             ResponseItem::LocalShellCall { call_id, .. }
             | ResponseItem::ToolSearchCall { call_id, .. } => {
-                self.0.extend(call_id.iter().cloned())
+                self.calls.extend(call_id.iter().cloned())
             }
+            ResponseItem::Message {
+                role, id: Some(id), ..
+            } if role == "assistant" => self.messages.push(id.to_string()),
             _ => {}
         }
     }
@@ -95,7 +101,7 @@ impl Session {
         step_context: &StepContext,
         prompt: &Prompt,
         response_id: &str,
-        calls: ResponseCalls,
+        members: ResponseMembers,
         usage: Option<&TokenUsage>,
         reported_reasoning_tokens: Option<u64>,
     ) {
@@ -117,7 +123,8 @@ impl Session {
                         read_tokens,
                         thinking_tokens,
                         output_tokens: output_tokens - thinking_tokens.unwrap_or(0),
-                        call_ids: calls.0,
+                        call_ids: members.calls,
+                        message_ids: members.messages,
                         admission: Admission::Pending,
                     },
                     turn_id: turn_context.sub_id.clone(),

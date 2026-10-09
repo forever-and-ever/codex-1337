@@ -12601,6 +12601,13 @@ class StepAdmissionThreadItem(BaseModel):
     ]
     completed_at_ms: Annotated[int, Field(alias="completedAtMs")]
     id: str
+    message_ids: Annotated[
+        list[str] | None,
+        Field(
+            alias="messageIds",
+            description="The assistant messages the response produced, in order. Absent from records written before messages were tracked.",
+        ),
+    ] = []
     output_tokens: Annotated[
         int,
         Field(
