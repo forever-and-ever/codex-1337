@@ -32,13 +32,28 @@ pub(super) struct Figures {
     pub(super) notes: Vec<String>,
 }
 
-/// A step's thought, output and own results; zero or unreported parts are absent.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+/// A step's thought, output and own results; a zero has nothing to report.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) struct Split {
-    pub(super) thought: Option<String>,
-    pub(super) output: Option<String>,
-    /// Its own results, or what stands in for them: `…` pending, `—` severed.
-    pub(super) own: Option<String>,
+    pub(super) thought: u64,
+    pub(super) output: u64,
+    pub(super) own: Own,
+}
+
+/// A step's own results, as the next request's seal measured them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(super) enum Own {
+    /// No step has its seal yet.
+    Pending,
+    /// Every step lost its seal.
+    Severed,
+    /// What the sealed steps measured: `approximate` when apportioned, `pending` while other
+    /// steps still await their seals.
+    Measured {
+        tokens: u64,
+        approximate: bool,
+        pending: bool,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -128,11 +143,14 @@ pub(super) fn steps_figures(
     }
     let approx = if approximate { "≈" } else { "" };
     let measured = steps.len() - unsealed - severed;
-    let own_label = match (measured, unsealed) {
-        (0, 0) => Some("—".to_string()),
-        (0, _) => Some("…".to_string()),
-        (_, 0) => (own > 0).then(|| format!("{approx}{}", token_label(own))),
-        (_, _) => Some(format!("{approx}{}+…", token_label(own))),
+    let own_figure = match (measured, unsealed) {
+        (0, 0) => Own::Severed,
+        (0, _) => Own::Pending,
+        (_, unsealed) => Own::Measured {
+            tokens: own,
+            approximate,
+            pending: unsealed > 0,
+        },
     };
     let mut notes = Vec::new();
     if steps.len() > 1 {
@@ -155,9 +173,9 @@ pub(super) fn steps_figures(
     Figures {
         total: Total::Exact(thinking.unwrap_or(0) + output + own),
         split: Some(Split {
-            thought: thinking.filter(|thinking| *thinking > 0).map(token_label),
-            output: (output > 0).then(|| token_label(output)),
-            own: own_label,
+            thought: thinking.unwrap_or(0),
+            output,
+            own: own_figure,
         }),
         notes,
     }

@@ -3,7 +3,7 @@ source: tui/src/transcript_view/tool_entries_tests.rs
 expression: "snapshots.join(\"\\n\\n\").replace(&clock, \"14:17\")"
 ---
 width=64
-      [-] You
+      [-] User
 
             › Review the layout
 
@@ -19,12 +19,13 @@ width=64
       [+]       foo.rs (+1, -0)
       [+]       bar.rs (+1, -0)
 
-14:17       • The layout keeps prose, code, and tools aligned.
+14:17 [-] Response
+            • The layout keeps prose, code, and tools aligned.
 
                 source_indent();
 
 expanded width=64
-      [-] You
+      [-] User
 
             › Review the layout
 
@@ -45,7 +46,8 @@ expanded width=64
       [+]       foo.rs (+1, -0)
       [+]       bar.rs (+1, -0)
 
-14:17       • The layout keeps prose, code, and tools aligned.
+14:17 [-] Response
+            • The layout keeps prose, code, and tools aligned.
 
                 source_indent();
 
@@ -78,7 +80,7 @@ detailed width=64
                 source_indent();
 
 width=32
-      [-] You
+      [-] User
 
             › Review the layout
 
@@ -95,7 +97,8 @@ width=32
       [+]       foo.rs (+1, -0)
       [+]       bar.rs (+1, -0)
 
-14:17       • The layout keeps
+14:17 [-] Response
+            • The layout keeps
               prose, code, and
               tools aligned.
 

@@ -1,6 +1,5 @@
 ---
 source: tui/src/history_cell/tests.rs
-assertion_line: 2425
 expression: "snapshots.join(\"\\n\")"
 ---
 (255, 255, 255): Buffer {
@@ -14,11 +13,11 @@ expression: "snapshots.join(\"\\n\")"
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 0, y: 1, fg: Rgb(28, 100, 200), bg: Rgb(249, 249, 249), underline: Reset, modifier: NONE,
+        x: 0, y: 1, fg: Rgb(28, 100, 200), bg: Rgb(233, 239, 249), underline: Reset, modifier: NONE,
         x: 12, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 0, y: 3, fg: Reset, bg: Rgb(249, 249, 249), underline: Reset, modifier: BOLD | DIM,
-        x: 2, y: 3, fg: Rgb(28, 100, 200), bg: Rgb(249, 249, 249), underline: Reset, modifier: NONE,
-        x: 12, y: 3, fg: Reset, bg: Rgb(249, 249, 249), underline: Reset, modifier: NONE,
+        x: 0, y: 3, fg: Reset, bg: Rgb(233, 239, 249), underline: Reset, modifier: BOLD | DIM,
+        x: 2, y: 3, fg: Rgb(28, 100, 200), bg: Rgb(233, 239, 249), underline: Reset, modifier: NONE,
+        x: 12, y: 3, fg: Reset, bg: Rgb(233, 239, 249), underline: Reset, modifier: NONE,
         x: 27, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }
@@ -33,11 +32,11 @@ expression: "snapshots.join(\"\\n\")"
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 0, y: 1, fg: Rgb(99, 168, 248), bg: Rgb(55, 57, 66), underline: Reset, modifier: NONE,
+        x: 0, y: 1, fg: Rgb(140, 191, 249), bg: Rgb(62, 75, 103), underline: Reset, modifier: NONE,
         x: 12, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 0, y: 3, fg: Reset, bg: Rgb(55, 57, 66), underline: Reset, modifier: BOLD | DIM,
-        x: 2, y: 3, fg: Rgb(99, 168, 248), bg: Rgb(55, 57, 66), underline: Reset, modifier: NONE,
-        x: 12, y: 3, fg: Reset, bg: Rgb(55, 57, 66), underline: Reset, modifier: NONE,
+        x: 0, y: 3, fg: Reset, bg: Rgb(62, 75, 103), underline: Reset, modifier: BOLD | DIM,
+        x: 2, y: 3, fg: Rgb(140, 191, 249), bg: Rgb(62, 75, 103), underline: Reset, modifier: NONE,
+        x: 12, y: 3, fg: Reset, bg: Rgb(62, 75, 103), underline: Reset, modifier: NONE,
         x: 27, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }
@@ -52,11 +51,11 @@ expression: "snapshots.join(\"\\n\")"
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 0, y: 1, fg: Rgb(5, 9, 14), bg: Rgb(120, 120, 120), underline: Reset, modifier: NONE,
+        x: 0, y: 1, fg: Rgb(12, 20, 30), bg: Rgb(114, 126, 147), underline: Reset, modifier: NONE,
         x: 12, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 0, y: 3, fg: Reset, bg: Rgb(120, 120, 120), underline: Reset, modifier: BOLD | DIM,
-        x: 2, y: 3, fg: Rgb(5, 9, 14), bg: Rgb(120, 120, 120), underline: Reset, modifier: NONE,
-        x: 12, y: 3, fg: Reset, bg: Rgb(120, 120, 120), underline: Reset, modifier: NONE,
+        x: 0, y: 3, fg: Reset, bg: Rgb(114, 126, 147), underline: Reset, modifier: BOLD | DIM,
+        x: 2, y: 3, fg: Rgb(12, 20, 30), bg: Rgb(114, 126, 147), underline: Reset, modifier: NONE,
+        x: 12, y: 3, fg: Reset, bg: Rgb(114, 126, 147), underline: Reset, modifier: NONE,
         x: 27, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }

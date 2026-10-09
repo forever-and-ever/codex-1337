@@ -30,6 +30,9 @@ const LEGIBLE_ROW: usize = 16;
 pub(crate) struct ActivityTranscriptLines {
     pub(crate) output_mode: Option<OutputMode>,
     pub(crate) is_tool_entry: bool,
+    /// Rows above the activity's own, which neither clip nor hold its control: the script a
+    /// Code Mode member's header shows.
+    pub(crate) preface: Vec<HyperlinkLine>,
     pub(crate) activity: Vec<HyperlinkLine>,
     pub(crate) header: Option<crate::history_cell::activity_parts::ActivityHeader>,
     pub(crate) auxiliary: Vec<HyperlinkLine>,
@@ -110,23 +113,28 @@ pub(super) fn activity_layout(
         }
     }
     let has_details = !lines.activity.is_empty() && (expanded || lines.disclosure.is_some());
-    lines.activity.extend(lines.auxiliary);
+    let lead = lines.preface.len();
+    let mut rows = lines.preface;
+    rows.extend(lines.activity);
+    rows.extend(lines.auxiliary);
     let mut layout = TextLayout::new(
-        crate::transcript_geometry::gutter_lines(lines.activity, columns),
+        crate::transcript_geometry::gutter_lines(rows, columns),
         width,
     )
     .with_header_tokens(lines.header_tokens, TokenSeat::Trailing);
     if has_details {
         layout = layout.with_leading_disclosure_control(
             if expanded { "[-]" } else { "[+]" }.into(),
-            control_line,
+            lead + control_line,
         );
     }
-    for part in lines.controls {
+    for mut part in lines.controls {
+        part.line += lead;
         layout = layout.with_part_control(part);
     }
     if expanded && let (Some(mode), Some(header)) = (lines.output_mode, lines.header) {
-        layout = layout.with_output_controls(header.source_offset, mode);
+        let offset = layout.line_offset(lead) + header.source_offset;
+        layout = layout.with_output_controls(offset, mode);
     }
     layout
 }
@@ -332,6 +340,7 @@ impl TranscriptView {
                         output_mode: (expanded && cell.has_formatted_output())
                             .then_some(output_mode),
                         is_tool_entry: cell.is_tool_entry(),
+                        preface: Vec::new(),
                         activity: crate::transcript_geometry::clock_lines(parts.lines, timestamp),
                         header: parts.header,
                         auxiliary: Vec::new(),
@@ -354,6 +363,7 @@ impl TranscriptView {
                 ActivityTranscriptLines {
                     output_mode: (expanded && cell.has_formatted_output()).then_some(output_mode),
                     is_tool_entry: cell.is_tool_entry(),
+                    preface: Vec::new(),
                     activity: crate::transcript_geometry::clock_lines(activity, timestamp),
                     header: if expanded {
                         cell.expanded_activity_header()
@@ -413,29 +423,30 @@ impl TranscriptView {
                 Content::Beheaded => {
                     let mut lines = activity(expanded, expanded_parts);
                     yield_head(&mut lines);
-                    if lines.activity.is_empty() && lines.disclosure.is_some() {
-                        // Its header was all it showed: unfolded, its details take its place,
-                        // under the item's fold rather than a control of its own.
+                    // Its header was all it showed: unfolded, its details take its place,
+                    // under the item's fold rather than a control of its own.
+                    let bare = lines.activity.is_empty() && lines.disclosure.is_some();
+                    if bare {
                         let mut details = expanded_parts.clone();
                         details.extend(ids.iter().cloned());
-                        let mut lines = activity(/*expanded*/ true, &details);
+                        lines = activity(/*expanded*/ true, &details);
                         yield_head(&mut lines);
                         lines.is_tool_entry = false;
                         lines.disclosure = None;
-                        activity_layout(
-                            lines,
-                            crate::transcript_geometry::NESTED_COLUMNS,
-                            width,
-                            /*expanded*/ false,
-                        )
-                    } else {
-                        activity_layout(
-                            lines,
-                            crate::transcript_geometry::NESTED_COLUMNS,
-                            width,
-                            expanded,
-                        )
                     }
+                    // A Code Mode block's script leads its rows while its header shows it.
+                    lines.preface = cell
+                        .as_any()
+                        .downcast_ref::<crate::history_cell::CodeModeCell>()
+                        .filter(|block| expanded_parts.contains(&block.script_fold()))
+                        .and_then(crate::history_cell::CodeModeCell::script_lines)
+                        .unwrap_or_default();
+                    activity_layout(
+                        lines,
+                        crate::transcript_geometry::NESTED_COLUMNS,
+                        width,
+                        expanded && !bare,
+                    )
                 }
                 Content::Own | Content::Loose => activity_layout(
                     activity(expanded, expanded_parts),
@@ -445,11 +456,13 @@ impl TranscriptView {
                 ),
             };
             if let Some(header) = &seat.header {
-                layout = layout.with_fold_header(
-                    feed.header_lines(cells, header, bills, expanded_parts, width),
-                    feed.fold_target(header),
-                    header.unfolded,
-                );
+                layout = layout.with_fold_header(feed.header_rows(
+                    cells,
+                    header,
+                    bills,
+                    expanded_parts,
+                    width,
+                ));
             }
             layout
         }))

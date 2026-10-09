@@ -477,6 +477,7 @@ fn code_mode_batches_display_their_own_counts_and_replay_without_double_counting
                     is_tool_entry: tail.is_tool_entry(),
                     header: tail.activity_header(),
                     controls: Vec::new(),
+                    preface: Vec::new(),
                     activity: if expanded {
                         tail.expanded_hyperlink_lines(width)
                     } else {
@@ -687,6 +688,7 @@ fn activity_focus_keeps_controls_without_passive_hints() {
                     is_tool_entry: cell.is_tool_entry(),
                     header: cell.activity_header(),
                     controls: Vec::new(),
+                    preface: Vec::new(),
                     activity: if expanded {
                         cell.expanded_hyperlink_lines(width)
                     } else {

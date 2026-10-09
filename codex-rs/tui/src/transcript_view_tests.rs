@@ -97,6 +97,7 @@ fn terminal_output_disclosure_follows_live_history_and_keymap() {
                 is_tool_entry: cell.is_tool_entry(),
                 header: cell.activity_header(),
                 controls: Vec::new(),
+                preface: Vec::new(),
                 activity: cell.compact_hyperlink_lines(width),
                 auxiliary: Vec::new(),
                 disclosure: cell.activity_disclosure(width),

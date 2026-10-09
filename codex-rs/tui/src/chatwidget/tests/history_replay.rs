@@ -320,9 +320,7 @@ async fn replayed_delegated_tool_output_is_attributed_without_seeding_composer_h
             let cells: Vec<std::sync::Arc<dyn history_cell::HistoryCell>> =
                 projected.into_iter().collect();
             crate::transcript_view::TranscriptView::default().render(area, &mut buffer, &cells);
-            let background = crate::style::history_prompt_style()
-                .bg
-                .expect("message background");
+            let background = crate::style::aside_style().bg.expect("message background");
             assert!(buffer.content.iter().all(|cell| cell.bg == background));
         },
     );

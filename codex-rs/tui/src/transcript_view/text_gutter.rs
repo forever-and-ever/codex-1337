@@ -11,19 +11,18 @@ use ratatui::text::Span;
 /// A loose row's tokens, right-aligned in the gutter.
 pub(super) fn token_span(tokens: u64) -> Span<'static> {
     token_figure(
-        String::new(),
+        token_label(tokens),
         tokens,
         usize::from(crate::transcript_geometry::TOKEN_COLUMNS),
     )
 }
 
-/// A right-aligned total colored by its size.
+/// A right-aligned figure, `label`, colored by the size of the tokens it reports.
 pub(in crate::transcript_view) fn token_figure(
-    prefix: String,
+    label: String,
     tokens: u64,
     width: usize,
 ) -> Span<'static> {
-    let label = format!("{prefix}{}", token_label(tokens));
     let color = match tokens {
         0..=1_000 => {
             let alpha = if tokens <= 300 { 0.2 } else { 0.45 };

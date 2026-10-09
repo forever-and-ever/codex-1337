@@ -8,7 +8,7 @@ expression: "normalize_snapshot_paths(buffer_text(crate::custom_terminal::test_s
             › first question
 
 
-      [-] You
+      [-] User
 
             › second question
 ────────────────────────────────────────────────────────────────────────────────

@@ -26,7 +26,7 @@ impl OutputProvenance {
             Self::Formatted => crate::style::formatted_output_style(),
             Self::Client => {
                 if crate::terminal_palette::default_bg().is_some() {
-                    crate::style::history_prompt_style()
+                    crate::style::aside_style()
                 } else {
                     Style::default().reversed()
                 }

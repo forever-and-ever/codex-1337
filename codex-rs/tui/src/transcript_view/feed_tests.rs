@@ -1,12 +1,18 @@
-//! The feed's one interaction worth pinning: steps fold under their headers with their figures.
+//! The feed's one interaction worth pinning: steps fold under their headers with their figures,
+//! and a Code Mode header shows its block's script.
 
 use super::*;
 use crate::exec_cell::CommandOutput;
 use crate::exec_cell::new_active_exec_command;
 use crate::history_cell::ThoughtTextVisibility;
 use codex_app_server_protocol::ArrivalItem;
+use codex_app_server_protocol::CodeModeEvent;
+use codex_app_server_protocol::CodeModeItem;
+use codex_app_server_protocol::CodeModeOwner;
+use codex_app_server_protocol::CodeModeStatus;
 use codex_app_server_protocol::CommandExecutionSource;
 use codex_app_server_protocol::ThreadItem;
+use codex_protocol::ThreadId;
 use codex_protocol::step_admission::Admission;
 use codex_protocol::step_admission::AdmissionPrecision;
 use codex_protocol::step_admission::Arrival;
@@ -34,6 +40,63 @@ fn message(id: &str, text: &str) -> Arc<dyn HistoryCell> {
     let mut cell = AgentMarkdownCell::new(text.into(), std::path::Path::new("/tmp"));
     cell.item_id = Some(id.into());
     Arc::new(cell)
+}
+
+/// A finished Code Mode block that kept its script, with the one call the script made.
+fn script_block(exec: &str) -> Arc<dyn HistoryCell> {
+    let fact = |suffix: &str, event| CodeModeItem {
+        id: format!("code-mode:{exec}:{suffix}"),
+        cell_id: None,
+        exec_call_id: exec.into(),
+        created_at: CLOCK_MS / 1_000,
+        event,
+    };
+    let mut block = CodeModeCell::owned(
+        CodeModeOwner {
+            thread_id: ThreadId::from_u128(/*value*/ 7),
+            exec_call_id: exec.into(),
+            cell_id: None,
+            started_at_ms: CLOCK_MS,
+        },
+        /*animations_enabled*/ false,
+    );
+    block.admit_fact(
+        fact(
+            "start",
+            CodeModeEvent::Started {
+                call_id: exec.into(),
+                script: Some(
+                    "const status = await tools.exec_command({ cmd: \"git status\" });\ntext(status.output);\n"
+                        .into(),
+                ),
+            },
+        ),
+        /*live*/ false,
+    );
+    let mut status = new_active_exec_command(
+        "call-status".into(),
+        ["git", "status"].map(String::from).to_vec(),
+        Vec::new(),
+        CommandExecutionSource::Agent,
+        /*interaction_input*/ None,
+        /*animations_enabled*/ false,
+    );
+    status.complete_call(
+        "call-status",
+        CommandOutput::new(/*exit_code*/ 0, "clean\n".into()),
+        std::time::Duration::ZERO,
+    );
+    block.admit_children("call-status".into(), vec![Arc::new(status)]);
+    block.admit_fact(
+        fact(
+            "end",
+            CodeModeEvent::Finished {
+                status: CodeModeStatus::Completed,
+            },
+        ),
+        /*live*/ false,
+    );
+    Arc::new(block)
 }
 
 fn step(
@@ -107,6 +170,8 @@ fn steps_fold_under_one_header_with_their_figures() {
             remote_image_urls: Vec::new(),
             spoken: false,
         }),
+        script_block("exec-1"),
+        message("msg-4", "No step billed this reply."),
     ];
     let mut view = TranscriptView::default();
     view.record_step_admission(step(
@@ -141,6 +206,7 @@ fn steps_fold_under_one_header_with_their_figures() {
             precision: AdmissionPrecision::Exact,
         }),
     ));
+    view.record_step_admission(step("resp-3", &["exec-1"], &[], Admission::Pending));
     let clock = crate::history_cell::HistoryTimestamp::from_millis(CLOCK_MS)
         .unwrap()
         .span()
@@ -150,22 +216,31 @@ fn steps_fold_under_one_header_with_their_figures() {
     let mut snapshots = Vec::new();
     let mut screen = |view: &mut TranscriptView, label: &str| {
         let buffer = crate::transcript_view::tests::render(
-            view, &cells, /*width*/ 96, /*height*/ 22,
+            view, &cells, /*width*/ 104, /*height*/ 34,
         );
         let text = crate::transcript_view::tests::text(&buffer).replace(&clock, "HH:MM");
         snapshots.push(format!("{label}\n{text}"));
         text
     };
+    let click = |view: &mut TranscriptView, text: &str, needle: &str, column: Option<u16>| {
+        let (row, line) = text
+            .lines()
+            .enumerate()
+            .find(|(_, line)| line.contains(needle))
+            .unwrap_or_else(|| panic!("{needle} is drawn:\n{text}"));
+        let column = column.unwrap_or_else(|| {
+            let start = line.find(needle).unwrap_or_default();
+            unicode_width::UnicodeWidthStr::width(&line[..start]) as u16 + 1
+        });
+        assert!(view.toggle_disclosure_at(&cells, column, row as u16));
+    };
+    let fold = Some(crate::transcript_geometry::CONTROL_COLUMN + 1);
     let folded = screen(&mut view, "folded");
-    let row = folded
-        .lines()
-        .position(|line| line.contains("cargo test"))
-        .unwrap_or_else(|| panic!("the step's header names its call:\n{folded}"));
-    assert!(view.toggle_disclosure_at(
-        &cells,
-        crate::transcript_geometry::CONTROL_COLUMN + 1,
-        row as u16,
-    ));
-    screen(&mut view, "unfolded");
+    // The lower header first, so unfolding it leaves the upper one's row where it was.
+    click(&mut view, &folded, "Code Mode", fold);
+    click(&mut view, &folded, "cargo test", fold);
+    let unfolded = screen(&mut view, "unfolded");
+    click(&mut view, &unfolded, "[js]", /*column*/ None);
+    screen(&mut view, "script");
     insta::assert_snapshot!(snapshots.join("\n\n"));
 }

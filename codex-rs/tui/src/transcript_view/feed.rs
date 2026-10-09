@@ -4,14 +4,17 @@
 //! the server billed belongs to its step's Feed Item: the step's Thought, the response's
 //! messages and calls, and their results. Steps that share a cell, and a Code Mode exec with
 //! the steps that wait on it, form one item. User turns, arrivals and Preambles are items of
-//! one cell each. Every other cell stays loose, with its own clock and tokens.
+//! one cell each, and so is a finished reply no step claims: one from a chat that predates
+//! step bills, or from a step whose bill a resume lost. Every other cell stays loose, with its
+//! own clock and tokens.
 //!
 //! An item's members need not be adjacent. A run of members that no other item interrupts is
 //! a segment, and a segment draws a header when it begins a step or shows a member: clock,
 //! fold, title, then the figures of the steps that begin in it. The title is the first row of
 //! the segment's first activity, which yields that row to it: folded, the header clips it to
 //! one row; unfolded, it wraps it whole, and the activity draws the rest, or its details when
-//! nothing else remains. A segment without an activity borrows the item's title, and an item
+//! nothing else remains. An unfolded Code Mode title carries `[js]`, which shows the block's
+//! script above the rest. A segment without an activity borrows the item's title, and an item
 //! without any is a Response. Folded, a segment shows only its header, and the messages of an
 //! item that made calls. Unfolded, it shows every member, and an item of several steps heads
 //! each step's first member with that step's own figures; the one fold drives both levels. A
@@ -23,12 +26,17 @@
 //! the live tail.
 
 use super::step_bills::Figures;
+use super::step_bills::Own;
 use super::step_bills::Split;
 use super::step_bills::StepBills;
 use super::step_bills::Total;
 use super::step_bills::arrival_figures;
 use super::step_bills::steps_figures;
 use super::step_bills::user_figures;
+use super::text::HeaderControl;
+use super::text::HeaderRows;
+use super::text::token_figure;
+use super::text::token_label;
 use super::*;
 use crate::history_cell::AgentMarkdownCell;
 use crate::history_cell::ArrivalCell;
@@ -157,6 +165,8 @@ enum Kind {
     },
     Arrival,
     Preamble,
+    /// A finished reply no step claims.
+    Reply,
 }
 
 impl Item {
@@ -170,9 +180,12 @@ impl Item {
         }
     }
 
-    /// User turns and responses stand apart and unfold by default.
+    /// User turns and replies stand apart and unfold by default.
     fn spacious(&self) -> bool {
-        matches!(self.kind, Kind::User { .. } | Kind::Steps { calls: false })
+        matches!(
+            self.kind,
+            Kind::User { .. } | Kind::Reply | Kind::Steps { calls: false }
+        )
     }
 
     /// Whether the member draws rows of its own.
@@ -305,7 +318,9 @@ impl FeedIndex {
         let mut last_item = None;
         let mut last_step: Option<&str> = None;
         for (index, cell) in cells.iter().enumerate() {
-            if let Some((kind, key)) = entry_kind(cell, last_step, &mut placed_users) {
+            if let Some((kind, key)) =
+                entry_kind(cell, &cell_nodes[index], last_step, &mut placed_users)
+            {
                 items.push(Item::new(kind, key));
                 let item = items.len() - 1;
                 items[item].segments.push(vec![index]);
@@ -431,7 +446,7 @@ impl FeedIndex {
                 header: Some(header(vec![index], Vec::new(), Title::Response)),
                 content: match (&item.kind, unfolded) {
                     (_, false) => Content::Hidden,
-                    (Kind::User { .. }, true) => Content::Own,
+                    (Kind::User { .. } | Kind::Reply, true) => Content::Own,
                     (_, true) => Content::Body,
                 },
             };
@@ -638,15 +653,16 @@ impl FeedIndex {
     }
 
     /// A header's rows: clock, fold, title and figures, then the rest of a title it owns,
-    /// wrapped under itself while unfolded.
-    pub(super) fn header_lines(
+    /// wrapped under itself while unfolded. An unfolded Code Mode title ends in `[js]`, the
+    /// control that shows the block's script.
+    pub(super) fn header_rows(
         &self,
         cells: &[Arc<dyn HistoryCell>],
         header: &Header,
         bills: &StepBills,
         expanded: &HashSet<String>,
         width: u16,
-    ) -> Vec<Line<'static>> {
+    ) -> HeaderRows {
         use crate::transcript_geometry::CLOCK_COLUMNS;
         use crate::transcript_geometry::TITLE_COLUMN;
         let item = &self.items[header.item];
@@ -660,18 +676,44 @@ impl FeedIndex {
                     HistoryTimestamp::from_millis(bills.step(&item.steps[*step])?.completed_at_ms)
                 })
             });
-        let (title_width, split) = header_columns(width);
-        let title = self.title(cells, header, expanded, width);
-        let mut titles = match header.title {
+        let (title_width, reach) = header_columns(width);
+        let mut title = self.title(cells, header, expanded, width);
+        let script = match header.title {
+            Title::Owned(index) if header.unfolded => cells
+                .get(index)
+                .and_then(|cell| cell.as_any().downcast_ref::<CodeModeCell>())
+                .filter(|block| block.script().is_some())
+                .map(CodeModeCell::script_fold),
+            _ => None,
+        };
+        if let Some(fold) = &script {
+            title.push_span(" ");
+            title.push_span(if expanded.contains(fold) {
+                Span::styled("[js]", crate::style::accent_style().underlined())
+            } else {
+                "[js]".dim()
+            });
+        }
+        let titles = match header.title {
             // Wrapped as the activity wraps its own rows: a command never splits at a hyphen.
             Title::Owned(_) if header.unfolded => crate::wrapping::adaptive_wrap_lines(
                 [title],
                 crate::wrapping::RtOptions::new(title_width)
                     .word_splitter(textwrap::WordSplitter::NoHyphenation),
-            )
-            .into_iter(),
-            _ => vec![truncate_line_with_ellipsis_if_overflow(title, title_width)].into_iter(),
+            ),
+            _ => vec![truncate_line_with_ellipsis_if_overflow(title, title_width)],
         };
+        // `[js]` ends the title, so it ends the title's last row.
+        let control = script.map(|fold| {
+            let row = titles.len().saturating_sub(1);
+            let end = TITLE_COLUMN + titles.last().map_or(0, line_width) as u16;
+            HeaderControl {
+                row,
+                columns: end.saturating_sub(4)..end,
+                target: FoldTarget::Part(fold),
+            }
+        });
+        let mut titles = titles.into_iter();
         let first = titles.next().unwrap_or_default();
         let used = line_width(&first);
         let mut spans = vec![
@@ -685,8 +727,13 @@ impl FeedIndex {
         if let Some(figures) = self.figures(cells, header, bills) {
             spans.push(" ".repeat(title_width - used.min(title_width) + 1).into());
             spans.push(total_span(figures.total));
-            if split && let Some(split) = &figures.split {
+            if reach >= Reach::Split
+                && let Some(split) = figures.split
+            {
                 spans.extend(split_spans(split));
+                if reach == Reach::Legend {
+                    spans.push(format!("  {LEGEND}").dim());
+                }
             }
             if !figures.notes.is_empty() {
                 spans.push(format!("  {}", figures.notes.join(" · ")).dim());
@@ -698,7 +745,12 @@ impl FeedIndex {
             spans.extend(title.spans);
             Line::from(spans)
         }));
-        lines
+        HeaderRows {
+            lines,
+            fold: self.fold_target(header),
+            unfolded: header.unfolded,
+            control,
+        }
     }
 
     fn title(
@@ -712,7 +764,7 @@ impl FeedIndex {
         let cell = |index: usize| cells.get(index).map(AsRef::as_ref);
         let response = || Line::from("Response".bold());
         match (&item.kind, header.title) {
-            (Kind::User { .. }, _) => Line::from("You".bold()),
+            (Kind::User { .. }, _) => Line::from("User".bold()),
             (Kind::Arrival | Kind::Preamble, _) => header
                 .scope
                 .first()
@@ -722,7 +774,7 @@ impl FeedIndex {
             (Kind::Steps { .. }, Title::Owned(index) | Title::Borrowed(index)) => cell(index)
                 .and_then(|cell| title_row(cell, expanded, width))
                 .unwrap_or_else(response),
-            (Kind::Steps { .. }, Title::Response) => response(),
+            (Kind::Steps { .. }, Title::Response) | (Kind::Reply, _) => response(),
         }
     }
 
@@ -760,6 +812,7 @@ impl FeedIndex {
                 total: Total::Exact(cell?.activity_header_tokens()?),
                 ..Figures::default()
             },
+            Kind::Reply => return None,
         };
         (figures.total != Total::Unknown).then_some(figures)
     }
@@ -801,9 +854,11 @@ fn in_flight(cell: &dyn HistoryCell) -> bool {
             .is_some_and(CodeModeCell::is_active)
 }
 
-/// The user turns, arrivals and Preambles that are items of their own, with their fold keys.
+/// The cells that are items of their own, with their fold keys: user turns, arrivals,
+/// Preambles, and finished replies no step claims.
 fn entry_kind(
     cell: &Arc<dyn HistoryCell>,
+    steps: &[usize],
     last_step: Option<&str>,
     placed_users: &mut HashMap<String, usize>,
 ) -> Option<(Kind, String)> {
@@ -825,6 +880,15 @@ fn entry_kind(
     if any.is::<PreambleCell>() {
         let id = cell.activity_ids().into_iter().next()?;
         return Some((Kind::Preamble, id));
+    }
+    if steps.is_empty()
+        && let Some(reply) = any.downcast_ref::<AgentMarkdownCell>()
+    {
+        let key = reply
+            .item_id
+            .as_ref()
+            .map_or_else(|| format!("{:x}", cell_key(cell)), String::clone);
+        return Some((Kind::Reply, format!("reply:{key}")));
     }
     None
 }
@@ -961,49 +1025,93 @@ pub(super) fn behead(lines: &mut Vec<HyperlinkLine>) -> usize {
 
 /// A header's total, right-aligned.
 const TOTAL_WIDTH: usize = 6;
-/// A step's split: each part's label and the columns its value takes, shown or not.
-const SPLIT: [(&str, usize); 3] = [("thought:", 5), ("output:", 5), ("self:", 6)];
-const SPLIT_WIDTH: usize = {
-    let mut width = 0;
-    let mut part = 0;
-    while part < SPLIT.len() {
-        width += 2 + SPLIT[part].0.len() + 1 + SPLIT[part].1;
-        part += 1;
-    }
-    width
-};
+/// The columns each part of a step's split takes, shown or not: thought, output, self.
+const SPLIT: [usize; 3] = [5, 5, 7];
+const SPLIT_WIDTH: usize = 2 * SPLIT.len() + SPLIT[0] + SPLIT[1] + SPLIT[2];
+/// What the split's columns hold, said after them.
+const LEGEND: &str = "(thought, output, self)";
 const MIN_TITLE: usize = 16;
 const MAX_TITLE: usize = 48;
 
-/// How a header divides its row: the title's columns, and whether the split fits after the
-/// total.
-fn header_columns(width: u16) -> (usize, bool) {
+/// How far a header's figures reach along its row.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Reach {
+    Total,
+    Split,
+    Legend,
+}
+
+impl Reach {
+    const fn width(self) -> usize {
+        match self {
+            Self::Total => TOTAL_WIDTH,
+            Self::Split => TOTAL_WIDTH + SPLIT_WIDTH,
+            Self::Legend => TOTAL_WIDTH + SPLIT_WIDTH + 2 + LEGEND.len(),
+        }
+    }
+}
+
+/// How a header divides its row: the title's columns, and how far the figures after it reach.
+/// Every header at one width divides it alike, so their figures line up.
+fn header_columns(width: u16) -> (usize, Reach) {
     let room = usize::from(width)
         .saturating_sub(usize::from(crate::transcript_geometry::TITLE_COLUMN) + 1);
-    let split = room >= MIN_TITLE + TOTAL_WIDTH + SPLIT_WIDTH;
-    let figures = TOTAL_WIDTH + if split { SPLIT_WIDTH } else { 0 };
+    let reach = [Reach::Legend, Reach::Split]
+        .into_iter()
+        .find(|reach| room >= MIN_TITLE + reach.width())
+        .unwrap_or(Reach::Total);
     (
-        room.saturating_sub(figures).clamp(MIN_TITLE, MAX_TITLE),
-        split,
+        room.saturating_sub(reach.width())
+            .clamp(MIN_TITLE, MAX_TITLE),
+        reach,
     )
 }
 
-/// The split in its fixed columns; a part with nothing to report leaves its columns blank.
-fn split_spans(split: &Split) -> impl Iterator<Item = Span<'static>> + '_ {
-    SPLIT
-        .iter()
-        .zip([&split.thought, &split.output, &split.own])
-        .map(|((label, width), value)| match value {
-            Some(value) => format!("  {label} {value:>width$}", width = *width).dim(),
-            None => " ".repeat(2 + label.len() + 1 + width).into(),
-        })
+/// The split in its fixed columns, each part colored by its size like the total; a part with
+/// nothing to report leaves its column blank.
+fn split_spans(split: Split) -> impl Iterator<Item = Span<'static>> {
+    let [thought, output, own] = SPLIT;
+    let measured = |tokens: u64, width: usize| -> Span<'static> {
+        if tokens == 0 {
+            " ".repeat(width).into()
+        } else {
+            token_figure(token_label(tokens), tokens, width)
+        }
+    };
+    let own = match split.own {
+        Own::Pending => format!("{:>own$}", "…").dim(),
+        Own::Severed => format!("{:>own$}", "—").dim(),
+        Own::Measured {
+            tokens,
+            approximate,
+            pending,
+        } if tokens > 0 || pending => {
+            let approximate = if approximate { "≈" } else { "" };
+            let pending = if pending { "+…" } else { "" };
+            token_figure(
+                format!("{approximate}{}{pending}", token_label(tokens)),
+                tokens,
+                own,
+            )
+        }
+        Own::Measured { .. } => " ".repeat(own).into(),
+    };
+    [
+        measured(split.thought, thought),
+        measured(split.output, output),
+        own,
+    ]
+    .into_iter()
+    .flat_map(|figure| [Span::from("  "), figure])
 }
 
 /// The total, right-aligned and colored by size; placeholders stay dim.
 fn total_span(total: Total) -> Span<'static> {
     match total {
-        Total::Exact(tokens) => super::text::token_figure(String::new(), tokens, TOTAL_WIDTH),
-        Total::Approximate(tokens) => super::text::token_figure("≈".into(), tokens, TOTAL_WIDTH),
+        Total::Exact(tokens) => token_figure(token_label(tokens), tokens, TOTAL_WIDTH),
+        Total::Approximate(tokens) => {
+            token_figure(format!("≈{}", token_label(tokens)), tokens, TOTAL_WIDTH)
+        }
         Total::Pending => format!("{:>TOTAL_WIDTH$}", "…").dim(),
         Total::Severed => format!("{:>TOTAL_WIDTH$}", "—").dim(),
         Total::Unknown => " ".repeat(TOTAL_WIDTH).into(),

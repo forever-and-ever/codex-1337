@@ -64,8 +64,24 @@ pub(super) struct TextLayout {
     disclosure_controls: Vec<DisclosureControl>,
     heading: HeadingDecorations,
     output_mode: Option<OutputMode>,
-    /// A Feed Item's header rows, its fold and whether the item is unfolded.
-    feed_header: Option<(Vec<Line<'static>>, FoldTarget, bool)>,
+    feed_header: Option<HeaderRows>,
+}
+
+/// A Feed Item's synthetic header rows: its fold on the first, and a control their text draws.
+#[derive(Clone)]
+pub(super) struct HeaderRows {
+    pub(super) lines: Vec<Line<'static>>,
+    pub(super) fold: FoldTarget,
+    pub(super) unfolded: bool,
+    pub(super) control: Option<HeaderControl>,
+}
+
+/// A control drawn in a header row's own text, such as a Code Mode title's `[js]`.
+#[derive(Clone)]
+pub(super) struct HeaderControl {
+    pub(super) row: usize,
+    pub(super) columns: Range<u16>,
+    pub(super) target: FoldTarget,
 }
 
 #[derive(Default)]
@@ -92,6 +108,11 @@ enum DisclosurePlacement {
     Output {
         start: usize,
         end: usize,
+    },
+    /// Drawn in its row's own text, which owns its label and style.
+    Inline {
+        start: u16,
+        end: u16,
     },
 }
 
@@ -131,7 +152,7 @@ impl TextLayout {
                     control.target.clone(),
                 ),
                 // The header row is synthetic and returns with its line below.
-                DisclosurePlacement::Fold => layout,
+                DisclosurePlacement::Fold | DisclosurePlacement::Inline { .. } => layout,
                 DisclosurePlacement::Output { start, end } => {
                     if let FoldTarget::OutputMode(mode) = control.target {
                         layout.with_output_target(
@@ -147,8 +168,8 @@ impl TextLayout {
             };
         }
         layout.output_mode = self.output_mode;
-        if let Some((lines, target, unfolded)) = &self.feed_header {
-            layout = layout.with_fold_header(lines.clone(), target.clone(), *unfolded);
+        if let Some(rows) = &self.feed_header {
+            layout = layout.with_fold_header(rows.clone());
         }
         match (self.separated, self.ruled) {
             (true, true) => layout.with_leading_rule(),
@@ -335,6 +356,9 @@ impl TextLayout {
                 (anchor + start).min(usize::from(self.width)) as u16
                     ..(anchor + end).min(usize::from(self.width)) as u16
             }
+            DisclosurePlacement::Inline { start, end } => {
+                start.min(self.width)..end.min(self.width)
+            }
         }
     }
 
@@ -357,7 +381,11 @@ impl TextLayout {
                         usize::from(crate::transcript_geometry::TOKEN_COLUMNS),
                     ),
                     crate::transcript_geometry::TokenSeat::Trailing => {
-                        let span = gutter::token_figure(String::new(), tokens, /*width*/ 0);
+                        let span = gutter::token_figure(
+                            gutter::token_label(tokens),
+                            tokens,
+                            /*width*/ 0,
+                        );
                         let columns = span.width();
                         (span, line_width(&row.line.line) + 2, columns)
                     }

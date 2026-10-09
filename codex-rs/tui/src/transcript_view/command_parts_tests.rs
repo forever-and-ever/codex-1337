@@ -102,6 +102,7 @@ fn shell_rows_share_output_but_have_independent_source_folds() {
                 output_mode: None,
                 is_tool_entry: cells[0].is_tool_entry(),
                 header: parts.header,
+                preface: Vec::new(),
                 activity: parts.lines,
                 auxiliary: Vec::new(),
                 header_tokens: Some(2352),

@@ -205,6 +205,7 @@ fn mouse_selected_blockquote_copies_without_markers() {
         /*x*/ 0, /*y*/ 0, /*width*/ 32, /*height*/ 10,
     );
     view.render(area, &mut Buffer::empty(area), &cells);
+    // The reply's header takes row 0.
     for (kind, column) in [
         (MouseEventKind::Down(MouseButton::Left), 0),
         (MouseEventKind::Drag(MouseButton::Left), 31),
@@ -213,7 +214,7 @@ fn mouse_selected_blockquote_copies_without_markers() {
             MouseEvent {
                 kind,
                 column,
-                row: 0,
+                row: 1,
                 modifiers: KeyModifiers::NONE,
             },
             &cells,
