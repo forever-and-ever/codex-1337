@@ -44,6 +44,7 @@ impl App {
                     | AppEvent::RestoreFarmReceipt { .. }
                     | AppEvent::OpenWarnings
                     | AppEvent::Queue(_)
+                    | AppEvent::Submission(_)
                     | AppEvent::CopyWarning(_)
                     | AppEvent::UpdateWarnings { .. }
                     | AppEvent::CopySelection { .. }
@@ -320,6 +321,7 @@ impl App {
             }
             AppEvent::OpenWarnings => self.chat_widget.open_warnings(&self.transcript_cells),
             AppEvent::Queue(event) => self.handle_queue_event(app_server, event).await,
+            AppEvent::Submission(event) => self.handle_submission_event(event).await,
             AppEvent::UpdateWarnings { transcript, dismissed, kept } => {
                 if !Arc::ptr_eq(&transcript, &self.chat_widget.warning_display_state.transcript) {
                     return Ok(AppRunControl::Continue);
@@ -690,16 +692,7 @@ impl App {
                 tui.frame_requester().schedule_frame();
             }
             AppEvent::SubagentTextInput { thread_id, expected_turn_id, input } => {
-                let client_id = Uuid::new_v4().to_string();
-                let result = if let Some(turn_id) = expected_turn_id {
-                    app_server.turn_steer(thread_id, turn_id, client_id, input)
-                        .await.map(|_| ()).map_err(color_eyre::eyre::Report::from)
-                } else {
-                    app_server.turn_start_text(thread_id, client_id, input).await.map(|_| ())
-                };
-                if let Err(error) = result {
-                    self.chat_widget.add_error_message(format!("Could not send to agent {thread_id}: {error:#}"));
-                }
+                self.enqueue_subagent_turn(app_server, thread_id, expected_turn_id, input);
             }
             AppEvent::InsertHistoryCell(cell) => {
                 self.insert_history_cell(tui, cell);

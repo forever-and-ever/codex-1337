@@ -3203,6 +3203,7 @@ async fn server_only_profile_selection_keeps_turns_on_the_selected_profile() -> 
         .handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     let turn = next_user_turn_op(&mut ops);
     app.submit_thread_op(&mut server, thread_id, turn).await?;
+    app.settle_turn_submissions(&mut server).await?;
     server.startup_interrupt(thread_id).await?;
     let settings = next_thread_settings_updated(&mut server, thread_id).await;
     app.enqueue_thread_notification(
@@ -3263,6 +3264,7 @@ async fn server_only_profile_selection_keeps_turns_on_the_selected_profile() -> 
         *active_permission_profile = Some(ActivePermissionProfile::new("stale-profile"));
     }
     app.submit_thread_op(&mut server, thread_id, turn).await?;
+    app.settle_turn_submissions(&mut server).await?;
     let thread = server
         .thread_read(thread_id, /*include_turns*/ true)
         .await?;
@@ -6207,6 +6209,7 @@ async fn make_test_app() -> Box<App> {
         rate_limit_hard_stop_generation: 0,
         rate_limit_refresh_state: Default::default(),
         queued_messages: Default::default(),
+        turn_submissions: Default::default(),
         pending_plugin_enabled_writes: HashMap::new(),
         pending_hook_enabled_writes: HashMap::new(),
         recap: recap::RecapState::default(),
@@ -6327,6 +6330,7 @@ pub(super) async fn make_test_app_with_channels() -> (
             rate_limit_hard_stop_generation: 0,
             rate_limit_refresh_state: Default::default(),
             queued_messages: Default::default(),
+            turn_submissions: Default::default(),
             pending_plugin_enabled_writes: HashMap::new(),
             pending_hook_enabled_writes: HashMap::new(),
             recap: recap::RecapState::default(),

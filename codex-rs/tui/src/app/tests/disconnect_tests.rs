@@ -66,6 +66,7 @@ async fn lost_mutation_reply_preserves_work_without_resubmitting() -> Result<()>
             .await?,
         AppRunControl::Continue
     ));
+    app.settle_turn_submissions(&mut session).await?;
     assert!(app.reconnect.offline);
     assert!(!app.chat_widget.has_active_view());
     for key in [
@@ -117,13 +118,31 @@ async fn lost_mutation_reply_preserves_work_without_resubmitting() -> Result<()>
             "{}\n{}",
             lines_to_single_string(
                 &app.transcript_cells
-                    .last()
-                    .unwrap()
+                    .iter()
+                    .rev()
+                    .find(|cell| cell.as_any().is::<crate::history_cell::UserHistoryCell>())
+                    .expect("the optimistic user message remains in the transcript")
                     .display_lines(/*width*/ 80)
             ),
             render_bottom_popup(&app.chat_widget, /*width*/ 80)
         )
     );
+    let displayed_history = app
+        .transcript_cells
+        .iter()
+        .map(|cell| lines_to_single_string(&cell.display_lines(80)))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(displayed_history.matches("› only once").count(), 1);
+    assert!(displayed_history.contains("The original may still be delivered"));
+    assert!(displayed_history.contains("have not been resent"));
+    // Reconnect recovery must not recover the ledger's uncertain entry a second time.
+    let input = app.chat_widget.capture_thread_input_state();
+    app.chat_widget.restore_reconnected_input(input, &[]);
+    let recovered = render_bottom_popup(&app.chat_widget, 80);
+    assert_eq!(recovered.matches("only once").count(), 1);
+    assert!(!app.chat_widget.maybe_send_next_queued_input());
+    assert!(ops.try_recv().is_err());
     let mut keymap = codex_config::types::TuiKeymap::default();
     keymap.chat.edit_queued_message = Some(codex_config::types::KeybindingsSpec::One(
         codex_config::types::KeybindingSpec("ctrl-x up".into()),
@@ -144,6 +163,20 @@ async fn lost_mutation_reply_preserves_work_without_resubmitting() -> Result<()>
     assert_eq!(
         app.chat_widget.composer_text_with_pending(),
         "queued before disconnect"
+    );
+    // Discarding an unconfirmed recovered draft is local, not a remote cancellation.
+    app.handle_tui_event(
+        &mut tui,
+        &mut session,
+        TuiEvent::Key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::ALT)),
+    )
+    .await?;
+    assert!(ops.try_recv().is_err());
+    assert!(
+        !std::iter::from_fn(|| events.try_recv().ok()).any(|event| matches!(
+            event,
+            AppEvent::CodexOp(_) | AppEvent::Queue(QueueEvent::Remove { .. })
+        ))
     );
     assert!(!app.chat_widget.has_queued_follow_up_messages());
     let paste = "copied text ".repeat(/*n*/ 92);

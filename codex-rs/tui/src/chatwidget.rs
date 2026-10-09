@@ -283,6 +283,7 @@ mod image_submission;
 use self::ide_context::IdeContextState;
 mod input_queue;
 mod server_queue;
+mod turn_submissions;
 pub(crate) use server_queue::queued_message_text;
 mod reconnect;
 use self::input_queue::InputQueueState;
@@ -420,7 +421,7 @@ mod usage;
 mod user_messages;
 mod working_directory;
 use self::user_messages::MessageDelivery;
-use self::user_messages::PendingSteer;
+pub(crate) use self::user_messages::PendingSteer;
 #[cfg(test)]
 use self::user_messages::PendingSteerCompareKey;
 use self::user_messages::PendingSteerReplacement;
@@ -435,7 +436,7 @@ use self::user_messages::UserMessageDisplay;
 #[cfg(test)]
 use self::user_messages::UserMessageHistoryOverride;
 use self::user_messages::UserMessageHistoryRecord;
-use self::user_messages::UserMessageSource;
+pub(crate) use self::user_messages::UserMessageSource;
 use self::user_messages::app_server_text_elements;
 pub(crate) use self::user_messages::create_initial_user_message;
 pub(crate) use self::user_messages::mention_bindings_from_user_inputs;
@@ -708,6 +709,7 @@ pub(crate) struct ChatWidget {
     // order.
     suppress_initial_user_message_submit: bool,
     input_queue: InputQueueState,
+    submission_preview: crate::app::turn_submissions::SubmissionPreview,
     safety_buffering_prompt: Option<UserMessage>,
     safety_buffering_source: UserMessageSource,
     /// Main chat-surface bindings resolved from `tui.keymap.chat`.

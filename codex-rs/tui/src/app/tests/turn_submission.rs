@@ -164,6 +164,7 @@ async fn turn_start_failure_is_shown_without_exiting() -> Result<()> {
         .await?;
 
     assert!(matches!(control, AppRunControl::Continue));
+    app.settle_turn_submissions(&mut app_server).await?;
     let error_cell = std::iter::from_fn(|| app_event_rx.try_recv().ok())
         .find_map(|event| match event {
             AppEvent::InsertHistoryCell(cell) => Some(cell),

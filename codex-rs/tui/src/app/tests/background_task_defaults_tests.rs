@@ -973,6 +973,7 @@ async fn command_center_new_restores_blank_drafts_and_builtin_permissions() -> R
         .submit_user_message_as_plain_user_turn(crate::chatwidget::UserMessage::from("Hello"))
         .expect("submit the first turn");
     app.submit_thread_op(&mut server, startup, op).await?;
+    app.settle_turn_submissions(&mut server).await?;
     let turns = recorded_params(&requests, "turn/start");
     let params = turns.last().expect("turn/start was sent");
     assert_eq!(

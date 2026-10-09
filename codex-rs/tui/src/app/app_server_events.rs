@@ -89,6 +89,7 @@ impl App {
                 self.refresh_agents_overview_threads(app_server_client);
             }
             AppServerEvent::ServerNotification(mut notification) => {
+                self.note_submission_notification(notification.as_ref());
                 if let ServerNotification::ThreadWorkStatusUpdated(update) = notification.as_mut()
                     && update.status.emitted_at.is_none()
                 {

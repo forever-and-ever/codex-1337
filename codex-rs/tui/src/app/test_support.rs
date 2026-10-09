@@ -117,6 +117,7 @@ pub(crate) async fn make_test_app() -> App {
         rate_limit_hard_stop_generation: 0,
         rate_limit_refresh_state: Default::default(),
         queued_messages: Default::default(),
+        turn_submissions: Default::default(),
         pending_plugin_enabled_writes: HashMap::new(),
         pending_hook_enabled_writes: HashMap::new(),
         recap: recap::RecapState::default(),

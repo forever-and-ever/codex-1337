@@ -62,7 +62,7 @@ pub(super) enum ShellEscapePolicy {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-pub(super) enum UserMessageSource {
+pub(crate) enum UserMessageSource {
     Prompt,
     QuestionAnswer,
 }

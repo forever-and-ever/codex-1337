@@ -49,6 +49,7 @@ impl App {
             && self.chat_widget.can_reload_ui()
             && matches!(self.farm.state, farm::FarmRequestState::Idle)
             && self.queued_messages.mutations.is_empty()
+            && self.turn_submissions.is_empty()
             && self.overlay.is_none()
             && self.jira.is_none()
             && self.temporary_structured_requests.is_empty()

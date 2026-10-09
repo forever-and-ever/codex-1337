@@ -259,6 +259,7 @@ pub(crate) use provider_models::ProviderModelChoice;
 pub(crate) use provider_models::ProviderModelEvent;
 mod queued_messages;
 mod rate_limit_refresh;
+pub(crate) mod turn_submissions;
 pub(crate) use queued_messages::QueueEvent;
 mod comms;
 mod context_role;
@@ -679,6 +680,7 @@ pub(crate) struct App {
     account_ui: accounts::AccountUi,
     rate_limit_refresh_state: rate_limit_refresh::RateLimitRefreshState,
     queued_messages: queued_messages::QueuedMessages,
+    turn_submissions: turn_submissions::TurnSubmissions,
     // Serialize plugin enablement writes per plugin so stale completions cannot
     // overwrite a newer toggle, even if the plugin is toggled from different
     // cwd contexts.
@@ -1220,6 +1222,7 @@ impl App {
     }
 
     fn render_chat_widget_frame(&mut self, tui: &mut tui::Tui, screen_size: Size) -> Result<Rect> {
+        self.refresh_submission_preview();
         self.sync_thread_title_progress();
         self.chat_widget
             .set_sparkle_terminal_focus(tui.is_terminal_focused());

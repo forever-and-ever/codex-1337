@@ -340,7 +340,9 @@ async fn reconnect_restores_history_permissions_and_resumes_unsent_input() -> Re
                 "kept draft"
             }
         );
+        app.settle_turn_submissions(&mut session).await?;
         let history = drain_history(&mut app, &mut tui, &mut session, &mut events).await?;
+        app.settle_turn_submissions(&mut session).await?;
         let notices = history
             .lines()
             .filter(|line| {
@@ -393,6 +395,7 @@ async fn reconnect_restores_history_permissions_and_resumes_unsent_input() -> Re
         while let Ok(event) = events.try_recv() {
             app.handle_event(&mut tui, &mut session, event).await?;
         }
+        app.settle_turn_submissions(&mut session).await?;
         session.shutdown().await?;
         let methods = server.await??;
         assert_eq!(
@@ -547,6 +550,7 @@ async fn reconnect_reconciles_offscreen_pending_profile_before_restoring_permiss
             app.handle_event(&mut tui, &mut session, event).await?;
         }
     }
+    app.settle_turn_submissions(&mut session).await?;
     session.shutdown().await?;
     let methods = server.await??;
     assert_eq!(

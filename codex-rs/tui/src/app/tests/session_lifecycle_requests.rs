@@ -161,6 +161,7 @@ pub(super) enum HistoryCapabilities {
     ConfigReadUnknownVoice,
     VoiceCatalogCustom,
     VoiceCatalogUnavailable,
+    TurnSubmissionStalls,
 }
 
 /// Returns and resets `(thread/loaded/list, thread/read)` request counts.
@@ -348,6 +349,11 @@ pub(super) async fn start_recording_app_server_with_realtime_speech(
                         .push(request.clone());
                     if realtime_behavior == RealtimeRequestBehavior::AcceptSpeechAndStallStop
                         && request.method == "thread/realtime/stop"
+                    {
+                        continue;
+                    }
+                    if history_capabilities == HistoryCapabilities::TurnSubmissionStalls
+                        && matches!(request.method.as_str(), "turn/start" | "turn/steer")
                     {
                         continue;
                     }

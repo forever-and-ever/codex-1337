@@ -17,6 +17,8 @@ mod provider_selection_tests;
 mod realtime;
 mod rollout_history;
 mod thread_list;
+mod turn_submissions;
+pub(crate) use turn_submissions::turn_start_params;
 mod warming;
 
 #[cfg(test)]
@@ -125,14 +127,8 @@ use codex_app_server_protocol::ThreadUnsubscribeResponse;
 use codex_app_server_protocol::Turn;
 use codex_app_server_protocol::TurnInterruptParams;
 use codex_app_server_protocol::TurnInterruptResponse;
-use codex_app_server_protocol::TurnStartParams;
+#[cfg(test)]
 use codex_app_server_protocol::TurnStartResponse;
-use codex_app_server_protocol::TurnSteerCancelParams;
-use codex_app_server_protocol::TurnSteerCancelResponse;
-use codex_app_server_protocol::TurnSteerParams;
-use codex_app_server_protocol::TurnSteerReplaceParams;
-use codex_app_server_protocol::TurnSteerReplaceResponse;
-use codex_app_server_protocol::TurnSteerResponse;
 use codex_app_server_protocol::UserInput;
 use codex_config::ConfigLayerSource;
 use codex_otel::TelemetryAuthMode;
@@ -1213,6 +1209,7 @@ impl AppServerSession {
             .wrap_err("thread/inject_items failed during TUI side conversation setup")
     }
 
+    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn turn_start(
         &mut self,
@@ -1233,62 +1230,27 @@ impl AppServerSession {
         output_schema: Option<serde_json::Value>,
     ) -> Result<TurnStartResponse> {
         let request_id = self.next_request_id();
-        let (sandbox_policy, permissions) =
-            turn_permissions_overrides(permissions_override, cwd.as_path())?;
+        let params = turn_start_params(
+            thread_id,
+            client_user_message_id,
+            items,
+            cwd,
+            approval_policy,
+            approvals_reviewer,
+            permissions_override,
+            workspace_roots,
+            model,
+            effort,
+            summary,
+            service_tier,
+            collaboration_mode,
+            personality,
+            output_schema,
+        )?;
         self.client
-            .request_typed(ClientRequest::TurnStart {
-                request_id,
-                params: TurnStartParams {
-                    disabled_plugin_ids: None,
-                    thread_id: thread_id.to_string(),
-                    turn_trigger: Some("user".to_string()),
-                    client_user_message_id: Some(client_user_message_id),
-                    input: items,
-                    tool_output: None,
-                    responsesapi_client_metadata: None,
-                    additional_context: None,
-                    environments: None,
-                    cwd: Some(cwd),
-                    runtime_workspace_roots: Some(workspace_roots.to_vec()),
-                    approval_policy,
-                    approvals_reviewer,
-                    sandbox_policy,
-                    permissions,
-                    model: Some(model),
-                    service_tier,
-                    service_tier_for_turn: None,
-                    effort,
-                    summary,
-                    personality: personality_opt_out_only(personality),
-                    output_schema,
-                    collaboration_mode,
-                    multi_agent_mode: None,
-                    cyber_access_program: None,
-                },
-            })
+            .request_typed(ClientRequest::TurnStart { request_id, params })
             .await
             .wrap_err("turn/start failed in TUI")
-    }
-
-    pub(crate) async fn turn_start_text(
-        &mut self,
-        thread_id: ThreadId,
-        client_user_message_id: String,
-        input: Vec<UserInput>,
-    ) -> Result<TurnStartResponse> {
-        let request_id = self.next_request_id();
-        self.client
-            .request_typed(ClientRequest::TurnStart {
-                request_id,
-                params: TurnStartParams {
-                    thread_id: thread_id.to_string(),
-                    client_user_message_id: Some(client_user_message_id),
-                    input,
-                    ..Default::default()
-                },
-            })
-            .await
-            .wrap_err("turn/start failed")
     }
 
     pub(crate) async fn turn_interrupt(
@@ -1315,69 +1277,6 @@ impl AppServerSession {
         thread_id: ThreadId,
     ) -> std::result::Result<(), TypedRequestError> {
         self.turn_interrupt(thread_id, String::new()).await
-    }
-
-    pub(crate) async fn turn_steer(
-        &mut self,
-        thread_id: ThreadId,
-        turn_id: String,
-        client_user_message_id: String,
-        items: Vec<UserInput>,
-    ) -> std::result::Result<TurnSteerResponse, TypedRequestError> {
-        let request_id = self.next_request_id();
-        self.client
-            .request_typed(ClientRequest::TurnSteer {
-                request_id,
-                params: TurnSteerParams {
-                    thread_id: thread_id.to_string(),
-                    client_user_message_id: Some(client_user_message_id),
-                    input: items,
-                    responsesapi_client_metadata: None,
-                    additional_context: None,
-                    expected_turn_id: turn_id,
-                },
-            })
-            .await
-    }
-
-    pub(crate) async fn turn_steer_replace(
-        &mut self,
-        thread_id: ThreadId,
-        client_user_message_id: String,
-        input: Vec<UserInput>,
-    ) -> std::result::Result<bool, TypedRequestError> {
-        let request_id = self.next_request_id();
-        let response: TurnSteerReplaceResponse = self
-            .client
-            .request_typed(ClientRequest::TurnSteerReplace {
-                request_id,
-                params: TurnSteerReplaceParams {
-                    thread_id: thread_id.to_string(),
-                    client_user_message_id,
-                    input,
-                },
-            })
-            .await?;
-        Ok(response.replaced)
-    }
-
-    pub(crate) async fn turn_steer_cancel(
-        &mut self,
-        thread_id: ThreadId,
-        client_user_message_id: String,
-    ) -> std::result::Result<bool, TypedRequestError> {
-        let request_id = self.next_request_id();
-        let response: TurnSteerCancelResponse = self
-            .client
-            .request_typed(ClientRequest::TurnSteerCancel {
-                request_id,
-                params: TurnSteerCancelParams {
-                    thread_id: thread_id.to_string(),
-                    client_user_message_id,
-                },
-            })
-            .await?;
-        Ok(response.cancelled)
     }
 
     pub(crate) async fn thread_set_name(

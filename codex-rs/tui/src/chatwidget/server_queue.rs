@@ -111,7 +111,13 @@ impl ChatWidget {
             self.refresh_pending_input_preview();
             return true;
         }
+        if self.edit_waiting_submission(action) {
+            return true;
+        }
         let Some(item) = self.input_queue.server_messages.last().cloned() else {
+            if self.explain_sending_submission() {
+                return true;
+            }
             // Image preparation retains its attachments in the draft when cancelled.
             return self.cancel_image_submission();
         };
