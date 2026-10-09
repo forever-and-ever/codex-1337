@@ -19,6 +19,8 @@ use serde::Deserialize;
 use super::super::shell_spec::create_write_stdin_tool;
 use super::post_unified_exec_tool_use_payload;
 
+mod cell;
+
 #[derive(Debug, Deserialize)]
 struct WriteStdinArgs {
     // The model is trained on `session_id`.
@@ -31,7 +33,10 @@ struct WriteStdinArgs {
     max_output_tokens: Option<usize>,
 }
 
-pub struct WriteStdinHandler;
+#[derive(Default)]
+pub struct WriteStdinHandler {
+    caller: cell::Caller,
+}
 
 impl ToolExecutor<ToolInvocation> for WriteStdinHandler {
     fn tool_name(&self) -> ToolName {
@@ -39,7 +44,7 @@ impl ToolExecutor<ToolInvocation> for WriteStdinHandler {
     }
 
     fn spec(&self) -> ToolSpec {
-        create_write_stdin_tool()
+        self.caller.spec(create_write_stdin_tool())
     }
 
     fn supports_parallel_tool_calls(&self) -> bool {
@@ -89,7 +94,7 @@ impl WriteStdinHandler {
                 WriteStdinRequest {
                     process_id: args.session_id,
                     input: &args.chars,
-                    yield_time_ms: args.yield_time_ms,
+                    yield_time_ms: self.caller.yield_time_ms(&args.chars, args.yield_time_ms),
                     max_output_tokens: args.max_output_tokens,
                     truncation_policy: context
                         .step_context

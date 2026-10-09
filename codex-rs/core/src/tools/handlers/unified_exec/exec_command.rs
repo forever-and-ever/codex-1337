@@ -27,6 +27,7 @@ use crate::tools::registry::PostToolUsePayload;
 use crate::tools::registry::PreToolUsePayload;
 use crate::tools::registry::ToolExecutor;
 use crate::unified_exec::ExecCommandRequest;
+use crate::unified_exec::InitialWait;
 use crate::unified_exec::UnifiedExecContext;
 use crate::unified_exec::UnifiedExecError;
 use crate::unified_exec::UnifiedExecProcessManager;
@@ -53,6 +54,8 @@ use super::get_command;
 use super::post_unified_exec_tool_use_payload;
 use super::shell_mode_for_environment;
 
+mod cell;
+
 // A byte limit is a conservative hard token bound even for byte-fallback tokenizers.
 const EXEC_COMMAND_REJECTION_MAX_BYTES: usize = 900;
 
@@ -70,6 +73,7 @@ pub(crate) struct ExecCommandHandlerOptions {
 enum ExecCommandLifetime {
     Interactive,
     OneShot,
+    Cell,
 }
 
 pub struct ExecCommandHandler {
@@ -127,6 +131,7 @@ impl ToolExecutor<ToolInvocation> for ExecCommandHandler {
         let mut spec = match self.lifetime {
             ExecCommandLifetime::Interactive => spec,
             ExecCommandLifetime::OneShot => one_shot_exec_command_spec(spec),
+            ExecCommandLifetime::Cell => cell::spec(spec),
         };
         if !self.options.allow_tty
             && let ToolSpec::Function(spec) = &mut spec
@@ -310,13 +315,19 @@ impl ExecCommandHandler {
             ..
         } = args;
         let completion_timeout = match self.lifetime {
-            ExecCommandLifetime::Interactive => None,
+            ExecCommandLifetime::Interactive | ExecCommandLifetime::Cell => None,
             ExecCommandLifetime::OneShot => {
                 tty = false;
                 Some(Duration::from_millis(
                     timeout_ms.unwrap_or(DEFAULT_EXEC_COMMAND_TIMEOUT_MS),
                 ))
             }
+        };
+        let initial_wait = match self.lifetime {
+            ExecCommandLifetime::Interactive | ExecCommandLifetime::OneShot => {
+                InitialWait::Yield(yield_time_ms)
+            }
+            ExecCommandLifetime::Cell => cell::initial_wait(&arguments)?,
         };
 
         let exec_permission_approvals_enabled =
@@ -411,7 +422,7 @@ impl ExecCommandHandler {
             shell_type,
             hook_command: hook_command.clone(),
             process_id,
-            yield_time_ms,
+            initial_wait,
             max_output_tokens,
             cwd,
             sandbox_cwd: native_environment_cwd,
