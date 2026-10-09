@@ -1491,7 +1491,7 @@ impl App {
                 }
                 Err(read_err) => {
                     self.add_session_picker_error(format!(
-                        "Failed to view thread open elsewhere: {read_err}"
+                        "Failed to view thread open elsewhere: {read_err:#}"
                     ));
                     return Ok(AppRunControl::Continue);
                 }
@@ -1499,7 +1499,7 @@ impl App {
             Err(err) => {
                 let path_display = target_session.display_label();
                 self.add_session_picker_error(format!(
-                    "Failed to resume session from {path_display}: {err}"
+                    "Failed to resume session from {path_display}: {err:#}"
                 ));
                 return Ok(AppRunControl::Continue);
             }

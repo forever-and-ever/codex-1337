@@ -85,8 +85,11 @@ Uninstalled development binaries display `tui-dev`.
 install restarts. The executable reads its channel only from that manifest. Staging
 keeps its daemon's socket, startup lock and recovery record under `~/.codex/staging`,
 runs without remote control, and refuses daemon and remote-control subcommands.
-Configuration, credentials, sessions and SQLite state stay shared: never open one
-thread in both installations. `scripts/uninstall-local --staging` removes staging alone.
+Configuration, credentials, sessions and SQLite state stay shared, so either
+installation opens any thread, omitting stored history items its build cannot read.
+Continue a thread only in a build at least as new as the last one that wrote it: an
+older build also drops model input it cannot parse. `scripts/uninstall-local
+--staging` removes staging alone.
 
 ## Provider data
 

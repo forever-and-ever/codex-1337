@@ -51,6 +51,7 @@ use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::mcp::ClientMcpExtensions;
 use codex_protocol::protocol::ThreadHistoryMode;
 use codex_thread_store::PersistContext;
+use codex_thread_store::legible_item;
 use std::ops::ControlFlow;
 
 pub(super) const THREAD_LIST_DEFAULT_LIMIT: usize = 25;
@@ -3316,7 +3317,7 @@ impl ThreadRequestProcessor {
             })?;
         let mut turns = Vec::with_capacity(page.turns.len());
         for turn in page.turns {
-            let mut turn = stored_turn_to_api_turn(turn, items_view)?;
+            let mut turn = stored_turn_to_api_turn(turn, items_view);
             if matches!(items_view, TurnItemsView::Full) {
                 turn.items = self
                     .paginated_turn_full_items(thread_id, turn.id.as_str())
@@ -3367,9 +3368,11 @@ impl ThreadRequestProcessor {
                 })
                 .await
                 .map_err(paginated_history_list_error)?;
-            for item in page.items {
-                items.push(deserialize_stored_thread_item(item)?);
-            }
+            items.extend(
+                page.items
+                    .iter()
+                    .filter_map(|item| legible_item(&item.item_id, &item.item_json)),
+            );
             let Some(next_cursor) = page.next_cursor else {
                 return Ok(items);
             };
@@ -3515,57 +3518,65 @@ impl ThreadRequestProcessor {
             .map(|value| value as usize)
             .unwrap_or(THREAD_ITEMS_DEFAULT_LIMIT)
             .clamp(1, THREAD_ITEMS_MAX_LIMIT);
-        let page = self
-            .thread_store
-            .list_items(StoreListItemsParams {
-                thread_id,
-                turn_id,
-                include_archived: true,
-                position,
-                page_size,
-                sort_direction: match sort_direction.unwrap_or(SortDirection::Asc) {
-                    SortDirection::Asc => StoreSortDirection::Asc,
-                    SortDirection::Desc => StoreSortDirection::Desc,
-                },
-                sort_key: StoreItemSortKey::CreatedAtOrdinal,
-                after_updated_at_ordinal: None,
-            })
-            .await
-            .map_err(|err| match err {
-                ThreadStoreError::InvalidRequest { message } if has_anchor => {
-                    invalid_params(message)
-                }
-                ThreadStoreError::InvalidRequest { message } => invalid_request(message),
-                ThreadStoreError::Unsupported { .. } => {
-                    method_not_found("thread/items/list is not supported yet")
-                }
-                ThreadStoreError::ThreadNotFound { thread_id } => {
-                    invalid_request(format!("no rollout found for thread id {thread_id}"))
-                }
-                err => internal_error(format!("failed to list thread items: {err}")),
-            })?;
-        let data = page
-            .items
-            .into_iter()
-            .map(|stored_item| {
-                let turn_id = stored_item.turn_id.clone();
-                let started_at_ms = stored_item.started_at_ms;
-                let completed_at_ms = stored_item.completed_at_ms;
-                let item = deserialize_stored_thread_item(stored_item)?;
-                Ok(ThreadItemEntry {
-                    turn_id,
-                    item,
-                    started_at_ms,
-                    completed_at_ms,
+        let sort_direction = match sort_direction.unwrap_or(SortDirection::Asc) {
+            SortDirection::Asc => StoreSortDirection::Asc,
+            SortDirection::Desc => StoreSortDirection::Desc,
+        };
+        let mut position = position;
+        loop {
+            let page = self
+                .thread_store
+                .list_items(StoreListItemsParams {
+                    thread_id,
+                    turn_id: turn_id.clone(),
+                    include_archived: true,
+                    position: position.take(),
+                    page_size,
+                    sort_direction,
+                    sort_key: StoreItemSortKey::CreatedAtOrdinal,
+                    after_updated_at_ordinal: None,
                 })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(ThreadItemsListResponse {
-            data,
-            next_cursor: page.next_cursor,
-            backwards_cursor: page.backwards_cursor,
-        })
+                .await
+                .map_err(|err| match err {
+                    ThreadStoreError::InvalidRequest { message } if has_anchor => {
+                        invalid_params(message)
+                    }
+                    ThreadStoreError::InvalidRequest { message } => invalid_request(message),
+                    ThreadStoreError::Unsupported { .. } => {
+                        method_not_found("thread/items/list is not supported yet")
+                    }
+                    ThreadStoreError::ThreadNotFound { thread_id } => {
+                        invalid_request(format!("no rollout found for thread id {thread_id}"))
+                    }
+                    err => internal_error(format!("failed to list thread items: {err}")),
+                })?;
+            let data = page
+                .items
+                .into_iter()
+                .filter_map(|stored_item| {
+                    Some(ThreadItemEntry {
+                        item: legible_item(&stored_item.item_id, &stored_item.item_json)?,
+                        turn_id: stored_item.turn_id,
+                        started_at_ms: stored_item.started_at_ms,
+                        completed_at_ms: stored_item.completed_at_ms,
+                    })
+                })
+                .collect::<Vec<_>>();
+            // Clients read an empty page as the end of the history, so skip a page holding
+            // only items this build cannot read.
+            match page.next_cursor {
+                Some(cursor) if data.is_empty() => {
+                    position = Some(StoreListItemsPosition::Cursor(cursor));
+                }
+                next_cursor => {
+                    return Ok(ThreadItemsListResponse {
+                        backwards_cursor: page.backwards_cursor.filter(|_| !data.is_empty()),
+                        data,
+                        next_cursor,
+                    });
+                }
+            }
+        }
     }
 
     async fn load_thread_turns_list_history(
@@ -6033,21 +6044,7 @@ fn paginated_history_list_error(err: ThreadStoreError) -> JSONRPCErrorError {
     }
 }
 
-fn deserialize_stored_thread_item(
-    item: codex_thread_store::StoredThreadItem,
-) -> Result<ThreadItem, JSONRPCErrorError> {
-    serde_json::from_slice::<ThreadItem>(&item.item_json).map_err(|err| {
-        internal_error(format!(
-            "failed to deserialize stored thread item {}: {err}",
-            item.item_id
-        ))
-    })
-}
-
-fn stored_turn_to_api_turn(
-    turn: StoredTurn,
-    items_view: TurnItemsView,
-) -> Result<Turn, JSONRPCErrorError> {
+fn stored_turn_to_api_turn(turn: StoredTurn, items_view: TurnItemsView) -> Turn {
     let status = match turn.status {
         StoredTurnStatus::Completed => TurnStatus::Completed,
         StoredTurnStatus::Interrupted => TurnStatus::Interrupted,
@@ -6062,10 +6059,10 @@ fn stored_turn_to_api_turn(
     });
     let items = turn
         .items
-        .into_iter()
-        .map(deserialize_stored_thread_item)
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(Turn {
+        .iter()
+        .filter_map(|item| legible_item(&item.item_id, &item.item_json))
+        .collect();
+    Turn {
         id: turn.turn_id,
         items,
         items_view,
@@ -6074,7 +6071,7 @@ fn stored_turn_to_api_turn(
         started_at: turn.started_at,
         completed_at: turn.completed_at,
         duration_ms: turn.duration_ms,
-    })
+    }
 }
 
 pub(super) fn unsupported_thread_store_operation(operation: &'static str) -> JSONRPCErrorError {
