@@ -3,28 +3,6 @@ source: tui/src/app/activity_groups_tests.rs
 expression: "expected.iter().enumerate().map(|(index, cell)|\n{\n    let collapsed = text(cell); let expanded =\n    cell.expanded_hyperlink_lines(90).iter().map(|line|\n    line.line.to_string()).collect::<Vec<_>>().join(\"\\n\");\n    format!(\"cell {index} collapsed\\n{collapsed}\\nexpanded\\n{expanded}\")\n}).collect::<Vec<_>>().join(\"\\n\\n\")"
 ---
 cell 0 collapsed
-• Used computer · 1 action
-  └ Inspect direct
-expanded
-• Called
-  └ cua_repl.js({"title":"Inspect direct"})
-    Stored result · exact capture unavailable
-    Result direct
-
-cell 1 collapsed
-• Waited on ψγζζ
-expanded
-• Waited on ψγζζ
-
-cell 2 collapsed
-• Interrupted (Code Mode δοτζ)
-    • Inspect child-b
-expanded
-• Interrupted (Code Mode δοτζ)
-    • cua_repl.js({"title":"Inspect child-b"})
-  Stored result · exact capture unavailable
-
-cell 3 collapsed
 • Failed (Code Mode ψγζζ)
     • Inspect child-a1
     • Inspect child-a2
@@ -38,3 +16,25 @@ expanded
     • Generated Image:
         visible notify-a
         visible wait-output-a
+
+cell 1 collapsed
+• Interrupted (Code Mode δοτζ)
+    • Inspect child-b
+expanded
+• Interrupted (Code Mode δοτζ)
+    • cua_repl.js({"title":"Inspect child-b"})
+  Stored result · exact capture unavailable
+
+cell 2 collapsed
+• Used computer · 1 action
+  └ Inspect direct
+expanded
+• Called
+  └ cua_repl.js({"title":"Inspect direct"})
+    Stored result · exact capture unavailable
+    Result direct
+
+cell 3 collapsed
+• Waited on ψγζζ
+expanded
+• Waited on ψγζζ

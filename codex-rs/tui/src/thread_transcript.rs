@@ -219,12 +219,7 @@ fn append_thread_items(
                                 })
                             })
                     }) {
-                        if projection.terminal_transition {
-                            cells.remove(index);
-                            cells.push(projection.block);
-                        } else {
-                            cells[index] = projection.block;
-                        }
+                        cells[index] = projection.block;
                     } else {
                         cells.push(projection.block);
                     }

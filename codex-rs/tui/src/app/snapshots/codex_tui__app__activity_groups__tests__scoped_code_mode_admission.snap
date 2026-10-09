@@ -12,11 +12,11 @@ Held reading
 Return to live
                 • Before script
 
-                • Calling (Code Mode βεθε)
-                    • Inspect child-b
          10 [+] • Called (Code Mode ρξωζ)
                     • Explored
                         Read child-a.rs (whole file)
+                • Calling (Code Mode βεθε)
+                    • Inspect child-b
             [+] • Waited on ρξωζ
 
 Terminal interactions

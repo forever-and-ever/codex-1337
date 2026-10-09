@@ -1102,15 +1102,16 @@ async fn interleaved_scripts_keep_exact_ownership_after_terminal_wait_and_replay
             .collect::<Vec<_>>()
             .join("\n")
     };
-    assert!(text(&expected[0]).contains("direct"));
-    assert!(text(&expected[1]).contains("Waited on"));
-    assert!(text(&expected[2]).contains("Interrupted (Code Mode"));
-    assert!(text(&expected[3]).contains("Failed (Code Mode"));
-    assert!(!text(&expected[3]).contains("direct"));
-    assert!(!text(&expected[3]).contains("child-b"));
-    assert!(!text(&expected[3]).contains("visible notify-a"));
+    // Finished blocks keep their places ahead of the calls and waits that followed them.
+    assert!(text(&expected[0]).contains("Failed (Code Mode"));
+    assert!(text(&expected[1]).contains("Interrupted (Code Mode"));
+    assert!(text(&expected[2]).contains("direct"));
+    assert!(text(&expected[3]).contains("Waited on"));
+    assert!(!text(&expected[0]).contains("direct"));
+    assert!(!text(&expected[0]).contains("child-b"));
+    assert!(!text(&expected[0]).contains("visible notify-a"));
     assert!(
-        expected[3]
+        expected[0]
             .expanded_hyperlink_lines(/*width*/ 90)
             .iter()
             .any(|line| line.line.to_string().contains("visible wait-output-a"))
@@ -1166,7 +1167,7 @@ async fn interleaved_scripts_keep_exact_ownership_after_terminal_wait_and_replay
                 .transcript_view
                 .activity_output_tokens(&cell.activity_ids()))
             .collect::<Vec<_>>(),
-        vec![None, None, None, Some(40)]
+        vec![Some(40), None, None, None]
     );
 }
 
@@ -1286,7 +1287,7 @@ async fn returned_batches_keep_one_disclosure_and_bill_across_live_replay_and_pa
         let expected = project(&app, &current.items);
         assert_eq!(expected.len(), 3);
         // A discarded child may contain anything; only returned batches are output authority.
-        let detail = expected[1].expanded_hyperlink_lines(/*width*/ 240);
+        let detail = expected[0].expanded_hyperlink_lines(/*width*/ 240);
         let text = detail
             .iter()
             .map(|line| line.line.to_string())
@@ -1427,7 +1428,7 @@ async fn returned_batches_keep_one_disclosure_and_bill_across_live_replay_and_pa
                     .transcript_view
                     .activity_output_tokens(&cell.activity_ids()))
                 .collect::<Vec<_>>(),
-            vec![None, Some(1280), Some(20)]
+            vec![Some(1280), None, Some(20)]
         );
         for expanded in [false, true] {
             if expanded {
