@@ -32,7 +32,8 @@
 //! Plain Left opens agents when the local-daemon composer is empty and available for input.
 //! Explicit editor remaps take precedence.
 //! Parent-owned children retain command restrictions; loaded children may submit plain text
-//! immediately, without prompt-history recall or queued follow-ups.
+//! immediately, with the same draft-history recall and search as root conversations, but without
+//! queued follow-ups.
 //!
 //! Most key handling goes through [`ChatComposer::handle_key_event`], which dispatches to a
 //! popup-specific handler if a popup is visible and otherwise to
@@ -384,6 +385,7 @@ use codex_protocol::user_input::TextElement;
 
 mod agents_navigation;
 mod attachment_state;
+mod child_input;
 mod completion_target;
 mod composer_layout;
 mod draft_state;
@@ -2004,11 +2006,11 @@ impl ChatComposer {
             return self.handle_history_search_key(key_event);
         }
 
-        if !self.blocks_direct_input && self.handle_vim_history_key(key_event) {
+        if self.history_recall_available() && self.handle_vim_history_key(key_event) {
             return (InputResult::None, true);
         }
 
-        if !self.blocks_direct_input
+        if self.history_recall_available()
             && Self::is_history_search_key(&key_event, &self.history_search_previous_keys)
         {
             return self.begin_history_search();
@@ -3610,7 +3612,7 @@ impl ChatComposer {
             )
         };
         if history_up_pressed || history_down_pressed {
-            if !self.blocks_direct_input
+            if self.history_recall_available()
                 && self.draft.textarea.mouse_selection_range().is_none()
                 && self.history.should_handle_navigation(
                     &self.current_text(),

@@ -2701,8 +2701,8 @@ fn selected_and_resumed_threads_use_server_capability_for_v1_and_v2_children() -
         // Even with a root turn present, Ctrl+C in the child view must not target it.
         let root_store = Arc::clone(&app.ensure_thread_channel(root_thread_id).store);
         root_store.lock().await.set_active_turn_id("root-turn".to_string());
-        assert!(app.handle_subagent_panel_key(&mut tui, &mut app_server,
-            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)).await);
+        Box::pin(app.handle_key_event(&mut tui, &mut app_server,
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL))).await;
         assert_eq!(root_store.lock().await.pending_interrupt_turn_id, None);
         Box::pin(app.handle_key_event(&mut tui, &mut app_server,
             KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))).await;
