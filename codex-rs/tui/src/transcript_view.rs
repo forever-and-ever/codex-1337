@@ -10,6 +10,7 @@ mod bookmark;
 mod composer_gap;
 mod disclosure;
 mod disclosure_navigation;
+mod feed;
 mod follow_control;
 mod footer;
 mod input;
@@ -46,6 +47,7 @@ use snapshot::ViewSnapshot;
 use text::TextLayout;
 
 pub(crate) use bookmark::TranscriptBookmark;
+pub(crate) use feed::FeedEntry;
 pub(crate) use input::JumpTarget;
 pub(crate) use input::ViewAction;
 pub(crate) use layout::ActivityTranscriptLines;
@@ -99,6 +101,7 @@ pub(crate) struct TranscriptView {
     cache: LayoutCache,
     live: Option<Arc<TextLayout>>,
     live_separated: Option<Arc<TextLayout>>,
+    live_ruled: Option<Arc<TextLayout>>,
     live_key: Option<(u16, ActiveCellTranscriptKey)>,
     live_continuation: bool,
     live_tool_entry: bool,
@@ -120,6 +123,7 @@ pub(crate) struct TranscriptView {
     disclosure: disclosure::Disclosure,
     tool_output_tokens: tool_output_tokens::ToolOutputTokens,
     step_bills: step_bills::StepBills,
+    feed: feed::FeedIndex,
 }
 
 impl Default for TranscriptView {
@@ -135,6 +139,7 @@ impl Default for TranscriptView {
             cache: LayoutCache::default(),
             live: None,
             live_separated: None,
+            live_ruled: None,
             live_key: None,
             live_continuation: false,
             live_tool_entry: false,
@@ -156,6 +161,7 @@ impl Default for TranscriptView {
             disclosure: disclosure::Disclosure::default(),
             tool_output_tokens: Default::default(),
             step_bills: Default::default(),
+            feed: Default::default(),
         }
     }
 }
@@ -353,6 +359,7 @@ impl TranscriptView {
             || self.live_key.map(|(_, key)| key.revision) != next.map(|(_, key)| key.revision);
         self.live_key = next;
         self.live_separated = None;
+        self.live_ruled = None;
         self.live_continuation = key.is_some_and(|key| key.is_stream_continuation);
         let live = layout(width, &self.disclosure.expanded).map(|(layout, tool_entry)| {
             self.live_tool_entry = tool_entry;

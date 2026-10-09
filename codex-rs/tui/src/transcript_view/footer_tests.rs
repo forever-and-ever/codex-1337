@@ -484,7 +484,6 @@ fn code_mode_batches_display_their_own_counts_and_replay_without_double_counting
                     },
                     auxiliary: Vec::new(),
                     header_tokens,
-                    header_bill: None,
                     disclosure: tail.activity_disclosure(width),
                 })
             },
@@ -695,7 +694,6 @@ fn activity_focus_keeps_controls_without_passive_hints() {
                     },
                     auxiliary: Vec::new(),
                     header_tokens,
-                    header_bill: None,
                     disclosure: cell.activity_disclosure(width),
                 })
             },

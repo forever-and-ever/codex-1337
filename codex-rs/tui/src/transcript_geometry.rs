@@ -1,5 +1,7 @@
 //! Rich transcript geometry. Clocks and disclosures never enter selectable source.
 //! Marker-bearing entries share a fixed content column; cards retain cell-owned markers.
+//! A Feed Item's header puts its fold after the clock and its title at `TITLE_COLUMN`; the
+//! item's members keep the content column, offset under the title.
 
 use crate::history_cell::HistoryCell;
 use crate::history_cell::HistoryRenderMode;
@@ -8,9 +10,12 @@ use crate::terminal_hyperlinks::prefix_hyperlink_lines;
 
 pub(crate) const DISCLOSURE_COLUMNS: u16 = 3;
 pub(crate) const CLOCK_COLUMNS: u16 = 6;
+/// A loose row's tokens share the columns a feed header gives its fold.
 pub(crate) const TOKEN_COLUMN: u16 = CLOCK_COLUMNS;
 pub(crate) const TOKEN_COLUMNS: u16 = 5;
-pub(crate) const DISCLOSURE_COLUMN: u16 = TOKEN_COLUMN + TOKEN_COLUMNS + 1;
+pub(crate) const FOLD_COLUMN: u16 = CLOCK_COLUMNS;
+pub(crate) const TITLE_COLUMN: u16 = FOLD_COLUMN + DISCLOSURE_COLUMNS + 1;
+pub(crate) const DISCLOSURE_COLUMN: u16 = TITLE_COLUMN + 2;
 pub(crate) const GUTTER_COLUMNS: u16 = DISCLOSURE_COLUMN + DISCLOSURE_COLUMNS + 1;
 pub(crate) const MARKER_COLUMNS: u16 = 2;
 pub(crate) const BODY_COLUMN: u16 = GUTTER_COLUMNS + MARKER_COLUMNS;

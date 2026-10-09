@@ -23,6 +23,7 @@ mod activity;
 #[path = "text_gutter.rs"]
 mod gutter;
 
+pub(super) use gutter::token_figure;
 pub(super) use gutter::token_label;
 
 use ratatui::buffer::Buffer;
@@ -57,17 +58,21 @@ pub(super) struct TextLayout {
     rows: Vec<TextRow>,
     width: u16,
     pub(super) separated: bool,
+    /// The leading gap is drawn as the rule above live work.
+    ruled: bool,
     pub(super) disclosure: bool,
     disclosure_controls: Vec<DisclosureControl>,
     heading: HeadingDecorations,
     output_mode: Option<OutputMode>,
+    /// A Feed Item's header row: its line, fold and whether the item is unfolded.
+    feed_header: Option<(Line<'static>, FoldTarget, bool)>,
 }
 
 #[derive(Default)]
 struct HeadingDecorations {
+    /// A loose row's tokens, in the gutter its feed header would use for the fold.
     tokens: Option<u64>,
-    /// Display-only text after the heading: output controls or a step's bill.
-    decoration: Option<(usize, String)>,
+    output_controls: Option<(usize, String)>,
 }
 
 struct DisclosureControl {
@@ -83,7 +88,12 @@ enum DisclosurePlacement {
     Row,
     Inline,
     Leading,
-    Output { start: usize, end: usize },
+    /// A Feed Item's fold, after the clock on its header row.
+    Fold,
+    Output {
+        start: usize,
+        end: usize,
+    },
 }
 
 struct TextRow {
@@ -108,7 +118,7 @@ impl TextLayout {
     pub(super) fn rewrap(&self, width: u16) -> Self {
         let mut layout = Self::from_logical(self.logical.clone(), width);
         layout.heading.tokens = self.heading.tokens;
-        if let Some((offset, label)) = &self.heading.decoration {
+        if let Some((offset, label)) = &self.heading.output_controls {
             layout = layout.with_inline_decoration_at(*offset, label.clone());
         }
         for control in &self.disclosure_controls {
@@ -123,6 +133,8 @@ impl TextLayout {
                         control.source_offset,
                         control.target.clone(),
                     ),
+                    // The header row is synthetic and returns with its line below.
+                    DisclosurePlacement::Fold => layout,
                     DisclosurePlacement::Output { start, end } => {
                         if let FoldTarget::OutputMode(mode) = control.target {
                             layout.with_output_target(
@@ -138,10 +150,13 @@ impl TextLayout {
                 };
         }
         layout.output_mode = self.output_mode;
-        if self.separated {
-            layout.with_leading_separator()
-        } else {
-            layout
+        if let Some((line, target, unfolded)) = &self.feed_header {
+            layout = layout.with_fold_header(line.clone(), target.clone(), *unfolded);
+        }
+        match (self.separated, self.ruled) {
+            (true, true) => layout.with_leading_rule(),
+            (true, false) => layout.with_leading_separator(),
+            (false, _) => layout,
         }
     }
 
@@ -232,22 +247,39 @@ impl TextLayout {
     /// Reserve one presentation-only row before existing spacing and source text.
     pub(super) fn with_leading_spacer(mut self) -> Self {
         if !self.rows.is_empty() {
-            self.rows.insert(
-                /*index*/ 0,
-                TextRow {
-                    line: HyperlinkLine::from(""),
-                    source: 0..0,
-                    line_end: None,
-                    content_width: self.width,
-                    first_column: 0,
-                    prefix_columns: 0,
-                    tabs: tabs::TabStops::default(),
-                    inline_decoration: None,
-                },
-            );
-            for control in &mut self.disclosure_controls {
-                control.row += 1;
-            }
+            self = self.with_leading_row(Line::default());
+        }
+        self
+    }
+
+    /// Insert a presentation-only row before all others, even in an entry without source.
+    pub(super) fn with_leading_row(mut self, line: Line<'static>) -> Self {
+        self.rows.insert(
+            /*index*/ 0,
+            TextRow {
+                line: HyperlinkLine::from(line),
+                source: 0..0,
+                line_end: None,
+                content_width: self.width,
+                first_column: 0,
+                prefix_columns: 0,
+                tabs: tabs::TabStops::default(),
+                inline_decoration: None,
+            },
+        );
+        for control in &mut self.disclosure_controls {
+            control.row += 1;
+        }
+        self
+    }
+
+    /// Draw the gap above the entry as a rule: live work follows it.
+    pub(super) fn with_leading_rule(mut self) -> Self {
+        if !self.separated && !self.rows.is_empty() {
+            let width = usize::from(self.width);
+            self = self.with_leading_row(Line::from("─".repeat(width)).dim());
+            self.separated = true;
+            self.ruled = true;
         }
         self
     }
@@ -332,6 +364,12 @@ impl TextLayout {
                         + crate::transcript_geometry::DISCLOSURE_COLUMNS)
                         .min(self.width)
             }
+            DisclosurePlacement::Fold => {
+                crate::transcript_geometry::FOLD_COLUMN.min(self.width)
+                    ..(crate::transcript_geometry::FOLD_COLUMN
+                        + crate::transcript_geometry::DISCLOSURE_COLUMNS)
+                        .min(self.width)
+            }
             DisclosurePlacement::Output { start, end } => {
                 let anchor = row.inline_decoration.map_or(0, |(column, _)| column);
                 (anchor + start).min(usize::from(self.width)) as u16
@@ -368,6 +406,7 @@ impl TextLayout {
                     control.placement,
                     DisclosurePlacement::Inline
                         | DisclosurePlacement::Leading
+                        | DisclosurePlacement::Fold
                         | DisclosurePlacement::Output { .. }
                 ) && control.row == start_row + usize::from(screen_row)
             }) {
@@ -562,10 +601,12 @@ impl TextLayout {
             rows,
             width,
             separated: false,
+            ruled: false,
             disclosure: false,
             disclosure_controls: Vec::new(),
             output_mode: None,
             heading: HeadingDecorations::default(),
+            feed_header: None,
         }
     }
 }

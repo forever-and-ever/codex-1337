@@ -399,14 +399,16 @@ fn item_to_cells(
                 remote_image_urls: item.image_urls(),
             }));
         }
-        ThreadItem::AgentMessage { text, .. } => {
+        ThreadItem::AgentMessage { id, text, .. } => {
             let parsed = parse_assistant_markdown(&text, cwd.as_path());
             if !parsed.visible_markdown.trim().is_empty() {
-                cells.push(Arc::new(AgentMarkdownCell::new_with_inline_visualizations(
+                let mut cell = AgentMarkdownCell::new_with_inline_visualizations(
                     parsed.visible_markdown,
                     cwd.as_path(),
                     inline_visualization_context,
-                )));
+                );
+                cell.item_id = Some(id);
+                cells.push(Arc::new(cell));
             }
         }
         ThreadItem::FunctionCallOutput {

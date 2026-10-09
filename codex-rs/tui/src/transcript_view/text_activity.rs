@@ -18,31 +18,24 @@ impl TextLayout {
         self
     }
 
-    /// Display-only text after the heading: a step's bill, then output controls when shown.
-    pub(in crate::transcript_view) fn with_heading_extras(
+    pub(in crate::transcript_view) fn with_output_controls(
         mut self,
         offset: usize,
-        bill: Option<String>,
-        mode: Option<OutputMode>,
+        mode: OutputMode,
     ) -> Self {
-        let mut decoration = bill.unwrap_or_default();
+        let mut decoration = String::new();
         let mut controls = Vec::new();
-        if mode.is_some() {
-            for (mode, label) in [(OutputMode::Raw, "[Raw]"), (OutputMode::Fmt, "[Fmt]")] {
-                decoration.push(' ');
-                let start = display_width(&decoration);
-                decoration.push_str(label);
-                controls.push((mode, label, start..display_width(&decoration)));
-            }
-        }
-        if decoration.is_empty() {
-            return self;
+        for (mode, label) in [(OutputMode::Raw, "[Raw]"), (OutputMode::Fmt, "[Fmt]")] {
+            decoration.push(' ');
+            let start = display_width(&decoration);
+            decoration.push_str(label);
+            controls.push((mode, label, start..display_width(&decoration)));
         }
         self = self.with_inline_decoration_at(offset, decoration);
         for (mode, label, columns) in controls {
             self = self.with_output_target(label.into(), offset, mode, columns);
         }
-        self.output_mode = mode;
+        self.output_mode = Some(mode);
         self
     }
 
@@ -118,6 +111,26 @@ impl TextLayout {
         )
     }
 
+    /// Head the layout with a Feed Item's header row, its fold after the clock.
+    pub(in crate::transcript_view) fn with_fold_header(
+        self,
+        line: Line<'static>,
+        target: FoldTarget,
+        unfolded: bool,
+    ) -> Self {
+        let mut layout = self.with_leading_row(line.clone());
+        layout.disclosure = true;
+        layout.disclosure_controls.push(DisclosureControl {
+            target: target.clone(),
+            label: if unfolded { "[-]" } else { "[+]" }.into(),
+            source_offset: 0,
+            row: 0,
+            placement: DisclosurePlacement::Fold,
+        });
+        layout.feed_header = Some((line, target, unfolded));
+        layout
+    }
+
     pub(in crate::transcript_view) fn fold_targets(&self) -> Vec<FoldTarget> {
         let mut controls: Vec<_> = self.disclosure_controls.iter().collect();
         controls.sort_by_key(|control| (control.row, self.control_columns(control).start));
@@ -186,7 +199,7 @@ impl TextLayout {
             }
         }
         row.inline_decoration = Some((column, width));
-        self.heading.decoration = Some((offset, label));
+        self.heading.output_controls = Some((offset, label));
         self
     }
 }

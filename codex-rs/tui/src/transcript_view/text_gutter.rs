@@ -1,4 +1,4 @@
-//! Fixed-width, display-only token bills. Accounting remains integer-valued upstream.
+//! Display-only token figures. Accounting remains integer-valued upstream.
 
 use crate::color::blend;
 use crate::terminal_palette::best_color;
@@ -8,8 +8,22 @@ use crate::terminal_palette::rgb_color;
 use ratatui::style::Style;
 use ratatui::text::Span;
 
+/// A loose row's tokens, right-aligned in the gutter.
 pub(super) fn token_span(tokens: u64) -> Span<'static> {
-    let label = token_label(tokens);
+    token_figure(
+        String::new(),
+        tokens,
+        usize::from(crate::transcript_geometry::TOKEN_COLUMNS),
+    )
+}
+
+/// A right-aligned total colored by its size.
+pub(in crate::transcript_view) fn token_figure(
+    prefix: String,
+    tokens: u64,
+    width: usize,
+) -> Span<'static> {
+    let label = format!("{prefix}{}", token_label(tokens));
     let color = match tokens {
         0..=1_000 => {
             let alpha = if tokens <= 300 { 0.2 } else { 0.45 };
@@ -30,7 +44,6 @@ pub(super) fn token_span(tokens: u64) -> Span<'static> {
             crate::style::readable_color_on(rgb_color((220, 65, 65)), /*background*/ None)
         }
     };
-    let width = usize::from(crate::transcript_geometry::TOKEN_COLUMNS);
     Span::styled(format!("{label:>width$}"), Style::reset().fg(color))
 }
 

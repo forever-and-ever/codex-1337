@@ -2,13 +2,21 @@
 //!
 //! Mutable cells refresh each frame, then share that frame's layout across measurement and paint.
 //! Stable cells also invalidate when animation ticks, syntax themes, or terminal colors change.
+//! A Feed Item's header is a row of the entry it heads, and the rule above live work draws
+//! in the gap before it, so committing live work never moves the entries around it; see
+//! `feed`.
 
+use super::feed;
+use super::feed::Content;
+use super::feed::Seat;
 use crate::history_cell::ActivityDisclosure;
 use crate::history_cell::ReasoningSummaryCell;
 use crate::history_cell::ToolOutputGroup;
 use crate::history_cell::output_provenance::OutputMode;
 use crate::key_hint::ShortcutHint;
 use crate::keymap::KeymapContext;
+use std::hash::Hash;
+use std::hash::Hasher;
 use std::sync::Weak;
 
 use super::*;
@@ -23,9 +31,8 @@ pub(crate) struct ActivityTranscriptLines {
     pub(crate) activity: Vec<HyperlinkLine>,
     pub(crate) header: Option<crate::history_cell::activity_parts::ActivityHeader>,
     pub(crate) auxiliary: Vec<HyperlinkLine>,
+    /// The row's tokens in the gutter, when no Feed Item bills it.
     pub(crate) header_tokens: Option<u64>,
-    /// The bill of the steps the row heads, shown after its header.
-    pub(crate) header_bill: Option<String>,
     pub(crate) disclosure: Option<ActivityDisclosure>,
     pub(crate) controls: Vec<crate::history_cell::activity_parts::PartControl>,
 }
@@ -97,12 +104,8 @@ pub(super) fn activity_layout(
     for part in lines.controls {
         layout = layout.with_part_control(part);
     }
-    if let Some(header) = lines.header {
-        layout = layout.with_heading_extras(
-            header.source_offset,
-            lines.header_bill,
-            lines.output_mode.filter(|_| expanded),
-        );
+    if expanded && let (Some(mode), Some(header)) = (lines.output_mode, lines.header) {
+        layout = layout.with_output_controls(header.source_offset, mode);
     }
     layout
 }
@@ -134,10 +137,14 @@ struct CachedLayout {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) struct CellPresentation {
     separated: bool,
+    /// The gap above the entry is the rule above live work.
+    rule: bool,
     turn_tip_space: bool,
     expanded: bool,
     disclosure: bool,
     continued_edit: bool,
+    /// The digest of the entry's feed rows; zero when it draws as a loose entry.
+    feed: u64,
 }
 
 impl TranscriptView {
@@ -181,31 +188,21 @@ impl TranscriptView {
         cells: &[Arc<dyn HistoryCell>],
         index: usize,
     ) -> Option<Arc<TextLayout>> {
-        if self.elides_cell(cells, index) {
+        if index > cells.len() {
+            return None;
+        }
+        let seat = self.feed_seat(cells, index);
+        if self.elides_cell(cells, index) || !seat.is_visible() {
             return Some(Arc::new(TextLayout::new(
                 Vec::new(),
                 self.area.width.max(/*other*/ 1),
             )));
         }
-        let previous = cells
-            .get(..index)?
-            .iter()
-            .enumerate()
-            .rev()
-            .find(|(index, cell)| {
-                !self.elides_cell(cells, *index)
-                    && (self.detailed
-                        || self.mode != HistoryRenderMode::Rich
-                        || !cell
-                            .as_any()
-                            .downcast_ref::<ReasoningSummaryCell>()
-                            .is_some_and(ReasoningSummaryCell::is_transcript_only))
-            })
-            .map(|(_, cell)| cell);
+        let previous_index = self.previous_visible(cells, index);
+        let rule = previous_index.is_some() && self.feed_rule(cells, index);
+        let previous = previous_index.and_then(|previous| cells.get(previous));
+        let width = self.area.width.max(/*other*/ 1);
         let Some(cell) = cells.get(index) else {
-            if index != cells.len() {
-                return None;
-            }
             let live = self.live.as_ref()?;
             if !crate::transcript_geometry::separated(
                 previous.map(AsRef::as_ref),
@@ -214,12 +211,15 @@ impl TranscriptView {
             ) {
                 return Some(Arc::clone(live));
             }
-            let width = self.area.width.max(/*other*/ 1);
+            if rule {
+                return Some(Arc::clone(self.live_ruled.get_or_insert_with(|| {
+                    Arc::new(live.rewrap(width).with_leading_rule())
+                })));
+            }
             return Some(Arc::clone(self.live_separated.get_or_insert_with(|| {
                 Arc::new(live.rewrap(width).with_leading_separator())
             })));
         };
-        let width = self.area.width.max(/*other*/ 1);
         // Session information belongs before all history, including pages not loaded yet.
         // Pinned displayed revisions above remain visible; hidden headers never enter the cache.
         if self.history.has_unloaded_history()
@@ -229,17 +229,18 @@ impl TranscriptView {
         }
         let detailed = self.detailed;
         let mode = self.mode;
+        let loose = seat.content == Content::Loose;
         let ids = cell.activity_ids();
         let disclosure = !detailed && mode == HistoryRenderMode::Rich && !ids.is_empty();
         let expanded = disclosure && self.disclosure.is_expanded(&ids);
         let output_mode = self.disclosure.output_mode(&ids);
-        let bill = self.step_bill(cell.as_ref());
-        let header_tokens = bill
-            .as_ref()
-            .and_then(|bill| bill.total)
-            .or_else(|| cell.activity_header_tokens())
-            .or_else(|| self.activity_output_tokens(&ids));
-        let header_bill = bill.map(|bill| bill.decoration);
+        // A member's figures belong to its item's header; a loose row keeps its own tokens.
+        let header_tokens = loose
+            .then(|| {
+                cell.activity_header_tokens()
+                    .or_else(|| self.activity_output_tokens(&ids))
+            })
+            .flatten();
         let continued_edit = disclosure
             && !cell.is_stream_continuation()
             && ToolOutputGroup::is_patch(cell.as_ref())
@@ -247,26 +248,67 @@ impl TranscriptView {
         if expanded {
             self.disclosure.expanded.extend(ids);
         }
-        let separated = crate::transcript_geometry::separated(
-            previous.map(AsRef::as_ref),
-            cell.is_tool_entry(),
-            cell.is_stream_continuation(),
-        );
+        let separated = match &seat.header {
+            Some(header) => {
+                previous_index.is_some()
+                    && (header.spacious
+                        || !previous_index.is_some_and(|previous| self.feed.compact(previous)))
+            }
+            None if loose => crate::transcript_geometry::separated(
+                previous.map(AsRef::as_ref),
+                cell.is_tool_entry(),
+                cell.is_stream_continuation(),
+            ),
+            None => false,
+        };
         let presentation = CellPresentation {
             separated,
+            rule: separated && rule,
             turn_tip_space: self.turn_tip_key == Some(EntryKey::cell(cell)),
             expanded,
             disclosure,
             continued_edit,
+            feed: feed_digest(&seat, self.feed.revision, self.step_bills.revision()),
         };
         let shortcut = self
             .disclosure
             .keymap
             .primary_hint(KeymapContext::Global, "open_transcript");
         let expanded_parts = &self.disclosure.expanded;
+        let feed = &self.feed;
+        let bills = &self.step_bills;
         Some(self.cache.get(cell, width, presentation, || {
             let content_width = crate::transcript_geometry::content_width(width, mode);
-            if disclosure {
+            // A member's clock is its item's header's.
+            let timestamp = if loose {
+                cell.transcript_timestamp()
+            } else {
+                None
+            };
+            let own = || {
+                if !disclosure {
+                    let lines = crate::history_cell::fullscreen_session_lines(
+                        cell.as_ref(),
+                        content_width,
+                        detailed,
+                        mode,
+                    );
+                    // Detailed content and markerless cards share the gutter without acquiring
+                    // synthetic markers, disclosure identities, or expansion controls.
+                    let lines = if mode == HistoryRenderMode::Rich {
+                        crate::transcript_geometry::rich_lines(
+                            crate::transcript_geometry::clock_lines(lines, timestamp),
+                        )
+                    } else {
+                        lines
+                    };
+                    let layout = TextLayout::new(lines, width);
+                    return if mode == HistoryRenderMode::Rich {
+                        layout.with_header_tokens(header_tokens)
+                    } else {
+                        layout
+                    };
+                }
                 if let Some(parts) = cell.output_parts(
                     content_width,
                     /*reserve*/ 0,
@@ -280,12 +322,11 @@ impl TranscriptView {
                             is_tool_entry: cell.is_tool_entry(),
                             activity: crate::transcript_geometry::clock_lines(
                                 parts.lines,
-                                cell.transcript_timestamp(),
+                                timestamp,
                             ),
                             header: parts.header,
                             auxiliary: Vec::new(),
                             header_tokens,
-                            header_bill,
                             disclosure: parts.output,
                             controls: parts.controls,
                         },
@@ -310,10 +351,7 @@ impl TranscriptView {
                         output_mode: (expanded && cell.has_formatted_output())
                             .then_some(output_mode),
                         is_tool_entry: cell.is_tool_entry(),
-                        activity: crate::transcript_geometry::clock_lines(
-                            activity,
-                            cell.transcript_timestamp(),
-                        ),
+                        activity: crate::transcript_geometry::clock_lines(activity, timestamp),
                         header: if expanded {
                             cell.expanded_activity_header()
                         } else {
@@ -321,7 +359,6 @@ impl TranscriptView {
                         },
                         auxiliary: Vec::new(),
                         header_tokens,
-                        header_bill,
                         disclosure,
                         controls: Vec::new(),
                     },
@@ -329,35 +366,67 @@ impl TranscriptView {
                     expanded,
                     shortcut,
                 )
-            } else {
-                let lines = crate::history_cell::fullscreen_session_lines(
-                    cell.as_ref(),
-                    content_width,
-                    detailed,
-                    mode,
+            };
+            let mut layout = match seat.content {
+                Content::Hidden => TextLayout::new(Vec::new(), width),
+                Content::Body => TextLayout::new(
+                    crate::transcript_geometry::rich_lines(feed::entry_body(
+                        cell.as_ref(),
+                        content_width,
+                    )),
+                    width,
+                ),
+                Content::Own | Content::Loose => own(),
+            };
+            if let Some(header) = &seat.header {
+                layout = layout.with_fold_header(
+                    feed.header_line(cells, header, bills, width),
+                    feed.fold_target(header),
+                    header.unfolded,
                 );
-                // Detailed content and markerless cards share the gutter without acquiring
-                // synthetic markers, disclosure identities, or expansion controls.
-                let lines = if mode == HistoryRenderMode::Rich {
-                    crate::transcript_geometry::rich_lines(crate::transcript_geometry::clock_lines(
-                        lines,
-                        cell.transcript_timestamp(),
-                    ))
-                } else {
-                    lines
-                };
-                let layout = TextLayout::new(lines, width);
-                if mode == HistoryRenderMode::Rich {
-                    layout.with_header_tokens(header_tokens)
-                } else {
-                    layout
-                }
             }
+            layout
         }))
+    }
+
+    /// The nearest earlier entry that draws anything.
+    fn previous_visible(&mut self, cells: &[Arc<dyn HistoryCell>], index: usize) -> Option<usize> {
+        let mut candidate = index.min(cells.len());
+        while let Some(previous) = candidate.checked_sub(/*rhs*/ 1) {
+            candidate = previous;
+            let transcript_only = !self.detailed
+                && self.mode == HistoryRenderMode::Rich
+                && cells[previous]
+                    .as_any()
+                    .downcast_ref::<ReasoningSummaryCell>()
+                    .is_some_and(ReasoningSummaryCell::is_transcript_only);
+            if self.elides_cell(cells, previous)
+                || transcript_only
+                || !self.feed_seat(cells, previous).is_visible()
+            {
+                continue;
+            }
+            return Some(previous);
+        }
+        None
     }
 }
 
+/// Zero for a loose entry drawn as before; otherwise a digest of everything its feed rows show.
+fn feed_digest(seat: &Seat, revision: u64, bills: u64) -> u64 {
+    if *seat == Seat::LOOSE {
+        return 0;
+    }
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    (seat, revision, bills).hash(&mut hasher);
+    hasher.finish() | 1
+}
+
 impl LayoutCache {
+    pub(super) fn frame(&self) -> u64 {
+        self.frame
+    }
+
     pub(super) fn begin_frame(&mut self) {
         self.frame = self.frame.wrapping_add(/*rhs*/ 1);
         let state = RenderState {
@@ -397,10 +466,10 @@ impl LayoutCache {
             return layout;
         }
         let layout = render();
-        let layout = if presentation.separated {
-            layout.with_leading_separator()
-        } else {
-            layout
+        let layout = match (presentation.separated, presentation.rule) {
+            (true, true) => layout.with_leading_rule(),
+            (true, false) => layout.with_leading_separator(),
+            (false, _) => layout,
         };
         let layout = Arc::new(if presentation.turn_tip_space {
             layout.with_leading_spacer()

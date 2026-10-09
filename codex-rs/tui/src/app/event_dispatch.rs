@@ -739,6 +739,7 @@ impl App {
             }
             AppEvent::ConsolidateAgentMessage {
                 source,
+                item_id,
                 cwd,
                 inline_visualization_context,
                 scrollback_reflow,
@@ -747,6 +748,7 @@ impl App {
                 self.handle_consolidate_agent_message(
                     tui,
                     source,
+                    item_id,
                     cwd,
                     inline_visualization_context,
                     scrollback_reflow,

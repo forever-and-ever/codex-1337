@@ -6,6 +6,7 @@ use super::HistoryTimestamp;
 use super::activity_parts::ActivityHeader;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::terminal_hyperlinks::visible_lines;
+use crate::transcript_view::FeedEntry;
 use codex_app_server_protocol::ThreadItem;
 use codex_protocol::PreambleChange;
 use codex_protocol::PreamblePart;
@@ -196,6 +197,20 @@ fn row(tokens: u64, depth: usize, label: ratatui::text::Span<'static>) -> Line<'
 
 fn count(tokens: u64) -> String {
     format_with_separators(i64::try_from(tokens).unwrap_or(i64::MAX))
+}
+
+impl FeedEntry for PreambleCell {
+    fn feed_title(&self) -> Line<'static> {
+        self.heading()
+    }
+
+    fn feed_body(&self, _width: u16) -> Vec<HyperlinkLine> {
+        crate::terminal_hyperlinks::prefix_hyperlink_lines(
+            self.detail_lines().into_iter().map(Into::into).collect(),
+            "  ".into(),
+            "  ".into(),
+        )
+    }
 }
 
 impl HistoryCell for PreambleCell {

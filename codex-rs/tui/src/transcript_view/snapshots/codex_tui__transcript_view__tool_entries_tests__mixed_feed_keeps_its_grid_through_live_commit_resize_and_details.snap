@@ -3,6 +3,7 @@ source: tui/src/transcript_view/tool_entries_tests.rs
 expression: "snapshots.join(\"\\n\\n\").replace(&clock, \"14:17\")"
 ---
 width=64
+      [-] You
 
                 › Review the layout
 
@@ -24,6 +25,7 @@ width=64
                     source_indent();
 
 expanded width=64
+      [-] You
 
                 › Review the layout
 
@@ -79,6 +81,7 @@ detailed width=64
                     source_indent();
 
 width=32
+      [-] You
 
                 › Review the
                   layout

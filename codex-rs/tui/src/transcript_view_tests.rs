@@ -101,7 +101,6 @@ fn terminal_output_disclosure_follows_live_history_and_keymap() {
                 auxiliary: Vec::new(),
                 disclosure: cell.activity_disclosure(width),
                 header_tokens: None,
-                header_bill: None,
             })
         },
     );

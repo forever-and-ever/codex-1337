@@ -504,6 +504,8 @@ impl HistoryCell for AgentMessageCell {
 #[derive(Debug)]
 pub(crate) struct AgentMarkdownCell {
     pub(crate) timestamp: Option<HistoryTimestamp>,
+    /// The message's item id, which places it in its step's Feed Item.
+    pub(crate) item_id: Option<String>,
     markdown_source: String,
     cwd: PathBuf,
     inline_visualization_context: Option<crate::inline_visualization::InlineVisualizationContext>,
@@ -539,6 +541,7 @@ impl AgentMarkdownCell {
         Self {
             markdown_source,
             timestamp: None,
+            item_id: None,
             cwd: cwd.to_path_buf(),
             inline_visualization_context,
             rendered_lines,

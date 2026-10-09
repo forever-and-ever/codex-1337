@@ -100,7 +100,6 @@ impl ChatWidget {
             header_tokens: active
                 .and_then(HistoryCell::activity_header_tokens)
                 .or(tool_output_tokens),
-            header_bill: None,
             disclosure,
             controls,
         })

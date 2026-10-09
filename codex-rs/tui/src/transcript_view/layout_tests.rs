@@ -47,7 +47,6 @@ fn tool_output_disclosure_shows_fixed_token_column() {
             auxiliary: Vec::new(),
             disclosure: Some(ActivityDisclosure::Generic),
             header_tokens: Some(1_280),
-            header_bill: None,
         },
         /*width*/ 80,
         /*expanded*/ false,
@@ -116,7 +115,6 @@ fn tool_heading_decorations_preserve_source_and_hit_targets() {
                 },
                 auxiliary: Vec::new(),
                 header_tokens: tokens,
-                header_bill: None,
                 disclosure: mcp.activity_disclosure(width),
             },
             width,
@@ -162,7 +160,6 @@ fn tool_heading_decorations_preserve_source_and_hit_targets() {
             ],
             auxiliary: Vec::new(),
             header_tokens: Some(1_337),
-            header_bill: None,
             disclosure: None,
         },
         /*width*/ 80,
@@ -197,6 +194,8 @@ fn layouts_refresh_for_width_animation_and_mutable_frames() {
                     expanded: false,
                     disclosure: false,
                     continued_edit: false,
+                    rule: false,
+                    feed: 0,
                 },
                 || TextLayout::new(history.transcript_hyperlink_lines(width), width),
             )
@@ -272,6 +271,8 @@ fn recent_entries_are_reused_and_old_entries_are_evicted() {
                 expanded: false,
                 disclosure: false,
                 continued_edit: false,
+                rule: false,
+                feed: 0,
             },
             || {
                 TextLayout::new(
@@ -292,6 +293,8 @@ fn recent_entries_are_reused_and_old_entries_are_evicted() {
                 expanded: false,
                 disclosure: false,
                 continued_edit: false,
+                rule: false,
+                feed: 0,
             },
             || {
                 TextLayout::new(
