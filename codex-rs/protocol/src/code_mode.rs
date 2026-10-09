@@ -180,12 +180,24 @@ pub struct CodeModeItem {
 )]
 #[ts(export_to = "v2/")]
 pub enum CodeModeEvent {
-    Started { call_id: String },
+    Started {
+        call_id: String,
+        /// The exec input as the model wrote it; records from before it was kept have none.
+        script: Option<String>,
+    },
     Allocated,
-    ToolCall { call_id: String },
-    WaitStarted { call_id: String },
-    WaitCompleted { call_id: String },
-    Finished { status: CodeModeStatus },
+    ToolCall {
+        call_id: String,
+    },
+    WaitStarted {
+        call_id: String,
+    },
+    WaitCompleted {
+        call_id: String,
+    },
+    Finished {
+        status: CodeModeStatus,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS, JsonSchema)]

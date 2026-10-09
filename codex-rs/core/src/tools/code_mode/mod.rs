@@ -129,6 +129,7 @@ impl CodeModeService {
     async fn execute(
         &self,
         request: codex_code_mode::ExecuteRequest,
+        script: String,
         step_context: Arc<StepContext>,
         session: std::sync::Weak<Session>,
     ) -> Result<(codex_code_mode::StartedCell, Arc<lifecycle::ExecutionScope>), String> {
@@ -140,6 +141,7 @@ impl CodeModeService {
                 session.clone(),
                 Arc::clone(&step_context.turn),
                 exec_call_id,
+                script,
                 self.shutdown_token.clone(),
             )
             .await;

@@ -18,7 +18,7 @@ pub(super) async fn record(
 ) {
     let exec_call_id = &owner.exec_call_id;
     let suffix = match &event {
-        CodeModeEvent::Started { call_id } => format!("start:{call_id}"),
+        CodeModeEvent::Started { call_id, .. } => format!("start:{call_id}"),
         CodeModeEvent::Allocated => "allocation".into(),
         CodeModeEvent::ToolCall { call_id } => format!("tool:{call_id}"),
         CodeModeEvent::WaitStarted { call_id } => format!("wait-start:{call_id}"),

@@ -13,6 +13,7 @@ async fn early_terminal_and_late_capture_have_one_execution_lifetime() {
             Arc::downgrade(&session),
             Arc::clone(&turn),
             "exec-1".into(),
+            "text('done')".into(),
             service.shutdown_token.clone(),
         )
         .await;
@@ -49,7 +50,8 @@ async fn early_terminal_and_late_capture_have_one_execution_lifetime() {
             (
                 opened_owner,
                 CodeModeEvent::Started {
-                    call_id: "exec-1".into()
+                    call_id: "exec-1".into(),
+                    script: Some("text('done')".into()),
                 }
             ),
             (owner.clone(), CodeModeEvent::Allocated),
@@ -138,6 +140,7 @@ async fn failed_allocation_closes_without_fabricating_a_runtime_cell() {
             Arc::downgrade(&session),
             turn,
             "failed-exec".into(),
+            "throw 1".into(),
             service.shutdown_token.clone(),
         )
         .await
@@ -164,7 +167,8 @@ async fn failed_allocation_closes_without_fabricating_a_runtime_cell() {
             (
                 None,
                 CodeModeEvent::Started {
-                    call_id: "failed-exec".into()
+                    call_id: "failed-exec".into(),
+                    script: Some("throw 1".into()),
                 }
             ),
             (
@@ -192,6 +196,7 @@ async fn service_teardown_cancels_blocked_transcript_admission() {
             Arc::downgrade(&session),
             turn,
             "abandoned-exec".into(),
+            "await new Promise(() => {})".into(),
             service.shutdown_token.clone(),
         )
         .await;

@@ -214,6 +214,13 @@
             "call_id": {
               "type": "string"
             },
+            "script": {
+              "description": "The exec input as the model wrote it; records from before it was kept have none.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "type": {
               "enum": [
                 "started"

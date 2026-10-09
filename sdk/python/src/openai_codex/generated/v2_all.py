@@ -598,6 +598,12 @@ class StartedCodeModeEvent(BaseModel):
         populate_by_name=True,
     )
     call_id: str
+    script: Annotated[
+        str | None,
+        Field(
+            description="The exec input as the model wrote it; records from before it was kept have none."
+        ),
+    ] = None
     type: Annotated[Literal["started"], Field(title="StartedCodeModeEventType")]
 
 

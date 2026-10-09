@@ -167,6 +167,7 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
             "exec-a",
             CodeModeEvent::Started {
                 call_id: "exec-a".into(),
+                script: None,
             },
         ),
     ))));
@@ -188,6 +189,7 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
                 "exec-b",
                 CodeModeEvent::Started {
                     call_id: "exec-b".into(),
+                    script: None,
                 },
             ),
         ),
@@ -531,6 +533,7 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
                 "exec-a",
                 CodeModeEvent::Started {
                     call_id: "exec-a".into(),
+                    script: None,
                 },
             ),
         ),
@@ -651,6 +654,7 @@ async fn metadata_only_receipt_keeps_block_disclosure_and_replay_without_a_token
             "receipt-exec",
             CodeModeEvent::Started {
                 call_id: "receipt-exec".into(),
+                script: None,
             },
         ),
         code_mode(
@@ -924,6 +928,7 @@ async fn interleaved_scripts_keep_exact_ownership_after_terminal_wait_and_replay
             "exec-a",
             CodeModeEvent::Started {
                 call_id: "exec-a".into(),
+                script: None,
             },
         ),
         code_mode(
@@ -937,6 +942,7 @@ async fn interleaved_scripts_keep_exact_ownership_after_terminal_wait_and_replay
             "exec-b",
             CodeModeEvent::Started {
                 call_id: "exec-b".into(),
+                script: None,
             },
         ),
         code_mode(
@@ -1238,6 +1244,7 @@ async fn returned_batches_keep_one_disclosure_and_bill_across_live_replay_and_pa
                 "a",
                 CodeModeEvent::Started {
                     call_id: "a".into(),
+                    script: None,
                 },
             ),
             code_mode(
@@ -1267,6 +1274,7 @@ async fn returned_batches_keep_one_disclosure_and_bill_across_live_replay_and_pa
                 "c",
                 CodeModeEvent::Started {
                     call_id: "c".into(),
+                    script: None,
                 },
             ),
             code_mode(

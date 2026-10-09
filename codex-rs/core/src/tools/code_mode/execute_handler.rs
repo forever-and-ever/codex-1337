@@ -93,6 +93,7 @@ impl CodeModeExecuteHandler {
                     yield_time_ms: Some(step_context.turn.config.code_mode.max_yield_time_ms.get()),
                     max_output_tokens: args.max_output_tokens,
                 },
+                code,
                 Arc::clone(&step_context),
                 Arc::downgrade(&exec.session),
             )

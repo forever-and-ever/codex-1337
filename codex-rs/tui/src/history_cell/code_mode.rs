@@ -260,7 +260,7 @@ impl CodeModeCell {
     fn calls(&self) -> HashSet<&str> {
         std::iter::once(self.exec_call_id.as_str())
             .chain(self.facts.iter().filter_map(|fact| match &fact.event {
-                CodeModeEvent::Started { call_id }
+                CodeModeEvent::Started { call_id, .. }
                 | CodeModeEvent::ToolCall { call_id }
                 | CodeModeEvent::WaitStarted { call_id }
                 | CodeModeEvent::WaitCompleted { call_id } => Some(call_id.as_str()),
