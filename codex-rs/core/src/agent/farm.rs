@@ -186,12 +186,14 @@ impl CodexThread {
             .into());
         }
 
+        // Materialization checkpoints the initial account binding under the same
+        // nonreentrant permit used below. It must finish before the snapshot boundary.
+        self.ensure_rollout_materialized().await;
         // Settings, ready environment bindings, and the ordinary stored fork input are
         // captured under the checkpoint/settings boundary, never a whole-turn/tool lock.
         let (turn, fork_history) = {
             let _boundary = thread_settings::acquire_persistence_lock(&self.session).await;
             let turn = self.session.new_inject_items_context().await;
-            self.ensure_rollout_materialized().await;
             self.flush_rollout()
                 .await
                 .map_err(|error| CodexErr::Fatal(format!("could not flush parent: {error}")))?;
