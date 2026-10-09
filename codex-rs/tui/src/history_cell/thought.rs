@@ -46,6 +46,11 @@ impl ThoughtCell {
         &self.response_id
     }
 
+    /// Whether it carries text to read, rather than only its step's thinking tokens.
+    pub(crate) fn is_readable(&self) -> bool {
+        !self.text.trim().is_empty()
+    }
+
     fn heading(&self) -> Line<'static> {
         let mut heading = Line::default();
         heading.push_span("Thought".bold());
@@ -111,7 +116,7 @@ impl HistoryCell for ThoughtCell {
     }
 
     fn activity_disclosure(&self, _width: u16) -> Option<ActivityDisclosure> {
-        (!self.text.trim().is_empty()).then_some(ActivityDisclosure::Generic)
+        self.is_readable().then_some(ActivityDisclosure::Generic)
     }
 
     fn activity_header_tokens(&self) -> Option<u64> {

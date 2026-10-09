@@ -13,8 +13,8 @@ use crate::history_cell::ActivityDisclosure;
 use crate::history_cell::ReasoningSummaryCell;
 use crate::history_cell::ToolOutputGroup;
 use crate::history_cell::output_provenance::OutputMode;
-use crate::key_hint::ShortcutHint;
-use crate::keymap::KeymapContext;
+use crate::transcript_geometry::TokenSeat;
+use std::collections::HashSet;
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::sync::Weak;
@@ -23,6 +23,8 @@ use super::*;
 
 const MAX_CACHED_ENTRIES: usize = 64;
 const MAX_CACHED_TEXT_BYTES: usize = 8 * 1024 * 1024;
+/// The columns a clipped first row keeps before tokens that trail it give way.
+const LEGIBLE_ROW: usize = 16;
 
 /// The selected activity presentation and any live content that follows it.
 pub(crate) struct ActivityTranscriptLines {
@@ -37,30 +39,49 @@ pub(crate) struct ActivityTranscriptLines {
     pub(crate) controls: Vec<crate::history_cell::activity_parts::PartControl>,
 }
 
-/// Keep disclosure controls outside selectable source without rendering hidden details.
+/// Keep disclosure controls outside selectable source without rendering hidden details. Rows
+/// start `columns` from the edge; the activity's tokens trail its first.
 pub(super) fn activity_layout(
     mut lines: ActivityTranscriptLines,
+    columns: u16,
     width: u16,
     expanded: bool,
-    _shortcut: Option<ShortcutHint>,
 ) -> TextLayout {
     // A truncated header can create the control even when there is no output. Once open,
     // its untruncated invocation must still have a control to close it.
     if expanded && !lines.activity.is_empty() {
         lines.disclosure.get_or_insert(ActivityDisclosure::Generic);
     }
-    let control_line = match lines.disclosure {
+    // The activity's own control takes the first row its parts leave free.
+    let mut control_line = match lines.disclosure {
         Some(ActivityDisclosure::EditedFile { header }) => usize::from(header),
         _ => 0,
     };
+    while control_line + 1 < lines.activity.len()
+        && lines.controls.iter().any(|part| part.line == control_line)
+    {
+        control_line += 1;
+    }
     if lines.is_tool_entry
         && (lines.header.is_some() || lines.disclosure.is_some() || !lines.controls.is_empty())
         && !expanded
         && !lines.controls.iter().any(|control| control.expanded)
     {
-        for header in &mut lines.activity {
-            let available = usize::from(width)
-                .saturating_sub(usize::from(crate::transcript_geometry::GUTTER_COLUMNS));
+        // Tokens that trail the first row keep their room on it while the row stays legible.
+        let available = usize::from(crate::transcript_geometry::content_width(
+            width,
+            HistoryRenderMode::Rich,
+        ));
+        let trailing = lines
+            .header_tokens
+            .map_or(0, |tokens| 2 + super::text::token_label(tokens).len());
+        let trailing = if available >= LEGIBLE_ROW + trailing {
+            trailing
+        } else {
+            0
+        };
+        for (row, header) in lines.activity.iter_mut().enumerate() {
+            let available = available - if row == 0 { trailing } else { 0 };
             if header.width() > available {
                 if lines
                     .header
@@ -91,10 +112,10 @@ pub(super) fn activity_layout(
     let has_details = !lines.activity.is_empty() && (expanded || lines.disclosure.is_some());
     lines.activity.extend(lines.auxiliary);
     let mut layout = TextLayout::new(
-        crate::transcript_geometry::rich_lines(lines.activity),
+        crate::transcript_geometry::gutter_lines(lines.activity, columns),
         width,
     )
-    .with_header_tokens(lines.header_tokens);
+    .with_header_tokens(lines.header_tokens, TokenSeat::Trailing);
     if has_details {
         layout = layout.with_leading_disclosure_control(
             if expanded { "[-]" } else { "[+]" }.into(),
@@ -108,6 +129,24 @@ pub(super) fn activity_layout(
         layout = layout.with_output_controls(header.source_offset, mode);
     }
     layout
+}
+
+/// Give an activity's first row to its header, keeping the rows after it and their controls.
+fn yield_head(lines: &mut ActivityTranscriptLines) {
+    let dropped = feed::behead(&mut lines.activity);
+    lines.header = None;
+    lines
+        .controls
+        .retain_mut(|part| match part.line.checked_sub(dropped) {
+            Some(line) => {
+                part.line = line;
+                true
+            }
+            None => false,
+        });
+    if dropped > 0 && lines.disclosure == Some(ActivityDisclosure::EditedFile { header: true }) {
+        lines.disclosure = Some(ActivityDisclosure::EditedFile { header: false });
+    }
 }
 
 #[derive(Default)]
@@ -246,7 +285,7 @@ impl TranscriptView {
             && ToolOutputGroup::is_patch(cell.as_ref())
             && previous.is_some_and(|previous| ToolOutputGroup::is_patch(previous.as_ref()));
         if expanded {
-            self.disclosure.expanded.extend(ids);
+            self.disclosure.expanded.extend(ids.iter().cloned());
         }
         let separated = match &seat.header {
             Some(header) => {
@@ -270,10 +309,6 @@ impl TranscriptView {
             continued_edit,
             feed: feed_digest(&seat, self.feed.revision, self.step_bills.revision()),
         };
-        let shortcut = self
-            .disclosure
-            .keymap
-            .primary_hint(KeymapContext::Global, "open_transcript");
         let expanded_parts = &self.disclosure.expanded;
         let feed = &self.feed;
         let bills = &self.step_bills;
@@ -285,55 +320,25 @@ impl TranscriptView {
             } else {
                 None
             };
-            let own = || {
-                if !disclosure {
-                    let lines = crate::history_cell::fullscreen_session_lines(
-                        cell.as_ref(),
-                        content_width,
-                        detailed,
-                        mode,
-                    );
-                    // Detailed content and markerless cards share the gutter without acquiring
-                    // synthetic markers, disclosure identities, or expansion controls.
-                    let lines = if mode == HistoryRenderMode::Rich {
-                        crate::transcript_geometry::rich_lines(
-                            crate::transcript_geometry::clock_lines(lines, timestamp),
-                        )
-                    } else {
-                        lines
-                    };
-                    let layout = TextLayout::new(lines, width);
-                    return if mode == HistoryRenderMode::Rich {
-                        layout.with_header_tokens(header_tokens)
-                    } else {
-                        layout
-                    };
-                }
+            // The activity's rows, compact or expanded, and what controls them.
+            let activity = |expanded: bool, expanded_parts: &HashSet<String>| {
                 if let Some(parts) = cell.output_parts(
                     content_width,
                     /*reserve*/ 0,
                     expanded_parts,
                     output_mode,
                 ) {
-                    return activity_layout(
-                        ActivityTranscriptLines {
-                            output_mode: (expanded && cell.has_formatted_output())
-                                .then_some(output_mode),
-                            is_tool_entry: cell.is_tool_entry(),
-                            activity: crate::transcript_geometry::clock_lines(
-                                parts.lines,
-                                timestamp,
-                            ),
-                            header: parts.header,
-                            auxiliary: Vec::new(),
-                            header_tokens,
-                            disclosure: parts.output,
-                            controls: parts.controls,
-                        },
-                        width,
-                        expanded,
-                        shortcut,
-                    );
+                    return ActivityTranscriptLines {
+                        output_mode: (expanded && cell.has_formatted_output())
+                            .then_some(output_mode),
+                        is_tool_entry: cell.is_tool_entry(),
+                        activity: crate::transcript_geometry::clock_lines(parts.lines, timestamp),
+                        header: parts.header,
+                        auxiliary: Vec::new(),
+                        header_tokens,
+                        disclosure: parts.output,
+                        controls: parts.controls,
+                    };
                 }
                 let mut activity = if expanded {
                     cell.expanded_output_lines(content_width, output_mode)
@@ -346,26 +351,20 @@ impl TranscriptView {
                 } else {
                     cell.activity_disclosure(content_width)
                 };
-                activity_layout(
-                    ActivityTranscriptLines {
-                        output_mode: (expanded && cell.has_formatted_output())
-                            .then_some(output_mode),
-                        is_tool_entry: cell.is_tool_entry(),
-                        activity: crate::transcript_geometry::clock_lines(activity, timestamp),
-                        header: if expanded {
-                            cell.expanded_activity_header()
-                        } else {
-                            cell.activity_header()
-                        },
-                        auxiliary: Vec::new(),
-                        header_tokens,
-                        disclosure,
-                        controls: Vec::new(),
+                ActivityTranscriptLines {
+                    output_mode: (expanded && cell.has_formatted_output()).then_some(output_mode),
+                    is_tool_entry: cell.is_tool_entry(),
+                    activity: crate::transcript_geometry::clock_lines(activity, timestamp),
+                    header: if expanded {
+                        cell.expanded_activity_header()
+                    } else {
+                        cell.activity_header()
                     },
-                    width,
-                    expanded,
-                    shortcut,
-                )
+                    auxiliary: Vec::new(),
+                    header_tokens,
+                    disclosure,
+                    controls: Vec::new(),
+                }
             };
             let mut layout = match seat.content {
                 Content::Hidden => TextLayout::new(Vec::new(), width),
@@ -376,11 +375,78 @@ impl TranscriptView {
                     )),
                     width,
                 ),
-                Content::Own | Content::Loose => own(),
+                // Detailed content and markerless cards share the gutter without acquiring
+                // synthetic markers, disclosure identities, or expansion controls.
+                _ if !disclosure => {
+                    let mut lines = crate::history_cell::fullscreen_session_lines(
+                        cell.as_ref(),
+                        content_width,
+                        detailed,
+                        mode,
+                    );
+                    if mode == HistoryRenderMode::Rich {
+                        let columns = if seat.content == Content::Beheaded {
+                            feed::behead(&mut lines);
+                            crate::transcript_geometry::NESTED_COLUMNS
+                        } else {
+                            crate::transcript_geometry::GUTTER_COLUMNS
+                        };
+                        TextLayout::new(
+                            crate::transcript_geometry::gutter_lines(
+                                crate::transcript_geometry::clock_lines(lines, timestamp),
+                                columns,
+                            ),
+                            width,
+                        )
+                        .with_header_tokens(
+                            header_tokens,
+                            if detailed {
+                                TokenSeat::Gutter
+                            } else {
+                                TokenSeat::Trailing
+                            },
+                        )
+                    } else {
+                        TextLayout::new(lines, width)
+                    }
+                }
+                Content::Beheaded => {
+                    let mut lines = activity(expanded, expanded_parts);
+                    yield_head(&mut lines);
+                    if lines.activity.is_empty() && lines.disclosure.is_some() {
+                        // Its header was all it showed: unfolded, its details take its place,
+                        // under the item's fold rather than a control of its own.
+                        let mut details = expanded_parts.clone();
+                        details.extend(ids.iter().cloned());
+                        let mut lines = activity(/*expanded*/ true, &details);
+                        yield_head(&mut lines);
+                        lines.is_tool_entry = false;
+                        lines.disclosure = None;
+                        activity_layout(
+                            lines,
+                            crate::transcript_geometry::NESTED_COLUMNS,
+                            width,
+                            /*expanded*/ false,
+                        )
+                    } else {
+                        activity_layout(
+                            lines,
+                            crate::transcript_geometry::NESTED_COLUMNS,
+                            width,
+                            expanded,
+                        )
+                    }
+                }
+                Content::Own | Content::Loose => activity_layout(
+                    activity(expanded, expanded_parts),
+                    crate::transcript_geometry::GUTTER_COLUMNS,
+                    width,
+                    expanded,
+                ),
             };
             if let Some(header) = &seat.header {
                 layout = layout.with_fold_header(
-                    feed.header_line(cells, header, bills, width),
+                    feed.header_lines(cells, header, bills, expanded_parts, width),
                     feed.fold_target(header),
                     header.unfolded,
                 );

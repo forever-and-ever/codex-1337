@@ -64,14 +64,14 @@ pub(super) struct TextLayout {
     disclosure_controls: Vec<DisclosureControl>,
     heading: HeadingDecorations,
     output_mode: Option<OutputMode>,
-    /// A Feed Item's header row: its line, fold and whether the item is unfolded.
-    feed_header: Option<(Line<'static>, FoldTarget, bool)>,
+    /// A Feed Item's header rows, its fold and whether the item is unfolded.
+    feed_header: Option<(Vec<Line<'static>>, FoldTarget, bool)>,
 }
 
 #[derive(Default)]
 struct HeadingDecorations {
-    /// A loose row's tokens, in the gutter its feed header would use for the fold.
-    tokens: Option<u64>,
+    /// A loose row's tokens, and where they go.
+    tokens: Option<(u64, crate::transcript_geometry::TokenSeat)>,
     output_controls: Option<(usize, String)>,
 }
 
@@ -86,7 +86,6 @@ struct DisclosureControl {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum DisclosurePlacement {
     Row,
-    Inline,
     Leading,
     /// A Feed Item's fold, after the clock on its header row.
     Fold,
@@ -122,36 +121,34 @@ impl TextLayout {
             layout = layout.with_inline_decoration_at(*offset, label.clone());
         }
         for control in &self.disclosure_controls {
-            layout =
-                match control.placement {
-                    DisclosurePlacement::Row => layout
-                        .with_disclosure_control_at(control.label.clone(), control.source_offset),
-                    DisclosurePlacement::Inline => layout
-                        .with_inline_disclosure_at(control.label.clone(), control.source_offset),
-                    DisclosurePlacement::Leading => layout.with_leading_disclosure_at(
-                        control.label.clone(),
-                        control.source_offset,
-                        control.target.clone(),
-                    ),
-                    // The header row is synthetic and returns with its line below.
-                    DisclosurePlacement::Fold => layout,
-                    DisclosurePlacement::Output { start, end } => {
-                        if let FoldTarget::OutputMode(mode) = control.target {
-                            layout.with_output_target(
-                                control.label.clone(),
-                                control.source_offset,
-                                mode,
-                                start..end,
-                            )
-                        } else {
-                            layout
-                        }
+            layout = match control.placement {
+                DisclosurePlacement::Row => {
+                    layout.with_disclosure_control_at(control.label.clone(), control.source_offset)
+                }
+                DisclosurePlacement::Leading => layout.with_leading_disclosure_at(
+                    control.label.clone(),
+                    control.source_offset,
+                    control.target.clone(),
+                ),
+                // The header row is synthetic and returns with its line below.
+                DisclosurePlacement::Fold => layout,
+                DisclosurePlacement::Output { start, end } => {
+                    if let FoldTarget::OutputMode(mode) = control.target {
+                        layout.with_output_target(
+                            control.label.clone(),
+                            control.source_offset,
+                            mode,
+                            start..end,
+                        )
+                    } else {
+                        layout
                     }
-                };
+                }
+            };
         }
         layout.output_mode = self.output_mode;
-        if let Some((line, target, unfolded)) = &self.feed_header {
-            layout = layout.with_fold_header(line.clone(), target.clone(), *unfolded);
+        if let Some((lines, target, unfolded)) = &self.feed_header {
+            layout = layout.with_fold_header(lines.clone(), target.clone(), *unfolded);
         }
         match (self.separated, self.ruled) {
             (true, true) => layout.with_leading_rule(),
@@ -207,30 +204,6 @@ impl TextLayout {
             source_offset,
             row: control_row,
             placement: DisclosurePlacement::Row,
-        });
-        self
-    }
-
-    fn with_inline_disclosure_at(mut self, label: String, source_offset: usize) -> Self {
-        if self.text.is_empty() || label.is_empty() {
-            return self;
-        }
-        if let Some(control) = self.disclosure_controls.pop()
-            && control.placement == DisclosurePlacement::Row
-        {
-            self.rows.remove(control.row);
-        }
-        let source_offset = self
-            .text
-            .floor_char_boundary(source_offset.min(self.text.len()));
-        let row = self.row_for_offset(source_offset);
-        self.disclosure = true;
-        self.disclosure_controls.push(DisclosureControl {
-            target: FoldTarget::Activity,
-            label,
-            source_offset,
-            row,
-            placement: DisclosurePlacement::Inline,
         });
         self
     }
@@ -351,23 +324,10 @@ impl TextLayout {
                 row.first_column as u16
                     ..line_width(&row.line.line).min(usize::from(self.width)) as u16
             }
-            DisclosurePlacement::Inline => {
-                let start = line_width(&row.line.line)
-                    .saturating_add(/*rhs*/ 1)
-                    .min(usize::from(self.width));
-                let end = (start + display_width(&control.label)).min(usize::from(self.width));
-                start as u16..end as u16
-            }
-            DisclosurePlacement::Leading => {
-                crate::transcript_geometry::DISCLOSURE_COLUMN.min(self.width)
-                    ..(crate::transcript_geometry::DISCLOSURE_COLUMN
-                        + crate::transcript_geometry::DISCLOSURE_COLUMNS)
-                        .min(self.width)
-            }
-            DisclosurePlacement::Fold => {
-                crate::transcript_geometry::FOLD_COLUMN.min(self.width)
-                    ..(crate::transcript_geometry::FOLD_COLUMN
-                        + crate::transcript_geometry::DISCLOSURE_COLUMNS)
+            DisclosurePlacement::Leading | DisclosurePlacement::Fold => {
+                crate::transcript_geometry::CONTROL_COLUMN.min(self.width)
+                    ..(crate::transcript_geometry::CONTROL_COLUMN
+                        + crate::transcript_geometry::CONTROL_COLUMNS)
                         .min(self.width)
             }
             DisclosurePlacement::Output { start, end } => {
@@ -387,25 +347,34 @@ impl TextLayout {
             row_area.width = row.content_width;
             HyperlinkParagraph::new(std::slice::from_ref(&row.line), row.line.line.style)
                 .render(row_area, buf);
-            if let Some(tokens) = self.heading.tokens
+            if let Some((tokens, seat)) = self.heading.tokens
                 && start_row + usize::from(screen_row) == self.row_for_offset(/*offset*/ 0)
-                && area.width
-                    >= crate::transcript_geometry::TOKEN_COLUMN
-                        + crate::transcript_geometry::TOKEN_COLUMNS
             {
-                let span = gutter::token_span(tokens);
-                buf.set_span(
-                    area.x + crate::transcript_geometry::TOKEN_COLUMN,
-                    area.y + screen_row,
-                    &span,
-                    crate::transcript_geometry::TOKEN_COLUMNS,
-                );
+                let (span, column, columns) = match seat {
+                    crate::transcript_geometry::TokenSeat::Gutter => (
+                        gutter::token_span(tokens),
+                        usize::from(crate::transcript_geometry::TOKEN_COLUMN),
+                        usize::from(crate::transcript_geometry::TOKEN_COLUMNS),
+                    ),
+                    crate::transcript_geometry::TokenSeat::Trailing => {
+                        let span = gutter::token_figure(String::new(), tokens, /*width*/ 0);
+                        let columns = span.width();
+                        (span, line_width(&row.line.line) + 2, columns)
+                    }
+                };
+                if column + columns <= usize::from(area.width) {
+                    buf.set_span(
+                        area.x + column as u16,
+                        area.y + screen_row,
+                        &span,
+                        columns as u16,
+                    );
+                }
             }
             for control in self.disclosure_controls.iter().filter(|control| {
                 matches!(
                     control.placement,
-                    DisclosurePlacement::Inline
-                        | DisclosurePlacement::Leading
+                    DisclosurePlacement::Leading
                         | DisclosurePlacement::Fold
                         | DisclosurePlacement::Output { .. }
                 ) && control.row == start_row + usize::from(screen_row)

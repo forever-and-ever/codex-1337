@@ -597,9 +597,15 @@ fn single_row_scrolling_crosses_an_entry_separator_in_both_directions() {
             /*height*/ 1,
         )));
     }
+    let indent = " ".repeat(usize::from(GUTTER_COLUMNS));
     assert_eq!(
         frames,
-        ["", "                first", "", "                second"]
+        [
+            String::new(),
+            format!("{indent}first"),
+            String::new(),
+            format!("{indent}second"),
+        ]
     );
 }
 

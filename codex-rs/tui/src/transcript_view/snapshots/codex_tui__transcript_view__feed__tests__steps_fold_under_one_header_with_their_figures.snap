@@ -5,20 +5,20 @@ expression: "snapshots.join(\"\\n\\n\")"
 folded
       [-] You
 
-                › Fix the failing test
+            › Fix the failing test
 
 
-HH:MM [+] Ran · failed cargo test                            1342 (120 34 ≈1188)
-                • I'll run the tests first.
-HH:MM [+] Injection · environment_context                     ≈84
+HH:MM [+] Ran · failed cargo test -p codex-…   1342  thought:   120  output:    34  self:  ≈1188
+            • I'll run the tests first.
+HH:MM [+] Injection · environment_context       ≈84
 
-HH:MM [-] Response                                            154 (120 34 0)
-            [+] • Thought · Summary
-                • Fixed the parser.
+HH:MM [-] Response                              154  thought:   120  output:    34
+      [+]   • Thought · Summary
+            • Fixed the parser.
 
-      [-] You                                                   3
+      [-] You                                     3
 
-                › Thanks
+            › Thanks
 
 
 
@@ -29,19 +29,22 @@ HH:MM [-] Response                                            154 (120 34 0)
 unfolded
       [-] You
 
-                › Fix the failing test
+            › Fix the failing test
 
 
-HH:MM [-] Ran · failed cargo test                            1342 (120 34 ≈1188)
-                • I'll run the tests first.
-            [+] • Thought · Summary
-            [+] • Ran · failed cargo test
-HH:MM [+] Injection · environment_context                     ≈84
+HH:MM [-] Ran · failed cargo test -p           1342  thought:   120  output:    34  self:  ≈1188
+          codex-tui --lib
+          transcript_view::feed
+            • I'll run the tests first.
+      [+]   • Thought · Summary
+          Stored result · exact capture unavailable
+            test parse ... FAILED
+HH:MM [+] Injection · environment_context       ≈84
 
-HH:MM [-] Response                                            154 (120 34 0)
-            [+] • Thought · Summary
-                • Fixed the parser.
+HH:MM [-] Response                              154  thought:   120  output:    34
+      [+]   • Thought · Summary
+            • Fixed the parser.
 
-      [-] You                                                   3
+      [-] You                                     3
 
-                › Thanks
+            › Thanks

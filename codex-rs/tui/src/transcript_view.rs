@@ -320,10 +320,6 @@ impl TranscriptView {
             crate::history_cell::output_provenance::OutputMode,
         ) -> Option<ActivityTranscriptLines>,
     ) -> bool {
-        let shortcut = self
-            .disclosure
-            .keymap
-            .primary_hint(crate::keymap::KeymapContext::Global, "open_transcript");
         let mode = self.mode;
         let output_mode = self.disclosure.output_mode(&self.disclosure.live_ids);
         self.sync_live_layout(width, key, |width, expanded_parts| {
@@ -335,7 +331,12 @@ impl TranscriptView {
             .map(|mut lines| {
                 let is_tool_entry = lines.is_tool_entry;
                 let layout = if mode == HistoryRenderMode::Rich {
-                    layout::activity_layout(lines, width, expanded, shortcut)
+                    layout::activity_layout(
+                        lines,
+                        crate::transcript_geometry::GUTTER_COLUMNS,
+                        width,
+                        expanded,
+                    )
                 } else {
                     lines.activity.extend(lines.auxiliary);
                     TextLayout::new(lines.activity, width)

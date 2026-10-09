@@ -663,7 +663,7 @@ fn mixed_shell_reads_share_one_disclosure_and_output_bill() {
         let mut buffer = Buffer::empty(area);
         view.render(area, &mut buffer, &cells);
         let text = crate::transcript_view::tests::text(&buffer);
-        assert_eq!(text.matches(" 1280 ").count(), 1);
+        assert_eq!(text.matches(" 1280").count(), 1);
         snapshots.push(format!("expanded={expanded}\n{buffer:?}"));
     }
     insta::assert_snapshot!("mixed_shell_reads_shared_output", snapshots.join("\n"));

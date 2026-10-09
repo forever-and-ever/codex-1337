@@ -3,91 +3,91 @@ source: tui/src/app/activity_groups_tests.rs
 expression: "snapshots.join(\"\\n\\n\")"
 ---
 Exploration ordinary=false expanded=false
-1280 [+] • Called (Code Mode εμογ)
-                    • Explored
-                        Read first.rs (whole file)
-                    • Explored
-                        Read nested.rs (whole file)
-         20 [+] • Called (Code Mode τνμβ)
-                    • Explored
-                        Read second.rs (whole file)
+[+]   • Called (Code Mode εμογ)  1280
+                • Explored
+                    Read first.rs (whole file)
+                • Explored
+                    Read nested.rs (whole file)
+      [+]   • Called (Code Mode τνμβ)  20
+                • Explored
+                    Read second.rs (whole file)
 
 Exploration ordinary=false expanded=true
-1280 [-] • Called (Code Mode εμογ)
-                    • Explored
-                        Read first.rs (whole file)
-                    • Explored
-                        Read nested.rs (whole file)
-                          chosen porcelain:  exact
-                        {"content":[{"type":"text","text":"repeat"}],"structuredContent":"repeat"}
-                        {"content":[{"type":"text","text":"repeat"}],"structuredContent":"repeat"}
+[-]   • Called (Code Mode εμογ)  1280
+                • Explored
+                    Read first.rs (whole file)
+                • Explored
+                    Read nested.rs (whole file)
+                      chosen porcelain:  exact
+                    {"content":[{"type":"text","text":"repeat"}],"structuredContent":"repeat"}
+                    {"content":[{"type":"text","text":"repeat"}],"structuredContent":"repeat"}
 
-                        Returned b
-                        Script completed
-                        Wall time 0.0 seconds
-                        Output:
-                        Only model-visible text.
-         20 [-] • Called (Code Mode τνμβ)
-                    • Explored
-                        Read second.rs (whole file)
-                        Returned c
-                        Script completed
-                        Wall time 0.0 seconds
-                        Output:
-                        Only model-visible text.
+                    Returned b
+                    Script completed
+                    Wall time 0.0 seconds
+                    Output:
+                    Only model-visible text.
+      [-]   • Called (Code Mode τνμβ)  20
+                • Explored
+                    Read second.rs (whole file)
+                    Returned c
+                    Script completed
+                    Wall time 0.0 seconds
+                    Output:
+                    Only model-visible text.
 
 Computer ordinary=false expanded=false
-1280 [+] • Called (Code Mode εμογ)
-                    • Inspect first
-                    • Inspect nested
-         20 [+] • Called (Code Mode τνμβ)
-                    • Inspect second
+[+]   • Called (Code Mode εμογ)  1280
+                • Inspect first
+                • Inspect nested
+      [+]   • Called (Code Mode τνμβ)  20
+                • Inspect second
 
 Computer ordinary=false expanded=true
-1280 [-] • Called (Code Mode εμογ)
-                    • cua_repl.js({"title":"Inspect first"})
-                    • cua_repl.js({"title":"Inspect nested"})
-                          chosen porcelain:  exact
-                        {"content":[{"type":"text","text":"repeat"}],"structuredContent":"repeat"}
-                        {"content":[{"type":"text","text":"repeat"}],"structuredContent":"repeat"}
+[-]   • Called (Code Mode εμογ)  1280
+                • cua_repl.js({"title":"Inspect first"})
+                • cua_repl.js({"title":"Inspect nested"})
+                      chosen porcelain:  exact
+                    {"content":[{"type":"text","text":"repeat"}],"structuredContent":"repeat"}
+                    {"content":[{"type":"text","text":"repeat"}],"structuredContent":"repeat"}
 
-                        Returned b
-                        Script completed
-                        Wall time 0.0 seconds
-                        Output:
-                        Only model-visible text.
-         20 [-] • Called (Code Mode τνμβ)
-                    • cua_repl.js({"title":"Inspect second"})
-                        Returned c
-                        Script completed
-                        Wall time 0.0 seconds
-                        Output:
-                        Only model-visible text.
+                    Returned b
+                    Script completed
+                    Wall time 0.0 seconds
+                    Output:
+                    Only model-visible text.
+      [-]   • Called (Code Mode τνμβ)  20
+                • cua_repl.js({"title":"Inspect second"})
+                    Returned c
+                    Script completed
+                    Wall time 0.0 seconds
+                    Output:
+                    Only model-visible text.
 
 Exploration ordinary=true expanded=false
-1280 [+] • Called (Code Mode εμογ)
-                    • Ran cargo check
-                    • Ran cargo check
-         20 [+] • Called (Code Mode τνμβ)
-                    • Ran cargo check
+[+]   • Called (Code Mode εμογ)  1280
+                • Ran cargo check
+                • Ran cargo check
+      [+]   • Called (Code Mode τνμβ)  20
+                • Ran cargo check
 
 Exploration ordinary=true expanded=true
-1280 [-] • Called (Code Mode εμογ)
-                    • Ran cargo check
-                    • Ran cargo check
-                          chosen porcelain:  exact
-                        {"content":[{"type":"text","text":"repeat"}],"structuredContent":"repeat"}
-                        {"content":[{"type":"text","text":"repeat"}],"structuredContent":"repeat"}
+[-]   • Called (Code Mode εμογ)  1280
+                • Ran cargo check
+                • Ran cargo check
+                      chosen porcelain:  exact
+                    {"content":[{"type":"text","text":"repeat"}],"structuredContent":"repeat"}
+                    {"content":[{"type":"text","text":"repeat"}],"structuredContent":"repeat"}
 
-                        Returned b
-                        Script completed
-                        Wall time 0.0 seconds
-                        Output:
-                        Only model-visible text.
-         20 [-] • Called (Code Mode τνμβ)
-                    • Ran cargo check
-                        Returned c
-                        Script completed
-                        Wall time 0.0 seconds
-                        Output:
-                        Only model-visible text.
+                    Returned b
+                    Script completed
+                    Wall time 0.0 seconds
+                    Output:
+                    Only model-visible text.
+      [-]   • Called (Code Mode τνμβ)  20
+                • Ran cargo check
+                    Returned c
+                    Script completed
+                    Wall time 0.0 seconds
+                    Output:
+                    Only model-visible text.

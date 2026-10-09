@@ -1,12 +1,11 @@
 //! What each model request admitted, as measured by the server, and the figures a Feed
 //! Item's header shows for it.
 //!
-//! A step's figures are its total, then `(thinking output self)`: thinking and output from
-//! the response's own usage, self from the next request's seal. A header over several steps
-//! sums them ×N. A pending step shows only what its response reported; a sealed one adds its
-//! own results. An arrival's figure is its share of its step's seal. User input has no
-//! arrival item: the feed bills it on the user's own item when it can place it, and on the
-//! admitting step otherwise.
+//! A step's figures are its total, then its split: thought and output from the response's
+//! own usage, self from the next request's seal. A header over several steps sums them ×N. A
+//! pending step shows only what its response reported; a sealed one adds its own results. An
+//! arrival's figure is its share of its step's seal. User input has no arrival item: the feed
+//! bills it on the user's own item when it can place it, and on the admitting step otherwise.
 
 use super::text::token_label;
 use codex_app_server_protocol::StepAdmissionItem;
@@ -28,9 +27,18 @@ pub(super) struct StepBills {
 pub(super) struct Figures {
     /// The admitted total, or what stands in for it: `…` pending, `—` severed.
     pub(super) total: Total,
-    /// `(thinking output self)`, for steps.
-    pub(super) split: Option<String>,
+    /// What a step's total is made of.
+    pub(super) split: Option<Split>,
     pub(super) notes: Vec<String>,
+}
+
+/// A step's thought, output and own results; zero or unreported parts are absent.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub(super) struct Split {
+    pub(super) thought: Option<String>,
+    pub(super) output: Option<String>,
+    /// Its own results, or what stands in for them: `…` pending, `—` severed.
+    pub(super) own: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -121,12 +129,11 @@ pub(super) fn steps_figures(
     let approx = if approximate { "≈" } else { "" };
     let measured = steps.len() - unsealed - severed;
     let own_label = match (measured, unsealed) {
-        (0, 0) => "—".to_string(),
-        (0, _) => "…".to_string(),
-        (_, 0) => format!("{approx}{}", token_label(own)),
-        (_, _) => format!("{approx}{}+…", token_label(own)),
+        (0, 0) => Some("—".to_string()),
+        (0, _) => Some("…".to_string()),
+        (_, 0) => (own > 0).then(|| format!("{approx}{}", token_label(own))),
+        (_, _) => Some(format!("{approx}{}+…", token_label(own))),
     };
-    let thinking_label = thinking.map_or_else(|| "—".to_string(), token_label);
     let mut notes = Vec::new();
     if steps.len() > 1 {
         notes.push(format!("×{}", steps.len()));
@@ -147,10 +154,11 @@ pub(super) fn steps_figures(
     }
     Figures {
         total: Total::Exact(thinking.unwrap_or(0) + output + own),
-        split: Some(format!(
-            "({thinking_label} {} {own_label})",
-            token_label(output)
-        )),
+        split: Some(Split {
+            thought: thinking.filter(|thinking| *thinking > 0).map(token_label),
+            output: (output > 0).then(|| token_label(output)),
+            own: own_label,
+        }),
         notes,
     }
 }

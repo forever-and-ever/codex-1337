@@ -1,27 +1,43 @@
-//! Rich transcript geometry. Clocks and disclosures never enter selectable source.
-//! Marker-bearing entries share a fixed content column; cards retain cell-owned markers.
-//! A Feed Item's header puts its fold after the clock and its title at `TITLE_COLUMN`; the
-//! item's members keep the content column, offset under the title.
+//! Rich transcript geometry. Clocks, controls and token figures never enter selectable source.
+//! Every row shares one grid: clock, control, then content at `GUTTER_COLUMNS`, two columns
+//! right of a Feed Item header's title, whether an item claims the row or not; nothing moves
+//! sideways when the feed regroups a cell or the view turns detailed. The normal view trails a
+//! row's tokens after its first line; the detailed view has no controls and puts the tokens in
+//! their column. Marker-bearing entries share the content column; cards retain cell-owned
+//! markers.
 
 use crate::history_cell::HistoryCell;
 use crate::history_cell::HistoryRenderMode;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::terminal_hyperlinks::prefix_hyperlink_lines;
 
-pub(crate) const DISCLOSURE_COLUMNS: u16 = 3;
 pub(crate) const CLOCK_COLUMNS: u16 = 6;
-/// A loose row's tokens share the columns a feed header gives its fold.
-pub(crate) const TOKEN_COLUMN: u16 = CLOCK_COLUMNS;
+/// A header's fold, and the controls of every row.
+pub(crate) const CONTROL_COLUMN: u16 = CLOCK_COLUMNS;
+pub(crate) const CONTROL_COLUMNS: u16 = 3;
+/// The detailed view's tokens take the column its rows have no controls for.
+pub(crate) const TOKEN_COLUMN: u16 = CONTROL_COLUMN;
 pub(crate) const TOKEN_COLUMNS: u16 = 5;
-pub(crate) const FOLD_COLUMN: u16 = CLOCK_COLUMNS;
-pub(crate) const TITLE_COLUMN: u16 = FOLD_COLUMN + DISCLOSURE_COLUMNS + 1;
-pub(crate) const DISCLOSURE_COLUMN: u16 = TITLE_COLUMN + 2;
-pub(crate) const GUTTER_COLUMNS: u16 = DISCLOSURE_COLUMN + DISCLOSURE_COLUMNS + 1;
+/// A Feed Item header's title.
+pub(crate) const TITLE_COLUMN: u16 = CONTROL_COLUMN + CONTROL_COLUMNS + 1;
+/// Every row's content.
+pub(crate) const GUTTER_COLUMNS: u16 = TITLE_COLUMN + 2;
 pub(crate) const MARKER_COLUMNS: u16 = 2;
 pub(crate) const BODY_COLUMN: u16 = GUTTER_COLUMNS + MARKER_COLUMNS;
 pub(crate) const CHILD_INDENT: u16 = BODY_COLUMN - GUTTER_COLUMNS + 2;
+/// The rows nested under a row that a header shows as its title hang from that title.
+pub(crate) const NESTED_COLUMNS: u16 = GUTTER_COLUMNS - CHILD_INDENT;
 pub(crate) const CHILD_PREFIX: &str = "    ";
 pub(crate) const CHILD_BRANCH: &str = "  └ ";
+
+/// Where a row's own tokens go.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum TokenSeat {
+    /// The token column, which the detailed view leaves free of controls.
+    Gutter,
+    /// After the row's first line, where controls hold that column.
+    Trailing,
+}
 
 pub(crate) fn content_width(width: u16, mode: HistoryRenderMode) -> u16 {
     match mode {
@@ -31,14 +47,19 @@ pub(crate) fn content_width(width: u16, mode: HistoryRenderMode) -> u16 {
 }
 
 pub(crate) fn rich_lines(lines: Vec<HyperlinkLine>) -> Vec<HyperlinkLine> {
-    let prefix = " ".repeat(usize::from(GUTTER_COLUMNS));
+    gutter_lines(lines, GUTTER_COLUMNS)
+}
+
+/// Indent rows `columns` from the edge, drawing a row's clock at its start.
+pub(crate) fn gutter_lines(lines: Vec<HyperlinkLine>, columns: u16) -> Vec<HyperlinkLine> {
+    let prefix = " ".repeat(usize::from(columns));
     let mut lines = prefix_hyperlink_lines(lines, prefix.clone().into(), prefix.into());
     for line in &mut lines {
         if let Some(clock) = line.clock.take() {
             // Prefix provenance already excludes the entire gutter from copy/selection.
             let mut spans = vec![
                 clock.span(),
-                " ".repeat(usize::from(GUTTER_COLUMNS - CLOCK_COLUMNS))
+                " ".repeat(usize::from(columns.saturating_sub(CLOCK_COLUMNS)))
                     .into(),
             ];
             spans.extend(line.line.spans.drain(1..));

@@ -3,16 +3,16 @@ source: tui/src/transcript_view/search_tests.rs
 expression: "format!(\"{selected_frame:?}\")"
 ---
 Buffer {
-    area: Rect { x: 0, y: 0, width: 44, height: 4 },
+    area: Rect { x: 0, y: 0, width: 40, height: 4 },
     content: [
-        "                newer needle                ",
-        "                                            ",
-        "                                            ",
-        "                                            ",
+        "            newer needle                ",
+        "                                        ",
+        "                                        ",
+        "                                        ",
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 16, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: REVERSED,
-        x: 28, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 12, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: REVERSED,
+        x: 24, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }

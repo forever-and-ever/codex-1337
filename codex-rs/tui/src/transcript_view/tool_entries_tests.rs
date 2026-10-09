@@ -497,7 +497,7 @@ fn mixed_feed_keeps_its_grid_through_live_commit_resize_and_details() {
         let committed = tests::render(&mut view, &cells, width, /*height*/ 50);
         assert_eq!(live, committed);
         let text = tests::text(&committed);
-        assert_eq!(text.matches("  128 ").count(), 1);
+        assert_eq!(text.matches("  128").count(), 1);
         assert_eq!(text.matches("Edited").count(), 1);
         let layout = view.current_layout(&cells, cells.len() - 1).unwrap();
         assert!(layout.text().contains("  source_indent();"));
@@ -510,13 +510,13 @@ fn mixed_feed_keeps_its_grid_through_live_commit_resize_and_details() {
         let (row, columns, _) = tool_layout.fold_position(&FoldTarget::Activity).unwrap();
         assert_eq!(
             columns,
-            crate::transcript_geometry::DISCLOSURE_COLUMN
-                ..crate::transcript_geometry::DISCLOSURE_COLUMN
-                    + crate::transcript_geometry::DISCLOSURE_COLUMNS
+            crate::transcript_geometry::CONTROL_COLUMN
+                ..crate::transcript_geometry::CONTROL_COLUMN
+                    + crate::transcript_geometry::CONTROL_COLUMNS
         );
         assert!(tool_layout.fold_at(row, /*column*/ 0).is_none());
         assert_eq!(
-            tool_layout.fold_at(row, crate::transcript_geometry::DISCLOSURE_COLUMN),
+            tool_layout.fold_at(row, crate::transcript_geometry::CONTROL_COLUMN),
             Some(FoldTarget::Activity)
         );
         snapshots.push(format!("width={width}\n{}", text.trim_end()));

@@ -3,7 +3,7 @@ source: tui/src/app/owned_transcript_tests.rs
 expression: "normalize_snapshot_paths(snapshots.join(\"\\n\\n\"))"
 ---
 80x10, Recap at tail
-                  ↳ Recap: The draft is ready.
+              ↳ Recap: The draft is ready.
 
 
 
@@ -16,7 +16,7 @@ expression: "normalize_snapshot_paths(snapshots.join(\"\\n\\n\"))"
 
 80x10, Message after recap
 
-                • Follow-up response.
+            • Follow-up response.
 
 
 › Ask Codex to do anything
@@ -28,7 +28,7 @@ expression: "normalize_snapshot_paths(snapshots.join(\"\\n\\n\"))"
 
 80x10, Live message after recap
 
-                • Streaming response.
+            • Streaming response.
 
 
 › Ask Codex to do anything
@@ -41,7 +41,7 @@ expression: "normalize_snapshot_paths(snapshots.join(\"\\n\\n\"))"
 80x12, Recap at tail
   ? for shortcuts
 ────────────────────────────────────────────────────────────────────────────────
-                           Next: Review the changes.
+                       Next: Review the changes.
 
 
 
@@ -56,7 +56,7 @@ expression: "normalize_snapshot_paths(snapshots.join(\"\\n\\n\"))"
   ? for shortcuts
 ────────────────────────────────────────────────────────────────────────────────
 
-                • Follow-up response.
+            • Follow-up response.
 
 
 › Ask Codex to do anything
@@ -70,7 +70,7 @@ expression: "normalize_snapshot_paths(snapshots.join(\"\\n\\n\"))"
   ? for shortcuts
 ────────────────────────────────────────────────────────────────────────────────
 
-                • Streaming response.
+            • Streaming response.
 
 
 › Ask Codex to do anything
@@ -83,7 +83,7 @@ expression: "normalize_snapshot_paths(snapshots.join(\"\\n\\n\"))"
 32x12, Recap at tail
   ? for shortcuts
 ────────────────────────────────
-                           s.
+                       .
 
 
 
@@ -97,8 +97,8 @@ expression: "normalize_snapshot_paths(snapshots.join(\"\\n\\n\"))"
 32x12, Message after recap
   ? for shortcuts
 ────────────────────────────────
-                • Follow-up
-                  response.
+            • Follow-up
+              response.
 
 
 › Ask Codex to do anything
@@ -111,8 +111,8 @@ expression: "normalize_snapshot_paths(snapshots.join(\"\\n\\n\"))"
 32x12, Live message after recap
   ? for shortcuts
 ────────────────────────────────
-                • Streaming
-                  response.
+            • Streaming
+              response.
 
 
 › Ask Codex to do anything

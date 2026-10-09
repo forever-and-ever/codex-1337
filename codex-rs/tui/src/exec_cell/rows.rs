@@ -255,7 +255,7 @@ pub(crate) fn command_parts(
                 lines.extend(batch.output_lines(width, mode));
             }
         } else {
-            lines.push(client_notice("Stored result · exact capture unavailable"));
+            lines.push(client_notice("  Stored result · exact capture unavailable"));
             for call in calls {
                 if let Some(output) = &call.output {
                     let mut detail = plain_hyperlink_lines(

@@ -5,8 +5,8 @@ expression: "snapshots.join(\"\\n\\n\")"
 Latest
 
 ────────────────────────────────────────────────────────────────────────────────
-                Transcript row 39
-                Transcript row 40
+            Transcript row 39
+            Transcript row 40
 
 
 › draft
@@ -18,8 +18,8 @@ Latest
 
 Reading
   esc latest
-                Transcript row 38
-                Transcript row 39
+            Transcript row 38
+            Transcript row 39
 ────────────────────────────────────────────────────────────────────────────────
                              ↓ Back to bottom · esc
 
@@ -31,7 +31,7 @@ Reading
   gpt-test default · /tmp/project
 
 Resized multiline composer
-                Transcript row 38
+            Transcript row 38
 ────────────────────────────────────────
          ↓ Back to bottom · esc
 
@@ -54,7 +54,7 @@ Tiny terminal
 Detailed
 
 ────────────────────────────────────────────────────────────────────────────────
-                • Viewed image assets/detail-image.png
+            • Viewed image assets/detail-image.png
 
 
 

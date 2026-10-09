@@ -6,9 +6,9 @@ collapsed
 Buffer {
     area: Rect { x: 0, y: 0, width: 70, height: 10 },
     content: [
-        "                • Edited                                              ",
-        "            [+]     alpha.rs (+2, -0)                                 ",
-        "            [+]     beta.rs (+2, -0)                                  ",
+        "            • Edited                                                  ",
+        "      [+]       alpha.rs (+2, -0)                                     ",
+        "      [+]       beta.rs (+2, -0)                                      ",
         "                                                                      ",
         "                                                                      ",
         "                                                                      ",
@@ -19,21 +19,21 @@ Buffer {
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 16, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
-        x: 18, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
-        x: 24, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 12, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
-        x: 15, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 30, y: 1, fg: Green, bg: Reset, underline: Reset, modifier: NONE,
+        x: 12, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 14, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 20, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 6, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 9, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 26, y: 1, fg: Green, bg: Reset, underline: Reset, modifier: NONE,
+        x: 28, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 30, y: 1, fg: Red, bg: Reset, underline: Reset, modifier: NONE,
         x: 32, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 34, y: 1, fg: Red, bg: Reset, underline: Reset, modifier: NONE,
-        x: 36, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 12, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
-        x: 15, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 29, y: 2, fg: Green, bg: Reset, underline: Reset, modifier: NONE,
+        x: 6, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 9, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 25, y: 2, fg: Green, bg: Reset, underline: Reset, modifier: NONE,
+        x: 27, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 29, y: 2, fg: Red, bg: Reset, underline: Reset, modifier: NONE,
         x: 31, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 33, y: 2, fg: Red, bg: Reset, underline: Reset, modifier: NONE,
-        x: 35, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }
 
@@ -41,11 +41,11 @@ second file expanded
 Buffer {
     area: Rect { x: 0, y: 0, width: 70, height: 10 },
     content: [
-        "                • Edited                                              ",
-        "            [+]     alpha.rs (+2, -0)                                 ",
-        "            [-]     beta.rs (+2, -0)                                  ",
-        "                    1 +beta body                                      ",
-        "                    2 +second beta line                               ",
+        "            • Edited                                                  ",
+        "      [+]       alpha.rs (+2, -0)                                     ",
+        "      [-]       beta.rs (+2, -0)                                      ",
+        "                1 +beta body                                          ",
+        "                2 +second beta line                                   ",
         "                                                                      ",
         "                                                                      ",
         "                                                                      ",
@@ -54,68 +54,68 @@ Buffer {
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 16, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
-        x: 18, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
-        x: 24, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 12, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
-        x: 15, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 30, y: 1, fg: Green, bg: Reset, underline: Reset, modifier: NONE,
+        x: 12, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 14, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 20, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 6, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 9, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 26, y: 1, fg: Green, bg: Reset, underline: Reset, modifier: NONE,
+        x: 28, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 30, y: 1, fg: Red, bg: Reset, underline: Reset, modifier: NONE,
         x: 32, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 34, y: 1, fg: Red, bg: Reset, underline: Reset, modifier: NONE,
-        x: 36, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 12, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
-        x: 15, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 29, y: 2, fg: Green, bg: Reset, underline: Reset, modifier: NONE,
+        x: 6, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 9, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 25, y: 2, fg: Green, bg: Reset, underline: Reset, modifier: NONE,
+        x: 27, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 29, y: 2, fg: Red, bg: Reset, underline: Reset, modifier: NONE,
         x: 31, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 33, y: 2, fg: Red, bg: Reset, underline: Reset, modifier: NONE,
-        x: 35, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 0, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: REVERSED,
-        x: 20, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: DIM | REVERSED,
-        x: 22, y: 3, fg: Green, bg: Reset, underline: Reset, modifier: REVERSED,
-        x: 23, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: REVERSED,
-        x: 20, y: 4, fg: Reset, bg: Reset, underline: Reset, modifier: DIM | REVERSED,
-        x: 22, y: 4, fg: Green, bg: Reset, underline: Reset, modifier: REVERSED,
-        x: 23, y: 4, fg: Reset, bg: Reset, underline: Reset, modifier: REVERSED,
+        x: 16, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: DIM | REVERSED,
+        x: 18, y: 3, fg: Green, bg: Reset, underline: Reset, modifier: REVERSED,
+        x: 19, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: REVERSED,
+        x: 16, y: 4, fg: Reset, bg: Reset, underline: Reset, modifier: DIM | REVERSED,
+        x: 18, y: 4, fg: Green, bg: Reset, underline: Reset, modifier: REVERSED,
+        x: 19, y: 4, fg: Reset, bg: Reset, underline: Reset, modifier: REVERSED,
         x: 0, y: 5, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }
 
 both files expanded with batch bill
-        123     • Edited
-            [-]     alpha.rs (+2, -0)
-                    1 +alpha body
-                    2 +second alpha line
-            [-]     beta.rs (+2, -0)
-                    1 +beta body
-                    2 +second beta line
+            • Edited  123
+      [-]       alpha.rs (+2, -0)
+                1 +alpha body
+                2 +second alpha line
+      [-]       beta.rs (+2, -0)
+                1 +beta body
+                2 +second beta line
 
 first file collapsed
-        123     • Edited
-            [+]     alpha.rs (+2, -0)
-            [-]     beta.rs (+2, -0)
-                    1 +beta body
-                    2 +second beta line
+            • Edited  123
+      [+]       alpha.rs (+2, -0)
+      [-]       beta.rs (+2, -0)
+                1 +beta body
+                2 +second beta line
 
 adjacent calls
-        123     • Edited
-            [+]     alpha.rs (+2, -0)
-            [+]     beta.rs (+2, -0)
-         55 [+]     gamma.rs (+1, -0)
+            • Edited  123
+      [+]       alpha.rs (+2, -0)
+      [+]       beta.rs (+2, -0)
+      [+]       gamma.rs (+1, -0)  55
 
 next file expanded
-        123     • Edited
-            [+]     alpha.rs (+2, -0)
-            [+]     beta.rs (+2, -0)
-         55 [-]     gamma.rs (+1, -0)
-                    1 +gamma body
+            • Edited  123
+      [+]       alpha.rs (+2, -0)
+      [+]       beta.rs (+2, -0)
+      [-]       gamma.rs (+1, -0)  55
+                1 +gamma body
 
 message boundary
-        123     • Edited
-            [+]     alpha.rs (+2, -0)
-            [+]     beta.rs (+2, -0)
+            • Edited  123
+      [+]       alpha.rs (+2, -0)
+      [+]       beta.rs (+2, -0)
 
-                A separate message
+            A separate message
 
-         55     • Edited
-            [-]     gamma.rs (+1, -0)
-                    1 +gamma body
+            • Edited  55
+      [-]       gamma.rs (+1, -0)
+                1 +gamma body

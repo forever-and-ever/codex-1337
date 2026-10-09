@@ -5,13 +5,10 @@ expression: "stages.join(\"\\n\\n---\\n\\n\")"
 owned=true, plan=false
 Streaming:
 • 1. One
-  2. This
-     item
+  2. This item
      has
-     enoug
-     h
-     words
-     to
+     enough
+     words to
      wrap
   3. Three
   4. Four
@@ -38,13 +35,10 @@ Streaming:
 
 
   1. One
-  2. This
-     item
+  2. This item
      has
-     enoug
-     h
-     words
-     to
+     enough
+     words to
      wrap
   3. Three
   4. Four

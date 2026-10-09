@@ -2,7 +2,7 @@
 source: tui/src/app/owned_transcript_follow_tests.rs
 expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(super::tests::buffer_text(buffer))"
 ---
-                transcript row 28
+            transcript row 28
 ────────────────────────────────────────────────────────────────────────────────
                              ↓ Back to bottom · esc
 • Working (0s • ctrl+c to interrupt)

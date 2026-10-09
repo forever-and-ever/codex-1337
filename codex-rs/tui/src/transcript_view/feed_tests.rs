@@ -59,7 +59,16 @@ fn step(
 fn steps_fold_under_one_header_with_their_figures() {
     let mut exec = new_active_exec_command(
         "call-1".into(),
-        vec!["cargo".into(), "test".into()],
+        [
+            "cargo",
+            "test",
+            "-p",
+            "codex-tui",
+            "--lib",
+            "transcript_view::feed",
+        ]
+        .map(String::from)
+        .to_vec(),
         Vec::new(),
         CommandExecutionSource::Agent,
         /*interaction_input*/ None,
@@ -154,7 +163,7 @@ fn steps_fold_under_one_header_with_their_figures() {
         .unwrap_or_else(|| panic!("the step's header names its call:\n{folded}"));
     assert!(view.toggle_disclosure_at(
         &cells,
-        crate::transcript_geometry::FOLD_COLUMN + 1,
+        crate::transcript_geometry::CONTROL_COLUMN + 1,
         row as u16,
     ));
     screen(&mut view, "unfolded");

@@ -13,8 +13,12 @@ impl TextRow {
 }
 
 impl TextLayout {
-    pub(in crate::transcript_view) fn with_header_tokens(mut self, tokens: Option<u64>) -> Self {
-        self.heading.tokens = tokens;
+    pub(in crate::transcript_view) fn with_header_tokens(
+        mut self,
+        tokens: Option<u64>,
+        seat: crate::transcript_geometry::TokenSeat,
+    ) -> Self {
+        self.heading.tokens = tokens.map(|tokens| (tokens, seat));
         self
     }
 
@@ -111,14 +115,17 @@ impl TextLayout {
         )
     }
 
-    /// Head the layout with a Feed Item's header row, its fold after the clock.
+    /// Head the layout with a Feed Item's header rows, its fold after the clock.
     pub(in crate::transcript_view) fn with_fold_header(
         self,
-        line: Line<'static>,
+        lines: Vec<Line<'static>>,
         target: FoldTarget,
         unfolded: bool,
     ) -> Self {
-        let mut layout = self.with_leading_row(line.clone());
+        let mut layout = self;
+        for line in lines.iter().rev() {
+            layout = layout.with_leading_row(line.clone());
+        }
         layout.disclosure = true;
         layout.disclosure_controls.push(DisclosureControl {
             target: target.clone(),
@@ -127,7 +134,7 @@ impl TextLayout {
             row: 0,
             placement: DisclosurePlacement::Fold,
         });
-        layout.feed_header = Some((line, target, unfolded));
+        layout.feed_header = Some((lines, target, unfolded));
         layout
     }
 

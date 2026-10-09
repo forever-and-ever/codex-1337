@@ -48,9 +48,9 @@ fn tool_output_disclosure_shows_fixed_token_column() {
             disclosure: Some(ActivityDisclosure::Generic),
             header_tokens: Some(1_280),
         },
+        crate::transcript_geometry::GUTTER_COLUMNS,
         /*width*/ 80,
         /*expanded*/ false,
-        /*shortcut*/ None,
     );
     let area = Rect::new(
         /*x*/ 0, /*y*/ 0, /*width*/ 80, /*height*/ 2,
@@ -117,26 +117,25 @@ fn tool_heading_decorations_preserve_source_and_hit_targets() {
                 header_tokens: tokens,
                 disclosure: mcp.activity_disclosure(width),
             },
+            crate::transcript_geometry::GUTTER_COLUMNS,
             width,
             expanded,
-            /*shortcut*/ None,
         );
         let area = Rect::new(/*x*/ 0, /*y*/ 0, width, /*height*/ 8);
         let mut buffer = Buffer::empty(area);
         layout.render(area, &mut buffer, /*start_row*/ 0);
         assert_eq!(
             layout.disclosure_columns(),
-            crate::transcript_geometry::DISCLOSURE_COLUMN
-                ..crate::transcript_geometry::DISCLOSURE_COLUMN
-                    + crate::transcript_geometry::DISCLOSURE_COLUMNS
+            crate::transcript_geometry::CONTROL_COLUMN
+                ..crate::transcript_geometry::CONTROL_COLUMN
+                    + crate::transcript_geometry::CONTROL_COLUMNS
         );
         assert!(!layout.text().contains("tokens)"));
         assert!(layout.text().starts_with("Called"));
         if tokens.is_some() {
-            assert!(
-                crate::transcript_view::tests::text(&buffer).contains("   82 [+] • Called")
-                    || crate::transcript_view::tests::text(&buffer).contains("   82 [-] • Called")
-            );
+            let text = crate::transcript_view::tests::text(&buffer);
+            assert!(text.contains("[+]   • Called") || text.contains("[-]   • Called"));
+            assert!(text.lines().next().is_some_and(|row| row.ends_with("  82")));
         }
         assert_eq!(layout.position_at(/*row*/ 0, /*column*/ 0), 0);
         if !expanded {
@@ -162,9 +161,9 @@ fn tool_heading_decorations_preserve_source_and_hit_targets() {
             header_tokens: Some(1_337),
             disclosure: None,
         },
+        crate::transcript_geometry::GUTTER_COLUMNS,
         /*width*/ 80,
         /*expanded*/ false,
-        /*shortcut*/ None,
     );
     for (offset, _) in layout.text().grapheme_indices(/*is_extended*/ true) {
         let column = layout.column_for_offset(offset);

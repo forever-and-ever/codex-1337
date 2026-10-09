@@ -4,20 +4,26 @@
 //! the server billed belongs to its step's Feed Item: the step's Thought, the response's
 //! messages and calls, and their results. Steps that share a cell, and a Code Mode exec with
 //! the steps that wait on it, form one item. User turns, arrivals and Preambles are items of
-//! one cell each. Every other cell stays loose and draws as before.
+//! one cell each. Every other cell stays loose, with its own clock and tokens.
 //!
 //! An item's members need not be adjacent. A run of members that no other item interrupts is
-//! a segment, and each segment draws a header above its first visible member: clock, fold,
-//! title, then the figures of the steps that begin in it. Folded, a segment shows only its
-//! header, and the messages of an item that made calls. Unfolded, it shows every member, and
-//! an item of several steps heads each step's first member with that step's own figures; the
-//! one fold drives both levels. User turns and responses unfold by default, live work while
-//! it lasts, and an explicit fold or unfold outlasts both.
+//! a segment, and a segment draws a header when it begins a step or shows a member: clock,
+//! fold, title, then the figures of the steps that begin in it. The title is the first row of
+//! the segment's first activity, which yields that row to it: folded, the header clips it to
+//! one row; unfolded, it wraps it whole, and the activity draws the rest, or its details when
+//! nothing else remains. A segment without an activity borrows the item's title, and an item
+//! without any is a Response. Folded, a segment shows only its header, and the messages of an
+//! item that made calls. Unfolded, it shows every member, and an item of several steps heads
+//! each step's first member with that step's own figures; the one fold drives both levels. A
+//! Thought shows only when it has text to read: otherwise its tokens are its step's thought
+//! figure. User turns and responses unfold by default, live work while it lasts, and an
+//! explicit fold or unfold outlasts both.
 //!
 //! Live work stays below a rule: the trailing items still in flight, else a running tool in
 //! the live tail.
 
 use super::step_bills::Figures;
+use super::step_bills::Split;
 use super::step_bills::StepBills;
 use super::step_bills::Total;
 use super::step_bills::arrival_figures;
@@ -34,6 +40,8 @@ use crate::history_cell::PreambleCell;
 use crate::history_cell::ThoughtCell;
 use crate::history_cell::UserHistoryCell;
 use crate::history_cell::activity_parts::FoldTarget;
+use crate::history_cell::activity_preview::compact_header;
+use crate::history_cell::output_provenance::OutputMode;
 use crate::line_truncation::line_width;
 use crate::line_truncation::truncate_line_with_ellipsis_if_overflow;
 use codex_app_server_protocol::StepAdmissionItem;
@@ -94,7 +102,37 @@ struct Membership {
     steps: Vec<usize>,
     /// The steps whose first member this is.
     opens: Vec<usize>,
-    message: bool,
+    contribution: Contribution,
+}
+
+/// What a member brings to its item.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Contribution {
+    /// A call or other activity; the first in a header's scope titles it.
+    Activity,
+    /// An assistant message, shown even while an item that made calls is folded.
+    Message,
+    /// A Thought with text to read.
+    Thought,
+    /// A Thought with nothing to read: only its tokens count, in its step's figures.
+    Silent,
+}
+
+impl Contribution {
+    fn of(cell: &dyn HistoryCell) -> Self {
+        let any = cell.as_any();
+        if let Some(thought) = any.downcast_ref::<ThoughtCell>() {
+            if thought.is_readable() {
+                Self::Thought
+            } else {
+                Self::Silent
+            }
+        } else if any.is::<AgentMarkdownCell>() {
+            Self::Message
+        } else {
+            Self::Activity
+        }
+    }
 }
 
 struct Item {
@@ -136,6 +174,15 @@ impl Item {
     fn spacious(&self) -> bool {
         matches!(self.kind, Kind::User { .. } | Kind::Steps { calls: false })
     }
+
+    /// Whether the member draws rows of its own.
+    fn shows(&self, member: &Membership, unfolded: bool) -> bool {
+        match member.contribution {
+            Contribution::Silent => false,
+            Contribution::Message => unfolded || self.kind == Kind::Steps { calls: true },
+            Contribution::Activity | Contribution::Thought => unfolded,
+        }
+    }
 }
 
 /// How one cell draws in the feed.
@@ -152,6 +199,9 @@ pub(super) enum Content {
     Hidden,
     /// The cell's own rows, under its item's header.
     Own,
+    /// The cell's rows after its first, which its item's header shows as its title; its
+    /// details when nothing else remains.
+    Beheaded,
     /// A feed entry's body.
     Body,
 }
@@ -160,12 +210,32 @@ pub(super) enum Content {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) struct Header {
     item: usize,
-    /// The members its title and clock come from.
+    /// The members its clock comes from.
     scope: Vec<usize>,
     /// The item's steps it bills.
     steps: Vec<usize>,
+    title: Title,
     pub(super) unfolded: bool,
     pub(super) spacious: bool,
+}
+
+/// What a steps header shows as its title.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum Title {
+    /// The first row of an activity under this header, which yields the row to it.
+    Owned(usize),
+    /// The first row of the item's first activity, which another header owns.
+    Borrowed(usize),
+    /// Nothing the item did besides respond.
+    Response,
+}
+
+/// Where one header draws, what it covers and what titles it.
+struct Plan {
+    site: usize,
+    scope: Vec<usize>,
+    steps: Vec<usize>,
+    title: Title,
 }
 
 impl Seat {
@@ -244,7 +314,7 @@ impl FeedIndex {
                     segment: 0,
                     steps: Vec::new(),
                     opens: Vec::new(),
-                    message: false,
+                    contribution: Contribution::of(cell.as_ref()),
                 });
                 last_item = Some(item);
                 continue;
@@ -287,7 +357,7 @@ impl FeedIndex {
                 segment,
                 steps,
                 opens,
-                message: cell.as_any().is::<AgentMarkdownCell>(),
+                contribution: Contribution::of(cell.as_ref()),
             });
             last_item = Some(item);
         }
@@ -348,69 +418,130 @@ impl FeedIndex {
         };
         let item = &self.items[member.item];
         let unfolded = item.unfolded(expanded);
-        let spacious = item.spacious();
-        let segment = &item.segments[member.segment];
-        let header = |scope: Vec<usize>, steps: Vec<usize>| Header {
+        let header = |scope: Vec<usize>, steps: Vec<usize>, title: Title| Header {
             item: member.item,
             scope,
             steps,
+            title,
             unfolded,
-            spacious,
+            spacious: item.spacious(),
         };
-        match item.kind {
-            Kind::User { .. } | Kind::Arrival | Kind::Preamble => Seat {
-                header: Some(header(vec![index], Vec::new())),
+        if !matches!(item.kind, Kind::Steps { .. }) {
+            return Seat {
+                header: Some(header(vec![index], Vec::new(), Title::Response)),
                 content: match (&item.kind, unfolded) {
                     (_, false) => Content::Hidden,
                     (Kind::User { .. }, true) => Content::Own,
                     (_, true) => Content::Body,
                 },
-            },
-            Kind::Steps { calls } => {
-                let content = if unfolded || (calls && member.message) {
-                    Content::Own
-                } else {
-                    Content::Hidden
-                };
-                let header = if unfolded && item.steps.len() > 1 {
-                    // Each step heads its own first visible member; the segment's first visible
-                    // member is headed even when its steps began in an earlier segment.
-                    let mut pending = Vec::new();
-                    let mut first = true;
-                    let mut found = None;
-                    for candidate in segment {
-                        if let Some(Role::Member(other)) = self.roles.get(*candidate) {
-                            pending.extend(other.opens.iter().copied());
-                        }
-                        if elided(*candidate) {
-                            continue;
-                        }
-                        let headed = first || !pending.is_empty();
-                        first = false;
-                        let steps = std::mem::take(&mut pending);
-                        if *candidate == index {
-                            found = headed.then(|| {
-                                let scope = if steps.is_empty() {
-                                    segment.clone()
-                                } else {
-                                    self.step_members(segment, &steps)
-                                };
-                                header(scope, steps)
-                            });
-                            break;
-                        }
-                    }
-                    found
-                } else {
-                    segment
-                        .iter()
-                        .copied()
-                        .find(|candidate| !elided(*candidate))
-                        .filter(|site| *site == index)
-                        .map(|_| header(segment.clone(), self.segment_steps(segment)))
-                };
-                Seat { header, content }
+            };
+        }
+        let plans = self.plans(item, &item.segments[member.segment], unfolded, elided);
+        let content = if !item.shows(member, unfolded) {
+            Content::Hidden
+        } else if plans.iter().any(|plan| plan.title == Title::Owned(index)) {
+            Content::Beheaded
+        } else {
+            Content::Own
+        };
+        let header = plans
+            .into_iter()
+            .find(|plan| plan.site == index)
+            .map(|plan| header(plan.scope, plan.steps, plan.title));
+        Seat { header, content }
+    }
+
+    /// The headers of one segment of a steps item, in order.
+    fn plans(
+        &self,
+        item: &Item,
+        segment: &[usize],
+        unfolded: bool,
+        elided: &dyn Fn(usize) -> bool,
+    ) -> Vec<Plan> {
+        let member = |index: usize| match self.roles.get(index) {
+            Some(Role::Member(member)) => Some(member),
+            _ => None,
+        };
+        let opened = self.segment_steps(segment);
+        let shown = segment.iter().any(|index| {
+            !elided(*index) && member(*index).is_some_and(|member| item.shows(member, unfolded))
+        });
+        if !(unfolded && item.steps.len() > 1) {
+            if opened.is_empty() && !shown {
+                return Vec::new();
             }
+            return segment
+                .iter()
+                .copied()
+                .find(|index| !elided(*index))
+                .map(|site| self.plan(item, site, segment.to_vec(), opened, elided))
+                .into_iter()
+                .collect();
+        }
+        // Each step heads its first member. Members of steps begun in an earlier segment are
+        // headed by the segment's first member, when any of them shows.
+        let mut plans = Vec::new();
+        let mut pending = Vec::new();
+        for &candidate in segment {
+            if let Some(member) = member(candidate) {
+                pending.extend(member.opens.iter().copied());
+            }
+            if elided(candidate) || (pending.is_empty() && !(plans.is_empty() && shown)) {
+                continue;
+            }
+            let steps = std::mem::take(&mut pending);
+            let scope = segment
+                .iter()
+                .copied()
+                .filter(|index| {
+                    member(*index).is_some_and(|member| {
+                        if steps.is_empty() {
+                            member.steps.iter().all(|step| !opened.contains(step))
+                        } else {
+                            member.steps.iter().any(|step| steps.contains(step))
+                        }
+                    })
+                })
+                .collect();
+            plans.push(self.plan(item, candidate, scope, steps, elided));
+        }
+        plans
+    }
+
+    /// A header over `scope`, titled by its first activity, else by the item's.
+    fn plan(
+        &self,
+        item: &Item,
+        site: usize,
+        scope: Vec<usize>,
+        steps: Vec<usize>,
+        elided: &dyn Fn(usize) -> bool,
+    ) -> Plan {
+        let activity = |index: &usize| {
+            !elided(*index)
+                && matches!(self.roles.get(*index), Some(Role::Member(member))
+                    if member.contribution == Contribution::Activity)
+        };
+        let title = scope
+            .iter()
+            .copied()
+            .find(activity)
+            .map(Title::Owned)
+            .or_else(|| {
+                item.segments
+                    .iter()
+                    .flatten()
+                    .copied()
+                    .find(activity)
+                    .map(Title::Borrowed)
+            })
+            .unwrap_or(Title::Response);
+        Plan {
+            site,
+            scope,
+            steps,
+            title,
         }
     }
 
@@ -422,17 +553,6 @@ impl FeedIndex {
                 _ => None,
             })
             .flatten()
-            .collect()
-    }
-
-    fn step_members(&self, segment: &[usize], steps: &[usize]) -> Vec<usize> {
-        segment
-            .iter()
-            .copied()
-            .filter(|index| {
-                matches!(self.roles.get(*index), Some(Role::Member(member))
-                    if member.steps.iter().any(|step| steps.contains(step)))
-            })
             .collect()
     }
 
@@ -478,29 +598,55 @@ impl FeedIndex {
         Some(index)
     }
 
-    /// The header that remains for `near`'s segment of the item, or its first segment's.
+    /// The header that remains nearest `near` in its segment of the item, else the item's
+    /// first.
     pub(super) fn header_site(
         &self,
         item: usize,
         near: usize,
+        expanded: &HashSet<String>,
         elided: &dyn Fn(usize) -> bool,
     ) -> Option<usize> {
-        let segment = match self.roles.get(near) {
-            Some(Role::Member(member)) if member.item == item => {
-                &self.items[item].segments[member.segment]
-            }
-            _ => self.items.get(item)?.segments.first()?,
+        let entry = self.items.get(item)?;
+        if !matches!(entry.kind, Kind::Steps { .. }) {
+            return entry.segments.first()?.first().copied();
+        }
+        let unfolded = entry.unfolded(expanded);
+        let sites = |segment: &[usize]| -> Vec<usize> {
+            self.plans(entry, segment, unfolded, elided)
+                .into_iter()
+                .map(|plan| plan.site)
+                .collect()
         };
-        segment.iter().copied().find(|index| !elided(*index))
+        if let Some(Role::Member(member)) = self.roles.get(near)
+            && member.item == item
+        {
+            let sites = sites(&entry.segments[member.segment]);
+            if let Some(site) = sites
+                .iter()
+                .rev()
+                .find(|site| **site <= near)
+                .or(sites.first())
+            {
+                return Some(*site);
+            }
+        }
+        entry
+            .segments
+            .iter()
+            .find_map(|segment| sites(segment).first().copied())
     }
 
-    pub(super) fn header_line(
+    /// A header's rows: clock, fold, title and figures, then the rest of a title it owns,
+    /// wrapped under itself while unfolded.
+    pub(super) fn header_lines(
         &self,
         cells: &[Arc<dyn HistoryCell>],
         header: &Header,
         bills: &StepBills,
+        expanded: &HashSet<String>,
         width: u16,
-    ) -> Line<'static> {
+    ) -> Vec<Line<'static>> {
         use crate::transcript_geometry::CLOCK_COLUMNS;
         use crate::transcript_geometry::TITLE_COLUMN;
         let item = &self.items[header.item];
@@ -514,6 +660,20 @@ impl FeedIndex {
                     HistoryTimestamp::from_millis(bills.step(&item.steps[*step])?.completed_at_ms)
                 })
             });
+        let (title_width, split) = header_columns(width);
+        let title = self.title(cells, header, expanded, width);
+        let mut titles = match header.title {
+            // Wrapped as the activity wraps its own rows: a command never splits at a hyphen.
+            Title::Owned(_) if header.unfolded => crate::wrapping::adaptive_wrap_lines(
+                [title],
+                crate::wrapping::RtOptions::new(title_width)
+                    .word_splitter(textwrap::WordSplitter::NoHyphenation),
+            )
+            .into_iter(),
+            _ => vec![truncate_line_with_ellipsis_if_overflow(title, title_width)].into_iter(),
+        };
+        let first = titles.next().unwrap_or_default();
+        let used = line_width(&first);
         let mut spans = vec![
             clock.map_or_else(
                 || " ".repeat(usize::from(CLOCK_COLUMNS)).into(),
@@ -521,60 +681,49 @@ impl FeedIndex {
             ),
             " ".repeat(usize::from(TITLE_COLUMN - CLOCK_COLUMNS)).into(),
         ];
-        let title_width = usize::from(width.saturating_sub(/*rhs*/ 44).clamp(16, 48));
-        let title =
-            truncate_line_with_ellipsis_if_overflow(self.title(cells, header, width), title_width);
-        let figures = self.figures(cells, header, bills);
-        let used = line_width(&title);
-        spans.extend(title.spans);
-        if let Some(figures) = figures {
+        spans.extend(first.spans);
+        if let Some(figures) = self.figures(cells, header, bills) {
             spans.push(" ".repeat(title_width - used.min(title_width) + 1).into());
             spans.push(total_span(figures.total));
-            if let Some(split) = figures.split {
-                spans.push(format!(" {split}").dim());
+            if split && let Some(split) = &figures.split {
+                spans.extend(split_spans(split));
             }
             if !figures.notes.is_empty() {
                 spans.push(format!("  {}", figures.notes.join(" · ")).dim());
             }
         }
-        Line::from(spans)
+        let mut lines = vec![Line::from(spans)];
+        lines.extend(titles.map(|title| {
+            let mut spans = vec![" ".repeat(usize::from(TITLE_COLUMN)).into()];
+            spans.extend(title.spans);
+            Line::from(spans)
+        }));
+        lines
     }
 
-    fn title(&self, cells: &[Arc<dyn HistoryCell>], header: &Header, width: u16) -> Line<'static> {
+    fn title(
+        &self,
+        cells: &[Arc<dyn HistoryCell>],
+        header: &Header,
+        expanded: &HashSet<String>,
+        width: u16,
+    ) -> Line<'static> {
         let item = &self.items[header.item];
-        let first = header.scope.first().and_then(|index| cells.get(*index));
-        match &item.kind {
-            Kind::User { .. } => return Line::from("You".bold()),
-            Kind::Arrival | Kind::Preamble => {
-                if let Some(entry) = first.and_then(|cell| feed_entry(cell.as_ref())) {
-                    return entry.feed_title();
-                }
-            }
-            Kind::Steps { .. } => {}
+        let cell = |index: usize| cells.get(index).map(AsRef::as_ref);
+        let response = || Line::from("Response".bold());
+        match (&item.kind, header.title) {
+            (Kind::User { .. }, _) => Line::from("You".bold()),
+            (Kind::Arrival | Kind::Preamble, _) => header
+                .scope
+                .first()
+                .and_then(|index| feed_entry(cell(*index)?))
+                .map(FeedEntry::feed_title)
+                .unwrap_or_default(),
+            (Kind::Steps { .. }, Title::Owned(index) | Title::Borrowed(index)) => cell(index)
+                .and_then(|cell| title_row(cell, expanded, width))
+                .unwrap_or_else(response),
+            (Kind::Steps { .. }, Title::Response) => response(),
         }
-        let members = || header.scope.iter().filter_map(|index| cells.get(*index));
-        let content_width =
-            crate::transcript_geometry::content_width(width, HistoryRenderMode::Rich);
-        if let Some(line) = members()
-            .find(|cell| {
-                !cell.as_any().is::<ThoughtCell>() && !cell.as_any().is::<AgentMarkdownCell>()
-            })
-            .and_then(|cell| {
-                cell.display_lines(content_width)
-                    .into_iter()
-                    .find(|line| line_width(line) > 0)
-            })
-        {
-            return strip_marker(line);
-        }
-        let label = if members().any(|cell| cell.as_any().is::<AgentMarkdownCell>()) {
-            "Response"
-        } else if members().any(|cell| cell.as_any().is::<ThoughtCell>()) {
-            "Thought"
-        } else {
-            "Step"
-        };
-        Line::from(label.bold())
     }
 
     fn figures(
@@ -780,15 +929,84 @@ fn strip_marker(line: Line<'static>) -> Line<'static> {
     Line::from(spans).style(line.style)
 }
 
+/// The row an activity yields to its header: its first, clipped where the activity would
+/// clip it, without its marker.
+fn title_row(
+    cell: &dyn HistoryCell,
+    expanded: &HashSet<String>,
+    width: u16,
+) -> Option<Line<'static>> {
+    let width = crate::transcript_geometry::content_width(width, HistoryRenderMode::Rich);
+    let lines = match cell.output_parts(width, /*reserve*/ 0, expanded, OutputMode::Raw) {
+        Some(parts) => parts.lines,
+        None => cell.compact_hyperlink_lines(width),
+    };
+    let row = lines.into_iter().find(|line| line.width() > 0)?;
+    Some(strip_marker(compact_header(row.line, usize::from(width))))
+}
+
+/// Drop the row an activity yields to its header, with the blank rows around it; how many
+/// rows went.
+pub(super) fn behead(lines: &mut Vec<HyperlinkLine>) -> usize {
+    let Some(title) = lines.iter().position(|line| line.width() > 0) else {
+        return 0;
+    };
+    let rest = lines[title + 1..]
+        .iter()
+        .position(|line| line.width() > 0)
+        .map_or(lines.len(), |rest| title + 1 + rest);
+    lines.drain(..rest);
+    rest
+}
+
+/// A header's total, right-aligned.
+const TOTAL_WIDTH: usize = 6;
+/// A step's split: each part's label and the columns its value takes, shown or not.
+const SPLIT: [(&str, usize); 3] = [("thought:", 5), ("output:", 5), ("self:", 6)];
+const SPLIT_WIDTH: usize = {
+    let mut width = 0;
+    let mut part = 0;
+    while part < SPLIT.len() {
+        width += 2 + SPLIT[part].0.len() + 1 + SPLIT[part].1;
+        part += 1;
+    }
+    width
+};
+const MIN_TITLE: usize = 16;
+const MAX_TITLE: usize = 48;
+
+/// How a header divides its row: the title's columns, and whether the split fits after the
+/// total.
+fn header_columns(width: u16) -> (usize, bool) {
+    let room = usize::from(width)
+        .saturating_sub(usize::from(crate::transcript_geometry::TITLE_COLUMN) + 1);
+    let split = room >= MIN_TITLE + TOTAL_WIDTH + SPLIT_WIDTH;
+    let figures = TOTAL_WIDTH + if split { SPLIT_WIDTH } else { 0 };
+    (
+        room.saturating_sub(figures).clamp(MIN_TITLE, MAX_TITLE),
+        split,
+    )
+}
+
+/// The split in its fixed columns; a part with nothing to report leaves its columns blank.
+fn split_spans(split: &Split) -> impl Iterator<Item = Span<'static>> + '_ {
+    SPLIT
+        .iter()
+        .zip([&split.thought, &split.output, &split.own])
+        .map(|((label, width), value)| match value {
+            Some(value) => format!("  {label} {value:>width$}", width = *width).dim(),
+            None => " ".repeat(2 + label.len() + 1 + width).into(),
+        })
+}
+
 /// The total, right-aligned and colored by size; placeholders stay dim.
 fn total_span(total: Total) -> Span<'static> {
-    const WIDTH: usize = 6;
     match total {
-        Total::Exact(tokens) => super::text::token_figure(String::new(), tokens, WIDTH),
-        Total::Approximate(tokens) => super::text::token_figure("≈".into(), tokens, WIDTH),
-        Total::Pending => format!("{:>WIDTH$}", "…").dim(),
-        Total::Severed => format!("{:>WIDTH$}", "—").dim(),
-        Total::Unknown => " ".repeat(WIDTH).into(),
+        Total::Exact(tokens) => super::text::token_figure(String::new(), tokens, TOTAL_WIDTH),
+        Total::Approximate(tokens) => super::text::token_figure("≈".into(), tokens, TOTAL_WIDTH),
+        Total::Pending => format!("{:>TOTAL_WIDTH$}", "…").dim(),
+        Total::Severed => format!("{:>TOTAL_WIDTH$}", "—").dim(),
+        Total::Unknown => " ".repeat(TOTAL_WIDTH).into(),
     }
 }
 
@@ -877,7 +1095,9 @@ impl TranscriptView {
         self.live_ruled = None;
         let site = self
             .feed
-            .header_site(item, index, &|index| self.elides_cell(cells, index))
+            .header_site(item, index, &self.disclosure.expanded, &|index| {
+                self.elides_cell(cells, index)
+            })
             .unwrap_or(index);
         let target = FoldTarget::Part(fold.to_string());
         let row = self
