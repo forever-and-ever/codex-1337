@@ -39,7 +39,7 @@ pub use decoder::anthropic_context_window_exceeded;
 pub use decoder::anthropic_output_limit_exceeded;
 pub use decoder::anthropic_refused;
 pub use decoder::anthropic_stop_reason;
-pub use warm::AnthropicWarmRequest;
+pub use warm::AnthropicWarmingRequest;
 
 /// Canonical history borrowed by the native Messages encoder, without a Responses payload.
 pub struct AnthropicPrompt<'a> {

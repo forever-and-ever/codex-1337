@@ -7,7 +7,7 @@ use crate::client_common::ResponseEvent;
 use crate::client_common::ResponseStream;
 use codex_api::AnthropicClient;
 use codex_api::AnthropicRequest;
-use codex_api::AnthropicWarmRequest;
+use codex_api::AnthropicWarmingRequest;
 use codex_api::Provider;
 use codex_api::ReqwestTransport;
 use codex_api::map_api_error;
@@ -85,7 +85,7 @@ pub struct CompletedRequest {
     pub started: RequestStart,
     pub lore: WarmingLore,
     pub usage: TokenUsage,
-    pub replay: std::result::Result<WarmReplay, Unreplayable>,
+    pub replay: std::result::Result<WarmingRequest, Unreplayable>,
 }
 
 /// Observes prompt-cache facts synchronously, so real work always supersedes warming.
@@ -102,15 +102,15 @@ pub trait PromptCacheManager {
 
 /// Immutable wire prefix and transport identity, without retained bearer credentials or runtime.
 #[derive(Clone)]
-pub struct WarmReplay {
-    request: AnthropicWarmRequest,
+pub struct WarmingRequest {
+    request: AnthropicWarmingRequest,
     transport: ReqwestTransport,
     provider: Provider,
     auth: Arc<AnthropicAuthContext>,
     account: String,
 }
 
-impl WarmReplay {
+impl WarmingRequest {
     pub fn retained_bytes(&self) -> usize {
         self.request.retained_bytes()
     }
@@ -140,7 +140,7 @@ pub(crate) struct Dispatch {
     epoch: u64,
     started: RequestStart,
     lore: WarmingLore,
-    replay: std::result::Result<WarmReplay, Unreplayable>,
+    replay: std::result::Result<WarmingRequest, Unreplayable>,
 }
 
 impl ModelClient {
@@ -198,7 +198,7 @@ impl ModelClient {
         &self,
         model: &ModelInfo,
         effort: Option<&ReasoningEffort>,
-        replay: impl FnOnce() -> std::result::Result<WarmReplay, Unreplayable>,
+        replay: impl FnOnce() -> std::result::Result<WarmingRequest, Unreplayable>,
     ) -> Option<Dispatch> {
         let observer = self.prompt_cache_observer.get()?;
         let lore = self.prompt_cache_lore(model, effort)?;
@@ -214,18 +214,18 @@ impl ModelClient {
         })
     }
 
-    pub(super) fn seal_warm_replay(
+    pub(super) fn warming_request(
         &self,
         request: &AnthropicRequest,
         transport: ReqwestTransport,
         provider: Provider,
         account: Option<String>,
-    ) -> std::result::Result<WarmReplay, Unreplayable> {
-        let request = match AnthropicWarmRequest::from_inference(request) {
+    ) -> std::result::Result<WarmingRequest, Unreplayable> {
+        let request = match AnthropicWarmingRequest::from_inference(request) {
             Ok(Some(request)) => request,
             Ok(None) => return Err(Unreplayable::RequestShape),
             Err(error) => {
-                tracing::debug!(%error, "Cannot seal Anthropic warm");
+                tracing::debug!(%error, "Cannot build an Anthropic warming request");
                 return Err(Unreplayable::RequestShape);
             }
         };
@@ -236,7 +236,7 @@ impl ModelClient {
             .ok()
             .flatten()
             .ok_or(Unreplayable::Provider)?;
-        Ok(WarmReplay {
+        Ok(WarmingRequest {
             request,
             transport,
             provider,
