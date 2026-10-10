@@ -3,9 +3,9 @@ source: tui/src/chatwidget/tests/history_projection.rs
 expression: "format!(\"compact:\\n{}\\ndetailed:\\n{}\",\nlines_to_single_string(&exploration.iter().flat_map(|cell|\ncell.display_lines(40)).collect::<Vec<_>>()),\nlines_to_single_string(&exploration.iter().flat_map(|cell|\ncell.transcript_lines(40)).collect::<Vec<_>>()),)"
 ---
 compact:
-• Explored
+• Command
     Read one.rs (whole file)
-• Explored
+• Command
     Read two.rs (whole file)
 
 detailed:

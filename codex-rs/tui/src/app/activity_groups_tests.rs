@@ -1112,7 +1112,7 @@ async fn interleaved_scripts_keep_exact_ownership_after_terminal_wait_and_replay
     assert!(text(&expected[0]).contains("Failed (Code Mode"));
     assert!(text(&expected[1]).contains("Interrupted (Code Mode"));
     assert!(text(&expected[2]).contains("direct"));
-    assert!(text(&expected[3]).contains("Waited on"));
+    assert!(text(&expected[3]).contains("Waited for"));
     assert!(!text(&expected[0]).contains("direct"));
     assert!(!text(&expected[0]).contains("child-b"));
     assert!(!text(&expected[0]).contains("visible notify-a"));

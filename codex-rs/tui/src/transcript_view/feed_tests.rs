@@ -237,12 +237,12 @@ fn steps_fold_under_one_header_with_their_figures() {
         assert!(view.toggle_disclosure_at(&cells, column, row as u16));
     };
     let fold = Some(crate::transcript_geometry::CONTROL_COLUMN + 1);
-    let folded = screen(&mut view, "folded");
-    // The lower header first, so unfolding it leaves the upper one's row where it was.
-    click(&mut view, &folded, "Code Mode", fold);
-    click(&mut view, &folded, "cargo test", fold);
     let unfolded = screen(&mut view, "unfolded");
     click(&mut view, &unfolded, "[js]", /*column*/ None);
-    screen(&mut view, "script");
+    let script = screen(&mut view, "script");
+    // The lower header first, so folding it leaves the upper one's row where it was.
+    click(&mut view, &script, "Code Mode", fold);
+    click(&mut view, &script, "cargo test", fold);
+    screen(&mut view, "folded");
     insta::assert_snapshot!(snapshots.join("\n\n"));
 }

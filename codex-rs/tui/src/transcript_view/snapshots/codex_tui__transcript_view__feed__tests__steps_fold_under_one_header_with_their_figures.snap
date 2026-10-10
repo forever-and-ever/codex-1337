@@ -2,55 +2,20 @@
 source: tui/src/transcript_view/feed_tests.rs
 expression: "snapshots.join(\"\\n\\n\")"
 ---
-folded
-        [-] User
-
-              › Fix the failing test
-
-
-  HH:MM [+] Ran · failed cargo test -p codex-tui…   1342    120     34    ≈1188  (thought, output, self)
-              • I'll run the tests first.
-  HH:MM [+] Injection · environment_context          ≈84
-
-  HH:MM [-] Response                                 154    120     34           (thought, output, self)
-        [+]   • Thought · Summary
-              • Fixed the parser.
-
-        [-] User                                       3
-
-              › Thanks
-
-
-  HH:MM [+] Called (Code Mode ζσξζ)                  154    120     34        …  (thought, output, self)
-
-        [-] Response
-              • No step billed this reply.
-
-
-
-
-
-
-
-
-
-
-
-
-
 unfolded
         [-] User
 
               › Fix the failing test
 
 
-  HH:MM [-] Ran · failed cargo test -p codex-tui    1342    120     34    ≈1188  (thought, output, self)
-            --lib transcript_view::feed
+  HH:MM [-] Command · failed cargo test -p          1342    120     34    ≈1188  (thought, output, self)
+            codex-tui --lib transcript_view::feed
         [+]   • Thought · Summary
               • I'll run the tests first.
             Stored result · exact capture unavailable
               test parse ... FAILED
-  HH:MM [+] Injection · environment_context          ≈84
+  HH:MM [-] Injection · environment_context          ≈84
+                <environment_context>cwd</environment_context>
 
   HH:MM [-] Response                                 154    120     34           (thought, output, self)
         [+]   • Thought · Summary
@@ -62,11 +27,10 @@ unfolded
 
 
   HH:MM [-] Called (Code Mode ζσξζ) [js]             154    120     34        …  (thought, output, self)
-        [+]   • Ran git status
+        [+]   • Command git status
 
         [-] Response
               • No step billed this reply.
-
 
 
 
@@ -80,13 +44,14 @@ script
               › Fix the failing test
 
 
-  HH:MM [-] Ran · failed cargo test -p codex-tui    1342    120     34    ≈1188  (thought, output, self)
-            --lib transcript_view::feed
+  HH:MM [-] Command · failed cargo test -p          1342    120     34    ≈1188  (thought, output, self)
+            codex-tui --lib transcript_view::feed
         [+]   • Thought · Summary
               • I'll run the tests first.
             Stored result · exact capture unavailable
               test parse ... FAILED
-  HH:MM [+] Injection · environment_context          ≈84
+  HH:MM [-] Injection · environment_context          ≈84
+                <environment_context>cwd</environment_context>
 
   HH:MM [-] Response                                 154    120     34           (thought, output, self)
         [+]   • Thought · Summary
@@ -100,7 +65,36 @@ script
   HH:MM [-] Called (Code Mode ζσξζ) [js]             154    120     34        …  (thought, output, self)
               const status = await tools.exec_command({ cmd: "git status" });
               text(status.output);
-        [+]   • Ran git status
+        [+]   • Command git status
+
+        [-] Response
+              • No step billed this reply.
+
+
+
+
+
+folded
+        [-] User
+
+              › Fix the failing test
+
+
+  HH:MM [+] Command · failed cargo test -p codex…   1342    120     34    ≈1188  (thought, output, self)
+              • I'll run the tests first.
+  HH:MM [-] Injection · environment_context          ≈84
+                <environment_context>cwd</environment_context>
+
+  HH:MM [-] Response                                 154    120     34           (thought, output, self)
+        [+]   • Thought · Summary
+              • Fixed the parser.
+
+        [-] User                                       3
+
+              › Thanks
+
+
+  HH:MM [+] Called (Code Mode ζσξζ)                  154    120     34        …  (thought, output, self)
 
         [-] Response
               • No step billed this reply.

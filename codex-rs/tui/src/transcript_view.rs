@@ -101,7 +101,6 @@ pub(crate) struct TranscriptView {
     cache: LayoutCache,
     live: Option<Arc<TextLayout>>,
     live_separated: Option<Arc<TextLayout>>,
-    live_ruled: Option<Arc<TextLayout>>,
     live_key: Option<(u16, ActiveCellTranscriptKey)>,
     live_continuation: bool,
     live_tool_entry: bool,
@@ -139,7 +138,6 @@ impl Default for TranscriptView {
             cache: LayoutCache::default(),
             live: None,
             live_separated: None,
-            live_ruled: None,
             live_key: None,
             live_continuation: false,
             live_tool_entry: false,
@@ -360,7 +358,6 @@ impl TranscriptView {
             || self.live_key.map(|(_, key)| key.revision) != next.map(|(_, key)| key.revision);
         self.live_key = next;
         self.live_separated = None;
-        self.live_ruled = None;
         self.live_continuation = key.is_some_and(|key| key.is_stream_continuation);
         let live = layout(width, &self.disclosure.expanded).map(|(layout, tool_entry)| {
             self.live_tool_entry = tool_entry;
@@ -409,10 +406,6 @@ impl TranscriptView {
 
     pub(crate) fn is_following(&self) -> bool {
         self.selection.is_none() && self.position == Position::Latest
-    }
-
-    pub(crate) fn is_tail_visible(&self) -> bool {
-        self.tail_visible
     }
 
     /// Hold the current reading position until every older page has arrived.

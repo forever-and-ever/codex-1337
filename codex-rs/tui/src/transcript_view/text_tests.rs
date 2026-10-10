@@ -478,7 +478,7 @@ fn command_and_output_copy_preserve_hard_lines_across_resize() {
                     cell.activity_parts(/*width*/ 32, /*header_reserve*/ 0, &expanded)
                         .unwrap()
                         .lines,
-                    format!("• Running\n{command}\n\n{output}"),
+                    format!("• Command\n{command}\n\n{output}"),
                 ),
                 (
                     "detailed_command_copy",

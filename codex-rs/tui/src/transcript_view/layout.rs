@@ -2,9 +2,8 @@
 //!
 //! Mutable cells refresh each frame, then share that frame's layout across measurement and paint.
 //! Stable cells also invalidate when animation ticks, syntax themes, or terminal colors change.
-//! A Feed Item's header is a row of the entry it heads, and the rule above live work draws
-//! in the gap before it, so committing live work never moves the entries around it; see
-//! `feed`.
+//! A Feed Item's header is a row of the entry it heads, so committing live work never moves
+//! the entries around it; see `feed`.
 
 use super::feed;
 use super::feed::Content;
@@ -184,8 +183,6 @@ struct CachedLayout {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) struct CellPresentation {
     separated: bool,
-    /// The gap above the entry is the rule above live work.
-    rule: bool,
     turn_tip_space: bool,
     expanded: bool,
     disclosure: bool,
@@ -246,7 +243,6 @@ impl TranscriptView {
             )));
         }
         let previous_index = self.previous_visible(cells, index);
-        let rule = previous_index.is_some() && self.feed_rule(cells, index);
         let previous = previous_index.and_then(|previous| cells.get(previous));
         let width = self.area.width.max(/*other*/ 1);
         let Some(cell) = cells.get(index) else {
@@ -257,11 +253,6 @@ impl TranscriptView {
                 self.live_continuation,
             ) {
                 return Some(Arc::clone(live));
-            }
-            if rule {
-                return Some(Arc::clone(self.live_ruled.get_or_insert_with(|| {
-                    Arc::new(live.rewrap(width).with_leading_rule())
-                })));
             }
             return Some(Arc::clone(self.live_separated.get_or_insert_with(|| {
                 Arc::new(live.rewrap(width).with_leading_separator())
@@ -310,7 +301,6 @@ impl TranscriptView {
         };
         let presentation = CellPresentation {
             separated,
-            rule: separated && rule,
             turn_tip_space: self.turn_tip_key == Some(EntryKey::cell(cell)),
             expanded,
             disclosure,
@@ -545,10 +535,10 @@ impl LayoutCache {
             return layout;
         }
         let layout = render();
-        let layout = match (presentation.separated, presentation.rule) {
-            (true, true) => layout.with_leading_rule(),
-            (true, false) => layout.with_leading_separator(),
-            (false, _) => layout,
+        let layout = if presentation.separated {
+            layout.with_leading_separator()
+        } else {
+            layout
         };
         let layout = Arc::new(if presentation.turn_tip_space {
             layout.with_leading_spacer()

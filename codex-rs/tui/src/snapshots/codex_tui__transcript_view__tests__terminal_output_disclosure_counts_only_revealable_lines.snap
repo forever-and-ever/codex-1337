@@ -3,13 +3,13 @@ source: tui/src/transcript_view_tests.rs
 expression: "frames.join(\"\\n\\n\")"
 ---
 empty result, collapsed
-              • Ran true
+              • Command true
 
 three lines, collapsed
-        [+]   • Ran echo
+        [+]   • Command echo
 
 three lines, expanded
-        [-]   • Ran echo
+        [-]   • Command echo
 
                 Stored result · exact capture unavailable
                   a
@@ -17,10 +17,10 @@ three lines, expanded
                   c
 
 four lines, collapsed
-        [+]   • Ran echo
+        [+]   • Command echo
 
 four lines, expanded
-        [-]   • Ran echo
+        [-]   • Command echo
 
                 Stored result · exact capture unavailable
                   a
@@ -29,27 +29,27 @@ four lines, expanded
                   d
 
 clipped line, collapsed
-        [+]   • Ran
+        [+]   • C...
         [+]       ..
 
 clipped line, expanded
-        [-]   • Ran
+        [-]   •
+              Comman
+              d
         [-]       ec
                   ho
 
 
                 Stor
-                ed
-                resu
 
 command only, collapsed
-              • Ran
+              • Command
         [+]       echo a
 
 command only, expanded
-              • Ran
+              • Command
         [-]       echo a
                   echo b
 
 storage truncated, collapsed
-        [+]   • Running echo
+        [+]   • Command echo

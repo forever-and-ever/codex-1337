@@ -449,7 +449,6 @@ impl TranscriptView {
         self.cache.clear();
         self.live_key = None;
         self.live_separated = None;
-        self.live_ruled = None;
         self.restart_search();
     }
 

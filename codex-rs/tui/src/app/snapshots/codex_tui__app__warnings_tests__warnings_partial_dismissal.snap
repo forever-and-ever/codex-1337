@@ -4,7 +4,6 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(screen)
 ---
   esc latest                                           ⚠ 1 warning · f2 to view
 ────────────────────────────────────────────────────────────────────────────────
-              Earlier transcript row 16
               Earlier transcript row 17
               Earlier transcript row 18
               Earlier transcript row 19
@@ -17,6 +16,7 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(screen)
               Earlier transcript row 26
               Earlier transcript row 27
               Earlier transcript row 28
+              Earlier transcript row 29
 ────────────────────────────────────────────────────────────────────────────────
                              ↓ Back to bottom · esc
 

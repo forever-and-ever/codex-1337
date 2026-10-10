@@ -2328,15 +2328,8 @@ impl BottomPane {
             // Clip spacing and hints before activity and previews when the composer is tall.
             let above_composer = if let Some(gap) = options.composer_gap {
                 let mut column = FlexRenderable::new();
-                if gap.separates_transcript {
-                    column.push(/*flex*/ 1, RenderableItem::Borrowed(gap));
-                } else if has_status_or_footer {
-                    column.push(/*flex*/ 1, RenderableItem::Owned("".into()));
-                }
+                column.push(/*flex*/ 1, RenderableItem::Borrowed(gap));
                 column.push(/*flex*/ 0, RenderableItem::Owned(flex.into()));
-                if !gap.separates_transcript {
-                    column.push(/*flex*/ 1, RenderableItem::Borrowed(gap));
-                }
                 column.into()
             } else {
                 flex.into()

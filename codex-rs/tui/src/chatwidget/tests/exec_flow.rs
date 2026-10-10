@@ -74,7 +74,7 @@ async fn replayed_command_completion_preserves_tracking_without_duplicate_starts
         .collect::<Vec<_>>();
     assert_eq!(
         history,
-        vec!["• Explored\n    Read replay (whole file)\n".to_string()]
+        vec!["• Command\n    Read replay (whole file)\n".to_string()]
     );
 }
 
@@ -113,7 +113,7 @@ async fn replayed_completion_preserves_unrelated_running_command() {
         assert!(active_blob(&chat).contains(if active_mcp {
             "Calling"
         } else {
-            "Running sleep 5"
+            "Command sleep 5"
         }));
     }
 }
@@ -649,7 +649,7 @@ async fn exec_history_cell_shows_working_then_completed() {
     let blob = lines_to_single_string(lines);
     // New behavior: no glyph markers; ensure command is shown and no panic.
     assert!(
-        blob.contains("• Ran"),
+        blob.contains("• Command"),
         "expected summary header present: {blob:?}"
     );
     assert!(
@@ -680,7 +680,7 @@ async fn exec_history_cell_shows_working_then_failed() {
     assert_eq!(cells.len(), 1, "expected finalized exec cell to flush");
     let lines = cells[0].display_lines(/*width*/ 80);
     let blob = lines_to_single_string(&lines);
-    assert_eq!(blob, "• Ran · failed false\n");
+    assert_eq!(blob, "• Command · failed false\n");
     assert!(
         lines_to_single_string(&cells[0].transcript_lines(/*width*/ 80))
             .to_lowercase()
@@ -726,7 +726,7 @@ async fn exec_end_without_begin_uses_event_command() {
     assert_eq!(cells.len(), 1, "expected finalized exec cell to flush");
     let blob = lines_to_single_string(&cells[0]);
     assert!(
-        blob.contains("• Ran echo orphaned"),
+        blob.contains("• Command echo orphaned"),
         "expected command text to come from event: {blob:?}"
     );
     assert!(
@@ -763,7 +763,7 @@ async fn exec_history_shows_unified_exec_startup_commands() {
     assert_eq!(cells.len(), 1, "expected finalized exec cell to flush");
     let blob = lines_to_single_string(&cells[0]);
     assert!(
-        blob.contains("• Ran echo unified exec startup"),
+        blob.contains("• Command echo unified exec startup"),
         "expected startup command to render: {blob:?}"
     );
 }

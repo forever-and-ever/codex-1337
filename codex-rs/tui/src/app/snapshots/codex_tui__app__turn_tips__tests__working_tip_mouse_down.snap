@@ -15,10 +15,10 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(screen)
               Response row 8
               Response row 9
 
+────────────────────────────────────────────────────────────────────────────────
 
 • Working (0s • ctrl+c to interrupt)
   └ Tip: Try /help.
-
 
 › Ask Codex to do anything
 

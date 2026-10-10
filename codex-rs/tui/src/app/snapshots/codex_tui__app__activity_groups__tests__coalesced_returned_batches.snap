@@ -4,19 +4,19 @@ expression: "snapshots.join(\"\\n\\n\")"
 ---
 Exploration ordinary=false expanded=false
 [+]   • Called (Code Mode εμογ)  1280
-                  • Explored
+                  • Command
                       Read first.rs (whole file)
-                  • Explored
+                  • Command
                       Read nested.rs (whole file)
         [+]   • Called (Code Mode τνμβ)  20
-                  • Explored
+                  • Command
                       Read second.rs (whole file)
 
 Exploration ordinary=false expanded=true
 [-]   • Called (Code Mode εμογ)  1280
-                  • Explored
+                  • Command
                       Read first.rs (whole file)
-                  • Explored
+                  • Command
                       Read nested.rs (whole file)
                         chosen porcelain:  exact
                       {"content":[{"type":"text","text":"repeat"}],"structuredContent":"repeat"}
@@ -28,7 +28,7 @@ Exploration ordinary=false expanded=true
                       Output:
                       Only model-visible text.
         [-]   • Called (Code Mode τνμβ)  20
-                  • Explored
+                  • Command
                       Read second.rs (whole file)
                       Returned c
                       Script completed
@@ -66,15 +66,15 @@ Computer ordinary=false expanded=true
 
 Exploration ordinary=true expanded=false
 [+]   • Called (Code Mode εμογ)  1280
-                  • Ran cargo check
-                  • Ran cargo check
+                  • Command cargo check
+                  • Command cargo check
         [+]   • Called (Code Mode τνμβ)  20
-                  • Ran cargo check
+                  • Command cargo check
 
 Exploration ordinary=true expanded=true
 [-]   • Called (Code Mode εμογ)  1280
-                  • Ran cargo check
-                  • Ran cargo check
+                  • Command cargo check
+                  • Command cargo check
                         chosen porcelain:  exact
                       {"content":[{"type":"text","text":"repeat"}],"structuredContent":"repeat"}
                       {"content":[{"type":"text","text":"repeat"}],"structuredContent":"repeat"}
@@ -85,7 +85,7 @@ Exploration ordinary=true expanded=true
                       Output:
                       Only model-visible text.
         [-]   • Called (Code Mode τνμβ)  20
-                  • Ran cargo check
+                  • Command cargo check
                       Returned c
                       Script completed
                       Wall time 0.0 seconds

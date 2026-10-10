@@ -58,8 +58,6 @@ pub(super) struct TextLayout {
     rows: Vec<TextRow>,
     width: u16,
     pub(super) separated: bool,
-    /// The leading gap is drawn as the rule above live work.
-    ruled: bool,
     pub(super) disclosure: bool,
     disclosure_controls: Vec<DisclosureControl>,
     heading: HeadingDecorations,
@@ -171,10 +169,10 @@ impl TextLayout {
         if let Some(rows) = &self.feed_header {
             layout = layout.with_fold_header(rows.clone());
         }
-        match (self.separated, self.ruled) {
-            (true, true) => layout.with_leading_rule(),
-            (true, false) => layout.with_leading_separator(),
-            (false, _) => layout,
+        if self.separated {
+            layout.with_leading_separator()
+        } else {
+            layout
         }
     }
 
@@ -263,17 +261,6 @@ impl TextLayout {
         );
         for control in &mut self.disclosure_controls {
             control.row += 1;
-        }
-        self
-    }
-
-    /// Draw the gap above the entry as a rule: live work follows it.
-    pub(super) fn with_leading_rule(mut self) -> Self {
-        if !self.separated && !self.rows.is_empty() {
-            let width = usize::from(self.width);
-            self = self.with_leading_row(Line::from("─".repeat(width)).dim());
-            self.separated = true;
-            self.ruled = true;
         }
         self
     }
@@ -598,7 +585,6 @@ impl TextLayout {
             rows,
             width,
             separated: false,
-            ruled: false,
             disclosure: false,
             disclosure_controls: Vec::new(),
             output_mode: None,

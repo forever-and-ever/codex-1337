@@ -3,7 +3,7 @@ source: tui/src/transcript_view/command_parts_tests.rs
 expression: "snapshots.join(\"\\n\\n\")"
 ---
 collapsed
-        [+]   • Ran  2352
+        [+]   • Command  2352
                   Read main.rs:10–20;
                   Search TODO in src;
                   List src;
@@ -11,7 +11,7 @@ collapsed
                   echo 'not;a&&boundary'
 
 output only
-        [-]   • Ran  2352
+        [-]   • Command  2352
                   Read main.rs:10–20;
                   Search TODO in src;
                   List src;
@@ -22,7 +22,7 @@ output only
                   combined output
 
 opaque command expanded
-        [-]   • Ran  2352
+        [-]   • Command  2352
                   Read main.rs:10–20;
                   Search TODO in src;
                   List src;
@@ -34,7 +34,7 @@ opaque command expanded
                   combined output
 
 narrow
-        [-]   • Ran  2352
+        [-]   • Command  2352
                   Read main.rs:10–20;
                   Search TODO in src;
                   List src;
@@ -50,7 +50,7 @@ narrow
                   combined output
 
 wide
-        [-]   • Ran  2352
+        [-]   • Command  2352
                   Read main.rs:10–20;
                   Search TODO in src;
                   List src;
@@ -61,7 +61,7 @@ wide
                   combined output
 
 opaque command open, output closed
-        [+]   • Ran  2352
+        [+]   • Command  2352
                   Read main.rs:10–20;
                   Search TODO in src;
                   List src;

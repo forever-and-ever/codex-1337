@@ -4,7 +4,7 @@ expression: "examples.join(\"\\n\\n\")"
 ---
 Held reading
         [+]   • Calling (Code Mode ρξωζ)
-                  • Exploring
+                  • Command
                       Read child-a.rs (whole file)
               • Calling (Code Mode βεθε)
                   • Inspect child-b
@@ -13,11 +13,12 @@ Return to live
               • Before script
 
         [+]   • Called (Code Mode ρξωζ)  10
-                  • Explored
+                  • Command
                       Read child-a.rs (whole file)
               • Calling (Code Mode βεθε)
                   • Inspect child-b
-        [+]   • Waited on ρξωζ
+        [+]   • Command
+                  Waited for ρξωζ
 
 Terminal interactions
 ↳ Interacted with background terminal · cat child-a.rs
@@ -26,7 +27,7 @@ Terminal interactions
 
 Exact captures
 • Called (Code Mode ρξωζ)
-    • Explored
+    • Command
         Read child-a.rs (whole file)
         {"answer":42}
         Exact accepted return
@@ -37,7 +38,7 @@ Historical suffix
 
 Hydrated fork
 • Called (Code Mode ρξωζ)
-    • Explored
+    • Command
         Read child-a.rs (whole file)
         {"answer":42}
         Exact accepted return

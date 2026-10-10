@@ -12,7 +12,7 @@ width=64
 
                 More text
 
-  14:17 [+]   • Explored  128
+  14:17 [+]   • Command  128
                   Read foo.rs (whole file)
               • Called tools.inspect()
               • Edited
@@ -36,7 +36,7 @@ expanded width=64
 
   14:17 [-]       $ poll foo  128
 
-              • Explored
+              • Command
                   $ cat foo.rs
 
               • tools.inspect()
@@ -62,7 +62,7 @@ detailed width=64
 
   14:17   128     $ poll foo
 
-              • Explored
+              • Command
                   $ cat foo.rs
 
               • tools.inspect()
@@ -91,7 +91,7 @@ width=32
 
                 More text
 
-  14:17 [+]   • Explored  128
+  14:17 [+]   • Command  128
                   Read foo.rs...
               • Called tools....
               • Edited
@@ -119,7 +119,7 @@ detailed width=32
 
   14:17   128     $ poll foo
 
-              • Explored
+              • Command
                   $ cat foo.rs
 
               • tools.inspect()

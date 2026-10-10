@@ -1146,7 +1146,7 @@ mod tests {
             .map(render_line_text)
             .join("\n");
 
-        insta::assert_snapshot!(rendered, @r"• Running Get-Content C:\skills\demo\SKILL.md");
+        insta::assert_snapshot!(rendered, @r"• Command Get-Content C:\skills\demo\SKILL.md");
     }
 
     #[test]
@@ -1253,7 +1253,7 @@ mod tests {
             .collect();
 
         assert_eq!(first, second);
-        assert_eq!(first, vec!["• Running echo done".to_string()]);
+        assert_eq!(first, vec!["• Command echo done".to_string()]);
     }
 
     #[test]

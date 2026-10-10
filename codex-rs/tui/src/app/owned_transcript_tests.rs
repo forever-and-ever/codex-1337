@@ -377,19 +377,14 @@ async fn owned_transcript_reserves_a_row_above_the_composer() -> Result<()> {
         }
         let gap = Rect::new(/*x*/ 0, bottom.y, width, /*height*/ 1);
         let buffer = crate::custom_terminal::test_support::last_rendered_buffer(&tui.terminal);
-        let start = buffer.index_of(gap.x, gap.y);
-        // Both scenarios show the current tail, including the paused detailed view.
-        if matches!(label, "Latest" | "Detailed") {
-            assert_eq!(
-                &buffer.content()[start..start + usize::from(width)],
-                Buffer::empty(gap).content(),
-                "{label}",
-            );
-        } else {
-            assert_eq!(
-                buffer_text(buffer).lines().nth(usize::from(gap.y)).unwrap(),
-                "─".repeat(usize::from(width))
-            );
+        // A rule closes the transcript in every scenario; one paused away from the current tail
+        // offers the way back under it.
+        assert_eq!(
+            buffer_text(buffer).lines().nth(usize::from(gap.y)).unwrap(),
+            "─".repeat(usize::from(width)),
+            "{label}",
+        );
+        if !matches!(label, "Latest" | "Detailed") {
             assert!(
                 buffer_text(buffer)
                     .lines()

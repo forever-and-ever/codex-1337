@@ -196,7 +196,6 @@ fn layouts_refresh_for_width_animation_and_mutable_frames() {
                     expanded: false,
                     disclosure: false,
                     continued_edit: false,
-                    rule: false,
                     feed: 0,
                 },
                 || TextLayout::new(history.transcript_hyperlink_lines(width), width),
@@ -273,7 +272,6 @@ fn recent_entries_are_reused_and_old_entries_are_evicted() {
                 expanded: false,
                 disclosure: false,
                 continued_edit: false,
-                rule: false,
                 feed: 0,
             },
             || {
@@ -295,7 +293,6 @@ fn recent_entries_are_reused_and_old_entries_are_evicted() {
                 expanded: false,
                 disclosure: false,
                 continued_edit: false,
-                rule: false,
                 feed: 0,
             },
             || {

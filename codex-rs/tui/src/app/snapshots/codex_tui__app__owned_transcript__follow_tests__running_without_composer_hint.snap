@@ -2,11 +2,11 @@
 source: tui/src/app/owned_transcript_follow_tests.rs
 expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(super::tests::buffer_text(buffer))"
 ---
-              transcript row 38
-              transcript row 39
+                  • Command cargo test
+────────────────────────────────────────────────────────────────────────────────
+• Running (for ζσξζ)
 
 • Working (0s • ctrl+c to interrupt)
-
 
 › draft stays here
 

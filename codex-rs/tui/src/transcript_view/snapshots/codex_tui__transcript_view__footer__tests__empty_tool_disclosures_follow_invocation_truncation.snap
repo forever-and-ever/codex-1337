@@ -3,32 +3,33 @@ source: tui/src/transcript_view/footer_tests.rs
 expression: "snapshots.join(\"\\n\\n\")"
 ---
 true, width=100
-              • Ran true
+              • Command true
 
 true, width=44
-              • Ran true
+              • Command true
 
 true, width=24
-              • Ran true
+              • Command
+                  true
 
 printf '%s' a_long_argument >/dev/null, width=100
-              • Ran printf '%s' a_long_argument >/dev/null
+              • Command printf '%s' a_long_argument >/dev/null
 
 printf '%s' a_long_argument >/dev/null, width=44
-              • Ran
+              • Command
         [+]       printf '%s' a_long_argu...
 
 expanded
-              • Ran
+              • Command
         [-]       printf '%s'
                   a_long_argument >/dev/null
 
 printf '%s' a_long_argument >/dev/null, width=24
-              • Ran
+              • Command
         [+]       pri...
 
 expanded
-              • Ran
+              • Command
         [-]       printf
                   '%s'
                   a_long
@@ -38,31 +39,31 @@ expanded
                   null
 
 cat config.json, width=100
-        [+]   • Explored
+        [+]   • Command
                   Read config.json (whole file)
 
 expanded
-        [-]   • Explored
+        [-]   • Command
                   Read config.json (whole file)
 
                   real file data
 
 cat config.json, width=44
-        [+]   • Explored
+        [+]   • Command
                   Read config.json (whole...
 
 expanded
-        [-]   • Explored
+        [-]   • Command
                   Read config.json (whole...
 
                   real file data
 
 cat config.json, width=24
-        [+]   • Explored
+        [+]   • Command
                   Rea...
 
 expanded
-        [-]   • Explored
+        [-]   • Command
                   Rea...
 
                   real

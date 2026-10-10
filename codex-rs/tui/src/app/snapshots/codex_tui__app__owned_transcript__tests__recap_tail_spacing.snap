@@ -4,7 +4,7 @@ expression: "normalize_snapshot_paths(snapshots.join(\"\\n\\n\"))"
 ---
 80x10, Recap at tail
                 ↳ Recap: The draft is ready.
-
+────────────────────────────────────────────────────────────────────────────────
 
 
 › Ask Codex to do anything
@@ -15,8 +15,8 @@ expression: "normalize_snapshot_paths(snapshots.join(\"\\n\\n\"))"
   gpt-test default · /tmp/project
 
 80x10, Message after recap
-
               • Follow-up response.
+────────────────────────────────────────────────────────────────────────────────
 
 
 › Ask Codex to do anything
@@ -27,8 +27,8 @@ expression: "normalize_snapshot_paths(snapshots.join(\"\\n\\n\"))"
   gpt-test default · /tmp/project
 
 80x10, Live message after recap
-
               • Streaming response.
+────────────────────────────────────────────────────────────────────────────────
 
 
 › Ask Codex to do anything
@@ -40,9 +40,9 @@ expression: "normalize_snapshot_paths(snapshots.join(\"\\n\\n\"))"
 
 80x12, Recap at tail
   ? for shortcuts
-────────────────────────────────────────────────────────────────────────────────
                          Next: Review the changes.
 
+────────────────────────────────────────────────────────────────────────────────
 
 
 › Ask Codex to do anything
@@ -54,9 +54,9 @@ expression: "normalize_snapshot_paths(snapshots.join(\"\\n\\n\"))"
 
 80x12, Message after recap
   ? for shortcuts
-────────────────────────────────────────────────────────────────────────────────
 
               • Follow-up response.
+────────────────────────────────────────────────────────────────────────────────
 
 
 › Ask Codex to do anything
@@ -68,9 +68,9 @@ expression: "normalize_snapshot_paths(snapshots.join(\"\\n\\n\"))"
 
 80x12, Live message after recap
   ? for shortcuts
-────────────────────────────────────────────────────────────────────────────────
 
               • Streaming response.
+────────────────────────────────────────────────────────────────────────────────
 
 
 › Ask Codex to do anything
@@ -82,9 +82,9 @@ expression: "normalize_snapshot_paths(snapshots.join(\"\\n\\n\"))"
 
 32x12, Recap at tail
   ? for shortcuts
-────────────────────────────────
                          es.
 
+────────────────────────────────
 
 
 › Ask Codex to do anything
@@ -96,9 +96,9 @@ expression: "normalize_snapshot_paths(snapshots.join(\"\\n\\n\"))"
 
 32x12, Message after recap
   ? for shortcuts
-────────────────────────────────
               • Follow-up
                 response.
+────────────────────────────────
 
 
 › Ask Codex to do anything
@@ -110,9 +110,9 @@ expression: "normalize_snapshot_paths(snapshots.join(\"\\n\\n\"))"
 
 32x12, Live message after recap
   ? for shortcuts
-────────────────────────────────
               • Streaming
                 response.
+────────────────────────────────
 
 
 › Ask Codex to do anything

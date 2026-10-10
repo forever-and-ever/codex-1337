@@ -3,10 +3,10 @@ source: tui/src/tool_output_tests.rs
 expression: "format!(\"history:\\n{}\\n\\ncompact:\\n{}\\n\\ntranscript:\\n{}\",\ncompleted.iter().map(ToString::to_string).collect::<Vec<_>>().join(\"\\n\"),\nvisible_lines(cell.compact_hyperlink_lines(80)).iter().map(ToString::to_string).collect::<Vec<_>>().join(\"\\n\"),\ncell.transcript_lines(80).iter().map(ToString::to_string).collect::<Vec<_>>().join(\"\\n\"),)"
 ---
 history:
-• Ran echo output
+• Command echo output
 
 compact:
-• Ran echo output
+• Command echo output
 
 transcript:
 $ echo output

@@ -6,7 +6,7 @@ expanded=false
 Buffer {
     area: Rect { x: 0, y: 0, width: 100, height: 10 },
     content: [
-        "        [+]   • Ran · failed  1280                                                                  ",
+        "        [+]   • Command · failed  1280                                                              ",
         "                  git status;                                                                       ",
         "                  Read lib.rs:20–80;                                                                ",
         "                  Read log.txt                                                                      ",
@@ -24,8 +24,8 @@ Buffer {
         x: 14, y: 0, fg: Red, bg: Reset, underline: Reset, modifier: BOLD,
         x: 15, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 16, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
-        x: 19, y: 0, fg: Red, bg: Reset, underline: Reset, modifier: NONE,
-        x: 28, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 23, y: 0, fg: Red, bg: Reset, underline: Reset, modifier: NONE,
+        x: 32, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 18, y: 1, fg: Rgb(137, 180, 250), bg: Reset, underline: Reset, modifier: NONE,
         x: 21, y: 1, fg: Rgb(205, 214, 244), bg: Reset, underline: Reset, modifier: NONE,
         x: 28, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
@@ -42,7 +42,7 @@ expanded=true
 Buffer {
     area: Rect { x: 0, y: 0, width: 100, height: 10 },
     content: [
-        "        [-]   • Ran · failed  1280                                                                  ",
+        "        [-]   • Command · failed  1280                                                              ",
         "                  git status;                                                                       ",
         "                  Read lib.rs:20–80;                                                                ",
         "                  Read log.txt                                                                      ",
@@ -60,8 +60,8 @@ Buffer {
         x: 14, y: 0, fg: Red, bg: Reset, underline: Reset, modifier: BOLD,
         x: 15, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 16, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
-        x: 19, y: 0, fg: Red, bg: Reset, underline: Reset, modifier: NONE,
-        x: 28, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 23, y: 0, fg: Red, bg: Reset, underline: Reset, modifier: NONE,
+        x: 32, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 18, y: 1, fg: Rgb(137, 180, 250), bg: Reset, underline: Reset, modifier: NONE,
         x: 21, y: 1, fg: Rgb(205, 214, 244), bg: Reset, underline: Reset, modifier: NONE,
         x: 28, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,

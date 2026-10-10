@@ -1,4 +1,4 @@
-//! The Activity Feed: one container per step, folded by default.
+//! The Activity Feed: one container per step, unfolded until the reader folds it.
 //!
 //! The feed is a presentation over the retained cells, never a second transcript. Each cell
 //! the server billed belongs to its step's Feed Item: the step's Thought, the response's
@@ -22,11 +22,7 @@
 //! item that made calls. Unfolded, it shows every member, and an item of several steps heads
 //! each step's first member with that step's own figures; the one fold drives both levels. A
 //! Thought shows only when it has text to read: otherwise its tokens are its step's thought
-//! figure. User turns and responses unfold by default, live work while it lasts, and an
-//! explicit fold or unfold outlasts both.
-//!
-//! Live work stays below a rule: the trailing items still in flight, else a running tool in
-//! the live tail.
+//! figure.
 
 use super::step_bills::Figures;
 use super::step_bills::Own;
@@ -96,7 +92,6 @@ pub(super) struct FeedIndex {
     folds: HashMap<String, usize>,
     /// How many of each step's user inputs the feed placed on users' own items.
     placed_users: HashMap<String, usize>,
-    live_from: Option<usize>,
 }
 
 #[derive(Clone, Default)]
@@ -150,11 +145,10 @@ impl Contribution {
 struct Item {
     kind: Kind,
     fold: String,
-    unfold_mark: String,
+    /// Recorded in the expanded set while the reader keeps the item folded.
     fold_mark: String,
     steps: Vec<String>,
     segments: Vec<Vec<usize>>,
-    live: bool,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -174,17 +168,12 @@ enum Kind {
 }
 
 impl Item {
+    /// Every item unfolds until the reader folds it.
     fn unfolded(&self, expanded: &HashSet<String>) -> bool {
-        if expanded.contains(&self.unfold_mark) {
-            true
-        } else if expanded.contains(&self.fold_mark) {
-            false
-        } else {
-            self.live || self.spacious()
-        }
+        !expanded.contains(&self.fold_mark)
     }
 
-    /// User turns and replies stand apart and unfold by default.
+    /// User turns and replies stand apart.
     fn spacious(&self) -> bool {
         matches!(
             self.kind,
@@ -389,34 +378,13 @@ impl FeedIndex {
                         .is_some_and(|step| !step.call_ids.is_empty())
                 });
             }
-            item.live = item
-                .segments
-                .iter()
-                .flatten()
-                .any(|index| in_flight(cells[*index].as_ref()));
         }
-
-        // Live work trails the transcript: the segments of items in flight, and loose
-        // cells in flight, with whatever lies between their members.
-        let mut live = vec![false; cells.len()];
-        for item in items.iter().filter(|item| item.live) {
-            for segment in &item.segments {
-                if let (Some(first), Some(last)) = (segment.first(), segment.last()) {
-                    live[*first..=*last].fill(true);
-                }
-            }
-        }
-        for (index, cell) in cells.iter().enumerate() {
-            live[index] |= matches!(roles[index], Role::Loose) && in_flight(cell.as_ref());
-        }
-        let trailing = live.iter().rev().take_while(|live| **live).count();
 
         self.folds = items
             .iter()
             .enumerate()
             .map(|(index, item)| (item.fold.clone(), index))
             .collect();
-        self.live_from = (trailing > 0).then(|| cells.len() - trailing);
         self.cells = cells.iter().map(cell_key).collect();
         self.frame = Some(frame);
         self.bills = bills.revision();
@@ -581,10 +549,6 @@ impl FeedIndex {
             if !self.items[member.item].spacious())
     }
 
-    pub(super) fn live_from(&self) -> Option<usize> {
-        self.live_from
-    }
-
     pub(super) fn fold_target(&self, header: &Header) -> FoldTarget {
         FoldTarget::Part(self.items[header.item].fold.clone())
     }
@@ -602,18 +566,13 @@ impl FeedIndex {
         Some(self.items[*item].unfolded(expanded))
     }
 
-    /// Record the opposite of the item's current state as an explicit choice.
+    /// Fold an unfolded item, or unfold a folded one.
     pub(super) fn toggle(&self, fold: &str, expanded: &mut HashSet<String>) -> Option<usize> {
         let index = *self.folds.get(fold)?;
         let item = &self.items[index];
-        let unfolded = item.unfolded(expanded);
-        expanded.remove(&item.unfold_mark);
-        expanded.remove(&item.fold_mark);
-        expanded.insert(if unfolded {
-            item.fold_mark.clone()
-        } else {
-            item.unfold_mark.clone()
-        });
+        if !expanded.remove(&item.fold_mark) {
+            expanded.insert(item.fold_mark.clone());
+        }
         Some(index)
     }
 
@@ -827,12 +786,10 @@ impl Item {
         let fold = format!("feed:{key}");
         Self {
             kind,
-            unfold_mark: format!("{fold}+"),
             fold_mark: format!("{fold}-"),
             fold,
             steps: Vec::new(),
             segments: Vec::new(),
-            live: false,
         }
     }
 }
@@ -847,15 +804,6 @@ fn find(parent: &mut [usize], mut node: usize) -> usize {
         node = parent[node];
     }
     node
-}
-
-/// Whether the cell is still running: animating, or a Code Mode block that has not finished.
-fn in_flight(cell: &dyn HistoryCell) -> bool {
-    cell.transcript_animation_tick().is_some()
-        || cell
-            .as_any()
-            .downcast_ref::<CodeModeCell>()
-            .is_some_and(CodeModeCell::is_active)
 }
 
 /// The cells that are items of their own, with their fold keys: user turns, arrivals,
@@ -1216,27 +1164,6 @@ impl TranscriptView {
         }
     }
 
-    /// Whether the rule above live work belongs on this entry: the first visible entry of
-    /// the trailing work in flight, else a running tool in the live tail.
-    pub(super) fn feed_rule(&mut self, cells: &[Arc<dyn HistoryCell>], index: usize) -> bool {
-        if self.detailed || self.mode != HistoryRenderMode::Rich {
-            return false;
-        }
-        if let Some(last) = cells.len().checked_sub(/*rhs*/ 1) {
-            self.refresh_feed(cells, last);
-        }
-        let start = self
-            .feed
-            .live_from()
-            .or_else(|| (self.live.is_some() && self.live_tool_entry).then_some(cells.len()));
-        let Some(start) = start.filter(|start| *start <= index) else {
-            return false;
-        };
-        (start..index).all(|earlier| {
-            self.elides_cell(cells, earlier) || !self.feed_seat(cells, earlier).is_visible()
-        })
-    }
-
     /// Fold or unfold a Feed Item, keeping its remaining header in view and focused.
     pub(super) fn toggle_feed(
         &mut self,
@@ -1255,7 +1182,6 @@ impl TranscriptView {
         self.cache.clear();
         self.live_key = None;
         self.live_separated = None;
-        self.live_ruled = None;
         let site = self
             .feed
             .header_site(item, index, &self.disclosure.expanded, &|index| {

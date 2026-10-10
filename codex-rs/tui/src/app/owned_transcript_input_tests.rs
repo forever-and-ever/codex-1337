@@ -521,7 +521,7 @@ async fn escape_returns_to_latest_without_changing_the_composer_draft() -> Resul
 
     app.render_owned_transcript(&mut tui, size)?;
     app.transcript_view
-        .scroll(&app.transcript_cells, /*rows*/ -10);
+        .scroll(&app.transcript_cells, /*rows*/ -9);
     app.transcript_cells
         .push(Arc::new(PlainHistoryCell::new(vec![
             "visible after resize".into(),

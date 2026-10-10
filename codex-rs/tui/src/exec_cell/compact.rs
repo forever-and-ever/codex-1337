@@ -82,20 +82,21 @@ impl ExecCell {
         } else {
             "•".green().bold()
         };
-        let (verb, suffix) = if let Some(output) = failed {
-            ("Failed", format!(" (exit {})", output.exit_code))
-        } else if self.is_active() {
-            ("Running", String::new())
-        } else if call.is_unified_exec_interaction() {
-            ("Background", " output".into())
-        } else {
-            ("Ran", String::new())
+        let (verb, suffix) = match failed {
+            Some(output) => (
+                "Command",
+                format!(" · failed (exit {})", output.exit_code).red(),
+            ),
+            None if !self.is_active() && call.is_unified_exec_interaction() => {
+                ("Background", " output".bold())
+            }
+            None => ("Command", "".into()),
         };
         let heading = vec![marker, " ".into()];
         let mut heading = Line::from(heading);
         heading.push_span(verb.bold());
         let header = crate::history_cell::activity_parts::ActivityHeader::at_end(&heading);
-        heading.extend([suffix.bold(), " ".into()]);
+        heading.extend([suffix, " ".into()]);
         (heading, Some(header))
     }
 }

@@ -3,8 +3,8 @@ source: tui/src/history_cell/timestamp_tests.rs
 expression: snapshot
 ---
 width 60
-  13:04       • Ran echo hello
-  13:04       • Explored
+  13:04       • Command echo hello
+  13:04       • Command
                   Read lib.rs (whole file)
   13:04       • A reply with a table and enough prose to
                 wrap.
@@ -13,8 +13,9 @@ width 60
                 ━━━━━━━  ━━━━━━━
                  alpha    42
 width 32
-  13:04       • Ran echo hello
-  13:04       • Explored
+  13:04       • Command
+                  echo hello
+  13:04       • Command
                   Read lib.rs...
   13:04       • A reply with a
                 table and enough
@@ -24,8 +25,8 @@ width 32
                 ━━━━━━━  ━━━━━━━
                  alpha    42
 width 60
-  13:04       • Ran echo hello
-  13:04       • Explored
+  13:04       • Command echo hello
+  13:04       • Command
                   Read lib.rs (whole file)
   13:04       • A reply with a table and enough prose to
                 wrap.
