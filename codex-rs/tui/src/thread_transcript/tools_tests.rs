@@ -233,12 +233,7 @@ fn historical_command_fallbacks_preserve_status_output_and_group_boundaries() {
         );
         assert_eq!(cells.len(), 3);
         for cell in [&cells[0], &cells[2]] {
-            assert!(
-                cell.as_any()
-                    .downcast_ref::<ExecCell>()
-                    .unwrap()
-                    .has_only_read_actions()
-            );
+            assert!(cell.as_any().is::<ExecCell>());
         }
         let [compact, detailed, raw] = [
             cells[1].display_lines(/*width*/ 80),

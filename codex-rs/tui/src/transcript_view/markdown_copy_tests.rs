@@ -336,13 +336,14 @@ fn copied_selection_keeps_its_revision_and_format_across_resize() {
     view.render(area, &mut Buffer::empty(area), &cells);
     let layout = view.layout(&cells, /*index*/ 0).unwrap();
     let start = layout.text().find("selected").unwrap();
+    // The reply's header takes row 0.
     view.begin_selection(
         &cells,
         layout.column_for_offset(start + 8),
-        /*row*/ 0,
+        /*row*/ 1,
         /*clicks*/ 1,
     );
-    view.extend_selection(layout.column_for_offset(start), /*row*/ 0);
+    view.extend_selection(layout.column_for_offset(start), /*row*/ 1);
     view.end_drag();
     assert_eq!(view.selected_text(&cells).as_deref(), Some("selected"));
     cells[0] = Arc::new(AgentMarkdownCell::new("replacement".into(), Path::new("/")));

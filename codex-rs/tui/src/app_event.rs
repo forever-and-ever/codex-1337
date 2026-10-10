@@ -1222,6 +1222,10 @@ pub(crate) enum AppEvent {
         call_id: String,
         tokens: Option<u64>,
     },
+    RecordStepAdmission {
+        thread_id: ThreadId,
+        item: codex_app_server_protocol::StepAdmissionItem,
+    },
     /// FIFO barrier after the completed turn's history insertions.
     TurnTipReady {
         thread_id: ThreadId,
@@ -1258,6 +1262,7 @@ pub(crate) enum AppEvent {
     /// transcript without first writing its provisional render to scrollback.
     ConsolidateAgentMessage {
         source: String,
+        item_id: Option<String>,
         cwd: PathBuf,
         inline_visualization_context: Option<InlineVisualizationContext>,
         scrollback_reflow: ConsolidationScrollbackReflow,

@@ -10,6 +10,7 @@ mod bookmark;
 mod composer_gap;
 mod disclosure;
 mod disclosure_navigation;
+mod feed;
 mod follow_control;
 mod footer;
 mod input;
@@ -20,6 +21,7 @@ mod prompt_header;
 mod search;
 mod selection;
 mod snapshot;
+mod step_bills;
 mod text;
 mod tool_output_tokens;
 mod turn_tip;
@@ -45,6 +47,7 @@ use snapshot::ViewSnapshot;
 use text::TextLayout;
 
 pub(crate) use bookmark::TranscriptBookmark;
+pub(crate) use feed::FeedEntry;
 pub(crate) use input::JumpTarget;
 pub(crate) use input::ViewAction;
 pub(crate) use layout::ActivityTranscriptLines;
@@ -118,6 +121,8 @@ pub(crate) struct TranscriptView {
     last_click: Option<(std::time::Instant, u16, u16, u8)>,
     disclosure: disclosure::Disclosure,
     tool_output_tokens: tool_output_tokens::ToolOutputTokens,
+    step_bills: step_bills::StepBills,
+    feed: feed::FeedIndex,
 }
 
 impl Default for TranscriptView {
@@ -153,6 +158,8 @@ impl Default for TranscriptView {
             last_click: None,
             disclosure: disclosure::Disclosure::default(),
             tool_output_tokens: Default::default(),
+            step_bills: Default::default(),
+            feed: Default::default(),
         }
     }
 }
@@ -311,10 +318,6 @@ impl TranscriptView {
             crate::history_cell::output_provenance::OutputMode,
         ) -> Option<ActivityTranscriptLines>,
     ) -> bool {
-        let shortcut = self
-            .disclosure
-            .keymap
-            .primary_hint(crate::keymap::KeymapContext::Global, "open_transcript");
         let mode = self.mode;
         let output_mode = self.disclosure.output_mode(&self.disclosure.live_ids);
         self.sync_live_layout(width, key, |width, expanded_parts| {
@@ -326,7 +329,12 @@ impl TranscriptView {
             .map(|mut lines| {
                 let is_tool_entry = lines.is_tool_entry;
                 let layout = if mode == HistoryRenderMode::Rich {
-                    layout::activity_layout(lines, width, expanded, shortcut)
+                    layout::activity_layout(
+                        lines,
+                        crate::transcript_geometry::GUTTER_COLUMNS,
+                        width,
+                        expanded,
+                    )
                 } else {
                     lines.activity.extend(lines.auxiliary);
                     TextLayout::new(lines.activity, width)
@@ -398,10 +406,6 @@ impl TranscriptView {
 
     pub(crate) fn is_following(&self) -> bool {
         self.selection.is_none() && self.position == Position::Latest
-    }
-
-    pub(crate) fn is_tail_visible(&self) -> bool {
-        self.tail_visible
     }
 
     /// Hold the current reading position until every older page has arrived.

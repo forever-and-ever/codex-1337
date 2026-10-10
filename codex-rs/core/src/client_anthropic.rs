@@ -229,7 +229,7 @@ impl ModelClientSession {
                 .then(|| {
                     self.client
                         .prompt_cache_dispatch(model, effort.as_ref(), || {
-                            self.client.seal_warm_replay(
+                            self.client.warming_request(
                                 &request,
                                 transport.clone(),
                                 provider.clone(),

@@ -182,6 +182,7 @@ async fn list_spacing_completion_preserves_the_scrolled_reader() -> Result<()> {
     app.handle_consolidate_agent_message(
         &mut tui,
         "- First item wraps onto a second row\n- b\n- c".into(),
+        /*item_id*/ None,
         app.config.cwd.to_path_buf(),
         /*inline_visualization_context*/ None,
         ConsolidationScrollbackReflow::Required,
@@ -376,19 +377,14 @@ async fn owned_transcript_reserves_a_row_above_the_composer() -> Result<()> {
         }
         let gap = Rect::new(/*x*/ 0, bottom.y, width, /*height*/ 1);
         let buffer = crate::custom_terminal::test_support::last_rendered_buffer(&tui.terminal);
-        let start = buffer.index_of(gap.x, gap.y);
-        // Both scenarios show the current tail, including the paused detailed view.
-        if matches!(label, "Latest" | "Detailed") {
-            assert_eq!(
-                &buffer.content()[start..start + usize::from(width)],
-                Buffer::empty(gap).content(),
-                "{label}",
-            );
-        } else {
-            assert_eq!(
-                buffer_text(buffer).lines().nth(usize::from(gap.y)).unwrap(),
-                "─".repeat(usize::from(width))
-            );
+        // A rule closes the transcript in every scenario; one paused away from the current tail
+        // offers the way back under it.
+        assert_eq!(
+            buffer_text(buffer).lines().nth(usize::from(gap.y)).unwrap(),
+            "─".repeat(usize::from(width)),
+            "{label}",
+        );
+        if !matches!(label, "Latest" | "Detailed") {
             assert!(
                 buffer_text(buffer)
                     .lines()

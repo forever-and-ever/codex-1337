@@ -6,6 +6,7 @@
 
 mod error;
 mod in_memory;
+mod legible;
 mod live_thread;
 mod local;
 mod projects;
@@ -28,6 +29,7 @@ pub use error::ThreadStoreError;
 pub use error::ThreadStoreResult;
 pub use in_memory::InMemoryThreadStore;
 pub use in_memory::InMemoryThreadStoreCalls;
+pub use legible::legible_item;
 pub use live_thread::LiveThread;
 pub use live_thread::LiveThreadInitGuard;
 pub use local::LocalThreadStore;

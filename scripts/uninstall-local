@@ -4,7 +4,21 @@ set -eu
 install_root=${CODEX_INSTALL_ROOT:-$HOME/.local}
 data_home=${XDG_DATA_HOME:-$HOME/.local/share}
 distribution_root="$data_home/codex-1337/distributions"
+staging_root="$data_home/codex-1337/staging"
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+case "$#:${1:-}" in
+    0: | 1:--staging) ;;
+    *)
+        printf 'uninstall-local refused: expected no arguments or --staging\n' >&2
+        exit 1
+        ;;
+esac
+python3 "$root/scripts/local_integration.py" uninstall-staging "$install_root"
+rm -rf -- "$staging_root"
+if [ "${1:-}" = --staging ]; then
+    printf 'removed the staging Codex distribution\n'
+    exit 0
+fi
 python3 "$root/scripts/local_integration.py" uninstall "$install_root"
 
 launcher="$install_root/bin/codex"

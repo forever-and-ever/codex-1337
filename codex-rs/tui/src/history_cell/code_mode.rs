@@ -6,11 +6,15 @@ use super::HistoryTimestamp;
 use super::ToolOutputCell;
 use super::activity_parts::ActivityHeader;
 use super::output_provenance::OutputMode;
+use super::output_provenance::OutputProvenance;
 use super::output_provenance::client_notice;
+use super::output_provenance::mark_lines;
+use crate::exec_cell::ExecCell;
 use crate::motion::MotionMode;
 use crate::motion::ReducedMotionIndicator;
 use crate::motion::activity_indicator;
 use crate::terminal_hyperlinks::HyperlinkLine;
+use crate::terminal_hyperlinks::plain_hyperlink_lines;
 use crate::terminal_hyperlinks::prefix_hyperlink_lines;
 use crate::terminal_hyperlinks::visible_lines;
 use codex_app_server_protocol::CodeModeEvent;
@@ -49,6 +53,12 @@ impl HistoryCell for CodeModeWaitCell {
     }
     fn display_lines(&self, _width: u16) -> Vec<Line<'static>> {
         self.0.lines(owner_label(&self.1))
+    }
+    /// The wait's step bill follows its fixed label.
+    fn activity_header(&self) -> Option<ActivityHeader> {
+        let mut header = ActivityHeader::at_end(self.display_lines(u16::MAX).first()?);
+        header.expand_on_truncation = false;
+        Some(header)
     }
     fn raw_lines(&self) -> Vec<Line<'static>> {
         self.display_lines(u16::MAX)
@@ -93,15 +103,17 @@ fn owner_label(owner: &CodeModeOwner) -> String {
 }
 
 impl CodeModeFactCell {
+    /// A wait reads as the commands do: a group headed "Command", naming the block it waits for.
     fn lines(&self, label: String) -> Vec<Line<'static>> {
         let verb = match self.0.event {
             CodeModeEvent::WaitStarted { .. } => "Waiting",
             CodeModeEvent::WaitCompleted { .. } => "Waited",
             _ => return Vec::new(),
         };
-        let mut spans = vec!["• ".dim()];
-        spans.extend([verb.bold(), format!(" on {label}").into()]);
-        vec![spans.into()]
+        vec![
+            Line::from(vec!["• ".dim(), "Command".bold()]),
+            Line::from(format!("    {verb} for {label}")),
+        ]
     }
 }
 
@@ -145,6 +157,81 @@ impl CodeModeCell {
         self.live && self.status().is_none()
     }
 
+    /// The block's Greek name, stable across redraw, replay and process restarts.
+    pub(crate) fn tetrad(&self) -> String {
+        self.owner
+            .as_ref()
+            .map_or_else(|| label(&self.exec_call_id), owner_label)
+    }
+
+    /// The block as live work under the transcript's closing rule: a heading naming the block,
+    /// each of its running commands and other running calls two columns in, then whether the
+    /// model waits for it. The block draws them in place too.
+    pub(crate) fn live_lines(&self) -> Vec<Line<'static>> {
+        if !self.is_active() {
+            return Vec::new();
+        }
+        let marker = activity_indicator(
+            Some(self.start_time),
+            MotionMode::from_animations_enabled(self.animations_enabled),
+            ReducedMotionIndicator::StaticBullet,
+        )
+        .unwrap_or_else(|| "•".dim());
+        let mut lines = vec![Line::from(vec![
+            marker,
+            " ".into(),
+            "Running".bold(),
+            format!(" (for {})", self.tetrad()).dim(),
+        ])];
+        for member in &self.members {
+            if let Some(exec) = member.as_any().downcast_ref::<ExecCell>() {
+                for call in exec.iter_calls().filter(|call| call.duration.is_none()) {
+                    let command = crate::exec_command::strip_bash_lc_and_escape(&call.command);
+                    let first = command.lines().next().unwrap_or_default().to_string();
+                    lines.push(Line::from(vec!["  ".into(), first.into()]));
+                }
+            } else if member.transcript_animation_tick().is_some()
+                && let Some(line) = member.display_lines(u16::MAX).into_iter().next()
+            {
+                let mut spans = vec!["  ".into()];
+                spans.extend(line.spans);
+                lines.push(Line::from(spans));
+            }
+        }
+        if self.awaited() {
+            let marker = activity_indicator(
+                /*start_time*/ None,
+                MotionMode::from_animations_enabled(self.animations_enabled),
+                ReducedMotionIndicator::StaticBullet,
+            )
+            .unwrap_or_else(|| "•".dim());
+            lines.push(Line::from(vec![
+                marker,
+                " ".into(),
+                "Waiting".bold(),
+                format!(" (for {})", self.tetrad()).dim(),
+            ]));
+        }
+        lines
+    }
+
+    /// Whether the model is waiting for the block: a wait started that has not completed.
+    fn awaited(&self) -> bool {
+        let mut waits = HashSet::new();
+        for fact in &self.facts {
+            match &fact.event {
+                CodeModeEvent::WaitStarted { call_id } => {
+                    waits.insert(call_id.as_str());
+                }
+                CodeModeEvent::WaitCompleted { call_id } => {
+                    waits.remove(call_id.as_str());
+                }
+                _ => {}
+            }
+        }
+        !waits.is_empty()
+    }
+
     fn from_fact(fact: CodeModeItem, animations_enabled: bool) -> Self {
         Self {
             exec_call_id: fact.exec_call_id.clone(),
@@ -175,6 +262,7 @@ impl CodeModeCell {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn terminal(&self) -> bool {
         self.status().is_some()
     }
@@ -191,6 +279,35 @@ impl CodeModeCell {
             self.live = true;
         }
         self.insert_fact(fact);
+    }
+
+    /// The exec input as the model wrote it, when the record kept it.
+    pub(crate) fn script(&self) -> Option<&str> {
+        self.facts.iter().find_map(|fact| match &fact.event {
+            CodeModeEvent::Started { script, .. } => script.as_deref(),
+            _ => None,
+        })
+    }
+
+    /// The fold that shows the script above the block's calls.
+    pub(crate) fn script_fold(&self) -> String {
+        format!("{}:js", self.identity())
+    }
+
+    /// The script as rows nested under the block's title, highlighted and marked as the
+    /// client's view of it rather than captured output.
+    pub(crate) fn script_lines(&self) -> Option<Vec<HyperlinkLine>> {
+        let script = self.script()?.trim_end_matches(['\r', '\n']);
+        let mut lines = plain_hyperlink_lines(crate::render::highlight::highlight_code_to_lines(
+            script,
+            "javascript",
+        ));
+        mark_lines(&mut lines, OutputProvenance::Client);
+        Some(prefix_hyperlink_lines(
+            lines,
+            crate::transcript_geometry::CHILD_PREFIX.into(),
+            crate::transcript_geometry::CHILD_PREFIX.into(),
+        ))
     }
 
     pub(crate) fn admit_children(&mut self, id: String, cells: Vec<Arc<dyn HistoryCell>>) {
@@ -253,7 +370,7 @@ impl CodeModeCell {
     fn calls(&self) -> HashSet<&str> {
         std::iter::once(self.exec_call_id.as_str())
             .chain(self.facts.iter().filter_map(|fact| match &fact.event {
-                CodeModeEvent::Started { call_id }
+                CodeModeEvent::Started { call_id, .. }
                 | CodeModeEvent::ToolCall { call_id }
                 | CodeModeEvent::WaitStarted { call_id }
                 | CodeModeEvent::WaitCompleted { call_id } => Some(call_id.as_str()),
@@ -339,13 +456,7 @@ impl CodeModeCell {
         let mut spans = vec![bullet, " ".into()];
         spans.extend([
             verb.bold(),
-            format!(
-                " (Code Mode {})",
-                self.owner
-                    .as_ref()
-                    .map_or_else(|| label(&self.exec_call_id), owner_label)
-            )
-            .into(),
+            format!(" (Code Mode {})", self.tetrad()).into(),
         ]);
         Some(spans.into())
     }

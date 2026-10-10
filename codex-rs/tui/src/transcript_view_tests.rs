@@ -97,6 +97,7 @@ fn terminal_output_disclosure_follows_live_history_and_keymap() {
                 is_tool_entry: cell.is_tool_entry(),
                 header: cell.activity_header(),
                 controls: Vec::new(),
+                preface: Vec::new(),
                 activity: cell.compact_hyperlink_lines(width),
                 auxiliary: Vec::new(),
                 disclosure: cell.activity_disclosure(width),
@@ -597,9 +598,15 @@ fn single_row_scrolling_crosses_an_entry_separator_in_both_directions() {
             /*height*/ 1,
         )));
     }
+    let indent = " ".repeat(usize::from(GUTTER_COLUMNS));
     assert_eq!(
         frames,
-        ["", "                first", "", "                second"]
+        [
+            String::new(),
+            format!("{indent}first"),
+            String::new(),
+            format!("{indent}second"),
+        ]
     );
 }
 

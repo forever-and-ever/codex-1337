@@ -223,7 +223,7 @@ fn serialized_tokens(value: &impl Serialize) -> u64 {
 }
 
 /// Injected fragments open with a tag or a heading; anything else shows its first line.
-fn context_label(text: &str) -> String {
+pub(super) fn context_label(text: &str) -> String {
     let line = text.lines().next().unwrap_or_default().trim();
     if let Some(path) = line.strip_prefix("# AGENTS.md instructions for ") {
         return format!("AGENTS.md {path}");

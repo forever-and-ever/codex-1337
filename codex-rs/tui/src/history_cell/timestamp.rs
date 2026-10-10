@@ -18,8 +18,12 @@ impl HistoryTimestamp {
             .map(|time| Self(time.with_timezone(&Local).time()))
     }
 
+    /// The clock, right-aligned in its column.
     pub(crate) fn span(self) -> Span<'static> {
-        format!("{} ", self.0.format("%H:%M")).reset().dim()
+        let width = usize::from(crate::transcript_geometry::CLOCK_COLUMNS) - 1;
+        format!("{:>width$} ", self.0.format("%H:%M").to_string())
+            .reset()
+            .dim()
     }
 }
 

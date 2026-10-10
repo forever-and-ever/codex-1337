@@ -94,6 +94,7 @@ impl ChatWidget {
             output_mode: (expanded && active.is_some_and(HistoryCell::has_formatted_output))
                 .then_some(output_mode),
             is_tool_entry: active.is_some_and(HistoryCell::is_tool_entry),
+            preface: Vec::new(),
             activity,
             header,
             auxiliary,

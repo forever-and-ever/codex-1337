@@ -1,6 +1,8 @@
-//! The return control preserves composer geometry and draft across mouse navigation and resize.
+//! The return control preserves composer geometry and draft across mouse navigation and resize,
+//! and live work stays pinned under the transcript's closing rule.
 
 use super::*;
+use crate::history_cell::CodeModeCell;
 use crate::history_cell::PlainHistoryCell;
 use crossterm::event::MouseButton;
 use crossterm::event::MouseEvent;
@@ -23,6 +25,41 @@ async fn follow_control_click_preserves_draft_caret_and_composer_geometry() -> R
     ))];
     for (width, running) in [(80, false), (40, false), (80, true)] {
         if running {
+            // A running block draws in place and again under the rule, named for itself.
+            let mut block = CodeModeCell::owned(
+                codex_app_server_protocol::CodeModeOwner {
+                    thread_id: ThreadId::from_u128(/*value*/ 7),
+                    exec_call_id: "exec-1".into(),
+                    cell_id: None,
+                    started_at_ms: 0,
+                },
+                /*animations_enabled*/ false,
+            );
+            block.admit_fact(
+                codex_app_server_protocol::CodeModeItem {
+                    id: "code-mode:exec-1:start".into(),
+                    cell_id: None,
+                    exec_call_id: "exec-1".into(),
+                    created_at: 0,
+                    event: codex_app_server_protocol::CodeModeEvent::Started {
+                        call_id: "exec-1".into(),
+                        script: None,
+                    },
+                },
+                /*live*/ true,
+            );
+            block.admit_children(
+                "call-test".into(),
+                vec![Arc::new(crate::exec_cell::new_active_exec_command(
+                    "call-test".into(),
+                    ["cargo", "test"].map(String::from).to_vec(),
+                    Vec::new(),
+                    codex_app_server_protocol::CommandExecutionSource::Agent,
+                    /*interaction_input*/ None,
+                    /*animations_enabled*/ false,
+                ))],
+            );
+            app.transcript_cells.push(Arc::new(block));
             app.chat_widget.handle_server_notification(
                 codex_app_server_protocol::ServerNotification::TurnStarted(
                     codex_app_server_protocol::TurnStartedNotification {

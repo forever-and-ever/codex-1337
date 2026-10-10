@@ -141,7 +141,11 @@ impl AgentStatusThreadPreview {
 fn activity_summary(item: &ThreadItem) -> Option<String> {
     let summary = match item {
         ThreadItem::CodeModeOwned(owned) => return activity_summary(owned.payload()),
-        ThreadItem::CodeMode(_) | ThreadItem::Thought { .. } | ThreadItem::Preamble { .. } => {
+        ThreadItem::CodeMode(_)
+        | ThreadItem::Thought { .. }
+        | ThreadItem::Preamble { .. }
+        | ThreadItem::StepAdmission(_)
+        | ThreadItem::Arrival(_) => {
             return None;
         }
         ThreadItem::AgentMessage { text, .. } | ThreadItem::Plan { text, .. } => text,

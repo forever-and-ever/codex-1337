@@ -8,7 +8,13 @@ die() {
 
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 [ "$(uname -s)" = Linux ] || die 'this distribution is Linux-only'
-[ "$#" -eq 0 ] || die 'expected no arguments'
+# Staging installs a trial build beside production: its own daemon and
+# `codex-staging` launcher, sharing configuration, credentials and sessions.
+case "$#:${1:-}" in
+    0:) channel=production ;;
+    1:--staging) channel=staging ;;
+    *) die 'expected no arguments or --staging' ;;
+esac
 [ -z "$(git -C "$root" status --porcelain)" ] || die 'source checkout is dirty'
 
 # rustup selects the workspace toolchain by cwd, not Cargo's --manifest-path.
@@ -48,7 +54,11 @@ fi
 revision=$(git -C "$root" rev-parse HEAD)
 short_revision=$(printf '%s' "$revision" | cut -c1-12)
 identity="codex-$codex_version-1337-$short_revision"
+# Each channel publishes into and collects only its own root, so production's
+# cleanup never reaches staging, even from a checkout that predates staging.
 distribution_root="$data_home/codex-1337/distributions"
+[ "$channel" = production ] \
+    || distribution_root="$data_home/codex-1337/$channel/distributions"
 payload="$distribution_root/$identity"
 stage=
 
@@ -90,9 +100,11 @@ PY
     install -Dm644 "$root/LICENSE" "$package/licenses/Codex-LICENSE"
     install -Dm644 "$root/NOTICE" "$package/licenses/Codex-NOTICE"
     "$package/bin/codex" completion zsh >"$package/_codex"
-    printf 'codex_version=%s\nsource_commit=%s\n' \
-        "$codex_version" "$revision" \
-        >"$package/distribution"
+    {
+        printf 'codex_version=%s\nsource_commit=%s\n' "$codex_version" "$revision"
+        # The binary reads its channel from here, never from the environment.
+        [ "$channel" = production ] || printf 'channel=%s\n' "$channel"
+    } >"$package/distribution"
     python3 "$root/scripts/tui_revision.py" "$package" "$state_home/codex-1337"
 fi
 
@@ -107,8 +119,10 @@ for executable in codex codex-code-mode-host codex-wrangler-bridge; do
 done
 [ -f "$payload/distribution" ] || die 'payload provenance is absent'
 
-python3 "$root/scripts/local_integration.py" check-launcher-ownership \
-    "$distribution_root" "$install_root/bin/codex"
+if [ "$channel" = production ]; then
+    python3 "$root/scripts/local_integration.py" check-launcher-ownership \
+        "$distribution_root" "$install_root/bin/codex"
+fi
 
 previous=
 if [ -L "$distribution_root/current" ]; then
@@ -118,31 +132,30 @@ next="$distribution_root/.current.$$"
 ln -s "$identity" "$next"
 mv -Tf "$next" "$distribution_root/current"
 
-python3 "$root/scripts/local_integration.py" install-launcher \
-    "$distribution_root" "$install_root/bin/codex"
-for executable in codex-code-mode-host codex-wrangler-bridge; do
-    next="$install_root/bin/.$executable.$$"
-    ln -s "$distribution_root/current/bin/$executable" "$next"
-    mv -Tf "$next" "$install_root/bin/$executable"
-done
-next="$install_root/share/zsh/site-functions/._codex.$$"
-ln -s "$distribution_root/current/_codex" "$next"
-mv -Tf "$next" "$install_root/share/zsh/site-functions/_codex"
+if [ "$channel" = staging ]; then
+    python3 "$root/scripts/local_integration.py" install-staging "$install_root"
+else
+    python3 "$root/scripts/local_integration.py" install-launcher \
+        "$distribution_root" "$install_root/bin/codex"
+    for executable in codex-code-mode-host codex-wrangler-bridge; do
+        next="$install_root/bin/.$executable.$$"
+        ln -s "$distribution_root/current/bin/$executable" "$next"
+        mv -Tf "$next" "$install_root/bin/$executable"
+    done
+    next="$install_root/share/zsh/site-functions/._codex.$$"
+    ln -s "$distribution_root/current/_codex" "$next"
+    mv -Tf "$next" "$install_root/share/zsh/site-functions/_codex"
 
-python3 "$root/scripts/local_integration.py" install "$install_root"
+    python3 "$root/scripts/local_integration.py" install "$install_root"
+fi
 
 # A live older TUI may still launch sibling helpers from its original bundle.
 live_binaries=$(readlink /proc/[0-9]*/exe 2>/dev/null || true)
 for candidate in "$distribution_root"/*; do
-    [ -d "$candidate" ] || continue
+    [ -d "$candidate" ] && [ ! -L "$candidate" ] || continue
     name=${candidate##*/}
-    [ "$name" = current ] && continue
     [ "$name" = "$identity" ] && continue
     [ -n "$previous" ] && [ "$name" = "$previous" ] && continue
-    if [ -L "$distribution_root/current" ] \
-        && [ "$name" = "$(readlink "$distribution_root/current")" ]; then
-        continue
-    fi
     [ -f "$candidate/distribution" ] || continue
     case "$live_binaries" in
         *"$candidate/bin/"*) continue ;;
@@ -150,4 +163,9 @@ for candidate in "$distribution_root"/*; do
     rm -rf -- "$candidate"
 done
 
-printf 'installed Codex %s-1337 from %s\n' "$codex_version" "$short_revision"
+if [ "$channel" = staging ]; then
+    printf 'installed staging Codex %s-1337 from %s; run codex-staging\n' \
+        "$codex_version" "$short_revision"
+else
+    printf 'installed Codex %s-1337 from %s\n' "$codex_version" "$short_revision"
+fi

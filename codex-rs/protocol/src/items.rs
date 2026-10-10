@@ -50,6 +50,10 @@ pub enum TurnItem {
     ToolOutputTokens(ToolOutputTokensItem),
     /// Human-only census of the standing context one request carried; never model input.
     Preamble(crate::PreambleItem),
+    /// Human-only bill of one request and what its step admitted; never model input.
+    StepAdmission(crate::step_admission::StepAdmissionItem),
+    /// Human-only announcement of context a step admitted after its results.
+    Arrival(crate::step_admission::ArrivalItem),
     HookPrompt(HookPromptItem),
     AgentMessage(AgentMessageItem),
     Plan(PlanItem),
@@ -773,6 +777,8 @@ impl TurnItem {
             TurnItem::FunctionCallOutput(item) => item.id.clone(),
             TurnItem::ToolOutputTokens(item) => item.id.clone(),
             TurnItem::Preamble(item) => item.id.clone(),
+            TurnItem::StepAdmission(item) => item.id.clone(),
+            TurnItem::Arrival(item) => item.id.clone(),
             TurnItem::HookPrompt(item) => item.id.clone(),
             TurnItem::AgentMessage(item) => item.id.clone(),
             TurnItem::Plan(item) => item.id.clone(),

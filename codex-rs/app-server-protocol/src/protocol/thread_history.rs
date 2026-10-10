@@ -662,6 +662,8 @@ impl ThreadHistoryBuilder {
             | codex_protocol::items::TurnItem::FunctionCallOutput(_)
             | codex_protocol::items::TurnItem::ToolOutputTokens(_)
             | codex_protocol::items::TurnItem::Preamble(_)
+            | codex_protocol::items::TurnItem::StepAdmission(_)
+            | codex_protocol::items::TurnItem::Arrival(_)
             | codex_protocol::items::TurnItem::CommandExecution(_)
             | codex_protocol::items::TurnItem::DynamicToolCall(_)
             | codex_protocol::items::TurnItem::CollabAgentToolCall(_)

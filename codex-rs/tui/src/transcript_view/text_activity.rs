@@ -13,8 +13,12 @@ impl TextRow {
 }
 
 impl TextLayout {
-    pub(in crate::transcript_view) fn with_header_tokens(mut self, tokens: Option<u64>) -> Self {
-        self.heading.tokens = tokens;
+    pub(in crate::transcript_view) fn with_header_tokens(
+        mut self,
+        tokens: Option<u64>,
+        seat: crate::transcript_geometry::TokenSeat,
+    ) -> Self {
+        self.heading.tokens = tokens.map(|tokens| (tokens, seat));
         self
     }
 
@@ -64,13 +68,17 @@ impl TextLayout {
         label: String,
         source_line: usize,
     ) -> Self {
-        let offset = self
-            .logical
-            .iter()
-            .take(source_line)
-            .map(|line| line.origin.range.len() + 1)
-            .sum();
+        let offset = self.line_offset(source_line);
         self.with_leading_disclosure_at(label, offset, FoldTarget::Activity)
+    }
+
+    /// Where logical line `line` starts in the layout's source.
+    pub(in crate::transcript_view) fn line_offset(&self, line: usize) -> usize {
+        self.logical
+            .iter()
+            .take(line)
+            .map(|line| line.origin.range.len() + 1)
+            .sum()
     }
 
     pub(super) fn with_leading_disclosure_at(
@@ -98,17 +106,42 @@ impl TextLayout {
         self,
         part: crate::history_cell::activity_parts::PartControl,
     ) -> Self {
-        let offset = self
-            .logical
-            .iter()
-            .take(part.line)
-            .map(|line| line.origin.range.len() + 1)
-            .sum();
+        let offset = self.line_offset(part.line);
         self.with_leading_disclosure_at(
             if part.expanded { "[-]" } else { "[+]" }.into(),
             offset,
             FoldTarget::Part(part.id),
         )
+    }
+
+    /// Head the layout with a Feed Item's header rows, its fold after the clock.
+    pub(in crate::transcript_view) fn with_fold_header(self, rows: HeaderRows) -> Self {
+        let mut layout = self;
+        for line in rows.lines.iter().rev() {
+            layout = layout.with_leading_row(line.clone());
+        }
+        layout.disclosure = true;
+        layout.disclosure_controls.push(DisclosureControl {
+            target: rows.fold.clone(),
+            label: if rows.unfolded { "[-]" } else { "[+]" }.into(),
+            source_offset: 0,
+            row: 0,
+            placement: DisclosurePlacement::Fold,
+        });
+        if let Some(control) = &rows.control {
+            layout.disclosure_controls.push(DisclosureControl {
+                target: control.target.clone(),
+                label: String::new(),
+                source_offset: 0,
+                row: control.row,
+                placement: DisclosurePlacement::Inline {
+                    start: control.columns.start,
+                    end: control.columns.end,
+                },
+            });
+        }
+        layout.feed_header = Some(rows);
+        layout
     }
 
     pub(in crate::transcript_view) fn fold_targets(&self) -> Vec<FoldTarget> {

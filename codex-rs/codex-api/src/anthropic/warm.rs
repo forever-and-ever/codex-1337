@@ -13,18 +13,18 @@ use serde_json::Value;
 use serde_json::json;
 use std::time::Duration;
 
-/// A sealed inference prefix that admits a zero-output, non-streaming replay.
+/// An inference request re-encoded to replay its prefix without output or streaming.
 #[derive(Clone)]
-pub struct AnthropicWarmRequest {
+pub struct AnthropicWarmingRequest {
     body: EncodedJsonBody,
     headers: HeaderMap,
 }
 
-impl AnthropicWarmRequest {
+impl AnthropicWarmingRequest {
     pub fn from_inference(request: &AnthropicRequest) -> Result<Option<Self>, ApiError> {
         let mut body: Value = serde_json::from_str(request.body().get()).map_err(|error| {
             ApiError::InvalidRequest {
-                message: format!("invalid sealed Anthropic request: {error}"),
+                message: format!("invalid Anthropic inference request: {error}"),
             }
         })?;
         if body["thinking"]["type"] == "enabled"
@@ -46,7 +46,7 @@ impl AnthropicWarmRequest {
         );
         Ok(Some(Self {
             body: EncodedJsonBody::encode(&body).map_err(|error| ApiError::InvalidRequest {
-                message: format!("failed to encode Anthropic warm: {error}"),
+                message: format!("failed to encode Anthropic warming request: {error}"),
             })?,
             headers,
         }))
@@ -60,7 +60,7 @@ impl AnthropicWarmRequest {
 impl<T: HttpTransport> AnthropicClient<T> {
     /// Sends once: uncertain POSTs, rate limits and authentication rejection are never retried.
     #[tracing::instrument(name = "anthropic.warm", level = "debug", skip_all)]
-    pub async fn warm(&self, request: &AnthropicWarmRequest) -> Result<TokenUsage, ApiError> {
+    pub async fn warm(&self, request: &AnthropicWarmingRequest) -> Result<TokenUsage, ApiError> {
         let response = tokio::time::timeout(
             Duration::from_secs(/*secs*/ 60),
             self.session.execute_with(
@@ -75,20 +75,22 @@ impl<T: HttpTransport> AnthropicClient<T> {
             ),
         )
         .await
-        .map_err(|_| ApiError::NativeStream("Anthropic warm outcome unknown: timeout".into()))??;
+        .map_err(|_| {
+            ApiError::NativeStream("Anthropic warming request outcome unknown: timeout".into())
+        })??;
         if !response.status.is_success() {
             return Err(ApiError::Api {
                 status: response.status,
-                message: "Anthropic warm rejected".into(),
+                message: "Anthropic warming request rejected".into(),
             });
         }
         if response.headers.contains_key(http::header::RETRY_AFTER) {
             return Err(ApiError::NativeStream(
-                "Anthropic warm requested backoff".into(),
+                "Anthropic requested backoff for the warming request".into(),
             ));
         }
         let body: Value = serde_json::from_slice(&response.body).map_err(|error| {
-            ApiError::NativeStream(format!("invalid Anthropic warm response: {error}"))
+            ApiError::NativeStream(format!("invalid Anthropic warming response: {error}"))
         })?;
         let mut usage = Usage::default();
         usage.update(&body["usage"])?;
@@ -98,11 +100,11 @@ impl<T: HttpTransport> AnthropicClient<T> {
             cache_write = usage.cache_write_input_tokens,
             input = usage.input_tokens,
             output = usage.output_tokens,
-            "Anthropic cache warm usage"
+            "Anthropic warming request usage"
         );
         if usage.output_tokens != 0 {
             return Err(ApiError::NativeStream(
-                "Anthropic warm unexpectedly generated output".into(),
+                "Anthropic warming request unexpectedly generated output".into(),
             ));
         }
         Ok(usage)

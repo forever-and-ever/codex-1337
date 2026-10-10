@@ -1,13 +1,13 @@
 ---
 source: tui/src/chatwidget/tests/status_and_layout.rs
-expression: "format!(\"exec running:\\n{exec_running}\\nexec and hook running:\\n{exec_and_hook_running}\\nhistory after exec:\\n{history_after_exec}\\nhook running after exec:\\n{hook_running_after_exec}\\nquiet hook completed:\\n{quiet_hook_completed}\")"
+expression: "regex_lite::Regex::new(r\"Working \\([0-9hms ]+ •\").unwrap().replace_all(&format!(\"exec running:\\n{exec_running}\\nexec and hook running:\\n{exec_and_hook_running}\\nhistory after exec:\\n{history_after_exec}\\nhook running after exec:\\n{hook_running_after_exec}\\nquiet hook completed:\\n{quiet_hook_completed}\"),\n\"Working (0s •\")"
 ---
 exec running:
-• Running echo done
+• Command echo done
 
 exec and hook running:
 "                                                                                "
-"• Running echo done                                                             "
+"• Command echo done                                                             "
 "                                                                                "
 "• Working (0s • ctrl+c to interrupt) · checking output policy                   "
 "                                                                                "
@@ -19,7 +19,7 @@ exec and hook running:
 "────────────────────────────────────────────────────────────────────────────────"
 "  GPT-5.6-Sol default · /tmp/project                                            "
 history after exec:
-• Ran echo done
+• Command echo done
 
 hook running after exec:
 "                                                                                "

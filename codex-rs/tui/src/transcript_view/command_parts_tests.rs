@@ -48,7 +48,7 @@ fn shell_rows_share_output_but_have_independent_source_folds() {
     assert_eq!(targets[0], FoldTarget::Activity);
     assert!(view.toggle_disclosure_at(
         &cells,
-        crate::transcript_geometry::DISCLOSURE_COLUMN,
+        crate::transcript_geometry::CONTROL_COLUMN,
         /*row*/ 0
     ));
     render(&mut view, "output only", 64);
@@ -102,6 +102,7 @@ fn shell_rows_share_output_but_have_independent_source_folds() {
                 output_mode: None,
                 is_tool_entry: cells[0].is_tool_entry(),
                 header: parts.header,
+                preface: Vec::new(),
                 activity: parts.lines,
                 auxiliary: Vec::new(),
                 header_tokens: Some(2352),

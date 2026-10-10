@@ -215,6 +215,7 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
                 Some(ActivityTranscriptLines {
                     output_mode: Some(mode),
                     is_tool_entry: true,
+                    preface: Vec::new(),
                     activity: output.expanded_output_lines(width, mode),
                     header: output.activity_header(),
                     auxiliary: Vec::new(),
@@ -480,6 +481,7 @@ fn mixed_feed_keeps_its_grid_through_live_commit_resize_and_details() {
                     output_mode: None,
                     is_tool_entry: false,
                     header: None,
+                    preface: Vec::new(),
                     activity: Vec::new(),
                     auxiliary: crate::transcript_geometry::clock_lines(
                         tail.compact_hyperlink_lines(width),
@@ -495,9 +497,31 @@ fn mixed_feed_keeps_its_grid_through_live_commit_resize_and_details() {
         view.sync_live_tail(width, /*key*/ None, |_| None);
         cells.push(Arc::clone(&tail));
         let committed = tests::render(&mut view, &cells, width, /*height*/ 50);
-        assert_eq!(live, committed);
+        // Committing heads the finished reply, and the header takes its clock; every other
+        // row keeps its place, and the reply's rows keep their columns under the header.
+        let rows = |buffer: &Buffer| -> Vec<Vec<ratatui::buffer::Cell>> {
+            buffer
+                .content
+                .chunks(usize::from(width))
+                .map(<[_]>::to_vec)
+                .collect()
+        };
+        let header = tests::text(&committed)
+            .lines()
+            .position(|row| row.contains("[-] Response"))
+            .expect("the finished reply heads itself");
+        let mut committed_rows = rows(&committed);
+        committed_rows.remove(header);
+        for (index, (live, committed)) in rows(&live).iter().zip(&committed_rows).enumerate() {
+            let from = if index == header {
+                usize::from(crate::transcript_geometry::CLOCK_COLUMNS)
+            } else {
+                0
+            };
+            assert_eq!(live[from..], committed[from..], "row {index}");
+        }
         let text = tests::text(&committed);
-        assert_eq!(text.matches("  128 ").count(), 1);
+        assert_eq!(text.matches("  128").count(), 1);
         assert_eq!(text.matches("Edited").count(), 1);
         let layout = view.current_layout(&cells, cells.len() - 1).unwrap();
         assert!(layout.text().contains("  source_indent();"));
@@ -510,13 +534,13 @@ fn mixed_feed_keeps_its_grid_through_live_commit_resize_and_details() {
         let (row, columns, _) = tool_layout.fold_position(&FoldTarget::Activity).unwrap();
         assert_eq!(
             columns,
-            crate::transcript_geometry::DISCLOSURE_COLUMN
-                ..crate::transcript_geometry::DISCLOSURE_COLUMN
-                    + crate::transcript_geometry::DISCLOSURE_COLUMNS
+            crate::transcript_geometry::CONTROL_COLUMN
+                ..crate::transcript_geometry::CONTROL_COLUMN
+                    + crate::transcript_geometry::CONTROL_COLUMNS
         );
         assert!(tool_layout.fold_at(row, /*column*/ 0).is_none());
         assert_eq!(
-            tool_layout.fold_at(row, crate::transcript_geometry::DISCLOSURE_COLUMN),
+            tool_layout.fold_at(row, crate::transcript_geometry::CONTROL_COLUMN),
             Some(FoldTarget::Activity)
         );
         snapshots.push(format!("width={width}\n{}", text.trim_end()));
@@ -708,6 +732,7 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
                 output_mode: None,
                 is_tool_entry: tail.is_tool_entry(),
                 header: tail.activity_header(),
+                preface: Vec::new(),
                 activity: tail.compact_hyperlink_lines(width),
                 auxiliary: Vec::new(),
                 header_tokens: None,

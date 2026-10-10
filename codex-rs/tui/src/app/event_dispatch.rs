@@ -52,6 +52,7 @@ impl App {
                     | AppEvent::CodeModeTranscript { .. }
                     | AppEvent::CodeModeProjection { .. }
                     | AppEvent::RecordToolOutputTokens { .. }
+                    | AppEvent::RecordStepAdmission { .. }
                     | AppEvent::CommitRealtimeTranscriptHistory
                     | AppEvent::ResetTranscriptForThreadSwitch
                     | AppEvent::ResetTranscriptForThreadSwitchPreservingScreen
@@ -709,6 +710,14 @@ impl App {
                     tui.frame_requester().schedule_frame();
                 }
             }
+            AppEvent::RecordStepAdmission { thread_id, item } => {
+                if self.chat_widget.thread_id() == Some(thread_id) {
+                    let response_id = item.response_id.clone();
+                    self.transcript_view.record_step_admission(item);
+                    self.seat_thought(tui, &response_id);
+                    tui.frame_requester().schedule_frame();
+                }
+            }
             AppEvent::TurnTipReady { thread_id, turn_id } => {
                 self.turn_tips.ready(thread_id, &turn_id, self.transcript_cells.last());
                 tui.frame_requester().schedule_frame();
@@ -725,6 +734,7 @@ impl App {
             }
             AppEvent::ConsolidateAgentMessage {
                 source,
+                item_id,
                 cwd,
                 inline_visualization_context,
                 scrollback_reflow,
@@ -733,6 +743,7 @@ impl App {
                 self.handle_consolidate_agent_message(
                     tui,
                     source,
+                    item_id,
                     cwd,
                     inline_visualization_context,
                     scrollback_reflow,

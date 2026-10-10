@@ -184,6 +184,7 @@ impl TranscriptRegistry {
         session: Weak<Session>,
         turn: Arc<TurnContext>,
         exec_call_id: String,
+        script: String,
         shutdown: CancellationToken,
     ) -> ExecutionStart {
         let draining_shutdown = shutdown.clone();
@@ -269,6 +270,7 @@ impl TranscriptRegistry {
                         &draining.turn,
                         CodeModeEvent::Started {
                             call_id: exec_call_id,
+                            script: Some(script),
                         },
                     )
                     .await;

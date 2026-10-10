@@ -84,18 +84,7 @@ impl ExecCall {
     }
 }
 
-impl ExecCell {
-    /// Final presentation label only; grouping and lifecycle never depend on recognition.
-    pub(crate) fn has_only_read_actions(&self) -> bool {
-        self.group.calls.iter().all(|call| {
-            call.command_rows()
-                .rows
-                .iter()
-                .all(|row| row.summary.is_some())
-        })
-    }
-}
-
+/// One heading for any group of commands: its marker says whether they run or failed.
 pub(crate) fn command_header(cells: &[&ExecCell]) -> (Line<'static>, ActivityHeader) {
     let active = cells.iter().any(|cell| cell.is_active());
     let failed = cells.iter().flat_map(|cell| cell.iter_calls()).any(|call| {
@@ -103,7 +92,6 @@ pub(crate) fn command_header(cells: &[&ExecCell]) -> (Line<'static>, ActivityHea
             .as_ref()
             .is_some_and(|output| output.exit_code != 0)
     });
-    let read_only = cells.iter().all(|cell| cell.has_only_read_actions());
     let marker = if active {
         activity_indicator(
             cells.iter().find_map(|cell| cell.active_start_time()),
@@ -116,14 +104,8 @@ pub(crate) fn command_header(cells: &[&ExecCell]) -> (Line<'static>, ActivityHea
     } else {
         "•".green().bold()
     };
-    let verb = match (active, read_only) {
-        (true, true) => "Exploring",
-        (true, false) => "Running",
-        (false, true) => "Explored",
-        (false, false) => "Ran",
-    };
     let mut heading = Line::from(vec![marker, " ".into()]);
-    heading.push_span(verb.bold());
+    heading.push_span("Command".bold());
     let header = ActivityHeader::at_end(&heading);
     if failed {
         heading.push_span(" · failed".red());
@@ -255,7 +237,7 @@ pub(crate) fn command_parts(
                 lines.extend(batch.output_lines(width, mode));
             }
         } else {
-            lines.push(client_notice("Stored result · exact capture unavailable"));
+            lines.push(client_notice("  Stored result · exact capture unavailable"));
             for call in calls {
                 if let Some(output) = &call.output {
                     let mut detail = plain_hyperlink_lines(

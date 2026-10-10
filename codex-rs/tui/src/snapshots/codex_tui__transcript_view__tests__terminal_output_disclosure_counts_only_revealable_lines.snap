@@ -3,53 +3,53 @@ source: tui/src/transcript_view_tests.rs
 expression: "frames.join(\"\\n\\n\")"
 ---
 empty result, collapsed
-                • Ran true
+              • Command true
 
 three lines, collapsed
-            [+] • Ran echo
+        [+]   • Command echo
 
 three lines, expanded
-            [-] • Ran echo
+        [-]   • Command echo
 
                 Stored result · exact capture unavailable
-                    a
-                    b
-                    c
+                  a
+                  b
+                  c
 
 four lines, collapsed
-            [+] • Ran echo
+        [+]   • Command echo
 
 four lines, expanded
-            [-] • Ran echo
+        [-]   • Command echo
 
                 Stored result · exact capture unavailable
-                    a
-                    b
-                    c
-                    d
+                  a
+                  b
+                  c
+                  d
 
 clipped line, collapsed
-            [+] •...
-            [+]
+        [+]   • C...
+        [+]       ..
 
 clipped line, expanded
-            [-] •
-                Ran
-echo        [-]
+        [-]   •
+              Comman
+              d
+        [-]       ec
+                  ho
 
 
                 Stor
-                ed
-                resu
 
 command only, collapsed
-                • Ran
-            [+]     echo a
+              • Command
+        [+]       echo a
 
 command only, expanded
-                • Ran
-            [-]     echo a
-                    echo b
+              • Command
+        [-]       echo a
+                  echo b
 
 storage truncated, collapsed
-            [+] • Running echo
+        [+]   • Command echo

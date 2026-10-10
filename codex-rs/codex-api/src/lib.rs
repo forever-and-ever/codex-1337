@@ -33,7 +33,7 @@ pub use crate::anthropic::AnthropicStopReason;
 pub use crate::anthropic::AnthropicStreamOptions;
 pub use crate::anthropic::AnthropicTool;
 pub use crate::anthropic::AnthropicToolIdentity;
-pub use crate::anthropic::AnthropicWarmRequest;
+pub use crate::anthropic::AnthropicWarmingRequest;
 pub use crate::anthropic::anthropic_context_window_exceeded;
 pub use crate::anthropic::anthropic_function_input_schema;
 pub use crate::anthropic::anthropic_output_limit_exceeded;

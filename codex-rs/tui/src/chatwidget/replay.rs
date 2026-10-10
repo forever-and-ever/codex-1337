@@ -376,6 +376,7 @@ impl ChatWidget {
             item @ ThreadItem::Preamble { .. } => {
                 self.add_to_history(history_cell::PreambleCell::from_item(item));
             }
+            ThreadItem::Arrival(item) => self.add_to_history(history_cell::ArrivalCell::new(item)),
             ThreadItem::Reasoning {
                 id,
                 summary,
@@ -496,6 +497,12 @@ impl ChatWidget {
                 }
             }
             ThreadItem::HookPrompt { .. } => {}
+            ThreadItem::StepAdmission(item) => {
+                if let Some(thread_id) = self.thread_id() {
+                    self.app_event_tx
+                        .send(AppEvent::RecordStepAdmission { thread_id, item });
+                }
+            }
             ThreadItem::ToolOutputTokens {
                 id,
                 call_id,

@@ -3,8 +3,8 @@ source: tui/src/chatwidget/tests/exec_flow.rs
 expression: snapshot
 ---
 History:
-• Ran echo repro-marker
+• Command echo repro-marker
 
 Active:
-• Exploring
+• Command
     Read null (whole file)

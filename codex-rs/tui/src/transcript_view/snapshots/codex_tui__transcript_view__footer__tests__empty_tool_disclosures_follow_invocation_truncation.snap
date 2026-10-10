@@ -3,74 +3,69 @@ source: tui/src/transcript_view/footer_tests.rs
 expression: "snapshots.join(\"\\n\\n\")"
 ---
 true, width=100
-                • Ran true
+              • Command true
 
 true, width=44
-                • Ran true
+              • Command true
 
 true, width=24
-                • Ran
-                    true
+              • Command
+                  true
 
 printf '%s' a_long_argument >/dev/null, width=100
-                • Ran printf '%s' a_long_argument >/dev/null
+              • Command printf '%s' a_long_argument >/dev/null
 
 printf '%s' a_long_argument >/dev/null, width=44
-                • Ran
-            [+]     printf '%s' a_long_ar...
+              • Command
+        [+]       printf '%s' a_long_argu...
 
 expanded
-                • Ran
-            [-]     printf '%s'
-                    a_long_argument >/dev/
-                    null
+              • Command
+        [-]       printf '%s'
+                  a_long_argument >/dev/null
 
 printf '%s' a_long_argument >/dev/null, width=24
-                • Ran
-            [+]     p...
+              • Command
+        [+]       pri...
 
 expanded
-                • Ran
-            [-]     prin
-                    tf
-                    '%s'
-                    a_lo
-                    ng_a
-                    rgum
-                    ent
-                    >/
-                    dev/
-                    null
+              • Command
+        [-]       printf
+                  '%s'
+                  a_long
+                  _argum
+                  ent >/
+                  dev/
+                  null
 
 cat config.json, width=100
-            [+] • Explored
-                    Read config.json (whole file)
+        [+]   • Command
+                  Read config.json (whole file)
 
 expanded
-            [-] • Explored
-                    Read config.json (whole file)
+        [-]   • Command
+                  Read config.json (whole file)
 
-                    real file data
+                  real file data
 
 cat config.json, width=44
-            [+] • Explored
-                    Read config.json (who...
+        [+]   • Command
+                  Read config.json (whole...
 
 expanded
-            [-] • Explored
-                    Read config.json (who...
+        [-]   • Command
+                  Read config.json (whole...
 
-                    real file data
+                  real file data
 
 cat config.json, width=24
-            [+] • Exp...
-                    R...
+        [+]   • Command
+                  Rea...
 
 expanded
-            [-] •
-                Explored
-                    R...
+        [-]   • Command
+                  Rea...
 
-                    real
-                    file
-                    data
+                  real
+                  file
+                  data

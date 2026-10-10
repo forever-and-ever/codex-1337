@@ -3,16 +3,16 @@ source: tui/src/transcript_view/search_tests.rs
 expression: "format!(\"{buffer:?}\")"
 ---
 Buffer {
-    area: Rect { x: 0, y: 0, width: 52, height: 8 },
+    area: Rect { x: 0, y: 0, width: 50, height: 8 },
     content: [
-        "                joined computer actions             ",
-        "                                                    ",
-        "                latest answer                       ",
-        "                                                    ",
-        "                new committed answer                ",
-        "                                                    ",
-        "                stream after page                   ",
-        "                                                    ",
+        "              joined computer actions             ",
+        "                                                  ",
+        "              latest answer                       ",
+        "                                                  ",
+        "              new committed answer                ",
+        "                                                  ",
+        "              stream after page                   ",
+        "                                                  ",
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,

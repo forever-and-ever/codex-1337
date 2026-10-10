@@ -23,10 +23,15 @@ use crate::pager_overlay::Overlay;
 use crate::tui;
 
 impl App {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the consolidation event's fields, unpacked"
+    )]
     pub(super) fn handle_consolidate_agent_message(
         &mut self,
         tui: &mut tui::Tui,
         source: String,
+        item_id: Option<String>,
         cwd: PathBuf,
         inline_visualization_context: Option<InlineVisualizationContext>,
         scrollback_reflow: ConsolidationScrollbackReflow,
@@ -67,6 +72,7 @@ impl App {
                 .as_any()
                 .downcast_ref::<history_cell::AgentMessageCell>()
                 .and_then(|cell| cell.timestamp);
+            consolidated.item_id = item_id;
             let consolidated: Arc<dyn HistoryCell> = Arc::new(consolidated);
             self.native_history
                 .consolidate(&self.transcript_cells[start..end], &consolidated);

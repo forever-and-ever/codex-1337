@@ -7059,6 +7059,7 @@ async fn directive_only_completion_removes_streamed_directive() -> Result<()> {
     app.handle_consolidate_agent_message(
         &mut tui,
         String::new(),
+        /*item_id*/ None,
         PathBuf::from("/tmp"),
         /*inline_visualization_context*/ None,
         ConsolidationScrollbackReflow::Required,
@@ -7105,6 +7106,7 @@ async fn required_stream_reflow_during_capped_initial_replay_survives_transcript
         &mut tui,
         "Final answer:\n\n| Pattern | Outcome |\n| --- | --- |\n| Table tail | Preserved |"
             .to_string(),
+        /*item_id*/ None,
         PathBuf::from("/tmp"),
         /*inline_visualization_context*/ None,
         ConsolidationScrollbackReflow::Required,

@@ -72,19 +72,19 @@ Independent file 2
         beta.rs (+0, -1)
         1 -deleted body
 Painted collapsed
-            [+] • Called (Code Mode ωρρλ)
-                    • semedit.edit({})
-                        Edited
-            [+]             /workspace/receipt.rs (+1, -1)
-                    • Edited
-            [+]         alpha.rs (+1, -0)
-            [+]         beta.rs (+0, -1)
+        [+]   • Called (Code Mode ωρρλ)
+                  • semedit.edit({})
+                      Edited
+        [+]               /workspace/receipt.rs (+1, -1)
+                  • Edited
+        [+]           alpha.rs (+1, -0)
+        [+]           beta.rs (+0, -1)
 Clicked native file
-            [+] • Called (Code Mode ωρρλ)
-                    • semedit.edit({})
-                        Edited
-            [+]             /workspace/receipt.rs (+1, -1)
-                    • Edited
-            [-]         alpha.rs (+1, -0)
-                        1 +created body
-            [+]         beta.rs (+0, -1)
+        [+]   • Called (Code Mode ωρρλ)
+                  • semedit.edit({})
+                      Edited
+        [+]               /workspace/receipt.rs (+1, -1)
+                  • Edited
+        [-]           alpha.rs (+1, -0)
+                      1 +created body
+        [+]           beta.rs (+0, -1)

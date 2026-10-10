@@ -359,7 +359,7 @@ async fn native_request_pins_recovery_then_switches_with_exact_custom_tool_repla
         .lock()
         .unwrap()
         .take()
-        .expect("cached inference sealed");
+        .expect("cached inference has a warming request");
     let history_before = prompt.input.clone();
     while events_rx.try_recv().is_ok() {}
     Mock::given(method("POST"))
@@ -408,7 +408,7 @@ async fn native_request_pins_recovery_then_switches_with_exact_custom_tool_repla
 #[derive(Default)]
 struct WarmCapture {
     lore: Mutex<Vec<crate::WarmingLore>>,
-    replay: Mutex<Option<crate::WarmReplay>>,
+    replay: Mutex<Option<crate::WarmingRequest>>,
 }
 
 impl crate::PromptCacheObserver for WarmCapture {

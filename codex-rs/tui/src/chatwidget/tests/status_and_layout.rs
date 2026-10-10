@@ -457,7 +457,19 @@ async fn flush_answer_stream_requests_scrollback_reflow_for_live_table_tail() {
         view.sync_live_tail(width, /*key*/ None, |_| None);
         let mut committed = Buffer::empty(area);
         view.render(area, &mut committed, &cells);
-        assert_eq!(live, committed);
+        // The finished reply draws the tail's rows under its own header, which takes the clock.
+        let rows = |buffer: &Buffer, skip: u16| -> Vec<Vec<ratatui::buffer::Cell>> {
+            (skip..area.height)
+                .map(|row| {
+                    (crate::transcript_geometry::GUTTER_COLUMNS..width)
+                        .map(|column| buffer[(column, row)].clone())
+                        .collect()
+                })
+                .collect()
+        };
+        let mut drawn = rows(&live, /*skip*/ 0);
+        drawn.truncate(usize::from(area.height) - 1);
+        assert_eq!(drawn, rows(&committed, /*skip*/ 1));
         snapshots.push(format!(
             "width={width}\n{}",
             live.content

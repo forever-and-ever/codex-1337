@@ -5,6 +5,9 @@ use crate::history_cell::AgentMarkdownCell;
 use crate::transcript_geometry::GUTTER_COLUMNS;
 use pretty_assertions::assert_eq;
 
+/// The reply's first row: its header takes the area's first, at row 1.
+const TEXT_ROW: u16 = 2;
+
 fn transcript(markdown: &str, width: u16) -> (TranscriptView, Vec<Arc<dyn HistoryCell>>) {
     let cells: Vec<Arc<dyn HistoryCell>> = vec![Arc::new(AgentMarkdownCell::new(
         markdown.into(),
@@ -84,7 +87,7 @@ fn shift_click_extends_a_double_clicked_word_in_both_directions() {
             MouseEventKind::Down(MouseButton::Left),
             MouseEventKind::Up(MouseButton::Left),
         ] {
-            view.handle_mouse(mouse(kind, /*column*/ 11, /*row*/ 1), &cells);
+            view.handle_mouse(mouse(kind, /*column*/ 11, TEXT_ROW), &cells);
             view.render(area, &mut buffer, &cells);
         }
     }
@@ -99,7 +102,7 @@ fn shift_click_extends_a_double_clicked_word_in_both_directions() {
             let action = view.handle_mouse(
                 MouseEvent {
                     modifiers: KeyModifiers::SHIFT,
-                    ..mouse(kind, column, /*row*/ 1)
+                    ..mouse(kind, column, TEXT_ROW)
                 },
                 &cells,
             );
@@ -114,7 +117,7 @@ fn shift_click_extends_a_double_clicked_word_in_both_directions() {
         MouseEventKind::Down(MouseButton::Left),
         MouseEventKind::Up(MouseButton::Left),
     ] {
-        view.handle_mouse(mouse(kind, /*column*/ 17, /*row*/ 1), &cells);
+        view.handle_mouse(mouse(kind, /*column*/ 17, TEXT_ROW), &cells);
     }
     assert_eq!(view.selected_text(&cells), None);
     insta::assert_snapshot!(frames.join("\n\n"));
@@ -127,14 +130,14 @@ fn shift_click_preserves_selection_units_and_allows_dragging() {
         view.begin_selection(
             &cells,
             /*column*/ GUTTER_COLUMNS + 10,
-            /*row*/ 1,
+            TEXT_ROW,
             clicks,
         );
         view.handle_mouse(
             mouse(
                 MouseEventKind::Drag(MouseButton::Left),
                 /*column*/ 14,
-                /*row*/ 1,
+                TEXT_ROW,
             ),
             &cells,
         );
@@ -142,7 +145,7 @@ fn shift_click_preserves_selection_units_and_allows_dragging() {
             mouse(
                 MouseEventKind::Up(MouseButton::Left),
                 /*column*/ 14,
-                /*row*/ 1,
+                TEXT_ROW,
             ),
             &cells,
         );
@@ -159,7 +162,7 @@ fn shift_click_preserves_selection_units_and_allows_dragging() {
             view.handle_mouse(
                 MouseEvent {
                     modifiers: KeyModifiers::SHIFT,
-                    ..mouse(kind, column, /*row*/ 1)
+                    ..mouse(kind, column, TEXT_ROW)
                 },
                 &cells,
             );
@@ -179,7 +182,7 @@ fn ordinary_click_opens_bare_and_markdown_links_on_release() {
             let down = mouse(
                 MouseEventKind::Down(MouseButton::Left),
                 /*column*/ 4,
-                /*row*/ 1,
+                TEXT_ROW,
             );
             assert!(matches!(
                 view.handle_mouse(down, &cells),
@@ -220,7 +223,7 @@ fn dragging_a_link_selects_text_and_never_opens_it() {
             mouse(
                 MouseEventKind::Down(MouseButton::Left),
                 /*column*/ 4,
-                /*row*/ 1,
+                TEXT_ROW,
             ),
             &cells,
         );
@@ -228,18 +231,14 @@ fn dragging_a_link_selects_text_and_never_opens_it() {
             mouse(
                 MouseEventKind::Drag(MouseButton::Left),
                 /*column*/ 7,
-                /*row*/ 1,
+                TEXT_ROW,
             ),
             &cells,
         );
         assert_eq!(view.selected_text(&cells).as_deref(), Some("doc"));
         let column = if return_to_origin { 4 } else { 7 };
         let action = view.handle_mouse(
-            mouse(
-                MouseEventKind::Up(MouseButton::Left),
-                column,
-                /*row*/ 1,
-            ),
+            mouse(MouseEventKind::Up(MouseButton::Left), column, TEXT_ROW),
             &cells,
         );
         if return_to_origin {
@@ -260,16 +259,12 @@ fn dragging_a_link_selects_text_and_never_opens_it() {
 #[test]
 fn scrolling_or_releasing_elsewhere_cancels_link_activation() {
     for interruption in [
-        mouse(MouseEventKind::ScrollUp, /*column*/ 4, /*row*/ 1),
-        mouse(
-            MouseEventKind::ScrollDown,
-            /*column*/ 4,
-            /*row*/ 1,
-        ),
+        mouse(MouseEventKind::ScrollUp, /*column*/ 4, TEXT_ROW),
+        mouse(MouseEventKind::ScrollDown, /*column*/ 4, TEXT_ROW),
         mouse(
             MouseEventKind::Up(MouseButton::Left),
             /*column*/ 5,
-            /*row*/ 1,
+            TEXT_ROW,
         ),
         mouse(
             MouseEventKind::Up(MouseButton::Left),
@@ -282,7 +277,7 @@ fn scrolling_or_releasing_elsewhere_cancels_link_activation() {
             mouse(
                 MouseEventKind::Down(MouseButton::Left),
                 /*column*/ 4,
-                /*row*/ 1,
+                TEXT_ROW,
             ),
             &cells,
         );
@@ -295,7 +290,7 @@ fn scrolling_or_releasing_elsewhere_cancels_link_activation() {
                 mouse(
                     MouseEventKind::Up(MouseButton::Left),
                     /*column*/ 4,
-                    /*row*/ 1
+                    TEXT_ROW
                 ),
                 &cells
             ),
@@ -313,7 +308,7 @@ fn modified_clicks_still_open_immediately() {
             ..mouse(
                 MouseEventKind::Down(MouseButton::Left),
                 /*column*/ 4,
-                /*row*/ 1,
+                TEXT_ROW,
             )
         };
         let Some(ViewAction::OpenLink(url)) = view.handle_mouse(event, &cells) else {

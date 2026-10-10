@@ -477,6 +477,7 @@ fn code_mode_batches_display_their_own_counts_and_replay_without_double_counting
                     is_tool_entry: tail.is_tool_entry(),
                     header: tail.activity_header(),
                     controls: Vec::new(),
+                    preface: Vec::new(),
                     activity: if expanded {
                         tail.expanded_hyperlink_lines(width)
                     } else {
@@ -634,9 +635,8 @@ fn mixed_shell_reads_share_one_disclosure_and_output_bill() {
         /*interaction_input*/ None,
         /*animations_enabled*/ false,
     );
-    // Recognized reads must not hide the opaque stage or turn the whole script into
-    // a read-only exploration group. The process has one result and one output bill.
-    assert!(!cell.has_only_read_actions());
+    // Recognized reads must not hide the opaque stage. The process has one result and one
+    // output bill.
     cell.complete_call(
         "mixed",
         CommandOutput::new(/*exit_code*/ 2, "combined output\nfinal error".into()),
@@ -663,7 +663,7 @@ fn mixed_shell_reads_share_one_disclosure_and_output_bill() {
         let mut buffer = Buffer::empty(area);
         view.render(area, &mut buffer, &cells);
         let text = crate::transcript_view::tests::text(&buffer);
-        assert_eq!(text.matches(" 1280 ").count(), 1);
+        assert_eq!(text.matches(" 1280").count(), 1);
         snapshots.push(format!("expanded={expanded}\n{buffer:?}"));
     }
     insta::assert_snapshot!("mixed_shell_reads_shared_output", snapshots.join("\n"));
@@ -687,6 +687,7 @@ fn activity_focus_keeps_controls_without_passive_hints() {
                     is_tool_entry: cell.is_tool_entry(),
                     header: cell.activity_header(),
                     controls: Vec::new(),
+                    preface: Vec::new(),
                     activity: if expanded {
                         cell.expanded_hyperlink_lines(width)
                     } else {

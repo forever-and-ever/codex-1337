@@ -22,8 +22,8 @@ use codex_core::PromptCacheFact;
 use codex_core::PromptCacheObserver;
 use codex_core::RequestStart;
 use codex_core::Unreplayable;
-use codex_core::WarmReplay;
 use codex_core::WarmingLore;
+use codex_core::WarmingRequest;
 use codex_protocol::ThreadId;
 use codex_protocol::error::Result as CodexResult;
 use codex_protocol::openai_models::AnthropicCacheTtl;
@@ -95,7 +95,7 @@ enum Cache {
     Warm {
         refreshed: RequestStart,
         lore: WarmingLore,
-        replay: Option<Arc<WarmReplay>>,
+        replay: Option<Arc<WarmingRequest>>,
     },
     /// The next request will not match the cached prefix.
     Cold,
@@ -144,7 +144,7 @@ impl Entry {
     }
 
     /// The retained replay, while the prefix it keeps warm has not expired.
-    fn live_replay(&self) -> Option<(&Arc<WarmReplay>, RequestStart, Duration)> {
+    fn live_replay(&self) -> Option<(&Arc<WarmingRequest>, RequestStart, Duration)> {
         match &self.cache {
             Cache::Warm {
                 refreshed,
@@ -391,7 +391,7 @@ impl Shared {
         let now = SystemTime::now();
         let mut registry = self.lock();
         let mut wait: Option<Duration> = None;
-        let mut due: Option<(ThreadId, Arc<WarmReplay>, Duration)> = None;
+        let mut due: Option<(ThreadId, Arc<WarmingRequest>, Duration)> = None;
         for (thread, entry) in registry.iter_mut() {
             let before = entry.view();
             let stopped = entry.lapse(*thread, now);
@@ -426,7 +426,7 @@ impl Shared {
         }
     }
 
-    fn wanted(&self, thread: ThreadId, replay: &Arc<WarmReplay>) -> bool {
+    fn wanted(&self, thread: ThreadId, replay: &Arc<WarmingRequest>) -> bool {
         self.lock().get(&thread).is_some_and(|entry| {
             matches!(entry.warming, Warming::On { until } if SystemTime::now() < until)
                 && entry
@@ -438,7 +438,7 @@ impl Shared {
     fn replayed(
         &self,
         thread: ThreadId,
-        replay: &Arc<WarmReplay>,
+        replay: &Arc<WarmingRequest>,
         result: CodexResult<Option<(RequestStart, TokenUsage)>>,
     ) {
         let result = match result {
@@ -491,7 +491,7 @@ impl Shared {
 }
 
 enum Next {
-    Replay(ThreadId, Arc<WarmReplay>),
+    Replay(ThreadId, Arc<WarmingRequest>),
     Wait(Option<Duration>),
 }
 

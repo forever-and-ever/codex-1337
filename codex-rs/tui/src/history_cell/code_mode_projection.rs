@@ -132,11 +132,8 @@ pub(crate) fn reconcile_code_mode(
             CodeModeCell::from_fact(fact?.0.clone(), fact?.1),
         ),
     };
-    let mut terminal = false;
     let mut reference = None;
     if let Some(fact) = fact {
-        terminal = matches!(fact.0.event, CodeModeEvent::Finished { .. })
-            && (owner_index == cells.len() || block.status().is_none());
         block.insert_fact(fact.0.clone());
         if matches!(
             fact.0.event,
@@ -192,14 +189,11 @@ pub(crate) fn reconcile_code_mode(
         }
     }
     let block: Arc<dyn HistoryCell> = Arc::new(block);
-    if terminal {
-        retained.push(block);
-    } else {
-        retained.insert(block_position, block);
-    }
+    // A finished block keeps its place: its waits follow it, and its Feed Item heads them.
+    retained.insert(block_position, block);
     if let Some(reference) = reference {
         let index = reference_position.map_or(retained.len(), |index| {
-            index + usize::from(!terminal && index >= block_position)
+            index + usize::from(index >= block_position)
         });
         retained.insert(index, reference);
     }
@@ -258,13 +252,9 @@ pub(crate) fn reunite_code_mode(cells: &[Arc<dyn HistoryCell>]) -> Option<Projec
         if block.owner.is_some() {
             continue;
         }
-        if let Some((anchor, retained)) = blocks.get_mut(&block.exec_call_id) {
+        // A block reunites at its first piece: where it started, ahead of its waits.
+        if let Some((_, retained)) = blocks.get_mut(&block.exec_call_id) {
             changed = true;
-            if block.status().is_some()
-                && block.status().map(|(_, at)| at) >= retained.status().map(|(_, at)| at)
-            {
-                *anchor = index;
-            }
             for fact in &block.facts {
                 retained.insert_fact(fact.clone());
             }

@@ -3,7 +3,7 @@ source: tui/src/thread_transcript/tools_tests.rs
 expression: rendered
 ---
 Command: compact
-• Ran cargo check
+• Command cargo check
 
 Command: detailed
 $ cargo check

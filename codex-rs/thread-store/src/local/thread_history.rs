@@ -438,9 +438,9 @@ WHERE thread_id = ?
                 })?;
         let item_id = item.item.id().to_string();
         let item_json = serde_json::to_string(&item.item).map_err(thread_history_error)?;
-        // Completed items are immutable: local producers emit ItemCompleted exactly once per
-        // item. Tolerate an unexpected duplicate defensively so it cannot poison materialization,
-        // preserving the original creation ordinal and timestamp while updating its snapshot.
+        // Local producers emit ItemCompleted once per item, except a step's bill, which completes
+        // pending and again sealed or severed. A repeat cannot poison materialization: it keeps
+        // the original creation ordinal and timestamp and replaces the snapshot.
         sqlx::query(
             r#"
 INSERT INTO thread_items (
@@ -532,6 +532,8 @@ WHERE thread_id = ?
             | ThreadItem::Reasoning { .. }
             | ThreadItem::Thought { .. }
             | ThreadItem::Preamble { .. }
+            | ThreadItem::StepAdmission(_)
+            | ThreadItem::Arrival(_)
             | ThreadItem::CommandExecution { .. }
             | ThreadItem::FileChange { .. }
             | ThreadItem::McpToolCall { .. }

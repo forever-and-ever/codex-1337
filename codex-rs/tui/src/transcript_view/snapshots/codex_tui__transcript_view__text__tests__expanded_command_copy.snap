@@ -5,12 +5,12 @@ expression: "format!(\"{buffer:?}\")"
 Buffer {
     area: Rect { x: 0, y: 0, width: 24, height: 8 },
     content: [
-        "• Running               ",
+        "• Command               ",
         "    printf 'alpha beta  ",
         "    gamma delta'        ",
         "                        ",
-        "Stored result · exact   ",
-        "capture unavailable     ",
+        "  Stored result · exact ",
+        "  capture unavailable   ",
         "      output alpha beta ",
         "    gamma delta         ",
     ],

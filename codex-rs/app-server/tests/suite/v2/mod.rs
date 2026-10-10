@@ -63,6 +63,7 @@ mod hooks_list;
 mod host_skills;
 mod imagegen_extension;
 mod initialize;
+mod legible_history;
 mod luna_reserve;
 mod marketplace_add;
 mod marketplace_remove;

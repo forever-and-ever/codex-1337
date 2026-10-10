@@ -46,6 +46,7 @@ async fn execution_scope(
             Arc::downgrade(session),
             Arc::clone(turn),
             "original-exec".into(),
+            "text('original')".into(),
             service.shutdown_token.clone(),
         )
         .await;

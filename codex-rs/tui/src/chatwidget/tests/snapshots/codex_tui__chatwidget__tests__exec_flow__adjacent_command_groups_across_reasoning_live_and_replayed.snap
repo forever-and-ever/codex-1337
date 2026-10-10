@@ -3,15 +3,15 @@ source: tui/src/chatwidget/tests/exec_flow.rs
 expression: "renders[0]"
 ---
 Compact:
-• Explored · failed
+• Command · failed
     List missing
-• Explored
+• Command
     Read index.html (whole file)
-• Ran echo boundary
-• Explored
+• Command echo boundary
+• Command
     Read later.txt (whole file)
 • Checking one more file.
-• Explored
+• Command
     Read final.txt (whole file)
 Expanded:
 $ ls missing

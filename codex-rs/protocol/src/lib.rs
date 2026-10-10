@@ -10,6 +10,7 @@ mod response_item_id;
 mod response_usage;
 mod sanitized_git_url;
 mod session_id;
+pub mod step_admission;
 mod thread_id;
 mod tool_name;
 pub use agent_path::AgentPath;

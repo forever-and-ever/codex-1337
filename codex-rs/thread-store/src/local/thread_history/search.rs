@@ -26,6 +26,7 @@ use crate::StoredThreadOccurrence;
 use crate::ThreadOccurrenceSearchPage;
 use crate::ThreadStoreError;
 use crate::ThreadStoreResult;
+use crate::legible_item;
 
 const SNIPPET_CONTEXT_BEFORE_CHARS: usize = 48;
 const SNIPPET_CONTEXT_AFTER_CHARS: usize = 96;
@@ -168,12 +169,9 @@ ORDER BY rollout_ordinal ASC
         let mut matching_occurrences = 0_usize;
         while let Some(row) = rows.try_next().await.map_err(thread_history_error)? {
             let row = candidate_row(row)?;
-            let item =
-                serde_json::from_str::<ThreadItem>(row.item_json.as_str()).map_err(|err| {
-                    ThreadStoreError::Internal {
-                        message: format!("failed to deserialize stored thread item: {err}"),
-                    }
-                })?;
+            let Some(item) = legible_item(&row.item_id, row.item_json.as_bytes()) else {
+                continue;
+            };
             let Some(text) = searchable_text(&item) else {
                 continue;
             };
@@ -340,6 +338,8 @@ fn searchable_text(item: &ThreadItem) -> Option<Cow<'_, str>> {
         | ThreadItem::Reasoning { .. }
         | ThreadItem::Thought { .. }
         | ThreadItem::Preamble { .. }
+        | ThreadItem::StepAdmission(_)
+        | ThreadItem::Arrival(_)
         | ThreadItem::CommandExecution { .. }
         | ThreadItem::FileChange { .. }
         | ThreadItem::McpToolCall { .. }

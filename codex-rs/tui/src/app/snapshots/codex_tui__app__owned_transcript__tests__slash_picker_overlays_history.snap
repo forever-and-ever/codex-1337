@@ -4,7 +4,7 @@ expression: open_text
 ---
   model high · fast
 ────────────────────────────────────────────────────────────────────────────────
-                Transcript row 34: content behind the menu
+              Transcript row 35: content behind the menu
 › /model     choose what model and reasoning effort to use
   /memories  configure memory use and generation
   /mention   mention a file

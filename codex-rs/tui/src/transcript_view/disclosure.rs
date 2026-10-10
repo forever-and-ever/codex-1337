@@ -105,10 +105,18 @@ impl TranscriptView {
     }
 
     pub(super) fn activity_ids(&self, cells: &[Arc<dyn HistoryCell>], index: usize) -> Vec<String> {
-        cells.get(index).map_or_else(
-            || self.disclosure.live_ids.clone(),
-            |cell| cell.activity_ids(),
-        )
+        let Some(cell) = cells.get(index) else {
+            return self.disclosure.live_ids.clone();
+        };
+        let ids = cell.activity_ids();
+        // A Feed Item's header over a cell without identities is focused through its fold.
+        if ids.is_empty()
+            && self.indexed_seat(cells, index).header.is_some()
+            && let Some(fold) = self.feed.fold_of(index)
+        {
+            return vec![fold.to_string()];
+        }
+        ids
     }
 
     /// Retired live entries and replaced groups keep the identities of their displayed revision.
@@ -241,7 +249,14 @@ impl TranscriptView {
                     return Some(ViewAction::Changed);
                 }
                 let ids = target.ids(&self.activity_ids(cells, focused));
-                if self.disclosure.is_expanded(&ids) != (action == ListAction::MoveRight) {
+                let expanded = match &target {
+                    FoldTarget::Part(fold) => {
+                        self.feed.is_unfolded(fold, &self.disclosure.expanded)
+                    }
+                    _ => None,
+                }
+                .unwrap_or_else(|| self.disclosure.is_expanded(&ids));
+                if expanded != (action == ListAction::MoveRight) {
                     self.toggle_activity(cells, focused, target);
                 }
             }
@@ -362,6 +377,16 @@ impl TranscriptView {
         index: usize,
         target: FoldTarget,
     ) {
+        if let FoldTarget::Part(fold) = &target
+            && self
+                .feed
+                .is_unfolded(fold, &self.disclosure.expanded)
+                .is_some()
+        {
+            let fold = fold.clone();
+            self.toggle_feed(cells, index, &fold);
+            return;
+        }
         let activity_ids = self.activity_ids(cells, index);
         let ids = target.ids(&activity_ids);
         if ids.is_empty() {

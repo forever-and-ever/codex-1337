@@ -16,6 +16,25 @@ use ratatui::style::Color;
 use ratatui::style::Style;
 
 const LIGHT_BG_ACCENT_RGB: (u8, u8, u8) = (28, 100, 200);
+/// The user's blue. Green reads far brighter than blue at equal strength, so the model's tint
+/// leans less.
+const USER_TINT: Tint = Tint {
+    hue: (90, 150, 255),
+    dark: 0.16,
+    light: 0.08,
+};
+const MODEL_TINT: Tint = Tint {
+    hue: (90, 200, 120),
+    dark: 0.10,
+    light: 0.05,
+};
+
+/// A hue a speaker's fill leans toward, and how far on dark and on light backgrounds.
+struct Tint {
+    hue: (u8, u8, u8),
+    dark: f32,
+    light: f32,
+}
 
 /// ChatGPT Blue 100 (#A4CDFB), used for selection fills on light backgrounds.
 pub(crate) const CHATGPT_BLUE_100: (u8, u8, u8) = (164, 205, 251);
@@ -61,17 +80,42 @@ pub fn user_message_style() -> Style {
     user_message_style_for(default_bg())
 }
 
-/// Submitted prompts use a lighter fill than the editable composer in either theme.
+/// Submitted prompts: the aside fill tinted toward the user's blue.
 pub(crate) fn history_prompt_style() -> Style {
-    let Some(background) = default_bg() else {
-        return Style::default();
-    };
-    let (foreground, alpha) = if is_light(background) {
-        ((0, 0, 0), 0.02)
+    speaker_style(&USER_TINT)
+}
+
+/// The model's messages: the aside fill tinted toward the model's green.
+pub(crate) fn history_response_style() -> Style {
+    speaker_style(&MODEL_TINT)
+}
+
+/// Words neither speaker said, such as client notices and other threads' messages: a neutral
+/// fill, lighter than the editable composer's in either theme.
+pub(crate) fn aside_style() -> Style {
+    default_bg().map_or_else(Style::default, |background| {
+        Style::default().bg(best_color(aside_rgb(background)))
+    })
+}
+
+fn aside_rgb(background: (u8, u8, u8)) -> (u8, u8, u8) {
+    if is_light(background) {
+        blend((0, 0, 0), background, 0.02)
     } else {
-        ((255, 255, 255), 0.16)
-    };
-    Style::default().bg(best_color(blend(foreground, background, alpha)))
+        blend((255, 255, 255), background, 0.16)
+    }
+}
+
+/// A speaker's fill: the aside fill, tinted toward the speaker's hue.
+fn speaker_style(tint: &Tint) -> Style {
+    default_bg().map_or_else(Style::default, |background| {
+        let strength = if is_light(background) {
+            tint.light
+        } else {
+            tint.dark
+        };
+        Style::default().bg(best_color(blend(tint.hue, aside_rgb(background), strength)))
+    })
 }
 
 pub(crate) fn formatted_output_style() -> Style {

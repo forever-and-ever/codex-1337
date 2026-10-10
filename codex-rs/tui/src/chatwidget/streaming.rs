@@ -137,6 +137,11 @@ impl ChatWidget {
                 self.note_stream_consolidation_queued();
                 self.app_event_tx.send(AppEvent::ConsolidateAgentMessage {
                     source,
+                    // Only an item's completion supplies its message; a flush between items has
+                    // no identity to give.
+                    item_id: completed_message
+                        .and(self.transcript.last_completed_agent_message.as_ref())
+                        .map(|(_, id)| id.clone()),
                     cwd: self.config.cwd.to_path_buf(),
                     inline_visualization_context,
                     scrollback_reflow,
@@ -417,6 +422,7 @@ impl ChatWidget {
                 context,
             );
             cell.timestamp = self.transcript.agent_timestamp;
+            cell.item_id = Some(item.id.clone());
             self.add_to_history(cell);
             self.handle_stream_finished();
             self.request_redraw();

@@ -5,6 +5,7 @@ use super::markdown_render_cache::MarkdownRenderCache;
 use super::*;
 use crate::style::accent_color_on;
 use crate::style::history_prompt_style;
+use crate::style::history_response_style;
 use crate::terminal_hyperlinks::annotate_web_urls;
 use crate::terminal_hyperlinks::lines_with_sources_eq;
 use crate::terminal_hyperlinks::remap_source_wrapped_line;
@@ -471,7 +472,7 @@ impl HistoryCell for AgentMessageCell {
                     .subsequent_indent(subsequent_indent),
             ));
         }
-        wrapped
+        response_band(wrapped)
     }
 
     fn transcript_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
@@ -504,6 +505,8 @@ impl HistoryCell for AgentMessageCell {
 #[derive(Debug)]
 pub(crate) struct AgentMarkdownCell {
     pub(crate) timestamp: Option<HistoryTimestamp>,
+    /// The message's item id, which places it in its step's Feed Item.
+    pub(crate) item_id: Option<String>,
     markdown_source: String,
     cwd: PathBuf,
     inline_visualization_context: Option<crate::inline_visualization::InlineVisualizationContext>,
@@ -539,6 +542,7 @@ impl AgentMarkdownCell {
         Self {
             markdown_source,
             timestamp: None,
+            item_id: None,
             cwd: cwd.to_path_buf(),
             inline_visualization_context,
             rendered_lines,
@@ -576,6 +580,18 @@ fn normalize_whitespace_only_hyperlink_lines(mut lines: Vec<HyperlinkLine>) -> V
     lines
 }
 
+/// Lay a model message on the model's fill. A row that brings its own background keeps it.
+fn response_band(mut lines: Vec<HyperlinkLine>) -> Vec<HyperlinkLine> {
+    let band = history_response_style();
+    for line in &mut lines {
+        line.line.style = band.patch(line.line.style);
+        if let Some(source) = &mut line.source {
+            source.line_style = band.patch(source.line_style);
+        }
+    }
+    lines
+}
+
 impl AgentMarkdownCell {
     fn render_lines(
         &self,
@@ -588,11 +604,11 @@ impl AgentMarkdownCell {
             let Some(wrap_width) =
                 crate::width::usable_content_width_u16(width, initial_prefix.width() as u16)
             else {
-                return prefix_hyperlink_lines(
+                return response_band(prefix_hyperlink_lines(
                     vec![HyperlinkLine::new(Line::default())],
                     initial_prefix,
                     subsequent_prefix,
-                );
+                ));
             };
 
             // Reserve the marker; transcript geometry has already excluded the clock gutter.
@@ -610,10 +626,8 @@ impl AgentMarkdownCell {
             } else {
                 lines
             };
-            normalize_whitespace_only_hyperlink_lines(prefix_hyperlink_lines(
-                lines,
-                initial_prefix,
-                subsequent_prefix,
+            response_band(normalize_whitespace_only_hyperlink_lines(
+                prefix_hyperlink_lines(lines, initial_prefix, subsequent_prefix),
             ))
         };
 
@@ -698,10 +712,12 @@ impl HistoryCell for StreamingAgentTailCell {
     fn display_hyperlink_lines(&self, _width: u16) -> Vec<HyperlinkLine> {
         // Tail lines are already rendered at the controller's current stream width.
         // Re-wrapping them here can split table borders and produce malformed in-flight rows.
-        normalize_whitespace_only_hyperlink_lines(prefix_hyperlink_lines(
-            self.lines.clone(),
-            agent_prefix(self.is_first_line),
-            agent_prefix(/*first*/ false),
+        response_band(normalize_whitespace_only_hyperlink_lines(
+            prefix_hyperlink_lines(
+                self.lines.clone(),
+                agent_prefix(self.is_first_line),
+                agent_prefix(/*first*/ false),
+            ),
         ))
     }
 

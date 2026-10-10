@@ -39,7 +39,7 @@ pub(super) fn turn_summary(turn: &Turn, include_outputs: bool, output_chars: usi
         .rev()
         .filter_map(|item| Some(match item.native_item() {
             ThreadItem::CodeModeOwned(_) => unreachable!("ownership ingress rejects nesting"),
-            ThreadItem::ToolOutputTokens { .. } | ThreadItem::CodeMode(_) | ThreadItem::Thought { .. } | ThreadItem::Preamble { .. } => return None,
+            ThreadItem::ToolOutputTokens { .. } | ThreadItem::CodeMode(_) | ThreadItem::Thought { .. } | ThreadItem::Preamble { .. } | ThreadItem::StepAdmission(_) | ThreadItem::Arrival(_) => return None,
             ThreadItem::UserMessage { id, content, .. } => json!({
                 "type": "userMessage",
                 "id": id,

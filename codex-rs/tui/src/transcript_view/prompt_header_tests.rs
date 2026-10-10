@@ -217,11 +217,11 @@ fn paused_header_reservation_survives_copy_until_scroll_or_resize() {
     ];
     for scroll in [false, true] {
         let mut view = TranscriptView::default();
-        let before = render(&mut view, &cells, /*width*/ 40, /*height*/ 7);
-        view.begin_selection(&cells, /*column*/ 0, /*row*/ 6, /*clicks*/ 2);
+        let before = render(&mut view, &cells, /*width*/ 40, /*height*/ 8);
+        view.begin_selection(&cells, /*column*/ 0, /*row*/ 7, /*clicks*/ 2);
         assert_eq!(
             text(&render(
-                &mut view, &cells, /*width*/ 40, /*height*/ 7
+                &mut view, &cells, /*width*/ 40, /*height*/ 8
             )),
             text(&before)
         );
@@ -237,20 +237,20 @@ fn paused_header_reservation_survives_copy_until_scroll_or_resize() {
         let bookmark = view.bookmark(&cells);
         view.set_presentation(/*detailed*/ true, HistoryRenderMode::Rich);
         view.jump_to_entry(&cells, /*index*/ 0);
-        render(&mut view, &cells, /*width*/ 40, /*height*/ 7);
+        render(&mut view, &cells, /*width*/ 40, /*height*/ 8);
         view.restore_bookmark(bookmark);
         assert_eq!(
             (
-                render(&mut view, &cells, /*width*/ 40, /*height*/ 7),
+                render(&mut view, &cells, /*width*/ 40, /*height*/ 8),
                 view.is_following(),
             ),
             (before, false)
         );
         let height = if scroll {
             view.scroll(&cells, /*rows*/ -1);
-            7
-        } else {
             8
+        } else {
+            9
         };
         render(&mut view, &cells, /*width*/ 40, height);
         assert_eq!(view.area.y, 1);

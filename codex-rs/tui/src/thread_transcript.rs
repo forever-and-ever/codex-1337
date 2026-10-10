@@ -42,7 +42,9 @@ pub(crate) type TranscriptCells = Vec<Arc<dyn HistoryCell>>;
 fn is_activity_metadata(item: &ThreadItem) -> bool {
     matches!(
         item,
-        ThreadItem::Reasoning { .. } | ThreadItem::ToolOutputTokens { .. }
+        ThreadItem::Reasoning { .. }
+            | ThreadItem::ToolOutputTokens { .. }
+            | ThreadItem::StepAdmission(_)
     ) || crate::history_cell::ToolOutputCell::is_item(item)
 }
 
@@ -217,12 +219,7 @@ fn append_thread_items(
                                 })
                             })
                     }) {
-                        if projection.terminal_transition {
-                            cells.remove(index);
-                            cells.push(projection.block);
-                        } else {
-                            cells[index] = projection.block;
-                        }
+                        cells[index] = projection.block;
                     } else {
                         cells.push(projection.block);
                     }
@@ -360,6 +357,9 @@ fn item_to_cells(
         item @ ThreadItem::Preamble { .. } => {
             cells.push(Arc::new(crate::history_cell::PreambleCell::from_item(item)));
         }
+        ThreadItem::Arrival(item) => {
+            cells.push(Arc::new(crate::history_cell::ArrivalCell::new(item)));
+        }
         ThreadItem::UserMessage {
             id,
             client_id,
@@ -399,14 +399,16 @@ fn item_to_cells(
                 remote_image_urls: item.image_urls(),
             }));
         }
-        ThreadItem::AgentMessage { text, .. } => {
+        ThreadItem::AgentMessage { id, text, .. } => {
             let parsed = parse_assistant_markdown(&text, cwd.as_path());
             if !parsed.visible_markdown.trim().is_empty() {
-                cells.push(Arc::new(AgentMarkdownCell::new_with_inline_visualizations(
+                let mut cell = AgentMarkdownCell::new_with_inline_visualizations(
                     parsed.visible_markdown,
                     cwd.as_path(),
                     inline_visualization_context,
-                )));
+                );
+                cell.item_id = Some(id);
+                cells.push(Arc::new(cell));
             }
         }
         ThreadItem::FunctionCallOutput {

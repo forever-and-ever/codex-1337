@@ -1756,6 +1756,7 @@ dependencies = [
  "codex-config",
  "codex-core",
  "codex-http-client",
+ "codex-install-context",
  "codex-login",
  "codex-model-provider",
  "codex-protocol",
@@ -3142,6 +3143,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "tracing",
 ]
 
 [[package]]

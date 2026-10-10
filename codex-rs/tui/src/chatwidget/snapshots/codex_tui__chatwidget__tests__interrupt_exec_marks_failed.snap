@@ -2,4 +2,4 @@
 source: tui/src/chatwidget/tests/review_mode.rs
 expression: exec_blob
 ---
-• Ran · failed sleep 1
+• Command · failed sleep 1

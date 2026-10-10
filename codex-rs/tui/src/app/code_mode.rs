@@ -93,9 +93,9 @@ impl App {
             self.transcript_view
                 .record_tool_output_tokens(item_id, call_id, tokens);
         }
-        self.set_code_mode_cell(tui, projection.block, projection.terminal_transition);
+        self.set_code_mode_cell(tui, projection.block);
         if let Some(wait) = projection.wait {
-            self.set_code_mode_cell(tui, wait, /*terminal_transition*/ false);
+            self.set_code_mode_cell(tui, wait);
         }
         tui.frame_requester().schedule_frame();
         self.chat_widget.request_pending_usage_output_insertion();
@@ -120,7 +120,7 @@ impl App {
             return;
         };
         match self.code_mode_transcript.hydrate(display, block) {
-            Ok(cell) => self.set_code_mode_cell(tui, cell, /*terminal_transition*/ false),
+            Ok(cell) => self.set_code_mode_cell(tui, cell),
             Err(error) => tracing::warn!(%error, "rejecting conflicting Code Mode hydration"),
         }
     }
@@ -137,7 +137,7 @@ impl App {
                 .iter()
                 .any(|cell| cell.activity_ids() == incoming.activity_ids())
             {
-                self.set_code_mode_cell(tui, incoming, /*terminal_transition*/ false);
+                self.set_code_mode_cell(tui, incoming);
                 return;
             }
             if let Some(index) = page
@@ -177,16 +177,8 @@ impl App {
                 .downcast_ref::<history_cell::CodeModeCell>()
                 .is_some_and(|old| old.identity() == block.identity())
         }) {
-            let terminal_before = self.transcript_cells[index]
-                .as_any()
-                .downcast_ref::<history_cell::CodeModeCell>()
-                .is_some_and(history_cell::CodeModeCell::terminal);
-            if terminal_before || !block.terminal() {
-                self.set_code_mode_cell(tui, canonical, /*terminal_transition*/ false);
-                return;
-            }
-            // Hydration found the original terminal position of a suffix-only block.
-            // Existing reading/selection snapshots retain the old source revision.
+            // The older page holds the block's start, so the block moves there with all it
+            // knows. Existing reading/selection snapshots retain the old source revision.
             self.transcript_view.replace_group_members(
                 &self.transcript_cells,
                 index..index + 1,
@@ -208,12 +200,8 @@ impl App {
         }
     }
 
-    fn set_code_mode_cell(
-        &mut self,
-        tui: &mut tui::Tui,
-        incoming: Arc<dyn HistoryCell>,
-        terminal_transition: bool,
-    ) {
+    /// Revise a block or wait in place; a finished block keeps its place ahead of its waits.
+    fn set_code_mode_cell(&mut self, tui: &mut tui::Tui, incoming: Arc<dyn HistoryCell>) {
         let Some(identity) = incoming.activity_ids().first().cloned() else {
             return;
         };
@@ -229,24 +217,12 @@ impl App {
             {
                 return;
             }
-            let range = if terminal_transition {
-                index..self.transcript_cells.len()
-            } else {
-                index..index + 1
-            };
-            let retained = if terminal_transition {
-                self.transcript_cells[index + 1..].to_vec()
-            } else {
-                Vec::new()
-            };
-            let mut replacements = retained.clone();
-            replacements.push(incoming);
             self.commit_transcript_splice(
                 tui,
                 TranscriptSplice {
-                    range,
-                    cells: replacements,
-                    shape: SpliceShape::Members(retained),
+                    range: index..index + 1,
+                    cells: vec![incoming],
+                    shape: SpliceShape::Members(Vec::new()),
                 },
             );
         } else {

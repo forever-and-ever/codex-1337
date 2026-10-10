@@ -27,9 +27,14 @@ use codex_protocol::ThreadId;
 use codex_protocol::items::TurnItem;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::openai_models::ReasoningEffort;
+use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::CodexErrorInfo;
 use codex_protocol::protocol::EventMsg;
+use codex_protocol::protocol::ItemCompletedEvent;
 use codex_protocol::protocol::Op;
+use codex_protocol::protocol::ThreadSettingsOverrides;
+use codex_protocol::step_admission::Admission;
+use codex_protocol::step_admission::ArrivalKind;
 use codex_protocol::user_input::UserInput;
 use core_test_support::assert_regex_match;
 use core_test_support::responses::ResponsesRequest;
@@ -46,6 +51,7 @@ use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_codex::test_codex;
+use core_test_support::test_codex::turn_permission_fields;
 use core_test_support::wait_for_event;
 use pretty_assertions::assert_eq;
 use serde_json::json;
@@ -339,8 +345,72 @@ async fn current_time_reminders_can_follow_only_user_or_tool_outputs() -> Result
         .build(&server)
         .await?;
 
-    test.submit_turn_with_permission_profile("first turn", PermissionProfile::Disabled)
+    let (sandbox_policy, permission_profile) =
+        turn_permission_fields(PermissionProfile::Disabled, test.config.cwd.as_path());
+    test.codex
+        .start_or_steer_turn(
+            TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "first turn".into(),
+                text_elements: Vec::new(),
+            }])
+            .with_thread_settings(ThreadSettingsOverrides {
+                approval_policy: Some(AskForApproval::Never),
+                sandbox_policy: Some(sandbox_policy),
+                permission_profile,
+                ..Default::default()
+            }),
+        )
         .await?;
+    // The first step's seal is measured off-thread and may follow turn completion.
+    let mut announced = Vec::new();
+    let mut sealed = None;
+    let mut completed = false;
+    while sealed.is_none() || !completed {
+        match wait_for_event(&test.codex, |_| true).await {
+            EventMsg::ItemCompleted(ItemCompletedEvent {
+                item: TurnItem::Arrival(item),
+                ..
+            }) => announced.push(item),
+            EventMsg::ItemCompleted(ItemCompletedEvent {
+                item: TurnItem::StepAdmission(item),
+                ..
+            }) if item.response_id == "resp-1" && item.admission != Admission::Pending => {
+                sealed = Some(item.admission);
+            }
+            EventMsg::TurnComplete(_) => completed = true,
+            _ => {}
+        }
+    }
+    // The reminder written after the tool output is announced as the second request reads
+    // it, and the first step's seal bills it under the same id.
+    let [arrival] = announced.as_slice() else {
+        panic!("expected one announced arrival, got {announced:?}");
+    };
+    assert_eq!(
+        (
+            arrival.response_id.as_str(),
+            arrival.kind,
+            arrival.label.as_str(),
+            arrival.text.as_deref(),
+        ),
+        (
+            "resp-1",
+            ArrivalKind::Injection,
+            "current_time_reminder",
+            Some(SECOND_REMINDER),
+        )
+    );
+    let Some(Admission::Sealed(sealed)) = sealed else {
+        panic!("first step severed: {sealed:?}");
+    };
+    assert_eq!(
+        sealed
+            .arrivals
+            .iter()
+            .map(|billed| (billed.id.as_str(), billed.kind))
+            .collect::<Vec<_>>(),
+        vec![(arrival.id.as_str(), ArrivalKind::Injection)]
+    );
 
     let requests = responses.requests();
     assert_eq!(requests.len(), 3);

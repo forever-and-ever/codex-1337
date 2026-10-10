@@ -173,7 +173,6 @@ pub(crate) struct TokenBill {
 pub(crate) struct Projection {
     pub(crate) opens_live: bool,
     pub(crate) block: Arc<dyn HistoryCell>,
-    pub(crate) terminal_transition: bool,
     pub(crate) wait: Option<Arc<dyn HistoryCell>>,
     pub(crate) tokens: Option<TokenBill>,
 }
@@ -268,7 +267,6 @@ impl Reducers {
         if descriptor.cell_id.is_none() {
             descriptor.cell_id = owner.cell_id;
         }
-        let terminal_before = block.cell.terminal();
         let active_before = block.cell.is_active();
         let mut wait = None;
         let mut tokens = None;
@@ -374,7 +372,6 @@ impl Reducers {
         Ok(Projection {
             opens_live: !active_before && block.cell.is_active(),
             block: Arc::new(block.cell.clone()),
-            terminal_transition: !terminal_before && block.cell.terminal(),
             wait,
             tokens,
         })

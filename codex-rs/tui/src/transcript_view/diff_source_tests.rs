@@ -136,7 +136,7 @@ fn file_disclosures_are_independent_and_not_copied() {
         if collapse_first {
             assert!(view.toggle_disclosure_at(
                 &cells,
-                crate::transcript_geometry::DISCLOSURE_COLUMN,
+                crate::transcript_geometry::CONTROL_COLUMN,
                 /*row*/ 1
             ));
         }

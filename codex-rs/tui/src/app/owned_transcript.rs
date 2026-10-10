@@ -132,14 +132,37 @@ impl App {
             /*height*/ 1,
         ));
         let footer = view.footer_with_navigation(footer_area.width, motion, latest_navigation);
-        if let Some(gap) = composer_gap.as_mut() {
-            gap.separates_transcript = !view.is_following() && !view.is_tail_visible();
-        }
         let popup_placement = if view.has_active_interaction() {
             crate::bottom_pane::CommandPopupPlacement::Hidden
         } else {
             crate::bottom_pane::CommandPopupPlacement::Overlay
         };
+        let live_work = self
+            .transcript_cells
+            .iter()
+            .filter_map(|cell| {
+                cell.as_any()
+                    .downcast_ref::<crate::history_cell::CodeModeCell>()
+            })
+            .flat_map(crate::history_cell::CodeModeCell::live_lines)
+            .collect::<Vec<_>>();
+        if !live_work.is_empty() && composer_gap.is_some() {
+            // Live work takes at most half the rows the transcript would have without it.
+            let without = chat_widget
+                .bottom_pane_renderable(
+                    prompt_footer.as_ref().or(footer.as_ref()),
+                    popup_placement,
+                    crate::bottom_pane::ComposerHintPlacement::ScreenHeader,
+                    composer_gap.as_ref(),
+                    working_tip,
+                )
+                .desired_height(screen_size.width);
+            let room = usize::from(screen_size.height.saturating_sub(without) / 2);
+            if let Some(gap) = composer_gap.as_mut() {
+                gap.live = live_work;
+                gap.live.truncate(room);
+            }
+        }
         let bottom = chat_widget.bottom_pane_renderable(
             prompt_footer.as_ref().or(footer.as_ref()),
             popup_placement,
@@ -191,11 +214,7 @@ impl App {
                 &self.transcript_cells,
                 completion_tip,
             );
-            let mut reading_boundary_changed = false;
             if let Some(gap) = composer_gap.as_mut() {
-                let separates_transcript = !view.is_following() && !view.is_tail_visible();
-                reading_boundary_changed = gap.separates_transcript != separates_transcript;
-                gap.separates_transcript = separates_transcript;
                 gap.needs_separator = available > header_height + 1
                     && chat_widget.no_modal_or_popup_active()
                     && view.composer_gap_has_content(transcript_width, composer_hint.as_ref(), now);
@@ -227,15 +246,13 @@ impl App {
                     .desired_height(screen_size.width)
                     .min(screen_size.height)
                     != bottom_height;
-            if footer_height_changed
-                && (reading_boundary_changed
-                    || composer_gap.as_ref().is_some_and(|gap| gap.needs_separator))
+            if footer_height_changed && composer_gap.as_ref().is_some_and(|gap| gap.needs_separator)
             {
                 bottom_area.height = bottom
                     .desired_height(screen_size.width)
                     .min(screen_size.height);
                 bottom_area.y = screen_size.height.saturating_sub(bottom_area.height);
-                // Releasing a reading boundary can restore header space on short terminals.
+                // A changed separator can restore header space on short terminals.
                 // Reconcile both regions before repainting, including newly available rows.
                 available = bottom_area.y;
                 header_height = chat_widget

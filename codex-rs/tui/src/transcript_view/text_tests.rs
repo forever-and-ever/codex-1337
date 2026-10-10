@@ -76,7 +76,7 @@ fn token_gutter_rounding_color_and_reflow_preserve_source() {
                     ]),
                     /*width*/ 80,
                 )
-                .with_header_tokens(tokens)
+                .with_header_tokens(tokens, crate::transcript_geometry::TokenSeat::Gutter)
                 .with_leading_separator();
                 for width in [80, 40, 10] {
                     let layout = layout.rewrap(width).with_leading_spacer();
@@ -478,7 +478,7 @@ fn command_and_output_copy_preserve_hard_lines_across_resize() {
                     cell.activity_parts(/*width*/ 32, /*header_reserve*/ 0, &expanded)
                         .unwrap()
                         .lines,
-                    format!("• Running\n{command}\n\n{output}"),
+                    format!("• Command\n{command}\n\n{output}"),
                 ),
                 (
                     "detailed_command_copy",
