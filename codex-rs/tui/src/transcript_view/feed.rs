@@ -4,9 +4,12 @@
 //! the server billed belongs to its step's Feed Item: the step's Thought, the response's
 //! messages and calls, and their results. Steps that share a cell, and a Code Mode exec with
 //! the steps that wait on it, form one item. User turns, arrivals and Preambles are items of
-//! one cell each, and so is a finished reply no step claims: one from a chat that predates
-//! step bills, or from a step whose bill a resume lost. Every other cell stays loose, with its
-//! own clock and tokens.
+//! one cell each, and so is a finished reply no step claims, from a chat older than its
+//! bills. Every other cell stays loose, with its own clock and tokens.
+//!
+//! A Thought opens its step. The server announces it only when its response completes, after
+//! the response's messages and calls, so the transcript rotates it ahead of them once the
+//! step's bill names them.
 //!
 //! An item's members need not be adjacent. A run of members that no other item interrupts is
 //! a segment, and a segment draws a header when it begins a step or shows a member: clock,
@@ -57,6 +60,7 @@ use codex_protocol::code_mode::CodeModeEvent;
 use ratatui::text::Span;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::ops::Range;
 
 /// A cell that is a Feed Item of its own: its header carries the title and its fold the body.
 pub(crate) trait FeedEntry {
@@ -1123,6 +1127,57 @@ impl TranscriptView {
         if self.step_bills.record(item) {
             self.cache.clear();
             self.live_key = None;
+        }
+    }
+
+    /// The run whose rotation seats a step's Thought ahead of the step: from the first of the
+    /// step's own members before the Thought, through the Thought. The search ends at a user
+    /// turn, or at a cell another step claims.
+    pub(crate) fn misplaced_thought(
+        &self,
+        cells: &[Arc<dyn HistoryCell>],
+        response_id: &str,
+    ) -> Option<Range<usize>> {
+        let bills = &self.step_bills;
+        bills.step(response_id)?;
+        let mut thought = None;
+        let mut first = None;
+        for (index, cell) in cells.iter().enumerate().rev() {
+            let any = cell.as_any();
+            if any.is::<UserHistoryCell>() {
+                break;
+            }
+            if let Some(candidate) = any.downcast_ref::<ThoughtCell>() {
+                if thought.is_none() && candidate.response_id() == response_id {
+                    thought = Some(index);
+                }
+                continue;
+            }
+            if thought.is_none() {
+                continue;
+            }
+            match steps_of(cell.as_ref(), bills).0.as_slice() {
+                [] => {}
+                [step] if *step == response_id => first = Some(index),
+                _ => break,
+            }
+        }
+        Some(first?..thought? + 1)
+    }
+
+    /// Seats every Thought of a page of cells ahead of its step.
+    pub(crate) fn seat_thoughts(&self, cells: &mut [Arc<dyn HistoryCell>]) {
+        for index in 0..cells.len() {
+            let Some(response_id) = cells[index]
+                .as_any()
+                .downcast_ref::<ThoughtCell>()
+                .map(|thought| thought.response_id().to_string())
+            else {
+                continue;
+            };
+            if let Some(range) = self.misplaced_thought(&cells[..=index], &response_id) {
+                cells[range].rotate_right(/*k*/ 1);
+            }
         }
     }
 

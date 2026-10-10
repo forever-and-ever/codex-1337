@@ -1031,15 +1031,15 @@ async fn interleaved_scripts_keep_exact_ownership_after_terminal_wait_and_replay
             for (kind, column) in [
                 (
                     crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
-                    10,
+                    12,
                 ),
                 (
                     crossterm::event::MouseEventKind::Drag(crossterm::event::MouseButton::Left),
-                    28,
+                    30,
                 ),
                 (
                     crossterm::event::MouseEventKind::Up(crossterm::event::MouseButton::Left),
-                    28,
+                    30,
                 ),
             ] {
                 app.transcript_view.handle_mouse(

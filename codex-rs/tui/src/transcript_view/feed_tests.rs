@@ -142,7 +142,8 @@ fn steps_fold_under_one_header_with_their_figures() {
         CommandOutput::new(/*exit_code*/ 1, "test parse ... FAILED\n".into()),
         std::time::Duration::ZERO,
     );
-    let cells: Vec<Arc<dyn HistoryCell>> = vec![
+    // Cells arrive as the server announces them: each Thought after its response's members.
+    let mut cells: Vec<Arc<dyn HistoryCell>> = vec![
         Arc::new(UserHistoryCell {
             message: "Fix the failing test".into(),
             text_elements: Vec::new(),
@@ -151,8 +152,8 @@ fn steps_fold_under_one_header_with_their_figures() {
             spoken: false,
         }),
         message("msg-1", "I'll run the tests first."),
-        thought("resp-1"),
         Arc::new(exec),
+        thought("resp-1"),
         Arc::new(ArrivalCell::new(ArrivalItem {
             id: "arrival:resp-1:0".into(),
             response_id: "resp-1".into(),
@@ -161,8 +162,8 @@ fn steps_fold_under_one_header_with_their_figures() {
             label: "environment_context".into(),
             text: Some("<environment_context>cwd</environment_context>".into()),
         })),
-        thought("resp-2"),
         message("msg-2", "Fixed the parser."),
+        thought("resp-2"),
         Arc::new(UserHistoryCell {
             message: "Thanks".into(),
             text_elements: Vec::new(),
@@ -207,6 +208,7 @@ fn steps_fold_under_one_header_with_their_figures() {
         }),
     ));
     view.record_step_admission(step("resp-3", &["exec-1"], &[], Admission::Pending));
+    view.seat_thoughts(&mut cells);
     let clock = crate::history_cell::HistoryTimestamp::from_millis(CLOCK_MS)
         .unwrap()
         .span()

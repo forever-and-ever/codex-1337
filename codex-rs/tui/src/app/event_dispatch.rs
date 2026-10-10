@@ -719,7 +719,9 @@ impl App {
             }
             AppEvent::RecordStepAdmission { thread_id, item } => {
                 if self.chat_widget.thread_id() == Some(thread_id) {
+                    let response_id = item.response_id.clone();
                     self.transcript_view.record_step_admission(item);
+                    self.seat_thought(tui, &response_id);
                     tui.frame_requester().schedule_frame();
                 }
             }

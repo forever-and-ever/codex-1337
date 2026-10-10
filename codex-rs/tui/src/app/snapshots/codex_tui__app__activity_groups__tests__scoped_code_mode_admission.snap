@@ -3,21 +3,21 @@ source: tui/src/app/activity_groups_tests.rs
 expression: "examples.join(\"\\n\\n\")"
 ---
 Held reading
-      [+]   • Calling (Code Mode ρξωζ)
-                • Exploring
-                    Read child-a.rs (whole file)
-            • Calling (Code Mode βεθε)
-                • Inspect child-b
+        [+]   • Calling (Code Mode ρξωζ)
+                  • Exploring
+                      Read child-a.rs (whole file)
+              • Calling (Code Mode βεθε)
+                  • Inspect child-b
 
 Return to live
-            • Before script
+              • Before script
 
-      [+]   • Called (Code Mode ρξωζ)  10
-                • Explored
-                    Read child-a.rs (whole file)
-            • Calling (Code Mode βεθε)
-                • Inspect child-b
-      [+]   • Waited on ρξωζ
+        [+]   • Called (Code Mode ρξωζ)  10
+                  • Explored
+                      Read child-a.rs (whole file)
+              • Calling (Code Mode βεθε)
+                  • Inspect child-b
+        [+]   • Waited on ρξωζ
 
 Terminal interactions
 ↳ Interacted with background terminal · cat child-a.rs

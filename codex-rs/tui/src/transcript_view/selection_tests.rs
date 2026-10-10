@@ -396,13 +396,13 @@ fn clicking_and_clearing_selection_preserves_the_separator_row() {
     insta::assert_snapshot!(frames.join("\n\n"), @"
     prepend=false
 
-                • alpha beta gamma
-                  second line
+                  • alpha beta gamma
+                    second line
 
     prepend=true
 
-                • alpha beta gamma
-                  second line
+                  • alpha beta gamma
+                    second line
     ");
 }
 

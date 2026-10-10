@@ -61,4 +61,24 @@ impl App {
         tui.frame_requester().schedule_frame();
         self.chat_widget.request_pending_usage_output_insertion();
     }
+
+    /// Seats a step's Thought ahead of the step's members once the step's bill names them.
+    pub(super) fn seat_thought(&mut self, tui: &mut tui::Tui, response_id: &str) {
+        let Some(range) = self
+            .transcript_view
+            .misplaced_thought(&self.transcript_cells, response_id)
+        else {
+            return;
+        };
+        let mut cells = self.transcript_cells[range.clone()].to_vec();
+        cells.rotate_right(/*k*/ 1);
+        self.commit_transcript_splice(
+            tui,
+            TranscriptSplice {
+                range,
+                shape: SpliceShape::Members(cells.clone()),
+                cells,
+            },
+        );
+    }
 }

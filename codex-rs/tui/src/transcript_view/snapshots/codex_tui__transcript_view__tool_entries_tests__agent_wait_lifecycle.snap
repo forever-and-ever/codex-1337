@@ -3,8 +3,8 @@ source: tui/src/transcript_view/tool_entries_tests.rs
 expression: "stages.join(\"\\n\\n\")"
 ---
 InProgress
-            • Started `/root/worker`
-            • Waiting for agents
+              • Started `/root/worker`
+              • Waiting for agents
 
 Completed
-            • Started `/root/worker`
+              • Started `/root/worker`

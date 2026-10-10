@@ -295,6 +295,7 @@ impl App {
                     .is_some_and(|existing| existing.id == thought.id)
             })
         });
+        self.transcript_view.seat_thoughts(&mut cells);
         cells
     }
 

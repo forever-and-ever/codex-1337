@@ -16,9 +16,25 @@ use ratatui::style::Color;
 use ratatui::style::Style;
 
 const LIGHT_BG_ACCENT_RGB: (u8, u8, u8) = (28, 100, 200);
-/// The hues the transcript tints each speaker's words toward.
-const USER_HUE: (u8, u8, u8) = (90, 150, 255);
-const MODEL_HUE: (u8, u8, u8) = (90, 200, 120);
+/// The user's blue. Green reads far brighter than blue at equal strength, so the model's tint
+/// leans less.
+const USER_TINT: Tint = Tint {
+    hue: (90, 150, 255),
+    dark: 0.16,
+    light: 0.08,
+};
+const MODEL_TINT: Tint = Tint {
+    hue: (90, 200, 120),
+    dark: 0.10,
+    light: 0.05,
+};
+
+/// A hue a speaker's fill leans toward, and how far on dark and on light backgrounds.
+struct Tint {
+    hue: (u8, u8, u8),
+    dark: f32,
+    light: f32,
+}
 
 /// ChatGPT Blue 100 (#A4CDFB), used for selection fills on light backgrounds.
 pub(crate) const CHATGPT_BLUE_100: (u8, u8, u8) = (164, 205, 251);
@@ -66,12 +82,12 @@ pub fn user_message_style() -> Style {
 
 /// Submitted prompts: the aside fill tinted toward the user's blue.
 pub(crate) fn history_prompt_style() -> Style {
-    speaker_style(USER_HUE)
+    speaker_style(&USER_TINT)
 }
 
 /// The model's messages: the aside fill tinted toward the model's green.
 pub(crate) fn history_response_style() -> Style {
-    speaker_style(MODEL_HUE)
+    speaker_style(&MODEL_TINT)
 }
 
 /// Words neither speaker said, such as client notices and other threads' messages: a neutral
@@ -91,10 +107,14 @@ fn aside_rgb(background: (u8, u8, u8)) -> (u8, u8, u8) {
 }
 
 /// A speaker's fill: the aside fill, tinted toward the speaker's hue.
-fn speaker_style(hue: (u8, u8, u8)) -> Style {
+fn speaker_style(tint: &Tint) -> Style {
     default_bg().map_or_else(Style::default, |background| {
-        let tint = if is_light(background) { 0.10 } else { 0.20 };
-        Style::default().bg(best_color(blend(hue, aside_rgb(background), tint)))
+        let strength = if is_light(background) {
+            tint.light
+        } else {
+            tint.dark
+        };
+        Style::default().bg(best_color(blend(tint.hue, aside_rgb(background), strength)))
     })
 }
 

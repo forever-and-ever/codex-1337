@@ -3,8 +3,8 @@ source: tui/src/app/owned_transcript_follow_tests.rs
 expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(super::tests::buffer_text(buffer))"
 ---
   esc latest
-            transcript row 28
-            transcript row 29
+              transcript row 28
+              transcript row 29
 ────────────────────────────────────────────────────────────────────────────────
                              ↓ Back to bottom · esc
 

@@ -78,8 +78,8 @@ fn copy_on_select_waits_for_release_and_retains_selection() {
             insta::assert_snapshot!(
                 format!("{}\n{highlight}", text(&buffer)),
                 @"
-                        selected text
-            ············^^^^^^^^········
+                          selected text
+            ··············^^^^^^^^········
             "
             );
             for result in [

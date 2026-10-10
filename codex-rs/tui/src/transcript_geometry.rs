@@ -11,7 +11,8 @@ use crate::history_cell::HistoryRenderMode;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::terminal_hyperlinks::prefix_hyperlink_lines;
 
-pub(crate) const CLOCK_COLUMNS: u16 = 6;
+/// A two-column margin, the clock and a space: no row starts against the edge.
+pub(crate) const CLOCK_COLUMNS: u16 = 8;
 /// A header's fold, and the controls of every row.
 pub(crate) const CONTROL_COLUMN: u16 = CLOCK_COLUMNS;
 pub(crate) const CONTROL_COLUMNS: u16 = 3;
