@@ -18,4 +18,9 @@ limit?: number | null,
 /**
  * When true, include models that are hidden from the default picker list.
  */
-includeHidden?: boolean | null, };
+includeHidden?: boolean | null,
+/**
+ * Conversation whose accounts the catalog reads, as its turns and agents would. Without
+ * it, the catalog reads the active login, which new conversations use.
+ */
+threadId?: string | null, };

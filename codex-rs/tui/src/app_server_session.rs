@@ -510,6 +510,8 @@ impl AppServerSession {
                             cursor: None,
                             limit: None,
                             include_hidden: Some(true),
+                            // A resumed conversation may not be loaded yet; its picker refetches.
+                            thread_id: None,
                         },
                     })
                     .await

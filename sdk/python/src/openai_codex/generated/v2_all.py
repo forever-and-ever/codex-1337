@@ -2866,6 +2866,13 @@ class ModelListParams(BaseModel):
             description="Configured provider whose catalog should be read on the server.",
         ),
     ] = None
+    thread_id: Annotated[
+        str | None,
+        Field(
+            alias="threadId",
+            description="Conversation whose accounts the catalog reads, as its turns and agents would. Without it, the catalog reads the active login, which new conversations use.",
+        ),
+    ] = None
 
 
 class ModelProviderCapabilitiesReadParams(BaseModel):

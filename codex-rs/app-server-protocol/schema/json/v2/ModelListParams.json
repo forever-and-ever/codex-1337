@@ -30,6 +30,13 @@
         "string",
         "null"
       ]
+    },
+    "threadId": {
+      "description": "Conversation whose accounts the catalog reads, as its turns and agents would. Without it, the catalog reads the active login, which new conversations use.",
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "title": "ModelListParams",

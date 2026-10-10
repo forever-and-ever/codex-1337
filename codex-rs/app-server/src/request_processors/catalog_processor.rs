@@ -178,9 +178,11 @@ impl CatalogRequestProcessor {
         &self,
         params: ModelListParams,
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
-        // Every request reads current configuration. The startup catalog is reused only for an
-        // unchanged provider definition that is not a Claude subscription, whose catalog captures
-        // the default account.
+        // Every request reads current configuration. A loaded conversation lists through the
+        // catalog its own accounts select; one not yet loaded, such as a resume target, reads the
+        // active login's, as account/read does. Otherwise the startup catalog is reused only for
+        // an unchanged provider definition that is not a Claude subscription, whose catalog
+        // captures the default account.
         let config = Arc::new(
             self.config_manager
                 .load_with_overrides(
@@ -193,7 +195,25 @@ impl CatalogRequestProcessor {
                 .await
                 .map_err(|err| config_load_error(&err))?,
         );
-        let catalog = if config.model_provider_id == self.config.model_provider_id
+        let thread = match params.thread_id.as_deref() {
+            Some(thread_id) => {
+                let thread_id = ThreadId::from_string(thread_id)
+                    .map_err(|err| invalid_request(format!("invalid thread id: {err}")))?;
+                self.thread_manager.get_thread(thread_id).await.ok()
+            }
+            None => None,
+        };
+        let catalog = if let Some(thread) = thread {
+            let manager = thread
+                .models_manager(&config)
+                .await
+                .map_err(invalid_request)?;
+            Arc::new(ModelCatalog::new(
+                self.config_manager.clone(),
+                config.clone(),
+                manager,
+            ))
+        } else if config.model_provider_id == self.config.model_provider_id
             && config.model_provider == self.config.model_provider
             && config.model_provider.adapter
                 != codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription
@@ -305,6 +325,7 @@ impl CatalogRequestProcessor {
             cursor,
             include_hidden,
             model_provider: _,
+            thread_id: _,
         } = params;
         let presets = catalog
             .list_models(codex_models_manager::manager::RefreshStrategy::OnlineIfUncached)

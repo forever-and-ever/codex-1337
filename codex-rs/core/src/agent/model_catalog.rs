@@ -3,6 +3,7 @@
 use crate::agent::child_config::MAX_SPAWN_AGENT_MODEL_OVERRIDES;
 use crate::agent::child_config::model_supports_multi_agent_backend;
 use crate::agent::control::ProviderAccountSelection;
+use crate::codex_thread::CodexThread;
 use crate::config::Config;
 use crate::session::session::Session;
 use crate::thread_manager::accounts::AccountInheritance;
@@ -180,6 +181,14 @@ impl Session {
             })
         })).await;
         catalogs.into_iter().flatten().collect()
+    }
+}
+
+impl CodexThread {
+    /// The catalog this conversation reads for `config`'s provider: the one its turns use for
+    /// its own provider, and the one its agents would use for another.
+    pub async fn models_manager(&self, config: &Config) -> Result<SharedModelsManager, String> {
+        self.session.agent_models_manager(config).await
     }
 }
 

@@ -225,6 +225,7 @@ requires_openai_auth = true
             request_id,
             params: ModelListParams {
                 model_provider: None,
+                thread_id: None,
                 limit: Some(100),
                 include_hidden: Some(true),
                 cursor: None,
@@ -372,6 +373,7 @@ async fn list_models_returns_all_models_with_large_limit() -> Result<()> {
             request_id,
             params: ModelListParams {
                 model_provider: None,
+                thread_id: None,
                 limit: Some(100),
                 cursor: None,
                 include_hidden: None,
@@ -404,6 +406,7 @@ async fn list_models_includes_hidden_models() -> Result<()> {
             request_id,
             params: ModelListParams {
                 model_provider: None,
+                thread_id: None,
                 limit: Some(100),
                 cursor: None,
                 include_hidden: Some(true),
@@ -527,6 +530,7 @@ model_catalog_url = "{server_uri}/v1/models"
     let request_id = mcp
         .send_list_models_request(ModelListParams {
             model_provider: None,
+            thread_id: None,
             limit: Some(100),
             cursor: None,
             include_hidden: None,
@@ -613,6 +617,7 @@ async fn list_models_pagination_works() -> Result<()> {
                 request_id,
                 params: ModelListParams {
                     model_provider: None,
+                    thread_id: None,
                     limit: Some(1),
                     cursor: cursor.clone(),
                     include_hidden: None,
@@ -650,6 +655,7 @@ async fn list_models_rejects_invalid_cursor() -> Result<()> {
     let request_id = mcp
         .send_list_models_request(ModelListParams {
             model_provider: None,
+            thread_id: None,
             limit: None,
             cursor: Some("invalid".to_string()),
             include_hidden: None,

@@ -47,6 +47,7 @@ impl AppServerSession {
         &self,
         request_id: Uuid,
         provider: String,
+        thread_id: Option<codex_protocol::ThreadId>,
         app_event_tx: AppEventSender,
     ) {
         let request_handle = self.request_handle();
@@ -59,6 +60,8 @@ impl AppServerSession {
                         cursor: None,
                         limit: None,
                         include_hidden: Some(true),
+                        // A conversation's picker lists what its own account offers.
+                        thread_id: thread_id.map(|id| id.to_string()),
                     },
                 })
                 .await

@@ -475,40 +475,48 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
             }
         );
     }
-    // The catalog follows the chosen account: a lapsed former login once hid models that
-    // only the chosen account's plan offers.
-    Mock::given(method("GET"))
-        .and(path("/models"))
-        .and(header("authorization", "Bearer access-bob"))
-        .respond_with(
-            ResponseTemplate::new(/*s*/ 200).set_body_json(ModelsResponse {
-                models: vec![serde_json::from_value::<ModelInfo>(json!({
-                    "slug": "bob-model", "display_name": "bob-model",
-                    "supported_reasoning_levels": [], "shell_type": "shell_command",
-                    "visibility": "list", "supported_in_api": true, "priority": 0,
-                    "support_verbosity": false,
-                    "truncation_policy": {"mode": "bytes", "limit": 10000},
-                    "experimental_supported_tools": []
-                }))?],
-            }),
-        )
-        .up_to_n_times(1)
-        .mount(&server)
-        .await;
-    let models: ModelListResponse = app
-        .request(|request_id| ClientRequest::ModelList {
-            request_id,
-            params: ModelListParams::default(),
-        })
-        .await?;
-    assert_eq!(
-        models
-            .data
-            .into_iter()
-            .map(|model| model.id)
-            .collect::<Vec<_>>(),
-        ["bob-model"]
-    );
+    // The catalog follows the account: a lapsed former login once hid models that only the
+    // chosen account's plan offers. An unscoped read speaks for the active login, and a
+    // conversation's read for that conversation's own account.
+    for id in ["bob", "alice"] {
+        Mock::given(method("GET"))
+            .and(path("/models"))
+            .and(header("authorization", format!("Bearer access-{id}")))
+            .respond_with(
+                ResponseTemplate::new(/*s*/ 200).set_body_json(ModelsResponse {
+                    models: vec![serde_json::from_value::<ModelInfo>(json!({
+                        "slug": format!("{id}-model"), "display_name": format!("{id}-model"),
+                        "supported_reasoning_levels": [], "shell_type": "shell_command",
+                        "visibility": "list", "supported_in_api": true, "priority": 0,
+                        "support_verbosity": false,
+                        "truncation_policy": {"mode": "bytes", "limit": 10000},
+                        "experimental_supported_tools": []
+                    }))?],
+                }),
+            )
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+    }
+    for (thread_id, expected) in [(None, "bob-model"), (Some(&threads[1]), "alice-model")] {
+        let models: ModelListResponse = app
+            .request(|request_id| ClientRequest::ModelList {
+                request_id,
+                params: ModelListParams {
+                    thread_id: thread_id.cloned(),
+                    ..Default::default()
+                },
+            })
+            .await?;
+        assert_eq!(
+            models
+                .data
+                .into_iter()
+                .map(|model| model.id)
+                .collect::<Vec<_>>(),
+            [expected]
+        );
+    }
     let request = app
         .send_thread_start_request_with_auto_env(ThreadStartParams::default())
         .await?;
