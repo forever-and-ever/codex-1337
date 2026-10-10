@@ -1,5 +1,6 @@
 use codex_protocol::ExecutionOutputMetadata;
 use codex_protocol::NativeExecutionResult;
+use codex_protocol::SettledExecution;
 use serde_json::Map;
 use serde_json::Value;
 
@@ -68,7 +69,7 @@ fn native_batch(
         return None;
     }
     let value_key = v8::String::new(scope, "value")?;
-    NativeExecutionResult::render_batch(
+    SettledExecution::render_batch(
         (0..length).map(|index| {
             v8::scope!(let scope, scope);
             let key = v8::String::new(scope, &index.to_string())?;
@@ -78,7 +79,7 @@ fn native_batch(
                 return None;
             }
             let value = descriptor.get(scope, value_key.into())?;
-            native_result(scope, value)
+            native_result(scope, value).map(SettledExecution::Fulfilled)
         }),
         metadata,
     )
@@ -127,7 +128,7 @@ fn output_metadata(
     }
 }
 
-fn native_result(
+pub(super) fn native_result(
     scope: &mut v8::PinScope<'_, '_>,
     value: v8::Local<'_, v8::Value>,
 ) -> Option<NativeExecutionResult> {

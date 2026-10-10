@@ -53,6 +53,8 @@ static READ_ONLY: LazyLock<Template> = LazyLock::new(|| {
         .unwrap_or_else(|err| panic!("read-only sandbox template must parse: {err}"))
 });
 
+mod cells;
+
 #[derive(Debug, Clone, Copy)]
 pub struct ApprovalPromptContext<'a> {
     reviewer: ApprovalsReviewer,

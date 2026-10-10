@@ -115,6 +115,9 @@ pub(super) fn completion_state(
         .unwrap_or_default();
 
     let Some(pending_promise) = pending_promise else {
+        if super::sh::running(scope) {
+            return CompletionState::Pending;
+        }
         return CompletionState::Completed {
             stored_value_writes,
             error_text: None,
@@ -124,6 +127,7 @@ pub(super) fn completion_state(
     let promise = v8::Local::new(scope, pending_promise);
     match promise.state() {
         v8::PromiseState::Pending => CompletionState::Pending,
+        v8::PromiseState::Fulfilled if super::sh::running(scope) => CompletionState::Pending,
         v8::PromiseState::Fulfilled => CompletionState::Completed {
             stored_value_writes,
             error_text: None,

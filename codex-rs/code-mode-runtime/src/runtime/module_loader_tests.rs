@@ -34,6 +34,7 @@ fn discarded_tool_response_is_collectible_before_cell_ends() {
         tool_call_id: "cell".to_string(),
         runtime_command_tx,
         exit_requested: false,
+        sh_calls: Vec::new(),
     });
 
     let promise = {
@@ -119,6 +120,7 @@ fn native_result_presentation_follows_each_promise_and_current_values() {
         tool_call_id: "cell".to_string(),
         runtime_command_tx,
         exit_requested: false,
+        sh_calls: Vec::new(),
     });
     super::super::globals::install_globals(scope).expect("install globals");
     let promise = super::evaluate_main_module(scope, r#"

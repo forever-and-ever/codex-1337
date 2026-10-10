@@ -805,6 +805,8 @@ const running = await tools.exec_command({cmd: "stty -echo; printf partial; read
 text(running);
 text(await tools.write_stdin({session_id: running.session_id, chars: "continue\n", yield_time_ms: 5000}));
 text(await tools.exec_command({cmd: "sleep 1; printf finished", yield_time_ms: 250}));
+await sh("printf one", {}, "exit 3", {cmd: "printf two"});
+sh("printf unawaited");
 "#,
         move |config| {
             if tool_mode == ToolMode::CodeModeOnly {
@@ -815,7 +817,7 @@ text(await tools.exec_command({cmd: "sleep 1; printf finished", yield_time_ms: 2
     .await?;
 
     let items = custom_tool_output_items(&second_mock.single_request(), "call-1");
-    assert_eq!(items.len(), 7);
+    assert_eq!(items.len(), 9);
     assert_regex_match(
         concat!(r"(?s)\A", r"Script completed\nOutput:\n\z"),
         text_item(&items, /*index*/ 0),
@@ -840,6 +842,12 @@ text(await tools.exec_command({cmd: "sleep 1; printf finished", yield_time_ms: 2
             assert_regex_match(r"^Running \(session \d+\)$", text_item(&items, /*index*/ 6));
         }
     }
+    // `sh` prints a rejected call in its slot, and the cell outlives a call left unawaited.
+    assert_regex_match(
+        r"(?s)\A\[1\]\none\n\[2\] Error\n.*cmd.*\n\[3\] Exit 3\n\[4\]\ntwo\z",
+        text_item(&items, /*index*/ 7),
+    );
+    assert_eq!(text_item(&items, /*index*/ 8), "unawaited");
     let parsed: Value = serde_json::from_str(text_item(&items, /*index*/ 2))?;
     assert!(
         parsed

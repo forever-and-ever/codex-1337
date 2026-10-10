@@ -2,13 +2,16 @@
 //!
 //! A cell blocks until its script finishes and returns control to the model when news arrives or
 //! its own budget runs out, so a command it starts needs no yield of its own: the command runs
-//! until it exits unless the script backgrounds it. The schema drops `yield_time_ms`; one passed
-//! out of habit is ignored rather than refused.
+//! until it exits unless the script backgrounds it. An escalation is the bare request: the
+//! reviewer judges the command and its conversation, not the model's case for it, and nothing
+//! persists a model-proposed prefix. The schema therefore drops `yield_time_ms`,
+//! `justification`, and `prefix_rule`; one passed out of habit is ignored rather than refused.
 
 use codex_tools::JsonSchema;
 use codex_tools::ToolSpec;
 use serde::Deserialize;
 
+use super::super::ExecCommandArgs;
 use super::ExecCommandHandler;
 use super::ExecCommandHandlerOptions;
 use super::ExecCommandLifetime;
@@ -22,6 +25,7 @@ const UPSTREAM_DESCRIPTION: &str =
 const DESCRIPTION: &str = "Runs a command until it exits and returns its output. Set `background` for servers or to keep working while it runs; the call then returns a session ID for `write_stdin`.";
 const BACKGROUND_DESCRIPTION: &str =
     "True starts the command and returns its session ID at once instead of waiting for it to exit.";
+const DROPPED: [&str; 3] = ["yield_time_ms", "justification", "prefix_rule"];
 
 impl ExecCommandHandler {
     /// `exec_command` for a Code Mode Only session, where every call comes from a cell.
@@ -49,6 +53,12 @@ pub(super) fn initial_wait(arguments: &str) -> Result<InitialWait, FunctionCallE
     })
 }
 
+/// Forgets the rationale a habitual call still carries.
+pub(super) fn forget_rationale(args: &mut ExecCommandArgs) {
+    args.justification = None;
+    args.prefix_rule = None;
+}
+
 pub(super) fn spec(spec: ToolSpec) -> ToolSpec {
     let ToolSpec::Function(mut spec) = spec else {
         unreachable!("exec_command has a function schema");
@@ -57,7 +67,9 @@ pub(super) fn spec(spec: ToolSpec) -> ToolSpec {
         .description
         .replacen(UPSTREAM_DESCRIPTION, DESCRIPTION, 1);
     let properties = spec.parameters.properties.get_or_insert_default();
-    properties.remove("yield_time_ms");
+    for dropped in DROPPED {
+        properties.remove(dropped);
+    }
     properties.insert(
         "background".to_string(),
         JsonSchema::boolean(Some(BACKGROUND_DESCRIPTION.to_string())),

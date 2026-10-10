@@ -23,34 +23,32 @@ pub enum ExecutionOutputMetadata {
     Included,
 }
 
-impl NativeExecutionResult {
+/// A native call as its script settled it: the result it produced, or the error that rejected it.
+pub enum SettledExecution {
+    Fulfilled(NativeExecutionResult),
+    Rejected(String),
+}
+
+impl SettledExecution {
     /// Contradictory status must retain its complete structured representation.
     pub fn render(&self, metadata: ExecutionOutputMetadata) -> Option<String> {
-        let header = self.header(metadata)?;
-        Some(match (header.is_empty(), self.output.is_empty()) {
-            (true, _) => self.output.clone(),
-            (false, true) => header,
-            (false, false) => format!("{header}\n{}", self.output),
-        })
+        let (header, body) = self.parts(metadata)?;
+        Some(compose(header, body))
     }
 
     /// Reject the entire batch on an incompatible item; the caller emits only
     /// after validation finishes. Items are consumed without retaining bodies.
     pub fn render_batch(
-        results: impl IntoIterator<Item = Option<Self>>,
+        calls: impl IntoIterator<Item = Option<Self>>,
         metadata: ExecutionOutputMetadata,
     ) -> Option<String> {
         let mut output = String::new();
         let mut empty_start = None;
         let mut empty_end = 0;
-        for (index, result) in results.into_iter().enumerate() {
-            let result = result?;
+        for (index, call) in calls.into_iter().enumerate() {
+            let call = call?;
             let ordinal = index + 1;
-            if matches!(metadata, ExecutionOutputMetadata::Hidden)
-                && result.exit_code == Some(0)
-                && result.session_id.is_none()
-                && result.output.is_empty()
-            {
+            if call.is_quiet(metadata) {
                 empty_start.get_or_insert(ordinal);
                 empty_end = ordinal;
                 continue;
@@ -58,7 +56,7 @@ impl NativeExecutionResult {
             if let Some(start) = empty_start.take() {
                 append_empty_span(&mut output, start, empty_end);
             }
-            let header = result.header(metadata)?;
+            let (header, body) = call.parts(metadata)?;
             if !output.is_empty() && !output.ends_with('\n') {
                 output.push('\n');
             }
@@ -67,15 +65,41 @@ impl NativeExecutionResult {
                 output.push(' ');
                 output.push_str(&header);
             }
-            if !result.output.is_empty() {
+            if !body.is_empty() {
                 output.push('\n');
-                output.push_str(&result.output);
+                output.push_str(body);
             }
         }
         if let Some(start) = empty_start {
             append_empty_span(&mut output, start, empty_end);
         }
         Some(output)
+    }
+
+    fn parts(&self, metadata: ExecutionOutputMetadata) -> Option<(String, &str)> {
+        match self {
+            Self::Fulfilled(result) => Some((result.header(metadata)?, &result.output)),
+            Self::Rejected(error) => Some(("Error".to_string(), error)),
+        }
+    }
+
+    /// A routine success folds into a `Completed` span unless metadata was requested.
+    fn is_quiet(&self, metadata: ExecutionOutputMetadata) -> bool {
+        matches!(metadata, ExecutionOutputMetadata::Hidden)
+            && matches!(
+                self,
+                Self::Fulfilled(result)
+                    if result.exit_code == Some(0)
+                        && result.session_id.is_none()
+                        && result.output.is_empty()
+            )
+    }
+}
+
+impl NativeExecutionResult {
+    /// Contradictory status must retain its complete structured representation.
+    pub fn render(&self, metadata: ExecutionOutputMetadata) -> Option<String> {
+        Some(compose(self.header(metadata)?, &self.output))
     }
 
     fn header(&self, metadata: ExecutionOutputMetadata) -> Option<String> {
@@ -124,5 +148,13 @@ fn append_empty_span(output: &mut String, start: usize, end: usize) {
         output.push_str(&format!("[{start}] Completed"));
     } else {
         output.push_str(&format!("[{start}–{end}] Completed"));
+    }
+}
+
+fn compose(header: String, body: &str) -> String {
+    match (header.is_empty(), body.is_empty()) {
+        (true, _) => body.to_string(),
+        (false, true) => header,
+        (false, false) => format!("{header}\n{body}"),
     }
 }

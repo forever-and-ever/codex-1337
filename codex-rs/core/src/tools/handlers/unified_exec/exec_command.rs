@@ -249,6 +249,9 @@ impl ExecCommandHandler {
                 parse_arguments(&arguments)?
             }
         };
+        if let ExecCommandLifetime::Cell = self.lifetime {
+            cell::forget_rationale(&mut args);
+        }
         if args.tty && !session.features().enabled(Feature::UnifiedExecTty) {
             return Err(FunctionCallError::RespondToModel(
                 "TTY execution is disabled by config; omit `tty` or set it to false.".to_string(),
