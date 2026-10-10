@@ -31,6 +31,7 @@ codex-1337: private downstream fork of openai/codex; Linux and fullscreen TUI on
 
 ## routes
 - Writing codex-rs code → `AGENTS.md` (upstream conventions)
+- Merging upstream or resolving merge conflicts → `docs/teleology.md`
 - Naming native, owned, receipt, family, farm, retire, unload, close, reload → `docs/fork.md` Glossary
 - Changing Cargo inputs, V8 artifacts, or profiles → `docs/fork.md` Build inputs
 - Snapshot changes → `docs/fork.md` Snapshots
