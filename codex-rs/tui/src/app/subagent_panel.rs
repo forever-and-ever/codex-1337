@@ -207,18 +207,6 @@ impl App {
         if retirement_blocks_navigation && key.code != KeyCode::Esc {
             return true;
         }
-        if watch_only && key.modifiers == KeyModifiers::CONTROL && key.code == KeyCode::Char('c') {
-            if let Some(id) = watched_child
-                && self.active_turn_id_for_thread(id).await.is_some()
-                && let Err(error) = self
-                    .submit_thread_op(server, id, AppCommand::Interrupt)
-                    .await
-            {
-                self.chat_widget
-                    .add_error_message(format!("Could not interrupt subagent: {error}"));
-            }
-            return true;
-        }
         if matches!(key.code, KeyCode::Char(c) if !c.is_control())
             && (key.modifiers - KeyModifiers::SHIFT).is_empty()
         {

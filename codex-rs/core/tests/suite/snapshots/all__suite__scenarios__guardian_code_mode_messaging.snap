@@ -81,8 +81,8 @@ Scenario: A root uses Code Mode to send a confirmation and receives a real user 
 
 ## Window 3 (after request 6: input diverged at item 00, settings changed (instructions, model, parallel_tool_calls, prompt_cache_key, reasoning, text, tools))
 -- request 7 (turn) --
-00:additional_tools/developer (1; hash=16654a65ef757d85):
-        - namespace/functions; hash=d9c1d534447a9813
+00:additional_tools/developer (1; hash=6041ed07a98e3653):
+        - namespace/functions; hash=186f96c16fa92e91
           - custom/exec
           - function/wait
 01:message/developer:
@@ -151,8 +151,8 @@ Scenario: A root uses Code Mode to send a confirmation and receives a real user 
 
 ## Window 4 (after request 7: input diverged at item 04, settings changed (prompt_cache_key))
 -- request 8 (turn) --
-00:additional_tools/developer (1; hash=16654a65ef757d85):
-        - namespace/functions; hash=d9c1d534447a9813
+00:additional_tools/developer (1; hash=6041ed07a98e3653):
+        - namespace/functions; hash=186f96c16fa92e91
           - custom/exec
           - function/wait
 01:message/developer:

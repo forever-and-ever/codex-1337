@@ -207,6 +207,9 @@ impl App {
             }
             self.retire_background_voice();
             self.reconnect.offline = true;
+            self.app_event_tx.send(AppEvent::Submission(
+                super::turn_submissions::SubmissionEvent::Retire,
+            ));
             // Cached blank sessions are usable only while this connection owns a subscription.
             self.agents_overview.blank_sessions.clear();
             self.reconnect.failed = false;
@@ -279,6 +282,8 @@ impl App {
             .and_then(|index| self.agents_overview.visible_thread_ids.get(index).copied());
         let displayed = self.current_displayed_thread_id();
         let restoring_draft = self.chat_widget.session_draft.is_some();
+        self.handle_submission_event(super::turn_submissions::SubmissionEvent::Retire)
+            .await;
         for (thread_id, item) in self.queued_messages.retire() {
             self.restore_queued_edit(thread_id, item).await;
         }

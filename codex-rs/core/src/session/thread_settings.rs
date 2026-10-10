@@ -84,6 +84,7 @@ pub(super) fn prepare_update(overrides: ThreadSettingsOverrides) -> SessionSetti
 }
 
 /// Acquires the shared permit before capturing or changing persistent settings.
+/// Nonreentrant: callers holding this permit must not materialize a rollout or reacquire it.
 pub(crate) async fn acquire_persistence_lock(session: &Session) -> SemaphorePermit<'_> {
     session
         .thread_settings_persistence

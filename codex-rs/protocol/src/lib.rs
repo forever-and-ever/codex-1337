@@ -41,6 +41,7 @@ pub mod exec_output;
 mod native_execution_result;
 pub use native_execution_result::ExecutionOutputMetadata;
 pub use native_execution_result::NativeExecutionResult;
+pub use native_execution_result::SettledExecution;
 pub mod items;
 mod legacy_events;
 pub mod local_media;

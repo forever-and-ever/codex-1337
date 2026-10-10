@@ -253,7 +253,7 @@ async fn agents_navigation_picker_keeps_selection_when_running_order_changes() {
 
 #[tokio::test]
 async fn agents_navigation_escape_returns_to_main_but_preserves_drafts_and_popups() -> Result<()> {
-    let mut app = make_test_app().await;
+    let (mut app, mut events, _operations) = make_test_app_with_channels().await;
     let mut app_server = crate::start_embedded_app_server_for_picker(&app.config).await?;
     let root = app_server.start_thread(&app.config).await?;
     let root_id = root.session.thread_id;
@@ -352,14 +352,96 @@ async fn agents_navigation_escape_returns_to_main_but_preserves_drafts_and_popup
     app.handle_key_event(&mut tui, &mut app_server, KeyCode::Esc.into())
         .await;
     assert_eq!(app.current_displayed_thread_id(), Some(child_id));
-    app.select_agent_thread(&mut tui, &mut app_server, root_id)
+    app.chat_widget.set_child_text_input_enabled();
+    tui.set_owned_screen(/*owned*/ true)?;
+    // Parent-owned children still have a composer: clearing and recovering its
+    // draft must win over interruption, even while both child and root are busy.
+    app.enqueue_thread_notification(child_id, turn_started_notification(child_id, "child-turn"))
         .await?;
+    app.drain_active_thread_events(&mut tui).await?;
+    let root_store = Arc::clone(&app.ensure_thread_channel(root_id).store);
+    root_store
+        .lock()
+        .await
+        .set_active_turn_id("root-turn".into());
+    let child_store = Arc::clone(&app.ensure_thread_channel(child_id).store);
+    while events.try_recv().is_ok() {}
+    let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+    app.transcript_view.begin_search();
+    app.handle_tui_event(&mut tui, &mut app_server, TuiEvent::Key(ctrl_c))
+        .await?;
+    assert!(!app.transcript_view.is_search_active());
+    assert_eq!(
+        app.chat_widget.composer_text_with_pending(),
+        "Hidden child draft"
+    );
+    app.handle_tui_event(&mut tui, &mut app_server, TuiEvent::Key(ctrl_c))
+        .await?;
+    let child_pending_interrupt = child_store.lock().await.pending_interrupt_turn_id.clone();
+    let root_pending_interrupt = root_store.lock().await.pending_interrupt_turn_id.clone();
+    assert_eq!(
+        (
+            app.chat_widget.composer_text_with_pending(),
+            app.chat_widget.is_task_running_for_test(),
+            child_pending_interrupt,
+            root_pending_interrupt,
+        ),
+        (String::new(), true, None, None)
+    );
+    assert!(
+        !std::iter::from_fn(|| events.try_recv().ok())
+            .any(|event| matches!(event, AppEvent::CodexOp(_) | AppEvent::Exit(_)))
+    );
+    app.handle_key_event(&mut tui, &mut app_server, KeyCode::Up.into())
+        .await;
+    assert_eq!(
+        app.chat_widget.composer_text_with_pending(),
+        "Hidden child draft"
+    );
+    app.handle_tui_event(&mut tui, &mut app_server, TuiEvent::Key(ctrl_c))
+        .await?;
+    assert!(app.chat_widget.composer_is_empty());
+    assert!(
+        !std::iter::from_fn(|| events.try_recv().ok())
+            .any(|event| matches!(event, AppEvent::CodexOp(_) | AppEvent::Exit(_)))
+    );
+    app.handle_tui_event(&mut tui, &mut app_server, TuiEvent::Key(ctrl_c))
+        .await?;
+    let interrupt = std::iter::from_fn(|| events.try_recv().ok())
+        .find(|event| matches!(event, AppEvent::CodexOp(_) | AppEvent::Exit(_)))
+        .expect("empty child composer should interrupt");
+    assert!(matches!(
+        interrupt,
+        AppEvent::CodexOp(AppCommand::Interrupt)
+    ));
+    Box::pin(app.handle_event(&mut tui, &mut app_server, interrupt)).await?;
+    let child_pending_interrupt = child_store.lock().await.pending_interrupt_turn_id.clone();
+    let root_pending_interrupt = root_store.lock().await.pending_interrupt_turn_id.clone();
+    assert_eq!(
+        (child_pending_interrupt, root_pending_interrupt),
+        (Some("child-turn".into()), None)
+    );
+    root_store.lock().await.clear_active_turn_id();
+    app.enqueue_thread_notification(
+        child_id,
+        turn_completed_notification(child_id, "child-turn", TurnStatus::Interrupted),
+    )
+    .await?;
+    app.drain_active_thread_events(&mut tui).await?;
+    while events.try_recv().is_ok() {}
+    app.handle_tui_event(&mut tui, &mut app_server, TuiEvent::Key(ctrl_c))
+        .await?;
+    assert!(
+        std::iter::from_fn(|| events.try_recv().ok())
+            .any(|event| matches!(event, AppEvent::Exit(ExitMode::ShutdownFirst)))
+    );
+    app.handle_key_event(&mut tui, &mut app_server, KeyCode::Esc.into())
+        .await;
     assert_eq!(app.current_displayed_thread_id(), Some(root_id));
     assert_eq!(
         app.chat_widget.composer_text_with_pending(),
         "Preserve this root draft"
     );
-    tui.set_owned_screen(/*owned*/ true)?;
     // The owned transcript routes input before handle_key_event. An idle child
     // previously consumed Escape as prompt backtracking instead of navigation.
     for phase in ["running", "finished", "stopped", "finishing"] {

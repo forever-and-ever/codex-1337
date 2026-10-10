@@ -9,6 +9,11 @@ const LOCAL_COMPLETION_CAPACITY: usize = 64;
 
 #[derive(Debug)]
 pub(super) enum LocalThreadCompletion {
+    Submission {
+        thread_id: ThreadId,
+        id: uuid::Uuid,
+        outcome: super::turn_submissions::SubmissionOutcome,
+    },
     HistoryLookup {
         thread_id: ThreadId,
         event: HistoryLookupResponse,
@@ -152,6 +157,14 @@ impl App {
         completion: LocalThreadCompletion,
     ) -> Result<()> {
         match completion {
+            LocalThreadCompletion::Submission {
+                thread_id,
+                id,
+                outcome,
+            } => {
+                self.finish_submission(app_server, thread_id, id, outcome)
+                    .await?;
+            }
             LocalThreadCompletion::HistoryLookup { thread_id, event } => {
                 self.enqueue_thread_history_entry_response(thread_id, event)
                     .await?;

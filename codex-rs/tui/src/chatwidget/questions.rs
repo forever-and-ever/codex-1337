@@ -97,6 +97,9 @@ impl ChatWidget {
                 self.request_redraw();
                 return true;
             }
+            if self.edit_submission_after_questions(expanded, forward) {
+                return true;
+            }
             return expanded;
         }
         if !expanded {

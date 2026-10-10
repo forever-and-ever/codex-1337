@@ -2701,8 +2701,8 @@ fn selected_and_resumed_threads_use_server_capability_for_v1_and_v2_children() -
         // Even with a root turn present, Ctrl+C in the child view must not target it.
         let root_store = Arc::clone(&app.ensure_thread_channel(root_thread_id).store);
         root_store.lock().await.set_active_turn_id("root-turn".to_string());
-        assert!(app.handle_subagent_panel_key(&mut tui, &mut app_server,
-            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)).await);
+        Box::pin(app.handle_key_event(&mut tui, &mut app_server,
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL))).await;
         assert_eq!(root_store.lock().await.pending_interrupt_turn_id, None);
         Box::pin(app.handle_key_event(&mut tui, &mut app_server,
             KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))).await;
@@ -3203,6 +3203,7 @@ async fn server_only_profile_selection_keeps_turns_on_the_selected_profile() -> 
         .handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     let turn = next_user_turn_op(&mut ops);
     app.submit_thread_op(&mut server, thread_id, turn).await?;
+    app.settle_turn_submissions(&mut server).await?;
     server.startup_interrupt(thread_id).await?;
     let settings = next_thread_settings_updated(&mut server, thread_id).await;
     app.enqueue_thread_notification(
@@ -3263,6 +3264,7 @@ async fn server_only_profile_selection_keeps_turns_on_the_selected_profile() -> 
         *active_permission_profile = Some(ActivePermissionProfile::new("stale-profile"));
     }
     app.submit_thread_op(&mut server, thread_id, turn).await?;
+    app.settle_turn_submissions(&mut server).await?;
     let thread = server
         .thread_read(thread_id, /*include_turns*/ true)
         .await?;
@@ -6207,6 +6209,7 @@ async fn make_test_app() -> Box<App> {
         rate_limit_hard_stop_generation: 0,
         rate_limit_refresh_state: Default::default(),
         queued_messages: Default::default(),
+        turn_submissions: Default::default(),
         pending_plugin_enabled_writes: HashMap::new(),
         pending_hook_enabled_writes: HashMap::new(),
         recap: recap::RecapState::default(),
@@ -6327,6 +6330,7 @@ pub(super) async fn make_test_app_with_channels() -> (
             rate_limit_hard_stop_generation: 0,
             rate_limit_refresh_state: Default::default(),
             queued_messages: Default::default(),
+            turn_submissions: Default::default(),
             pending_plugin_enabled_writes: HashMap::new(),
             pending_hook_enabled_writes: HashMap::new(),
             recap: recap::RecapState::default(),

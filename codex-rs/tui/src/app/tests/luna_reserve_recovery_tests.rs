@@ -150,6 +150,7 @@ async fn luna_reserve_entry_dispatches_an_already_queued_turn_with_accepted_sett
         )
         .await?;
         app.handle_event(&mut tui, &mut server, pending).await?;
+        app.settle_turn_submissions(&mut server).await?;
         let sent = requests.lock().unwrap().clone();
         let methods: Vec<_> = sent.iter().map(|request| request.method.as_str()).collect();
         assert_eq!(methods, ["thread/settings/update", "turn/start"]);

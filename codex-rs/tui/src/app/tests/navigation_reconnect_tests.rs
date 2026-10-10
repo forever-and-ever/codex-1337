@@ -604,6 +604,7 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
             channel.sender.send(event).await?;
             assert!(app.active_thread_rx.as_mut().unwrap().try_recv().is_ok());
         }
+        app.settle_turn_submissions(&mut session).await?;
         session.shutdown().await?;
         let methods = server.await??;
         assert_eq!(

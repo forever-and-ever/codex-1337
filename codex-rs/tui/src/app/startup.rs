@@ -895,6 +895,7 @@ See the Codex keymap documentation for supported actions and examples."
             account_ui: Default::default(),
             rate_limit_refresh_state: Default::default(),
             queued_messages: Default::default(),
+            turn_submissions: Default::default(),
             pending_plugin_enabled_writes: HashMap::new(),
             pending_hook_enabled_writes: HashMap::new(),
             recap: recap::RecapState::default(),

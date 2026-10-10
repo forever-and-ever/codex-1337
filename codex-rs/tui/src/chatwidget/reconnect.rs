@@ -163,6 +163,9 @@ impl ChatWidget {
         if self.handle_question_key(key) {
             return;
         }
+        if self.discard_recovered_submission(key) {
+            return;
+        }
         if key.kind == KeyEventKind::Press && self.chat_keymap.edit_queued_message.is_pressed(key) {
             if let Some(composer) = self.pop_latest_queued_composer_state() {
                 self.restore_composer_state(composer);

@@ -142,6 +142,7 @@ sandbox = "unelevated"
         app.try_submit_active_thread_op_via_app_server(&mut server, saved.session.thread_id, &op)
             .await?
     );
+    app.settle_turn_submissions(&mut server).await?;
     tokio::time::timeout(Duration::from_secs(/*secs*/ 30), async {
         loop {
             let page = server

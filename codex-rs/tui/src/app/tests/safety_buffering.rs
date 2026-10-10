@@ -235,6 +235,7 @@ stream_max_retries = 0
     let turn = next_user_turn_event(&mut app_event_rx);
     app.submit_thread_op(&mut app_server, thread_id, turn)
         .await?;
+    app.settle_turn_submissions(&mut app_server).await?;
     let turn_id = next_turn_started(&mut app, &mut app_server, thread_id).await;
     // Leave the original message's completion queued until after submitting the identical steer.
     tokio::time::timeout(
@@ -257,6 +258,7 @@ stream_max_retries = 0
     let pending_input = app.chat_widget.capture_thread_input_state();
     app.submit_thread_op(&mut app_server, thread_id, steer)
         .await?;
+    app.settle_turn_submissions(&mut app_server).await?;
     let other_id = ThreadId::from_string(
         &app_test_support::create_fake_rollout(
             app.config.codex_home.as_path(),
@@ -593,6 +595,7 @@ goals = true
         let previous_turn = next_user_turn_event(&mut app_event_rx);
         app.submit_thread_op(&mut app_server, source_thread_id, previous_turn)
             .await?;
+        app.settle_turn_submissions(&mut app_server).await?;
         if scenario == SafetyRetryScenario::InterruptedPrevious {
             let previous_turn_id =
                 next_turn_started(&mut app, &mut app_server, source_thread_id).await;
@@ -650,6 +653,7 @@ goals = true
     let mut active_turn = next_user_turn_event(&mut app_event_rx);
     app.submit_thread_op(&mut app_server, source_thread_id, active_turn.clone())
         .await?;
+    app.settle_turn_submissions(&mut app_server).await?;
     let active_turn_id = next_turn_started(&mut app, &mut app_server, source_thread_id).await;
     drive_until_request_count(
         &mut app,
@@ -664,6 +668,7 @@ goals = true
         let steer = next_user_turn_event(&mut app_event_rx);
         app.submit_thread_op(&mut app_server, source_thread_id, steer)
             .await?;
+        app.settle_turn_submissions(&mut app_server).await?;
         let _ = release_active_response
             .take()
             .expect("active response should still be gated")
@@ -863,6 +868,7 @@ goals = true
         )
         .await;
         drain_active_thread_events(&mut app);
+        app.settle_turn_submissions(&mut app_server).await?;
         assert!(
             app.chat_widget
                 .can_retry_safety_buffered_turn(&first_retry_turn_id)
@@ -904,6 +910,7 @@ goals = true
             |item| matches!(item, AppServerUserInput::Text { text, .. } if text == RETRY_PROMPT)
         ));
         Box::pin(app.retry_safety_buffered_turn(&mut tui, &mut app_server, second_retry)).await;
+        app.settle_turn_submissions(&mut app_server).await?;
     }
 
     if let Some(draft) = failing_draft {

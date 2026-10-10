@@ -3,6 +3,7 @@
 //! Farm identities and saved submissions remain process-local. Refuse replacement
 //! until they are resolved/discarded, preserving the v1 supervisor checkpoint format
 //! and avoiding protocol-upgrade rollback loops in already-running supervisors.
+//! Side threads survive the host handoff, but thread/resume requires stored history they lack.
 
 use super::*;
 
@@ -49,6 +50,7 @@ impl App {
             && self.chat_widget.can_reload_ui()
             && matches!(self.farm.state, farm::FarmRequestState::Idle)
             && self.queued_messages.mutations.is_empty()
+            && self.turn_submissions.is_empty()
             && self.overlay.is_none()
             && self.jira.is_none()
             && self.temporary_structured_requests.is_empty()
@@ -61,10 +63,17 @@ impl App {
             && !self.pending_managed_worktree_creation
             && self.agents_overview.new_session_draft.is_none()
             && self.agents_overview.parked_draft.is_none()
+            && self.side_threads.is_empty()
     }
 
     #[cfg(target_os = "linux")]
     async fn capture_reload_input(&mut self) -> Result<crate::reload::RetainedInput, String> {
+        if !self.side_threads.is_empty() {
+            return Err(
+                "Close the side conversation before reloading (ctrl+c in its empty composer)."
+                    .into(),
+            );
+        }
         if self.agents_overview.parked_draft.is_some() {
             return Err("Use /new to return to your unsent draft before reloading.".into());
         }

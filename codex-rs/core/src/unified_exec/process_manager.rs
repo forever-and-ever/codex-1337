@@ -59,7 +59,6 @@ use crate::unified_exec::async_watcher::emit_exec_end_for_unified_exec;
 use crate::unified_exec::async_watcher::emit_failed_exec_end_for_unified_exec;
 use crate::unified_exec::async_watcher::spawn_exit_watcher;
 use crate::unified_exec::async_watcher::start_streaming_output;
-use crate::unified_exec::clamp_yield_time;
 use crate::unified_exec::generate_chunk_id;
 use crate::unified_exec::head_tail_buffer::HeadTailBuffer;
 use crate::unified_exec::process::OutputBuffers;
@@ -628,17 +627,15 @@ impl UnifiedExecProcessManager {
             }
         };
 
-        let yield_time_ms = clamp_yield_time(request.yield_time_ms);
         // For the initial exec_command call, we both stream output to events
         // (via start_streaming_output above) and collect a snapshot here for
         // the tool response body.
-        let wait = completion.as_ref().map_or_else(
-            || Duration::from_millis(yield_time_ms),
-            |completion| completion.timeout,
-        );
-        let deadline = start
-            .checked_add(wait)
-            .ok_or_else(|| UnifiedExecError::process_failed("timeout_ms is too large".into()))?;
+        let deadline = match completion.as_ref() {
+            Some(completion) => start.checked_add(completion.timeout).ok_or_else(|| {
+                UnifiedExecError::process_failed("timeout_ms is too large".into())
+            })?,
+            None => request.initial_wait.deadline(start),
+        };
         let collected_output = Self::collect_output_until_deadline(
             process.output_handles(),
             Some(context.session.subscribe_elicitation_pause_state()),

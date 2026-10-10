@@ -584,6 +584,7 @@ impl App {
             self.background_voice = Some(Box::new(previous));
         }
         self.sync_active_agent_label();
+        self.refresh_submission_preview();
     }
 
     pub(super) async fn select_agent_thread(

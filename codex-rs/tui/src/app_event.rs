@@ -529,6 +529,7 @@ pub(crate) enum AppEvent {
     /// Open retained warnings without changing the draft or transcript position.
     OpenWarnings,
     Queue(crate::app::QueueEvent),
+    Submission(crate::app::turn_submissions::SubmissionEvent),
     /// Copy a diagnostic and acknowledge in the footer, without appending history.
     CopyWarning(String),
     /// Apply the user's decisions for the frozen warning details, in viewer-close order.

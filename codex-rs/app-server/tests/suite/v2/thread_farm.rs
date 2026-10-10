@@ -1,9 +1,11 @@
 //! Direct-user child spawning while the parent remains active or idle, including durable replay.
 
 use anyhow::Result;
+use app_test_support::ChatGptAuthFixture;
 use app_test_support::MockResponsesConfig;
 use app_test_support::TestAppServer;
 use app_test_support::create_mock_responses_server_repeating_assistant;
+use app_test_support::write_chatgpt_auth;
 use app_test_support::write_models_cache_with_models;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::RequestId;
@@ -24,6 +26,7 @@ use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::TurnStartResponse;
 use codex_app_server_protocol::UserInput;
 use codex_features::Feature;
+use codex_login::AuthCredentialsStoreMode;
 use codex_protocol::ThreadId;
 use codex_protocol::protocol::MultiAgentVersion;
 use core_test_support::responses;
@@ -46,12 +49,14 @@ use wiremock::matchers::path;
 enum ParentState {
     Active,
     Idle,
+    Pristine,
 }
 
 #[test_case::test_case(ThreadFarmMode::FullHistory, ParentState::Active; "full_active")]
 #[test_case::test_case(ThreadFarmMode::FullHistory, ParentState::Idle; "full_idle")]
 #[test_case::test_case(ThreadFarmMode::Fresh, ParentState::Active; "fresh_active")]
 #[test_case::test_case(ThreadFarmMode::Fresh, ParentState::Idle; "fresh_idle")]
+#[test_case::test_case(ThreadFarmMode::FullHistory, ParentState::Pristine; "full_pristine")]
 #[tokio::test]
 async fn farm_spawns_and_replays_without_steering_parent(
     mode: ThreadFarmMode,
@@ -61,12 +66,23 @@ async fn farm_spawns_and_replays_without_steering_parent(
     const TASK: &str = "Inspect only the delegated staging task.";
     let server = create_mock_responses_server_repeating_assistant("Done").await;
     let home = TempDir::new()?;
+    // A pristine scoped parent initializes its account binding on first materialization.
+    write_chatgpt_auth(
+        home.path(),
+        ChatGptAuthFixture::new("farm-access")
+            .account_id("farm-account")
+            .chatgpt_account_id("farm-account")
+            .chatgpt_user_id("farm-user"),
+        AuthCredentialsStoreMode::File,
+    )?;
     let role = home.path().join("farm-role.toml");
     std::fs::write(
         &role,
         "model = \"role-model\"\nmodel_reasoning_effort = \"low\"\ndeveloper_instructions = \"Preserve the default role restriction.\"\n",
     )?;
     MockResponsesConfig::new(&server.uri())
+        .with_provider_config("requires_openai_auth = true")
+        .with_root_config(&format!("chatgpt_base_url = {:?}", server.uri()))
         .enable_feature(Feature::MultiAgentV2)
         .with_extra_config(&format!("[agents.default]\ndescription = \"Restricted delegated role\"\nconfig_file = {:?}\n[wrangler.farm]\nmodel = \"farm-model\"\nreasoning_effort = \"high\"\ninstructions = \"Never modify production.\"", role.display().to_string()))
         .write(home.path())?;
@@ -81,21 +97,34 @@ async fn farm_spawns_and_replays_without_steering_parent(
             effort: codex_protocol::openai_models::ReasoningEffort::High,
             description: "Focused delegated reasoning".to_owned(),
         }];
-    write_models_cache_with_models(home.path(), vec![parent_model, child_model]).await?;
+    let catalog_path = home.path().join("models.json");
+    std::fs::write(
+        &catalog_path,
+        serde_json::to_vec(&json!({"models": [parent_model, child_model]}))?,
+    )?;
+    let config_path = home.path().join("config.toml");
+    let mut config_document: toml_edit::DocumentMut =
+        std::fs::read_to_string(&config_path)?.parse()?;
+    config_document["model_catalog_json"] =
+        toml_edit::value(catalog_path.to_string_lossy().into_owned());
+    std::fs::write(config_path, config_document.to_string())?;
     let mut app = TestAppServer::builder()
         .with_codex_home(home.path())
+        .with_env_overrides(&[("OPENAI_API_KEY", None)])
         .build_initialized()
         .await?;
     let parent = app.start_thread(ThreadStartParams::default()).await?.thread;
-    app.start_turn_and_wait_for_completion(TurnStartParams {
-        thread_id: parent.id.clone(),
-        input: vec![UserInput::Text {
-            text: BACKGROUND.to_owned(),
-            text_elements: Vec::new(),
-        }],
-        ..Default::default()
-    })
-    .await?;
+    if !matches!(parent_state, ParentState::Pristine) {
+        app.start_turn_and_wait_for_completion(TurnStartParams {
+            thread_id: parent.id.clone(),
+            input: vec![UserInput::Text {
+                text: BACKGROUND.to_owned(),
+                text_elements: Vec::new(),
+            }],
+            ..Default::default()
+        })
+        .await?;
+    }
     let active_turn = if matches!(parent_state, ParentState::Active) {
         // A slow parent inference must not become a spawn lock. The child uses its own model.
         Mock::given(method("POST"))
@@ -111,6 +140,7 @@ async fn farm_spawns_and_replays_without_steering_parent(
                     )])),
             )
             .with_priority(1)
+            .up_to_n_times(1)
             .mount(&server)
             .await;
         let started: TurnStartResponse = app
@@ -193,7 +223,9 @@ async fn farm_spawns_and_replays_without_steering_parent(
             parent_read.thread.status,
             ThreadStatus::Active { .. }
         )),
-        ParentState::Idle => assert_eq!(parent_read.thread.status, ThreadStatus::Idle),
+        ParentState::Idle | ParentState::Pristine => {
+            assert_eq!(parent_read.thread.status, ThreadStatus::Idle)
+        }
     }
     let requests = server
         .received_requests()
@@ -220,7 +252,7 @@ async fn farm_spawns_and_replays_without_steering_parent(
     let input = children[0]["input"].to_string();
     assert_eq!(
         input.contains(BACKGROUND),
-        mode == ThreadFarmMode::FullHistory
+        mode == ThreadFarmMode::FullHistory && !matches!(parent_state, ParentState::Pristine)
     );
     assert_eq!(
         input.matches(TASK).count(),
@@ -238,8 +270,10 @@ async fn farm_spawns_and_replays_without_steering_parent(
             .count(),
         if matches!(parent_state, ParentState::Active) {
             2
-        } else {
+        } else if matches!(parent_state, ParentState::Idle) {
             1
+        } else {
+            0
         },
         "child completion does not wake the parent"
     );
@@ -265,6 +299,31 @@ async fn farm_spawns_and_replays_without_steering_parent(
             .await?;
         assert_eq!(second.agent_path, "/root/farm_impl_staging_1");
     }
+    // A farm must leave the loaded parent able to accept work and resume.
+    timeout(
+        Duration::from_secs(/*secs*/ 10),
+        app.start_turn_and_wait_for_completion(TurnStartParams {
+            thread_id: parent.id.clone(),
+            input: vec![UserInput::Text {
+                text: "Continue the parent after farming".to_owned(),
+                text_elements: Vec::new(),
+            }],
+            ..Default::default()
+        }),
+    )
+    .await??;
+    let _: ThreadResumeResponse = timeout(
+        Duration::from_secs(/*secs*/ 10),
+        app.request(|request_id| ClientRequest::ThreadResume {
+            request_id,
+            params: ThreadResumeParams {
+                thread_id: parent.id.clone(),
+                exclude_turns: true,
+                ..Default::default()
+            },
+        }),
+    )
+    .await??;
     let retired: ThreadRetireResponse = app
         .request(|request_id| ClientRequest::ThreadRetire {
             request_id,
@@ -278,13 +337,14 @@ async fn farm_spawns_and_replays_without_steering_parent(
     app.shutdown_gracefully().await?;
     app = TestAppServer::builder()
         .with_codex_home(home.path())
+        .with_env_overrides(&[("OPENAI_API_KEY", None)])
         .build_initialized()
         .await?;
     let _: ThreadResumeResponse = app
         .request(|request_id| ClientRequest::ThreadResume {
             request_id,
             params: ThreadResumeParams {
-                thread_id: parent.id,
+                thread_id: parent.id.clone(),
                 exclude_turns: true,
                 ..Default::default()
             },

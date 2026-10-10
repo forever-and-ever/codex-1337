@@ -21,6 +21,7 @@ use crate::context::world_state::PluginsInstructionsState;
 use crate::context::world_state::RealtimeState;
 use crate::context::world_state::ToolsState;
 use crate::context::world_state::WorldState;
+use crate::tools::effective_tool_mode;
 use codex_connectors::AppToolPolicyEvaluator;
 use codex_extension_api::WorldStateContributionInput;
 use codex_features::Feature;
@@ -30,6 +31,7 @@ use codex_prompts::ResolvedModelMessages;
 use codex_prompts::render_model_instructions;
 use codex_protocol::error::Result as CodexResult;
 use codex_protocol::models::BaseInstructionsProvenance;
+use codex_protocol::openai_models::ToolMode;
 use codex_protocol::protocol::MultiAgentVersion;
 
 const MAX_ENVIRONMENT_SUBAGENTS: usize = 8;
@@ -180,10 +182,15 @@ impl Session {
             let cwd = environment
                 .and_then(|environment| environment.cwd().to_abs_path().ok())
                 .unwrap_or_else(|| turn_context.cwd.clone());
+            let approval_context =
+                ApprovalPromptContext::new(settings.approvals_reviewer(), model_messages);
             world_state.add_section(PermissionsState::new(
                 &permission_profile,
                 settings.approval_policy(),
-                ApprovalPromptContext::new(settings.approvals_reviewer(), model_messages),
+                match effective_tool_mode(turn_context, model_info) {
+                    ToolMode::CodeModeOnly => approval_context.for_cells(),
+                    ToolMode::Direct | ToolMode::CodeMode => approval_context,
+                },
                 &exec_policy,
                 &cwd,
                 paths.as_ref(),

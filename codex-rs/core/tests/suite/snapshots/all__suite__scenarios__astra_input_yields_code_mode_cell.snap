@@ -6,8 +6,8 @@ Scenario: Astra continues after new user input yields a running code cell, then 
 
 ## Window 1
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=0a11619c8f76b584):
-        - namespace/functions; hash=3aeb3785c5914a90
+00:additional_tools/developer (2; hash=a1c18a7fba154fd6):
+        - namespace/functions; hash=0ec80b77f1946992
           - custom/exec
           - function/wait
           - function/request_user_input
@@ -37,18 +37,9 @@ Scenario: Astra continues after new user input yields a running code cell, then 
         Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `read-only`: The san... permits reading files. Network access is restricted. [hash=be7da4425f89053c]
         # Escalation Requests
 
-        Commands are run outside the sandbox if they are approved by the user, or match an existing rule that al...hell control operators, including but not limited to: [hash=d24ebf5fa4e4b9bb]
+        Commands run in the sandbox unless an approved rule lets them run unrestricted. To run a command outside... request it directly rather than asking in a message. [hash=eb943878187a9cde]
 
-        - Pipes: |
-        - Logical operators: &&, ||
-        <OMITTED 43 LINES; ~681 TOKENS; hash=7c97c4aa90607c77>
-        NEVER provide a prefix_rule if your command uses a heredoc or herestring.
-
-        ### Examples
-        Good examples of prefixes:
-        - ["npm", "run", "dev"]
-        - ["gh", "pr", "check"]
-        - ["cargo", "test"]
+        Escalate when the task requires it: to write outside the writable roots (for example, tests that write t...ous, but never circumvent approvals with other tools. [hash=1f7de9ceb0bbc59b]
         </permissions instructions>
     [02] <collaboration_mode># Collaboration Mode: Default
 

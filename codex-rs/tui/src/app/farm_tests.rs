@@ -1,6 +1,7 @@
 use super::*;
 use crate::app::tests::make_test_app_with_channels;
 use crate::app::tests::test_thread_session;
+use codex_app_server_client::RemoteAppServerEndpoint;
 use crossterm::event::KeyCode;
 use pretty_assertions::assert_eq;
 
@@ -316,6 +317,93 @@ async fn farm_receipt_reconciles_identity_and_draft_without_steering_or_navigati
         .collect::<Vec<_>>()
         .join("\n");
     insta::assert_snapshot!(text, @"• Farmed to /root/farm_1 · child-id");
+
+    #[cfg(target_os = "linux")]
+    {
+        app.app_server_target = AppServerTarget::LocalDaemon {
+            endpoint: RemoteAppServerEndpoint::UnixSocket {
+                socket_path: app.config.codex_home.join("test-server.sock"),
+            },
+            allow_embedded_fallback: false,
+        };
+        let mut turn = Turn {
+            id: "completed-turn".into(),
+            items_view: codex_app_server_protocol::TurnItemsView::Full,
+            items: Vec::new(),
+            status: TurnStatus::InProgress,
+            error: None,
+            started_at: Some(0),
+            completed_at: None,
+            duration_ms: None,
+        };
+        app.chat_widget.handle_server_notification(
+            ServerNotification::TurnStarted(codex_app_server_protocol::TurnStartedNotification {
+                thread_id: root.to_string(),
+                turn: turn.clone(),
+            }),
+            /*replay_kind*/ None,
+        );
+        turn.status = TurnStatus::Completed;
+        turn.completed_at = Some(1);
+        app.chat_widget.handle_server_notification(
+            ServerNotification::TurnCompleted(
+                codex_app_server_protocol::TurnCompletedNotification {
+                    thread_id: root.to_string(),
+                    turn,
+                },
+            ),
+            /*replay_kind*/ None,
+        );
+        assert!(app.ready_for_idle_restart());
+
+        // Toggling to the parent leaves the ephemeral side open, even without a draft or status.
+        // Neither replacement path may mistake that quiet state for disposable UI state.
+        let side = ThreadId::new();
+        app.side_threads.insert(side, SideThreadState::new(root));
+        let mut errors = Vec::new();
+        for displayed in [root, side] {
+            app.active_thread_id = Some(displayed);
+            assert!(!app.ready_for_idle_restart());
+            while events.try_recv().is_ok() {}
+            let error = app.reload_ui(/*idle_candidate*/ None).await.unwrap_err();
+            assert_eq!(error.kind(), std::io::ErrorKind::WouldBlock);
+            let message = loop {
+                if let AppEvent::InsertHistoryCell(cell) = events.try_recv().expect("reload error")
+                {
+                    break cell
+                        .raw_lines()
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                }
+            };
+            errors.push(message);
+            assert_eq!(app.side_threads[&side].parent_thread_id, root);
+            assert_eq!(app.side_threads[&side].parent_status, None);
+            assert_eq!(app.active_thread_id, Some(displayed));
+        }
+        insta::assert_snapshot!(errors.join("\n"), @r"
+        ■ Close the side conversation before reloading (ctrl+c in its empty composer).
+        ■ Close the side conversation before reloading (ctrl+c in its empty composer).
+        ");
+        app.chat_widget.insert_str("unsent side question");
+        app.side_threads.get_mut(&side).unwrap().parent_status = Some(SideParentStatus::NeedsInput);
+        let input = app.chat_widget.capture_thread_input_state();
+        assert!(!app.ready_for_idle_restart());
+        assert_eq!(
+            app.reload_ui(/*idle_candidate*/ None)
+                .await
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+        assert_eq!(app.chat_widget.capture_thread_input_state(), input);
+        assert_eq!(
+            app.side_threads[&side].parent_status,
+            Some(SideParentStatus::NeedsInput)
+        );
+    }
     while let Ok(operation) = ops.try_recv() {
         assert!(!matches!(
             operation,
