@@ -3034,32 +3034,55 @@ async fn slash_pets_on_old_iterm2_shows_upgrade_warning() {
 
 #[tokio::test]
 async fn slash_fork_requests_current_fork() {
-    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    for running in [false, true] {
+        let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+        let checkout = tempfile::tempdir().expect("temporary checkout");
+        if running {
+            // A live checkout must bypass worktree choices, not offer to copy partial edits.
+            std::fs::create_dir(checkout.path().join(".git")).expect("git directory");
+            std::fs::write(checkout.path().join(".git/HEAD"), "ref: refs/heads/main\n")
+                .expect("git HEAD");
+            chat.config.cwd = AbsolutePathBuf::from_absolute_path(checkout.path()).unwrap();
+            chat.set_feature_enabled(Feature::Worktrees, /*enabled*/ true);
+        }
+        chat.turn_lifecycle.agent_turn_running = running;
+        chat.bottom_pane.set_task_running(running);
 
-    chat.dispatch_command(SlashCommand::Fork);
+        chat.dispatch_command(SlashCommand::Fork);
 
-    assert_matches!(
-        rx.try_recv(),
-        Ok(AppEvent::ForkCurrentSession { name: None })
-    );
+        assert_matches!(
+            rx.try_recv(),
+            Ok(AppEvent::ForkCurrentSession { name: None })
+        );
+        assert!(drain_insert_history_transcript(&mut rx).is_empty());
+        assert!(!chat.bottom_pane.has_active_view());
+    }
 }
 
 #[tokio::test]
 async fn slash_fork_with_name_requests_named_fork() {
-    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    chat.bottom_pane
-        .set_composer_text("/fork   Add User  ".to_string(), Vec::new(), Vec::new());
+    for running in [false, true] {
+        let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+        chat.turn_lifecycle.agent_turn_running = running;
+        chat.bottom_pane.set_task_running(running);
+        chat.bottom_pane.set_composer_text(
+            "/fork   Add User  ".to_string(),
+            Vec::new(),
+            Vec::new(),
+        );
 
-    chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
-    assert_matches!(rx.try_recv(), Ok(AppEvent::FollowTranscript));
+        assert_matches!(rx.try_recv(), Ok(AppEvent::FollowTranscript));
 
-    assert_matches!(
-        rx.try_recv(),
-        Ok(AppEvent::ForkCurrentSession {
-            name: Some(name)
-        }) if name == "Add User"
-    );
+        assert_matches!(
+            rx.try_recv(),
+            Ok(AppEvent::ForkCurrentSession {
+                name: Some(name)
+            }) if name == "Add User"
+        );
+        assert!(drain_insert_history_transcript(&mut rx).is_empty());
+    }
 }
 
 #[tokio::test]

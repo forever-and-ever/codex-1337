@@ -41,6 +41,16 @@ const RAW_USAGE: &str = "Usage: /raw [on|off]";
 const USAGE_CHATGPT_LOGIN_REQUIRED: &str = "Sign in with ChatGPT to use /usage.";
 
 impl ChatWidget {
+    fn request_session_fork(&mut self, name: Option<String>) {
+        // A running agent may be editing the checkout; never copy it into a worktree.
+        if self.is_agent_turn_running() || self.bottom_pane.is_task_running() {
+            self.app_event_tx
+                .send(AppEvent::ForkCurrentSession { name });
+        } else {
+            self.show_session_checkout_picker(ManagedWorktreeMode::Fork, name);
+        }
+    }
+
     /// Dispatch a bare slash command and record its staged local-history entry.
     ///
     /// The composer stages history before returning `InputResult::Command`; this wrapper commits
@@ -145,7 +155,10 @@ impl ChatWidget {
         cmd: SlashCommand,
         source: SlashCommandDispatchSource,
     ) -> bool {
-        (!cmd.available_during_task()
+        let blocked_during_task = !cmd.available_during_task()
+            || (cmd == SlashCommand::Fork
+                && (!self.is_agent_turn_running() || self.review.is_review_mode));
+        (blocked_during_task
             && (self.turn_lifecycle.agent_turn_running
                 || self.review.is_review_mode
                 || (self.bottom_pane.is_task_running()
@@ -286,7 +299,7 @@ impl ChatWidget {
                 self.app_event_tx.send(AppEvent::OpenResumePicker);
             }
             SlashCommand::Fork => {
-                self.show_session_checkout_picker(ManagedWorktreeMode::Fork, /*name*/ None);
+                self.request_session_fork(/*name*/ None);
             }
             SlashCommand::Worktree => {
                 self.show_managed_worktree_picker();
@@ -908,10 +921,7 @@ impl ChatWidget {
                 });
             }
             SlashCommand::Fork if !trimmed.is_empty() => {
-                self.show_session_checkout_picker(
-                    ManagedWorktreeMode::Fork,
-                    Some(trimmed.to_string()),
-                );
+                self.request_session_fork(Some(trimmed.to_string()));
             }
             SlashCommand::Plan if !trimmed.is_empty() => {
                 let plan_available = self.apply_plan_slash_command();

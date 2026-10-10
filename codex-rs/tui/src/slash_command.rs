@@ -268,7 +268,6 @@ impl SlashCommand {
             SlashCommand::New
             | SlashCommand::Archive
             | SlashCommand::Delete
-            | SlashCommand::Fork
             | SlashCommand::Worktree
             | SlashCommand::Init
             | SlashCommand::Compact
@@ -288,6 +287,7 @@ impl SlashCommand {
             | SlashCommand::MemoryDrop
             | SlashCommand::MemoryUpdate => false,
             SlashCommand::Diff
+            | SlashCommand::Fork
             | SlashCommand::Account
             | SlashCommand::Resume
             | SlashCommand::Model
