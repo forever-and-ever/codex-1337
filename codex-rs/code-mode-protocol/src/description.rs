@@ -50,6 +50,7 @@ const EXEC_DESCRIPTION_TEMPLATE: &str = r#"Run JavaScript code to orchestrate/co
 - Global helpers:
 - `exit()`: Immediately ends the current script successfully (like an early return from the top level).
 - `text(value, options?: {metadata?: boolean})`: Appends a text item; see Execution output rules below for native execution results and generic serialization.
+{{ sh_helper }}
 {{ media_helpers }}
 - `store(key: string, value: any)`: stores a serializable value under a string key for later `exec` calls in the same session.
 - `load(key: string)`: returns the stored value for a string key, or `undefined` if it is missing.
@@ -255,6 +256,14 @@ pub fn build_exec_tool_description(
         .and_then(|exec| exec.description.as_deref())
         .unwrap_or(EXEC_DESCRIPTION_TEMPLATE)
         .replace(MAX_YIELD_TIME_PLACEHOLDER, &max_yield_time_ms.to_string())
+        .replace(
+            "{{ sh_helper }}\n",
+            crate::sh::helper(
+                enabled_tools
+                    .iter()
+                    .chain(undeclared_tools.iter().map(UndeclaredTool::definition)),
+            ),
+        )
         .replace("{{ media_helpers }}", &media_helpers.render())
         .replace("{{ image_helper }}", media_helpers.image_helper());
     if !description.is_empty() {

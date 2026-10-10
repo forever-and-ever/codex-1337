@@ -4,6 +4,7 @@ mod discovery;
 mod globals;
 mod module_loader;
 mod native_result;
+mod sh;
 mod timers;
 mod value;
 
@@ -161,6 +162,8 @@ pub(super) struct RuntimeState {
     tool_call_id: String,
     runtime_command_tx: std_mpsc::Sender<RuntimeCommand>,
     exit_requested: bool,
+    /// Codex-1337: `sh` calls the cell outlives.
+    sh_calls: Vec<v8::Global<v8::Promise>>,
 }
 
 pub(super) struct PendingToolCall {
@@ -208,6 +211,7 @@ fn run_runtime(
         tool_call_id: config.tool_call_id,
         runtime_command_tx,
         exit_requested: false,
+        sh_calls: Vec::new(),
     });
 
     if let Err(error_text) = globals::install_globals(scope) {

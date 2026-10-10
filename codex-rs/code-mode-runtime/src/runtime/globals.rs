@@ -38,6 +38,9 @@ pub(super) fn install_globals(scope: &mut v8::PinScope<'_, '_>) -> Result<(), St
     let exit = helper_function(scope, "exit", exit_callback)?;
 
     set_global(scope, global, "tools", tools.into())?;
+    if let Some(sh) = super::sh::helper(scope, tools)? {
+        set_global(scope, global, "sh", sh)?;
+    }
     set_global(scope, global, "ALL_TOOLS", all_tools)?;
     set_global(scope, global, "describe_tool", describe_tool.into())?;
     set_global(scope, global, "search_tools", search_tools.into())?;

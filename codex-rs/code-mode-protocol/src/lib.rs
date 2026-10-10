@@ -7,6 +7,7 @@ mod response;
 mod roster;
 mod runtime;
 mod session;
+mod sh;
 
 pub use description::CODE_MODE_PRAGMA_PREFIX;
 pub use description::CodeModeToolKind;
@@ -53,6 +54,7 @@ pub use session::NoopCodeModeSessionDelegate;
 pub use session::NotificationFuture;
 pub use session::StartedCell;
 pub use session::ToolInvocationFuture;
+pub use sh::is_exec_command;
 
 pub const PUBLIC_TOOL_NAME: &str = "exec";
 pub const WAIT_TOOL_NAME: &str = "wait";
