@@ -1,9 +1,12 @@
 use super::*;
+use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::ConsumeAccountRateLimitResetCreditOutcome;
 use codex_app_server_protocol::ConsumeAccountRateLimitResetCreditResponse;
 use codex_app_server_protocol::GetAccountRateLimitsResponse;
 use codex_app_server_protocol::GetWorkspaceMessagesResponse;
 use codex_app_server_protocol::JSONRPCErrorError;
+use codex_app_server_protocol::ModelListParams;
+use codex_app_server_protocol::ModelListResponse;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ThreadAccountListResponse;
 use codex_app_server_protocol::ThreadAccountSelectResponse;
@@ -14,12 +17,13 @@ use codex_app_server_protocol::ThreadStartResponse;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::TurnStartResponse;
 use codex_app_server_protocol::UserInput;
+use codex_protocol::openai_models::ModelInfo;
+use codex_protocol::openai_models::ModelsResponse;
 use pretty_assertions::assert_eq;
 use wiremock::matchers::body_json;
 use wiremock::matchers::header;
 
-// A stale OpenAI default must never become a prerequisite for a provider that
-// does not use OpenAI authentication, including an installation with no login.
+// A provider that does not use OpenAI authentication starts without any OpenAI login.
 #[tokio::test]
 async fn provider_thread_starts_without_openai_account() -> Result<()> {
     let home = TempDir::new()?;
@@ -30,11 +34,6 @@ async fn provider_thread_starts_without_openai_account() -> Result<()> {
             ..Default::default()
         },
     )?;
-    let config_path = home.path().join("config.toml");
-    let mut config = std::fs::read_to_string(&config_path)?;
-    config.push_str("\n[wrangler]\ndefault_account = \"stale-openai-account\"\n");
-    std::fs::write(config_path, config)?;
-
     let mut app = TestAppServer::builder()
         .with_codex_home(home.path())
         .with_env_overrides(&[("OPENAI_API_KEY", None)])
@@ -136,7 +135,6 @@ base_url = "https://api.anthropic.com/v1"
 requires_openai_auth = false
 supports_websockets = false
 [wrangler]
-default_account = "stale-openai-account"
 default_claude_account = {}
 "#,
             serde_json::to_string(&catalog_path)?,
@@ -251,10 +249,6 @@ default_claude_account = {}
         );
     }
     let config: toml_edit::DocumentMut = std::fs::read_to_string(config_path)?.parse()?;
-    assert_eq!(
-        config["wrangler"]["default_account"].as_str(),
-        Some("stale-openai-account")
-    );
     assert_eq!(
         config["wrangler"]["default_claude_account"].as_str(),
         Some(ids[1].as_str())
@@ -406,10 +400,9 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
             }
         );
     }
-    // A draft previews the saved default while login detection still sees the
-    // global active login. No scoped operation may retarget that global login.
+    // Choosing an account makes it the active login, so drafts and unscoped reads agree.
     for (new_thread, id, account_id) in [
-        (None, "alice", None),
+        (None, "bob", None),
         (
             Some(codex_app_server_protocol::NewThreadAccountParams {
                 model_provider: None,
@@ -419,9 +412,8 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
             "bob",
             Some("bob:bob".to_owned()),
         ),
-        (None, "alice", None),
     ] {
-        // Identity, quota, spending and messages must share an account without changing global login.
+        // Identity, quota, spending and messages must share an account.
         let request = app
             .send_request(
                 "account/rateLimits/read",
@@ -483,6 +475,40 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
             }
         );
     }
+    // The catalog follows the chosen account: a lapsed former login once hid models that
+    // only the chosen account's plan offers.
+    Mock::given(method("GET"))
+        .and(path("/models"))
+        .and(header("authorization", "Bearer access-bob"))
+        .respond_with(
+            ResponseTemplate::new(/*s*/ 200).set_body_json(ModelsResponse {
+                models: vec![serde_json::from_value::<ModelInfo>(json!({
+                    "slug": "bob-model", "display_name": "bob-model",
+                    "supported_reasoning_levels": [], "shell_type": "shell_command",
+                    "visibility": "list", "supported_in_api": true, "priority": 0,
+                    "support_verbosity": false,
+                    "truncation_policy": {"mode": "bytes", "limit": 10000},
+                    "experimental_supported_tools": []
+                }))?],
+            }),
+        )
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    let models: ModelListResponse = app
+        .request(|request_id| ClientRequest::ModelList {
+            request_id,
+            params: ModelListParams::default(),
+        })
+        .await?;
+    assert_eq!(
+        models
+            .data
+            .into_iter()
+            .map(|model| model.id)
+            .collect::<Vec<_>>(),
+        ["bob-model"]
+    );
     let request = app
         .send_thread_start_request_with_auto_env(ThreadStartParams::default())
         .await?;
@@ -490,7 +516,7 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
         timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
     threads.push(response.thread.id);
 
-    // Logging in again changes the global active entry, not any pinned selector.
+    // A new active login moves no conversation's binding.
     write_chatgpt_auth(
         home.path(),
         ChatGptAuthFixture::new("access-alice-new")
@@ -1100,11 +1126,13 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
     assert!(selected.default_saved);
     assert!(selected.pending);
     app.shutdown_gracefully().await?;
-    // Another family's preference cannot supersede the saved root selection.
-    let config_path = home.path().join("config.toml");
-    let mut config: toml_edit::DocumentMut = std::fs::read_to_string(&config_path)?.parse()?;
-    config["wrangler"]["default_account"] = toml_edit::value("bob:bob");
-    std::fs::write(&config_path, config.to_string())?;
+    // Another family's choice of active login cannot supersede the saved root selection.
+    codex_login::auth::activate_account(
+        home.path(),
+        "bob:bob",
+        AuthCredentialsStoreMode::File,
+        AuthKeyringBackendKind::default(),
+    )?;
     app = TestAppServer::builder()
         .with_codex_home(home.path())
         .with_env_overrides(&[("OPENAI_API_KEY", None)])

@@ -84,6 +84,52 @@ impl AuthManager {
         })
     }
 
+    /// The active login's personal account, read from storage rather than any manager's cache or
+    /// scope: the account last chosen with `/account`, or the first one logged in.
+    pub fn active_account_id(&self) -> std::io::Result<Option<String>> {
+        if self.auth_credentials_store_mode == AuthCredentialsStoreMode::Ephemeral {
+            return Ok(None);
+        }
+        Ok(create_auth_storage(
+            self.codex_home.clone(),
+            self.auth_credentials_store_mode,
+            self.keyring_backend_kind,
+        )
+        .read()?
+        .map(|document| document.active)
+        .filter(|active| {
+            !active
+                .tokens
+                .as_ref()
+                .is_some_and(|tokens| tokens.id_token.is_workspace_account())
+        })
+        .as_ref()
+        .and_then(identity))
+    }
+
+    /// Makes a saved account the active login. Logging in never moves it; existing conversations
+    /// keep their own bindings.
+    pub async fn activate_account(&self, id: &str) -> std::io::Result<()> {
+        if self.workload_identity_selected
+            || self.has_external_auth()
+            || self.auth_credentials_store_mode == AuthCredentialsStoreMode::Ephemeral
+        {
+            return Err(std::io::Error::other(
+                "Host-managed authentication cannot select a saved account.",
+            ));
+        }
+        // Login-method and workspace restrictions bind the active login as they bind a conversation.
+        self.load_saved_account(id).await?;
+        crate::auth::activate_account(
+            &self.codex_home,
+            id,
+            self.auth_credentials_store_mode,
+            self.keyring_backend_kind,
+        )?;
+        self.reload().await;
+        Ok(())
+    }
+
     /// A conversation owns its selector; selecting an account never retargets another conversation.
     pub async fn for_account(&self, id: &str) -> std::io::Result<Arc<Self>> {
         if self.workload_identity_selected

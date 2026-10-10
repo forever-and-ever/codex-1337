@@ -15,6 +15,8 @@ mod manager;
 mod revoke;
 
 pub use accounts::SavedAccount;
+pub use accounts::activate_account;
+pub use accounts::admit_auth;
 pub use auth_headers::AuthHeaders;
 pub use change_state::AuthChangeState;
 pub use error::RefreshTokenFailedError;

@@ -6694,11 +6694,6 @@
           "description": "Display-only names keyed first by billing provider, then stable account ID.",
           "type": "object"
         },
-        "default_account": {
-          "default": null,
-          "description": "Account identity selected explicitly with `/account`; used for new conversations.",
-          "type": "string"
-        },
         "default_claude_account": {
           "default": null,
           "description": "Selected native Claude subscription identity for new conversations.",
@@ -7905,7 +7900,6 @@
       "default": {
         "account_aliases": {},
         "account_nicknames": {},
-        "default_account": null,
         "default_claude_account": null,
         "farm": {
           "instructions": null,

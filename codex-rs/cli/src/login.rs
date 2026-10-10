@@ -13,6 +13,7 @@ use codex_login::AuthKeyringBackendKind;
 use codex_login::AuthManager;
 use codex_login::AuthRouteConfig;
 use codex_login::CLIENT_ID;
+use codex_login::CodexAuth;
 use codex_login::ServerOptions;
 use codex_login::is_workload_identity_selected;
 use codex_login::login_with_access_token;
@@ -425,7 +426,10 @@ pub async fn run_login_status(cli_config_overrides: CliConfigOverrides) -> ! {
                 }
             },
             AuthMode::Chatgpt | AuthMode::ChatgptAuthTokens => {
-                eprintln!("Logged in using ChatGPT");
+                match auth.get_account_email() {
+                    Some(email) => eprintln!("Logged in using ChatGPT as {email}"),
+                    None => eprintln!("Logged in using ChatGPT"),
+                }
                 std::process::exit(0);
             }
             AuthMode::Headers => {
@@ -494,7 +498,21 @@ async fn finish_auth_change(config: &Config, message: &str) -> ! {
         eprintln!("Authentication changed, but the running app server did not adopt it: {err}");
         std::process::exit(1);
     }
-    eprintln!("{message}");
+    // Logging in adds an account and logging out may promote another, so name the result.
+    match config
+        .auth_config()
+        .load_auth(/*enable_codex_api_key_env*/ false)
+        .await
+        .ok()
+        .flatten()
+        .filter(CodexAuth::is_chatgpt_auth)
+        .and_then(|auth| auth.get_account_email())
+    {
+        Some(email) => {
+            eprintln!("{message}. Active account: {email}; choose another with /account.")
+        }
+        None => eprintln!("{message}"),
+    }
     std::process::exit(0);
 }
 

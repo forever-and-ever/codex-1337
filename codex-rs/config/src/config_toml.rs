@@ -161,8 +161,6 @@ pub struct FeatureToggleToml {
 pub struct WranglerConfig {
     /// Executor and additive child instructions for direct user delegation.
     pub farm: FarmConfig,
-    /// Account identity selected explicitly with `/account`; used for new conversations.
-    pub default_account: Option<String>,
     /// Selected native Claude subscription identity for new conversations.
     pub default_claude_account: Option<String>,
     /// Short names accepted by `/account`, mapped to saved account identities.

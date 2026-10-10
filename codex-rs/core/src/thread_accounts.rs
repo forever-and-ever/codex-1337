@@ -156,20 +156,11 @@ pub(crate) async fn account_auth_for_provider(
         })
         .or(persisted)
         .or_else(|| inherited.and_then(|auth| auth.selected_account_id()));
+    // Unbound conversations take the active login, read from storage so that neither a startup
+    // snapshot nor another provider's incidental manager overrides a newer `/account` choice.
     let id = match binding {
         Some(id) => Some(id),
-        None if matches!(inheritance, AccountInheritance::OtherProvider) => {
-            codex_config::read_account_preferences(config.codex_home.as_path())
-                .await?
-                .unwrap_or_else(|| config.wrangler.clone())
-                .default_account
-                .or_else(|| source.selected_account_id())
-        }
-        None => config
-            .wrangler
-            .default_account
-            .clone()
-            .or_else(|| source.selected_account_id()),
+        None => source.active_account_id()?,
     };
     match id {
         Some(id) => source.for_account(&id).await.map(Some).map_err(|error| {

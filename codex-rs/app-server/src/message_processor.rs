@@ -1486,9 +1486,21 @@ impl MessageProcessor {
                 self.turn_processor.thread_account_list(params).await
             }
             ClientRequest::ThreadAccountSelect { params, .. } => {
-                self.turn_processor
+                let activates_login = params.provider.is_none_or(|provider| {
+                    provider == codex_app_server_protocol::SubscriptionAccountProvider::Openai
+                });
+                let response = self
+                    .turn_processor
                     .thread_account_select(&request_id, params)
-                    .await
+                    .await;
+                // A ChatGPT selection moves the active login; adopt it wherever the server holds it.
+                if activates_login
+                    && response.is_ok()
+                    && let Err(error) = self.account_processor.reload_account().await
+                {
+                    tracing::warn!(?error, "could not adopt the selected account");
+                }
+                response
             }
             ClientRequest::AccountNicknameSet { params, .. } => {
                 self.turn_processor.account_nickname_set(params).await

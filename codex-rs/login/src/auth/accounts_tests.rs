@@ -30,7 +30,8 @@ fn account(id: &str, revision: usize) -> AuthDotJson {
     .unwrap()
 }
 
-// Login, refresh, deletion, and another process's stale refresh share one document.
+// Login, activation, refresh, deletion, and another process's stale refresh share one document.
+// Logging in renews or adds an account without moving the active login; `/account` moves it.
 // A writer must preserve unrelated accounts and lose to a newer login or deletion.
 #[test]
 fn account_transactions_preserve_other_logins_and_reject_stale_writers() -> anyhow::Result<()> {
@@ -52,11 +53,24 @@ fn account_transactions_preserve_other_logins_and_reject_stale_writers() -> anyh
 
     let refreshed = account("alice", /*revision*/ 1);
     assert!(scoped.compare_exchange(&alice, &refreshed)?);
-    assert_eq!(backend.load()?, Some(bob));
+    assert_eq!(backend.load()?, Some(bob.clone()));
     let relogged = account("alice", /*revision*/ 2);
-    backend.save(&relogged)?;
+    admit_auth(
+        home.path(),
+        &relogged,
+        AuthCredentialsStoreMode::File,
+        AuthKeyringBackendKind::default(),
+    )?;
+    assert_eq!(backend.load()?, Some(bob));
     assert!(!scoped.compare_exchange(&refreshed, &account("alice", /*revision*/ 3))?);
     assert_eq!(scoped.load()?, Some(relogged.clone()));
+    activate_account(
+        home.path(),
+        &identity(&alice).unwrap(),
+        AuthCredentialsStoreMode::File,
+        AuthKeyringBackendKind::default(),
+    )?;
+    assert_eq!(backend.load()?, Some(relogged.clone()));
     assert!(scoped.delete()?);
     assert!(!scoped.compare_exchange(&relogged, &account("alice", /*revision*/ 4))?);
     assert!(scoped.save(&relogged).is_err());

@@ -476,17 +476,11 @@ impl App {
                         self.account_ui.pending.remove(&thread_id);
                     }
                 }
-                if response.default_saved {
-                    match response.provider {
-                        SubscriptionAccountProvider::Openai => {
-                            self.config.wrangler.default_account =
-                                Some(response.account_id.clone());
-                        }
-                        SubscriptionAccountProvider::ClaudeSubscription => {
-                            self.config.wrangler.default_claude_account =
-                                Some(response.account_id.clone());
-                        }
-                    }
+                // The ChatGPT default is the server's active login, not configuration.
+                if response.default_saved
+                    && response.provider == SubscriptionAccountProvider::ClaudeSubscription
+                {
+                    self.config.wrangler.default_claude_account = Some(response.account_id.clone());
                 }
                 if self.current_displayed_thread_id() != Some(thread_id) {
                     return;

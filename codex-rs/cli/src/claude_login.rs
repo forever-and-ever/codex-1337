@@ -150,6 +150,14 @@ pub async fn run_login_with_claude_subscription(overrides: CliConfigOverrides) -
         eprintln!("Claude account saved: {id}");
         let saved = async {
             let _lock = lock_account_preferences(config.codex_home.as_path()).await?;
+            // Logging in adds an account; only the first becomes the new-conversation default.
+            if codex_config::read_account_preferences(config.codex_home.as_path())
+                .await?
+                .and_then(|preferences| preferences.default_claude_account)
+                .is_some()
+            {
+                return Ok(false);
+            }
             ConfigEditsBuilder::for_config(&config)
                 .with_edits([ConfigEdit::SetPath {
                     segments: vec!["wrangler".into(), "default_claude_account".into()],
@@ -157,12 +165,15 @@ pub async fn run_login_with_claude_subscription(overrides: CliConfigOverrides) -
                 }])
                 .apply()
                 .await
+                .map(|()| true)
         }
         .await;
-        if let Err(error) = saved {
-            eprintln!(
+        match saved {
+            Ok(true) => {}
+            Ok(false) => eprintln!("Select it for new conversations with /account."),
+            Err(error) => eprintln!(
                 "Account saved, but the new-conversation default could not be saved: {error}"
-            );
+            ),
         }
         Ok::<_, std::io::Error>(())
     }

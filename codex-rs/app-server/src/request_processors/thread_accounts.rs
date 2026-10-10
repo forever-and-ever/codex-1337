@@ -64,16 +64,12 @@ impl TurnRequestProcessor {
                     None
                 },
                 accounts,
-                selected_account_id: if is_claude {
-                    config
-                        .wrangler
-                        .default_account
-                        .clone()
-                        .or_else(|| self.auth_manager.selected_account_id())
-                } else if is_chatgpt {
+                selected_account_id: if is_chatgpt {
                     thread.auth_manager().selected_account_id()
                 } else {
-                    config.wrangler.default_account.clone()
+                    self.auth_manager
+                        .active_account_id()
+                        .map_err(|error| internal_error(error.to_string()))?
                 },
                 pending_account_id: is_chatgpt.then(|| thread.pending_account_id()).flatten(),
                 claude_accounts,
@@ -144,9 +140,6 @@ impl TurnRequestProcessor {
                 .into(),
             ));
         }
-        let _lock = codex_config::lock_account_preferences(config.codex_home.as_path())
-            .await
-            .map_err(|error| internal_error(error.to_string()))?;
         let id = config
             .wrangler
             .account_aliases
@@ -168,14 +161,12 @@ impl TurnRequestProcessor {
                 .await
                 .map_err(|error| invalid_request(error.to_string()))?;
         }
-        let default_saved = ConfigEditsBuilder::for_config(&config)
-            .with_edits([ConfigEdit::SetPath {
-                segments: vec!["wrangler".into(), "default_account".into()],
-                value: toml_edit::value(&id),
-            }])
-            .apply()
+        // The active login, not configuration, records the choice for new conversations.
+        let default_saved = self
+            .auth_manager
+            .activate_account(&id)
             .await
-            .map_err(|error| tracing::warn!(%error, "could not save default account"))
+            .map_err(|error| tracing::warn!(%error, "could not activate account"))
             .is_ok();
         Ok(Some(
             ThreadAccountSelectResponse {

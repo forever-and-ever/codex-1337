@@ -50,6 +50,10 @@ impl AccountRequestProcessor {
                         )
                         .await?;
                         let config = processor.config_manager.load_non_project_config().await?;
+                        // Logging in adds an account; only the first becomes the new-conversation default.
+                        if config.wrangler.default_claude_account.is_some() {
+                            return Ok(());
+                        }
                         ConfigEditsBuilder::for_config(&config)
                             .with_edits([ConfigEdit::SetPath {
                                 segments: vec!["wrangler".into(), "default_claude_account".into()],

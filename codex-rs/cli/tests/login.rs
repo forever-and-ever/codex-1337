@@ -355,9 +355,11 @@ async fn device_login_adds_an_account_without_revoking_existing_credentials() ->
         ]
     );
     let auth = read_auth_json(codex_home.path())?;
-    assert_eq!(auth["tokens"]["refresh_token"], "new-refresh");
-    assert_eq!(auth["tokens"]["account_id"], "new-account");
-    assert_eq!(auth["wrangler_accounts"], json!({":old-account": old_auth}));
+    // The new login joins the saved accounts; the earlier login stays active.
+    assert_eq!(auth["tokens"], old_auth["tokens"]);
+    let added = &auth["wrangler_accounts"][":new-account"];
+    assert_eq!(added["tokens"]["refresh_token"], "new-refresh");
+    assert_eq!(added["tokens"]["account_id"], "new-account");
 
     server.reset().await;
     Mock::given(method("POST"))

@@ -211,11 +211,7 @@ pub(super) trait AuthStorageBackend: Debug + Send + Sync {
         let mut document = self
             .read()?
             .unwrap_or_else(|| AuthDocument::new(auth.clone()));
-        document.retain_active();
-        document.active = auth.clone();
-        if let Some(id) = super::accounts::identity(auth) {
-            document.wrangler_accounts.remove(&id);
-        }
+        document.install(auth.clone());
         self.write(&document)
     }
     /// A delayed refresh must not overwrite a newer login or resurrect a removed account.

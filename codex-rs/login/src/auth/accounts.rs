@@ -5,11 +5,14 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 
+use codex_config::types::AuthCredentialsStoreMode;
 use serde::Deserialize;
 use serde::Serialize;
 
 use super::storage::AuthDotJson;
+use super::storage::AuthKeyringBackendKind;
 use super::storage::AuthStorageBackend;
+use super::storage::create_auth_storage;
 use super::storage::credential_lock;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -41,6 +44,56 @@ pub(super) fn identity(auth: &AuthDotJson) -> Option<String> {
     Some(format!("{user}:{account}"))
 }
 
+/// Persists an interactive login: it joins the saved accounts without displacing an active one.
+pub fn admit_auth(
+    codex_home: &Path,
+    auth: &AuthDotJson,
+    auth_credentials_store_mode: AuthCredentialsStoreMode,
+    keyring_backend_kind: AuthKeyringBackendKind,
+) -> std::io::Result<()> {
+    let backend = create_auth_storage(
+        codex_home.to_path_buf(),
+        auth_credentials_store_mode,
+        keyring_backend_kind,
+    );
+    if backend.is_ephemeral() {
+        return backend.save(auth);
+    }
+    let _guard = credential_lock(backend.home())?;
+    let mut document = backend
+        .read()?
+        .unwrap_or_else(|| AuthDocument::new(auth.clone()));
+    document.admit(auth.clone());
+    backend.write(&document)
+}
+
+/// Makes a saved account the active login: the account fresh conversations and server-wide
+/// work use until another is chosen.
+pub fn activate_account(
+    codex_home: &Path,
+    id: &str,
+    auth_credentials_store_mode: AuthCredentialsStoreMode,
+    keyring_backend_kind: AuthKeyringBackendKind,
+) -> std::io::Result<()> {
+    let backend = create_auth_storage(
+        codex_home.to_path_buf(),
+        auth_credentials_store_mode,
+        keyring_backend_kind,
+    );
+    let _guard = credential_lock(backend.home())?;
+    let unavailable = || {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "Saved account is unavailable; use /account or codex login.",
+        )
+    };
+    let mut document = backend.read()?.ok_or_else(unavailable)?;
+    if !document.activate(id) {
+        return Err(unavailable());
+    }
+    backend.write(&document)
+}
+
 #[cfg(test)]
 #[path = "accounts_tests.rs"]
 mod tests;
@@ -68,6 +121,37 @@ impl AuthDocument {
                 .filter(|auth| identity(auth).as_deref() == Some(id))
                 .cloned()
         }
+    }
+
+    /// Makes a login active; the displaced login stays saved.
+    pub fn install(&mut self, auth: AuthDotJson) {
+        self.retain_active();
+        if let Some(id) = identity(&auth) {
+            self.wrangler_accounts.remove(&id);
+        }
+        self.active = auth;
+    }
+
+    /// A login joins the saved accounts. It displaces the active login only when it renews that
+    /// account, when no ChatGPT account is active, or when it has no identity to be saved under;
+    /// choosing among saved accounts belongs to `/account`.
+    pub fn admit(&mut self, auth: AuthDotJson) {
+        if let Some(id) = identity(&auth)
+            && identity(&self.active).is_some_and(|active| active != id)
+        {
+            self.wrangler_accounts.insert(id, auth);
+            return;
+        }
+        self.install(auth);
+    }
+
+    /// Makes a saved account active; the displaced login stays saved.
+    pub fn activate(&mut self, id: &str) -> bool {
+        let Some(auth) = self.select(id) else {
+            return false;
+        };
+        self.install(auth);
+        true
     }
 
     pub fn accounts(mut self) -> Vec<SavedAccount> {

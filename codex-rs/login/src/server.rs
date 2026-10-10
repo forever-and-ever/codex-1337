@@ -28,7 +28,7 @@ use std::time::Duration;
 
 use crate::auth::AuthDotJson;
 use crate::auth::AuthKeyringBackendKind;
-use crate::auth::save_auth;
+use crate::auth::admit_auth;
 use crate::callback_params::LIFE_SCIENCES_OAUTH_STATE_SUFFIX;
 use crate::callback_params::LoginCallbackResult;
 use crate::callback_params::LoginOnboardingEntrypoint;
@@ -861,7 +861,7 @@ pub(crate) async fn persist_tokens_async(
             agent_identity: None,
             personal_access_token: None,
         };
-        save_auth(
+        admit_auth(
             &codex_home,
             &auth,
             auth_credentials_store_mode,

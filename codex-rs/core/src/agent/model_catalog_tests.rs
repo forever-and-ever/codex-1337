@@ -280,6 +280,7 @@ async fn claude_parent_secondary_catalog_rebinds_chatgpt_accounts_and_recovers()
     use codex_login::AuthCredentialsStoreMode;
     use codex_login::AuthKeyringBackendKind;
     use codex_login::AuthManager;
+    use codex_login::auth::activate_account;
     use codex_login::auth::save_auth;
     use serde_json::json;
     use wiremock::matchers::header;
@@ -350,15 +351,18 @@ async fn claude_parent_secondary_catalog_rebinds_chatgpt_accounts_and_recovers()
         model_catalog_url: Some(format!("{}/models", server.uri()).into()),
         ..Default::default()
     };
-    config.wrangler.default_account = Some(alice.clone());
-    // A Claude root retains an incidental ChatGPT manager and a startup config, neither
-    // of which may override a newer /account choice for fresh OpenAI children.
-    tokio::fs::write(
-        config.codex_home.join("config.toml"),
-        format!("[wrangler]\ndefault_account = {bob:?}\n"),
-    )
-    .await
-    .unwrap();
+    let activate = |id: &str| {
+        activate_account(
+            home.path(),
+            id,
+            AuthCredentialsStoreMode::File,
+            AuthKeyringBackendKind::default(),
+        )
+        .unwrap();
+    };
+    // A Claude root retains an incidental ChatGPT manager, which may not override a newer
+    // /account choice for fresh OpenAI children.
+    activate(&bob);
     let child_auth = account_auth_for_provider(
         &config,
         &session.services.local_agent_runtime.account_selection,
@@ -406,7 +410,7 @@ async fn claude_parent_secondary_catalog_rebinds_chatgpt_accounts_and_recovers()
             new_root_auth.selected_account_id(),
             resumed_auth.selected_account_id()
         ),
-        (Some(alice.clone()), Some(alice.clone()))
+        (Some(bob.clone()), Some(alice.clone()))
     );
     let first = session.agent_models_manager(&config).await.unwrap();
     first
@@ -417,12 +421,7 @@ async fn claude_parent_secondary_catalog_rebinds_chatgpt_accounts_and_recovers()
         .await;
     let retained = session.agent_models_manager(&config).await.unwrap();
     assert!(std::sync::Arc::ptr_eq(&first, &retained));
-    tokio::fs::write(
-        config.codex_home.join("config.toml"),
-        format!("[wrangler]\ndefault_account = {alice:?}\n"),
-    )
-    .await
-    .unwrap();
+    activate(&alice);
     let rebound = session.agent_models_manager(&config).await.unwrap();
     rebound
         .list_models(
@@ -436,12 +435,7 @@ async fn claude_parent_secondary_catalog_rebinds_chatgpt_accounts_and_recovers()
         .local_agent_runtime
         .account_selection
         .select("openai", ProviderAccountSelection::Chatgpt { id: alice });
-    tokio::fs::write(
-        config.codex_home.join("config.toml"),
-        format!("[wrangler]\ndefault_account = {bob:?}\n"),
-    )
-    .await
-    .unwrap();
+    activate(&bob);
     let bound = session.agent_models_manager(&config).await.unwrap();
     assert!(std::sync::Arc::ptr_eq(&rebound, &bound));
     // The failed Bob discovery did not run again during metadata lookup; /account selected Alice's actual
