@@ -122,11 +122,13 @@ class LocalInstallTest(unittest.TestCase):
             executable.chmod(0o755)
             launcher.write_text("unowned\n")
             with self.assertRaises(FileExistsError):
-                local_integration.install_launcher(distributions, launcher, "current")
+                local_integration.install_launcher(
+                    distributions, launcher, "production"
+                )
             launcher.unlink()
             launcher.symlink_to(distributions / "current/bin/codex")
-            local_integration.install_launcher(distributions, launcher, "current")
-            local_integration.install_launcher(distributions, launcher, "current")
+            local_integration.install_launcher(distributions, launcher, "production")
+            local_integration.install_launcher(distributions, launcher, "production")
             result = subprocess.run(
                 [launcher, "two words", "*", ""],
                 check=True,

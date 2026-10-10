@@ -79,12 +79,14 @@ manifest when copying a release. The status line pairs the connected server vers
 with the running executable's revision, never the latest installation's revision.
 Uninstalled development binaries display `tui-dev`.
 
-`scripts/install-local --staging` installs a trial build beside production: a
-`-staging` bundle whose `distribution` manifest carries `channel=staging`, the
-`codex-staging` launcher, and `codex-app-server-staging.service`, which every staging
-install restarts. The executable reads its channel only from that manifest. Staging
-keeps its daemon's socket, startup lock and recovery record under `~/.codex/staging`,
-runs without remote control, and refuses daemon and remote-control subcommands.
+`scripts/install-local --staging` installs a trial build beside production: a bundle
+under `codex-1337/staging/distributions` whose `distribution` manifest carries
+`channel=staging`, the `codex-staging` launcher, and `codex-app-server-staging.service`,
+which every staging install restarts. Each channel publishes into and collects only its
+own root, so no production install touches staging, even from a checkout that predates
+it. The executable reads its channel only from that manifest. Staging keeps its daemon's
+socket, startup lock and recovery record under `~/.codex/staging`, runs without remote
+control, and refuses daemon and remote-control subcommands.
 Configuration, credentials, sessions and SQLite state stay shared, so either
 installation opens any thread, omitting stored history items its build cannot read.
 Continue a thread only in a build at least as new as the last one that wrote it: an

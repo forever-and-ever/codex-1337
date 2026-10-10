@@ -2,9 +2,11 @@
 //!
 //! `scripts/install-local` publishes immutable bundles
 //! `<distributions>/<identity>/{bin/,distribution}` and links the installed
-//! release of each channel as `<distributions>/current` or
-//! `<distributions>/staging`. The `distribution` manifest holds `key=value`
-//! lines; a trial build's carries `channel=staging`.
+//! release as `<distributions>/current`. Each channel owns its root:
+//! `codex-1337/distributions` for production, `codex-1337/staging/distributions`
+//! for staging, so neither channel's cleanup can collect the other's bundles.
+//! The `distribution` manifest holds `key=value` lines; a trial build's
+//! carries `channel=staging`.
 //!
 //! Staging runs its own daemon beside production's, so a broken trial build
 //! cannot take other conversations down. Both share the Codex home:
@@ -50,13 +52,6 @@ impl Channel {
         match self {
             Self::Production => codex_home.to_path_buf(),
             Self::Staging => codex_home.join("staging"),
-        }
-    }
-
-    fn link(self) -> &'static str {
-        match self {
-            Self::Production => "current",
-            Self::Staging => "staging",
         }
     }
 }
@@ -133,11 +128,9 @@ impl Distribution {
         self.tui_revision
     }
 
-    /// The executable of this channel's latest installed release.
+    /// The executable of the latest release installed beside this bundle.
     pub fn entrypoint(&self) -> PathBuf {
-        self.distributions
-            .join(self.channel.link())
-            .join("bin/codex")
+        self.distributions.join("current/bin/codex")
     }
 }
 

@@ -45,12 +45,12 @@ def write_unit(unit_dir: Path, name: str, contents: str) -> None:
 
 
 def launcher_marker(channel: str) -> bytes:
-    label = "launcher" if channel == "current" else f"{channel} launcher"
+    label = "launcher" if channel == "production" else f"{channel} launcher"
     return f"# codex-1337 {label}\n".encode()
 
 
 def launcher_contents(distributions: Path, channel: str) -> str:
-    command = shlex.quote(str(distributions / channel / "bin/codex"))
+    command = shlex.quote(str(distributions / "current/bin/codex"))
     marker = launcher_marker(channel).decode()
     return f'#!/bin/sh\n{marker}exec {command} "$@"\n'
 
@@ -59,7 +59,7 @@ def check_launcher_ownership(distributions: Path, launcher: Path, channel: str) 
     if not distributions.is_absolute() or not launcher.is_absolute():
         raise ValueError("launcher and distributions paths must be absolute")
     if launcher.is_symlink():
-        if launcher.readlink() != distributions / channel / "bin/codex":
+        if launcher.readlink() != distributions / "current/bin/codex":
             raise FileExistsError(
                 f"refusing to replace an unowned launcher: {launcher}"
             )
@@ -92,7 +92,9 @@ def install_launcher(distributions: Path, launcher: Path, channel: str) -> None:
 def integrate_staging(action: str, install_root: Path) -> None:
     """A trial daemon beside production: its own launcher and unit, nothing else."""
     unit_dir = xdg("XDG_CONFIG_HOME", ".config") / "systemd/user"
-    distributions = xdg("XDG_DATA_HOME", ".local/share") / "codex-1337/distributions"
+    distributions = (
+        xdg("XDG_DATA_HOME", ".local/share") / "codex-1337/staging/distributions"
+    )
     launcher = install_root / "bin" / STAGING_LAUNCHER
     if action == "uninstall-staging":
         if (unit_dir / STAGING_UNIT).exists():
@@ -106,7 +108,7 @@ def integrate_staging(action: str, install_root: Path) -> None:
     unit_dir.mkdir(parents=True, exist_ok=True)
     template = (Path(__file__).parent / "systemd" / STAGING_UNIT).read_text()
     contents = template.replace(
-        "@CODEX@", unit_path(distributions / "staging/bin/codex")
+        "@CODEX@", unit_path(distributions / "current/bin/codex")
     )
     write_unit(unit_dir, STAGING_UNIT, contents)
     systemctl("daemon-reload")
@@ -177,9 +179,9 @@ if __name__ == "__main__":
         if args.launcher is None:
             parser.error("launcher action requires a destination")
         if args.action == "check-launcher-ownership":
-            check_launcher_ownership(args.install_root, args.launcher, "current")
+            check_launcher_ownership(args.install_root, args.launcher, "production")
         else:
-            install_launcher(args.install_root, args.launcher, "current")
+            install_launcher(args.install_root, args.launcher, "production")
     elif args.action in ("install-staging", "uninstall-staging"):
         integrate_staging(args.action, args.install_root)
     else:
