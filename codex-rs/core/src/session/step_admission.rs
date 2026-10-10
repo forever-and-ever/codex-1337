@@ -5,9 +5,13 @@
 //! response's re-sent output, is what the step's results and the arrivals after them added.
 //! Membership is exact, the items between the two prompts. Local o200k counts only split the
 //! delta among several shares, and run off the completion path.
+//!
+//! The mark lives in this process. A step an earlier process left pending can only be severed:
+//! its request's prompt is gone.
 
 use std::sync::Arc;
 
+use codex_history::RolloutItem;
 use codex_protocol::items::TurnItem;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::FunctionCallOutputBody;
@@ -37,6 +41,12 @@ use crate::context::is_contextual_user_fragment;
 pub(crate) struct StepMark {
     item: StepAdmissionItem,
     turn_id: String,
+    /// What the next request is measured against; absent when an earlier process sent it.
+    baseline: Option<Baseline>,
+}
+
+/// The marked request as this process sent it.
+struct Baseline {
     model: String,
     history_version: u64,
     prompt_len: usize,
@@ -44,6 +54,41 @@ pub(crate) struct StepMark {
     output_tokens: u64,
     /// Arrivals already announced, so that a retried request announces only the rest.
     announced: usize,
+}
+
+impl Baseline {
+    /// Whether `prompt` extends the marked request's context unchanged.
+    fn extended_by(&self, prompt: &Prompt, model: &str, history_version: u64) -> bool {
+        self.history_version == history_version
+            && self.model == model
+            && self.prompt_len <= prompt.input.len()
+    }
+}
+
+impl StepMark {
+    /// The step a resumed rollout left pending: the last pending bill no later record closed.
+    pub(super) fn orphaned(rollout: &[RolloutItem]) -> Option<Self> {
+        let mut orphan = None;
+        for item in rollout {
+            if let RolloutItem::EventMsg(EventMsg::ItemCompleted(ItemCompletedEvent {
+                turn_id,
+                item: TurnItem::StepAdmission(item),
+                ..
+            })) = item
+            {
+                if item.admission == Admission::Pending {
+                    orphan = Some(Self {
+                        item: item.clone(),
+                        turn_id: turn_id.clone(),
+                        baseline: None,
+                    });
+                } else if orphan.as_ref().is_some_and(|mark| mark.item.id == item.id) {
+                    orphan = None;
+                }
+            }
+        }
+        orphan
+    }
 }
 
 /// The items a step admitted, before the delta is split among them.
@@ -128,11 +173,13 @@ impl Session {
                         admission: Admission::Pending,
                     },
                     turn_id: turn_context.sub_id.clone(),
-                    model: model.to_string(),
-                    history_version,
-                    prompt_len: prompt.input.len(),
-                    output_tokens,
-                    announced: 0,
+                    baseline: Some(Baseline {
+                        model: model.to_string(),
+                        history_version,
+                        prompt_len: prompt.input.len(),
+                        output_tokens,
+                        announced: 0,
+                    }),
                 }
             });
             let pending = mark.as_ref().map(|mark| mark.item.clone());
@@ -153,12 +200,10 @@ impl Session {
         let Some(mut previous) = previous else {
             return;
         };
-        let received = read_tokens.filter(|_| {
-            previous.history_version == history_version
-                && previous.model == model
-                && previous.prompt_len <= prompt.input.len()
-        });
-        let Some(read_tokens) = received else {
+        let measured = read_tokens
+            .zip(previous.baseline.as_ref())
+            .filter(|(_, baseline)| baseline.extended_by(prompt, model, history_version));
+        let Some((read_tokens, baseline)) = measured else {
             previous.item.admission = Admission::Severed;
             self.emit_step_item(
                 turn_context,
@@ -170,8 +215,8 @@ impl Session {
         };
         let received = i128::from(read_tokens)
             - i128::from(previous.item.read_tokens)
-            - i128::from(previous.output_tokens);
-        let admitted = admit(&prompt.input[previous.prompt_len..]);
+            - i128::from(baseline.output_tokens);
+        let admitted = admit(&prompt.input[baseline.prompt_len..]);
         let session = Arc::clone(self);
         let turn_context = Arc::clone(turn_context);
         // Tokenizing large or pathological text must not hold up the turn.
@@ -192,16 +237,20 @@ impl Session {
         let (response_id, arrivals) = {
             let mut state = self.state.lock().await;
             let history_version = state.history.history_version();
-            let Some(mark) = state.step_mark.as_mut().filter(|mark| {
-                mark.history_version == history_version
-                    && mark.model == step_context.settings.model_info.slug
-                    && mark.prompt_len <= prompt.input.len()
-            }) else {
+            let model = step_context.settings.model_info.slug.as_str();
+            let Some(mark) = state.step_mark.as_mut() else {
                 return;
             };
-            let arrivals = admit(&prompt.input[mark.prompt_len..]).arrivals;
-            let announced = mark.announced;
-            mark.announced = announced.max(arrivals.len());
+            let Some(baseline) = mark
+                .baseline
+                .as_mut()
+                .filter(|baseline| baseline.extended_by(prompt, model, history_version))
+            else {
+                return;
+            };
+            let arrivals = admit(&prompt.input[baseline.prompt_len..]).arrivals;
+            let announced = baseline.announced;
+            baseline.announced = announced.max(arrivals.len());
             let fresh = arrivals.into_iter().enumerate().skip(announced);
             (mark.item.response_id.clone(), fresh.collect::<Vec<_>>())
         };

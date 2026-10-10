@@ -1789,6 +1789,7 @@ impl Session {
                 reviewer_compaction_hash.as_deref(),
             );
             state.last_started_turn_id = last_started_turn_id;
+            state.step_mark = step_admission::StepMark::orphaned(rollout_items);
             if let Some(world_state) = world_state_baseline {
                 state.history.set_world_state_baseline(world_state);
             }
