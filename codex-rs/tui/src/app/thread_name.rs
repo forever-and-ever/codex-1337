@@ -237,7 +237,9 @@ impl App {
         config.model = Some(self.chat_widget.current_model().to_string());
         config.model_reasoning_effort = self.chat_widget.current_reasoning_effort();
         let selected_profile = self.confirmed_server_profile(thread_id);
-        let goal_continuation = if self.chat_widget.is_agent_turn_running() {
+        // Sampled once: the source turn may finish while the fork request is in flight.
+        let source_turn_running = self.chat_widget.is_agent_turn_running();
+        let goal_continuation = if source_turn_running {
             ForkGoalContinuation::DeferUntilNextTurn
         } else {
             ForkGoalContinuation::StartIfIdle
@@ -261,10 +263,9 @@ impl App {
         match result {
             Ok(forked) => {
                 // In-flight input stays with its source; only idle locked drafts follow the fork.
-                let retained_input = (from_locked_thread
-                    && !self.chat_widget.is_agent_turn_running())
-                .then(|| self.chat_widget.capture_thread_input_state())
-                .flatten();
+                let retained_input = (from_locked_thread && !source_turn_running)
+                    .then(|| self.chat_widget.capture_thread_input_state())
+                    .flatten();
                 self.detach_current_thread_for_navigation(
                     app_server,
                     Some(forked.session.thread_id),
