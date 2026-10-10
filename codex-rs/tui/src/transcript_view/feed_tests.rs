@@ -1,5 +1,6 @@
 //! The feed's one interaction worth pinning: steps fold under their headers with their figures,
-//! and a Code Mode header shows its block's script.
+//! a Code Mode header shows its block's script, and an activity whose only row became its
+//! header keeps its details behind its own control.
 
 use super::*;
 use crate::exec_cell::CommandOutput;
@@ -139,7 +140,11 @@ fn steps_fold_under_one_header_with_their_figures() {
     );
     exec.complete_call(
         "call-1",
-        CommandOutput::new(/*exit_code*/ 1, "test parse ... FAILED\n".into()),
+        // Items unfold by default, so a header-only activity once dumped all of its output here.
+        CommandOutput::new(
+            /*exit_code*/ 1,
+            "test parse ... FAILED\ntest result: FAILED. 0 passed; 1 failed\n".into(),
+        ),
         std::time::Duration::ZERO,
     );
     // Cells arrive as the server announces them: each Thought after its response's members.

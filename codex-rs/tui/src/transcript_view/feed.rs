@@ -15,14 +15,14 @@
 //! a segment, and a segment draws a header when it begins a step or shows a member: clock,
 //! fold, title, then the figures of the steps that begin in it. The title is the first row of
 //! the segment's first activity, which yields that row to it: folded, the header clips it to
-//! one row; unfolded, it wraps it whole, and the activity draws the rest, or its details when
-//! nothing else remains. An unfolded Code Mode title carries `[js]`, which shows the block's
-//! script above the rest. A segment without an activity borrows the item's title, and an item
-//! without any is a Response. Folded, a segment shows only its header, and the messages of an
-//! item that made calls. Unfolded, it shows every member, and an item of several steps heads
-//! each step's first member with that step's own figures; the one fold drives both levels. A
-//! Thought shows only when it has text to read: otherwise its tokens are its step's thought
-//! figure.
+//! one row; unfolded, it wraps it whole, and the activity draws the rest. An activity left
+//! without a row draws the first row of its details, which holds the control that shows them.
+//! An unfolded Code Mode title carries `[js]`, which shows the block's script above the rest.
+//! A segment without an activity borrows the item's title, and an item without any is a
+//! Response. Folded, a segment shows only its header, and the messages of an item that made
+//! calls. Unfolded, it shows every member, and an item of several steps heads each step's first
+//! member with that step's own figures; the one fold drives both levels. A Thought shows only
+//! when it has text to read: otherwise its tokens are its step's thought figure.
 
 use super::step_bills::Figures;
 use super::step_bills::Own;

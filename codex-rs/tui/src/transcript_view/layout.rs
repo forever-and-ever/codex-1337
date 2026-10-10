@@ -139,6 +139,16 @@ pub(super) fn activity_layout(
 }
 
 /// Give an activity's first row to its header, keeping the rows after it and their controls.
+/// A row with text the reader can select: only such a row holds a control. Blank rows and
+/// client labels, such as a stored result's provenance, do not.
+fn holds_control(line: &HyperlinkLine) -> bool {
+    line.width() > 0
+        && line
+            .source
+            .as_ref()
+            .is_none_or(|source| !source.text.is_empty())
+}
+
 fn yield_head(lines: &mut ActivityTranscriptLines) {
     let dropped = feed::behead(&mut lines.activity);
     lines.header = None;
@@ -413,16 +423,19 @@ impl TranscriptView {
                 Content::Beheaded => {
                     let mut lines = activity(expanded, expanded_parts);
                     yield_head(&mut lines);
-                    // Its header was all it showed: unfolded, its details take its place,
-                    // under the item's fold rather than a control of its own.
-                    let bare = lines.activity.is_empty() && lines.disclosure.is_some();
-                    if bare {
+                    // Its header was all it showed: the first row of its details that can hold
+                    // a control stands in, holding the one that shows the rest.
+                    if lines.activity.is_empty() && lines.disclosure.is_some() {
                         let mut details = expanded_parts.clone();
                         details.extend(ids.iter().cloned());
-                        lines = activity(/*expanded*/ true, &details);
-                        yield_head(&mut lines);
-                        lines.is_tool_entry = false;
-                        lines.disclosure = None;
+                        let mut unfolded = activity(/*expanded*/ true, &details);
+                        yield_head(&mut unfolded);
+                        lines.activity = unfolded
+                            .activity
+                            .into_iter()
+                            .find(holds_control)
+                            .into_iter()
+                            .collect();
                     }
                     // A Code Mode block's script leads its rows while its header shows it.
                     lines.preface = cell
@@ -435,7 +448,7 @@ impl TranscriptView {
                         lines,
                         crate::transcript_geometry::NESTED_COLUMNS,
                         width,
-                        expanded && !bare,
+                        expanded,
                     )
                 }
                 Content::Own | Content::Loose => activity_layout(

@@ -29,21 +29,28 @@ Exact captures
 • Called (Code Mode ρξωζ)
     • Command
         Read child-a.rs (whole file)
+    • Returned
         {"answer":42}
+    • Returned
         Exact accepted return
 
 Historical suffix
 • Execution (Code Mode ρξωζ)
+    • Returned
         Late wait capture
 
 Hydrated fork
 • Called (Code Mode ρξωζ)
     • Command
         Read child-a.rs (whole file)
+    • Returned
         {"answer":42}
+    • Returned
         Exact accepted return
+    • Returned
         Late wait capture
 
 Isolated sibling
 • Execution (Code Mode ρξωζ)
+    • Returned
         Late wait capture

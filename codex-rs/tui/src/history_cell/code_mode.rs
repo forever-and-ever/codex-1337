@@ -470,16 +470,17 @@ impl CodeModeCell {
         let mut lines: Vec<_> = self.header().into_iter().map(HyperlinkLine::from).collect();
         let mut controls = Vec::new();
         let block_expanded = expanded.contains(&self.identity());
+        let nested_width = width.saturating_sub(crate::transcript_geometry::CHILD_INDENT);
         for member in &self.members {
-            let nested_width = width.saturating_sub(crate::transcript_geometry::CHILD_INDENT);
             if !block_expanded && member.as_any().is::<ToolOutputCell>() {
                 continue;
             }
             let parts = if block_expanded
                 && let Some(output) = member.as_any().downcast_ref::<ToolOutputCell>()
             {
+                // Headed, so the result reads apart from the calls' details above it.
                 Some(super::activity_parts::ActivityParts {
-                    lines: output.output_lines(nested_width, mode),
+                    lines: output.expanded_output_lines(nested_width, mode),
                     header: None,
                     output: None,
                     controls: Vec::new(),
@@ -502,9 +503,7 @@ impl CodeModeCell {
                 ));
             } else {
                 lines.extend(prefix_hyperlink_lines(
-                    member.nested_detail_lines(
-                        width.saturating_sub(crate::transcript_geometry::CHILD_INDENT),
-                    ),
+                    member.nested_detail_lines(nested_width),
                     crate::transcript_geometry::CHILD_PREFIX.into(),
                     crate::transcript_geometry::CHILD_PREFIX.into(),
                 ));

@@ -12,8 +12,7 @@ unfolded
             codex-tui --lib transcript_view::feed
         [+]   • Thought · Summary
               • I'll run the tests first.
-            Stored result · exact capture unavailable
-              test parse ... FAILED
+        [+]   test parse ... FAILED
   HH:MM [-] Injection · environment_context          ≈84
                 <environment_context>cwd</environment_context>
 
@@ -38,6 +37,7 @@ unfolded
 
 
 
+
 script
         [-] User
 
@@ -48,8 +48,7 @@ script
             codex-tui --lib transcript_view::feed
         [+]   • Thought · Summary
               • I'll run the tests first.
-            Stored result · exact capture unavailable
-              test parse ... FAILED
+        [+]   test parse ... FAILED
   HH:MM [-] Injection · environment_context          ≈84
                 <environment_context>cwd</environment_context>
 
@@ -69,6 +68,7 @@ script
 
         [-] Response
               • No step billed this reply.
+
 
 
 
