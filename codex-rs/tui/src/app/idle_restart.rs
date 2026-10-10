@@ -8,6 +8,7 @@ impl App {
             || !self.turn_submissions.is_empty()
             || self.thread_delivery.has_pending_work()
             || self.agents_overview.parked_draft.is_some()
+            || !self.side_threads.is_empty()
         {
             return false;
         }
