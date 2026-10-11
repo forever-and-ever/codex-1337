@@ -332,6 +332,96 @@
     "AgentPath": {
       "type": "string"
     },
+    "AlarmCondition": {
+      "oneOf": [
+        {
+          "properties": {
+            "at": {
+              "description": "Unix milliseconds.",
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "clock"
+              ],
+              "title": "ClockAlarmConditionType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "at",
+            "type"
+          ],
+          "title": "ClockAlarmCondition",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "command": {
+              "type": "string"
+            },
+            "deadline": {
+              "description": "Unix milliseconds.",
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "pattern": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "sessionId": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "watch"
+              ],
+              "title": "WatchAlarmConditionType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "sessionId",
+            "type"
+          ],
+          "title": "WatchAlarmCondition",
+          "type": "object"
+        }
+      ]
+    },
+    "AlarmSummary": {
+      "properties": {
+        "armedAt": {
+          "description": "Unix milliseconds.",
+          "format": "int64",
+          "type": "integer"
+        },
+        "condition": {
+          "$ref": "#/definitions/AlarmCondition"
+        },
+        "id": {
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "armedAt",
+        "condition",
+        "id",
+        "note"
+      ],
+      "type": "object"
+    },
     "AppBranding": {
       "description": "EXPERIMENTAL - app metadata returned by app-list APIs.",
       "properties": {
@@ -6066,6 +6156,26 @@
           "properties": {
             "method": {
               "enum": [
+                "thread/alarms/updated"
+              ],
+              "title": "Thread/alarms/updatedNotificationMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ThreadAlarmsUpdatedNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "title": "Thread/alarms/updatedNotification",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
                 "thread/promptCache/updated"
               ],
               "title": "Thread/promptCache/updatedNotificationMethod",
@@ -8118,6 +8228,24 @@
         "waitingOnUserInput"
       ],
       "type": "string"
+    },
+    "ThreadAlarmsUpdatedNotification": {
+      "properties": {
+        "alarms": {
+          "items": {
+            "$ref": "#/definitions/AlarmSummary"
+          },
+          "type": "array"
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "alarms",
+        "threadId"
+      ],
+      "type": "object"
     },
     "ThreadArchivedNotification": {
       "properties": {
@@ -11420,6 +11548,26 @@
         "params"
       ],
       "title": "Thread/workStatus/updatedNotification",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "thread/alarms/updated"
+          ],
+          "title": "Thread/alarms/updatedNotificationMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ThreadAlarmsUpdatedNotification"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "title": "Thread/alarms/updatedNotification",
       "type": "object"
     },
     {

@@ -1,0 +1,108 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AlarmCondition": {
+      "oneOf": [
+        {
+          "properties": {
+            "at": {
+              "description": "Unix milliseconds.",
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "clock"
+              ],
+              "title": "ClockAlarmConditionType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "at",
+            "type"
+          ],
+          "title": "ClockAlarmCondition",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "command": {
+              "type": "string"
+            },
+            "deadline": {
+              "description": "Unix milliseconds.",
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "pattern": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "sessionId": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "watch"
+              ],
+              "title": "WatchAlarmConditionType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "sessionId",
+            "type"
+          ],
+          "title": "WatchAlarmCondition",
+          "type": "object"
+        }
+      ]
+    },
+    "AlarmSummary": {
+      "properties": {
+        "armedAt": {
+          "description": "Unix milliseconds.",
+          "format": "int64",
+          "type": "integer"
+        },
+        "condition": {
+          "$ref": "#/definitions/AlarmCondition"
+        },
+        "id": {
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "armedAt",
+        "condition",
+        "id",
+        "note"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "alarms": {
+      "items": {
+        "$ref": "#/definitions/AlarmSummary"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "alarms"
+  ],
+  "title": "ThreadAlarmDisarmResponse",
+  "type": "object"
+}

@@ -192,6 +192,42 @@ class AgentPath(RootModel[str]):
     root: str
 
 
+class ClockAlarmCondition(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    at: Annotated[int, Field(description="Unix milliseconds.")]
+    type: Annotated[Literal["clock"], Field(title="ClockAlarmConditionType")]
+
+
+class WatchAlarmCondition(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    command: str
+    deadline: Annotated[int | None, Field(description="Unix milliseconds.")] = None
+    pattern: str | None = None
+    session_id: Annotated[int, Field(alias="sessionId")]
+    type: Annotated[Literal["watch"], Field(title="WatchAlarmConditionType")]
+
+
+class AlarmCondition(RootModel[ClockAlarmCondition | WatchAlarmCondition]):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: ClockAlarmCondition | WatchAlarmCondition
+
+
+class AlarmSummary(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    armed_at: Annotated[int, Field(alias="armedAt", description="Unix milliseconds.")]
+    condition: AlarmCondition
+    id: str
+    note: str
+
+
 class AllowDenyRequirement(Enum):
     allow = "allow"
     deny = "deny"
@@ -5370,6 +5406,29 @@ class ThreadActiveFlag(Enum):
     waiting_on_user_input = "waitingOnUserInput"
 
 
+class ThreadAlarmDisarmParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: str
+    thread_id: Annotated[str, Field(alias="threadId")]
+
+
+class ThreadAlarmDisarmResponse(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    alarms: list[AlarmSummary]
+
+
+class ThreadAlarmsUpdatedNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    alarms: list[AlarmSummary]
+    thread_id: Annotated[str, Field(alias="threadId")]
+
+
 class ThreadApproveGuardianDeniedActionParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -7444,6 +7503,17 @@ class ThreadContextRoleSetRequest(BaseModel):
         Literal["thread/contextRole/set"], Field(title="Thread/contextRole/setRequestMethod")
     ]
     params: ThreadSetContextRoleParams
+
+
+class ThreadAlarmDisarmRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[
+        Literal["thread/alarm/disarm"], Field(title="Thread/alarm/disarmRequestMethod")
+    ]
+    params: ThreadAlarmDisarmParams
 
 
 class ThreadWarmingSetRequest(BaseModel):
@@ -10103,6 +10173,23 @@ class ThreadGoalClearedServerNotification(BaseModel):
         Literal["thread/goal/cleared"], Field(title="Thread/goal/clearedNotificationMethod")
     ]
     params: ThreadGoalClearedNotification
+
+
+class ThreadAlarmsUpdatedServerNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    emitted_at_ms: Annotated[
+        int | None,
+        Field(
+            alias="emittedAtMs",
+            description="Unix timestamp (in milliseconds) when app-server emitted this notification.",
+        ),
+    ] = None
+    method: Annotated[
+        Literal["thread/alarms/updated"], Field(title="Thread/alarms/updatedNotificationMethod")
+    ]
+    params: ThreadAlarmsUpdatedNotification
 
 
 class ThreadPromptCacheUpdatedServerNotification(BaseModel):
@@ -13152,6 +13239,7 @@ class ClientRequest(
         | ThreadJiraRequest
         | ThreadFarmRequest
         | ThreadContextRoleSetRequest
+        | ThreadAlarmDisarmRequest
         | ThreadWarmingSetRequest
         | ThreadNameSetRequest
         | ThreadGoalSetRequest
@@ -13274,6 +13362,7 @@ class ClientRequest(
         | ThreadJiraRequest
         | ThreadFarmRequest
         | ThreadContextRoleSetRequest
+        | ThreadAlarmDisarmRequest
         | ThreadWarmingSetRequest
         | ThreadNameSetRequest
         | ThreadGoalSetRequest
@@ -13701,6 +13790,7 @@ class ServerNotification(
         | ThreadGoalUpdatedServerNotification
         | ThreadGoalClearedServerNotification
         | ThreadWorkStatusUpdatedServerNotification
+        | ThreadAlarmsUpdatedServerNotification
         | ThreadPromptCacheUpdatedServerNotification
         | ThreadPromptCacheMissedServerNotification
         | ThreadWarmingStoppedServerNotification
@@ -13796,6 +13886,7 @@ class ServerNotification(
         | ThreadGoalUpdatedServerNotification
         | ThreadGoalClearedServerNotification
         | ThreadWorkStatusUpdatedServerNotification
+        | ThreadAlarmsUpdatedServerNotification
         | ThreadPromptCacheUpdatedServerNotification
         | ThreadPromptCacheMissedServerNotification
         | ThreadWarmingStoppedServerNotification

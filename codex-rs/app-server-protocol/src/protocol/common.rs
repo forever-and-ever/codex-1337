@@ -607,6 +607,11 @@ client_request_definitions! {
         serialization: thread_id(params.thread_id),
         response: v2::ThreadSetContextRoleResponse,
     },
+    ThreadAlarmDisarm => "thread/alarm/disarm" {
+        params: v2::ThreadAlarmDisarmParams,
+        serialization: thread_id(params.thread_id),
+        response: v2::ThreadAlarmDisarmResponse,
+    },
     ThreadSetWarming => "thread/warming/set" {
         params: v2::ThreadSetWarmingParams,
         serialization: thread_id(params.thread_id),
@@ -1979,6 +1984,7 @@ server_notification_definitions! {
     ThreadGoalUpdated => "thread/goal/updated" (v2::ThreadGoalUpdatedNotification),
     ThreadGoalCleared => "thread/goal/cleared" (v2::ThreadGoalClearedNotification),
     ThreadWorkStatusUpdated => "thread/workStatus/updated" (v2::ThreadWorkStatusUpdatedNotification),
+    ThreadAlarmsUpdated => "thread/alarms/updated" (v2::ThreadAlarmsUpdatedNotification),
     ThreadPromptCacheUpdated => "thread/promptCache/updated" (v2::ThreadPromptCacheUpdatedNotification),
     ThreadPromptCacheMissed => "thread/promptCache/missed" (v2::ThreadPromptCacheMissedNotification),
     ThreadWarmingStopped => "thread/warming/stopped" (v2::ThreadWarmingStoppedNotification),

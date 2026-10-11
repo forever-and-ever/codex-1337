@@ -475,6 +475,30 @@
             },
             "method": {
               "enum": [
+                "thread/alarm/disarm"
+              ],
+              "title": "Thread/alarm/disarmRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/ThreadAlarmDisarmParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Thread/alarm/disarmRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/v2/RequestId"
+            },
+            "method": {
+              "enum": [
                 "thread/warming/set"
               ],
               "title": "Thread/warming/setRequestMethod",
@@ -5266,6 +5290,26 @@
           "properties": {
             "method": {
               "enum": [
+                "thread/alarms/updated"
+              ],
+              "title": "Thread/alarms/updatedNotificationMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/ThreadAlarmsUpdatedNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "title": "Thread/alarms/updatedNotification",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
                 "thread/promptCache/updated"
               ],
               "title": "Thread/promptCache/updatedNotificationMethod",
@@ -7825,6 +7869,96 @@
       },
       "AgentPath": {
         "type": "string"
+      },
+      "AlarmCondition": {
+        "oneOf": [
+          {
+            "properties": {
+              "at": {
+                "description": "Unix milliseconds.",
+                "format": "int64",
+                "type": "integer"
+              },
+              "type": {
+                "enum": [
+                  "clock"
+                ],
+                "title": "ClockAlarmConditionType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "at",
+              "type"
+            ],
+            "title": "ClockAlarmCondition",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "command": {
+                "type": "string"
+              },
+              "deadline": {
+                "description": "Unix milliseconds.",
+                "format": "int64",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "pattern": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "sessionId": {
+                "format": "int32",
+                "type": "integer"
+              },
+              "type": {
+                "enum": [
+                  "watch"
+                ],
+                "title": "WatchAlarmConditionType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "command",
+              "sessionId",
+              "type"
+            ],
+            "title": "WatchAlarmCondition",
+            "type": "object"
+          }
+        ]
+      },
+      "AlarmSummary": {
+        "properties": {
+          "armedAt": {
+            "description": "Unix milliseconds.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "condition": {
+            "$ref": "#/definitions/v2/AlarmCondition"
+          },
+          "id": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "armedAt",
+          "condition",
+          "id",
+          "note"
+        ],
+        "type": "object"
       },
       "AllowDenyRequirement": {
         "enum": [
@@ -22881,6 +23015,59 @@
           "waitingOnUserInput"
         ],
         "type": "string"
+      },
+      "ThreadAlarmDisarmParams": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "threadId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "threadId"
+        ],
+        "title": "ThreadAlarmDisarmParams",
+        "type": "object"
+      },
+      "ThreadAlarmDisarmResponse": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "alarms": {
+            "items": {
+              "$ref": "#/definitions/v2/AlarmSummary"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "alarms"
+        ],
+        "title": "ThreadAlarmDisarmResponse",
+        "type": "object"
+      },
+      "ThreadAlarmsUpdatedNotification": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "alarms": {
+            "items": {
+              "$ref": "#/definitions/v2/AlarmSummary"
+            },
+            "type": "array"
+          },
+          "threadId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "alarms",
+          "threadId"
+        ],
+        "title": "ThreadAlarmsUpdatedNotification",
+        "type": "object"
       },
       "ThreadApproveGuardianDeniedActionParams": {
         "$schema": "http://json-schema.org/draft-07/schema#",

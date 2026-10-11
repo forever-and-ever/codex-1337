@@ -7,6 +7,12 @@ Sections routed from `AGENTS.override.md`.
 These terms have several meanings in the code or name fork concepts. Use the
 qualified forms.
 
+- alarm: a thread-owned clock or exec-session watch that sounds once and queues
+  a model-visible result. An alarm sounding is its delivered result. Heartbeats
+  are upstream user-authored scheduled tasks (`UserInputOrigin::Heartbeat`),
+  not alarms or prompt-cache warming. `clock.sleep` blocks its current tool call;
+  an alarm leaves the agent free to work. XSync desktop attention
+  (`desktop_attention.rs`) watches desktop activity, not thread alarm conditions.
 - native: never used alone. Native history
   (`codex-rs/tui/src/app/native_history.rs`) is output written to the terminal's own
   scrollback. Provider-native items are a model provider's own wire format and
