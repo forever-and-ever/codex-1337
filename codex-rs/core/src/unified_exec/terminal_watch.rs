@@ -53,10 +53,18 @@ pub struct TerminalWatch {
     runtime: std::sync::Weak<crate::session::session::Session>,
     watches: Arc<TerminalWatches>,
     id: u64,
-    signal: Mutex<Option<oneshot::Receiver<Signal>>>,
+    signal: oneshot::Receiver<Signal>,
     command: String,
     retained: String,
     pattern: Option<Arc<Regex>>,
+}
+
+pub struct TerminalExitProbe(Arc<UnifiedExecProcess>);
+
+impl TerminalExitProbe {
+    pub fn has_exited(&self) -> bool {
+        self.0.has_exited()
+    }
 }
 
 pub enum TerminalWatchEvent {
@@ -228,7 +236,7 @@ impl CodexThread {
             runtime: Arc::downgrade(&self.session),
             watches,
             id,
-            signal: Mutex::new(Some(signal)),
+            signal,
             command,
             retained,
             pattern,
@@ -255,23 +263,13 @@ impl TerminalWatch {
         &self.retained
     }
 
-    pub fn has_exited(&self) -> bool {
-        self.process.has_exited()
+    /// Inspects the watched process's exit state while `wait` owns the watch.
+    pub fn exit_probe(&self) -> TerminalExitProbe {
+        TerminalExitProbe(Arc::clone(&self.process))
     }
 
-    /// Wait once for this watch's match or exit while keeping its exit state inspectable.
-    #[expect(
-        clippy::expect_used,
-        reason = "Each watch has one waiter; a claimed or poisoned signal cannot be recovered."
-    )]
-    pub async fn wait(&self) -> (i64, TerminalWatchEvent) {
-        let signal = self
-            .signal
-            .lock()
-            .expect("terminal watch signal poisoned")
-            .take()
-            .expect("terminal watch already awaited");
-        match signal.await {
+    pub async fn wait(mut self) -> (i64, TerminalWatchEvent) {
+        match (&mut self.signal).await {
             Ok(Signal::Matched { at, line }) => (at, TerminalWatchEvent::Matched(line)),
             Ok(Signal::Closed { at }) => {
                 self.process.cancellation_token().cancelled().await;

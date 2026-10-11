@@ -79,6 +79,7 @@ pub(super) async fn watch(
     deadline: Option<i64>,
 ) -> AlarmCause {
     let command = watch.command().to_string();
+    let probe = watch.exit_probe();
     let terminal = watch.wait();
     tokio::pin!(terminal);
     loop {
@@ -90,7 +91,7 @@ pub(super) async fn watch(
             biased;
             (observed_at, event) = &mut terminal => {
                 if deadline.is_some_and(|at| observed_at > at)
-                    && !watch.has_exited()
+                    && !probe.has_exited()
                     && !matches!(event, TerminalWatchEvent::Lost)
                 {
                     return AlarmCause::Deadline { session_id, command };
@@ -104,7 +105,7 @@ pub(super) async fn watch(
                 }
             } => {
                 if deadline.is_some_and(|at| super::now() >= at) {
-                    if watch.has_exited() {
+                    if probe.has_exited() {
                         let (_, event) = (&mut terminal).await;
                         return terminal_cause(event, session_id, command);
                     }

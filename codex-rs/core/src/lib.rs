@@ -154,6 +154,7 @@ mod stream_events_utils;
 pub mod test_support;
 mod unified_exec;
 
+pub use unified_exec::terminal_watch::TerminalExitProbe;
 pub use unified_exec::terminal_watch::TerminalWatch;
 pub use unified_exec::terminal_watch::TerminalWatchError;
 pub use unified_exec::terminal_watch::TerminalWatchEvent;
