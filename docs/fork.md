@@ -1,6 +1,6 @@
 # Codex-1337 fork reference
 
-Sections routed from `AGENTS.override.md`.
+Sections routed from `AGENTS.md`.
 
 ## Glossary
 

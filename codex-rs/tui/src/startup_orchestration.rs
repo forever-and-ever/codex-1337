@@ -28,19 +28,20 @@ pub(super) async fn run_main_inner(
             "--add-dir is not supported with --remote. Configure additional workspace roots on the server.",
         ));
     }
+    #[cfg(windows)]
+    let elevated_warning = if explicit_remote_endpoint.is_none()
+        && !cli.no_daemon
+        && !cli.agents_overview
+        && codex_app_server_daemon::is_elevated().map_err(std::io::Error::other)?
+    {
+        cli.no_daemon = true;
+        Some(daemon_startup::ELEVATED_LAUNCH_WARNING)
+    } else {
+        None
+    };
+    #[cfg(not(windows))]
+    let elevated_warning: Option<&str> = None;
     let strict_config = cli.strict_config;
-    if cli.shared.worktree {
-        if explicit_remote_endpoint.is_some() {
-            return Err(std::io::Error::other(
-                "`--worktree` is only supported for local sessions",
-            ));
-        }
-        if cli.fork_picker || cli.fork_last {
-            return Err(std::io::Error::other(
-                "`codex fork --worktree` requires an explicit session ID",
-            ));
-        }
-    }
     let (sandbox_mode, approval_policy) = if cli.dangerously_bypass_approvals_and_sandbox {
         (
             Some(SandboxMode::DangerFullAccess),
@@ -232,14 +233,6 @@ pub(super) async fn run_main_inner(
             EnvironmentManager::prepare_from_env().await
         }
         .map_err(std::io::Error::other)?;
-    if cli.shared.worktree
-        && (presentation_target.uses_remote_workspace()
-            || prepared_environment_manager.default_environment_is_remote())
-    {
-        return Err(std::io::Error::other(
-            "`--worktree` is only supported for local sessions",
-        ));
-    }
     let cwd = cli.cwd.clone();
     let config_cwd = config_cwd_for_app_server_target(
         cwd.as_deref(),
@@ -417,7 +410,7 @@ pub(super) async fn run_main_inner(
 
     let additional_dirs = cli.add_dir.clone();
 
-    let mut overrides = ConfigOverrides {
+    let overrides = ConfigOverrides {
         model,
         approval_policy,
         sandbox_mode,
@@ -444,9 +437,12 @@ pub(super) async fn run_main_inner(
     if app_server_target.uses_embedded_network_policy() {
         embedded_network_policy.activate(&mut config);
     }
-    startup_draft.apply_config(&config);
+    startup_draft.apply_settings(
+        &crate::local_settings::LocalSettings::from(&config),
+        config.cwd.as_path(),
+    );
 
-    let mut cloud_config_bundle = if workload_identity_selected {
+    let cloud_config_bundle = if workload_identity_selected {
         cloud_config_bundle
     } else {
         startup_draft
@@ -457,32 +453,6 @@ pub(super) async fn run_main_inner(
                 /*enable_codex_api_key_env*/ false,
             ))
             .await??
-    };
-    let managed_worktree = if cli.shared.worktree {
-        let (destination, bundle, worktree) = startup_draft
-            .run_until(worktree_startup::prepare(
-                &mut cli,
-                config.clone(),
-                &mut overrides,
-                cli_kv_overrides.clone(),
-                loader_overrides.clone(),
-                strict_config,
-                &app_server_target,
-                &arg0_paths,
-                cloud_config_bundle.clone(),
-                &embedded_network_policy,
-            ))
-            .await?
-            .map_err(|err| std::io::Error::other(err.to_string()))?;
-        config = destination;
-        cloud_config_bundle = bundle;
-        if app_server_target.uses_embedded_network_policy() {
-            embedded_network_policy.activate(&mut config);
-        }
-        startup_draft.apply_config(&config);
-        Some(worktree)
-    } else {
-        None
     };
     // The staging daemon is systemd-managed; its TUI never starts the shared one.
     let auto_start_daemon = codex_install_context::Channel::current()
@@ -536,6 +506,7 @@ pub(super) async fn run_main_inner(
             &mut startup_draft,
             &app_server_target,
             &config,
+            &cli_kv_overrides,
             managed_daemon,
         )
         .await?
@@ -547,15 +518,18 @@ pub(super) async fn run_main_inner(
     if app_server_target.uses_embedded_network_policy() {
         embedded_network_policy.activate(&mut config);
     }
-    let daemon_startup_warning = compatibility_warning.or_else(|| {
-        daemon_exclusion
+    let daemon_startup_warning = elevated_warning
+        .map(str::to_string)
+        .or(compatibility_warning)
+        .or_else(|| {
+            daemon_exclusion
             .filter(|_| auto_start_daemon)
             .map(|reason| {
                 format!(
                     "Running without the shared background server: {reason} requires embedded mode."
                 )
             })
-    });
+        });
     #[cfg(target_os = "macos")]
     let local_runtime_paths = local_runtime_paths.with_allowed_symlinked_codex_home(
         codex_config::allowed_symlinked_codex_home(&config.config_layer_stack, &config.codex_home),
@@ -614,6 +588,7 @@ pub(super) async fn run_main_inner(
     let selection_reason = match (&app_server_target, daemon_exclusion) {
         (AppServerTarget::Remote { .. }, _) => "explicit_remote",
         _ if cli.agents_overview => "agents",
+        _ if elevated_warning.is_some() => "elevated_windows",
         (_, Some("--no-daemon")) => "explicit_no_daemon",
         (_, Some(_)) => "incompatible_option",
         _ if auto_start_daemon => "auto_start",
@@ -707,9 +682,6 @@ pub(super) async fn run_main_inner(
         {
             restore_terminal_before_fatal_exit();
             eprintln!("Error adding directories: {warning}");
-            if let Some(worktree) = managed_worktree.as_ref() {
-                worktree.report_startup_failure();
-            }
             launch_telemetry.record(&app_server_target, /*connected*/ false);
             if let Some(otel) = otel {
                 let _ = otel
@@ -728,9 +700,6 @@ pub(super) async fn run_main_inner(
         {
             restore_terminal_before_fatal_exit();
             eprintln!("{err}");
-            if let Some(worktree) = managed_worktree.as_ref() {
-                worktree.report_startup_failure();
-            }
             launch_telemetry.record(&app_server_target, /*connected*/ false);
             if let Some(otel) = otel {
                 let _ = otel
@@ -855,7 +824,6 @@ pub(super) async fn run_main_inner(
         state_db,
         environment_manager,
         embedded_network_policy,
-        managed_worktree.clone(),
         daemon_startup_warning,
         launch_telemetry,
         startup_draft,
@@ -865,10 +833,6 @@ pub(super) async fn run_main_inner(
         err.downcast::<std::io::Error>()
             .unwrap_or_else(|err| std::io::Error::other(err.to_string()))
     });
-
-    if let Some(worktree) = managed_worktree.as_ref() {
-        worktree.report_startup_failure();
-    }
 
     if let Some(otel) = otel
         && let Err(err) = otel

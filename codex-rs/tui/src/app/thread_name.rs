@@ -171,7 +171,7 @@ impl App {
                 }
                 if self.agents_overview.rendered_full_screen {
                     if let Ok(mut state) = self.agents_overview.view_state.lock() {
-                        state.input = name;
+                        state.set_rename_input(&name, &self.keymap);
                         state.rename_target = Some(thread_id);
                     }
                     self.repaint_agents_overview();
@@ -190,9 +190,12 @@ impl App {
         app_server: &mut AppServerSession,
         name: Option<String>,
         conflict_thread_ids: Vec<String>,
+        from_agents_overview: bool,
     ) -> Result<()> {
         let from_locked_thread = self.chat_widget.is_external_writer_view();
-        let source = if from_locked_thread {
+        let source = if from_agents_overview {
+            "agents_overview_shortcut"
+        } else if from_locked_thread {
             "locked_thread_shortcut"
         } else {
             "slash_command"
@@ -236,7 +239,8 @@ impl App {
             .clone_from(&self.chat_widget.config_ref().model_provider_id);
         config.model = Some(self.chat_widget.current_model().to_string());
         config.model_reasoning_effort = self.chat_widget.current_reasoning_effort();
-        let selected_profile = self.confirmed_server_profile(thread_id);
+        config.daybreak_enabled = self.chat_widget.daybreak_enabled;
+        let selected_profile = self.selected_server_profile(thread_id);
         // Sampled once: the source turn may finish while the fork request is in flight.
         let source_turn_running = self.chat_widget.is_agent_turn_running();
         let goal_continuation = if source_turn_running {
@@ -262,10 +266,40 @@ impl App {
         self.chat_widget.fork_in_progress = false;
         match result {
             Ok(forked) => {
+                if let Some(profile) = &selected_profile {
+                    self.agents_overview
+                        .selected_permission_profiles
+                        .insert(forked.session.thread_id, profile.profile_id.clone());
+                }
                 // In-flight input stays with its source; only idle locked drafts follow the fork.
                 let retained_input = (from_locked_thread && !source_turn_running)
                     .then(|| self.chat_widget.capture_thread_input_state())
                     .flatten();
+                // Fork changes the foreground, not the source family's lifetime or approvals.
+                let mut retained_threads = self.agent_navigation.tracked_thread_ids();
+                retained_threads.push(thread_id);
+                retained_threads.extend(
+                    self.thread_event_channels
+                        .keys()
+                        .copied()
+                        .filter(|id| self.is_family_thread(*id)),
+                );
+                for id in retained_threads {
+                    if !self.side_threads.contains_key(&id) {
+                        self.agents_overview
+                            .dispatched_requests
+                            .entry(id)
+                            .or_default();
+                        if let Some(channel) = self.thread_event_channels.get(&id)
+                            && let Some(input) = channel.store.lock().await.input_state.clone()
+                        {
+                            self.agents_overview.input_states.insert(id, input);
+                        }
+                    }
+                }
+                if let Some(input) = self.chat_widget.capture_thread_input_state() {
+                    self.agents_overview.input_states.insert(thread_id, input);
+                }
                 self.detach_current_thread_for_navigation(
                     app_server,
                     Some(forked.session.thread_id),
@@ -311,7 +345,9 @@ impl App {
                 }
             }
         }
-        if from_locked_thread && tui.presentation_mode() != crate::tui::PresentationMode::Frozen {
+        if (from_locked_thread || from_agents_overview)
+            && tui.presentation_mode() != crate::tui::PresentationMode::Frozen
+        {
             if let Err(error) = tui.discard_pending_input_before_interactive_screen() {
                 tracing::warn!(%error, "failed to discard input after forking");
             }

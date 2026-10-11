@@ -11,6 +11,7 @@ workspace = true
 codex-protocol = { workspace = true }
 codex-utils-string = { workspace = true }
 tiktoken-rs = { workspace = true }
+serde_json = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }

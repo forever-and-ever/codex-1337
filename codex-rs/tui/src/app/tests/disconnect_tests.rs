@@ -257,6 +257,7 @@ async fn disconnected_command_center_keeps_input_and_blocks_actions() -> Result<
         KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL),
         KeyEvent::new(KeyCode::Char('w'), KeyModifiers::NONE),
         KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL),
+        KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE),
     ] {
         app.handle_tui_event(&mut tui, &mut session, TuiEvent::Key(key))
             .await?;
@@ -271,8 +272,8 @@ async fn disconnected_command_center_keeps_input_and_blocks_actions() -> Result<
         !std::iter::from_fn(|| events.try_recv().ok()).any(|event| matches!(
             event,
             AppEvent::NewAgentsOverviewSession { .. }
-                | AppEvent::NewAgentsOverviewWorktree { .. }
                 | AppEvent::OpenResumePicker
+                | AppEvent::ForkAgentsOverviewThread { .. }
         ))
     );
     assert!(app.chat_widget.has_active_view());
@@ -412,6 +413,7 @@ async fn lost_initial_thread_reply_keeps_startup_draft_offline() -> Result<()> {
             ThreadParamsMode::Remote,
             /*remote_cwd_override*/ None,
             /*model_provider_override*/ None,
+            crate::app_server_session::StartupLaunchChoices::default(),
         )
         .await;
         let mut tui = crate::tui::test_support::make_test_tui()?;

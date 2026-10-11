@@ -460,6 +460,7 @@ async fn status_command_requests_thread_usage_for_remote_connection_metadata() {
         is_local_daemon: false,
     });
 
+    assert_matches!(rx.try_recv(), Ok(AppEvent::FetchModels { .. }));
     chat.dispatch_command(SlashCommand::Status);
 
     assert_matches!(rx.try_recv(), Ok(AppEvent::RefreshThreadUsage { .. }));
@@ -477,6 +478,7 @@ async fn status_command_requests_thread_usage_with_backend_only_authentication()
     );
     assert!(!chat.has_chatgpt_account());
     assert!(chat.has_codex_backend_auth());
+    assert_matches!(rx.try_recv(), Ok(AppEvent::FetchModels { .. }));
     chat.dispatch_command(SlashCommand::Status);
 
     assert_matches!(rx.try_recv(), Ok(AppEvent::RefreshThreadUsage { .. }));

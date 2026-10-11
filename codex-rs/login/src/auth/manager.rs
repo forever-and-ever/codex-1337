@@ -1048,7 +1048,8 @@ pub fn login_with_api_key(
     )
 }
 
-/// Writes an `auth.json` that contains only the access token.
+/// Validate and store personal-access-token or Agent Identity credentials through
+/// the selected storage backend.
 pub async fn login_with_access_token(
     codex_home: &Path,
     access_token: &str,
@@ -1446,7 +1447,7 @@ fn logout_with_message(
     );
     let error_message = match removal_result {
         Ok(_) => message,
-        Err(err) => format!("{message}. Failed to remove auth.json: {err}"),
+        Err(err) => format!("{message}. Failed to remove stored credentials: {err}"),
     };
     Err(std::io::Error::other(error_message))
 }
@@ -2131,10 +2132,7 @@ fn default_agent_identity_authapi_base_url() -> Option<String> {
 impl AuthManager {
     /// Returns the application policy associated with this account owner.
     pub fn application_network_policy(&self) -> codex_http_client::NetworkPolicy {
-        self.auth_route_config
-            .http_client_factory()
-            .network_policy()
-            .clone()
+        self.auth_route_config.application_network_policy().clone()
     }
 
     /// Creates content clients bound to the account currently owned by this manager.
@@ -2696,8 +2694,7 @@ impl AuthManager {
                 auth_changed_for_refresh && !same_owner(previous, new_auth.as_ref());
             if owner_changed {
                 self.auth_route_config
-                    .http_client_factory()
-                    .network_policy()
+                    .application_network_policy()
                     .invalidate();
             }
             if auth_changed_for_refresh {

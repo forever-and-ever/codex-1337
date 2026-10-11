@@ -74,12 +74,16 @@ async fn queued_connector_fetches_are_bound_to_their_original_account() -> Resul
         /*status_account_display*/ None, /*plan_type*/ None,
         /*has_chatgpt_account*/ true, /*has_codex_backend_auth*/ true,
     );
-    let stale_fetch = app_event_rx.try_recv()?;
+    let stale_fetch = std::iter::from_fn(|| app_event_rx.try_recv().ok())
+        .find(|event| matches!(event, AppEvent::FetchInstalledConnectorMentions { .. }))
+        .expect("installed connector request");
     app.chat_widget.update_account_state(
         /*status_account_display*/ None, /*plan_type*/ None,
         /*has_chatgpt_account*/ true, /*has_codex_backend_auth*/ true,
     );
-    let current_fetch = app_event_rx.try_recv()?;
+    let current_fetch = std::iter::from_fn(|| app_event_rx.try_recv().ok())
+        .find(|event| matches!(event, AppEvent::FetchInstalledConnectorMentions { .. }))
+        .expect("refreshed installed connector request");
 
     let mut tui = crate::tui::test_support::make_test_tui()?;
     let mut app_server =

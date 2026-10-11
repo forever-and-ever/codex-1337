@@ -2,7 +2,7 @@
 source: tui/src/app/agent_center_tests.rs
 expression: "screen(&view, area.width, area.height)"
 ---
-  Agent command center  Group: Project  ctrl+s
+  Agent command center  Group: Project  ⌃s
    All 1   Needs you 0   Working 0   Ready 1   Inactive 0
   ────────────────────────────────────────────────────────────────────────────────────
   Search › find

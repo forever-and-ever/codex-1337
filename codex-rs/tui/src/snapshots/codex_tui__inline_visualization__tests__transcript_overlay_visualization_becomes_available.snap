@@ -11,7 +11,7 @@ before:
 
 
 
-Ctrl+Space select
+⌃space select
  ↑/↓ to scroll · pgup/pgdn to page · home/end to jump
  q close · f3 find · esc browse prompts
 
@@ -25,6 +25,6 @@ after:
 
 
 
-Ctrl+Space select
+⌃space select
  ↑/↓ to scroll · pgup/pgdn to page · home/end to jump
  q close · f3 find · esc browse prompts

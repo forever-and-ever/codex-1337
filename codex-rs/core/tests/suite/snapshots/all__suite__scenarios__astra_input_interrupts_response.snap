@@ -1,17 +1,22 @@
 ---
 source: core/tests/suite/scenarios.rs
+assertion_line: 1282
 expression: snapshot
 ---
 Scenario: Astra receives new user input after its unfinished response is interrupted.
 
 ## Window 1
 -- request 1 (request) --
-00:additional_tools/developer (2; hash=4672f415672fd65d):
-        - namespace/functions; hash=780182ad41191b99
+00:additional_tools/developer (2; hash=10add372b5a6b355):
+        - namespace/functions; hash=23dcd4f361a08c29
           - custom/exec
           - function/wait
+          - custom/python
+          - custom/bash
+          - function/write_stdin
           - function/request_user_input
           - function/request_user_input_async
+          - function/fence
         - namespace/wrangler_agents: Tools for spawning and managing sub-agents.; hash=458c670bcb4faf15
           - function/wait_agent
 01:message/developer:

@@ -5,7 +5,7 @@ use crate::without_update_plan_instructions;
 use codex_context_fragments::ContextualUserFragment;
 use codex_protocol::models::ContentItemKind;
 
-const DEFAULT_MULTI_AGENT_V2_MODEL_OVERRIDE_USAGE_HINT_TEXT: &str = "Full-history forks (`fork_turns` omitted or `\"all\"`) inherit the parent model and reasoning effort and do not accept overrides. Only set `model` or `reasoning_effort` when explicitly requested by the user, applicable `AGENTS.md` instructions, or skill instructions; when doing so, set `fork_turns` to `\"none\"` or a positive integer string.";
+const DEFAULT_MULTI_AGENT_V2_MODEL_OVERRIDE_USAGE_HINT_TEXT: &str = "Full-history forks (`fork_turns` omitted or `\"all\"`) inherit the parent model and reasoning effort and do not accept overrides. Only set `model` or `reasoning_effort` when explicitly requested by the user, applicable `AGENTS.md` instructions, or skill instructions; when doing so, set `fork_turns` to `\"none\"`.";
 const DEFAULT_MULTI_AGENT_V2_WAIT_AGENT_USAGE_HINT_TEXT: &str =
     "When calling `wait_agent`, prefer longer waits (minutes) to avoid busy polling.";
 const DEFAULT_MULTI_AGENT_V2_DIRECT_USAGE_HINT_TEXT: &str = "Agent-control tools cannot be called from inside `exec`. Call `spawn_agent`, `send_message`, `followup_task`, `wait_agent`, `interrupt_agent`, and `list_agents` directly using the exact exposed names in their tool definitions. They are intentionally absent from the JavaScript `tools.*` namespace. Tools available inside `exec` are listed in `ALL_TOOLS` and accessed through `tools.*`.";
@@ -40,10 +40,6 @@ impl ContextualUserFragment for MultiAgentRoleInstructions {
 
     fn role(&self) -> &'static str {
         "developer"
-    }
-
-    fn requires_separate_message(&self) -> bool {
-        true
     }
 
     fn markers(&self) -> (&'static str, &'static str) {

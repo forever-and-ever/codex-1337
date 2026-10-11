@@ -17,5 +17,3 @@ mod status_indicator;
 mod ui_reload;
 mod vt100_history;
 mod vt100_live_commit;
-#[cfg(unix)]
-mod worktree_stack;

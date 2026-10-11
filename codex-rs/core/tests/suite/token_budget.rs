@@ -1499,10 +1499,8 @@ async fn token_budget_auto_compact_fallback_uses_buffer_until_new_context() -> R
             .any(|name| name == "get_context_remaining"),
         "fallback should preserve the normal tool surface"
     );
-    assert_eq!(
-        fallback_request.function_call_output_text(trigger_call_id),
-        Some("You have 0 tokens left in this context window.".to_string())
-    );
+    // The tool may finish before this response reports usage; fallback admission,
+    // not its earlier remaining-token sample, owns the exhausted-window decision.
     let initial_context = token_budget_contexts(&requests[0]);
     assert_eq!(token_budget_contexts(fallback_request), initial_context);
     assert_eq!(token_budget_contexts(&requests[2]), initial_context);

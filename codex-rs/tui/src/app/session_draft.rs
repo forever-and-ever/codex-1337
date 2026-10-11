@@ -61,12 +61,19 @@ impl App {
         self.config.model = Some(self.chat_widget.current_model().to_owned());
         self.config.model_reasoning_effort = self.chat_widget.current_reasoning_effort();
         self.pending_startup_thread_start = true;
+        let mut launch_choices = crate::app_server_session::StartupLaunchChoices::default();
+        launch_choices.model = self.config.model.clone();
+        launch_choices.effort = self
+            .config
+            .model_reasoning_effort
+            .as_ref()
+            .and_then(|effort| serde_json::to_value(effort).ok());
         super::startup::spawn_startup_thread_start(
             server,
             self.local_settings.clone(),
             self.config.clone(),
+            launch_choices,
             self.app_event_tx.clone(),
-            /*worktree*/ None,
             Some(self.config.model_provider_id.clone()),
         );
     }

@@ -80,6 +80,10 @@ mod page_loading;
 #[path = "resume_picker_color_tests.rs"]
 mod color_tests;
 
+#[cfg(test)]
+#[path = "resume_picker_pagination_error_tests.rs"]
+mod pagination_error_tests;
+
 use page_loading::PageCwdFilter;
 use page_loading::PageLoadMode;
 use page_loading::PaginationState;
@@ -329,10 +333,10 @@ struct SessionPickerViewPersistence {
 struct SessionPickerRunOptions {
     use_theme_colors: bool,
     copy_on_select: bool,
+    mouse_scroll_speed: f64,
     show_all: bool,
     filter_cwd: Option<PathBuf>,
     local_filter_cwd: Option<PathBuf>,
-    worktrees_enabled: bool,
     action: SessionPickerAction,
     launch_context: SessionPickerLaunchContext,
     initial_density: SessionListDensity,
@@ -438,10 +442,10 @@ async fn run_resume_picker_with_launch_context(
     let options = SessionPickerRunOptions {
         use_theme_colors: local_settings.tui.status_line_use_colors,
         copy_on_select: local_settings.copy_on_select(&codex_terminal_detection::terminal_info()),
+        mouse_scroll_speed: local_settings.tui.mouse_scroll_speed.unwrap_or(1.0),
         show_all,
         filter_cwd: cwd_filter,
         local_filter_cwd,
-        worktrees_enabled: config.features.enabled(codex_features::Feature::Worktrees),
         action: SessionPickerAction::Resume,
         launch_context,
         initial_density: SessionListDensity::from(
@@ -461,7 +465,6 @@ async fn run_resume_picker_with_launch_context(
         tui,
         options,
         spawn_app_server_page_loader(
-            uses_remote_filesystem,
             app_server,
             archive_request_handle,
             include_non_interactive,
@@ -496,10 +499,10 @@ pub async fn run_fork_picker_with_app_server(
     let options = SessionPickerRunOptions {
         use_theme_colors: local_settings.tui.status_line_use_colors,
         copy_on_select: local_settings.copy_on_select(&codex_terminal_detection::terminal_info()),
+        mouse_scroll_speed: local_settings.tui.mouse_scroll_speed.unwrap_or(1.0),
         show_all,
         filter_cwd: cwd_filter,
         local_filter_cwd,
-        worktrees_enabled: config.features.enabled(codex_features::Feature::Worktrees),
         action: SessionPickerAction::Fork,
         launch_context: SessionPickerLaunchContext::Startup,
         initial_density: SessionListDensity::from(
@@ -519,7 +522,6 @@ pub async fn run_fork_picker_with_app_server(
         tui,
         options,
         spawn_app_server_page_loader(
-            uses_remote_filesystem,
             app_server,
             archive_request_handle,
             /*include_non_interactive*/ false,
@@ -549,7 +551,7 @@ async fn run_session_picker_with_loader(
     state.local_filter_cwd = options.local_filter_cwd;
     state.use_theme_colors = options.use_theme_colors;
     state.copy_on_select = options.copy_on_select;
-    state.worktrees_enabled = options.worktrees_enabled;
+    state.mouse_scroll_speed = options.mouse_scroll_speed;
     state.density = options.initial_density;
     state.view_persistence = options.view_persistence;
     state.keymap = options.keymap;
@@ -669,7 +671,6 @@ fn picker_cwd_filter(
 }
 
 fn spawn_app_server_page_loader(
-    uses_remote_filesystem: bool,
     app_server: AppServerSession,
     archive_request_handle: AppServerRequestHandle,
     include_non_interactive: bool,
@@ -685,14 +686,8 @@ fn spawn_app_server_page_loader(
         while let Some(request) = request_rx.recv().await {
             match request {
                 PickerLoadRequest::Page(request) => {
-                    let cwd_filter = page_cwd_filter.for_request(
-                        request.cursor.as_ref(),
-                        request.cwd_filter.as_deref(),
-                        uses_remote_filesystem,
-                        config.as_ref().is_some_and(|config| {
-                            config.features.enabled(codex_features::Feature::Worktrees)
-                        }),
-                    );
+                    let cwd_filter = page_cwd_filter
+                        .for_request(request.cursor.as_ref(), request.cwd_filter.as_deref());
                     let cursor = request.cursor.map(|PageCursor::AppServer(cursor)| cursor);
                     let params = thread_list_params(
                         cursor,
@@ -815,6 +810,7 @@ struct PickerState {
     clock_format: ClockFormat,
     use_theme_colors: bool,
     copy_on_select: bool,
+    mouse_scroll_speed: f64,
     // Resolve local filesystem membership once per cwd for each page-loading cycle.
     local_cwd_matches: HashMap<PathBuf, bool>,
     requester: FrameRequester,
@@ -839,7 +835,6 @@ struct PickerState {
     status: SessionStatus,
     filter_cwd: Option<PathBuf>,
     local_filter_cwd: Option<PathBuf>,
-    worktrees_enabled: bool,
     toolbar_focus: ToolbarControl,
     density: SessionListDensity,
     launch_context: SessionPickerLaunchContext,
@@ -1014,6 +1009,7 @@ impl PickerState {
             clock_format: ClockFormat::system(),
             use_theme_colors: true,
             copy_on_select: false,
+            mouse_scroll_speed: 1.0,
             requester,
             relative_time_reference: None,
             pagination: PaginationState::new(),
@@ -1036,7 +1032,6 @@ impl PickerState {
             status: SessionStatus::Active,
             local_filter_cwd: filter_cwd.clone(),
             local_cwd_matches: HashMap::new(),
-            worktrees_enabled: false,
             filter_cwd,
             toolbar_focus: ToolbarControl::Filter,
             density: SessionListDensity::Comfortable,
@@ -1065,7 +1060,7 @@ impl PickerState {
             self.chord_matcher.cancel();
             return Some(key);
         }
-        let context = if matches!(&self.overlay, Some(Overlay::Transcript(overlay)) if overlay.is_search_active())
+        let context = if matches!(&self.overlay, Some(Overlay::Transcript(overlay)) if overlay.is_search_editing())
         {
             crate::keymap::KeymapContext::Editor
         } else if self.overlay.is_some() {
@@ -1118,6 +1113,7 @@ impl PickerState {
             cells.clone(),
             self.keymap.pager.clone(),
             self.copy_on_select,
+            self.mouse_scroll_speed,
         );
         if let Overlay::Transcript(view) = &mut overlay {
             view.set_keymap_bindings(&self.keymap);
@@ -1494,7 +1490,19 @@ impl PickerState {
                     }));
                     return Ok(None);
                 }
-                let page = page.map_err(color_eyre::Report::from)?;
+                let page = match page {
+                    Ok(page) => page,
+                    Err(_) if !self.all_rows.is_empty() => {
+                        self.pagination.next_cursor = None;
+                        self.pending_page_down_target = None;
+                        self.frozen_footer_percent = None;
+                        self.search_state = SearchState::Idle;
+                        self.inline_error = Some("Could not load more sessions".to_string());
+                        self.request_frame();
+                        return Ok(None);
+                    }
+                    Err(err) => return Err(err.into()),
+                };
                 self.ingest_page(page);
                 self.complete_pending_page_down();
                 let completed_token = pending.search_token.or(search_token);
@@ -1643,13 +1651,6 @@ impl PickerState {
             return false;
         };
         paths_match(row_cwd, filter_cwd)
-            || (self.worktrees_enabled
-                && codex_git_utils::repository_identity(row_cwd)
-                    .zip(codex_git_utils::repository_identity(filter_cwd))
-                    .is_some_and(|(row, filter)| {
-                        row.common_dir == filter.common_dir
-                            && row.relative_cwd == filter.relative_cwd
-                    }))
     }
 
     fn set_query(&mut self, new_query: String) {
@@ -2059,25 +2060,6 @@ fn thread_list_params(
     }
 }
 
-pub(crate) fn repository_cwd_filter(
-    cwd: &Path,
-    uses_remote_filesystem: bool,
-    worktrees_enabled: bool,
-) -> ThreadListCwdFilter {
-    if worktrees_enabled
-        && !uses_remote_filesystem
-        && let Some(cwds) = codex_git_utils::linked_worktree_cwds(cwd)
-        && cwds.len() > 1
-    {
-        return ThreadListCwdFilter::Many(
-            cwds.into_iter()
-                .map(|cwd| cwd.to_string_lossy().into_owned())
-                .collect(),
-        );
-    }
-    ThreadListCwdFilter::One(cwd.to_string_lossy().into_owned())
-}
-
 fn paths_match(a: &Path, b: &Path) -> bool {
     path_utils::paths_match_after_normalization(a, b)
 }
@@ -2385,7 +2367,7 @@ fn footer_hint_lines(state: &PickerState, width: u16) -> Vec<Line<'static>> {
                 priority: 0,
             },
             PickerFooterHint {
-                key: "ctrl+c".to_string(),
+                key: crate::key_hint::ctrl(KeyCode::Char('c')).display_label(),
                 wide_label: String::from("quit"),
                 compact_label: String::from("quit"),
                 priority: 1,
@@ -2434,7 +2416,7 @@ fn footer_hint_lines(state: &PickerState, width: u16) -> Vec<Line<'static>> {
     }
     if !state.filtered_rows.is_empty() && state.archive_shortcut_available() {
         first_row_hints.push(PickerFooterHint {
-            key: "ctrl+a".to_string(),
+            key: crate::key_hint::ctrl(KeyCode::Char('a')).display_label(),
             wide_label: String::from("archive"),
             compact_label: String::from("archive"),
             priority: 2,
@@ -2450,7 +2432,7 @@ fn footer_hint_lines(state: &PickerState, width: u16) -> Vec<Line<'static>> {
     }
     first_row_hints.extend([
         PickerFooterHint {
-            key: "ctrl+c".to_string(),
+            key: crate::key_hint::ctrl(KeyCode::Char('c')).display_label(),
             wide_label: ctrl_c_label.to_string(),
             compact_label: ctrl_c_label.to_string(),
             priority: 2,
@@ -2478,19 +2460,19 @@ fn footer_hint_lines(state: &PickerState, width: u16) -> Vec<Line<'static>> {
     }
     let mut second_row_hints = vec![
         PickerFooterHint {
-            key: "ctrl+o".to_string(),
+            key: crate::key_hint::ctrl(KeyCode::Char('o')).display_label(),
             wide_label: density_label.to_string(),
             compact_label: density_compact_label.to_string(),
             priority: 3,
         },
         PickerFooterHint {
-            key: "ctrl+t".to_string(),
+            key: crate::key_hint::ctrl(KeyCode::Char('t')).display_label(),
             wide_label: String::from("transcript"),
             compact_label: String::from("preview"),
             priority: 4,
         },
         PickerFooterHint {
-            key: "ctrl+e".to_string(),
+            key: crate::key_hint::ctrl(KeyCode::Char('e')).display_label(),
             wide_label: String::from("expand"),
             compact_label: String::from("exp"),
             priority: 6,
@@ -2826,13 +2808,7 @@ fn render_comfortable_session_lines(
         .cwd
         .as_ref()
         .map(|path| format_directory_display(path, /*max_width*/ None));
-    let show_cwd = state.filter_mode == SessionFilterMode::All
-        || (state.worktrees_enabled
-            && row
-                .cwd
-                .as_deref()
-                .zip(state.local_filter_cwd.as_deref())
-                .is_some_and(|(row_cwd, filter_cwd)| !paths_match(row_cwd, filter_cwd)));
+    let show_cwd = state.filter_mode == SessionFilterMode::All;
     let footer_lines = render_footer_lines(
         state.sort_key,
         &created,
@@ -3697,204 +3673,6 @@ mod tests {
         assert_eq!(row.display_preview(), "My session");
     }
 
-    #[tokio::test]
-    async fn worktrees_filtering_requires_feature() {
-        let root = tempfile::tempdir().expect("temporary repository");
-        let primary = root.path().join("primary");
-        let linked = root.path().join("linked");
-        let admin = primary.join(".git/worktrees/linked");
-        std::fs::create_dir_all(&admin).unwrap();
-        std::fs::create_dir_all(&linked).unwrap();
-        std::fs::write(primary.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
-        std::fs::write(admin.join("commondir"), "../..").unwrap();
-        std::fs::write(
-            admin.join("gitdir"),
-            linked.join(".git").display().to_string(),
-        )
-        .unwrap();
-        std::fs::write(linked.join(".git"), format!("gitdir: {}", admin.display())).unwrap();
-        let primary = dunce::canonicalize(primary).unwrap();
-        let linked = dunce::canonicalize(linked).unwrap();
-        let mut state = PickerState::new(
-            FrameRequester::test_dummy(),
-            page_only_loader(|_| {}),
-            /*show_all*/ false,
-            Some(primary.clone()),
-            SessionPickerAction::Resume,
-        );
-        let mut row = make_row("session.jsonl", "2025-01-01T00:00:00Z", "Linked session");
-        row.cwd = Some(linked.clone());
-        let single = ThreadListCwdFilter::One(primary.display().to_string());
-        for enabled in [false, true] {
-            state.worktrees_enabled = enabled;
-            state.start_initial_load();
-            state.ingest_page(page(
-                vec![row.clone()],
-                /*next_cursor*/ None,
-                /*num_scanned_files*/ 1,
-                /*reached_scan_cap*/ false,
-            ));
-            assert_eq!(
-                state.filtered_rows,
-                if enabled { vec![row.clone()] } else { vec![] }
-            );
-            if enabled {
-                state
-                    .pagination
-                    .finish_load(state.next_request_token - 1)
-                    .expect("initial page completed");
-                state.relative_time_reference =
-                    Some(parse_timestamp_str("2025-01-02T00:00:00Z").expect("fixed time"));
-                // The retained row was filtered using its real checkout path; use a stable
-                // display path so the snapshot is independent of the temporary directory.
-                state.filtered_rows[0].cwd = Some(PathBuf::from("/repo/linked"));
-                state.update_viewport(/*rows*/ 12, /*width*/ 100);
-                assert_snapshot!(
-                    "resume_picker_linked_worktree",
-                    render_picker_list(&state, /*width*/ 100, /*height*/ 12)
-                );
-            }
-            assert_eq!(
-                repository_cwd_filter(&primary, /*uses_remote_filesystem*/ false, enabled),
-                if enabled {
-                    ThreadListCwdFilter::Many(vec![
-                        primary.display().to_string(),
-                        linked.display().to_string(),
-                    ])
-                } else {
-                    single.clone()
-                }
-            );
-            assert_eq!(
-                repository_cwd_filter(&primary, /*uses_remote_filesystem*/ true, enabled),
-                single
-            );
-        }
-        let mut config = crate::legacy_core::config::ConfigBuilder::default()
-            .codex_home(root.path().to_path_buf())
-            .build()
-            .await
-            .unwrap();
-        config
-            .features
-            .set_enabled(codex_features::Feature::Worktrees, /*enabled*/ true)
-            .unwrap();
-        for (filename_ts, timestamp, cwd, provider) in [
-            (
-                "2025-01-02T10-00-00",
-                "2025-01-02T10:00:00Z",
-                &primary,
-                "openai",
-            ),
-            (
-                "2025-01-02T11-00-00",
-                "2025-01-02T11:00:00Z",
-                &linked,
-                "claude_subscription",
-            ),
-        ] {
-            crate::tests::write_session_rollout(
-                root.path(),
-                filename_ts,
-                timestamp,
-                "picker session",
-                provider,
-                cwd,
-            )
-            .expect("persist CLI session");
-        }
-        let app_server = crate::start_embedded_app_server_for_picker(&config)
-            .await
-            .expect("start local app-server");
-        let request_handle = app_server.request_handle();
-        let (bg_tx, mut bg_rx) = mpsc::unbounded_channel();
-        let loader = spawn_app_server_page_loader(
-            /*uses_remote_filesystem*/ false,
-            app_server,
-            request_handle,
-            /*include_non_interactive*/ false,
-            RawReasoningVisibility::Hidden,
-            Some(config.clone()),
-            bg_tx,
-        );
-        let mut live_picker = PickerState::new(
-            FrameRequester::test_dummy(),
-            loader,
-            /*show_all*/ false,
-            Some(primary.clone()),
-            SessionPickerAction::Resume,
-        );
-        live_picker.local_filter_cwd = Some(primary.clone());
-        live_picker.worktrees_enabled = true;
-        live_picker.start_initial_load();
-        let event = tokio::time::timeout(std::time::Duration::from_secs(10), bg_rx.recv())
-            .await
-            .expect("app-server page response")
-            .expect("page event");
-        live_picker
-            .handle_background_event(event)
-            .await
-            .expect("ingest app-server page");
-        let linked_index = live_picker
-            .filtered_rows
-            .iter()
-            .position(|row| row.cwd.as_deref() == Some(linked.as_path()))
-            .unwrap_or_else(|| panic!("linked session missing from {:?}", live_picker.all_rows));
-        live_picker.selected = linked_index;
-        let linked_id = live_picker.filtered_rows[linked_index]
-            .thread_id
-            .expect("listed linked session id");
-        let accept = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
-        assert!(matches!(
-            live_picker.handle_key(accept).await.expect("resume selection"),
-            Some(SessionSelection::Resume(SessionTarget { thread_id, .. })) if thread_id == linked_id
-        ));
-        live_picker.action = SessionPickerAction::Fork;
-        assert!(matches!(
-            live_picker.handle_key(accept).await.expect("fork selection"),
-            Some(SessionSelection::Fork(SessionTarget { thread_id, .. })) if thread_id == linked_id
-        ));
-        let mut local = crate::latest_session_lookup_params(
-            /*uses_remote_filesystem*/ false,
-            &config,
-            Some(&primary),
-            /*include_non_interactive*/ false,
-            crate::LatestSessionLookupMode::StateDbOnly,
-        );
-        assert!(matches!(local.cwd, Some(ThreadListCwdFilter::Many(_))));
-        local.cwd = Some(single.clone());
-        assert_eq!(
-            crate::latest_session_lookup_params(
-                /*uses_remote_filesystem*/ true,
-                &config,
-                Some(&primary),
-                /*include_non_interactive*/ false,
-                crate::LatestSessionLookupMode::StateDbOnly,
-            ),
-            local
-        );
-        std::fs::remove_file(linked.join(".git")).unwrap();
-        state.set_query("Linked".to_string());
-        assert_eq!(state.filtered_rows, vec![row.clone()]);
-        state.start_initial_load();
-        state.ingest_page(page(
-            vec![row.clone()],
-            /*next_cursor*/ None,
-            /*num_scanned_files*/ 1,
-            /*reached_scan_cap*/ false,
-        ));
-        assert!(state.filtered_rows.is_empty());
-        state.filter_mode = SessionFilterMode::All;
-        state.apply_filter();
-        assert_eq!(state.filtered_rows, vec![row.clone()]);
-        state.filter_mode = SessionFilterMode::Cwd;
-        state.local_filter_cwd =
-            local_picker_cwd_filter(&Some(primary), /*uses_remote_filesystem*/ true);
-        assert_eq!(state.local_filter_cwd, None);
-        state.apply_filter();
-        assert_eq!(state.filtered_rows, vec![row]);
-    }
-
     #[test]
     fn local_picker_thread_list_params_include_cwd_filter() {
         let cwd_filter = picker_cwd_filter(
@@ -4540,11 +4318,11 @@ mod tests {
 
         let wide = footer_lines_text(&state, /*width*/ 220);
         assert!(wide.contains("esc exit"));
-        assert!(wide.contains("ctrl+c exit"));
+        assert!(wide.contains("⌃c exit"));
 
         let compact = footer_lines_text(&state, /*width*/ 119);
         assert!(compact.contains("esc exit"));
-        assert!(compact.contains("ctrl+c exit"));
+        assert!(compact.contains("⌃c exit"));
 
         state.query = String::from("picker");
 
@@ -4562,14 +4340,14 @@ mod tests {
             SessionPickerAction::Resume,
         );
 
-        assert!(footer_lines_text(&state, /*width*/ 220).contains("ctrl+o dense view"));
-        assert!(footer_lines_text(&state, /*width*/ 220).contains("ctrl+t transcript"));
-        assert!(footer_lines_text(&state, /*width*/ 220).contains("ctrl+e expand"));
+        assert!(footer_lines_text(&state, /*width*/ 220).contains("⌃o dense view"));
+        assert!(footer_lines_text(&state, /*width*/ 220).contains("⌃t transcript"));
+        assert!(footer_lines_text(&state, /*width*/ 220).contains("⌃e expand"));
         state.keymap.list.move_left = vec![crate::key_hint::ctrl(KeyCode::Char('h'))];
         state.keymap.list.move_right = vec![crate::key_hint::ctrl(KeyCode::Char('l'))];
         let remapped_footer = footer_lines_text(&state, /*width*/ 220);
         assert!(
-            remapped_footer.contains("ctrl+h/ctrl+l change option"),
+            remapped_footer.contains("⌃h/⌃l change option"),
             "{remapped_footer}"
         );
         state.keymap.list.move_left.clear();
@@ -4578,7 +4356,7 @@ mod tests {
 
         state.density = SessionListDensity::Dense;
 
-        assert!(footer_lines_text(&state, /*width*/ 220).contains("ctrl+o comfortable view"));
+        assert!(footer_lines_text(&state, /*width*/ 220).contains("⌃o comfortable view"));
     }
 
     #[test]
@@ -4597,9 +4375,9 @@ mod tests {
         assert!(rendered.contains("esc new"));
         assert!(rendered.contains("tab focus"));
         assert!(rendered.contains("←/→ option"));
-        assert!(rendered.contains("ctrl+o dense"));
-        assert!(rendered.contains("ctrl+t preview"));
-        assert!(rendered.contains("ctrl+e exp"));
+        assert!(rendered.contains("⌃o dense"));
+        assert!(rendered.contains("⌃t preview"));
+        assert!(rendered.contains("⌃e exp"));
         assert!(!rendered.contains("focus sort/filter"));
     }
 
@@ -4662,7 +4440,7 @@ mod tests {
         assert!(lines.iter().all(|line| line.width() <= width as usize));
         assert_eq!(
             rendered,
-            " enter resume   esc new   ctrl+c quit\n ctrl+o comfy   ctrl+t preview"
+            " enter resume   esc new   ⌃c quit\n ⌃o comfy   ⌃t preview   ↑/↓ browse"
         );
     }
 
@@ -4681,7 +4459,7 @@ mod tests {
         let rendered = footer_lines_text(&state, /*width*/ 80);
 
         assert!(rendered.contains("loading transcript"));
-        assert!(rendered.contains("ctrl+c quit"));
+        assert!(rendered.contains("⌃c quit"));
         assert!(!rendered.contains("enter"));
     }
 
@@ -5592,36 +5370,6 @@ session_picker_view = "dense"
                     "/Users/felipe.coury/code/codex.fcoury-session-picker/codex-rs"
                 )),
                 /*width*/ 100,
-            )
-        );
-    }
-
-    #[test]
-    fn dense_session_snapshot_includes_cwd_in_all_filter() {
-        assert_snapshot!(
-            "resume_picker_dense_all",
-            render_dense_row_snapshot(
-                /*show_all*/ true, /*filter_cwd*/ None, /*width*/ 120,
-            )
-        );
-    }
-
-    #[test]
-    fn dense_session_snapshot_auto_hides_cwd_when_narrow() {
-        assert_snapshot!(
-            "resume_picker_dense_all_auto_hidden_cwd",
-            render_dense_row_snapshot(
-                /*show_all*/ true, /*filter_cwd*/ None, /*width*/ 100,
-            )
-        );
-    }
-
-    #[test]
-    fn dense_session_snapshot_forces_cwd_when_narrow() {
-        assert_snapshot!(
-            "resume_picker_dense_all_forced_cwd",
-            render_dense_row_snapshot(
-                /*show_all*/ true, /*filter_cwd*/ None, /*width*/ 48,
             )
         );
     }
@@ -6674,6 +6422,7 @@ session_picker_view = "dense"
             name: None,
             turns: vec![codex_app_server_protocol::Turn {
                 id: String::from("turn-1"),
+                root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
                 items: vec![
                     ThreadItem::UserMessage {
@@ -6765,6 +6514,7 @@ session_picker_view = "dense"
             name: None,
             turns: vec![codex_app_server_protocol::Turn {
                 id: String::from("turn-1"),
+                root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
                 items: vec![ThreadItem::Reasoning {
                     id: String::from("reasoning-1"),
@@ -6848,6 +6598,7 @@ session_picker_view = "dense"
             name: None,
             turns: vec![codex_app_server_protocol::Turn {
                 id: String::from("turn-1"),
+                root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
                 items: vec![ThreadItem::Reasoning {
                     id: String::from("reasoning-1"),

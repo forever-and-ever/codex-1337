@@ -24,6 +24,5 @@ Buffer {
         x: 6, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
         x: 14, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
         x: 16, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
-        x: 23, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }

@@ -43,6 +43,7 @@ fn plain_tools_join_an_existing_functions_group_only_with_a_prefix() {
                 audio: false,
                 generated_image: false,
             },
+            codex_code_mode::DeferredToolDiscovery::Catalog,
             /*messages*/ None,
         )
     };

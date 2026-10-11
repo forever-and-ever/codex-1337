@@ -1,5 +1,6 @@
 ---
 source: core/tests/suite/scenarios.rs
+assertion_line: 1863
 expression: "context_snapshot::format_request_history_snapshot(\"A non-deferred connector is called through code mode while another connector stays deferred.\",\n&requests,\n&ContextSnapshotOptions::default().rewrite_known_segments().include_request_settings(),)"
 ---
 Scenario: A non-deferred connector is called through code mode while another connector stays deferred.
@@ -7,7 +8,6 @@ Scenario: A non-deferred connector is called through code mode while another con
 ## Window 1
 Settings:
   include: ["reasoning.encrypted_content"]
-  instructions: <MODEL_INSTRUCTIONS>
   model: "gpt-5.5"
   parallel_tool_calls: true
   prompt_cache_key: "<PROMPT_CACHE_KEY 1>"
@@ -16,21 +16,27 @@ Settings:
   stream: true
   text: {"verbosity":"low"}
   tool_choice: "auto"
-  tools (4; hash=83d133304bec10c7):
-    - custom/exec: Run JavaScript code to orchestrate/compose tool calls - Evaluates the provided JavaScript code in...; hash=79a23fea464c22d5
+  tools (8; hash=d51095b4c4dfb058):
+    - custom/exec: Run JavaScript code to orchestrate/compose tool calls - Evaluates the provided JavaScript code in...; hash=792d687d41facfaa
     - function/wait: Waits on a yielded `exec` cell and returns new output or completion. - Use `wait` only after `exe...; args=[cell_id, max_tokens, terminate]; hash=0d6841040273c1cc
+    - custom/python: Execute ordinary python source in a fresh python3 -u process, not a REPL or JavaScript. Supply so...; hash=fa80d4eff151e99a
+    - custom/bash: Execute ordinary bash source in a fresh bash process, not a REPL or JavaScript. Supply source dir...; hash=e39c65dbec586069
+    - function/write_stdin: Writes characters to an existing unified exec session and returns recent output.  exec tool decla...; args=[chars, max_output_tokens, session_id, yield_time_ms]; hash=59f58fe2bb4727ef
     - function/request_user_input: Request user input for one to three short questions and wait for the response. This tool is only ...; args=[questions]; hash=64a729b25c424fc6
+    - function/fence: Barrier for client-dispatched tool calls within this model response; provider-hosted tools are ou...; args=[]; hash=580b65f59256ee3c
     - web_search; hash=e214d4db1bc49e89
 -- request 1 (turn) --
-00:message/developer[2]:
+00:message/developer:
+    <MODEL_INSTRUCTIONS>
+01:message/developer[2]:
     [01] <PERMISSIONS_INSTRUCTIONS>
     [02] <APPS_INSTRUCTIONS>
-01:message/user:
-    <ENVIRONMENT_CONTEXT>
 02:message/user:
+    <ENVIRONMENT_CONTEXT>
+03:message/user:
     Look up my calendar.
 -- request 2 (turn) --
-03:custom_tool_call/exec:text((await tools.mcp__codex_apps__calendar__lookup({})).content[0].text);
-04:custom_tool_call_output:Script completed
+04:custom_tool_call/exec:text((await tools.mcp__codex_apps__calendar__lookup({})).content[0].text);
+05:custom_tool_call_output:Script completed
     Output:
      | calendar-lookup-ok

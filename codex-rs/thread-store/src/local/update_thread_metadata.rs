@@ -97,6 +97,14 @@ pub(super) async fn update_thread_metadata(
         None
     };
     let paginated = matches!(history_mode, Some(ThreadHistoryMode::Paginated));
+    if paginated
+        && patch.name.is_some()
+        && live_writer::rollout_path(store, thread_id).await.is_ok()
+    {
+        // Naming saves a new thread even before its first turn. Persist its live recorder before
+        // updating SQLite so the named thread can be resumed immediately or after a restart.
+        live_writer::persist_thread(store, thread_id).await?;
+    }
     let needs_rollout_compat = requires_rollout_compat || patch.name.is_some();
     // Reject competing writers before committing any part of a legacy rollout patch to SQLite.
     let writer_lock = if !paginated
@@ -969,7 +977,14 @@ mod tests {
     #[tokio::test]
     async fn update_thread_metadata_sets_name_on_active_rollout_and_indexes_name() {
         let home = TempDir::new().expect("temp dir");
-        let store = LocalThreadStore::new(test_config(home.path()), /*state_db*/ None);
+        let config = test_config(home.path());
+        let runtime = codex_state::StateRuntime::init(
+            codex_state::SqliteConfig::new_for_testing(home.path().abs()),
+            config.default_model_provider_id.clone(),
+        )
+        .await
+        .expect("state db should initialize");
+        let store = LocalThreadStore::new(config, Some(runtime));
         let uuid = Uuid::from_u128(301);
         let thread_id = ThreadId::from_string(&uuid.to_string()).expect("valid thread id");
         write_session_file(home.path(), "2025-01-03T14-00-00", uuid).expect("session file");
@@ -1295,6 +1310,7 @@ mod tests {
         let path = write_session_file(home.path(), "2025-01-03T12-00-00", uuid)?;
         store
             .resume_thread(ResumeThreadParams {
+                history_revision: None,
                 thread_id,
                 rollout_path: Some(path.clone()),
                 history: None,
@@ -1514,6 +1530,7 @@ mod tests {
 
         store
             .resume_thread(ResumeThreadParams {
+                history_revision: None,
                 thread_id,
                 rollout_path: Some(path.clone()),
                 history: None,
@@ -2008,7 +2025,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn metadata_patch_applies_title_over_existing_name() {
+    async fn metadata_patch_preserves_explicit_name() {
         let home = TempDir::new().expect("temp dir");
         let config = test_config(home.path());
         let runtime = codex_state::StateRuntime::init(
@@ -2048,7 +2065,7 @@ mod tests {
             .expect("apply observed metadata")
             .expect("local store returns updated thread");
 
-        assert_eq!(thread.name.as_deref(), Some("Derived first message"));
+        assert_eq!(thread.name.as_deref(), Some("User chosen name"));
     }
 
     #[tokio::test]
@@ -2397,6 +2414,7 @@ mod tests {
         .await;
         store
             .resume_thread(ResumeThreadParams {
+                history_revision: None,
                 thread_id,
                 rollout_path: Some(archived_path.clone()),
                 history: None,

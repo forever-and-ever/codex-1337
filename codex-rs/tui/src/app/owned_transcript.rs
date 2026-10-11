@@ -8,6 +8,7 @@ use super::*;
 use crate::history_cell::HistoryRenderMode;
 use crate::keymap::KeymapContext;
 use crate::keymap::bindings_for_action;
+use crate::keymap::configured_binding_for_action;
 use crate::keymap::keymap_action_ids;
 use crate::motion::MotionMode;
 use crate::pager_overlay::TranscriptHistoryState;
@@ -47,6 +48,7 @@ impl App {
         let chat_widget = &self.chat_widget;
         let transcript_width = chat_widget.history_wrap_width(width);
         let view = &mut self.transcript_view;
+        view.mouse_scroll_speed = self.local_settings.tui.mouse_scroll_speed.unwrap_or(1.0);
         view.primary_selection = cfg!(target_os = "linux");
         view.copy_on_select = self
             .local_settings
@@ -59,7 +61,10 @@ impl App {
         let tool_output_tokens = view.activity_output_tokens(&active_ids);
         let expanded = view.sync_live_activity(&self.transcript_cells, active_ids)
             && chat_widget.history_render_mode() == HistoryRenderMode::Rich;
-        if detailed {
+        let search_changed = view.sync_search_live_tail(transcript_width, active_key, |width| {
+            chat_widget.active_cell_transcript_hyperlink_lines(width)
+        });
+        let changed = if detailed {
             view.sync_live_tail(transcript_width, active_key, |width| {
                 chat_widget.active_cell_transcript_hyperlink_lines(width)
             })
@@ -78,7 +83,8 @@ impl App {
                     )
                 },
             )
-        }
+        };
+        changed || search_changed
     }
 
     pub(super) fn render_owned_transcript(
@@ -132,6 +138,11 @@ impl App {
             /*height*/ 1,
         ));
         let footer = view.footer_with_navigation(footer_area.width, motion, latest_navigation);
+        // Cap the whole composer (including padding and hints) at two-thirds of the screen,
+        // but allow at least 8 rows on small screens, without exceeding the screen itself.
+        let max_composer_height = ((u32::from(screen_size.height) * 2 / 3) as u16)
+            .max(8)
+            .min(screen_size.height);
         let popup_placement = if view.has_active_interaction() {
             crate::bottom_pane::CommandPopupPlacement::Hidden
         } else {
@@ -149,13 +160,15 @@ impl App {
         if !live_work.is_empty() && composer_gap.is_some() {
             // Live work takes at most half the rows the transcript would have without it.
             let without = chat_widget
-                .bottom_pane_renderable(
-                    prompt_footer.as_ref().or(footer.as_ref()),
-                    popup_placement,
-                    crate::bottom_pane::ComposerHintPlacement::ScreenHeader,
-                    composer_gap.as_ref(),
+                .bottom_pane_renderable(crate::bottom_pane::ComposerRenderOptions {
+                    max_height: Some(max_composer_height),
+                    footer: prompt_footer.as_ref().or(footer.as_ref()),
+                    command_popup_placement: popup_placement,
+                    hint_placement: crate::bottom_pane::ComposerHintPlacement::ScreenHeader,
+                    composer_gap: composer_gap.as_ref(),
                     working_tip,
-                )
+                    ..Default::default()
+                })
                 .desired_height(screen_size.width);
             let room = usize::from(screen_size.height.saturating_sub(without) / 2);
             if let Some(gap) = composer_gap.as_mut() {
@@ -163,13 +176,16 @@ impl App {
                 gap.live.truncate(room);
             }
         }
-        let bottom = chat_widget.bottom_pane_renderable(
-            prompt_footer.as_ref().or(footer.as_ref()),
-            popup_placement,
-            crate::bottom_pane::ComposerHintPlacement::ScreenHeader,
-            composer_gap.as_ref(),
-            working_tip,
-        );
+        let bottom =
+            chat_widget.bottom_pane_renderable(crate::bottom_pane::ComposerRenderOptions {
+                max_height: Some(max_composer_height),
+                footer: prompt_footer.as_ref().or(footer.as_ref()),
+                command_popup_placement: popup_placement,
+                hint_placement: crate::bottom_pane::ComposerHintPlacement::ScreenHeader,
+                composer_gap: composer_gap.as_ref(),
+                working_tip,
+                ..Default::default()
+            });
         let dashboard_visible = chat_widget
             .selected_index_for_present_view(AGENTS_OVERVIEW_VIEW_ID)
             .is_some();
@@ -234,13 +250,20 @@ impl App {
             {
                 *progress = crate::bottom_pane::footer_hint_items_line(&items);
             }
-            let bottom = chat_widget.bottom_pane_renderable(
-                prompt_footer.as_ref().or(footer.as_ref()),
-                popup_placement,
-                crate::bottom_pane::ComposerHintPlacement::ScreenHeader,
-                composer_gap.as_ref(),
-                working_tip,
-            );
+            let bottom =
+                chat_widget.bottom_pane_renderable(crate::bottom_pane::ComposerRenderOptions {
+                    hint_placement: crate::bottom_pane::ComposerHintPlacement::ScreenHeader,
+                    max_height: Some(max_composer_height),
+                    footer: prompt_footer.as_ref().or(footer.as_ref()),
+                    command_popup_placement: if view.has_active_interaction() {
+                        crate::bottom_pane::CommandPopupPlacement::Hidden
+                    } else {
+                        crate::bottom_pane::CommandPopupPlacement::Overlay
+                    },
+                    composer_gap: composer_gap.as_ref(),
+                    working_tip,
+                    ..Default::default()
+                });
             footer_height_changed = !dashboard_visible
                 && bottom
                     .desired_height(screen_size.width)
@@ -339,6 +362,12 @@ impl App {
                     cursor_style = header.cursor_style(header_area);
                 }
             }
+            if let Some(dialog) = chat_widget.centered_dialog() {
+                let area = Rect::new(0, 0, screen_size.width, screen_size.height);
+                dialog.render(area, frame.buffer);
+                rendered_cursor = dialog.cursor_pos(area);
+                cursor_style = dialog.cursor_style(area);
+            }
             if let Some(position) = rendered_cursor {
                 frame.set_cursor_style(cursor_style);
                 frame.set_cursor_position(position);
@@ -370,17 +399,32 @@ impl App {
         Ok(bottom_area)
     }
 
-    /// Keep modal input ownership while allowing wheel scrolling over the visible transcript.
+    /// Keep modal input ownership while allowing selection and copying in the visible transcript.
     pub(super) fn handle_owned_transcript_event(
         &mut self,
         tui: &mut tui::Tui,
         app_server: &mut AppServerSession,
         event: &TuiEvent,
     ) -> Result<bool> {
+        let has_modal = self.chat_widget.has_active_modal();
+        let modal_transcript_mouse = has_modal
+            && matches!(event, TuiEvent::Mouse(mouse)
+                if self.chat_widget.centered_dialog().is_none()
+                    || matches!(mouse.kind, crossterm::event::MouseEventKind::ScrollUp
+                        | crossterm::event::MouseEventKind::ScrollDown));
+        let modal_transcript_draw = has_modal
+            && self.chat_widget.centered_dialog().is_none()
+            && matches!(event, TuiEvent::Draw);
+        let modal_transcript_event = modal_transcript_mouse
+            || modal_transcript_draw
+            || (has_modal
+                && matches!(event, TuiEvent::Key(key)
+                    if crate::text_selection::is_copy_key(*key)
+                        && self.transcript_view.owns_interaction_key(*key)));
         if !tui.is_owned_screen()
             || matches!(event, TuiEvent::FocusLost | TuiEvent::Resume)
             || self.overlay.is_some()
-            || !self.chat_widget.no_modal_or_popup_active()
+            || (!self.chat_widget.no_modal_or_popup_active() && !modal_transcript_event)
         {
             self.transcript_view.end_drag();
         }
@@ -447,9 +491,15 @@ impl App {
                 return Ok(true);
             }
             if composer_ready && self.chat_widget.handle_composer_mouse(*mouse) {
-                self.transcript_view.end_selection(&self.transcript_cells);
-                self.transcript_view.cancel_search();
-                self.transcript_view.clear_activity_focus();
+                if !matches!(
+                    mouse.kind,
+                    crossterm::event::MouseEventKind::ScrollUp
+                        | crossterm::event::MouseEventKind::ScrollDown
+                ) {
+                    self.transcript_view.end_selection(&self.transcript_cells);
+                    self.transcript_view.cancel_search();
+                    self.transcript_view.clear_activity_focus();
+                }
                 if mouse.kind == MouseEventKind::Up(MouseButton::Left) {
                     self.handle_composer_copy_event(
                         tui,
@@ -463,17 +513,7 @@ impl App {
         }
         if !self.chat_widget.no_modal_or_popup_active() {
             self.chat_widget.end_composer_drag();
-            let is_modal_scroll = self.chat_widget.has_active_modal()
-                && matches!(
-                    event,
-                    TuiEvent::Mouse(mouse)
-                        if matches!(
-                            mouse.kind,
-                            crossterm::event::MouseEventKind::ScrollUp
-                                | crossterm::event::MouseEventKind::ScrollDown
-                        )
-                );
-            if !is_modal_scroll {
+            if !modal_transcript_event {
                 return Ok(false);
             }
         }
@@ -548,15 +588,30 @@ impl App {
             self.close_transcript_overlay(tui);
             return Ok(true);
         }
+        let empty_enter_returns_to_latest = matches!(
+            event,
+            TuiEvent::Key(KeyEvent {
+                code: KeyCode::Enter,
+                modifiers: KeyModifiers::NONE,
+                kind: KeyEventKind::Press,
+                ..
+            })
+        ) && self.enter_returns_to_latest()
+            && self.transcript_view.can_return_to_latest();
         if let TuiEvent::Key(key) = event
-            && ((key.modifiers.is_empty()
-                && matches!(key.code, KeyCode::PageUp | KeyCode::PageDown))
-                || crate::transcript_view::JumpTarget::from_key(*key).is_some())
             && !self.transcript_view.has_active_interaction()
             && keymap_action_ids().any(|action| {
                 action.context != KeymapContext::Pager
                     && !matches!(action.action, "find_transcript" | "focus_activity")
                     && self.active_keymap_contexts().contains_action(action)
+                    && !(empty_enter_returns_to_latest
+                        && action.context == KeymapContext::Composer
+                        && action.action == "submit")
+                    && ((key.modifiers.is_empty()
+                        && matches!(key.code, KeyCode::PageUp | KeyCode::PageDown))
+                        || crate::transcript_view::JumpTarget::from_key(*key).is_some()
+                        || configured_binding_for_action(&self.local_settings.tui.keymap, action)
+                            .is_some_and(std::option::Option::is_some))
                     && bindings_for_action(
                         &self.keymap,
                         action.context.config_name(),
@@ -569,7 +624,7 @@ impl App {
         }
         let action = match event {
             TuiEvent::Key(key)
-                if !self.transcript_view.is_search_active()
+                if !self.transcript_view.is_search_editing()
                     && self.keymap.app.find_transcript.is_pressed(*key) =>
             {
                 self.transcript_view.begin_search();
@@ -578,6 +633,9 @@ impl App {
             TuiEvent::Key(key) => self
                 .transcript_view
                 .handle_key(*key, &self.transcript_cells),
+            TuiEvent::Mouse(mouse) if modal_transcript_mouse => self
+                .transcript_view
+                .handle_selection_mouse(*mouse, &self.transcript_cells),
             TuiEvent::Mouse(mouse) => self
                 .transcript_view
                 .handle_mouse(*mouse, &self.transcript_cells),
@@ -597,17 +655,7 @@ impl App {
             | TuiEvent::FocusLost => None,
         };
         let Some(action) = action else {
-            if matches!(
-                event,
-                TuiEvent::Key(KeyEvent {
-                    code: KeyCode::Enter,
-                    modifiers: KeyModifiers::NONE,
-                    kind: KeyEventKind::Press,
-                    ..
-                })
-            ) && self.enter_returns_to_latest()
-                && self.transcript_view.can_return_to_latest()
-            {
+            if empty_enter_returns_to_latest {
                 self.transcript_view.jump_to_latest();
                 tui.frame_requester().schedule_frame();
                 return Ok(true);

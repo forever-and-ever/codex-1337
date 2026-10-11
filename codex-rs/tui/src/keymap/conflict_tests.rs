@@ -44,10 +44,11 @@ fn new_agents_defaults_preserve_existing_custom_bindings() {
         ("archive", "ctrl-a"),
         ("delete", "delete"),
         ("hide", "ctrl-w"),
-        ("new_worktree", "w"),
+        ("fork", "f"),
     ] {
         for (context, existing, suffix) in [
             ("agents", "stop", ""),
+            ("agents", "search", ""),
             ("list", "move_down", ""),
             ("global", "copy", ""),
             ("agents", "stop", " f12"),
@@ -71,7 +72,7 @@ fn new_agents_defaults_preserve_existing_custom_bindings() {
                 "archive" => &runtime.agents.archive,
                 "delete" => &runtime.agents.delete,
                 "hide" => &runtime.agents.hide,
-                "new_worktree" => &runtime.agents.new_worktree,
+                "fork" => &runtime.agents.fork,
                 _ => unreachable!(),
             };
             assert!(
@@ -122,7 +123,7 @@ fn explicit_activity_remapping_and_unbinding_replace_all_defaults() {
             Some("pgup"),
         ),
         (json!([]), Vec::new(), None),
-        (json!("ctrl-x t"), Vec::new(), Some("ctrl+x t")),
+        (json!("ctrl-x t"), Vec::new(), Some("⌃x t")),
     ] {
         let keymap: TuiKeymap =
             serde_json::from_value(json!({"global": {"focus_activity": configured}})).unwrap();

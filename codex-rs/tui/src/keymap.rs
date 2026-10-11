@@ -52,6 +52,7 @@ mod global_find_tests;
 pub(crate) use bindings::KeymapActionId;
 pub(crate) use bindings::KeymapContext;
 pub(crate) use bindings::bindings_for_action;
+pub(crate) use bindings::configured_binding_for_action;
 pub(crate) use bindings::keymap_action_id;
 pub(crate) use bindings::keymap_action_ids;
 use bindings::runtime_action_bindings;
@@ -430,12 +431,13 @@ pub(crate) struct AgentsKeymap {
     pub(crate) resume: Vec<KeyBinding>,
     pub(crate) search: Vec<KeyBinding>,
     pub(crate) new_task: Vec<KeyBinding>,
-    pub(crate) new_worktree: Vec<KeyBinding>,
+    pub(crate) fork: Vec<KeyBinding>,
     pub(crate) rename: Vec<KeyBinding>,
     pub(crate) stop: Vec<KeyBinding>,
     pub(crate) archive: Vec<KeyBinding>,
     pub(crate) delete: Vec<KeyBinding>,
     pub(crate) hide: Vec<KeyBinding>,
+    pub(crate) toggle_pin: Vec<KeyBinding>,
     pub(crate) toggle_grouping: Vec<KeyBinding>,
     chord_hints: Arc<RuntimeChordKeymap>,
 }
@@ -1369,55 +1371,44 @@ impl RuntimeKeymap {
             resume: resolve_local!(keymap, defaults, agents, resume),
             search: resolve_local!(keymap, defaults, agents, search),
             new_task: resolve_local!(keymap, defaults, agents, new_task),
-            new_worktree: resolve_local!(keymap, defaults, agents, new_worktree),
+            fork: resolve_local!(keymap, defaults, agents, fork),
             rename: resolve_local!(keymap, defaults, agents, rename),
             stop: resolve_local!(keymap, defaults, agents, stop),
             archive: resolve_local!(keymap, defaults, agents, archive),
             delete: resolve_local!(keymap, defaults, agents, delete),
             hide: resolve_local!(keymap, defaults, agents, hide),
+            toggle_pin: resolve_local!(keymap, defaults, agents, toggle_pin),
             toggle_grouping: resolve_local!(keymap, defaults, agents, toggle_grouping),
             chord_hints: Arc::clone(&chords),
         };
 
         // New defaults yield to explicit bindings, including existing list shortcuts.
-        for (configured, bindings, alias) in [
-            (keymap.agents.resume.as_ref(), &mut agents.resume, "ctrl-o"),
-            (keymap.agents.search.as_ref(), &mut agents.search, "ctrl-f"),
-            (
-                keymap.agents.new_task.as_ref(),
-                &mut agents.new_task,
-                "ctrl-n",
-            ),
-            (
-                keymap.agents.new_worktree.as_ref(),
-                &mut agents.new_worktree,
-                "w",
-            ),
-            (keymap.agents.rename.as_ref(), &mut agents.rename, "ctrl-r"),
-            (keymap.agents.stop.as_ref(), &mut agents.stop, "ctrl-x"),
-            (
-                keymap.agents.archive.as_ref(),
-                &mut agents.archive,
-                "ctrl-a",
-            ),
-            (keymap.agents.delete.as_ref(), &mut agents.delete, "delete"),
-            (keymap.agents.hide.as_ref(), &mut agents.hide, "ctrl-w"),
+        for (configured, bindings) in [
+            (keymap.agents.resume.as_ref(), &mut agents.resume),
+            (keymap.agents.search.as_ref(), &mut agents.search),
+            (keymap.agents.new_task.as_ref(), &mut agents.new_task),
+            (keymap.agents.fork.as_ref(), &mut agents.fork),
+            (keymap.agents.toggle_pin.as_ref(), &mut agents.toggle_pin),
+            (keymap.agents.rename.as_ref(), &mut agents.rename),
+            (keymap.agents.stop.as_ref(), &mut agents.stop),
+            (keymap.agents.archive.as_ref(), &mut agents.archive),
+            (keymap.agents.delete.as_ref(), &mut agents.delete),
+            (keymap.agents.hide.as_ref(), &mut agents.hide),
             (
                 keymap.agents.toggle_grouping.as_ref(),
                 &mut agents.toggle_grouping,
-                "ctrl-s",
             ),
         ] {
-            if configured.is_none()
-                && (configured_context_alias_is_used(&keymap.agents, alias)
-                    || configured_context_alias_is_used(&keymap.list, alias)
-                    || configured_context_alias_is_used(&keymap.global, alias)
-                    || chords.bindings.iter().any(|chord| {
-                        chord.action.context.overlaps(KeymapContext::Agents)
-                            && bindings.contains(&chord.chord.prefix)
-                    }))
-            {
-                bindings.clear();
+            if configured.is_none() {
+                bindings.retain(|binding| {
+                    !configured_context_binding_is_used(&keymap.agents, *binding)
+                        && !configured_context_binding_is_used(&keymap.list, *binding)
+                        && !configured_context_binding_is_used(&keymap.global, *binding)
+                        && !chords.bindings.iter().any(|chord| {
+                            chord.action.context.overlaps(KeymapContext::Agents)
+                                && chord.chord.prefix == *binding
+                        })
+                });
             }
         }
 
@@ -1559,15 +1550,13 @@ impl RuntimeKeymap {
             (keymap.agents.resume.as_ref(), &mut agents.resume),
             (keymap.agents.search.as_ref(), &mut agents.search),
             (keymap.agents.new_task.as_ref(), &mut agents.new_task),
-            (
-                keymap.agents.new_worktree.as_ref(),
-                &mut agents.new_worktree,
-            ),
+            (keymap.agents.fork.as_ref(), &mut agents.fork),
             (keymap.agents.rename.as_ref(), &mut agents.rename),
             (keymap.agents.stop.as_ref(), &mut agents.stop),
             (keymap.agents.archive.as_ref(), &mut agents.archive),
             (keymap.agents.delete.as_ref(), &mut agents.delete),
             (keymap.agents.hide.as_ref(), &mut agents.hide),
+            (keymap.agents.toggle_pin.as_ref(), &mut agents.toggle_pin),
             (
                 keymap.agents.toggle_grouping.as_ref(),
                 &mut agents.toggle_grouping,
@@ -1938,13 +1927,14 @@ impl RuntimeKeymap {
                 resume: default_bindings![ctrl(KeyCode::Char('o'))],
                 search: default_bindings![ctrl(KeyCode::Char('f'))],
                 new_task: default_bindings![ctrl(KeyCode::Char('n'))],
-                new_worktree: default_bindings![plain(KeyCode::Char('w'))],
                 rename: default_bindings![ctrl(KeyCode::Char('r'))],
                 stop: default_bindings![ctrl(KeyCode::Char('x'))],
                 archive: default_bindings![ctrl(KeyCode::Char('a')), ctrl(KeyCode::Char('e'))],
                 delete: default_bindings![plain(KeyCode::Delete)],
                 hide: default_bindings![ctrl(KeyCode::Char('w'))],
                 toggle_grouping: default_bindings![ctrl(KeyCode::Char('s'))],
+                fork: default_bindings![plain(KeyCode::Char('f'))],
+                toggle_pin: default_bindings![plain(KeyCode::Char('p'))],
                 chord_hints: Arc::default(),
             },
             approval: ApprovalKeymap {
@@ -2355,7 +2345,11 @@ impl RuntimeKeymap {
             "agents",
             context_bindings(KeymapContext::Agents),
             MAIN_RESERVED_BINDINGS,
-            [],
+            [(
+                "search",
+                "fixed.slash_command",
+                key_hint::plain(KeyCode::Char('/')),
+            )],
         )?;
         for (action, bindings) in context_bindings(KeymapContext::Agents) {
             #[cfg(unix)]

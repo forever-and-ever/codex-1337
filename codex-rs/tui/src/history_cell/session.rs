@@ -1,14 +1,13 @@
 //! Session headers, onboarding guidance, and transcript cards.
 
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering;
-
 use super::*;
 use crate::line_truncation::line_width;
 use crate::line_truncation::truncate_line_with_ellipsis_if_overflow;
 use crate::style::accent_color;
 use crate::width::display_width;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 
 /// Render `lines` inside a border whose inner width is at least `inner_width`.
 ///
@@ -120,7 +119,6 @@ pub(crate) fn set_fresh_session(cell: &mut dyn HistoryCell, fresh_session: &Arc<
         }
     }
 }
-
 /// Fullscreen transcript presentation omits tips; scrollback retains the original cells.
 pub(crate) fn fullscreen_session_lines(
     cell: &dyn HistoryCell,

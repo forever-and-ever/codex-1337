@@ -43,41 +43,141 @@ use tokio_tungstenite::tungstenite::Message;
 pub(super) type RecordedRequests = Arc<Mutex<Vec<JSONRPCRequest>>>;
 pub(super) type RecordingAppServer = (AppServerSession, RecordedRequests, JoinHandle<Result<()>>);
 
-async fn complete_managed_worktree_creation(
-    app: &mut App,
-    tui: &mut crate::tui::Tui,
-    server: &mut AppServerSession,
-    events: &mut tokio::sync::mpsc::UnboundedReceiver<AppEvent>,
-) -> Result<()> {
-    drain_managed_worktree_start(app, server).await;
-    assert!(
-        app.pending_managed_worktree_creation,
-        "checkout task started"
+#[tokio::test]
+async fn daybreak_command_persists_and_confirms_each_selection() -> Result<()> {
+    use codex_protocol::openai_models::ModelAccessPrograms;
+    use codex_protocol::turn_input::CyberAccessProgram;
+
+    let (mut app, mut events, mut ops) = make_test_app_with_channels().await;
+    app.config.features.enable(Feature::CliDaybreak)?;
+    app.chat_widget
+        .set_feature_enabled(Feature::CliDaybreak, /*enabled*/ true);
+    let (mut server, requests, proxy) = start_recording_app_server(
+        &app.config,
+        /*blocked_thread_list*/ None,
+        /*failed_thread_name*/ None,
+    )
+    .await?;
+    let mut enabled_config = app.config.clone();
+    enabled_config.daybreak_enabled = true;
+    let startup = crate::app_server_session::start_thread_with_request_handle(
+        server.request_handle(),
+        &app.local_settings,
+        enabled_config.clone(),
+        crate::app_server_session::ThreadParamsMode::Embedded,
+        /*remote_cwd_override*/ None,
+        /*model_provider_override*/ None,
+        crate::app_server_session::StartupLaunchChoices::default(),
+    )
+    .await?;
+    assert!(startup.session.daybreak_enabled);
+    enabled_config.ephemeral = true;
+    let ephemeral = server.start_thread(&enabled_config).await?;
+    assert!(ephemeral.session.daybreak_enabled);
+    let starts = recorded_params(&requests, "thread/start");
+    assert_eq!(starts[0]["daybreakEnabled"], true);
+    assert!(starts[1]["daybreakEnabled"].is_null());
+
+    let started = server.start_thread(&app.config).await?;
+    let thread_id = started.session.thread_id;
+    app.active_thread_id = Some(thread_id);
+    app.chat_widget.handle_thread_session_quiet(started.session);
+    app.chat_widget.update_account_state(
+        /*status_account_display*/ None, /*plan_type*/ None,
+        /*has_chatgpt_account*/ true, /*has_codex_backend_auth*/ true,
     );
-    loop {
-        let event = tokio::time::timeout(Duration::from_secs(15), events.recv())
-            .await?
-            .ok_or_else(|| color_eyre::eyre::eyre!("worktree creation event channel closed"))?;
-        if matches!(event, AppEvent::ManagedWorktreeCreated(_)) {
-            app.handle_event(tui, server, event).await?;
-            if let Some(created) = app.pending_managed_worktree_created.take() {
-                app.finish_managed_worktree(*created).await;
-            }
-            if let Some(transition) = app.pending_managed_worktree_transition.take() {
-                assert!(app.pending_managed_worktree_attach.is_none());
-                if let Err(error) = app
-                    .switch_to_managed_worktree(tui, server, *transition)
-                    .await
-                {
-                    app.chat_widget.add_error_message(error.to_string());
-                }
-                if let Some(attach) = app.pending_managed_worktree_attach.take() {
-                    app.attach_working_directory(tui, server, *attach).await;
-                }
-            }
-            return Ok(());
-        }
+    app.chat_widget.open_model_popup();
+    let request_id = std::iter::from_fn(|| events.try_recv().ok())
+        .filter_map(|event| match event {
+            AppEvent::FetchModels { request_id } => Some(request_id),
+            _ => None,
+        })
+        .last()
+        .expect("latest model catalog request");
+    let mut model = crate::test_support::TEST_MODEL_PRESETS[0].clone();
+    model.model = app.chat_widget.current_model().to_string();
+    model.available_access_programs = Some(ModelAccessPrograms {
+        cyber: vec![
+            CyberAccessProgram::Standard,
+            CyberAccessProgram::DaybreakBlue,
+        ],
+    });
+    app.chat_widget.on_models_loaded(
+        request_id,
+        Ok(crate::model_catalog::ModelListing {
+            models: vec![model.clone()],
+            providers: Vec::new(),
+        }),
+    );
+    app.chat_widget
+        .handle_key_event(KeyEvent::from(KeyCode::Esc));
+
+    let mut tui = crate::tui::test_support::make_test_tui()?;
+    let mut confirmations = Vec::new();
+    for enabled in [true, false] {
+        app.chat_widget.insert_str("/daybreak");
+        app.chat_widget
+            .handle_key_event(KeyEvent::from(KeyCode::Esc));
+        app.chat_widget
+            .handle_key_event(KeyEvent::from(KeyCode::Enter));
+        let selection = std::iter::from_fn(|| events.try_recv().ok())
+            .find(|event| matches!(event, AppEvent::PersistDaybreakSelection { .. }))
+            .expect("Daybreak selection event");
+        app.handle_event(&mut tui, &mut server, selection).await?;
+        confirmations.push(next_history_message(&mut events));
+        assert_eq!(
+            server
+                .thread_read(thread_id, /*include_turns*/ false)
+                .await?
+                .daybreak_enabled,
+            Some(enabled)
+        );
+        assert_eq!(app.config.daybreak_enabled, enabled);
+        let writes = recorded_params(&requests, "config/batchWrite");
+        let edit = &writes.last().expect("config write")["edits"][0];
+        assert_eq!(edit["keyPath"], "daybreak");
+        assert_eq!(edit["value"], enabled);
     }
+    insta::assert_snapshot!("daybreak_toggle_confirmations", confirmations.join("\n\n"));
+
+    let missing_thread_id = ThreadId::new();
+    app.active_thread_id = Some(missing_thread_id);
+    app.persist_daybreak_selection(&mut server, missing_thread_id, /*enabled*/ true)
+        .await;
+    assert!(next_history_message(&mut events).contains("Failed to read the thread"));
+    assert!(!app.chat_widget.daybreak_enabled);
+    assert!(!app.config.daybreak_enabled);
+    app.active_thread_id = Some(thread_id);
+
+    // Two accounts can have identical visible fields. Neither cached access nor an old reply
+    // may authorize a turn after the identity notification.
+    app.chat_widget.set_daybreak_enabled(/*enabled*/ true);
+    app.chat_widget.update_account_state(
+        /*status_account_display*/ None, /*plan_type*/ None,
+        /*has_chatgpt_account*/ true, /*has_codex_backend_auth*/ true,
+    );
+    app.chat_widget.on_models_loaded(
+        request_id,
+        Ok(crate::model_catalog::ModelListing {
+            models: vec![model],
+            providers: Vec::new(),
+        }),
+    );
+    app.chat_widget
+        .apply_external_edit("account-scoped prompt".into());
+    app.chat_widget
+        .handle_key_event(KeyEvent::from(KeyCode::Enter));
+    let turn = next_user_turn_op(&mut ops);
+    while events.try_recv().is_ok() {}
+    app.submit_thread_op(&mut server, thread_id, turn).await?;
+    assert!(recorded_params(&requests, "turn/start").is_empty());
+    assert!(next_history_message(&mut events).contains("could not be confirmed"));
+    app.chat_widget.set_daybreak_enabled(/*enabled*/ false);
+    while events.try_recv().is_ok() {}
+
+    server.shutdown().await?;
+    proxy.await??;
+    Ok(())
 }
 
 #[tokio::test]
@@ -292,6 +392,7 @@ pub(super) async fn start_recording_app_server_with_realtime_speech(
         let mut inventories = usize::from(failed_thread_name == Some("background"));
         let mut reject_detach = false;
         let mut reject_thread_list = history_capabilities == HistoryCapabilities::ThreadListFails;
+        let forwarding: Result<()> = async {
         loop {
             let frame = tokio::select! {
                 frame = websocket.next() => frame,
@@ -300,29 +401,12 @@ pub(super) async fn start_recording_app_server_with_realtime_speech(
                     if let codex_app_server_client::InProcessServerEvent::ServerNotification(notification) = event
                         && matches!(*notification, ServerNotification::ThreadSettingsUpdated(_))
                     {
-                        match websocket.send(Message::Text(serde_json::to_string(&notification)?.into())).await {
-                            Ok(()) => {}
-                            Err(tokio_tungstenite::tungstenite::Error::Protocol(
-                                tokio_tungstenite::tungstenite::error::ProtocolError::ResetWithoutClosingHandshake,
-                            )) => break,
-                            Err(tokio_tungstenite::tungstenite::Error::Io(error))
-                                if matches!(error.kind(), std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::ConnectionReset) => break,
-                            Err(error) => return Err(error.into()),
-                        }
+                        websocket.send(Message::Text(serde_json::to_string(&notification)?.into())).await?;
                     }
                     continue;
                 }
             };
             let Some(frame) = frame else { break };
-            // The client can close with an unread settings notification during shutdown.
-            match &frame {
-                Err(tokio_tungstenite::tungstenite::Error::Protocol(
-                    tokio_tungstenite::tungstenite::error::ProtocolError::ResetWithoutClosingHandshake,
-                )) => break,
-                Err(tokio_tungstenite::tungstenite::Error::Io(error))
-                    if matches!(error.kind(), std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::ConnectionReset) => break,
-                _ => {}
-            }
             let Message::Text(text) = frame? else {
                 continue;
             };
@@ -470,6 +554,7 @@ pub(super) async fn start_recording_app_server_with_realtime_speech(
                             },
                         })
                     } else if request.method == "thread/list"
+                        && params.is_some_and(|params| params["sortKey"] == "recency_at")
                         && std::mem::take(&mut reject_thread_list)
                     {
                         JSONRPCMessage::Error(JSONRPCError {
@@ -633,11 +718,36 @@ pub(super) async fn start_recording_app_server_with_realtime_speech(
                             trace: None,
                         });
                 }
-                JSONRPCMessage::Error(_) => {}
+                JSONRPCMessage::Error(error) => {
+                    request_sink
+                        .lock()
+                        .expect("request recorder lock")
+                        .push(JSONRPCRequest {
+                            id: error.id,
+                            method: "server/request/error".to_string(),
+                            params: Some(serde_json::to_value(error.error)?),
+                            trace: None,
+                        });
+                }
             }
         }
-        embedded.shutdown().await?;
         Ok(())
+        }.await;
+        embedded.shutdown().await?;
+        // Shutdown can close either side of a pending reply or notification.
+        // Assertions and awaited RPCs still expose disconnects before test completion.
+        match forwarding {
+            Err(error) if error.downcast_ref::<tokio_tungstenite::tungstenite::Error>().is_some_and(|error| {
+                use tokio_tungstenite::tungstenite::Error;
+                match error {
+                    Error::ConnectionClosed | Error::AlreadyClosed
+                    | Error::Protocol(tokio_tungstenite::tungstenite::error::ProtocolError::ResetWithoutClosingHandshake) => true,
+                    Error::Io(error) => matches!(error.kind(), std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::ConnectionReset),
+                    _ => false,
+                }
+            }) => Ok(()),
+            result => result,
+        }
     });
     let app_server = crate::connect_remote_app_server(crate::RemoteAppServerEndpoint::WebSocket {
         websocket_url,
@@ -742,7 +852,12 @@ async fn delete_current_thread_navigates_only_after_success() -> Result<()> {
         let mut side_config = app.config.clone();
         side_config.ephemeral = true;
         let side = server
-            .fork_side_thread(&app.local_settings, side_config.clone(), thread_id)
+            .fork_side_thread(
+                &app.local_settings,
+                side_config.clone(),
+                thread_id,
+                /*selected_profile*/ None,
+            )
             .await?;
         let side_id = side.session.thread_id;
         app.side_threads
@@ -752,7 +867,12 @@ async fn delete_current_thread_navigates_only_after_success() -> Result<()> {
             side_config.cwd = side_config.cwd.join("failure");
             assert!(
                 server
-                    .fork_side_thread(&app.local_settings, side_config, thread_id)
+                    .fork_side_thread(
+                        &app.local_settings,
+                        side_config,
+                        thread_id,
+                        /*selected_profile*/ None
+                    )
                     .await
                     .is_err()
             );
@@ -857,13 +977,22 @@ async fn archive_current_thread_reports_success_only_after_archiving() -> Result
 #[tokio::test]
 async fn archive_current_thread_returns_shared_servers_to_agents() -> Result<()> {
     let endpoint = crate::resolve_remote_addr("ws://127.0.0.1:4500")?;
-    for target in [
+    for (target, attachment, side_exists) in [
         AppServerTarget::LocalDaemon {
             allow_embedded_fallback: true,
             endpoint: endpoint.clone(),
         },
         AppServerTarget::Remote { endpoint },
-    ] {
+    ]
+    .into_iter()
+    .flat_map(|target| {
+        [
+            (ThreadEventAttachment::Live, true),
+            (ThreadEventAttachment::ReplayOnly, true),
+            (ThreadEventAttachment::ReplayOnly, false),
+        ]
+        .map(|(attachment, side_exists)| (target.clone(), attachment, side_exists))
+    }) {
         let (mut app, _codex_home) = make_history_test_app().await?;
         let thread_id =
             create_history_rollout(&app.config, ThreadHistoryMode::Legacy, "archive me")?;
@@ -881,12 +1010,26 @@ async fn archive_current_thread_returns_shared_servers_to_agents() -> Result<()>
                 crate::app_server_session::ResumeModelSettings::RestoreFromThread,
             )
             .await?;
-        let mut side_config = app.config.clone();
-        side_config.ephemeral = true;
-        let side = server
-            .fork_side_thread(&app.local_settings, side_config, thread_id)
-            .await?;
-        let side_id = side.session.thread_id;
+        let side_id = if side_exists {
+            let mut side_config = app.config.clone();
+            side_config.ephemeral = true;
+            server
+                .fork_side_thread(
+                    &app.local_settings,
+                    side_config,
+                    thread_id,
+                    /*selected_profile*/ None,
+                )
+                .await?
+                .session
+                .thread_id
+        } else {
+            // The saved side transcript outlived its ephemeral server thread.
+            ThreadId::new()
+        };
+        if attachment == ThreadEventAttachment::ReplayOnly {
+            app.ensure_thread_channel(side_id).mark_replay_only();
+        }
         app.side_threads
             .insert(side_id, SideThreadState::new(thread_id));
         app.app_server_target = target;
@@ -929,6 +1072,10 @@ async fn archive_current_thread_returns_shared_servers_to_agents() -> Result<()>
             recorded_params(&requests, "thread/unsubscribe"),
             vec![serde_json::json!({"threadId": side_id.to_string()})]
         );
+        assert_eq!(
+            recorded_params(&requests, "turn/interrupt"),
+            vec![serde_json::json!({"threadId": side_id.to_string(), "turnId": ""})]
+        );
         assert!(app.chat_widget.composer_is_empty());
         assert_eq!(
             recorded_params(&requests, "thread/archive"),
@@ -970,6 +1117,7 @@ async fn older_external_server_starts_without_unsupported_dynamic_tools_or_histo
         crate::app_server_session::ThreadParamsMode::Embedded,
         /*remote_cwd_override*/ None,
         /*model_provider_override*/ None,
+        crate::app_server_session::StartupLaunchChoices::default(),
     )
     .await?;
     assert!(!startup.task_tools_available);
@@ -1086,6 +1234,7 @@ async fn older_pagination_reconciles_review_prompts_across_page_boundaries() -> 
         user_item("newer-visible-prompt", "newer visible prompt"),
     ]);
     let events = std::iter::once(EventMsg::TurnStarted(TurnStartedEvent {
+        turn_attribution: None,
         turn_id: "cross-page-review-turn".to_string(),
         root_turn_id: None,
         trace_id: None,
@@ -1250,6 +1399,7 @@ async fn transcript_alt_beginning_loads_every_older_history_page() -> Result<()>
         .map(serde_json::from_str::<serde_json::Value>)
         .collect::<Result<Vec<_>, _>>()?;
     let events = std::iter::once(EventMsg::TurnStarted(TurnStartedEvent {
+        turn_attribution: None,
         turn_id: "multi-page-turn".to_string(),
         root_turn_id: None,
         trace_id: None,
@@ -1563,7 +1713,10 @@ async fn assert_remote_legacy_history_retry(request: LegacyHistoryRequest) -> Re
 
 #[tokio::test]
 async fn remote_legacy_history_resume_retries_generic_method_not_found() -> Result<()> {
-    assert_remote_legacy_history_retry(LegacyHistoryRequest::Resume).await
+    Box::pin(assert_remote_legacy_history_retry(
+        LegacyHistoryRequest::Resume,
+    ))
+    .await
 }
 
 #[tokio::test]
@@ -1573,7 +1726,7 @@ async fn remote_legacy_history_fork_avoids_unsupported_fields() -> Result<()> {
 
 #[tokio::test]
 async fn paginated_fork_survives_post_response_hydration_failure() -> Result<()> {
-    let (app, _codex_home) = make_history_test_app().await?;
+    let (app, _codex_home) = Box::pin(make_history_test_app()).await?;
     let parent_thread_id = create_history_rollout(
         &app.config,
         ThreadHistoryMode::Paginated,
@@ -1589,19 +1742,18 @@ async fn paginated_fork_survives_post_response_hydration_failure() -> Result<()>
     )
     .await?;
 
-    let started = app_server
-        .resume_thread(
-            &app.local_settings,
-            app.config.clone(),
-            parent_thread_id,
-            crate::app_server_session::ResumeModelSettings::RestoreFromThread,
-        )
-        .await?;
+    let started = Box::pin(app_server.resume_thread(
+        &app.local_settings,
+        app.config.clone(),
+        parent_thread_id,
+        crate::app_server_session::ResumeModelSettings::RestoreFromThread,
+    ))
+    .await?;
     assert_eq!(started.session.thread_id, parent_thread_id);
 
-    let forked = app_server
-        .fork_thread(&app.local_settings, app.config.clone(), parent_thread_id)
-        .await?;
+    let forked =
+        Box::pin(app_server.fork_thread(&app.local_settings, app.config.clone(), parent_thread_id))
+            .await?;
 
     assert_ne!(forked.session.thread_id, parent_thread_id);
     assert_eq!(recorded_params(&requests, "thread/fork").len(), 1);
@@ -1636,6 +1788,7 @@ async fn underfilled_scrollback_fetches_older_pages_without_opening_the_transcri
         .map(serde_json::from_str::<serde_json::Value>)
         .collect::<Result<Vec<_>, _>>()?;
     let events = std::iter::once(EventMsg::TurnStarted(TurnStartedEvent {
+        turn_attribution: None,
         turn_id: "scrollback-pagination-turn".to_string(),
         root_turn_id: None,
         trace_id: None,
@@ -1854,6 +2007,7 @@ async fn paginated_workflows_never_request_full_thread_history() -> Result<()> {
         &crate::local_settings::LocalSettings::from(&side_config),
         side_config,
         paginated_thread_id,
+        /*selected_profile*/ None,
     ))
     .await?;
 
@@ -2034,6 +2188,7 @@ async fn agents_overview_seeds_loaded_threads_when_recent_listing_is_unavailable
         let mut sort_keys = list_requests
             .iter()
             .map(|params| params["sortKey"].as_str().unwrap())
+            .filter(|sort_key| *sort_key != "section_position")
             .collect::<Vec<_>>();
         sort_keys.sort_unstable();
         assert_eq!(sort_keys, expected_sort_keys);
@@ -2267,562 +2422,6 @@ async fn cold_paginated_subagent_transcript_excludes_inherited_parent_history() 
     );
 
     app_server.shutdown().await?;
-    proxy.await??;
-    Ok(())
-}
-
-#[tokio::test]
-async fn managed_worktree_transitions_bind_owner_and_preserve_only_fork_history() -> Result<()> {
-    use crate::app_event::ManagedWorktreeMode;
-    use std::fs;
-    use std::process::Command;
-
-    let (mut app, mut events, _op_rx) = make_test_app_with_channels().await;
-    let root = tempdir()?;
-    let home = dunce::canonicalize(root.path())?.join("home");
-    let source = dunce::canonicalize(root.path())?.join("source");
-    let project_pool = dunce::canonicalize(root.path())?.join("project-pool");
-    fs::create_dir_all(&home)?;
-    fs::create_dir_all(source.join(".codex"))?;
-    fs::write(home.join("config.toml"), "[features]\nworktrees = true\n")?;
-    crate::legacy_core::config::set_project_trust_level(
-        &home,
-        &source,
-        codex_protocol::config_types::TrustLevel::Trusted,
-    )
-    .map_err(|error| color_eyre::eyre::eyre!(error.to_string()))?;
-    let destination = format!(
-        r#"developer_instructions = "committed policy"
-model = "gpt-5.2"
-model_reasoning_effort = "high"
-[desktop]
-git-worktree-root = {}
-"#,
-        toml::Value::String(project_pool.display().to_string()),
-    );
-    fs::write(source.join(".codex/config.toml"), destination)?;
-    fs::write(source.join("AGENTS.md"), "committed worktree instructions")?;
-    for args in [
-        vec!["init", "--quiet"],
-        vec!["add", "--force", ".codex/config.toml", "AGENTS.md"],
-        vec!["commit", "--quiet", "--no-gpg-sign", "-m", "initial"],
-    ] {
-        let result = Command::new("git")
-            .current_dir(&source)
-            .args([
-                "-c",
-                "user.name=Worktree Test",
-                "-c",
-                "user.email=test@example.invalid",
-            ])
-            .args(args)
-            .output()?;
-        assert!(
-            result.status.success(),
-            "{}",
-            String::from_utf8_lossy(&result.stderr)
-        );
-    }
-    fs::write(
-        source.join(".codex/config.toml"),
-        r#"developer_instructions = "dirty policy"
-model = "gpt-5.4"
-model_reasoning_effort = "low"
-"#,
-    )?;
-    fs::write(source.join("AGENTS.md"), "dirty source instructions")?;
-    app.config.codex_home = home.clone().abs();
-    app.config.sqlite = SqliteConfig::new_for_testing(home.clone().abs());
-    app.config.cwd = source.clone().abs();
-    app.harness_overrides.permission_profile = Some(PermissionProfile::workspace_write());
-    app.config = app.rebuild_config_for_cwd(source.clone()).await?;
-    app.chat_widget
-        .handle_thread_session_quiet(test_thread_session(ThreadId::new(), source.clone()));
-    let (mut server, requests, proxy) = start_recording_app_server(
-        &app.config,
-        /*blocked_thread_list*/ None,
-        /*failed_thread_name*/ None,
-    )
-    .await?;
-    let mut tui = crate::tui::test_support::make_test_tui()?;
-    app.start_fresh_session(
-        &mut tui,
-        &mut server,
-        /*session_start_source*/ None,
-        /*initial_user_message*/ None,
-        /*new_thread_name*/ None,
-    )
-    .await;
-    assert_eq!(
-        (
-            app.chat_widget.current_model(),
-            app.config.model_provider_id.as_str(),
-            app.chat_widget.current_reasoning_effort()
-        ),
-        ("gpt-5.4", "openai", Some(ReasoningEffortConfig::Low))
-    );
-    // Provider selection belongs to host config, not project config.
-    let host_config = home.join("config.toml");
-    let contents = fs::read_to_string(&host_config)?;
-    fs::write(
-        host_config,
-        format!("model_provider = \"ollama\"\n{contents}"),
-    )?;
-    let original = app.chat_widget.thread_id().expect("original thread");
-    server.thread_inject_items(original, vec![serde_json::from_value(serde_json::json!({
-        "type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "managed fork history"}]
-    }))?]).await?;
-    let manager = codex_worktree::WorktreeManager::new(
-        codex_worktree::WorktreeSettings::for_cli(&home, /*desktop*/ None)
-            .map_err(|error| color_eyre::eyre::eyre!(error.to_string()))?,
-    );
-    let mut browser_entries = Vec::new();
-    requests.lock().expect("request recorder lock").clear();
-    app.handle_event(
-        &mut tui,
-        &mut server,
-        AppEvent::StartManagedWorktree {
-            mode: ManagedWorktreeMode::Fork,
-            name: None,
-        },
-    )
-    .await?;
-    complete_managed_worktree_creation(&mut app, &mut tui, &mut server, &mut events).await?;
-    assert_eq!(app.chat_widget.thread_id(), Some(original));
-    assert!(recorded_params(&requests, "thread/fork").is_empty());
-    let unused = manager
-        .list(&source)
-        .map_err(|error| color_eyre::eyre::eyre!(error.to_string()))?
-        .pop()
-        .expect("unused checkout");
-    browser_entries.push(crate::worktree_browser::Entry {
-        root: unused.root.clone(),
-        cwd: unused.cwd.clone(),
-        owner: crate::worktree_browser::Owner::None,
-    });
-    assert_eq!(
-        manager
-            .owner(&unused.root)
-            .map_err(|error| color_eyre::eyre::eyre!(error.to_string()))?,
-        None
-    );
-    let error = std::iter::from_fn(|| events.try_recv().ok())
-        .filter_map(|event| match event {
-            AppEvent::InsertHistoryCell(cell) => {
-                Some(lines_to_single_string(&cell.display_lines(/*width*/ 500)))
-            }
-            _ => None,
-        })
-        .find(|message| message.contains("Cannot fork into this worktree"))
-        .expect("fork refusal");
-    let (_, with_path) = error
-        .split_once("An unused checkout was created at ")
-        .expect("checkout marker");
-    let (path, _) = with_path
-        .split_once("; remove it with")
-        .expect("cleanup marker");
-    insta::assert_snapshot!(error.replace(path, "<CHECKOUT>"), @"■ Cannot fork into this worktree because developer instructions differ. Start a new conversation instead. An unused checkout was created at <CHECKOUT>; remove it with `git worktree remove <checkout-path>` from the source repository.");
-    let retained = std::iter::from_fn(|| events.try_recv().ok())
-        .filter_map(|event| match event {
-            AppEvent::InsertHistoryCell(cell) => {
-                Some(lines_to_single_string(&cell.display_lines(/*width*/ 500)))
-            }
-            _ => None,
-        })
-        .find(|message| message.contains("A checkout was retained at"))
-        .expect("post-allocation recovery message");
-    let (_, with_path) = retained
-        .split_once("A checkout was retained at ")
-        .expect("retained checkout marker");
-    let (path, _) = with_path
-        .split_once("; remove it with")
-        .expect("retained checkout cleanup marker");
-    assert_eq!(
-        dunce::canonicalize(path)?,
-        dunce::canonicalize(&unused.root)?
-    );
-    assert!(retained.contains("git worktree remove <checkout-path>"));
-    fs::write(
-        source.join(".codex/config.toml"),
-        r#"developer_instructions = "committed policy"
-[features]
-terminal_visualization_instructions = true
-"#,
-    )?;
-    app.config = app.rebuild_config_for_cwd(source.clone()).await?;
-    requests.lock().expect("request recorder lock").clear();
-    app.handle_event(
-        &mut tui,
-        &mut server,
-        AppEvent::StartManagedWorktree {
-            mode: ManagedWorktreeMode::Fork,
-            name: None,
-        },
-    )
-    .await?;
-    complete_managed_worktree_creation(&mut app, &mut tui, &mut server, &mut events).await?;
-    assert_eq!(app.chat_widget.thread_id(), Some(original));
-    assert!(recorded_params(&requests, "thread/fork").is_empty());
-    let feature_mismatch_checkout = manager
-        .list(&source)
-        .map_err(|error| color_eyre::eyre::eyre!(error.to_string()))?
-        .into_iter()
-        .find(|checkout| checkout.cwd != unused.cwd)
-        .expect("feature mismatch leaves an unused checkout");
-    browser_entries.push(crate::worktree_browser::Entry {
-        root: feature_mismatch_checkout.root,
-        cwd: feature_mismatch_checkout.cwd,
-        owner: crate::worktree_browser::Owner::None,
-    });
-    while events.try_recv().is_ok() {}
-    app.handle_event(
-        &mut tui,
-        &mut server,
-        AppEvent::StartManagedWorktree {
-            mode: ManagedWorktreeMode::New,
-            name: None,
-        },
-    )
-    .await?;
-    assert_eq!(app.chat_widget.thread_id(), Some(original));
-    drain_managed_worktree_start(&mut app, &mut server).await;
-    assert!(app.pending_managed_worktree_creation);
-    let created = loop {
-        let event = tokio::time::timeout(Duration::from_secs(15), events.recv())
-            .await?
-            .ok_or_else(|| color_eyre::eyre::eyre!("worktree completion channel closed"))?;
-        if let AppEvent::ManagedWorktreeCreated(created) = event {
-            break created;
-        }
-    };
-    let stale_checkout = created
-        .result
-        .as_ref()
-        .expect("created checkout")
-        .1
-        .root
-        .clone();
-    let stale_cwd = created
-        .result
-        .as_ref()
-        .expect("created checkout")
-        .1
-        .cwd
-        .clone();
-    app.primary_thread_id = Some(ThreadId::new());
-    app.handle_event(
-        &mut tui,
-        &mut server,
-        AppEvent::ManagedWorktreeCreated(created),
-    )
-    .await?;
-    let created = app
-        .pending_managed_worktree_created
-        .take()
-        .expect("deferred checkout completion");
-    app.finish_managed_worktree(*created).await;
-    app.primary_thread_id = Some(original);
-    assert_eq!(app.chat_widget.thread_id(), Some(original));
-    assert!(!app.pending_managed_worktree_creation);
-    let stale_error = std::iter::from_fn(|| events.try_recv().ok())
-        .filter_map(|event| match event {
-            AppEvent::InsertHistoryCell(cell) => {
-                Some(lines_to_single_string(&cell.display_lines(/*width*/ 500)))
-            }
-            _ => None,
-        })
-        .find(|message| message.contains("A checkout was retained at"))
-        .expect("stale creation recovery message");
-    assert!(stale_error.contains(&stale_checkout.display().to_string()));
-    assert!(stale_error.contains("git worktree remove <checkout-path>"));
-    assert_eq!(
-        manager
-            .owner(&stale_checkout)
-            .map_err(|error| color_eyre::eyre::eyre!(error.to_string()))?,
-        None
-    );
-    browser_entries.push(crate::worktree_browser::Entry {
-        root: stale_checkout,
-        cwd: stale_cwd,
-        owner: crate::worktree_browser::Owner::None,
-    });
-    for mode in [ManagedWorktreeMode::New, ManagedWorktreeMode::Fork] {
-        requests.lock().expect("request recorder lock").clear();
-        let previous = app.chat_widget.thread_id();
-        let previous_rollout = app.chat_widget.rollout_path().expect("previous rollout");
-        app.handle_event(
-            &mut tui,
-            &mut server,
-            AppEvent::StartManagedWorktree {
-                mode,
-                name: Some(format!("{mode:?} worktree")),
-            },
-        )
-        .await?;
-        complete_managed_worktree_creation(&mut app, &mut tui, &mut server, &mut events).await?;
-        let replacement = app.chat_widget.thread_id().expect("replacement thread");
-        assert_ne!(Some(replacement), previous);
-        assert_eq!(
-            app.chat_widget.thread_name(),
-            Some(format!("{mode:?} worktree"))
-        );
-        let cwd = app.config.cwd.as_path().canonicalize()?;
-        let checkouts = manager
-            .list(&source)
-            .map_err(|error| color_eyre::eyre::eyre!(error.to_string()))?;
-        let checkout = checkouts
-            .iter()
-            .find(|checkout| checkout.cwd.canonicalize().ok().as_ref() == Some(&cwd))
-            .expect("managed checkout");
-        browser_entries.push(crate::worktree_browser::Entry {
-            root: checkout.root.clone(),
-            cwd: checkout.cwd.clone(),
-            owner: crate::worktree_browser::Owner::Unavailable(replacement),
-        });
-        assert!(checkout.root.starts_with(home.join("worktrees")));
-        assert!(!project_pool.exists());
-        assert_eq!(
-            manager
-                .owner(&checkout.root)
-                .map_err(|error| color_eyre::eyre::eyre!(error.to_string()))?,
-            Some(replacement.to_string())
-        );
-        assert_eq!(
-            app.config.developer_instructions.as_deref(),
-            Some("committed policy")
-        );
-        assert_eq!(
-            fs::read_to_string(checkout.cwd.join("AGENTS.md"))?,
-            "committed worktree instructions"
-        );
-        let fork = matches!(mode, ManagedWorktreeMode::Fork);
-        let method = if fork { "thread/fork" } else { "thread/start" };
-        let params = recorded_params(&requests, method);
-        assert_eq!(params.len(), 1);
-        assert_eq!(
-            [
-                params[0]["model"].as_str(),
-                params[0]["modelProvider"].as_str(),
-                params[0]["config"]["model_reasoning_effort"].as_str(),
-            ],
-            [Some("gpt-5.2"), fork.then_some("ollama"), Some("high")]
-        );
-        assert_eq!(app.config.model_provider_id, "ollama");
-        // Injection flushes and materializes a new thread's otherwise lazy rollout.
-        server.thread_inject_items(replacement, vec![serde_json::from_value(serde_json::json!({
-            "type": "message", "role": "assistant", "content": [{"type": "output_text", "text": format!("replacement persistence probe {mode:?}")}]
-        }))?]).await?;
-        let rollout = app.chat_widget.rollout_path().expect("replacement rollout");
-        let mut history = fs::read(&rollout)?;
-        let metadata = codex_rollout::read_session_meta_line(&rollout).await?;
-        assert_eq!(metadata.meta.history_base.is_some(), fork);
-        if let Some(base) = metadata.meta.history_base {
-            assert!(fork, "New must not inherit history");
-            assert_eq!(Some(base.thread_id), previous);
-            let parent = fs::read(&previous_rollout)?;
-            history.extend_from_slice(
-                parent
-                    .get(..usize::try_from(base.end_byte_offset)?)
-                    .expect("valid inherited prefix"),
-            );
-        }
-        let history = String::from_utf8(history)?;
-        assert!(!history.contains("managed fork history"));
-        if fork {
-            assert!(history.contains("replacement persistence probe New"));
-        }
-        let attached = server
-            .thread_read(replacement, /*include_turns*/ false)
-            .await?;
-        assert_eq!(attached.cwd.as_path().canonicalize()?, cwd);
-    }
-    browser_entries.sort_by(|left, right| left.cwd.cmp(&right.cwd));
-    let nested = source.join("browser-only");
-    fs::create_dir(&nested)?;
-    assert_eq!(
-        crate::worktree_browser::list(home.clone(), nested)
-            .await
-            .map_err(|error| color_eyre::eyre::eyre!(error.to_string()))?,
-        browser_entries
-    );
-    let unowned = manager
-        .create(&codex_worktree::CreateWorktree {
-            source_cwd: source.clone(),
-            base: None,
-        })
-        .map_err(|error| color_eyre::eyre::eyre!(error.to_string()))?;
-    browser_entries.push(crate::worktree_browser::Entry {
-        root: unowned.root.clone(),
-        cwd: unowned.cwd.clone(),
-        owner: crate::worktree_browser::Owner::None,
-    });
-    browser_entries.sort_by(|left, right| left.cwd.cmp(&right.cwd));
-    for owner in [None, Some("not-a-thread-uuid")] {
-        if let Some(owner) = owner {
-            manager
-                .bind_thread(&unowned.root, owner)
-                .map_err(|error| color_eyre::eyre::eyre!(error.to_string()))?;
-        }
-        assert_eq!(
-            crate::worktree_browser::list(home.clone(), source.clone())
-                .await
-                .map_err(|error| color_eyre::eyre::eyre!(error.to_string()))?,
-            browser_entries
-        );
-    }
-    let missing_owner = ThreadId::new();
-    let missing_checkout = manager
-        .create(&codex_worktree::CreateWorktree {
-            source_cwd: source.clone(),
-            base: None,
-        })
-        .map_err(|error| color_eyre::eyre::eyre!(error.to_string()))?;
-    manager
-        .bind_thread(&missing_checkout.root, &missing_owner.to_string())
-        .map_err(|error| color_eyre::eyre::eyre!(error.to_string()))?;
-    let (browser_tx, mut browser_rx) = tokio::sync::mpsc::unbounded_channel();
-    crate::worktree_browser::fetch(
-        crate::worktree_browser::Request {
-            id: uuid::Uuid::new_v4(),
-            cwd: source.clone(),
-            thread_id: Some(original),
-        },
-        home.clone(),
-        server.request_handle(),
-        crate::app_event_sender::AppEventSender::new(browser_tx),
-    );
-    let Some(AppEvent::ManagedWorktreesLoaded {
-        result: Ok(entries),
-        ..
-    }) = tokio::time::timeout(
-        std::time::Duration::from_secs(/*secs*/ 5),
-        browser_rx.recv(),
-    )
-    .await?
-    else {
-        panic!("browser must return annotated worktrees");
-    };
-    assert_eq!(
-        entries
-            .iter()
-            .find(|entry| entry.root == missing_checkout.root)
-            .map(|entry| &entry.owner),
-        Some(&crate::worktree_browser::Owner::Unavailable(missing_owner))
-    );
-    app.start_fresh_session(
-        &mut tui,
-        &mut server,
-        /*session_start_source*/ None,
-        /*initial_user_message*/ None,
-        /*new_thread_name*/ None,
-    )
-    .await;
-    let unsaved = app.chat_widget.thread_id().expect("unsaved thread");
-    let path = app.chat_widget.rollout_path();
-    assert!(path.is_none_or(|path| !rollout_path_is_resumable(&path)));
-    let completed = test_turn("completed-unsaved-turn", TurnStatus::Completed, Vec::new());
-    app.thread_event_channels[&unsaved]
-        .store
-        .lock()
-        .await
-        .set_turns(vec![completed]);
-    for mode in [ManagedWorktreeMode::Fork, ManagedWorktreeMode::New] {
-        requests.lock().expect("request recorder lock").clear();
-        app.handle_event(
-            &mut tui,
-            &mut server,
-            AppEvent::StartManagedWorktree { mode, name: None },
-        )
-        .await?;
-        drain_managed_worktree_start(&mut app, &mut server).await;
-        let is_new = mode == ManagedWorktreeMode::New;
-        if is_new {
-            complete_managed_worktree_creation(&mut app, &mut tui, &mut server, &mut events)
-                .await?;
-        }
-        assert_eq!(app.chat_widget.thread_id() != Some(unsaved), is_new);
-        assert_eq!(recorded_params(&requests, "thread/fork").len(), 0);
-    }
-    let saved_owner = entries
-        .iter()
-        .find_map(|entry| match &entry.owner {
-            crate::worktree_browser::Owner::Resumable(thread) => Some(thread.clone()),
-            _ => None,
-        })
-        .expect("browser should resolve a saved owner");
-    // Archive stops the writer; unarchive leaves a stored thread eligible for compression.
-    server.thread_archive(saved_owner.id).await?;
-    let saved_path = server
-        .thread_unarchive(saved_owner.id)
-        .await?
-        .path
-        .expect("saved rollout path");
-    fs::OpenOptions::new()
-        .write(true)
-        .open(&saved_path)?
-        .set_times(std::fs::FileTimes::new().set_modified(
-            std::time::SystemTime::now() - std::time::Duration::from_secs(8 * 24 * 60 * 60),
-        ))?;
-    codex_rollout::spawn_rollout_compression_worker(
-        home.clone(),
-        codex_rollout::RolloutCompressionTrigger::Startup,
-    );
-    tokio::time::timeout(std::time::Duration::from_secs(10), async {
-        while saved_path.exists() || !saved_path.with_extension("jsonl.zst").is_file() {
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        }
-    })
-    .await?;
-    let (browser_tx, mut browser_rx) = tokio::sync::mpsc::unbounded_channel();
-    crate::worktree_browser::fetch(
-        crate::worktree_browser::Request {
-            id: uuid::Uuid::new_v4(),
-            cwd: source.clone(),
-            thread_id: Some(original),
-        },
-        home.clone(),
-        server.request_handle(),
-        crate::app_event_sender::AppEventSender::new(browser_tx),
-    );
-    let Some(AppEvent::ManagedWorktreesLoaded {
-        result: Ok(compressed_entries),
-        ..
-    }) = tokio::time::timeout(std::time::Duration::from_secs(10), browser_rx.recv()).await?
-    else {
-        panic!("browser must return compressed owner metadata");
-    };
-    assert!(compressed_entries.iter().any(|entry| matches!(
-        &entry.owner,
-        crate::worktree_browser::Owner::Resumable(thread) if thread.id == saved_owner.id
-    )));
-    server.thread_archive(saved_owner.id).await?;
-    let (browser_tx, mut browser_rx) = tokio::sync::mpsc::unbounded_channel();
-    crate::worktree_browser::fetch(
-        crate::worktree_browser::Request {
-            id: uuid::Uuid::new_v4(),
-            cwd: source.clone(),
-            thread_id: Some(original),
-        },
-        home,
-        server.request_handle(),
-        crate::app_event_sender::AppEventSender::new(browser_tx),
-    );
-    let Some(AppEvent::ManagedWorktreesLoaded {
-        result: Ok(entries),
-        ..
-    }) = tokio::time::timeout(
-        std::time::Duration::from_secs(/*secs*/ 10),
-        browser_rx.recv(),
-    )
-    .await?
-    else {
-        panic!("browser must return archived owner metadata");
-    };
-    assert!(entries.iter().any(|entry| matches!(
-        &entry.owner,
-        crate::worktree_browser::Owner::Archived(thread) if thread.id == saved_owner.id
-    )));
-    server.shutdown().await?;
     proxy.await??;
     Ok(())
 }
@@ -3533,11 +3132,12 @@ fn session_lifecycle_avoids_redundant_subagent_metadata_reads() -> Result<()> {
                 })
                 .await?;
                 if let AppEvent::AgentPickerThreadsLoaded {
-                    result: Ok(threads),
+                    result: Ok(refresh),
                     ..
                 } = &mut completion
                 {
-                    let child = threads
+                    let child = refresh
+                        .threads
                         .iter_mut()
                         .find(|thread| thread.id == child_thread_id.to_string())
                         .expect("root-scoped response includes the cached child");
@@ -3547,7 +3147,7 @@ fn session_lifecycle_avoids_redundant_subagent_metadata_reads() -> Result<()> {
                     child.status = ThreadStatus::Active {
                         active_flags: Vec::new(),
                     };
-                    threads.push(discovered);
+                    refresh.threads.push(discovered);
                 }
                 Box::pin(app.handle_event(&mut tui, &mut app_server, completion)).await?;
                 assert_eq!(
@@ -3711,6 +3311,7 @@ async fn command_center_read_only_open_requests_and_failure_preservation() -> Re
                 let first_ordinal = contents.lines().count();
                 let events = [
                     EventMsg::TurnStarted(TurnStartedEvent {
+                        turn_attribution: None,
                         turn_id: format!("saved-turn-{index}"),
                         root_turn_id: None,
                         trace_id: None,

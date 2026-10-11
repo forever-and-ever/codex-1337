@@ -2,10 +2,10 @@
 source: tui/src/app/daemon_menu_tests.rs
 expression: "render_bottom_popup(&app.chat_widget, 80)"
 ---
-  Daemon
-  Remote shared service: v0.153.0
+      Daemon
+› As  Remote shared service: v0.153.0
 
-
-› 1. Close
-
-  enter select · esc back
+────                                                                        ────
+  Ac› 1. Close
+────                                                                        ────
+  GP  enter select · esc back

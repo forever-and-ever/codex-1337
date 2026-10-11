@@ -4,8 +4,6 @@ use super::PtyCodex;
 use super::write_test_config;
 use anyhow::Result;
 use anyhow::ensure;
-use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -21,9 +19,9 @@ fn external_editors_keep_the_screen_and_return_the_draft() -> Result<()> {
         let home = tempfile::tempdir()?;
         write_test_config(home.path(), &repo_root)?;
         let editor = home.path().join("editor.sh");
-        fs::write(
+        codex_utils_cargo_bin::write_executable(
             &editor,
-            format!(
+            &format!(
                 "#!/bin/sh\n{editor_output}\n: > \"$0.ready\"\nIFS= read -r ignored\n\
                  {exit_screen}\nprintf 'edited draft' > \"$1\"\n",
                 exit_screen = if editor_output.contains("1049h") {
@@ -33,7 +31,6 @@ fn external_editors_keep_the_screen_and_return_the_draft() -> Result<()> {
                 },
             ),
         )?;
-        fs::set_permissions(&editor, fs::Permissions::from_mode(0o755))?;
         let args = ["-c", "sandbox_mode=\"read-only\""];
         let codex = codex_utils_cargo_bin::cargo_bin("codex")?;
         let mut terminal = PtyCodex::start_binary(&codex, &repo_root, home, &args, Some(&editor))?;

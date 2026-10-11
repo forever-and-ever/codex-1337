@@ -57,6 +57,7 @@ impl ChatWidget {
                 session.windows_sandbox_host
             };
         self.invalidate_permission_discovery();
+        self.permission_discovery = None;
         self.permission_profiles_menu_opened = false;
         self.transcript.reset_copy_history();
         let history_metadata = session.message_history.unwrap_or_default();
@@ -71,6 +72,9 @@ impl ChatWidget {
         let connector_scope_changed = previous_thread_id != Some(session.thread_id)
             || self.config.cwd.as_path() != session.cwd.as_path();
         self.thread_id = Some(session.thread_id);
+        self.daybreak_enabled = self.config.features.enabled(Feature::CliDaybreak)
+            && session.daybreak_enabled
+            && !matches!(display, SessionConfiguredDisplay::SideConversation);
         self.session_draft = None;
         self.input_queue.server_messages.clear();
         self.input_queue.server_queue_busy = false;
@@ -116,6 +120,10 @@ impl ChatWidget {
             && codex_realtime_webrtc::RealtimeWebrtcSession::is_supported();
         self.bottom_pane
             .set_voice_command_enabled(self.realtime_conversation_available_for_thread);
+        self.set_daybreak_enabled(self.daybreak_enabled);
+        if self.daybreak_enabled && previous_thread_id != self.thread_id {
+            self.add_info_message("Daybreak is on for new turns.".into(), /*hint*/ None);
+        }
         if connector_scope_changed {
             self.invalidate_connector_scope();
         }
@@ -157,7 +165,6 @@ impl ChatWidget {
             }
         }
         self.config.approvals_reviewer = session.approvals_reviewer;
-        self.config.personality = session.personality;
         self.status_line_project_root_name_cache = None;
         let forked_from_id = session.forked_from_id;
         let default_model = session.model.clone();
@@ -204,7 +211,6 @@ impl ChatWidget {
                 });
         }
         self.sync_service_tier_commands();
-        self.sync_worktrees_enabled();
         self.sync_plugins_command_enabled();
         self.sync_goal_command_enabled();
         self.refresh_plugin_mentions();

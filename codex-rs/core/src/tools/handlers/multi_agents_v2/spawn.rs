@@ -214,6 +214,8 @@ async fn handle_spawn_agent(
                 &turn.session_telemetry,
                 turn.config.apps_mcp_product_sku.as_deref(),
                 &err,
+                &call_id,
+                &turn.sub_id,
                 fork_mode.as_ref(),
                 MultiAgentVersion::V2,
             );
@@ -230,6 +232,8 @@ async fn handle_spawn_agent(
         turn,
         SubAgentActivityItem {
             message_preview: None,
+            model: Some(agent_snapshot.model.clone()),
+            reasoning_effort: agent_snapshot.reasoning_effort.clone(),
             id: call_id,
             agent_thread_id: new_thread_id,
             agent_path: new_agent_path.clone(),
@@ -299,18 +303,9 @@ impl SpawnAgentArgs {
             return Ok(Some(SpawnAgentForkMode::FullHistory));
         }
 
-        let last_n_turns = fork_turns.parse::<usize>().map_err(|_| {
-            FunctionCallError::RespondToModel(
-                "fork_turns must be `none`, `all`, or a positive integer string".to_string(),
-            )
-        })?;
-        if last_n_turns == 0 {
-            return Err(FunctionCallError::RespondToModel(
-                "fork_turns must be `none`, `all`, or a positive integer string".to_string(),
-            ));
-        }
-
-        Ok(Some(SpawnAgentForkMode::LastNTurns(last_n_turns)))
+        Err(FunctionCallError::RespondToModel(
+            "fork_turns must be `none` or `all`".to_string(),
+        ))
     }
 }
 

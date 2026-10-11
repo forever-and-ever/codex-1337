@@ -31,7 +31,6 @@ impl App {
             && self.pending_hook_enabled_writes.is_empty()
             && self.pending_shutdown_exit_thread_id.is_none()
             && !self.pending_startup_thread_start
-            && !self.pending_managed_worktree_creation
     }
 
     pub(super) async fn try_idle_restart(

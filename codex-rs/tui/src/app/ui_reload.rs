@@ -60,7 +60,6 @@ impl App {
             && self.pending_hook_enabled_writes.is_empty()
             && self.pending_shutdown_exit_thread_id.is_none()
             && !self.pending_startup_thread_start
-            && !self.pending_managed_worktree_creation
             && self.agents_overview.new_session_draft.is_none()
             && self.agents_overview.parked_draft.is_none()
             && self.side_threads.is_empty()

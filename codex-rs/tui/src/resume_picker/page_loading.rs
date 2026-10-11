@@ -3,10 +3,9 @@
 use std::path::Path;
 
 use super::PageCursor;
-use super::repository_cwd_filter;
 use codex_app_server_protocol::ThreadListCwdFilter;
 
-/// Holds the expanded checkout set for the cursor's entire listing cycle.
+/// Holds the cwd filter for the cursor's entire listing cycle.
 #[derive(Default)]
 pub(super) struct PageCwdFilter {
     current: Option<ThreadListCwdFilter>,
@@ -17,12 +16,10 @@ impl PageCwdFilter {
         &mut self,
         cursor: Option<&PageCursor>,
         cwd: Option<&Path>,
-        uses_remote_filesystem: bool,
-        worktrees_enabled: bool,
     ) -> Option<ThreadListCwdFilter> {
         if cursor.is_none() {
-            self.current = cwd
-                .map(|cwd| repository_cwd_filter(cwd, uses_remote_filesystem, worktrees_enabled));
+            self.current =
+                cwd.map(|cwd| ThreadListCwdFilter::One(cwd.to_string_lossy().into_owned()));
         }
         self.current.clone()
     }

@@ -102,6 +102,46 @@ impl Drop for TestDaemon {
     }
 }
 
+#[test]
+fn managed_daemon_restarts_from_deleted_working_directory() -> Result<()> {
+    let daemon = TestDaemon::new()?;
+    let project = daemon.home.path().join("project");
+    std::fs::create_dir(&project)?;
+    let started = daemon
+        .command()
+        .current_dir(&project)
+        .args(["app-server", "daemon", "start"])
+        .output()?;
+    ensure!(
+        started.status.success(),
+        "{}",
+        String::from_utf8_lossy(&started.stderr)
+    );
+    let old_pid = daemon.pid("app-server.pid")?;
+
+    // Delete the restart caller's cwd without changing the test process's cwd.
+    let restarted = Command::new("/bin/sh")
+        .args([
+            "-c",
+            "rmdir \"$1\" && exec \"$2\" app-server daemon restart",
+            "restart",
+        ])
+        .arg(&project)
+        .arg(&daemon.codex)
+        .current_dir(&project)
+        .env("CODEX_HOME", daemon.home.path())
+        .output()?;
+    ensure!(
+        restarted.status.success(),
+        "{}",
+        String::from_utf8_lossy(&restarted.stderr)
+    );
+    let restarted: Value = serde_json::from_slice(&restarted.stdout)?;
+    assert_eq!(restarted["status"], "restarted");
+    assert_ne!(daemon.pid("app-server.pid")?, old_pid);
+    assert_eq!(daemon.lifecycle("version")?["status"], "running");
+    Ok(())
+}
 fn wait_for_exit(pid: u32) -> Result<()> {
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
@@ -125,7 +165,6 @@ enum InitialDaemon {
 }
 
 fn packaged_daemon_launch(action: &str, initial: InitialDaemon) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
     let mut daemon = TestDaemon::new()?;
     let standalone = daemon.home.path().join("packages/standalone");
     let package = if action == "start" && initial == InitialDaemon::Missing {
@@ -143,8 +182,7 @@ fn packaged_daemon_launch(action: &str, initial: InitialDaemon) -> Result<()> {
         "codex-path/rg",
         "codex-resources/bwrap",
     ] {
-        std::fs::write(package.join(helper), b"runtime fixture")?;
-        std::fs::set_permissions(package.join(helper), std::fs::Permissions::from_mode(0o755))?;
+        codex_utils_cargo_bin::write_executable(&package.join(helper), "runtime fixture")?;
     }
     let target = format!(
         "{}-{}",
@@ -242,13 +280,9 @@ fn packaged_daemon_launch(action: &str, initial: InitialDaemon) -> Result<()> {
         if initial == InitialDaemon::Legacy {
             assert!(!current.exists());
         }
-        std::fs::write(
-            package.join("bin/codex-code-mode-host"),
-            b"replacement helper",
-        )?;
-        std::fs::set_permissions(
-            package.join("bin/codex-code-mode-host"),
-            std::fs::Permissions::from_mode(0o755),
+        codex_utils_cargo_bin::write_executable(
+            &package.join("bin/codex-code-mode-host"),
+            "replacement helper",
         )?;
         let replaced = daemon
             .command()

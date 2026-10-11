@@ -142,7 +142,6 @@ impl ChatWidget {
                     };
                     SelectionItem {
                         name: effort.to_string(),
-                        is_default: effort == model.default_reasoning_effort,
                         actions: vec![Box::new(move |tx| {
                             tx.send(AppEvent::ProviderModel(ProviderModelEvent::Start(
                                 Box::new(choice.clone()),

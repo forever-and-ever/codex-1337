@@ -29,6 +29,19 @@ impl App {
         app_server: &mut AppServerSession,
         event: AppEvent,
     ) -> Result<AppRunControl> {
+        let from_agents_overview = matches!(event, AppEvent::ForkAgentsOverviewThreadReady { .. });
+        let event = if let AppEvent::ForkAgentsOverviewThreadReady { thread_id } = event {
+            if self.current_displayed_thread_id() != Some(thread_id)
+                || (self.thread_unavailable(thread_id)
+                    && !self.chat_widget.is_external_writer_view())
+            {
+                self.chat_widget.fork_in_progress = false;
+                return Ok(AppRunControl::Continue);
+            }
+            AppEvent::ForkCurrentSession { name: None }
+        } else {
+            event
+        };
         // Release the shortcut's input guard even when a fork is rejected below.
         if matches!(event, AppEvent::ForkCurrentSession { .. }) {
             self.chat_widget.fork_in_progress = false;
@@ -48,6 +61,8 @@ impl App {
                     | AppEvent::CopyWarning(_)
                     | AppEvent::UpdateWarnings { .. }
                     | AppEvent::CopySelection { .. }
+                    | AppEvent::SelectTranscriptCopy { .. }
+                    | AppEvent::TranscriptCopyClosed
                     | AppEvent::InsertHistoryCell(_)
                     | AppEvent::CodeModeTranscript { .. }
                     | AppEvent::CodeModeProjection { .. }
@@ -57,8 +72,7 @@ impl App {
                     | AppEvent::ResetTranscriptForThreadSwitch
                     | AppEvent::ResetTranscriptForThreadSwitchPreservingScreen
                     | AppEvent::FinishPromptRevert { .. }
-                    | AppEvent::ManagedWorktreeCreated(_)
-                    | AppEvent::AgentsOverviewWorktreeCreated(_)
+                    | AppEvent::AgentsOverviewPinToggled { .. }
                     | AppEvent::AppendMessageHistoryEntry { .. }
                     | AppEvent::BeginInitialHistoryReplayBuffer
                     | AppEvent::BeginThreadSwitchHistoryReplayBuffer
@@ -100,10 +114,6 @@ impl App {
                     | AppEvent::ForkCurrentSession { .. }
                     | AppEvent::ConfirmedThreadName {
                         request: super::thread_name::ThreadNameRequest::Fork { .. },
-                        ..
-                    }
-                    | AppEvent::StartManagedWorktree {
-                        mode: crate::app_event::ManagedWorktreeMode::Fork,
                         ..
                     }
                     | AppEvent::RevertSessionForPromptEdit { .. }
@@ -162,69 +172,6 @@ impl App {
                     self.chat_widget.show_misalignment_policy_precaution();
                 }
             }
-            AppEvent::StartManagedWorktree { mode, name } => {
-                if self.pending_start_managed_worktree.is_some() {
-                    self.chat_widget
-                        .add_error_message("A worktree is already being created.".to_string());
-                } else {
-                    self.pending_start_managed_worktree = Some((mode, name));
-                }
-            }
-            AppEvent::ManagedWorktreeCreated(created) => {
-                self.pending_managed_worktree_created = Some(created);
-            }
-            AppEvent::BrowseManagedWorktrees => {
-                if let Some(request) = self.chat_widget.request_managed_worktrees() {
-                    crate::worktree_browser::fetch(
-                        request,
-                        self.config.codex_home.to_path_buf(),
-                        app_server.request_handle(),
-                        self.app_event_tx.clone(),
-                    );
-                }
-            }
-            AppEvent::ManagedWorktreesLoaded { request, result } => {
-                self.chat_widget.on_managed_worktrees_loaded(request, result);
-            }
-            AppEvent::ManagedWorktreeAction { request, action } => {
-                if let Some(event) = self.chat_widget.managed_worktree_action(&request, action) {
-                    self.app_event_tx.send(event);
-                }
-            }
-            AppEvent::ShowManagedWorktreeActions { request, entry } => {
-                self.chat_widget.show_managed_worktree_actions(request, entry);
-            }
-            AppEvent::ConfirmManagedWorktreeRemoval { request, root } => {
-                self.chat_widget.confirm_managed_worktree_removal(request, root);
-            }
-            AppEvent::RemoveManagedWorktree { request, root } => {
-                if self.chat_widget.worktree_request_is_current(&request)
-                    && !request.cwd.starts_with(&root)
-                {
-                    let codex_home = self.config.codex_home.to_path_buf();
-                    let tx = self.app_event_tx.clone();
-                    tokio::spawn(async move {
-                        let result = crate::worktree_browser::remove(
-                            codex_home,
-                            request.cwd,
-                            root.clone(),
-                        )
-                        .await
-                        .map_err(|error| error.to_string());
-                        tx.send(AppEvent::ManagedWorktreeRemoved { root, result });
-                    });
-                }
-            }
-            AppEvent::ManagedWorktreeRemoved { root, result } => match result {
-                Ok(()) => self.chat_widget.add_info_message(
-                    format!("Removed worktree at {}. Thread history was kept.", root.display()),
-                    /*hint*/ None,
-                ),
-                Err(error) => self.chat_widget.add_error_message(format!(
-                    "Could not remove worktree at {}: {error}",
-                    root.display()
-                )),
-            },
             AppEvent::ChangeWorkingDirectory {
                 thread_id,
                 requested_cwd,
@@ -355,6 +302,17 @@ impl App {
                     self.chat_widget.maybe_send_next_queued_input();
                 }
             }
+            AppEvent::TranscriptCopyClosed => {
+                self.chat_widget.maybe_send_next_queued_input();
+            }
+            AppEvent::SelectTranscriptCopy { guard } => {
+                let size = tui.prepare_draw_size()?;
+                self.render_owned_transcript(tui, size)?;
+                if !self.transcript_view.begin_copy_mode(&self.transcript_cells, Some(guard)) {
+                    self.chat_widget.add_info_message("Nothing to copy".into(), /*hint*/ None);
+                }
+                tui.frame_requester().schedule_frame();
+            }
             AppEvent::CopySelection { text, label, format } => {
                 let result = tui.clipboard.copy(text, format, tui.frame_requester());
                 self.chat_widget.show_copy_result(&label, result);
@@ -472,8 +430,10 @@ impl App {
                 return self.delete_current_thread(tui, app_server).await;
             }
             AppEvent::ForkCurrentSession { name } => {
-                self.fork_current_thread(tui, app_server, name, Vec::new()).await?;
-                self.chat_widget.maybe_send_next_queued_input();
+                self.fork_current_thread(tui, app_server, name, Vec::new(), from_agents_overview).await?;
+                if !from_agents_overview {
+                    self.chat_widget.maybe_send_next_queued_input();
+                }
                 tui.frame_requester().schedule_frame();
             }
             AppEvent::RevertSessionForPromptEdit {
@@ -735,6 +695,7 @@ impl App {
             AppEvent::ConsolidateAgentMessage {
                 source,
                 item_id,
+                copy_source,
                 cwd,
                 inline_visualization_context,
                 scrollback_reflow,
@@ -742,10 +703,11 @@ impl App {
             } => {
                 self.handle_consolidate_agent_message(
                     tui,
-                    source,
-                    item_id,
-                    cwd,
-                    inline_visualization_context,
+                    {
+                        let mut cell = history_cell::AgentMarkdownCell::new_with_inline_visualizations(source, &cwd, inline_visualization_context).with_copy_source(copy_source);
+                        cell.item_id = item_id;
+                        cell
+                    },
                     scrollback_reflow,
                     deferred_history_cell,
                 )?;
@@ -1146,6 +1108,12 @@ impl App {
                         elicitation_target: None,
                     });
             }
+            AppEvent::AccountEmailLoaded { request_id, email } => {
+                if self.account_email_request_id == Some(request_id) {
+                    self.account_email_request_id = None;
+                    self.chat_widget.on_account_email_loaded(email);
+                }
+            }
             AppEvent::SecuritySetupLoaded { request_id, identity, notice } => {
                 tracing::debug!(current = request_id == self.chat_widget.security_setup_request_id, "handling security setup notice");
                 if request_id == self.chat_widget.security_setup_request_id {
@@ -1448,6 +1416,81 @@ impl App {
             }
             AppEvent::FetchMcpInventory { detail, thread_id } => {
                 self.fetch_mcp_inventory(app_server, detail, thread_id);
+            }
+            AppEvent::StartMcpLogin { name, thread_id } => {
+                if self.pending_mcp_login_start.is_some() {
+                    self.chat_widget.add_info_message(
+                        "MCP sign-in is starting. Wait for it to finish before trying again.".to_string(),
+                        /*hint*/ None,
+                    );
+                    return Ok(AppRunControl::Continue);
+                }
+                let request_id = format!("mcp-login-{}", uuid::Uuid::new_v4());
+                self.pending_mcp_login_start = Some(PendingMcpLoginStart {
+                    request_id: request_id.clone(),
+                    name: name.clone(),
+                    thread_id,
+                    completions: Vec::new(),
+                });
+                self.start_mcp_login(app_server, request_id, name, thread_id);
+            }
+            AppEvent::McpLoginStarted { request_id, result } => {
+                if let Some(pending) = self
+                    .pending_mcp_login_start
+                    .take_if(|pending| pending.request_id == request_id)
+                {
+                    match result {
+                        Ok(response) => {
+                            // Track the latest attempt per server: unrelated OAuth logins can
+                            // remain open while a user retries this server.
+                            if let Some(login_id) = response.login_id.as_ref() {
+                                self.active_mcp_login_ids
+                                    .insert(pending.name.clone(), login_id.clone());
+                            }
+                            let completed = pending.completions.iter().any(|completion| {
+                                completion.login_id == response.login_id
+                                    && completion.name == pending.name
+                            });
+                            if !completed {
+                                self.open_url_in_browser(response.authorization_url);
+                            }
+                        }
+                        Err(error) => {
+                            self.enqueue_thread_notification(
+                                pending.thread_id,
+                                ServerNotification::McpServerOauthLoginCompleted(
+                                    codex_app_server_protocol::McpServerOauthLoginCompletedNotification {
+                                        name: pending.name,
+                                        thread_id: Some(pending.thread_id.to_string()),
+                                        login_id: None,
+                                        success: false,
+                                        error: Some(error),
+                                    },
+                                ),
+                            ).await?;
+                        }
+                    }
+                    // A rejected start leaves the old attempt current. A successful replacement
+                    // has changed its ID, so the old cancellation is discarded here.
+                    for completion in pending.completions {
+                        if completion.login_id.is_some() {
+                            if completion.login_id.as_ref()
+                                != self.active_mcp_login_ids.get(&completion.name)
+                            {
+                                continue;
+                            }
+                            self.active_mcp_login_ids.remove(&completion.name);
+                        }
+                        if let Some(thread_id) = completion.thread_id.as_deref()
+                            .and_then(|id| ThreadId::from_string(id).ok())
+                        {
+                            self.enqueue_thread_notification(
+                                thread_id,
+                                ServerNotification::McpServerOauthLoginCompleted(completion),
+                            ).await?;
+                        }
+                    }
+                }
             }
             AppEvent::McpInventoryLoaded {
                 result,
@@ -2211,7 +2254,6 @@ impl App {
                                         /*summary*/ None,
                                         /*service_tier*/ None,
                                         /*collaboration_mode*/ None,
-                                        /*personality*/ None,
                                     ),
                                 ));
                                 self.app_event_tx.send(AppEvent::UpdateAskForApprovalPolicy(
@@ -2277,6 +2319,9 @@ impl App {
                     }
                 }
             }
+            AppEvent::PersistDaybreakSelection { thread_id, enabled } => {
+                self.persist_daybreak_selection(app_server, thread_id, enabled).await;
+            }
             AppEvent::SelectSessionModel { model, effort } => {
                 self.app_event_tx.send(AppEvent::FollowTranscript);
                 self.select_session_model(app_server, model, effort).await;
@@ -2316,8 +2361,24 @@ impl App {
                 }
                 self.chat_widget.on_plugin_mentions_loaded(plugins);
             }
-            AppEvent::OpenRealtimeSettings => {
-                self.open_realtime_settings(app_server).await;
+            AppEvent::OpenRealtimeSettings => self.chat_widget.open_realtime_settings(),
+            AppEvent::OpenRealtimeSoundDevices => self.chat_widget.open_realtime_sound_devices(),
+            AppEvent::OpenRealtimeVoices => self.open_realtime_voices(app_server).await,
+            AppEvent::OpenRealtimeDevicePicker { kind } => self.list_realtime_devices(kind),
+            AppEvent::OpenRealtimeInputChannels { device } => self.chat_widget.open_realtime_input_channels(device),
+            AppEvent::RealtimeDevicesListed { origin, kind, result } => {
+                if origin == self.active_thread_id {
+                    match result {
+                        Ok(devices) => self.chat_widget.open_realtime_device_picker(kind, devices),
+                        Err(error) => self.chat_widget.add_error_message(error),
+                    }
+                }
+            }
+            AppEvent::PersistRealtimeDevice { kind, name } => {
+                self.persist_realtime_device(kind, name).await;
+            }
+            AppEvent::PersistRealtimeInputChannel { channel } => {
+                self.persist_realtime_input_channel(channel).await;
             }
             AppEvent::PersistRealtimeVoiceSelection { voice } => {
                 self.persist_realtime_voice(app_server, voice).await;
@@ -2343,8 +2404,10 @@ impl App {
                     }
                     Err(err) => {
                         tracing::error!(error = %err, "failed to persist service tier selection");
+                        let error = format_config_error(&err);
                         self.chat_widget.add_error_message(format!(
-                            "Failed to save default service tier: {err}"
+                            "Failed to save default service tier: {error}\n\
+                             You can continue this task. To save the default, resolve the error above, then switch to a different tier and back to the desired tier."
                         ));
                     }
                 }
@@ -2559,24 +2622,34 @@ impl App {
                     AppRunControl::Exit(reason) => return Ok(AppRunControl::Exit(reason)),
                 }
             }
-            AppEvent::NewAgentsOverviewWorktree { cwd } => {
-                Box::pin(self.new_agents_overview_worktree(tui, app_server, cwd)).await;
-            }
-            AppEvent::AgentsOverviewWorktreeCreated(result) => {
-                self.pending_managed_worktree_creation = false;
-                self.agents_overview.view_state.lock().unwrap_or_else(std::sync::PoisonError::into_inner).creating_worktree = false;
-                match result {
-                    Ok(mut pending) => {
-                        let Some(checkout) = pending.checkout.take() else {
-                            return Ok(AppRunControl::Continue);
-                        };
-                        let manager = pending.manager.clone();
-                        let cwd = AbsolutePathBuf::try_from(checkout.cwd.clone())?;
-                        return Box::pin(self.start_agents_overview_session(tui, app_server, Some(cwd), Some((manager, checkout)), /*startup_draft*/ None)).await;
-                    }
-                    Err(error) => self.add_agents_overview_error(error),
+            AppEvent::ForkAgentsOverviewThread { thread_id } => {
+                if self.reconnect.offline {
+                    return Ok(AppRunControl::Continue);
                 }
+                if !self.side_threads.is_empty()
+                    && self.current_displayed_thread_id() != Some(thread_id)
+                {
+                    self.add_agents_overview_error(
+                        "Close the side conversation before forking another task.".into(),
+                    );
+                    return Ok(AppRunControl::Continue);
+                }
+                // Attachment replay must not submit queued input on the source task.
+                self.chat_widget.fork_in_progress = true;
+                let control = self.select_agents_overview_thread(tui, app_server, thread_id).await;
+                if matches!(&control, Ok(AppRunControl::Continue))
+                    && self.current_displayed_thread_id() == Some(thread_id)
+                {
+                    if let Some(input) = self.chat_widget.capture_thread_input_state() {
+                        self.agents_overview.input_states.insert(thread_id, input);
+                    }
+                    self.app_event_tx.send(AppEvent::ForkAgentsOverviewThreadReady { thread_id });
+                } else {
+                    self.chat_widget.fork_in_progress = false;
+                }
+                return control;
             }
+            AppEvent::ForkAgentsOverviewThreadReady { .. } => unreachable!("normalized above"),
             AppEvent::RenameAgentsOverviewThread { thread_id, name } => {
                 self.rename_thread(app_server, thread_id, name, Vec::new()).await;
             }
@@ -2589,11 +2662,24 @@ impl App {
                         if self.chat_widget.thread_id() != Some(thread_id) {
                             self.chat_widget.add_error_message("Fork canceled because the source thread changed.".to_string());
                         } else {
-                            self.fork_current_thread(tui, app_server, Some(name), conflict_thread_ids).await?;
+                            self.fork_current_thread(tui, app_server, Some(name), conflict_thread_ids, /*from_agents_overview*/ false).await?;
                             self.chat_widget.maybe_send_next_queued_input();
                         }
                     }
                 }
+            }
+            AppEvent::ToggleAgentsOverviewPin { thread_id, pinned } => {
+                self.toggle_agents_overview_pin(app_server, thread_id, pinned);
+            }
+            AppEvent::AgentsOverviewPinToggled {
+                request_id,
+                thread_id,
+                pinned,
+                result,
+            } => {
+                self.complete_agents_overview_pin(
+                    app_server, request_id, thread_id, pinned, result,
+                );
             }
             AppEvent::SuggestThreadName {
                 thread_id,
@@ -2672,6 +2758,7 @@ impl App {
                 }
             }
             AppEvent::HideAgentsOverviewThread { thread_id } => {
+                self.prepare_agents_overview_removal(&HashSet::from([thread_id]));
                 self.agents_overview.hidden_threads.insert(thread_id);
                 self.repaint_agents_overview();
             }
@@ -2711,7 +2798,12 @@ impl App {
                 request_id,
                 result,
             } => {
-                self.apply_agent_picker_thread_refresh(primary_thread_id, request_id, result);
+                self.apply_agent_picker_thread_refresh(
+                    app_server,
+                    primary_thread_id,
+                    request_id,
+                    result,
+                );
             }
             AppEvent::SelectAgentThread(thread_id) => {
                 self.select_agent_thread_and_discard_side(tui, app_server, thread_id)
@@ -2761,7 +2853,7 @@ impl App {
                         self.chat_widget.update_skill_enabled(path, enabled);
                     }
                     Err(err) => {
-                        let path_display = path.display();
+                        let path_display = path.inferred_native_path_string();
                         self.chat_widget.add_error_message(format!(
                             "Failed to update skill config for {path_display}: {err}"
                         ));
@@ -3023,6 +3115,9 @@ impl App {
             }
             AppEvent::TerminalTitleSetupCancelled => {
                 self.chat_widget.cancel_terminal_title_setup();
+            }
+            AppEvent::PersistAgentsOverviewGrouping(grouping) => {
+                self.persist_agents_overview_grouping(grouping).await;
             }
             AppEvent::SyntaxThemeSelected { name } => {
                 let edit = crate::legacy_core::config::edit::syntax_theme_edit(&name);

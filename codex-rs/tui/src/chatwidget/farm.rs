@@ -178,8 +178,9 @@ impl ChatWidget {
                     self.bottom_pane.skills().and_then(|skills| {
                         skills
                             .iter()
-                            .find(|skill| skill.path.as_path() == Path::new(&binding.path))
-                            .map(|skill| skill.path.to_path_buf())
+                            .find(|skill| skill.path.as_str() == binding.path)
+                            .and_then(|skill| skill.path.to_inferred_abs_path())
+                            .map(|path| path.to_path_buf())
                     })
                 });
             input.push(if let Some(path) = skill_path {

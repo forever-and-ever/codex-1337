@@ -8,6 +8,7 @@ use crate::session_prefix::format_subagent_context_line;
 use crate::thread_manager::ThreadManagerState;
 use codex_protocol::AgentPath;
 use codex_protocol::ThreadId;
+use codex_protocol::error::AgentErrorContext;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
 use std::collections::HashMap;
@@ -142,8 +143,9 @@ impl LocalAgentRuntime {
     }
 
     pub(crate) fn upgrade(&self) -> CodexResult<Arc<ThreadManagerState>> {
-        self.manager
-            .upgrade()
-            .ok_or_else(|| CodexErr::UnsupportedOperation("thread manager dropped".to_string()))
+        self.manager.upgrade().ok_or_else(|| {
+            CodexErr::UnsupportedOperation("thread manager dropped".to_string())
+                .with_agent_context(AgentErrorContext::ManagerUnavailable)
+        })
     }
 }

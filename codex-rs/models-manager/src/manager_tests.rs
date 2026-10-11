@@ -67,7 +67,6 @@ fn remote_model_with_visibility(
             "upgrade": null,
             "model_messages": {
                 "instructions_template": "base instructions",
-                "instructions_variables": null,
                 "approvals": null,
                 "auto_review": null,
                 "permissions": null

@@ -2,7 +2,7 @@
 source: tui/src/chatwidget/tests/questions_tests.rs
 expression: rendered
 ---
-• Working (0s • ctrl+c to interrupt)
+• Working (0s • ⌃c to interrupt)
 
 • Queued follow-up inputs
 
@@ -10,4 +10,4 @@ expression: rendered
 
   A typed answer
 
-  enter submit   ctrl+] skip   shift+→ main prompt
+  enter submit   ⌃] skip   ⇧→ main prompt

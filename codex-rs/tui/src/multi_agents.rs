@@ -731,6 +731,8 @@ mod tests {
                 "Check the parser failure, then report the root cause without editing files."
                     .into(),
             ),
+            model: None,
+            reasoning_effort: None,
             id: "activity-1".to_string(),
             kind: SubAgentActivityKind::Interacted,
             agent_thread_id: ThreadId::new().to_string(),
@@ -747,6 +749,8 @@ mod tests {
         let thread_id = ThreadId::new();
         let item = ThreadItem::SubAgentActivity {
             message_preview: None,
+            model: None,
+            reasoning_effort: None,
             id: "activity-1".to_string(),
             kind: SubAgentActivityKind::Completed,
             agent_thread_id: thread_id.to_string(),

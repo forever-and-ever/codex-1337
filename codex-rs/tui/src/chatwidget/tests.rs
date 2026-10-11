@@ -139,7 +139,6 @@ pub(super) use codex_protocol::approvals::GuardianRiskLevel;
 pub(super) use codex_protocol::approvals::GuardianUserAuthorization;
 pub(super) use codex_protocol::config_types::CollaborationMode;
 pub(super) use codex_protocol::config_types::ModeKind;
-pub(super) use codex_protocol::config_types::Personality;
 pub(super) use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
 pub(super) use codex_protocol::config_types::ServiceTier;
 pub(super) use codex_protocol::models::ActivePermissionProfile;
@@ -310,8 +309,6 @@ mod tool_activity_tests;
 mod usage;
 #[path = "tests/work_status.rs"]
 mod work_status;
-#[path = "tests/worktree_picker_tests.rs"]
-mod worktree_picker;
 
 pub(crate) use helpers::make_chatwidget_manual_with_sender;
 pub(crate) use helpers::set_chatgpt_auth;

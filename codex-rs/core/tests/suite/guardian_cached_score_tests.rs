@@ -152,7 +152,7 @@ async fn delayed_score_only_covers_the_tool_call_it_classified() -> Result<()> {
         .with_pre_build_hook(|home| {
             std::fs::write(
                 home.join("config.toml"),
-                "[features.guardianv2]\nenabled = true\npersist_scores = true\nmax_tool_call_lag = 1\n\n[features.guardianv2.review_scope]\ncomputer_use_only = false\n",
+                "[features.guardianv2]\nenabled = true\nasync_classifier_mode = \"snapshot\"\npersist_scores = true\nmax_tool_call_lag = 1\n\n[features.guardianv2.review_scope]\ncomputer_use_only = false\n",
             )
             .expect("write Guardian configuration");
         })

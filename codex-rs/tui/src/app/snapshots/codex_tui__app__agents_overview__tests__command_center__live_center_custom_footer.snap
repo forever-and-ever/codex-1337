@@ -2,8 +2,8 @@
 source: tui/src/app/agent_center_tests.rs
 expression: "screen(&view, 100, 12)"
 ---
-  Agent command center  Group: Project  ctrl+s
-   All 0   Needs you 0   Working 0   Ready 0   Inactive 0                     tab/shift+tab filter
+  Agent command center  Group: Project  ⌃s
+   All 0   Needs you 0   Working 0   Ready 0   Inactive 0                          tab/⇧tab filter
   ────────────────────────────────────────────────────────────────────────────────────────────────
   No tasks yet                                            │
                                                           │
@@ -13,4 +13,4 @@ expression: "screen(&view, 100, 12)"
                                                           │
                                                           │
                                                           │
-  ? help  esc back  k/j move  enter open  ctrl+n new
+  ? help  esc back  k/j move  enter open  ⌃n new

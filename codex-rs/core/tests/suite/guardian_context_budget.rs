@@ -213,10 +213,10 @@ enum ReviewerResponse {
 }
 
 #[test_case(1, ReviewerResponse::Decision; "required_context_fails_closed")]
-#[test_case(4_500, ReviewerResponse::ToolContinuation; "oversized_tool_continuation_compacts")]
-#[test_case(4_500, ReviewerResponse::FileImageContinuation; "uploaded_original_image_history_compacts")]
+#[test_case(7_000, ReviewerResponse::ToolContinuation; "oversized_tool_continuation_compacts")]
+#[test_case(7_000, ReviewerResponse::FileImageContinuation; "uploaded_original_image_history_compacts")]
 #[test_case(5_000, ReviewerResponse::UncompactableContinuation; "ineffective_compaction_fails_closed")]
-#[test_case(5_000, ReviewerResponse::CompactionError; "compaction_service_error_does_not_request_user_approval")]
+#[test_case(7_000, ReviewerResponse::CompactionError; "compaction_service_error_does_not_request_user_approval")]
 #[test_case(6_000, ReviewerResponse::NextReview; "incoming_review_compacts_existing_history")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn review_respects_complete_context_budget(
@@ -457,19 +457,29 @@ async fn review_respects_complete_context_budget(
             reviewer_response,
             ReviewerResponse::ToolContinuation | ReviewerResponse::FileImageContinuation
         );
-        assert_eq!(requests.len(), if recovered { 4 } else { 3 });
+        assert_eq!(
+            requests.len(),
+            if recovered { 4 } else { 3 },
+            "review outcome: {:?}",
+            requests
+                .last()
+                .map(|request| request.function_call_output("exec-over-budget"))
+        );
         assert_eq!(guardian_requests.len(), if recovered { 2 } else { 1 });
         if recovered {
             assert_eq!(compact_requests.len(), 1);
             let compact = &compact_requests[0];
             if matches!(reviewer_response, ReviewerResponse::FileImageContinuation) {
-                assert_eq!(
-                    image_store
-                        .uploads
-                        .lock()
-                        .expect("image upload tracker lock is not poisoned")
-                        .len(),
-                    1
+                let uploads = image_store
+                    .uploads
+                    .lock()
+                    .expect("image upload tracker lock is not poisoned");
+                let [upload] = uploads.as_slice() else {
+                    panic!("persistent Guardian should upload one image");
+                };
+                assert!(
+                    !upload.ephemeral,
+                    "persistent Guardian should request durable attachment storage"
                 );
                 // The file reservation also protects the compaction request itself: an output
                 // larger than its window is replaced before the summary request is sent.

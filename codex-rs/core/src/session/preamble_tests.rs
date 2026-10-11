@@ -31,6 +31,7 @@ fn exec_sections_split_the_rendered_nested_tools_losslessly() {
             audio: true,
             generated_image: true,
         },
+        codex_code_mode::DeferredToolDiscovery::Catalog,
         /*messages*/ None,
     );
     let (guidance, sections) = exec_sections(&description);

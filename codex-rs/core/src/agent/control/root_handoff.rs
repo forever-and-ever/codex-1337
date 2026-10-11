@@ -1,5 +1,6 @@
 //! Best-effort handoff windows plus recent root context, without saved handoff state.
 //! History position approximates dispatch order; absent calls leave the existing context unchanged.
+//! User inputs bypass relevance filtering; only assistant context is narrowed.
 
 use std::collections::BTreeSet;
 
@@ -140,14 +141,19 @@ pub(super) fn selected_message_indices(
                 })
                 .take(ROOT_CONTEXT_WINDOW),
         );
-        // This relevance filter leaves verified tool answers and unordered legacy evidence alone.
+        // Later user inputs can restrict an earlier handoff even when they are not recent.
+        // Leave all user inputs, verified answers, and unordered legacy evidence to the shared cap.
         selected.extend(
             messages
                 .iter()
                 .enumerate()
                 .filter_map(|(index, (order, message))| {
-                    (order.is_none() || matches!(message, GuardianRootMessage::UserInput(_)))
-                        .then_some(index)
+                    (order.is_none()
+                        || matches!(
+                            message,
+                            GuardianRootMessage::User(_) | GuardianRootMessage::UserInput(_)
+                        ))
+                    .then_some(index)
                 }),
         );
     }

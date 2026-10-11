@@ -34,7 +34,7 @@ async fn collaboration_catalog_is_optional_and_refetched_on_bootstrap() -> Resul
             "newThread": {
                 "modelProvider": null,
                 "cwd": null,
-                "config": config_request_overrides_from_config(&config)
+                "config": config_request_overrides_from_config(&config, ThreadParamsMode::Embedded)
             }
         });
         let thread_id = ThreadId::new();

@@ -217,7 +217,7 @@ async fn exec_batches_work_status_and_agent_delivery_after_full_history_fork() -
         ],
     )
     .await;
-    let TurnInputSubmission::Started { turn_id } = test
+    let TurnInputSubmission::Started { turn_id, .. } = test
         .codex
         .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
             text: "Batch work status with agent delivery.".into(),

@@ -115,11 +115,7 @@ impl Session {
                 }
                 .to_owned()
             }),
-            effective_service_tier: get_service_tier(
-                requested,
-                self.features.enabled(Feature::FastMode),
-                &model,
-            ),
+            effective_service_tier: get_service_tier(requested, &self.features, &model),
         }
     }
 }

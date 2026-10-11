@@ -1,4 +1,4 @@
-use crate::shell::ShellType;
+use crate::shell::ShellInvocation;
 use codex_tools::UnifiedExecShellMode;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -42,7 +42,7 @@ impl ScriptLanguage {
 #[derive(Clone, Debug)]
 pub(crate) enum ExecutionMode {
     Shell {
-        shell_type: ShellType,
+        invocation: ShellInvocation,
         shell_mode: UnifiedExecShellMode,
     },
     Script(ScriptLanguage),
@@ -75,12 +75,12 @@ impl ExecutionMode {
         }
     }
 
-    pub(crate) fn shell(&self) -> Option<(ShellType, &UnifiedExecShellMode)> {
+    pub(crate) fn shell(&self) -> Option<(&ShellInvocation, &UnifiedExecShellMode)> {
         match self {
             Self::Shell {
-                shell_type,
+                invocation,
                 shell_mode,
-            } => Some((*shell_type, shell_mode)),
+            } => Some((invocation, shell_mode)),
             Self::Script(_) => None,
         }
     }

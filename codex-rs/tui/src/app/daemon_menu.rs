@@ -51,7 +51,7 @@ impl App {
                 dismiss_on_select: true,
                 ..Default::default()
             }],
-            ..SelectionViewParams::picker()
+            ..SelectionViewParams::confirmation()
         });
     }
 }

@@ -8,6 +8,6 @@ expression: "buffer_to_text(&actual, area)"
 
 
 
-Ctrl+Space select
+⌃space select
  ↑/↓ to scroll · pgup/pgdn to page · hom
  q close · f3 find · esc browse prompts

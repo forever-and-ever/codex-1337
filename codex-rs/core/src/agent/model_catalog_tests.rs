@@ -233,10 +233,8 @@ async fn fresh_child_routes_model_and_provider_but_history_forks_stay_locked(
                 Some(child_model.into())
             ),
         );
-        for fork_mode in [
-            SpawnAgentForkMode::LastNTurns(1),
-            SpawnAgentForkMode::FullHistory,
-        ] {
+        {
+            let fork_mode = SpawnAgentForkMode::FullHistory;
             let error = prepare_agent_spawn_config(
                 &session,
                 &step,

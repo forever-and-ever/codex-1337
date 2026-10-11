@@ -324,7 +324,6 @@ mod alarms;
 mod prompt_cache;
 mod skills;
 mod slash_dispatch;
-mod worktree_picker;
 use self::skills::collect_tool_mentions;
 use self::skills::find_app_mentions;
 use self::skills::find_skill_mentions_with_tool_mentions;
@@ -534,7 +533,7 @@ pub(crate) enum ExternalEditorState {
 pub(crate) struct ChatWidget {
     pub(crate) empty_state_animation:
         std::cell::RefCell<crate::empty_state_animation::EmptyStateAnimation>,
-    pub(crate) cyber_policy_notice: crate::daybreak::NoticeCache,
+    pub(crate) daybreak_enabled: bool,
     app_event_tx: AppEventSender,
     codex_op_target: CodexOpTarget,
     bottom_pane: BottomPane,
@@ -556,7 +555,7 @@ pub(crate) struct ChatWidget {
     model_catalog: Arc<ModelCatalog>,
     model_popup_request_id: Option<uuid::Uuid>,
     permission_popup_request_id: Option<uuid::Uuid>,
-    worktree_popup_request_id: Option<uuid::Uuid>,
+    permission_discovery: Option<crate::permission_discovery::PermissionDiscovery>,
     permission_profiles_menu_opened: bool,
     model_popup_model_ids: Vec<String>,
     session_telemetry: SessionTelemetry,
@@ -568,7 +567,6 @@ pub(crate) struct ChatWidget {
     /// Remote app servers cannot read image paths on the TUI host.
     pub(crate) snapshot_local_images: bool,
     pending_image_submission: Option<image_submission::PendingImageSubmission>,
-    pub(crate) local_worktree_operations: bool,
     pub(crate) windows_sandbox_local_server: bool,
     pub(crate) windows_sandbox_config: crate::windows_sandbox::WindowsSandboxConfig,
     pub(crate) windows_sandbox_host: crate::app::WindowsSandboxHost,
@@ -617,13 +615,15 @@ pub(crate) struct ChatWidget {
     pending_stream_consolidations: usize,
     /// Copy feedback is discarded with its originating conversation.
     pending_clipboard: Option<clipboard::PendingCopy>,
+    /// Legacy terminals report auto-repeat as new presses; suppress the burst after a slow paste.
+    suppress_image_paste_until: Instant,
     copy_last_response_binding: Vec<KeyBinding>,
     running_commands: HashMap<String, RunningCommand>,
     collab_agent_metadata: HashMap<ThreadId, AgentMetadata>,
     pending_collab_spawn_requests: HashMap<String, multi_agents::SpawnRequestSummary>,
     suppressed_exec_calls: HashSet<String>,
     skills_all: Vec<SkillMetadata>,
-    skills_initial_state: Option<HashMap<AbsolutePathBuf, bool>>,
+    skills_initial_state: Option<HashMap<PathUri, bool>>,
     last_unified_wait: Option<UnifiedExecWaitState>,
     unified_exec_wait_streak: Option<UnifiedExecWaitStreak>,
     turn_lifecycle: TurnLifecycleState,
@@ -1088,7 +1088,7 @@ impl ChatWidget {
                     ..Default::default()
                 },
             ],
-            ..SelectionViewParams::picker()
+            ..SelectionViewParams::confirmation()
         });
     }
 
@@ -1741,6 +1741,10 @@ impl ChatWidget {
 
     pub(crate) fn composer_is_empty(&self) -> bool {
         self.bottom_pane.composer_is_empty() && !self.bottom_pane.is_in_paste_burst()
+    }
+
+    pub(crate) fn composer_is_vim_enabled(&self) -> bool {
+        self.bottom_pane.composer_is_vim_enabled()
     }
 
     #[cfg(test)]

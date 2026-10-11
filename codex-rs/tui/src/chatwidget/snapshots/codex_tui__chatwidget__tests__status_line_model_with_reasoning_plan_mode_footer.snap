@@ -9,4 +9,4 @@ expression: normalized_backend_snapshot(terminal.backend())
 "────────────────────────────────────────────────────────────────────────────────"
 "  Activity  —                                                                   "
 "────────────────────────────────────────────────────────────────────────────────"
-"  gpt-5.2 medium                                Plan mode (shift+tab to cycle)  "
+"  gpt-5.2 medium                                     Plan mode (⇧tab to cycle)  "

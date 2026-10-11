@@ -1,9 +1,9 @@
 ---
 source: tui/src/app/agents_overview_tests.rs
-assertion_line: 633
+assertion_line: 995
 expression: "age.replace_all(&rendered, \" [age]\")"
 ---
-  Agent command center  Group: Project  ctrl+s
+  Agent command center  Group: Project  ⌃s
    All 10   Needs you 0   Working 0   Ready 0   Inactive 10
   ────────────────────────────────────────────────────────────────────────────
       Tasks                                            Status         Updated
@@ -26,4 +26,4 @@ expression: "age.replace_all(&rendered, \" [age]\")"
 
 
 
-  ? help  esc back  ↑/↓ move  enter open  ctrl+n new
+  ? help  esc back  ↑/↓ move  enter open  ⌃n new

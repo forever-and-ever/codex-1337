@@ -40,7 +40,7 @@ use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_codex::TestCodex;
-use core_test_support::test_codex::local_selections;
+use core_test_support::test_codex::local_requests;
 use core_test_support::test_codex::turn_permission_fields;
 use core_test_support::wait_for_event;
 use core_test_support::wait_for_event_with_timeout;
@@ -472,8 +472,17 @@ async fn unified_exec_zsh_fork_guardian_reviews_persistent_terminal_in_current_t
     let outside_path = outside_dir
         .path()
         .join("unified-exec-zsh-fork-current-turn.txt");
-    let initial_denied_path = outside_dir.path().join("original-environment-private");
-    let permission_profile = denied_read_permission_profile(&initial_denied_path)?;
+    // A live terminal cannot acquire new denied-read restrictions. This case
+    // exercises current-turn review, not an impossible sandbox retrofit.
+    let permission_profile = permission_profile_from_toml(
+        r#"
+[filesystem]
+"/" = "read"
+":project_roots" = "write"
+[network]
+enabled = false
+"#,
+    )?;
     let rules = r#"prefix_rule(pattern=["touch"], decision="prompt")"#.to_string();
 
     let outside_path_for_hook = outside_path.clone();
@@ -571,9 +580,8 @@ async fn unified_exec_zsh_fork_guardian_reviews_persistent_terminal_in_current_t
 
     let next_cwd = test.config.cwd.join("next-turn");
     fs::create_dir(&next_cwd)?;
-    let next_denied_path = next_cwd.join("next-environment-private");
     let (sandbox_policy, permission_profile) = turn_permission_fields(
-        denied_read_permission_profile(next_denied_path.as_path())?,
+        test.session_configured.permission_profile.clone(),
         next_cwd.as_path(),
     );
     test.codex
@@ -583,7 +591,7 @@ async fn unified_exec_zsh_fork_guardian_reviews_persistent_terminal_in_current_t
                 text_elements: Vec::new(),
             }])
             .with_thread_settings(ThreadSettingsOverrides {
-                environments: Some(local_selections(next_cwd)),
+                environments: Some(local_requests(next_cwd)),
                 approvals_reviewer: Some(ApprovalsReviewer::AutoReview),
                 sandbox_policy: Some(sandbox_policy),
                 permission_profile,
@@ -659,14 +667,6 @@ async fn unified_exec_zsh_fork_guardian_reviews_persistent_terminal_in_current_t
     assert!(guardian_requests[0].body_contains_text(&environment));
     assert!(guardian_requests[0].body_contains_text("The `cwd` field is its launch directory"));
     assert!(guardian_requests[1].body_contains_text(&outside_path.to_string_lossy()));
-    let guardian_text = guardian_requests[1].message_input_texts("user").join("");
-    let permissions = guardian_text
-        .split_once("PARENT TURN PERMISSION CONTEXT START")
-        .and_then(|(_, text)| text.split_once("PARENT TURN PERMISSION CONTEXT END"))
-        .map(|(permissions, _)| permissions)
-        .context("intercepted command's Guardian permissions")?;
-    assert!(permissions.contains(initial_denied_path.to_string_lossy().as_ref()));
-    assert!(!permissions.contains(next_denied_path.to_string_lossy().as_ref()));
 
     Ok(())
 }
@@ -839,7 +839,7 @@ async fn submit_turn_with_session_permissions(
                 text_elements: Vec::new(),
             }])
             .with_thread_settings(ThreadSettingsOverrides {
-                environments: Some(local_selections(test.config.cwd.clone())),
+                environments: Some(local_requests(test.config.cwd.clone())),
                 approval_policy: Some(approval_policy),
                 approvals_reviewer: Some(approvals_reviewer),
                 sandbox_policy: Some(sandbox_policy),

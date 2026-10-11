@@ -72,6 +72,7 @@ use codex_utils_oss::get_default_model_for_oss_provider;
 use color_eyre::eyre::WrapErr;
 use crossterm::SynchronizedUpdate;
 use cwd_prompt::CwdPromptAction;
+pub use daemon_startup::uses_wsl_drvfs;
 pub use idle_restart::IDLE_RESTART_PROTOCOL;
 pub use idle_restart::apply_handoff as apply_idle_restart_handoff;
 #[cfg(target_os = "linux")]
@@ -103,8 +104,6 @@ use uuid::Uuid;
 
 pub(crate) use codex_app_server_client::legacy_core;
 
-pub(crate) use worktree_startup::ManagedTuiWorktree;
-
 mod additional_dirs;
 mod analytics;
 mod app;
@@ -130,6 +129,7 @@ mod clock_format;
 mod collaboration_modes;
 mod color;
 mod config_update;
+mod copy_input_guard;
 pub(crate) mod custom_terminal;
 mod daybreak;
 #[cfg(test)]
@@ -139,7 +139,6 @@ mod markdown_copy;
 mod permission_discovery;
 mod pets;
 mod security_setup;
-mod worktree_browser;
 pub use custom_terminal::Terminal;
 mod assistant_directives;
 mod auto_review_denials;
@@ -252,7 +251,6 @@ mod turn_tip;
 mod ui_consts;
 mod unarchive_prompt;
 pub(crate) mod update_action;
-mod worktree_startup;
 pub use update_action::UpdateAction;
 #[cfg(not(debug_assertions))]
 pub use update_action::get_update_action;
@@ -306,7 +304,8 @@ async fn start_embedded_app_server(
     environment_manager: Arc<EnvironmentManager>,
     embedded_network_policy: codex_app_server_client::EmbeddedNetworkPolicy,
 ) -> color_eyre::Result<InProcessAppServerClient> {
-    start_embedded_app_server_with(
+    // Keep embedded startup state off the caller's stack during session transitions.
+    Box::pin(start_embedded_app_server_with(
         arg0_paths,
         config,
         cli_kv_overrides,
@@ -319,7 +318,7 @@ async fn start_embedded_app_server(
         environment_manager,
         embedded_network_policy,
         InProcessAppServerClient::start,
-    )
+    ))
     .await
 }
 
@@ -399,10 +398,7 @@ async fn init_state_db_for_app_server_target(
         AppServerTarget::Embedded => state_db::try_init(config).await.map(Some).map_err(|err| {
             let database_path = codex_state::runtime_db_path_for_corruption_error(&err)
                 .unwrap_or_else(|| config.sqlite_config().state_db_path());
-            std::io::Error::other(LocalStateDbStartupError::new(
-                database_path,
-                format!("{err:#}"),
-            ))
+            std::io::Error::other(LocalStateDbStartupError::new(database_path, err))
         }),
         AppServerTarget::LocalDaemon { .. } | AppServerTarget::Remote { .. } => {
             Ok(state_db::get_state_db(config).await)
@@ -804,9 +800,7 @@ async fn lookup_session_target_with_app_server(
 }
 
 async fn lookup_latest_session_target_with_app_server(
-    uses_remote_filesystem: bool,
     app_server: &mut AppServerSession,
-    config: &Config,
     cwd_filter: Option<&Path>,
     include_non_interactive: bool,
 ) -> color_eyre::Result<Option<resume_picker::SessionTarget>> {
@@ -817,13 +811,15 @@ async fn lookup_latest_session_target_with_app_server(
     ] {
         let response = app_server
             .thread_list(latest_session_lookup_params(
-                uses_remote_filesystem,
-                config,
                 cwd_filter,
                 include_non_interactive,
                 lookup_mode,
             ))
-            .await?;
+            .await;
+        let response = match response {
+            Err(_) if lookup_mode == LatestSessionLookupMode::StateDbOnly => continue,
+            response => response?,
+        };
         let target = response
             .data
             .into_iter()
@@ -844,8 +840,6 @@ enum LatestSessionLookupMode {
 }
 
 fn latest_session_lookup_params(
-    uses_remote_filesystem: bool,
-    config: &Config,
     cwd_filter: Option<&Path>,
     include_non_interactive: bool,
     lookup_mode: LatestSessionLookupMode,
@@ -865,11 +859,7 @@ fn latest_session_lookup_params(
         parent_thread_id: None,
         ancestor_thread_id: None,
         cwd: cwd_filter.map(|cwd| {
-            resume_picker::repository_cwd_filter(
-                cwd,
-                uses_remote_filesystem,
-                config.features.enabled(codex_features::Feature::Worktrees),
-            )
+            codex_app_server_protocol::ThreadListCwdFilter::One(cwd.to_string_lossy().into_owned())
         }),
         use_state_db_only: match lookup_mode {
             LatestSessionLookupMode::StateDbOnly => true,
@@ -1120,7 +1110,6 @@ async fn run_ratatui_app(
     mut state_db: Option<StateDbHandle>,
     environment_manager: Arc<EnvironmentManager>,
     embedded_network_policy: codex_app_server_client::EmbeddedNetworkPolicy,
-    managed_worktree: Option<ManagedTuiWorktree>,
     daemon_startup_warning: Option<String>,
     launch_telemetry: daemon_telemetry::Launch<impl FnOnce(&AppServerTarget, bool)>,
     startup_draft: startup_draft::StartupDraft,
@@ -1345,7 +1334,6 @@ async fn run_ratatui_app(
                             cloud_config_bundle.clone(),
                             strict_config,
                             /*fallback_cwd*/ None,
-                            managed_worktree.as_ref(),
                         )
                         .await
                     } else {
@@ -1367,7 +1355,10 @@ async fn run_ratatui_app(
     if app_server_target.uses_embedded_network_policy() {
         embedded_network_policy.bind_config(&mut config);
     }
-    startup_draft.apply_config(&config);
+    startup_draft.apply_settings(
+        &crate::local_settings::LocalSettings::from(&config),
+        config.cwd.as_path(),
+    );
     if !(cli.resume_picker || cli.fork_picker || cli.agents_overview)
         && let Err(err) = startup_draft.show(&mut tui)
     {
@@ -1454,12 +1445,7 @@ async fn run_ratatui_app(
                 .run_until(
                     &mut tui,
                     lookup_latest_session_target_with_app_server(
-                        uses_remote_workspace_or_environment(
-                            &app_server_target,
-                            &environment_manager,
-                        ),
                         startup_app_server,
-                        &config,
                         filter_cwd,
                         /*include_non_interactive*/ false,
                     ),
@@ -1556,9 +1542,7 @@ async fn run_ratatui_app(
             .run_until(
                 &mut tui,
                 lookup_latest_session_target_with_app_server(
-                    uses_remote_workspace_or_environment(&app_server_target, &environment_manager),
                     startup_app_server,
-                    &config,
                     filter_cwd,
                     cli.resume_include_non_interactive,
                 ),
@@ -1684,7 +1668,6 @@ async fn run_ratatui_app(
                         cloud_config_bundle.clone(),
                         strict_config,
                         fallback_cwd,
-                        managed_worktree.as_ref(),
                     ),
                 )
                 .await
@@ -1715,7 +1698,10 @@ async fn run_ratatui_app(
     if app_server_target.uses_embedded_network_policy() {
         embedded_network_policy.bind_config(&mut config);
     }
-    startup_draft.apply_config(&config);
+    startup_draft.apply_settings(
+        &crate::local_settings::LocalSettings::from(&config),
+        config.cwd.as_path(),
+    );
 
     if config.model_provider_id != startup_model_provider
         && matches!(&app_server_target, AppServerTarget::Embedded)
@@ -1806,7 +1792,6 @@ async fn run_ratatui_app(
                 cloud_config_bundle.clone(),
                 strict_config,
                 Some(config.cwd.to_path_buf()),
-                managed_worktree.as_ref(),
             )
             .await;
             if app_server_target.uses_embedded_network_policy() {
@@ -1857,7 +1842,6 @@ async fn run_ratatui_app(
                     cloud_config_bundle.clone(),
                     strict_config,
                     Some(current_cwd.to_path_buf()),
-                    managed_worktree.as_ref(),
                 )
                 .await;
             }
@@ -1874,7 +1858,10 @@ async fn run_ratatui_app(
     if app_server_target.uses_embedded_network_policy() {
         embedded_network_policy.bind_config(&mut config);
     }
-    startup_draft.apply_config(&config);
+    startup_draft.apply_settings(
+        &crate::local_settings::LocalSettings::from(&config),
+        config.cwd.as_path(),
+    );
 
     // Count launches that reach final config resolution, regardless of screen policy.
     if config.analytics_enabled != Some(false)
@@ -1931,11 +1918,24 @@ async fn run_ratatui_app(
     let bypass_hook_trust_for_startup_review = config.bypass_hook_trust && !is_persistent_resume;
     let hooks_request_handle = app_server.request_handle();
     let hooks_cwd = config.cwd.to_path_buf();
+    let server_owned_fresh_bootstrap = app::startup_bootstrap::uses_server_owned_fresh_bootstrap(
+        &app_server_target,
+        &session_selection,
+        &loader_overrides,
+    );
     let startup_prefetch_started_at = Instant::now();
     let startup_prefetch = startup_draft
         .run_until(&mut tui, async {
             tokio::join!(
-                app_server.bootstrap_for_selection(&config, &session_selection),
+                async {
+                    if server_owned_fresh_bootstrap {
+                        return Ok::<_, color_eyre::Report>(None);
+                    }
+                    let bootstrap = app_server
+                        .bootstrap_for_selection(&config, &session_selection)
+                        .await?;
+                    Ok(Some(bootstrap))
+                },
                 load_startup_hooks_review_entry(hooks_request_handle, hooks_cwd),
             )
         })
@@ -1952,7 +1952,7 @@ async fn run_ratatui_app(
         return Err(err.into());
     }
     let startup_bootstrap = match startup_bootstrap {
-        Ok(startup_bootstrap) => Some(startup_bootstrap),
+        Ok(startup) => startup,
         Err(err) => {
             shutdown_startup_session(Some(app_server), &mut terminal_restore_guard).await;
             return Err(err);
@@ -2001,7 +2001,6 @@ async fn run_ratatui_app(
         startup_hooks_browser,
         daemon_startup_warning,
         startup_draft,
-        managed_worktree,
     ))
     .await;
 
@@ -2089,7 +2088,6 @@ async fn load_config_or_exit(
         cloud_config_bundle,
         strict_config,
         /*fallback_cwd*/ None,
-        /*worktree*/ None,
     )
     .await
 }
@@ -2102,64 +2100,25 @@ async fn load_config_or_exit_with_fallback_cwd(
     cloud_config_bundle: CloudConfigBundleLoader,
     strict_config: bool,
     fallback_cwd: Option<PathBuf>,
-    worktree: Option<&ManagedTuiWorktree>,
 ) -> Config {
     #[allow(clippy::print_stderr)]
-    match load_config_with_worktree_source_policy(
-        cli_kv_overrides,
-        overrides,
-        loader_overrides,
-        cloud_config_bundle,
-        strict_config,
-        fallback_cwd,
-        worktree,
-    )
-    .await
+    match ConfigBuilder::default()
+        .cli_overrides(cli_kv_overrides)
+        .harness_overrides(overrides)
+        .loader_overrides(loader_overrides)
+        .cloud_config_bundle(cloud_config_bundle)
+        .strict_config(strict_config)
+        .fallback_cwd(fallback_cwd)
+        .build()
+        .await
     {
         Ok(config) => config,
         Err(err) => {
             restore_terminal_before_fatal_exit();
             eprintln!("Error loading configuration: {err}");
-            if let Some(worktree) = worktree {
-                worktree.report_startup_failure();
-            }
             std::process::exit(1);
         }
     }
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn load_config_with_worktree_source_policy(
-    cli_kv_overrides: Vec<(String, toml::Value)>,
-    overrides: ConfigOverrides,
-    loader_overrides: LoaderOverrides,
-    cloud_config_bundle: CloudConfigBundleLoader,
-    strict_config: bool,
-    fallback_cwd: Option<PathBuf>,
-    worktree: Option<&ManagedTuiWorktree>,
-) -> std::io::Result<Config> {
-    let config = ConfigBuilder::default()
-        .cli_overrides(cli_kv_overrides.clone())
-        .harness_overrides(overrides.clone())
-        .loader_overrides(loader_overrides.clone())
-        .strict_config(strict_config)
-        .cloud_config_bundle(cloud_config_bundle.clone())
-        .fallback_cwd(fallback_cwd)
-        .build()
-        .await
-        .map_err(std::io::Error::other)?;
-    if let Some(worktree) = worktree {
-        worktree
-            .check_source_policy(
-                &cli_kv_overrides,
-                &overrides,
-                &loader_overrides,
-                &cloud_config_bundle,
-                strict_config,
-            )
-            .await?;
-    }
-    Ok(config)
 }
 
 #[allow(clippy::print_stderr)]
@@ -2995,12 +2954,9 @@ requires_openai_auth = {requires_openai_auth}
     async fn latest_session_lookup_params_keep_local_filters_for_embedded_sessions()
     -> std::io::Result<()> {
         let temp_dir = TempDir::new()?;
-        let config = build_config(&temp_dir).await?;
         let cwd = temp_dir.path().join("project");
 
         let params = latest_session_lookup_params(
-            /*uses_remote_filesystem*/ false,
-            &config,
             Some(cwd.as_path()),
             /*include_non_interactive*/ false,
             LatestSessionLookupMode::StateDbOnly,
@@ -3014,8 +2970,6 @@ requires_openai_auth = {requires_openai_auth}
         assert!(params.use_state_db_only);
 
         let scan_params = latest_session_lookup_params(
-            /*uses_remote_filesystem*/ false,
-            &config,
             Some(cwd.as_path()),
             /*include_non_interactive*/ false,
             LatestSessionLookupMode::ScanAndRepair,
@@ -3028,11 +2982,8 @@ requires_openai_auth = {requires_openai_auth}
     async fn latest_session_lookup_params_keep_local_filters_for_local_daemon_sessions()
     -> color_eyre::Result<()> {
         let temp_dir = TempDir::new()?;
-        let config = build_config(&temp_dir).await?;
         let cwd = temp_dir.path().join("project");
         let params = latest_session_lookup_params(
-            /*uses_remote_filesystem*/ false,
-            &config,
             Some(cwd.as_path()),
             /*include_non_interactive*/ false,
             LatestSessionLookupMode::StateDbOnly,
@@ -3049,12 +3000,7 @@ requires_openai_auth = {requires_openai_auth}
     #[tokio::test]
     async fn latest_session_lookup_params_omit_local_filters_for_remote_sessions()
     -> std::io::Result<()> {
-        let temp_dir = TempDir::new()?;
-        let config = build_config(&temp_dir).await?;
-
         let params = latest_session_lookup_params(
-            /*uses_remote_filesystem*/ true,
-            &config,
             /*cwd_filter*/ None,
             /*include_non_interactive*/ false,
             LatestSessionLookupMode::StateDbOnly,
@@ -3068,12 +3014,7 @@ requires_openai_auth = {requires_openai_auth}
     #[tokio::test]
     async fn latest_session_lookup_params_can_include_non_interactive_sources()
     -> std::io::Result<()> {
-        let temp_dir = TempDir::new()?;
-        let config = build_config(&temp_dir).await?;
-
         let params = latest_session_lookup_params(
-            /*uses_remote_filesystem*/ true,
-            &config,
             /*cwd_filter*/ None,
             /*include_non_interactive*/ true,
             LatestSessionLookupMode::StateDbOnly,
@@ -3094,13 +3035,9 @@ requires_openai_auth = {requires_openai_auth}
     #[tokio::test]
     async fn latest_session_lookup_params_keep_explicit_cwd_filter_for_remote_sessions()
     -> std::io::Result<()> {
-        let temp_dir = TempDir::new()?;
-        let config = build_config(&temp_dir).await?;
         let cwd = Path::new("repo/on/server");
 
         let params = latest_session_lookup_params(
-            /*uses_remote_filesystem*/ true,
-            &config,
             Some(cwd),
             /*include_non_interactive*/ false,
             LatestSessionLookupMode::StateDbOnly,
@@ -3162,7 +3099,7 @@ requires_openai_auth = {requires_openai_auth}
             format!("gitdir: {}", admin.display()),
         )?;
 
-        let mut config = ConfigBuilder::default()
+        let config = ConfigBuilder::default()
             .codex_home(temp_dir.path().to_path_buf())
             .harness_overrides(ConfigOverrides {
                 cwd: Some(project_cwd.clone()),
@@ -3170,9 +3107,6 @@ requires_openai_auth = {requires_openai_auth}
             })
             .build()
             .await?;
-        config
-            .features
-            .set_enabled(codex_features::Feature::Worktrees, /*enabled*/ false)?;
         let model_provider = config.model_provider_id.as_str();
         let project_thread_id = write_session_rollout(
             temp_dir.path(),
@@ -3182,7 +3116,7 @@ requires_openai_auth = {requires_openai_auth}
             model_provider,
             &project_cwd,
         )?;
-        let linked_thread_id = write_session_rollout(
+        write_session_rollout(
             temp_dir.path(),
             "2025-01-02T11-00-00",
             "2025-01-02T11:00:00Z",
@@ -3209,26 +3143,8 @@ requires_openai_auth = {requires_openai_auth}
             /*uses_remote_workspace*/ false, /*remote_cwd_override*/ None, &config,
             /*show_all*/ false,
         );
-        let disabled_target = lookup_latest_session_target_with_app_server(
-            /*uses_remote_filesystem*/ false,
-            &mut app_server,
-            &config,
-            filter_cwd,
-            /*include_non_interactive*/ false,
-        )
-        .await?
-        .expect("expected current-checkout target with worktrees disabled");
-        config
-            .features
-            .set_enabled(codex_features::Feature::Worktrees, /*enabled*/ true)?;
-        let filter_cwd = latest_session_cwd_filter(
-            /*uses_remote_workspace*/ false, /*remote_cwd_override*/ None, &config,
-            /*show_all*/ false,
-        );
         let scoped_target = lookup_latest_session_target_with_app_server(
-            /*uses_remote_filesystem*/ false,
             &mut app_server,
-            &config,
             filter_cwd,
             /*include_non_interactive*/ false,
         )
@@ -3239,9 +3155,7 @@ requires_openai_auth = {requires_openai_auth}
             /*show_all*/ true,
         );
         let show_all_target = lookup_latest_session_target_with_app_server(
-            /*uses_remote_filesystem*/ false,
             &mut app_server,
-            &config,
             show_all_filter_cwd,
             /*include_non_interactive*/ false,
         )
@@ -3249,8 +3163,7 @@ requires_openai_auth = {requires_openai_auth}
         .expect("expected global fork --last target");
         app_server.shutdown().await?;
 
-        assert_eq!(disabled_target.thread_id, project_thread_id);
-        assert_eq!(scoped_target.thread_id, linked_thread_id);
+        assert_eq!(scoped_target.thread_id, project_thread_id);
         assert_eq!(show_all_target.thread_id, other_thread_id);
         Ok(())
     }
@@ -3287,9 +3200,7 @@ requires_openai_auth = {requires_openai_auth}
         )?;
 
         let target = lookup_latest_session_target_with_app_server(
-            /*uses_remote_filesystem*/ false,
             &mut app_server,
-            &config,
             Some(project_cwd.as_path()),
             /*include_non_interactive*/ false,
         )
@@ -3681,7 +3592,7 @@ requires_openai_auth = {requires_openai_auth}
 
         assert_eq!(startup_error.database_path(), logs_db_path.as_path());
         assert!(
-            codex_state::sqlite_error_detail_is_corruption(startup_error.detail()),
+            startup_error.is_corruption(),
             "startup error should preserve the SQLite corruption cause, got: {}",
             startup_error.detail()
         );

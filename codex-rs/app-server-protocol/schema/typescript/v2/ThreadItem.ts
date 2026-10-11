@@ -140,7 +140,15 @@ reasoningEffort: ReasoningEffort | null,
 /**
  * Last known status of the target agents, when available.
  */
-agentsStates: { [key in string]?: CollabAgentState }, } | { "type": "subAgentActivity", id: string, kind: SubAgentActivityKind, agentThreadId: string, agentPath: string,
+agentsStates: { [key in string]?: CollabAgentState }, } | { "type": "subAgentActivity",
+/**
+ * Resolved model at sub-agent creation; absent from older records and other activities.
+ */
+model: string | null,
+/**
+ * Resolved reasoning effort at sub-agent creation, when known.
+ */
+reasoningEffort: ReasoningEffort | null, id: string, kind: SubAgentActivityKind, agentThreadId: string, agentPath: string,
 /**
  * Display-only excerpt of sent instructions, at most 512 characters.
  */

@@ -6,11 +6,11 @@ expression: "normalize_snapshot_paths(render_bottom_popup(&chat, 80)).replace('�
 
 • Queued follow-up inputs
   ↳ x
-    shift+← edit last · ⌥x cancel
+    ⇧← edit last · ⌥x cancel
 
 › describe
 
 ────────────────────────────────────────────────────────────────────────────────
   Activity  —
 ────────────────────────────────────────────────────────────────────────────────
-  ctrl+c quit
+  ⌃c quit

@@ -36,6 +36,7 @@ pub static CODEX_ALIASES_TEMP_DIR: Option<TestBinaryDispatchGuard> = {
     })
 };
 
+mod abort_lifecycle;
 #[cfg(not(target_os = "windows"))]
 mod abort_tasks;
 mod additional_context;
@@ -124,11 +125,12 @@ mod managed_threads;
 mod mcp_auth_elicitation;
 mod mcp_auth_refresh;
 mod mcp_ema_config;
+#[path = "mcp_executor_context_tests.rs"]
+mod mcp_executor_context;
 #[path = "mcp_extension_lease.rs"]
 mod mcp_extension_lease;
 mod mcp_extension_protocol;
 mod mcp_optional_startup_grace;
-#[cfg(unix)]
 mod mcp_refresh_cleanup;
 mod mcp_startup_refresh_http_proxy;
 mod mcp_subagent_elicitation;
@@ -208,6 +210,7 @@ mod step_settings;
 mod step_settings_snapshots;
 mod stream_error_allows_next_turn;
 mod stream_no_completed;
+mod subagent_dynamic_tools;
 mod subagent_notifications;
 mod subagent_service_tier;
 mod token_budget;
@@ -236,6 +239,7 @@ mod unstable_features_warning;
 mod user_notification;
 mod user_shell_cmd;
 mod view_image;
+mod wake_reservation;
 mod web_search;
 #[path = "web_search_system_proxy_tests.rs"]
 mod web_search_system_proxy;

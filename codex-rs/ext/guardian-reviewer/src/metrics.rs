@@ -106,6 +106,13 @@ fn guardian_review_metric_tags(
     reviewed_action: &GuardianReviewedAction,
 ) -> Vec<(&'static str, String)> {
     vec![
+        (
+            "context_mode",
+            result
+                .guardian_context_mode
+                .unwrap_or("unknown")
+                .to_string(),
+        ),
         ("decision", decision_tag(result.decision).to_string()),
         (
             "terminal_status",

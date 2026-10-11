@@ -28,7 +28,6 @@ use codex_extension_api::ThreadResumeInput;
 use codex_extension_api::TurnStartAdmission;
 use codex_protocol::ThreadId;
 use codex_protocol::items::TurnItem;
-use codex_protocol::models::FunctionCallOutputPayload;
 use codex_protocol::models::ImageDetail;
 use codex_protocol::models::ImageReference;
 use codex_protocol::models::ResponseItem;
@@ -394,7 +393,7 @@ async fn starting_a_selected_item_preserves_the_remaining_queue() -> anyhow::Res
 
     assert!(matches!(
         submission,
-        StartIfIdleSubmission::Started { turn_id } if !turn_id.is_empty()
+        StartIfIdleSubmission::Started { turn_id, .. } if !turn_id.is_empty()
     ));
     assert_eq!(vec![first], service.list(thread_id).await?);
     wait_for_event_match(test.codex.as_ref(), |event| match event {
@@ -531,28 +530,23 @@ async fn registered_queue_lifecycle_starts_messages_in_fifo_order() -> anyhow::R
         .with_extensions(extensions)
         .with_config(|config| config.include_environment_context = false)
         .build_with_auto_env(&server)
-        .await?;
+        .await
+        .expect("build queue lifecycle fixture");
     let thread_id = test.session_configured.thread_id;
     let staging = QueuedItemService::new(
-        loaded_thread_queue(&test)?,
+        loaded_thread_queue(&test).expect("queue state runtime"),
         Weak::new(),
         Arc::new(NoopExtensionEventSink),
     );
-    // A new service reads the persisted payload. Delegation must retain tool
-    // authority rather than being rewritten as a user instruction on dispatch.
-    let delegated = TurnInput::ResponseItem(ResponseItem::FunctionCallOutput {
-        id: None,
-        call_id: None,
-        name: Some("send_message_to_thread".to_string()),
-        namespace: Some("codex_tui".to_string()),
-        output: FunctionCallOutputPayload::from_text("B".to_string()),
-        internal_chat_message_metadata_passthrough: None,
-    });
-    staging.enqueue(thread_id, delegated.clone()).await?;
-    staging.enqueue(thread_id, user_input("C")).await?;
+    // A replacement service must drain persisted human input in order.
+    staging.enqueue(thread_id, user_input("B")).await?;
+    staging
+        .enqueue(thread_id, user_input("C"))
+        .await
+        .expect("enqueue user message");
     drop(staging);
     let queue = install_registered_queue(&test, installed.as_ref())?;
-    assert_eq!(queue.list(thread_id).await?[0].input, delegated);
+    assert_eq!(queue.list(thread_id).await?.len(), 2);
 
     tokio::time::timeout(Duration::from_secs(10), async {
         test.submit_text_turn("A").await?;
@@ -576,15 +570,7 @@ async fn registered_queue_lifecycle_starts_messages_in_fifo_order() -> anyhow::R
                 .context("model request has no user input")
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
-    assert_eq!(vec!["A", "A", "C"], prompts);
-    let input = responses.requests()[1].input();
-    assert!(
-        input
-            .iter()
-            .any(|item| item["type"] == "function_call_output"
-                && item["name"] == "send_message_to_thread"
-                && item["output"] == "B")
-    );
+    assert_eq!(vec!["A", "B", "C"], prompts);
     assert!(queue.list(thread_id).await?.is_empty());
     Ok(())
 }

@@ -75,8 +75,10 @@ async fn live_center_columns() {
         ThreadStatus::Idle,
     ));
     crate::chatwidget::activate_voice_for_thread(&mut app.chat_widget, child);
+    app.agents_overview.pinned_thread_ids = Some(vec![current, ThreadId::from_u128(/*value*/ 44)]);
     let mut view = app.agents_overview_view(threads, Some(current));
     insta::assert_snapshot!(screen(&view, /*width*/ 160, /*height*/ 22));
+    view.pinned_thread_ranks = None;
     let mut selected_status_styles = Vec::new();
     for _ in 0..fixtures.len() {
         let area = Rect::new(
@@ -199,6 +201,12 @@ async fn live_center_metadata_clips_at_grapheme_boundaries() {
             Some((36, 3))
         );
         if key == 'r' {
+            let cursor = view
+                .cursor_pos(Rect::new(
+                    /*x*/ 0, /*y*/ 0, /*width*/ 24, /*height*/ 18,
+                ))
+                .unwrap();
+            assert!(cursor.0 < 24);
             insta::assert_snapshot!("live_center_narrow_rename", rendered);
         }
         view.handle_key_event(KeyCode::Esc.into());
@@ -209,6 +217,7 @@ async fn live_center_metadata_clips_at_grapheme_boundaries() {
 async fn live_center_rename_retains_target_when_status_leaves_filter() -> Result<()> {
     let mut app = make_test_app().await;
     app.agents_overview.rendered_full_screen = true;
+    app.chat_widget.toggle_vim_mode_and_notify();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     app.app_event_tx = AppEventSender::new(tx);
     let id = ThreadId::new();
@@ -217,7 +226,7 @@ async fn live_center_rename_retains_target_when_status_leaves_filter() -> Result
         overview_thread(
             id,
             /*parent_thread_id*/ None,
-            "Target",
+            "Tar\nget",
             ThreadStatus::Idle,
         ),
         overview_thread(
@@ -237,10 +246,32 @@ async fn live_center_rename_retains_target_when_status_leaves_filter() -> Result
             }
         }
         view.handle_key_event(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
+        assert_eq!(
+            view.cursor_style(Rect::default()),
+            crossterm::cursor::SetCursorStyle::SteadyBar
+        );
         threads[0].status = ThreadStatus::SystemError;
         view = app.agents_overview_view(threads.clone(), Some(id));
+        if key == KeyCode::Enter {
+            for edit in [
+                KeyCode::Esc,
+                KeyCode::Char('0'),
+                KeyCode::Char('c'),
+                KeyCode::Char('w'),
+            ] {
+                view.handle_key_event(edit.into());
+            }
+            view.handle_paste("Target".into());
+        }
         view.handle_key_event(KeyCode::Char('!').into());
         view.handle_key_event(key.into());
+        if key == KeyCode::Esc {
+            assert_eq!(
+                view.cursor_style(Rect::default()),
+                crossterm::cursor::SetCursorStyle::DefaultUserShape
+            );
+            view.handle_key_event(KeyCode::Esc.into());
+        }
         assert_eq!(view.rows[view.selected_index().unwrap()].thread_id, other);
         if key == KeyCode::Enter {
             let rename = rx.try_recv().unwrap();
@@ -276,8 +307,7 @@ async fn live_center_rename_retains_target_when_status_leaves_filter() -> Result
 
 #[tokio::test]
 async fn live_center_navigation_and_complete_hints() {
-    let mut app = make_test_app().await;
-    app.config.features.enable(Feature::Worktrees).unwrap();
+    let app = make_test_app().await;
     let ready = ThreadId::from_u128(/*value*/ 42);
     let needs_you = ThreadId::from_u128(/*value*/ 43);
     let unloaded = ThreadId::from_u128(/*value*/ 44);
@@ -431,7 +461,6 @@ async fn live_center_fixed_shortcuts_yield_to_configured_actions() {
 #[tokio::test]
 async fn live_center_hints_follow_configured_bindings() {
     let mut app = make_test_app().await;
-    app.config.features.disable(Feature::Worktrees).unwrap();
     let config: TuiKeymap = toml::from_str(
         r#"
 [list]
@@ -441,14 +470,26 @@ page_up = []
 [agents]
 archive = []
 rename = 'z r'
+toggle_pin = 'z p'
 "#,
     )
     .unwrap();
     app.keymap = RuntimeKeymap::from_config(&config).unwrap();
-    let mut view = app.agents_overview_view(Vec::new(), /*selected_thread_id*/ None);
+    app.agents_overview.pinned_thread_ids = Some(Vec::new());
+    let view = app.agents_overview_view(Vec::new(), /*selected_thread_id*/ None);
     insta::assert_snapshot!(
         "live_center_custom_footer",
         screen(&view, /*width*/ 100, /*height*/ 12)
+    );
+    let thread_id = ThreadId::from_u128(/*value*/ 42);
+    let mut view = app.agents_overview_view(
+        vec![overview_thread(
+            thread_id,
+            /*parent_thread_id*/ None,
+            "Task",
+            ThreadStatus::Idle,
+        )],
+        Some(thread_id),
     );
     view.handle_key_event(KeyCode::Char('?').into());
     insta::assert_snapshot!(
@@ -507,7 +548,7 @@ async fn backspace_edits_search_and_rename_without_deleting_tasks() {
         )],
         /*selected_thread_id*/ None,
     );
-    for key in ['f', 'r'] {
+    for key in ['/', 'r'] {
         view.handle_key_event(KeyCode::Char(key).into());
         let initial = screen(&view, /*width*/ 88, /*height*/ 16);
         view.handle_paste("!".into());

@@ -1226,7 +1226,7 @@ async fn remote_overview_startup_hides_disabled_older_server_notice() -> Result<
     app.chat_widget.show_bottom_pane_view(Box::new(view));
     let rendered = render_bottom_popup(&app.chat_widget, /*width*/ 80);
     insta::assert_snapshot!(rendered.lines().take(2).collect::<Vec<_>>().join("\n"), @"
-    Agent command center  Group: Project  ctrl+s
+    Agent command center  Group: Project  ⌃s
      All 0   Needs you 0   Working 0   Ready 0   Inactive 0
     ");
     app.chat_widget.remote_connection =
@@ -1246,7 +1246,7 @@ async fn remote_overview_startup_hides_disabled_older_server_notice() -> Result<
     app.refresh_server_version_overview_notice("2.1.0");
     let rendered = render_bottom_popup(&app.chat_widget, /*width*/ 80);
     insta::assert_snapshot!(rendered.lines().take(2).collect::<Vec<_>>().join("\n"), @"
-    Agent command center  Group: Project  ctrl+s
+    Agent command center  Group: Project  ⌃s
      All 0   Needs you 0   Working 0   Ready 0   Inactive 0
     ");
     app.pending_server_version_notice =
@@ -1408,7 +1408,12 @@ async fn startup_thread_started_does_not_replay_resolved_approval() -> Result<()
 }
 
 #[tokio::test]
-async fn owned_subagent_approval_before_thread_started_is_preserved() -> Result<()> {
+async fn subagent_approval_respects_root_ownership() -> Result<()> {
+    check_subagent_approval_routing(/*mcp_first*/ false).await?;
+    check_subagent_approval_routing(/*mcp_first*/ true).await
+}
+
+async fn check_subagent_approval_routing(mcp_first: bool) -> Result<()> {
     let (mut app, _app_event_rx, _op_rx) = make_test_app_with_channels().await;
     let codex_home = tempdir()?;
     app.config.codex_home = codex_home.path().to_path_buf().abs();
@@ -1465,6 +1470,9 @@ async fn owned_subagent_approval_before_thread_started_is_preserved() -> Result<
             assert!(app.agent_navigation.get(&child_thread_id).is_none());
             parent_thread_id = child_thread_id;
         }
+        if mcp_first {
+            send_failed_mcp_startup(&mut app, &app_server, parent_thread_id).await;
+        }
         let mut request = exec_approval_request(
             parent_thread_id,
             "turn-1",
@@ -1492,6 +1500,26 @@ async fn owned_subagent_approval_before_thread_started_is_preserved() -> Result<
         );
     }
     Ok(())
+}
+
+async fn send_failed_mcp_startup(
+    app: &mut App,
+    app_server: &AppServerSession,
+    thread_id: ThreadId,
+) {
+    app.handle_app_server_event(
+        app_server,
+        codex_app_server_client::AppServerEvent::ServerNotification(Box::new(
+            ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+                thread_id: Some(thread_id.to_string()),
+                name: "fixture".to_string(),
+                status: McpServerStartupState::Failed,
+                error: Some("fixture failed".to_string()),
+                failure_reason: None,
+            }),
+        )),
+    )
+    .await;
 }
 
 #[tokio::test]

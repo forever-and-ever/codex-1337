@@ -1,0 +1,14 @@
+---
+source: tui/src/transcript_view/search_tests.rs
+expression: "crate::transcript_view::tests::text(&buffer)"
+---
+              • Command
+        [+]       'echo visible
+              • Command
+        [+]       'echo visible
+        [-]   • Command
+                  $ 'echo visible
+                  echo hidden newer needle'
+              • Command
+        [-]       'echo visible
+                  echo hidden manual'

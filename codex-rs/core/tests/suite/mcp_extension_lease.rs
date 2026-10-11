@@ -80,10 +80,13 @@ async fn extension_revocation_cancels_in_flight_call_without_stopping_thread() -
         .await?;
 
     // An ordinary MCP refresh must not strand a still-valid lease.
-    fixture
-        .codex
-        .refresh_mcp_config(fixture.config.clone())
-        .await;
+    assert_eq!(
+        fixture
+            .codex
+            .refresh_mcp_config(fixture.codex.config().await, fixture.config.clone())
+            .await,
+        codex_core::ConfigRefreshOutcome::Published
+    );
     fixture
         .codex
         .call_mcp_tool(

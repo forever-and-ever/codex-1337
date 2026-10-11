@@ -653,6 +653,8 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
                 agent_thread_id: "00000000-0000-0000-0000-000000000001".into(),
                 agent_path: "/root/worker".into(),
                 message_preview: None,
+                model: None,
+                reasoning_effort: None,
             })
             .unwrap(),
         ) as Arc<dyn HistoryCell>

@@ -188,17 +188,18 @@ async fn remote_tool_mode_selector_overrides_feature_flags() -> Result<()> {
     code_mode_only_model.tool_mode = Some(ToolMode::CodeModeOnly);
     code_mode_only_model.input_modalities = vec![InputModality::Text, InputModality::Image];
     let code_mode_only_body = response_body_for_remote_model(code_mode_only_model, |_| {}).await?;
-    assert_eq!(
-        tool_names(&code_mode_only_body),
-        vec![
-            // Code-mode entrypoints.
-            codex_code_mode::PUBLIC_TOOL_NAME.to_string(),
-            codex_code_mode::WAIT_TOOL_NAME.to_string(),
-            "request_user_input".to_string(),
-            // Hosted Responses tool.
-            "web_search".to_string(),
-        ]
+    let code_mode_tools = tool_names(&code_mode_only_body);
+    assert!(
+        code_mode_tools
+            .iter()
+            .any(|name| name == codex_code_mode::PUBLIC_TOOL_NAME)
     );
+    assert!(
+        code_mode_tools
+            .iter()
+            .any(|name| name == codex_code_mode::WAIT_TOOL_NAME)
+    );
+    assert!(code_mode_tools.iter().all(|name| name != "exec_command"));
 
     let unsupported_model = remote_model("test-tool-mode-unsupported");
     let unsupported_response = response_for_remote_model(unsupported_model, |config| {

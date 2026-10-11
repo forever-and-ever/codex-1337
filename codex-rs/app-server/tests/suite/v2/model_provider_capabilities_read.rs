@@ -26,7 +26,6 @@ async fn read_default_provider_capabilities() -> Result<()> {
         timeout(DEFAULT_TIMEOUT, mcp.read_response(request_id)).await??;
 
     let expected = ModelProviderCapabilitiesReadResponse {
-        namespace_tools: true,
         image_generation: true,
         web_search: true,
     };

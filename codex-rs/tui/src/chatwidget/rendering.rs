@@ -127,18 +127,33 @@ impl ExternalWriterNotice {
 
 impl ChatWidget {
     pub(crate) fn as_renderable(&self) -> RenderableItem<'_> {
+        let backdrop = self.as_backdrop_renderable();
+        match self.centered_dialog() {
+            Some(dialog) => RenderableItem::Owned(Box::new(crate::bottom_pane::DialogOverlay {
+                backdrop,
+                dialog,
+            })),
+            None => backdrop,
+        }
+    }
+
+    pub(crate) fn centered_dialog(&self) -> Option<crate::bottom_pane::CenteredView<'_>> {
+        self.bottom_pane.centered_dialog()
+    }
+
+    fn as_backdrop_renderable(&self) -> RenderableItem<'_> {
         if self
             .bottom_pane
             .selected_index_for_active_view(crate::app::AGENTS_OVERVIEW_VIEW_ID)
             .is_some()
+            || (self.bottom_pane.has_centered_view()
+                && self
+                    .bottom_pane
+                    .selected_index_for_present_view(crate::app::AGENTS_OVERVIEW_VIEW_ID)
+                    .is_some())
         {
-            return self.bottom_pane_renderable(
-                /*footer*/ None,
-                crate::bottom_pane::CommandPopupPlacement::AboveComposer,
-                crate::bottom_pane::ComposerHintPlacement::BelowComposer,
-                /*composer_gap*/ None,
-                /*working_tip*/ None,
-            );
+            return self
+                .bottom_pane_renderable(crate::bottom_pane::ComposerRenderOptions::default());
         }
 
         let active_cell_right_reserve = self.ambient_pet_wrap_reserved_cols();
@@ -199,16 +214,10 @@ impl ChatWidget {
         }
         flex.push(
             /*flex*/ 0,
-            self.bottom_pane_renderable(
-                /*footer*/ None,
-                crate::bottom_pane::CommandPopupPlacement::AboveComposer,
-                crate::bottom_pane::ComposerHintPlacement::BelowComposer,
-                /*composer_gap*/ None,
-                /*working_tip*/ None,
-            )
-            .inset(Insets::tlbr(
-                /*top*/ 1, /*left*/ 0, /*bottom*/ 0, /*right*/ 0,
-            )),
+            self.bottom_pane_renderable(crate::bottom_pane::ComposerRenderOptions::default())
+                .inset(Insets::tlbr(
+                    /*top*/ 1, /*left*/ 0, /*bottom*/ 0, /*right*/ 0,
+                )),
         );
         RenderableItem::Owned(Box::new(flex))
     }
@@ -220,11 +229,7 @@ impl ChatWidget {
     /// or above the composer at latest.
     pub(crate) fn bottom_pane_renderable<'a>(
         &'a self,
-        footer: Option<&'a crate::bottom_pane::TranscriptFooter>,
-        command_popup_placement: crate::bottom_pane::CommandPopupPlacement,
-        hint_placement: crate::bottom_pane::ComposerHintPlacement,
-        composer_gap: Option<&'a crate::bottom_pane::ComposerGap>,
-        working_tip: Option<&'a crate::turn_tip::TurnTip>,
+        mut options: crate::bottom_pane::ComposerRenderOptions<'a>,
     ) -> RenderableItem<'a> {
         if self.fork_in_progress {
             RenderableItem::Owned(Box::new(
@@ -248,21 +253,14 @@ impl ChatWidget {
             } else {
                 self.ambient_pet_wrap_reserved_cols()
             };
+            options.warning_count = self.warning_display_state.count;
+            options.textarea_right_reserve = right_reserve;
+            options.separate_status_line = options.command_popup_placement
+                != crate::bottom_pane::CommandPopupPlacement::AboveComposer;
+            options.prompt_cache = self.prompt_cache;
+            options.alarms = &self.alarms.armed;
             self.bottom_pane.as_renderable_with_extension(
-                crate::bottom_pane::ComposerRenderOptions {
-                    composer_gap,
-                    working_tip,
-                    warning_count: self.warning_display_state.count,
-                    textarea_right_reserve: right_reserve,
-                    prompt_cache: self.prompt_cache,
-                    alarms: &self.alarms.armed,
-                    separate_status_line: command_popup_placement
-                        != crate::bottom_pane::CommandPopupPlacement::AboveComposer,
-                    command_popup_placement,
-                    hint_placement,
-                    footer,
-                    ..Default::default()
-                },
+                options,
                 Some(RenderableItem::Owned(Box::new(
                     crate::render::ruled_sections::RuledSections(vec![
                         self.draft_provider_hint(),

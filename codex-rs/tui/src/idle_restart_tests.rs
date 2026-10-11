@@ -89,7 +89,6 @@ fn reexec_keeps_pid_and_resumes_once_without_replaying_launch_input() -> anyhow:
             "codex",
             "--model",
             "retained-model",
-            "--worktree",
             "--prompt",
             "original prompt",
         ]);
@@ -108,7 +107,6 @@ fn reexec_keeps_pid_and_resumes_once_without_replaying_launch_input() -> anyhow:
                     cli.resume_session_id.as_deref(),
                     cli.prompt.as_deref(),
                     cli.images.is_empty(),
-                    cli.worktree,
                     cli.fork_session_id.as_deref(),
                     cli.agents_overview,
                     cli.model.as_deref()
@@ -117,7 +115,6 @@ fn reexec_keeps_pid_and_resumes_once_without_replaying_launch_input() -> anyhow:
                     Some(thread.to_string().as_str()),
                     None,
                     true,
-                    false,
                     None,
                     false,
                     Some("retained-model")

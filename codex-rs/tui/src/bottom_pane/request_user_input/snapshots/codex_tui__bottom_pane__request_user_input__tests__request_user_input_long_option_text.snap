@@ -14,4 +14,4 @@ expression: "render_snapshot(&overlay, area)"
     2. Add a short status model                                                    Simpler labels with less detail for  
                                                                                    quick rollouts.                      
                                                                                                                         
-  tab to add notes | enter to submit answer | ctrl+c to interrupt
+  tab to add notes | enter to submit answer | ⌃c to interrupt

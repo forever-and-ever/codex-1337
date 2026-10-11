@@ -10,6 +10,7 @@ pub(crate) mod trace_context;
 
 mod agent_response;
 mod guardian_assessment;
+mod skill_invocation;
 mod targets;
 mod tool_result;
 
@@ -29,11 +30,14 @@ pub use crate::config::validate_span_attributes;
 pub use crate::events::session_telemetry::AuthEnvTelemetryMetadata;
 pub use crate::events::session_telemetry::SessionTelemetry;
 pub use crate::events::session_telemetry::SessionTelemetryMetadata;
+pub use crate::events::session_telemetry::bounded_product_sku;
 pub use crate::metrics::runtime_metrics::RuntimeMetricTotals;
 pub use crate::metrics::runtime_metrics::RuntimeMetricsSummary;
 pub use crate::metrics::timer::Timer;
 pub use crate::metrics::*;
 pub use crate::provider::OtelProvider;
+pub use crate::skill_invocation::SkillInvocationEvent;
+pub use crate::skill_invocation::SkillInvocationType;
 pub use crate::trace_context::context_from_w3c_trace_context;
 pub use crate::trace_context::current_span_trace_id;
 pub use crate::trace_context::current_span_w3c_trace_context;

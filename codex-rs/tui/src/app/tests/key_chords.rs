@@ -116,7 +116,7 @@ async fn global_chord_keeps_hints_and_completes_before_deadline() -> Result<()> 
     ────────────────────────────────────────────────────────────────────────────────
       Activity  —
     ────────────────────────────────────────────────────────────────────────────────
-      ctrl+x then · ctrl+t open transcript · ctrl+u interrupt turn · esc cancel
+      ⌃x then · ⌃t open transcript · ⌃u interrupt turn · esc cancel
     "
     );
 
@@ -696,7 +696,7 @@ async fn dashboard_chord_hint_survives_refresh_and_clears_on_cancel() -> Result<
     let _ = app.agents_overview_view(Vec::new(), /*selected_thread_id*/ None);
     insta::assert_snapshot!(
         render_bottom_popup(&app.chat_widget, /*width*/ 80).lines().last().unwrap(),
-        @"  ctrl+x then  n new task  esc cancel"
+        @"  ⌃x then  n new task  esc cancel"
     );
     assert_eq!(
         app.route_key_chord_event(&mut tui, KeyCode::Esc.into()),

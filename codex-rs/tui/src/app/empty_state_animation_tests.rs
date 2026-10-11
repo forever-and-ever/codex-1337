@@ -251,7 +251,7 @@ async fn empty_state_animation_preserves_header_cursor_and_footer() -> Result<()
 }
 
 #[tokio::test]
-async fn submitting_a_draft_keeps_greeting_and_dismisses_logo_even_after_clear() -> Result<()> {
+async fn submitting_a_draft_dismisses_logo_even_after_clear() -> Result<()> {
     let (mut app, _events, _ops) = crate::app::tests::make_test_app_with_channels().await;
     app.local_settings.tui.animations = true;
     let size = Size::new(/*width*/ 120, /*height*/ 44);

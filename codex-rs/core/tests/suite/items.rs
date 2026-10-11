@@ -39,7 +39,7 @@ use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_codex::TestCodex;
-use core_test_support::test_codex::local_selections;
+use core_test_support::test_codex::local_requests;
 use core_test_support::test_codex::test_codex;
 use core_test_support::test_codex::turn_permission_fields;
 use core_test_support::wait_for_event;
@@ -59,7 +59,7 @@ fn disabled_plan_turn(
         text_elements: Vec::new(),
     }])
     .with_thread_settings(ThreadSettingsOverrides {
-        environments: Some(local_selections(cwd)),
+        environments: Some(local_requests(cwd)),
         approval_policy: Some(AskForApproval::Never),
         sandbox_policy: Some(sandbox_policy),
         permission_profile,
@@ -309,7 +309,8 @@ async fn web_search_item_is_emitted() -> anyhow::Result<()> {
 
     let server = start_mock_server().await;
 
-    let TestCodex { codex, .. } = test_codex()
+    // Keep the fixture's directory owners alive while paginated storage is in use.
+    let test = test_codex()
         .with_history_mode(ThreadHistoryMode::Paginated)
         .build(&server)
         .await?;
@@ -325,14 +326,14 @@ async fn web_search_item_is_emitted() -> anyhow::Result<()> {
     ]);
     mount_sse_once(&server, first_response).await;
 
-    codex
+    test.codex
         .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
             text: "find the weather".into(),
             text_elements: Vec::new(),
         }]))
         .await?;
 
-    let started = wait_for_event_match(&codex, |ev| match ev {
+    let started = wait_for_event_match(&test.codex, |ev| match ev {
         EventMsg::ItemStarted(ItemStartedEvent {
             item: TurnItem::WebSearch(item),
             started_at_ms,
@@ -341,12 +342,12 @@ async fn web_search_item_is_emitted() -> anyhow::Result<()> {
         _ => None,
     })
     .await;
-    let begin = wait_for_event_match(&codex, |ev| match ev {
+    let begin = wait_for_event_match(&test.codex, |ev| match ev {
         EventMsg::WebSearchBegin(event) => Some(event.clone()),
         _ => None,
     })
     .await;
-    let completed = wait_for_event_match(&codex, |ev| match ev {
+    let completed = wait_for_event_match(&test.codex, |ev| match ev {
         EventMsg::ItemCompleted(ItemCompletedEvent {
             item: TurnItem::WebSearch(item),
             started_at_ms,
@@ -371,8 +372,8 @@ async fn web_search_item_is_emitted() -> anyhow::Result<()> {
         }
     );
 
-    codex.flush_rollout().await?;
-    let rollout_path = codex.rollout_path().expect("paginated rollout path");
+    test.codex.flush_rollout().await?;
+    let rollout_path = test.codex.rollout_path().expect("paginated rollout path");
     let rollout = std::fs::read_to_string(rollout_path)?;
     let persisted_completion = rollout
         .lines()

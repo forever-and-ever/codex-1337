@@ -161,7 +161,7 @@ impl App {
         let selected_thread = selected
             .and_then(|index| self.agent_navigation.picker_order.get(index).copied())
             .or(self.active_thread_id);
-        let mut threads = self.agent_navigation.ordered_threads();
+        let mut threads = self.agent_navigation.visible_threads();
         if self
             .chat_widget
             .selected_index_for_present_view(AGENT_PICKER_VIEW_ID)
@@ -524,6 +524,7 @@ impl App {
     /// This helper copies every known nickname/role from `AgentNavigationState` into the
     /// replacement widget so that replayed collab items render agent names immediately.
     pub(super) fn replace_chat_widget(&mut self, mut chat_widget: ChatWidget) {
+        chat_widget.fork_in_progress = self.chat_widget.fork_in_progress;
         if self.chat_widget.session_draft.is_some()
             && !self.reconnect.offline
             && let Some(input) = self.chat_widget.capture_thread_input_state()
@@ -543,7 +544,6 @@ impl App {
         if !self.chat_widget.realtime_conversation_is_running() {
             self.retain_realtime_replay_state_before_replace();
         }
-        chat_widget.cyber_policy_notice = self.chat_widget.cyber_policy_notice.clone();
         self.commit_animation = None;
         // Transfer the last-written terminal title to the replacement widget
         // so it knows what OSC title is currently displayed. Without this, the
@@ -555,7 +555,6 @@ impl App {
         }
         chat_widget.remote_connection = self.chat_widget.remote_connection.clone();
         chat_widget.snapshot_local_images = self.app_server_target.uses_remote_workspace();
-        chat_widget.set_local_worktree_operations(self.chat_widget.local_worktree_operations);
         chat_widget.windows_sandbox_local_server = self.chat_widget.windows_sandbox_local_server;
         chat_widget.windows_sandbox_host = WindowsSandboxHost::Unknown;
         #[cfg(any(target_os = "windows", test))]
@@ -816,6 +815,20 @@ impl App {
         self.app_event_tx
             .send(AppEvent::ResetTranscriptForThreadSwitch);
         self.replay_thread_snapshot(snapshot, resume_restored_queue);
+        if let Some(thread_id) = self.chat_widget.thread_id()
+            && let Some(active) = self
+                .chat_widget
+                .config_ref()
+                .permissions
+                .active_permission_profile()
+            && self
+                .agents_overview
+                .selected_permission_profiles
+                .get(&thread_id)
+                == Some(&active.id)
+        {
+            self.adopt_server_permissions();
+        }
         if external_writer {
             self.chat_widget.show_external_writer_thread();
         }
@@ -843,6 +856,16 @@ impl App {
 
     pub(super) async fn reset_thread_event_state(&mut self) {
         let voice_owner = self.voice_owner_thread_id();
+        // Move retained tasks' approvals to background routing before clearing request bookkeeping.
+        for (thread_id, requests) in &mut self.agents_overview.dispatched_requests {
+            if let Some(channel) = self.thread_event_channels.get(thread_id) {
+                for request in channel.store.lock().await.pending_replay_requests() {
+                    if !requests.iter().any(|pending| pending.id() == request.id()) {
+                        requests.push(request);
+                    }
+                }
+            }
+        }
         if voice_owner.is_some() {
             for (thread_id, channel) in &self.thread_event_channels {
                 if Some(*thread_id) != voice_owner {
@@ -854,7 +877,8 @@ impl App {
             }
         }
         self.thread_event_listener_tasks.retain(|id, task| {
-            if Some(*id) == voice_owner {
+            if Some(*id) == voice_owner || self.agents_overview.dispatched_requests.contains_key(id)
+            {
                 true
             } else {
                 task.abort();
@@ -1073,7 +1097,7 @@ impl App {
         // Start a fresh in-memory session while preserving resumability via persisted rollout
         // history. If an initial message is provided, `enqueue_primary_thread_session` suppresses it
         // until the new session is configured and any replayed turns have been rendered.
-        let mut config = match self.load_new_session_config(app_server).await {
+        let (mut config, local_settings) = match self.load_new_session_config(app_server).await {
             Ok(config) => config,
             Err(err) => {
                 if let Some(message) = initial_user_message {
@@ -1140,9 +1164,10 @@ impl App {
                     Some(started.session.thread_id),
                 )
                 .await;
-                self.local_settings = self.local_settings.reloaded(&config);
+                self.local_settings = local_settings;
                 self.refresh_server_version_overview_notice(CODEX_CLI_VERSION);
                 self.config = config;
+                self.remember_launch_permissions();
 
                 let name_error = if let Some(name) = new_thread_name {
                     match app_server

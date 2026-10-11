@@ -22,6 +22,7 @@ use codex_app_server_protocol::GetAccountRateLimitsResponse;
 use codex_app_server_protocol::MarketplaceAddResponse;
 use codex_app_server_protocol::MarketplaceRemoveResponse;
 use codex_app_server_protocol::MarketplaceUpgradeResponse;
+use codex_app_server_protocol::McpServerOauthLoginResponse;
 use codex_app_server_protocol::McpServerStatus;
 use codex_app_server_protocol::McpServerStatusDetail;
 use codex_app_server_protocol::PluginInstallResponse;
@@ -44,6 +45,7 @@ use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_approval_presets::ApprovalPreset;
+use codex_utils_path_uri::PathUri;
 use strum_macros::IntoStaticStr;
 use uuid::Uuid;
 
@@ -81,41 +83,6 @@ pub(crate) enum VoiceControl {
 pub(crate) enum AgentsOverviewAction {
     Archive,
     Delete,
-}
-
-/// Whether a managed checkout starts fresh or preserves the current conversation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ManagedWorktreeMode {
-    New,
-    Fork,
-}
-
-/// Checkout creation result returned from the blocking Git task to the TUI event loop.
-/// Prepared checkout and destination configuration consumed on a fresh event-loop stack.
-#[derive(Debug)]
-pub(crate) struct ManagedWorktreeTransition {
-    pub(crate) source_thread_id: ThreadId,
-    pub(crate) source_cwd: AbsolutePathBuf,
-    pub(crate) manager: codex_worktree::WorktreeManager,
-    pub(crate) checkout: codex_worktree::ManagedWorktree,
-    pub(crate) config: Box<crate::legacy_core::config::Config>,
-    pub(crate) mode: ManagedWorktreeMode,
-    pub(crate) name: Option<String>,
-}
-
-#[derive(Debug)]
-pub(crate) struct ManagedWorktreeCreated {
-    pub(crate) source_thread_id: ThreadId,
-    pub(crate) source_cwd: AbsolutePathBuf,
-    pub(crate) mode: ManagedWorktreeMode,
-    pub(crate) name: Option<String>,
-    pub(crate) result: Result<
-        (
-            codex_worktree::WorktreeManager,
-            codex_worktree::ManagedWorktree,
-        ),
-        String,
-    >,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -274,6 +241,13 @@ pub(crate) struct AgentsOverviewThreadRefresh {
     pub(crate) last_messages: std::collections::HashMap<ThreadId, String>,
     pub(crate) recent_seed_complete: bool,
     pub(crate) discovery: Option<crate::app::agents_overview_discovery::AgentsOverviewDiscovery>,
+    pub(crate) pinned_thread_ids: Option<Option<Vec<ThreadId>>>,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct AgentPickerThreadRefresh {
+    pub(crate) threads: Vec<Thread>,
+    pub(crate) archived_thread_ids: std::collections::HashSet<ThreadId>,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -283,6 +257,10 @@ pub(crate) enum AppEvent {
         thread_id: ThreadId,
         expected_turn_id: Option<String>,
         input: Vec<codex_app_server_protocol::UserInput>,
+    },
+    AccountEmailLoaded {
+        request_id: uuid::Uuid,
+        email: Option<String>,
     },
     SecuritySetupLoaded {
         request_id: uuid::Uuid,
@@ -310,11 +288,15 @@ pub(crate) enum AppEvent {
     SelectAgentsOverviewThread {
         thread_id: ThreadId,
     },
-    /// Create an empty session in a worktree from the selected project's default branch.
-    NewAgentsOverviewWorktree {
-        cwd: Option<AbsolutePathBuf>,
+
+    /// Fork the selected dashboard conversation and open the new session.
+    ForkAgentsOverviewThread {
+        thread_id: ThreadId,
     },
-    AgentsOverviewWorktreeCreated(Result<crate::app::PendingWorktree, String>),
+    /// Run the existing fork action after selection events have been processed.
+    ForkAgentsOverviewThreadReady {
+        thread_id: ThreadId,
+    },
     /// Rename a task directly from the shared dashboard.
     RenameAgentsOverviewThread {
         thread_id: ThreadId,
@@ -323,6 +305,18 @@ pub(crate) enum AppEvent {
     ConfirmedThreadName {
         request: crate::app::thread_name::ThreadNameRequest,
         conflict_thread_ids: Vec<String>,
+    },
+    /// Move a task into or out of the shared pinned section.
+    ToggleAgentsOverviewPin {
+        thread_id: ThreadId,
+        pinned: bool,
+    },
+    /// Finish moving a task into or out of the shared pinned section.
+    AgentsOverviewPinToggled {
+        request_id: Uuid,
+        thread_id: ThreadId,
+        pinned: bool,
+        result: Result<(), String>,
     },
     /// Generate an editable title suggestion for the active rename prompt.
     SuggestThreadName {
@@ -438,7 +432,7 @@ pub(crate) enum AppEvent {
     AgentPickerThreadsLoaded {
         primary_thread_id: ThreadId,
         request_id: Uuid,
-        result: Result<Vec<Thread>, String>,
+        result: Result<AgentPickerThreadRefresh, String>,
     },
     /// Switch the active thread to the selected agent.
     SelectAgentThread(ThreadId),
@@ -544,6 +538,14 @@ pub(crate) enum AppEvent {
         destination: TranscriptExportDestination,
     },
 
+    /// Select a response or block directly in the owned transcript.
+    SelectTranscriptCopy {
+        guard: Arc<crate::copy_input_guard::CopyInputGuard>,
+    },
+
+    /// Retry queued input after the transcript copy owner is released.
+    TranscriptCopyClosed,
+
     /// Copy text through the session clipboard worker.
     CopySelection {
         text: Arc<str>,
@@ -597,40 +599,6 @@ pub(crate) enum AppEvent {
     /// Start a new session, optionally assigning it a name.
     NewSession {
         name: Option<String>,
-    },
-
-    /// Create a managed checkout and start or fork a session into it.
-    StartManagedWorktree {
-        mode: ManagedWorktreeMode,
-        name: Option<String>,
-    },
-    /// Continue a checkout transition after synchronous Git work finishes off-loop.
-    ManagedWorktreeCreated(Box<ManagedWorktreeCreated>),
-
-    BrowseManagedWorktrees,
-    ManagedWorktreesLoaded {
-        request: crate::worktree_browser::Request,
-        result: Result<Vec<crate::worktree_browser::Entry>, String>,
-    },
-    ManagedWorktreeAction {
-        request: crate::worktree_browser::Request,
-        action: crate::worktree_browser::Action,
-    },
-    ShowManagedWorktreeActions {
-        request: crate::worktree_browser::Request,
-        entry: crate::worktree_browser::Entry,
-    },
-    ConfirmManagedWorktreeRemoval {
-        request: crate::worktree_browser::Request,
-        root: PathBuf,
-    },
-    RemoveManagedWorktree {
-        request: crate::worktree_browser::Request,
-        root: PathBuf,
-    },
-    ManagedWorktreeRemoved {
-        root: PathBuf,
-        result: Result<(), String>,
     },
 
     /// Change the working directory of the originating idle primary thread.
@@ -1180,6 +1148,16 @@ pub(crate) enum AppEvent {
         thread_id: Option<ThreadId>,
     },
 
+    StartMcpLogin {
+        name: String,
+        thread_id: ThreadId,
+    },
+
+    McpLoginStarted {
+        request_id: String,
+        result: Result<McpServerOauthLoginResponse, String>,
+    },
+
     /// Result of fetching MCP inventory via app-server RPCs.
     McpInventoryLoaded {
         result: Result<Vec<McpServerStatus>, String>,
@@ -1263,6 +1241,7 @@ pub(crate) enum AppEvent {
     ConsolidateAgentMessage {
         source: String,
         item_id: Option<String>,
+        copy_source: Option<String>,
         cwd: PathBuf,
         inline_visualization_context: Option<InlineVisualizationContext>,
         scrollback_reflow: ConsolidationScrollbackReflow,
@@ -1340,6 +1319,26 @@ pub(crate) enum AppEvent {
 
     /// Read the owning server preference before showing the voice picker.
     OpenRealtimeSettings,
+    OpenRealtimeSoundDevices,
+    OpenRealtimeVoices,
+    OpenRealtimeDevicePicker {
+        kind: codex_realtime_webrtc::AudioDeviceKind,
+    },
+    OpenRealtimeInputChannels {
+        device: codex_realtime_webrtc::AudioDevice,
+    },
+    RealtimeDevicesListed {
+        origin: Option<ThreadId>,
+        kind: codex_realtime_webrtc::AudioDeviceKind,
+        result: Result<Vec<codex_realtime_webrtc::AudioDevice>, String>,
+    },
+    PersistRealtimeDevice {
+        kind: codex_realtime_webrtc::AudioDeviceKind,
+        name: Option<String>,
+    },
+    PersistRealtimeInputChannel {
+        channel: Option<codex_config::config_toml::MicrophoneChannels>,
+    },
 
     /// Save the voice for subsequent conversations through the app server.
     PersistRealtimeVoiceSelection {
@@ -1349,6 +1348,12 @@ pub(crate) enum AppEvent {
     /// Persist the selected service tier to the appropriate config.
     PersistServiceTierSelection {
         service_tier: Option<String>,
+    },
+
+    /// Persist the current thread's Daybreak preference and the new-thread default.
+    PersistDaybreakSelection {
+        thread_id: ThreadId,
+        enabled: bool,
     },
 
     /// Fetch the current catalog even when cached models produce no picker.
@@ -1531,7 +1536,7 @@ pub(crate) enum AppEvent {
 
     /// Enable or disable a skill by path.
     SetSkillEnabled {
-        path: AbsolutePathBuf,
+        path: PathUri,
         enabled: bool,
     },
 
@@ -1654,6 +1659,9 @@ pub(crate) enum AppEvent {
     },
     /// Dismiss the terminal-title setup UI without changing config.
     TerminalTitleSetupCancelled,
+
+    /// Remember the Command Center grouping across launches.
+    PersistAgentsOverviewGrouping(codex_config::types::AgentsOverviewGrouping),
 
     /// Save the transcript renderer preference for the next launch only.
 

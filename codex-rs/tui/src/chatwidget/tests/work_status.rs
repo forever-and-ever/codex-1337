@@ -23,6 +23,7 @@ async fn work_status_below_composer_clears_with_activity_transcript_entries() {
     };
     let turn = Turn {
         id: "turn-1".into(),
+        root_turn_id: None,
         items_view: codex_app_server_protocol::TurnItemsView::Full,
         items: Vec::new(),
         status: TurnStatus::InProgress,

@@ -71,7 +71,7 @@ async fn yielded_skill_read_keeps_originating_turn_metadata() -> Result<()> {
             responses::ev_custom_tool_call(
                 "call-a",
                 "exec",
-                &format!("// @exec: {{\"yield_time_ms\": 1}}\n{read_after_barrier}"),
+                &format!("const pending = (async () => {{ {read_after_barrier} }})();\nawait yield_control();\nawait pending;"),
             ),
             ev_completed("resp-a"),
         ]),
@@ -90,7 +90,10 @@ async fn yielded_skill_read_keeps_originating_turn_metadata() -> Result<()> {
         text_elements: Vec::new(),
     }]);
     let submitted = test.codex.start_or_steer_turn(request).await?;
-    let TurnInputSubmission::Started { turn_id: turn_a } = submitted else {
+    let TurnInputSubmission::Started {
+        turn_id: turn_a, ..
+    } = submitted
+    else {
         anyhow::bail!("expected turn A to start, got {submitted:?}");
     };
     wait_for_event(&test.codex, |event| {
@@ -111,11 +114,7 @@ async fn yielded_skill_read_keeps_originating_turn_metadata() -> Result<()> {
         &server,
         sse(vec![
             ev_response_created("resp-b"),
-            responses::ev_custom_tool_call(
-                "call-b",
-                "exec",
-                &format!("// @exec: {{\"yield_time_ms\": 60000}}\n{read_after_barrier}"),
-            ),
+            responses::ev_custom_tool_call("call-b", "exec", &read_after_barrier),
             ev_completed("resp-b"),
         ]),
     )
@@ -135,7 +134,10 @@ async fn yielded_skill_read_keeps_originating_turn_metadata() -> Result<()> {
             text_elements: Vec::new(),
         }]))
         .await?;
-    let TurnInputSubmission::Started { turn_id: turn_b } = submitted else {
+    let TurnInputSubmission::Started {
+        turn_id: turn_b, ..
+    } = submitted
+    else {
         anyhow::bail!("expected turn B to start, got {submitted:?}");
     };
     wait_for_event(&test.codex, |event| {

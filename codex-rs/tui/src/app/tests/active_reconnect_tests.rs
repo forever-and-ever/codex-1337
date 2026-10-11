@@ -12,6 +12,22 @@ use tokio::net::TcpListener;
 use super::disconnect::serve_reconnect_requests;
 
 #[tokio::test]
+async fn reconnect_restores_launch_reviewer_without_a_profile_override() -> Result<()> {
+    let (mut app, _events, _ops) = make_test_app_with_channels().await;
+    let mut cached = test_thread_session(ThreadId::new(), app.config.cwd.to_path_buf());
+    cached.approvals_reviewer = ApprovalsReviewer::AutoReview;
+    app.primary_thread_id = Some(cached.thread_id);
+    app.config.approvals_reviewer = ApprovalsReviewer::AutoReview;
+    app.harness_overrides.approvals_reviewer = Some(ApprovalsReviewer::AutoReview);
+    app.remember_launch_permissions();
+    let mut resumed = cached.clone();
+    resumed.approvals_reviewer = ApprovalsReviewer::User;
+    app.restore_runtime_permissions(&mut resumed, &cached);
+    assert_eq!(resumed, cached);
+    Ok(())
+}
+
+#[tokio::test]
 async fn reconnect_restores_history_permissions_and_resumes_unsent_input() -> Result<()> {
     for (recovered_queue, edit_offline, resume_error_code, deferred_notice, notice_enabled) in [
         (true, false, -32603, false, false),
@@ -157,6 +173,7 @@ async fn reconnect_restores_history_permissions_and_resumes_unsent_input() -> Re
             Ok::<_, color_eyre::Report>(methods)
         });
         let mut session = crate::start_embedded_app_server_for_picker(&app.config).await?;
+
         app.chat_widget.remote_connection =
             crate::status::remote_connection::remote_connection_status_value(
                 &app.app_server_target,
@@ -165,7 +182,7 @@ async fn reconnect_restores_history_permissions_and_resumes_unsent_input() -> Re
         let mut tui = crate::tui::test_support::make_test_tui()?;
         if pending_profile {
             app.runtime_approvals_reviewer_override = Some(ApprovalsReviewer::User);
-            app.pending_server_profiles.insert(
+            app.agents_overview.requested_permission_profiles.insert(
                 id,
                 PermissionProfileSelection {
                     profile_id: "server-only".into(),
@@ -226,12 +243,7 @@ async fn reconnect_restores_history_permissions_and_resumes_unsent_input() -> Re
                 .note_turn_finished(&TurnStatus::Completed, before_disconnect);
         }
         app.schedule_recap_check(id, Instant::now());
-        app.pending_managed_worktree_creation = true;
-        app.agents_overview
-            .view_state
-            .lock()
-            .unwrap()
-            .creating_worktree = true;
+
         let old_sender = app.app_event_tx.clone();
         let connected = reconnect(
             app.app_server_target.clone(),
@@ -256,6 +268,7 @@ async fn reconnect_restores_history_permissions_and_resumes_unsent_input() -> Re
             );
         }
         assert!(app.pending_server_profiles.is_empty());
+        assert!(app.agents_overview.requested_permission_profiles.is_empty());
         if pending_profile {
             assert_eq!(
                 app.resume_permission_overrides(&app.config),
@@ -265,14 +278,7 @@ async fn reconnect_restores_history_permissions_and_resumes_unsent_input() -> Re
                 }
             );
         }
-        assert!(!app.pending_managed_worktree_creation);
-        assert!(
-            !app.agents_overview
-                .view_state
-                .lock()
-                .unwrap()
-                .creating_worktree
-        );
+
         assert!(!app.reconnect.offline);
         assert!(!app.thread_unavailable(id));
         assert_eq!(app.last_subagent_backfill_attempt, None);
@@ -284,14 +290,11 @@ async fn reconnect_restores_history_permissions_and_resumes_unsent_input() -> Re
                 )
                 .is_some()
         );
+        assert!(app.agent_navigation.picker_refresh.is_some());
         assert!(
             app.agent_navigation
-                .picker_refresh
-                .is_some_and(|(root, request)| root == id && request != stale_picker_refresh)
-        );
-        assert!(
-            !app.agent_navigation
                 .finish_picker_refresh(id, stale_picker_refresh)
+                .is_none()
         );
         // Let the rebound timer become due without depending on machine uptime.
         tokio::time::pause();

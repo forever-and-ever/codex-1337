@@ -105,14 +105,16 @@ impl SessionInner {
                         return Err("code-mode completion has no terminal outcome".to_string());
                     }
                 };
-                let (cell_id, delegate) = self
+                let cell = self
                     .state
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner)
                     .finished_cell(&finished.execution_id, &finished.cell_id)?;
-                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    delegate.cell_finished(&cell_id, outcome);
-                }));
+                if let Some((cell_id, delegate)) = cell {
+                    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        delegate.cell_finished(&cell_id, outcome);
+                    }));
+                }
                 Ok(())
             }
             grpc::session_event::Event::CellClosed(closed) => {

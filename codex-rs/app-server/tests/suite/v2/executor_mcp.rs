@@ -1306,6 +1306,11 @@ startup_timeout_sec = 10
         McpServerOauthLoginCompletedNotification {
             name: OAUTH_MCP_SERVER_NAME.to_string(),
             thread_id: Some(selected_thread.clone()),
+            login_id: Some(
+                response
+                    .login_id
+                    .expect("login response should contain an ID")
+            ),
             success: true,
             error: None,
         }

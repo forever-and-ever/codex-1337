@@ -10,4 +10,4 @@ expression: "render_snapshot(&overlay, area)"
                                                                                                                         
                                                                                                                         
                                                                                                                         
-  ctrl+j to submit answer | ctrl+c to interrupt
+  ⌃j to submit answer | ⌃c to interrupt

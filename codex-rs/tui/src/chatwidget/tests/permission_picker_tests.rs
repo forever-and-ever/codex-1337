@@ -44,12 +44,19 @@ async fn clipped_full_access_confirmation_discloses_hidden_warning_text() {
             rows.join("\n")
         ));
 
-        let complete = render_bottom_popup(&chat, /*width*/ 40)
+        let full_area = Rect::new(0, 0, 40, chat.bottom_pane.desired_height(40));
+        let mut full_buffer = Buffer::empty(full_area);
+        chat.bottom_pane.render(full_area, &mut full_buffer);
+        let complete = full_buffer
+            .content
+            .iter()
+            .map(ratatui::buffer::Cell::symbol)
+            .collect::<String>()
             .split_whitespace()
             .collect::<Vec<_>>()
             .join(" ");
         assert!(!complete.contains("[…"));
-        assert!(complete.contains("without your approval"));
+        assert!(complete.contains("without your approval"), "{complete}");
         if specialty.is_some() {
             assert!(complete.contains("Cyber models carry a higher risk"));
             assert!(complete.contains("Ask for approval"));

@@ -2,7 +2,6 @@
 
 use crate::sandboxing::SandboxPermissions;
 use codex_file_system::EnvironmentAccess;
-use codex_file_system::FileSystemEnvironmentAccessor;
 use codex_file_system::WriteFileOptions;
 use codex_tools::FunctionCallError;
 use codex_tools::JsonSchema;
@@ -109,24 +108,19 @@ impl ToolExecutor<ToolInvocation> for FileSystemHandler {
                 } => (path, environment_id),
             };
             let environment = resolve_tool_environment(
-                &invocation.step_context.environments,
+                &invocation.step_context,
                 environment_id.as_deref(),
-            )?
-            .ok_or_else(|| fault("no filesystem execution environment"))?;
+                "no filesystem execution environment",
+            )?;
             let path = environment.cwd().join(path).map_err(fault)?;
             let grants = apply_granted_turn_permissions(
-                invocation.session.as_ref(),
+                &invocation.step_context,
                 environment,
                 environment.cwd(),
                 SandboxPermissions::UseDefault,
                 /*additional_permissions*/ None,
-            )
-            .await;
-            let filesystem = environment.environment.get_filesystem();
-            let access = FileSystemEnvironmentAccessor::new(
-                &filesystem,
-                environment.sandbox_context(grants.additional_permissions),
             );
+            let access = environment.fs_accessor(grants.additional_permissions);
             let value = match request {
                 Request::Read { encoding, .. } => {
                     let mut stream = access.read_file_stream(&path).await.map_err(fault)?;

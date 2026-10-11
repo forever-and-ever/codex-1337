@@ -94,7 +94,8 @@ impl Handler {
             )
             .await;
 
-        let deadline = Instant::now() + Duration::from_millis(timeout_ms as u64);
+        let wait_started = Instant::now();
+        let deadline = wait_started + Duration::from_millis(timeout_ms as u64);
         let outcome = wait_for_activity(&mut activity_rx, pending_activity, deadline).await;
         let outcome = wake_batch::after_activity(
             outcome,
@@ -104,6 +105,20 @@ impl Handler {
             deadline,
         )
         .await;
+        // A completed wait may wake for a message, user input, or its timeout.
+        // Dropped waits do not have an observed outcome and are not included.
+        turn.session_telemetry.record_duration(
+            "codex.multi_agent.wait.duration_ms",
+            wait_started.elapsed(),
+            &[(
+                "outcome",
+                match outcome {
+                    WaitOutcome::MailboxActivity => "mailbox",
+                    WaitOutcome::Steered => "steered",
+                    WaitOutcome::TimedOut => "timed_out",
+                },
+            )],
+        );
         let result = WaitAgentResult::from_outcome(outcome, requested_timeout_ms, timeout_ms);
 
         session

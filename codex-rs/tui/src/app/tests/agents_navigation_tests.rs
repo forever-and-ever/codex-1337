@@ -370,7 +370,7 @@ async fn agents_navigation_escape_returns_to_main_but_preserves_drafts_and_popup
     app.transcript_view.begin_search();
     app.handle_tui_event(&mut tui, &mut app_server, TuiEvent::Key(ctrl_c))
         .await?;
-    assert!(!app.transcript_view.is_search_active());
+    assert!(!app.transcript_view.is_search_editing());
     assert_eq!(
         app.chat_widget.composer_text_with_pending(),
         "Hidden child draft"
@@ -476,7 +476,7 @@ async fn agents_navigation_escape_returns_to_main_but_preserves_drafts_and_popup
         )
         .await?;
         assert_eq!(app.current_displayed_thread_id(), Some(child_id));
-        assert!(!app.transcript_view.is_search_active());
+        assert!(!app.transcript_view.is_search_editing());
         app.handle_tui_event(
             &mut tui,
             &mut app_server,

@@ -16,7 +16,7 @@ Buffer {
         "                                                    ",
         "• Queued follow-up inputs                           ",
         "  ↳ Queued follow-up question                       ",
-        "    shift+← edit last                               ",
+        "    ⇧← edit last                                    ",
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
@@ -34,7 +34,7 @@ Buffer {
         x: 6, y: 4, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
         x: 14, y: 4, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
         x: 16, y: 4, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
-        x: 23, y: 4, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 5, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 0, y: 6, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
         x: 2, y: 6, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 0, y: 7, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
@@ -45,7 +45,7 @@ Buffer {
         x: 4, y: 10, fg: Reset, bg: Reset, underline: Reset, modifier: DIM | ITALIC,
         x: 29, y: 10, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 4, y: 11, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
-        x: 11, y: 11, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
-        x: 21, y: 11, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 6, y: 11, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 16, y: 11, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }

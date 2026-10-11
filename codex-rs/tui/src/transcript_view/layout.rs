@@ -199,6 +199,7 @@ pub(super) struct CellPresentation {
     continued_edit: bool,
     /// The digest of the entry's feed rows; zero when it draws as a loose entry.
     feed: u64,
+    detailed: bool,
 }
 
 impl TranscriptView {
@@ -224,6 +225,20 @@ impl TranscriptView {
             return None;
         }
         let key = self.entry_key(cells, index);
+        if let Some(layout) = self.search.match_layout(key) {
+            return Some(layout);
+        }
+        self.base_layout(cells, index)
+    }
+
+    /// Resolve manual disclosure and retained revisions, without Find's temporary expansion.
+    /// Call with the snapshot's cells, if present.
+    pub(super) fn base_layout(
+        &mut self,
+        cells: &[Arc<dyn HistoryCell>],
+        index: usize,
+    ) -> Option<Arc<TextLayout>> {
+        let key = self.entry_key(cells, index);
         if let Some(layout) = self
             .snapshot()
             .and_then(|snapshot| snapshot.pinned.get(&key))
@@ -241,6 +256,15 @@ impl TranscriptView {
         &mut self,
         cells: &[Arc<dyn HistoryCell>],
         index: usize,
+    ) -> Option<Arc<TextLayout>> {
+        self.entry_layout(cells, index, self.detailed)
+    }
+
+    pub(super) fn entry_layout(
+        &mut self,
+        cells: &[Arc<dyn HistoryCell>],
+        index: usize,
+        full_content: bool,
     ) -> Option<Arc<TextLayout>> {
         if index > cells.len() {
             return None;
@@ -275,12 +299,13 @@ impl TranscriptView {
         {
             return Some(Arc::new(TextLayout::new(Vec::new(), width)));
         }
-        let detailed = self.detailed;
         let mode = self.mode;
+        let detailed = self.detailed;
         let loose = seat.content == Content::Loose;
         let ids = cell.activity_ids();
         let disclosure = !detailed && mode == HistoryRenderMode::Rich && !ids.is_empty();
-        let expanded = disclosure && self.disclosure.is_expanded(&ids);
+        let manually_expanded = self.disclosure.is_expanded(&ids);
+        let expanded = disclosure && (full_content || manually_expanded);
         let output_mode = self.disclosure.output_mode(&ids);
         // A member's figures belong to its item's header; a loose row keeps its own tokens.
         let header_tokens = loose
@@ -293,7 +318,7 @@ impl TranscriptView {
             && !cell.is_stream_continuation()
             && ToolOutputGroup::is_patch(cell.as_ref())
             && previous.is_some_and(|previous| ToolOutputGroup::is_patch(previous.as_ref()));
-        if expanded {
+        if manually_expanded {
             self.disclosure.expanded.extend(ids.iter().cloned());
         }
         let separated = match &seat.header {
@@ -316,6 +341,7 @@ impl TranscriptView {
             disclosure,
             continued_edit,
             feed: feed_digest(&seat, self.feed.revision, self.step_bills.revision()),
+            detailed: full_content,
         };
         let expanded_parts = &self.disclosure.expanded;
         let feed = &self.feed;
@@ -330,12 +356,14 @@ impl TranscriptView {
             };
             // The activity's rows, compact or expanded, and what controls them.
             let activity = |expanded: bool, expanded_parts: &HashSet<String>| {
-                if let Some(parts) = cell.output_parts(
-                    content_width,
-                    /*reserve*/ 0,
-                    expanded_parts,
-                    output_mode,
-                ) {
+                if !full_content
+                    && let Some(parts) = cell.output_parts(
+                        content_width,
+                        /*reserve*/ 0,
+                        expanded_parts,
+                        output_mode,
+                    )
+                {
                     return ActivityTranscriptLines {
                         output_mode: (expanded && cell.has_formatted_output())
                             .then_some(output_mode),

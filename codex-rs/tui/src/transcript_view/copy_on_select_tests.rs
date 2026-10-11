@@ -103,7 +103,7 @@ fn copy_on_select_waits_for_release_and_retains_selection() {
                     view.copy_feedback
                         .as_ref()
                         .map(|feedback| (feedback.result, feedback.characters)),
-                    result.err().map(|_| (Err(()), copied.chars().count()))
+                    Some((result.map_err(|_| ()), copied.chars().count()))
                 );
             }
         }

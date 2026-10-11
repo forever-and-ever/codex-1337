@@ -328,6 +328,7 @@ async fn farm_receipt_reconciles_identity_and_draft_without_steering_or_navigati
         };
         let mut turn = Turn {
             id: "completed-turn".into(),
+            root_turn_id: None,
             items_view: codex_app_server_protocol::TurnItemsView::Full,
             items: Vec::new(),
             status: TurnStatus::InProgress,

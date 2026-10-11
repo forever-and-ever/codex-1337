@@ -44,8 +44,11 @@ impl ChatComposer {
         let footer_hint_height = self.footer_hint_height(area.width, options);
         let composer_min = if self.blocks_direct_input && !self.child_text_input_enabled {
             super::super::watch_help::lines(area.width).len() as u16
-        } else {
+        } else if self.attachments.remote_image_urls.is_empty() {
             3
+        } else {
+            // One attachment, its separator, and the editable prompt survive before extensions.
+            5
         };
         // Preserve input and hints before allocating the persistent status row.
         let status_height = self.status_surface_height(options).min(
@@ -139,7 +142,7 @@ impl ChatComposer {
             .len()
             .try_into()
             .unwrap_or(u16::MAX)
-            .min(textarea_rect.height.saturating_sub(1));
+            .min(textarea_rect.height.saturating_sub(2));
         let remote_images_separator = u16::from(remote_images_height > 0);
         let consumed = remote_images_height.saturating_add(remote_images_separator);
         let remote_images_rect = Rect {

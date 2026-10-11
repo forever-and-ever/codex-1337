@@ -228,8 +228,11 @@ impl ThreadQueueRequestProcessor {
             )
             .await
             .map_err(queue_error)?;
-        let turn_id = match submission {
-            StartIfIdleSubmission::Started { turn_id } => turn_id,
+        let (turn_id, root_turn_id) = match submission {
+            StartIfIdleSubmission::Started {
+                turn_id,
+                root_turn_id,
+            } => (turn_id, root_turn_id),
             StartIfIdleSubmission::NotSubmitted {
                 reason: NotSubmittedReason::ServerDraining,
             } => return Err(crate::error_code::server_draining_error()),
@@ -252,6 +255,7 @@ impl ThreadQueueRequestProcessor {
         Ok(ThreadQueueStartResponse {
             turn: Turn {
                 id: turn_id,
+                root_turn_id: Some(root_turn_id),
                 items: vec![],
                 items_view: TurnItemsView::NotLoaded,
                 error: None,

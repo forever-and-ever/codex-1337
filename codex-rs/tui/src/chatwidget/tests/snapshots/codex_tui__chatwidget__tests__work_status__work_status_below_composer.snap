@@ -3,7 +3,7 @@ source: tui/src/chatwidget/tests/work_status.rs
 expression: "panels.join(\"\\n\\n\")"
 ---
 "                                                                                "
-"• Working (0s • ctrl+c to interrupt)                                            "
+"• Working (0s • ⌃c to interrupt)                                                "
 "                                                                                "
 "                                                                                "
 "› Draft stays editable                                                          "
@@ -16,7 +16,7 @@ expression: "panels.join(\"\\n\\n\")"
 
 
 "                              "
-"• Working (0s • ctrl+c to int…"
+"• Working (0s • ⌃c to interru…"
 "                              "
 "                              "
 "› Draft stays editable        "
@@ -31,7 +31,7 @@ expression: "panels.join(\"\\n\\n\")"
 
 
 "                                                                                "
-"• Working (0s • ctrl+c to interrupt)                                            "
+"• Working (0s • ⌃c to interrupt)                                                "
 "                                                                                "
 "                                                                                "
 "› Draft stays editable                                                          "
@@ -45,7 +45,7 @@ expression: "panels.join(\"\\n\\n\")"
 
 
 "                              "
-"• Working (0s • ctrl+c to int…"
+"• Working (0s • ⌃c to interru…"
 "                              "
 "                              "
 "› Draft stays editable        "

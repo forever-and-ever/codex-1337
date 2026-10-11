@@ -1,4 +1,3 @@
-use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::Weak;
 
@@ -18,12 +17,10 @@ use codex_tools::TurnItemEmissionFuture;
 use codex_tools::TurnItemEmitter;
 use codex_utils_string::to_ascii_json_string;
 
-use crate::sandboxing::SandboxPermissions;
 use crate::session::session::Session;
 use crate::session::turn_context::TurnContext;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
-use crate::tools::handlers::apply_granted_turn_permissions;
 use crate::tools::lifecycle::extension_tool_call_source;
 use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::ToolExecutor;
@@ -70,7 +67,20 @@ impl ToolExecutor<ToolInvocation> for ExtensionToolAdapter {
             if let Some(approval) = self.0.approval() {
                 crate::mcp_tool_call::approve_extension_tool(&invocation, approval).await?;
             }
-            self.0.handle(to_extension_call(&invocation).await).await
+            let environment_accessors = invocation.step_context.environments();
+            let environments = environment_accessors
+                .iter()
+                .map(|(environment, fs)| {
+                    ToolEnvironment::new(
+                        environment.selection.environment_id.clone(),
+                        environment.cwd().clone(),
+                        fs,
+                    )
+                })
+                .collect();
+            self.0
+                .handle(to_extension_call(&invocation, environments).await)
+                .await
         })
     }
 }
@@ -169,7 +179,10 @@ impl TurnItemEmitter for CoreTurnItemEmitter {
     }
 }
 
-async fn to_extension_call(invocation: &ToolInvocation) -> ExtensionToolCall<'_> {
+async fn to_extension_call<'a>(
+    invocation: &ToolInvocation,
+    environments: Vec<ToolEnvironment<'a>>,
+) -> ExtensionToolCall<'a> {
     let history = invocation
         .session
         .clone_history()
@@ -189,26 +202,6 @@ async fn to_extension_call(invocation: &ToolInvocation) -> ExtensionToolCall<'_>
             &invocation.step_context.settings,
         ))
         .and_then(|metadata| to_ascii_json_string(&metadata).ok());
-    let mut environments = Vec::new();
-    for environment in invocation.step_context.environments.turn_environments() {
-        let additional_permissions = apply_granted_turn_permissions(
-            invocation.session.as_ref(),
-            environment,
-            environment.cwd(),
-            SandboxPermissions::UseDefault,
-            /*additional_permissions*/ None,
-        )
-        .await
-        .additional_permissions;
-        let file_system_sandbox_context = environment.sandbox_context(additional_permissions);
-        environments.push(ToolEnvironment {
-            _lifetime: PhantomData,
-            environment_id: environment.selection.environment_id.clone(),
-            cwd: environment.cwd().clone(),
-            file_system: environment.environment.get_filesystem(),
-            file_system_sandbox_context,
-        });
-    }
     ExtensionToolCall {
         turn_id: invocation.turn.sub_id.clone(),
         call_id: invocation.call_id.clone(),
@@ -361,7 +354,7 @@ mod tests {
             *self.captured_sandbox_cwds.lock().await = call
                 .environments
                 .iter()
-                .map(|environment| environment.file_system_sandbox_context.cwd.clone())
+                .map(|environment| environment.cwd.clone())
                 .collect();
             let call = codex_tools::ToolCall {
                 environments: Vec::new(),

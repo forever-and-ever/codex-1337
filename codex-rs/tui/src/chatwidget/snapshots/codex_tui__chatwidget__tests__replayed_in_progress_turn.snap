@@ -2,7 +2,7 @@
 source: tui/src/chatwidget/tests/history_replay.rs
 expression: "normalize_snapshot_paths(render_bottom_popup(&chat, 80))"
 ---
-• Working (0s • ctrl+c to interrupt)
+• Working (0s • ⌃c to interrupt)
 
 
 › Ask Codex to do anything

@@ -139,6 +139,7 @@ pub(crate) async fn approve_extension_tool(
         &call.call_id,
         &invocation,
         metadata.clone(),
+        crate::guardian::GuardianReviewContext::from(&call.step_context),
     );
     let mcp_config = config
         .to_mcp_config(&call.session.services.plugins_manager)

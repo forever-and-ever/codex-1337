@@ -18,8 +18,8 @@ pub(crate) fn turn_start_params(
     summary: Option<codex_protocol::config_types::ReasoningSummary>,
     service_tier: Option<Option<String>>,
     collaboration_mode: Option<codex_protocol::config_types::CollaborationMode>,
-    personality: Option<Personality>,
     output_schema: Option<serde_json::Value>,
+    cyber_access_program: Option<codex_app_server_protocol::CyberAccessProgram>,
 ) -> Result<TurnStartParams> {
     let (sandbox_policy, permissions) =
         turn_permissions_overrides(permissions_override, cwd.as_path())?;
@@ -27,6 +27,8 @@ pub(crate) fn turn_start_params(
         disabled_plugin_ids: None,
         thread_id: thread_id.to_string(),
         turn_trigger: Some("user".to_string()),
+        parent_turn_id: None,
+        root_turn_id: None,
         client_user_message_id: Some(client_user_message_id),
         input: items,
         tool_output: None,
@@ -44,10 +46,10 @@ pub(crate) fn turn_start_params(
         service_tier_for_turn: None,
         effort,
         summary,
-        personality: personality_opt_out_only(personality),
+        personality: None,
         output_schema,
         collaboration_mode,
         multi_agent_mode: None,
-        cyber_access_program: None,
+        cyber_access_program,
     })
 }

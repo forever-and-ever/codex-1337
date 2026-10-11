@@ -98,7 +98,7 @@ impl ChatWidget {
         );
         let mut widget = Self {
             empty_state_animation: std::cell::RefCell::new(empty_state_animation),
-            cyber_policy_notice: Default::default(),
+            daybreak_enabled: false,
             app_event_tx: app_event_tx.clone(),
             frame_requester: frame_requester.clone(),
             codex_op_target,
@@ -128,7 +128,7 @@ impl ChatWidget {
             model_catalog,
             model_popup_request_id: None,
             permission_popup_request_id: None,
-            worktree_popup_request_id: None,
+            permission_discovery: None,
             permission_profiles_menu_opened: false,
             model_popup_model_ids: Vec::new(),
             session_telemetry,
@@ -139,7 +139,6 @@ impl ChatWidget {
             remote_connection: None,
             snapshot_local_images: false,
             pending_image_submission: None,
-            local_worktree_operations: true,
             windows_sandbox_local_server: false,
             windows_sandbox_config: Default::default(),
             windows_sandbox_host: crate::app::WindowsSandboxHost::Unknown,
@@ -181,6 +180,7 @@ impl ChatWidget {
             plan_stream_controller: None,
             pending_stream_consolidations: 0,
             pending_clipboard: None,
+            suppress_image_paste_until: Instant::now(),
             copy_last_response_binding,
             running_commands: HashMap::new(),
             collab_agent_metadata: HashMap::new(),
@@ -313,7 +313,6 @@ impl ChatWidget {
             .bottom_pane
             .set_collaboration_modes_enabled(/*enabled*/ true);
         widget.sync_service_tier_commands();
-        widget.sync_worktrees_enabled();
         widget.sync_plugins_command_enabled();
         widget.sync_goal_command_enabled();
         widget

@@ -5,6 +5,41 @@ use crate::app_event::AppEvent;
 use crate::chatwidget::rate_limits::RATE_LIMIT_SWITCH_PROMPT_VIEW_ID;
 
 impl ChatWidget {
+    pub(crate) fn set_daybreak_enabled(&mut self, enabled: bool) {
+        self.daybreak_enabled = enabled && self.config.features.enabled(Feature::CliDaybreak);
+        self.bottom_pane
+            .set_daybreak_command_description(self.daybreak_command_description());
+    }
+
+    /// UI eligibility only; the catalog and server still determine model/program access.
+    pub(crate) fn daybreak_account_eligible(&self) -> bool {
+        self.config.features.enabled(Feature::CliDaybreak)
+            && self.config.model_provider_id == "openai"
+            && (self.has_chatgpt_account
+                || matches!(
+                    self.status_account_display,
+                    Some(StatusAccountDisplay::ApiKey)
+                ))
+    }
+
+    /// API-key turns need no explicit program while Daybreak is off.
+    pub(crate) fn daybreak_turn_eligible(&self, enabled: bool) -> bool {
+        self.daybreak_account_eligible() && (self.has_chatgpt_account || enabled)
+    }
+
+    pub(super) fn daybreak_command_description(&self) -> Option<&'static str> {
+        if self.daybreak_enabled {
+            Some("Disable broader access for cybersecurity work")
+        } else if !self.daybreak_account_eligible() {
+            None
+        } else {
+            match crate::daybreak::availability(&self.model_catalog.models) {
+                Some(true) => Some("Enable broader access for cybersecurity work"),
+                Some(false) => Some("Learn about broader access for cybersecurity work"),
+                None => Some("Manage broader access for cybersecurity work"),
+            }
+        }
+    }
     /// Set the approval policy in the widget's config copy.
     pub(crate) fn set_approval_policy(&mut self, policy: AskForApproval) {
         if let Err(err) = self
@@ -31,6 +66,7 @@ impl ChatWidget {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) fn set_permission_profile_with_active_profile(
         &mut self,
         profile: PermissionProfile,
@@ -76,12 +112,13 @@ impl ChatWidget {
             );
         }
         let enabled = self.config.features.enabled(feature);
-        if feature == Feature::FastMode {
+        if feature == Feature::CliDaybreak {
+            self.set_daybreak_enabled(self.daybreak_enabled);
+            self.refresh_status_surfaces();
+        }
+        if matches!(feature, Feature::FastMode | Feature::UltrafastMode) {
             self.refresh_effective_service_tier();
             self.sync_service_tier_commands();
-        }
-        if feature == Feature::Worktrees {
-            self.sync_worktrees_enabled();
         }
         if feature == Feature::Plugins {
             self.sync_plugins_command_enabled();
@@ -183,6 +220,13 @@ impl ChatWidget {
         self.model_catalog.clone()
     }
 
+    pub(crate) fn on_account_email_loaded(&mut self, current_email: Option<String>) {
+        if let Some(StatusAccountDisplay::ChatGpt { email, .. }) = &mut self.status_account_display
+        {
+            *email = current_email;
+        }
+    }
+
     pub(crate) fn current_plan_type(&self) -> Option<PlanType> {
         self.plan_type
     }
@@ -204,10 +248,17 @@ impl ChatWidget {
     ) {
         // Account-update notifications are the identity boundary. The visible account fields can
         // be identical across two accounts, so always invalidate account-scoped requests and data.
-        self.model_popup_request_id = None;
+        // A previous account's access programs are not evidence for this identity.
+        for model in &mut Arc::make_mut(&mut self.model_catalog).models {
+            model.available_access_programs = None;
+        }
+        let request_id = uuid::Uuid::new_v4();
+        self.model_popup_request_id = Some(request_id);
+        self.app_event_tx.send(AppEvent::FetchModels { request_id });
         self.bottom_pane
             .dismiss_view_by_id(super::provider_models::PROVIDER_MODELS_VIEW);
         self.invalidate_permission_discovery();
+        self.permission_discovery = None;
         self.invalidate_connector_scope();
         self.clear_pending_rate_limit_reset_requests();
         self.clear_backend_banner();
@@ -241,6 +292,7 @@ impl ChatWidget {
         self.status_account_display = status_account_display;
         self.plan_type = plan_type;
         self.has_chatgpt_account = has_chatgpt_account;
+        self.set_daybreak_enabled(self.daybreak_enabled);
         self.has_codex_backend_auth = has_codex_backend_auth;
         self.bottom_pane
             .set_connectors_enabled(self.connectors_enabled());
@@ -287,17 +339,6 @@ impl ChatWidget {
             .as_ref()
             .and_then(|mask| mask.model.as_deref())
             .unwrap_or_else(|| self.current_collaboration_mode.model())
-    }
-
-    pub(crate) fn set_local_worktree_operations(&mut self, enabled: bool) {
-        self.local_worktree_operations = enabled;
-        self.sync_worktrees_enabled();
-    }
-
-    pub(super) fn sync_worktrees_enabled(&mut self) {
-        self.bottom_pane.set_worktrees_enabled(
-            self.config.features.enabled(Feature::Worktrees) && self.local_worktree_operations,
-        );
     }
 
     pub(super) fn sync_plugins_command_enabled(&mut self) {
@@ -461,9 +502,17 @@ impl ChatWidget {
         self.apply_thread_settings_cwd(settings.cwd.clone());
         self.config.model_provider_id = settings.model_provider.clone();
         self.set_service_tier(settings.service_tier.clone());
-        self.set_approval_policy(settings.approval_policy);
+        if let Err(err) = self
+            .config
+            .permissions
+            .approval_policy
+            .set(settings.approval_policy.to_core())
+        {
+            tracing::warn!(%err, "failed to sync approval_policy from ThreadSettingsUpdated");
+            self.config.permissions.approval_policy =
+                Constrained::allow_only(settings.approval_policy.to_core());
+        }
         self.set_approvals_reviewer(settings.approvals_reviewer.to_core());
-        self.config.personality = settings.personality;
 
         let permission_profile = PermissionProfile::from_legacy_sandbox_policy_for_cwd(
             &settings.sandbox_policy.to_core(),
@@ -517,6 +566,9 @@ impl ChatWidget {
 
     fn apply_thread_settings_cwd(&mut self, cwd: AbsolutePathBuf) {
         let previous_cwd = std::mem::replace(&mut self.config.cwd, cwd.clone());
+        if previous_cwd != cwd {
+            self.permission_discovery = None;
+        }
         self.current_cwd = Some(cwd.to_path_buf());
         self.status_line_project_root_name_cache = None;
 
@@ -717,7 +769,6 @@ impl ChatWidget {
                 /*summary*/ None,
                 /*service_tier*/ None,
                 Some(self.effective_collaboration_mode()),
-                /*personality*/ None,
             ),
         });
     }

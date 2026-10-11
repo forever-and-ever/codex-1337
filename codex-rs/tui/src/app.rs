@@ -3,7 +3,6 @@
 //! This module owns the `App` struct, shared imports, and the high-level run loop that coordinates
 //! the focused app submodules.
 
-pub(crate) use self::agents_overview::PendingWorktree;
 use crate::AppServerTarget;
 use crate::app_backtrack::BacktrackState;
 use crate::app_command::AppCommand;
@@ -194,6 +193,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use toml::Value as TomlValue;
 use uuid::Uuid;
+mod account_status;
 mod activity_groups;
 mod agent_message_consolidation;
 mod agent_navigation;
@@ -213,6 +213,7 @@ mod accounts;
 mod app_server_event_targets;
 mod app_server_events;
 pub(crate) mod app_server_requests;
+mod app_server_thread_ownership;
 mod backend_banner_fallback;
 mod background_requests;
 mod claude_quota;
@@ -220,6 +221,7 @@ mod composer_hints;
 mod config_persistence;
 mod connector_mentions;
 mod daemon_menu;
+mod daybreak;
 mod empty_state_policy;
 mod event_dispatch;
 mod exit_summary;
@@ -237,7 +239,6 @@ mod idle_restart;
 mod input;
 mod link_hover;
 mod loaded_threads;
-mod managed_worktree_creation;
 mod misalignment_policy;
 mod model_defaults;
 mod new_session;
@@ -280,6 +281,7 @@ mod session_lifecycle;
 mod session_picker;
 mod side;
 mod startup;
+pub(crate) mod startup_bootstrap;
 mod startup_prompts;
 mod startup_warnings;
 mod subagent_panel;
@@ -663,25 +665,21 @@ pub(crate) struct App {
     pending_open_resume_picker: bool,
     /// Runs a requested /cd after event dispatch returns, with a fresh stack.
     pending_working_directory_change: Option<working_directory::PendingWorkingDirectoryChange>,
-    /// Starts worktree setup after the event handler returns, with a fresh stack.
-    pending_start_managed_worktree: Option<(crate::app_event::ManagedWorktreeMode, Option<String>)>,
-    pending_managed_worktree_creation: bool,
-    /// Defers checkout completion and config loading until the event handler returns.
-    pending_managed_worktree_created: Option<Box<crate::app_event::ManagedWorktreeCreated>>,
-    /// Defers the saved-history fork until the event handler has returned.
-    pending_managed_worktree_transition: Option<Box<crate::app_event::ManagedWorktreeTransition>>,
-    /// Holds notifications until the new widget is attached on a fresh loop iteration.
-    pending_managed_worktree_attach: Option<Box<working_directory::ManagedWorktreeAttach>>,
+
     /// Keeps protected screens quarantined until initialized chat receives genuine user input.
     startup_protected_input_boundary: bool,
     /// Keeps that boundary armed while a startup approval waits for the typing-idle timer.
     startup_pending_protected_request: bool,
     /// Invalidates in-flight full rate-limit reads when a newer rolling hard stop arrives.
+    account_email_request_id: Option<uuid::Uuid>,
     rate_limit_hard_stop_generation: u64,
     account_ui: accounts::AccountUi,
     rate_limit_refresh_state: rate_limit_refresh::RateLimitRefreshState,
     queued_messages: queued_messages::QueuedMessages,
     turn_submissions: turn_submissions::TurnSubmissions,
+    pending_mcp_login_start: Option<PendingMcpLoginStart>,
+    // Latest accepted attempt per server; stale retry completions must not update the UI.
+    active_mcp_login_ids: HashMap<String, String>,
     // Serialize plugin enablement writes per plugin so stale completions cannot
     // overwrite a newer toggle, even if the plugin is toggled from different
     // cwd contexts.
@@ -693,6 +691,13 @@ pub(crate) struct App {
     // App fixtures keep their home alive across widget replacement; drop it last.
     #[cfg(test)]
     _test_codex_home: Option<tempfile::TempDir>,
+}
+
+struct PendingMcpLoginStart {
+    request_id: String,
+    name: String,
+    thread_id: ThreadId,
+    completions: Vec<codex_app_server_protocol::McpServerOauthLoginCompletedNotification>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

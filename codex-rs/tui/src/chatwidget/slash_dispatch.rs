@@ -7,7 +7,6 @@
 
 use super::*;
 use crate::app::WindowsSandboxHost;
-use crate::app_event::ManagedWorktreeMode;
 use crate::app_event::ThreadGoalSetMode;
 use crate::bottom_pane::prompt_args::parse_slash_name;
 use crate::bottom_pane::slash_commands::BuiltinCommandFlags;
@@ -42,13 +41,8 @@ const USAGE_CHATGPT_LOGIN_REQUIRED: &str = "Sign in with ChatGPT to use /usage."
 
 impl ChatWidget {
     fn request_session_fork(&mut self, name: Option<String>) {
-        // A running agent may be editing the checkout; never copy it into a worktree.
-        if self.is_agent_turn_running() || self.bottom_pane.is_task_running() {
-            self.app_event_tx
-                .send(AppEvent::ForkCurrentSession { name });
-        } else {
-            self.show_session_checkout_picker(ManagedWorktreeMode::Fork, name);
-        }
+        self.app_event_tx
+            .send(AppEvent::ForkCurrentSession { name });
     }
 
     /// Dispatch a bare slash command and record its staged local-history entry.
@@ -213,6 +207,39 @@ impl ChatWidget {
         match cmd {
             SlashCommand::Comms => self.dispatch_comms(""),
             SlashCommand::ContextRole => self.dispatch_context_role(""),
+            SlashCommand::Daybreak => {
+                if !self.config.features.enabled(Feature::CliDaybreak) {
+                    return;
+                }
+                if !self.daybreak_enabled {
+                    if !self.daybreak_account_eligible() {
+                        self.add_error_message("Daybreak requires the OpenAI provider with either ChatGPT sign-in or an API key with Daybreak support enabled.".into());
+                        return;
+                    }
+                    if !crate::daybreak::available(&self.model_catalog.models) {
+                        if crate::daybreak::availability(&self.model_catalog.models) == Some(false)
+                        {
+                            self.add_info_message(
+                                "Daybreak is not available for this account. Apply at https://openai.com/form/enterprise-trusted-access-for-cyber/. Learn more at https://help.openai.com/en/articles/20001326.".into(),
+                                /*hint*/ None,
+                            );
+                        } else {
+                            self.add_error_message("Daybreak availability could not be determined from the connected host's model catalog.".into());
+                        }
+                        return;
+                    }
+                }
+                let Some(thread_id) = self.thread_id else {
+                    self.add_error_message(
+                        "Daybreak is unavailable until the thread starts.".into(),
+                    );
+                    return;
+                };
+                self.app_event_tx.send(AppEvent::PersistDaybreakSelection {
+                    thread_id,
+                    enabled: !self.daybreak_enabled,
+                });
+            }
             SlashCommand::Feedback => {
                 if !self.config.feedback_enabled {
                     let params = crate::bottom_pane::feedback_disabled_params();
@@ -229,13 +256,18 @@ impl ChatWidget {
             SlashCommand::Farm | SlashCommand::FarmFresh => unreachable!("handled above"),
             SlashCommand::Jira => self.app_event_tx.send(AppEvent::OpenJira),
             SlashCommand::New => {
-                self.show_session_checkout_picker(ManagedWorktreeMode::New, /*name*/ None);
+                self.app_event_tx.send(AppEvent::NewSession { name: None });
             }
             SlashCommand::Archive => {
                 self.bottom_pane.show_selection_view(SelectionViewParams {
                     title: Some("Archive this session?".to_string()),
                     subtitle: Some(
-                        "Are you sure? This will archive the current session".to_string(),
+                        if self.bottom_pane.is_task_running() {
+                            "This will stop the current turn and archive the session."
+                        } else {
+                            "Are you sure? This will archive the current session"
+                        }
+                        .to_string(),
                     ),
                     footer_hint: Some(standard_popup_hint_line()),
                     items: vec![
@@ -255,7 +287,7 @@ impl ChatWidget {
                             ..Default::default()
                         },
                     ],
-                    ..SelectionViewParams::picker()
+                    ..SelectionViewParams::confirmation()
                 });
                 self.request_redraw();
             }
@@ -288,7 +320,7 @@ impl ChatWidget {
                             ..Default::default()
                         },
                     ],
-                    ..SelectionViewParams::picker()
+                    ..SelectionViewParams::confirmation()
                 });
                 self.request_redraw();
             }
@@ -300,9 +332,6 @@ impl ChatWidget {
             }
             SlashCommand::Fork => {
                 self.request_session_fork(/*name*/ None);
-            }
-            SlashCommand::Worktree => {
-                self.show_managed_worktree_picker();
             }
             SlashCommand::App => {
                 let Some(thread_id) = self.thread_id else {
@@ -868,10 +897,27 @@ impl ChatWidget {
             SlashCommand::Ide => {
                 self.handle_ide_command_args(trimmed);
             }
-            SlashCommand::Mcp => match trimmed.to_ascii_lowercase().as_str() {
-                "verbose" => self.add_mcp_output(McpServerStatusDetail::Full),
-                _ => self.add_error_message("Usage: /mcp [verbose]".to_string()),
-            },
+            SlashCommand::Mcp => {
+                if trimmed.eq_ignore_ascii_case("verbose") {
+                    self.add_mcp_output(McpServerStatusDetail::Full);
+                } else if let Some((command, name)) = trimmed.split_once(' ')
+                    && command.eq_ignore_ascii_case("login")
+                    && !name.trim().is_empty()
+                {
+                    if let Some(thread_id) = self.thread_id {
+                        self.app_event_tx.send(AppEvent::StartMcpLogin {
+                            name: name.trim().to_string(),
+                            thread_id,
+                        });
+                    } else {
+                        self.add_error_message(
+                            "MCP sign-in requires an active session.".to_string(),
+                        );
+                    }
+                } else {
+                    self.add_error_message("Usage: /mcp [verbose | login <name>]".to_string());
+                }
+            }
             SlashCommand::Keymap => match trimmed.to_ascii_lowercase().as_str() {
                 "" => self.open_keymap_picker(),
                 "debug" => {
@@ -911,10 +957,9 @@ impl ChatWidget {
                 self.app_event_tx.set_thread_name(name);
             }
             SlashCommand::New if !trimmed.is_empty() => {
-                self.show_session_checkout_picker(
-                    ManagedWorktreeMode::New,
-                    Some(trimmed.to_string()),
-                );
+                self.app_event_tx.send(AppEvent::NewSession {
+                    name: Some(trimmed.to_string()),
+                });
             }
             SlashCommand::Clear if !trimmed.is_empty() => {
                 self.app_event_tx.send(AppEvent::ClearUi {
@@ -1248,10 +1293,9 @@ impl ChatWidget {
             plugins_command_enabled: self.config.features.enabled(Feature::Plugins),
             token_activity_command_enabled: self.has_codex_backend_auth,
             goal_command_enabled: self.config.features.enabled(Feature::Goals),
-            service_tier_commands_enabled: self.fast_mode_enabled(),
+            service_tier_commands_enabled: !self.current_model_service_tier_commands().is_empty(),
+            daybreak_command_description: self.daybreak_command_description(),
             voice_command_enabled: self.realtime_conversation_available_for_thread,
-            worktrees_enabled: self.config.features.enabled(Feature::Worktrees)
-                && self.local_worktree_operations,
             allow_elevate_sandbox,
             side_conversation_active: self.active_side_conversation,
         }
@@ -1291,6 +1335,7 @@ impl ChatWidget {
             | SlashCommand::Copy
             | SlashCommand::Raw
             | SlashCommand::Vim
+            | SlashCommand::Daybreak
             | SlashCommand::Diff
             | SlashCommand::App
             | SlashCommand::Rename
@@ -1302,13 +1347,6 @@ impl ChatWidget {
                 Some(thread_id) if self.can_change_working_directory(thread_id) => QueueDrain::Stop,
                 _ => QueueDrain::Continue,
             },
-            SlashCommand::Worktree => {
-                if self.managed_worktree_available() {
-                    QueueDrain::Stop
-                } else {
-                    QueueDrain::Continue
-                }
-            }
             SlashCommand::Feedback
             | SlashCommand::Warnings
             | SlashCommand::Export

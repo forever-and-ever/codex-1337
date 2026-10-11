@@ -144,6 +144,119 @@ Parent/ancestor-filtered `thread/list` queries omit retired edges and their
 subtrees. Unloaded, retained agents remain listed; `thread/resume` loads their
 owning chain without submitting new input. The root must already be loaded.
 
+## Environment information (experimental)
+
+`environment/info` connects to a configured environment by `environmentId` and
+returns its detected `shell` plus its default `cwd` as a canonical
+environment-native `file:` URI. Connection failures are returned as request
+errors. After connecting, the live metadata request has a 30-second timeout. A
+timeout closes the probed connection and starts normal session recovery without
+retrying the failed request.
+
+## User verification (experimental)
+
+Codex app-server advertises `openai/elicitation.userVerification` to the
+host-owned plugin service for bundled, in-process TUI sessions (`codex-tui`) and
+local stdio desktop sessions (`Codex Desktop`) on devices with supported biometric
+hardware and the `experimentalApi` opt-in. This is an app-server decision,
+independent of whether a key exists; TUI/Desktop/mobile do not advertise this MCP
+capability. Mobile integration requires a separate rollout. Other clients and
+network connections do not receive this mode, even with a recognized client name.
+Before sending verification requests to desktop sessions, deploy a GUI that
+handles the typed verification request, cancellation, and late proofs. The general
+`experimentalApi` opt-in does not identify a compatible GUI version.
+
+Native `openai/userVerification` elicitation requests preserve optional `_meta`
+JSON through MCP transport and `mcpServer/elicitation/request`. Clients may use
+this metadata for extension-specific presentation and must continue to accept
+requests without it. Metadata does not change the challenge bytes or the proof
+returned in the acceptance response.
+
+Local UI clients use five methods. They require the existing
+`experimentalApi` opt-in. The local provider reports
+`unavailable/providerUnavailable` on unsupported platforms or without the required
+ChatGPT account identity.
+
+| Method | Params | Result |
+| --- | --- | --- |
+| `userVerification/status` | `{}` | `{credentialId, unavailableReason, unavailableMessage}` |
+| `userVerification/enroll` | `{}` | `{credentialId, algorithm?, publicKey?}` |
+| `userVerification/delete` | `{}` | `{}` |
+| `userVerification/verify` | `{challenge, title, description}` | `{proof: {credentialId, signature}}` |
+| `userVerification/cancel` | `{requestId}` | `{}` |
+
+Status reads local readiness without prompting or contacting a backend. A null
+`unavailableReason` means local checks passed, not that registration is valid.
+Unsupported platforms and missing account identity are reported in the status
+response's `unavailableReason` field.
+Enrollment creates or reuses the local key and returns its public metadata. The
+`publicKey` is unpadded base64url SPKI-DER; `algorithm` is `ecdsaP256Sha256X962`.
+During the experimental rollout, `algorithm` and `publicKey` are optional for
+compatibility with older app-servers. Current servers populate both fields;
+callers must check that both are present and non-null before backend registration.
+The trusted UI host owns backend registration: obtain an enrollment challenge,
+sign it with `userVerification/verify`, check that the proof's `credentialId`
+matches this response, and submit the public metadata and proof to the backend.
+Local success is not server enrollment. The caller must preserve the authenticated
+account across this flow and reconcile uncertain registration before retrying.
+Deletion removes the local key; the caller owns backend revocation.
+Enrollment and deletion coordinate credential lifecycle; callers do not issue
+separate generate or rotate commands. Identity comes from the authenticated
+account; this API exposes no caller-selected scope.
+
+Verify signs 1–4096 decoded challenge bytes using P-256 ECDSA with SHA-256. The
+challenge and DER signature use unpadded base64url. Title is 1–256 UTF-8 bytes;
+description is at most 4096 bytes. The UI obtains approval for that display
+context before calling. Verify does not require a pending elicitation; a UI with
+its own authenticator can return proof directly in elicitation response content.
+The calling flow owns pending-request checks and discards late proofs.
+Native enroll, delete, and verify accept local stdio and in-process connections.
+WebSocket and remote-control peers must use their own device authenticator;
+status remains available for local readiness. Dropping an embedded RPC, disconnecting,
+or changing authentication cancels its native operation. Responses recheck the
+captured identity after waiting for outbound queue capacity.
+Canceling or resolving an elicitation does not itself stop a separate
+`userVerification/verify` RPC. The GUI must use `userVerification/cancel` to
+cancel that RPC and discard late proofs when an approval is canceled or resolved.
+See [User verification cancellation](#user-verification-cancellation-experimental)
+for request ID and acknowledgment semantics.
+Only one native worker runs per app-server. If an OS call remains active after
+cancellation or timeout, subsequent local operations return `failed/providerError`
+until that worker exits.
+
+Failures use the normal JSON-RPC error envelope with closed `{type, reason}` data:
+`invalidRequest`, `unavailable`, `cancelled`, or `failed`. UI clients branch on
+these values rather than message text. Native diagnostic payloads stay private.
+
+## Local rollout compression
+
+The experimental `rollout/compress` method takes no parameters and immediately
+returns `{}` after scheduling one best-effort background pass over the app-server's
+local rollout storage. It does not change `features.local_thread_store_compression`
+or require that startup flag to be enabled. Non-local thread stores do not support
+this method.
+
+The worker retains its existing cold-file checks, maintenance and writer locks,
+concurrency limit, and cooldown. Acknowledgement does not imply completion or that
+any files were compressed; failures are reported through existing logs and metrics.
+There are no progress notifications or cancellation API. Clients sharing this
+Codex home must support compressed rollout files, including shared histories.
+
+## Managed model provider requirements
+
+`configRequirements/read` reports `supportsIndependentSpeedModes: true` when
+`features.fast_mode` and `features.ultrafast_mode` independently control Fast and
+Ultra Fast. Older servers omit this field and use Fast mode as a shared speed
+gate. Missing individual feature requirements impose no additional restriction;
+the model catalog still determines which service tiers a model supports.
+
+Existing threads retain their provider configuration. Input RPCs reject requests when managed
+`model_provider` or `model_providers` requirements no longer match that configuration, or cannot
+be loaded. This covers turn start/steer, review, compaction, manual queue start, and active goal
+updates. Realtime connections use separate routing configuration and are not checked here.
+Interrupt, realtime stop, and goal pause/clear remain available. User and project
+configuration changes alone do not invalidate existing threads.
+
 # Amazon Bedrock authentication
 
 If `model_providers.amazon-bedrock.aws.credential_export` is configured, Bedrock setup and
@@ -157,10 +270,23 @@ AWS profile `credential_process` commands are run by the AWS SDK; their network 
 the application's HTTP policy. Configured credential exporters and AWS reauthentication commands
 require unrestricted application policy; policy revocation cancels their active work.
 
+After Bedrock login or setup, clients can call the experimental
+`account/bedrock/checkGovCloudRequirements` with `{}`. The server reloads configuration and
+requirements and returns `{ isGovCloud, shouldWarn }`. An explicitly configured official
+Bedrock endpoint hostname determines the region; with no URL or a custom proxy URL, the check
+resolves the AWS region using the current authentication state. It does not reload saved
+credentials or change login policy.
+For GovCloud, the advisory check requires API-only login and enabled managed application
+network restrictions with an explicit allow entry for the active Bedrock endpoint's domain.
+Non-Bedrock providers and commercial regions return both fields as `false`. Configuration or
+region resolution failures return an RPC error. This check does not block login or certify
+the entire network configuration.
+
 ## Stored thread attachments
 
 - `thread/attachment/add` — add a durable resource reference to a stored thread without loading it. Repeated writes with the same attachment type and identity key return the existing attachment.
 - `thread/attachment/list` — list attachments for one stored thread in a cursor-paginated request, including a thread that is not loaded.
+- `thread/attachmentOwner/list` — find stored threads with an exact attachment type and identity key, with cursor pagination and an optional archive filter.
 - `thread/attachment/remove` — remove an attachment by its thread, attachment type, and identity key; returns `{}`.
 - `thread/attachment/updated` — notification broadcast after an attachment is created or removed; contains the thread, attachment identity, attachment id, and operation.
 ### Example: Manage stored thread attachments
@@ -217,6 +343,8 @@ Attachments record the resources currently associated with a thread, independent
 ```
 
 `thread/attachment/list` accepts one `threadId` and returns at most 100 attachments per page, ordered by creation time and attachment id. Continue with `nextCursor` and the same `threadId` until the cursor is `null`. Each thread can retain up to 100 attachments. Removing an attachment frees a slot for a new attachment.
+
+`thread/attachmentOwner/list` performs the reverse lookup: pass `attachmentType` and `identityKey` to get `data: [{threadId, archived}]` and `nextCursor`. Omit `archived` (or pass `null`) to include both active and archived threads; `false` selects active threads and `true` selects archived threads. Use the same identity and archive filter on subsequent cursor pages. The lookup covers only this app-server's configured thread store, not other hosts or stores. Results describe current membership and are not an atomic resource-cleanup check: attachments can change after a lookup.
 
 A non-ephemeral fork copies the source thread's current attachments, even when forking at an earlier turn. The copies have new attachment IDs and creation timestamps, but retain the same resource identities and payloads. Clients use `forkedFromId` on `thread/started` to detect forks and call `thread/attachment/list` with the new thread ID to load their attachments. Fork copying does not emit per-attachment updates; explicit add/remove operations still do. Copying is awaited before publishing the fork, but is best effort: a copy failure is logged and the conversation fork succeeds without attachments. Membership can then change independently on either thread; the referenced resources themselves are not copied. Resuming a fork does not repeat the copy.
 
@@ -278,6 +406,23 @@ Existing rollouts may contain historical `ThreadRolledBack` events. Their replay
 and migration remain supported so resuming, reading, and forking those threads
 preserves the surviving history. This disk compatibility does not require restoring
 support for new `thread/rollback` requests.
+
+# MCP configuration reload
+
+`config/mcpServer/reload` returns an error when a loaded thread rejects the
+refreshed enterprise policy. The rejected thread retains its previous configuration
+layers with enterprise MCP disabled. Other planned thread refreshes are processed
+before the rejection is reported, so an error does not imply that no changes were
+applied. Correct the policy before retrying the reload.
+
+# Enterprise sign-in
+
+Call `mcpServer/oauth/login` with a directly configured server's `name` and its
+connected `threadId`. Open the returned `authorizationUrl` and match
+`mcpServer/oauthLogin/completed` by `loginId`. Starting another enterprise sign-in
+cancels the previous attempt and waits for its callback listener to close. Use
+`account/login/cancel` to cancel explicitly. Start a fresh session after success to
+use the saved grant.
 
 # Selected workspace routing
 

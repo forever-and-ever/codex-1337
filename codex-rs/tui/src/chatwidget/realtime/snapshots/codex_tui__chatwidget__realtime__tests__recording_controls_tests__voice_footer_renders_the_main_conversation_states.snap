@@ -13,7 +13,7 @@ connecting:
   status line stays visible
 
 listening:
- voice ● listening                                  ctrl+x mute     /voice stop
+ voice ● listening                                      ⌃x mute     /voice stop
    mic ▁▁▁▁▁▁  codex ▁▁▁▁▁▁
 
 › Ask Codex to do anything
@@ -24,7 +24,7 @@ listening:
   status line stays visible
 
 speaking:
- voice ● speaking                                   ctrl+x mute     /voice stop
+ voice ● speaking                                       ⌃x mute     /voice stop
    mic ▁▁▇▇▇▇  codex ▁▁████
 
 › Ask Codex to do anything
@@ -35,7 +35,7 @@ speaking:
   status line stays visible
 
 muted:
- voice ◌ muted                                      ctrl+x unmute   /voice stop
+ voice ◌ muted                                          ⌃x unmute   /voice stop
    mic ▁▁▁▁▁▁  codex ▁▁▇▇▇▇
 
 › Ask Codex to do anything
@@ -46,7 +46,7 @@ muted:
   status line stays visible
 
 transcript:
- voice ● speaking                                   ctrl+x mute     /voice stop
+ voice ● speaking                                       ⌃x mute     /voice stop
    mic ▁▁▄▄▄▄  codex ▁▁▄▄▄▄
 
 › Ask Codex to do anything
@@ -57,7 +57,7 @@ transcript:
   status line stays visible
 
 interrupted:
- voice ● heard                                      ctrl+x mute     /voice stop
+ voice ● heard                                          ⌃x mute     /voice stop
    mic ▁▁▄▄▄▄  codex ▁▁▄▄▄▄
 
 › Ask Codex to do anything

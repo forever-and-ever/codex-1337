@@ -113,7 +113,7 @@ impl Session {
                     session.thread_id().to_string(),
                 );
                 inject_session_env(&mut env, session.session_id());
-                inject_apply_patch_env(&mut env, &config.features);
+                inject_apply_patch_env(&mut env);
                 inject_permission_profile_env(
                     &mut env,
                     environment.active_permission_profile().as_ref(),
@@ -175,17 +175,17 @@ pub(super) fn shell_snapshot_request(
     cwd: &PathUri,
     context: &UnifiedExecContext,
 ) -> Option<ShellSnapshotRequest> {
-    let (shell_type, shell_mode) = request.execution.shell()?;
+    let (invocation, shell_mode) = request.execution.shell()?;
     if !context.session.features().enabled(Feature::ShellSnapshotV2)
         || !request.turn_environment.shell_snapshot_v2_supported
         || request.turn_environment.selection.cwd != *cwd
         || !matches!(shell_mode, UnifiedExecShellMode::Direct)
-        || !matches!(shell_type, ShellType::Bash | ShellType::Zsh | ShellType::Sh)
-        || request.command.get(1).is_none_or(|flag| flag != "-lc")
+        || !invocation.is_posix_login()
     {
         return None;
     }
 
+    let shell = &invocation.shell;
     Some(ShellSnapshotRequest {
         scope_id: format!(
             "{}:{}",
@@ -193,8 +193,8 @@ pub(super) fn shell_snapshot_request(
             request.turn_environment.selection.environment_id
         ),
         shell: ShellInfo {
-            name: shell_type.name().to_string(),
-            path: request.command.first()?.clone(),
+            name: shell.name().to_string(),
+            path: shell.shell_path.to_string_lossy().into_owned(),
         },
     })
 }

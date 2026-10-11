@@ -1,5 +1,6 @@
 ---
 source: core/tests/suite/scenarios_skill_catalog_dedup.rs
+assertion_line: 142
 expression: "context_snapshot::format_request_history_snapshot(\"Cloud skills replace duplicate executor listings before budgeting; unique executor skills retain their descriptions and e1 aliases across turns.\",\n&requests, &ContextSnapshotOptions::default().include_request_settings(),)"
 ---
 Scenario: Cloud skills replace duplicate executor listings before budgeting; unique executor skills retain their descriptions and e1 aliases across turns.
@@ -16,12 +17,13 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=31240abf9568ab2c):
-        - namespace/functions; hash=d8513690d6775ad2
+00:additional_tools/developer (2; hash=a5c8b7421a619d6c):
+        - namespace/functions; hash=374a97c15cf81aa8
           - custom/exec
           - function/wait
           - function/request_user_input
           - function/request_user_input_async
+          - function/fence
         - namespace/wrangler_agents: Tools for spawning and managing sub-agents.; hash=458c670bcb4faf15
           - function/wait_agent
 01:message/developer:
@@ -101,7 +103,7 @@ Settings:
 
     There are 4 available concurrency slots, meaning that up to 4 agents can be active at once, including you.
 
-    Full-history forks (`fork_turns` omitted or `"all"`) inherit the parent model and reasoning effort and d...ne"` or a positive integer string.</multi_agent_role> [hash=c7f52e90688299ce]
+    Full-history forks (`fork_turns` omitted or `"all"`) inherit the parent model and reasoning effort and d... so, set `fork_turns` to `"none"`.</multi_agent_role> [hash=d5928243dc643bcc]
 04:message/developer:
     <multi_agent_mode>Do not spawn sub-agents unless the user or applicable AGENTS.md/skill instructions exp...elegation, or parallel agent work.</multi_agent_mode> [hash=b214ebf2933cfe62]
 05:message/user:

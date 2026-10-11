@@ -4,7 +4,7 @@ expression: "render_bottom_popup(&chat, 80)"
 ---
 • Queued follow-up inputs
   ↳ From SYSADMIN: Check the service after your current turn.
-    shift+← edit last · ⌥x cancel
+    ⇧← edit last · ⌥x cancel
 
 › unfinished prompt
 

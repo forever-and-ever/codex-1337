@@ -209,7 +209,7 @@ fn terminal_draw_omits_cursor_style_without_an_owned_glyph() {
     let mut terminal =
         Terminal::with_options(CaptureBackend::new(/*width*/ 2, /*height*/ 1)).expect("terminal");
     let color_reset = if Colored::ansi_color_disabled_memoized() {
-        "\x1b[m\x1b[m"
+        ""
     } else {
         "\x1b[39m\x1b[49m"
     };

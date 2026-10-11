@@ -9,6 +9,8 @@ use globset::GlobSet;
 use globset::GlobSetBuilder;
 use std::collections::HashSet;
 use std::net::IpAddr;
+use std::net::Ipv4Addr;
+use std::net::Ipv6Addr;
 use url::Host as UrlHost;
 
 /// A normalized host string for policy evaluation.
@@ -40,6 +42,61 @@ pub fn is_loopback_host(host: &Host) -> bool {
     false
 }
 
+/// Classifies IP literals excluded from public network destinations; does not resolve DNS.
+pub fn is_non_public_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => is_non_public_ipv4(ip),
+        IpAddr::V6(ip) => is_non_public_ipv6(ip),
+    }
+}
+
+fn is_non_public_ipv4(ip: Ipv4Addr) -> bool {
+    // Use the standard library classification helpers where possible; they encode the intent more
+    // clearly than hand-rolled range checks. Some non-public ranges (e.g., CGNAT and TEST-NET
+    // blocks) are not covered by stable stdlib helpers yet, so we fall back to CIDR checks.
+    ip.is_loopback()
+        || ip.is_private()
+        || ip.is_link_local()
+        || ip.is_unspecified()
+        || ip.is_multicast()
+        || ip.is_broadcast()
+        || ipv4_in_cidr(ip, [0, 0, 0, 0], /*prefix*/ 8) // "this network" (RFC 1122)
+        || ipv4_in_cidr(ip, [100, 64, 0, 0], /*prefix*/ 10) // CGNAT (RFC 6598)
+        || ipv4_in_cidr(ip, [192, 0, 0, 0], /*prefix*/ 24) // IETF Protocol Assignments (RFC 6890)
+        || ipv4_in_cidr(ip, [192, 0, 2, 0], /*prefix*/ 24) // TEST-NET-1 (RFC 5737)
+        || ipv4_in_cidr(ip, [198, 18, 0, 0], /*prefix*/ 15) // Benchmarking (RFC 2544)
+        || ipv4_in_cidr(ip, [198, 51, 100, 0], /*prefix*/ 24) // TEST-NET-2 (RFC 5737)
+        || ipv4_in_cidr(ip, [203, 0, 113, 0], /*prefix*/ 24) // TEST-NET-3 (RFC 5737)
+        || ipv4_in_cidr(ip, [240, 0, 0, 0], /*prefix*/ 4) // Reserved (RFC 6890)
+}
+
+fn ipv4_in_cidr(ip: Ipv4Addr, base: [u8; 4], prefix: u8) -> bool {
+    let ip = u32::from(ip);
+    let base = u32::from(Ipv4Addr::from(base));
+    let mask = if prefix == 0 {
+        0
+    } else {
+        u32::MAX << (32 - prefix)
+    };
+    (ip & mask) == (base & mask)
+}
+
+fn is_non_public_ipv6(ip: Ipv6Addr) -> bool {
+    if let Some(v4) = ip.to_ipv4() {
+        return is_non_public_ipv4(v4) || ip.is_loopback();
+    }
+    // Treat anything that isn't globally routable as "local" for SSRF prevention. In particular:
+    //  - `::1` loopback
+    //  - `fc00::/7` unique-local (RFC 4193)
+    //  - `fe80::/10` link-local
+    //  - `::` unspecified
+    //  - multicast ranges
+    ip.is_loopback()
+        || ip.is_unspecified()
+        || ip.is_multicast()
+        || ip.is_unique_local()
+        || ip.is_unicast_link_local()
+}
 /// Normalize host fragments for policy matching (trim whitespace, strip ports/brackets, lowercase).
 pub fn normalize_host(host: &str) -> String {
     let host = host.trim();

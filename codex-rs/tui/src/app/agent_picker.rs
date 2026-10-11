@@ -1,10 +1,13 @@
 //! Root-scoped background refresh for the agent picker.
 
+use super::agent_navigation::AgentPickerThreadVisibility;
+use super::app_server_event_targets::ServerNotificationThreadTarget;
+use super::app_server_event_targets::server_notification_thread_target;
 use super::*;
+use crate::app_event::AgentPickerThreadRefresh;
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::SortDirection;
-use codex_app_server_protocol::Thread;
 use codex_app_server_protocol::ThreadListParams;
 use codex_app_server_protocol::ThreadListResponse;
 use codex_app_server_protocol::ThreadSourceKind;
@@ -18,46 +21,67 @@ const AGENT_PICKER_MAX_THREADS: usize = 1_000;
 pub(super) async fn list_agent_picker_threads(
     request_handle: &AppServerRequestHandle,
     root: ThreadId,
-) -> Result<Vec<Thread>, String> {
-    let mut threads = Vec::new();
-    let mut cursor = None;
-    let mut seen_cursors = HashSet::new();
-    while threads.len() < AGENT_PICKER_MAX_THREADS && seen_cursors.insert(cursor.clone()) {
-        let page = request_handle
-            .request_typed::<ThreadListResponse>(ClientRequest::ThreadList {
-                request_id: RequestId::String(Uuid::new_v4().to_string()),
-                params: ThreadListParams {
-                    originators: None,
-                    cursor,
-                    limit: Some(AGENT_PICKER_PAGE_SIZE),
-                    sort_key: None,
-                    sort_direction: Some(SortDirection::Desc),
-                    model_providers: Some(vec![]),
-                    source_kinds: Some(vec![ThreadSourceKind::SubAgentThreadSpawn]),
-                    archived: None,
-                    section_id: None,
-                    project_id: None,
-                    cwd: None,
-                    use_state_db_only: true,
-                    search_term: None,
-                    parent_thread_id: None,
-                    ancestor_thread_id: Some(root.to_string()),
-                },
-            })
-            .await
-            .map_err(|err| err.to_string())?;
-        threads.extend(
-            page.data
+) -> Result<AgentPickerThreadRefresh, String> {
+    let mut refresh = AgentPickerThreadRefresh::default();
+    for archived in [false, true] {
+        let mut cursor = None;
+        let mut seen_cursors = HashSet::new();
+        let mut listed = 0;
+        loop {
+            if listed >= AGENT_PICKER_MAX_THREADS || !seen_cursors.insert(cursor.clone()) {
+                return Err(
+                    "Agent roster listing was incomplete; retaining the previous roster.".into(),
+                );
+            }
+            let page = match request_handle
+                .request_typed::<ThreadListResponse>(ClientRequest::ThreadList {
+                    request_id: RequestId::String(Uuid::new_v4().to_string()),
+                    params: ThreadListParams {
+                        originators: None,
+                        cursor,
+                        limit: Some(AGENT_PICKER_PAGE_SIZE),
+                        sort_key: None,
+                        sort_direction: Some(SortDirection::Desc),
+                        model_providers: Some(vec![]),
+                        source_kinds: Some(vec![ThreadSourceKind::SubAgentThreadSpawn]),
+                        archived: Some(archived),
+                        section_id: None,
+                        project_id: None,
+                        cwd: None,
+                        use_state_db_only: true,
+                        search_term: None,
+                        parent_thread_id: None,
+                        ancestor_thread_id: Some(root.to_string()),
+                    },
+                })
+                .await
+            {
+                Ok(page) => page,
+                Err(err) => return Err(err.to_string()),
+            };
+            let page_threads: Vec<_> = page
+                .data
                 .into_iter()
-                .take(AGENT_PICKER_MAX_THREADS - threads.len()),
-        );
-        let Some(next_cursor) = page.next_cursor else {
-            break;
-        };
-        cursor = Some(next_cursor);
+                .take(AGENT_PICKER_MAX_THREADS - listed)
+                .collect();
+            listed += page_threads.len();
+            if archived {
+                refresh.archived_thread_ids.extend(
+                    page_threads
+                        .into_iter()
+                        .filter_map(|thread| ThreadId::from_string(&thread.id).ok()),
+                );
+            } else {
+                refresh.threads.extend(page_threads);
+            }
+            let Some(next_cursor) = page.next_cursor else {
+                break;
+            };
+            cursor = Some(next_cursor);
+        }
     }
-    threads.reverse();
-    Ok(threads)
+    refresh.threads.reverse();
+    Ok(refresh)
 }
 
 impl App {
@@ -93,29 +117,33 @@ impl App {
 
     pub(super) fn apply_agent_picker_thread_refresh(
         &mut self,
+        app_server: &AppServerSession,
         root: ThreadId,
         request_id: Uuid,
-        result: Result<Vec<Thread>, String>,
+        result: Result<AgentPickerThreadRefresh, String>,
     ) {
-        if !self
+        let Some(completion) = self
             .agent_navigation
             .finish_picker_refresh(root, request_id)
-            || self.primary_thread_id != Some(root)
-        {
+        else {
+            return;
+        };
+        if self.primary_thread_id != Some(root) {
             return;
         }
-        if std::mem::take(&mut self.agent_navigation.picker_refresh_again) {
-            self.app_event_tx
-                .send(AppEvent::RefreshSubagentRoster(root));
-        }
-        let threads = match result {
-            Ok(threads) => threads,
+        let refresh = match result {
+            Ok(refresh) => refresh,
             Err(err) => {
                 tracing::warn!(%err, "failed to refresh agent picker descendants");
+                self.agent_navigation.prune_untracked_picker_exclusions();
+                if completion.follow_up_requested {
+                    self.refresh_agent_picker_threads(app_server, root);
+                }
                 return;
             }
         };
-        let changed = std::mem::take(&mut self.agent_navigation.picker_refresh_changed);
+        let changed = completion.changed_threads;
+        let threads = refresh.threads;
         if threads.len() < AGENT_PICKER_MAX_THREADS {
             let reconciling = match self
                 .agent_navigation
@@ -127,11 +155,12 @@ impl App {
                 Some(crate::subagent_roster::Retirement::Reconciling(target)) => Some(target),
                 _ => None,
             };
-            let retained: HashSet<_> = threads
+            let mut retained: HashSet<_> = threads
                 .iter()
                 .filter_map(|thread| ThreadId::from_string(&thread.id).ok())
                 .collect();
-            for id in std::mem::take(&mut self.agent_navigation.picker_refresh_known) {
+            retained.extend(refresh.archived_thread_ids.iter().copied());
+            for id in completion.known_threads {
                 let verified = self.is_family_thread(id);
                 let deliberately_attached = self.side_threads.contains_key(&id)
                     || self.agent_navigation.explicit_attachments.contains(&id)
@@ -151,10 +180,17 @@ impl App {
                 }
             }
         }
+        let selected_thread_id = self.selected_agent_picker_thread_id();
         for thread in threads {
             let Ok(thread_id) = ThreadId::from_string(&thread.id) else {
                 continue;
             };
+            if !completion.visibility_changed_threads.contains(&thread_id) {
+                self.update_agent_picker_thread_visibility(
+                    thread_id,
+                    AgentPickerThreadVisibility::Visible,
+                );
+            }
             self.agent_navigation.record_model(&thread);
             let previous = self.agent_navigation.get(&thread_id);
             let status = if changed.contains(&thread_id) {
@@ -185,6 +221,15 @@ impl App {
             self.agent_navigation.set_agent_path(thread_id, agent_path);
             self.agent_navigation.set_status(thread_id, status);
         }
+        for thread_id in refresh.archived_thread_ids {
+            if !completion.visibility_changed_threads.contains(&thread_id) {
+                self.update_agent_picker_thread_visibility(
+                    thread_id,
+                    AgentPickerThreadVisibility::Hidden,
+                );
+            }
+        }
+        self.agent_navigation.prune_untracked_picker_exclusions();
 
         self.sync_subagent_roster();
         {
@@ -200,6 +245,81 @@ impl App {
                 roster.retiring = None;
             }
         }
-        self.refresh_visible_agent_picker();
+        self.replace_agent_picker_view(selected_thread_id);
+        if completion.follow_up_requested {
+            self.refresh_agent_picker_threads(app_server, root);
+        }
+    }
+
+    pub(super) fn set_agent_picker_thread_visibility(
+        &mut self,
+        thread_id: ThreadId,
+        visibility: AgentPickerThreadVisibility,
+    ) {
+        let selected_thread_id = self.selected_agent_picker_thread_id();
+        self.update_agent_picker_thread_visibility(thread_id, visibility);
+        self.replace_agent_picker_view(selected_thread_id);
+    }
+
+    fn update_agent_picker_thread_visibility(
+        &mut self,
+        thread_id: ThreadId,
+        visibility: AgentPickerThreadVisibility,
+    ) {
+        if matches!(visibility, AgentPickerThreadVisibility::Hidden) {
+            self.agent_navigation.mark_stopped(thread_id);
+            if let Some(channel) = self.thread_event_channels.get_mut(&thread_id) {
+                channel.mark_replay_only();
+            }
+        }
+        self.agent_navigation
+            .set_picker_thread_visibility(thread_id, visibility);
+    }
+
+    pub(super) fn handle_agent_picker_visibility_notification(
+        &mut self,
+        app_server: &AppServerSession,
+        notification: &ServerNotification,
+    ) {
+        let visibility = match notification {
+            ServerNotification::ThreadArchived(_) => AgentPickerThreadVisibility::Hidden,
+            ServerNotification::ThreadUnarchived(_) => AgentPickerThreadVisibility::Visible,
+            _ => return,
+        };
+        let ServerNotificationThreadTarget::Thread(thread_id) =
+            server_notification_thread_target(notification)
+        else {
+            return;
+        };
+        let refresh_uncached_thread = matches!(visibility, AgentPickerThreadVisibility::Visible)
+            && self.agent_navigation.get(&thread_id).is_none();
+        self.set_agent_picker_thread_visibility(thread_id, visibility);
+        if refresh_uncached_thread
+            && let Some(primary_thread_id) = self.primary_thread_id
+            && !self
+                .agent_navigation
+                .queue_picker_refresh(primary_thread_id)
+        {
+            self.refresh_agent_picker_threads(app_server, primary_thread_id);
+        }
+    }
+
+    fn selected_agent_picker_thread_id(&self) -> Option<ThreadId> {
+        let selected = self
+            .chat_widget
+            .selected_index_for_present_view(AGENT_PICKER_VIEW_ID)?;
+        self.agent_navigation.picker_order.get(selected).copied()
+    }
+
+    fn replace_agent_picker_view(&mut self, selected_thread_id: Option<ThreadId>) {
+        let selected = selected_thread_id.and_then(|selected_thread_id| {
+            self.agent_navigation
+                .picker_order
+                .iter()
+                .position(|thread_id| *thread_id == selected_thread_id)
+        });
+        let params = self.agent_picker_selection_view_params(selected);
+        self.chat_widget
+            .replace_selection_view_if_present(AGENT_PICKER_VIEW_ID, params);
     }
 }

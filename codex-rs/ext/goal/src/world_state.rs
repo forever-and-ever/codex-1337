@@ -51,10 +51,8 @@ fn continuation_rules_section(update_plan_enabled: bool) -> WorldStateSectionCon
     };
     let body = format!("\n{instructions}\n");
     let retained = format!("{START_MARKER}{body}{END_MARKER}");
-    WorldStateSectionContribution::new(
-        SECTION_ID,
-        Value::String(instructions.to_owned()),
-        move |previous| match previous {
+    WorldStateSectionContribution::new(SECTION_ID, move |previous| {
+        let fragment = match previous {
             PreviousWorldStateSection::Unknown => None,
             PreviousWorldStateSection::Known(previous)
                 if previous.as_str() == Some(instructions) =>
@@ -64,7 +62,8 @@ fn continuation_rules_section(update_plan_enabled: bool) -> WorldStateSectionCon
             PreviousWorldStateSection::Absent | PreviousWorldStateSection::Known(_) => Some(
                 RenderedWorldStateFragment::new("user", (START_MARKER, END_MARKER), body.clone()),
             ),
-        },
-    )
+        };
+        (Some(Value::String(instructions.to_owned())), fragment)
+    })
     .with_retained_fragment_matcher(move |role, text| role == "user" && text == retained)
 }

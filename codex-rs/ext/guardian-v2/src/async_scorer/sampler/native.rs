@@ -260,3 +260,10 @@ async fn decision(
 #[cfg(test)]
 #[path = "../sampler_native_tests.rs"]
 mod tests;
+
+impl LunaSampler {
+    pub(crate) fn supports_retained_history(&self) -> bool {
+        self.config.provider.info().is_openai()
+            && matches!(self.config.provider.anthropic_auth_context(), Ok(None))
+    }
+}

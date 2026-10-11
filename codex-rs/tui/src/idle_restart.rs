@@ -34,7 +34,6 @@ impl Handoff {
     fn apply(self, cli: &mut Cli) {
         cli.prompt = None;
         cli.images.clear();
-        cli.worktree = false;
         cli.cwd = Some(self.cwd.to_path_buf());
         cli.agents_overview = false;
         cli.resume_picker = false;

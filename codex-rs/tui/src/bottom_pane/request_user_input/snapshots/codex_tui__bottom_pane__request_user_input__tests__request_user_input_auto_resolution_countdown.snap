@@ -10,4 +10,4 @@ expression: "render_snapshot_at(&overlay, Rect::new(0, 0, 120, 16), now)"
     2. Option 2  Second choice.                                                                                         
     3. Option 3  Third choice.                                                                                          
                                                                                                                         
-  tab to add notes | enter to submit answer | ←/→ to navigate questions | ctrl+c to interrupt
+  tab to add notes | enter to submit answer | ←/→ to navigate questions | ⌃c to interrupt

@@ -14,6 +14,7 @@ pub enum SlashCommand {
     // more frequently used commands should be listed first.
     Model,
     Account,
+    Daybreak,
     Ide,
     Permissions,
     Keymap,
@@ -38,7 +39,6 @@ pub enum SlashCommand {
     Jira,
     #[strum(serialize = "farm_fresh")]
     FarmFresh,
-    Worktree,
     App,
     Init,
     Compact,
@@ -116,7 +116,6 @@ impl SlashCommand {
             SlashCommand::Farm => "delegate a task with the current conversation",
             SlashCommand::Jira => "browse this project's issues",
             SlashCommand::FarmFresh => "delegate a task without conversation history",
-            SlashCommand::Worktree => "start or continue a conversation in a new worktree",
             SlashCommand::App => "continue this session in the Desktop app",
             SlashCommand::Quit | SlashCommand::Exit => "exit Codex",
             SlashCommand::Copy => "copy the last response or part of it",
@@ -149,6 +148,7 @@ impl SlashCommand {
             SlashCommand::Account => {
                 "choose this conversation's account; /account <alias> also works"
             }
+            SlashCommand::Daybreak => "turn Daybreak on or off",
             SlashCommand::Ide => {
                 "include current selection, open files, and other context from your IDE"
             }
@@ -167,7 +167,7 @@ impl SlashCommand {
             SlashCommand::Experimental => "toggle experimental features",
             SlashCommand::AutoReview => "approve one retry of a recent auto-review denial",
             SlashCommand::Memories => "configure memory use and generation",
-            SlashCommand::Mcp => "list configured MCP tools; use /mcp verbose for details",
+            SlashCommand::Mcp => "list MCP tools; use /mcp verbose or /mcp login <name>",
             SlashCommand::Apps => "manage apps",
             SlashCommand::Plugins => "browse plugins",
             SlashCommand::Logout => "log out of Codex",
@@ -268,9 +268,7 @@ impl SlashCommand {
     pub fn available_during_task(self) -> bool {
         match self {
             SlashCommand::New
-            | SlashCommand::Archive
             | SlashCommand::Delete
-            | SlashCommand::Worktree
             | SlashCommand::Init
             | SlashCommand::Compact
             | SlashCommand::Recap
@@ -291,8 +289,10 @@ impl SlashCommand {
             SlashCommand::Diff
             | SlashCommand::Fork
             | SlashCommand::Account
+            | SlashCommand::Archive
             | SlashCommand::Resume
             | SlashCommand::Model
+            | SlashCommand::Daybreak
             | SlashCommand::Permissions
             | SlashCommand::Copy
             | SlashCommand::Raw

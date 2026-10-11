@@ -31,8 +31,7 @@ async fn unavailable_thread_routes_local_and_recovery_commands() -> Result<()> {
         app.chat_widget.queued_user_message_texts(),
         vec!["pending input", "keep queued input"]
     );
-    app.chat_widget
-        .set_local_worktree_operations(/*enabled*/ false);
+
     let mut session = start_config_write_test_app_server(&app).await?;
     let mut tui = crate::tui::test_support::make_test_tui()?;
     while events.try_recv().is_ok() {}
@@ -174,8 +173,7 @@ async fn unavailable_thread_new_and_clear_start_a_writable_session() -> Result<(
             _ => {}
         }
         app.chat_widget.pause_unavailable_thread();
-        app.chat_widget
-            .set_local_worktree_operations(/*enabled*/ false);
+
         let mut session = start_config_write_test_app_server(&app).await?;
         let mut tui = crate::tui::test_support::make_test_tui()?;
         while events.try_recv().is_ok() {}

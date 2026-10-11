@@ -62,7 +62,6 @@ impl RetainedInput {
     pub(crate) fn prepare_cli(&self, cli: &mut crate::cli::Cli) {
         cli.prompt = None;
         cli.images.clear();
-        cli.worktree = false;
         if let Some(cwd) = &self.cwd {
             cli.cwd = Some(cwd.to_path_buf());
         }

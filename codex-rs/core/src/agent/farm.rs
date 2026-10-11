@@ -206,7 +206,8 @@ impl CodexThread {
                             CodexErr::InvalidRequest(
                                 "parent history unavailable for farm".to_owned(),
                             )
-                        })?,
+                        })?
+                        .items,
                 ))
             } else {
                 None

@@ -62,6 +62,7 @@ from .v2_all import ThreadDeletedNotification
 from .v2_all import ThreadGoalClearedNotification
 from .v2_all import ThreadGoalUpdatedNotification
 from .v2_all import ThreadNameUpdatedNotification
+from .v2_all import ThreadPredictionUpdatedNotification
 from .v2_all import ThreadProjectUpdatedNotification
 from .v2_all import ThreadPromptCacheMissedNotification
 from .v2_all import ThreadPromptCacheUpdatedNotification
@@ -151,6 +152,7 @@ KnownNotificationPayload: TypeAlias = (
     | ThreadGoalClearedNotification
     | ThreadGoalUpdatedNotification
     | ThreadNameUpdatedNotification
+    | ThreadPredictionUpdatedNotification
     | ThreadProjectUpdatedNotification
     | ThreadPromptCacheMissedNotification
     | ThreadPromptCacheUpdatedNotification
@@ -243,6 +245,7 @@ NOTIFICATION_MODELS: dict[str, type[KnownNotificationPayload]] = {
     "thread/goal/cleared": ThreadGoalClearedNotification,
     "thread/goal/updated": ThreadGoalUpdatedNotification,
     "thread/name/updated": ThreadNameUpdatedNotification,
+    "thread/prediction/updated": ThreadPredictionUpdatedNotification,
     "thread/project/updated": ThreadProjectUpdatedNotification,
     "thread/promptCache/missed": ThreadPromptCacheMissedNotification,
     "thread/promptCache/updated": ThreadPromptCacheUpdatedNotification,

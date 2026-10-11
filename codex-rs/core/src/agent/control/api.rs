@@ -158,8 +158,18 @@ impl AgentControl for LocalAgentControl {
                             "target agent is missing an agent_path".to_string(),
                         )
                     })?;
-                    self.ensure_v2_agent_loaded(resume_config, target, /*parent*/ None)
-                        .await?;
+                    // Cold-restored children still reload lazily on any message. Only
+                    // locally evicted recipients can retain mail without reloading.
+                    // Loaded recipients go straight to delivery, which rejects sends
+                    // racing an in-progress eviction when it acquires the residency pin.
+                    if matches!(&message, crate::agent::types::AgentMessage::Encrypted(_))
+                        || mode == MessageDeliveryMode::TriggerTurn
+                        || (self.runtime.upgrade()?.get_thread(target).await.is_err()
+                            && self.runtime.registry.evicted_environments(target).is_none())
+                    {
+                        self.ensure_v2_agent_loaded(resume_config, target, /*parent*/ None)
+                            .await?;
+                    }
                     if matches!(&message, crate::agent::types::AgentMessage::Encrypted(_)) {
                         let manager = self.runtime.upgrade()?;
                         let recipient = manager.get_thread(target).await?;
@@ -198,6 +208,17 @@ impl AgentControl for LocalAgentControl {
                 submission_id,
             })
         })
+    }
+
+    fn take_mailbox(
+        &self,
+        agent: ThreadId,
+    ) -> Vec<codex_protocol::protocol::InterAgentCommunication> {
+        self.runtime.mailboxes.take(agent)
+    }
+
+    fn watch_mailbox(&self, agent: ThreadId) -> tokio::sync::watch::Receiver<bool> {
+        self.runtime.mailboxes.watch(agent)
     }
 
     fn ensure_child_loaded(&self, parent: ThreadId, child: ThreadId) -> BoxFuture<'_, Result<()>> {

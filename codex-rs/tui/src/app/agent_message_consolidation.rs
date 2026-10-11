@@ -8,32 +8,25 @@
 //! resize re-renders. The retained view preserves its displayed revision before that
 //! replacement, then repaints without replaying terminal scrollback.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use color_eyre::eyre::Result;
 
 use super::App;
 use super::resize_reflow::trailing_run_start;
+use super::transcript_splice::SpliceShape;
+use super::transcript_splice::TranscriptSplice;
 use crate::app_event::ConsolidationScrollbackReflow;
 use crate::history_cell;
 use crate::history_cell::HistoryCell;
-use crate::inline_visualization::InlineVisualizationContext;
 use crate::pager_overlay::Overlay;
 use crate::tui;
 
 impl App {
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the consolidation event's fields, unpacked"
-    )]
     pub(super) fn handle_consolidate_agent_message(
         &mut self,
         tui: &mut tui::Tui,
-        source: String,
-        item_id: Option<String>,
-        cwd: PathBuf,
-        inline_visualization_context: Option<InlineVisualizationContext>,
+        source: history_cell::AgentMarkdownCell,
         scrollback_reflow: ConsolidationScrollbackReflow,
         deferred_history_cell: Option<Box<dyn HistoryCell>>,
     ) -> Result<()> {
@@ -56,46 +49,32 @@ impl App {
         let end = self.transcript_cells.len();
         tracing::debug!(
             "ConsolidateAgentMessage: transcript_cells.len()={end}, source_len={}",
-            source.len()
+            source.copy_source().map_or(/*default*/ 0, str::len)
         );
         let start = trailing_run_start::<history_cell::AgentMessageCell>(&self.transcript_cells);
         if start < end {
             tracing::debug!(
                 "ConsolidateAgentMessage: replacing cells [{start}..{end}] with AgentMarkdownCell"
             );
-            let mut consolidated = history_cell::AgentMarkdownCell::new_with_inline_visualizations(
-                source,
-                &cwd,
-                inline_visualization_context,
-            );
+            let mut consolidated = source;
             consolidated.timestamp = self.transcript_cells[start]
                 .as_any()
                 .downcast_ref::<history_cell::AgentMessageCell>()
                 .and_then(|cell| cell.timestamp);
-            consolidated.item_id = item_id;
             let consolidated: Arc<dyn HistoryCell> = Arc::new(consolidated);
-            self.native_history
-                .consolidate(&self.transcript_cells[start..end], &consolidated);
-            if tui.is_owned_screen() {
-                self.transcript_view.replace_group(
-                    &self.transcript_cells,
-                    start..end,
-                    &consolidated,
-                );
+            let shape = if tui.is_owned_screen() {
+                SpliceShape::Members(Vec::new())
             } else {
-                self.transcript_view.replace_range(
-                    &self.transcript_cells,
-                    start..end,
-                    &consolidated,
-                );
-            }
-            self.transcript_cells
-                .splice(start..end, std::iter::once(consolidated.clone()));
-
-            if let Some(Overlay::Transcript(t)) = &mut self.overlay {
-                t.regroup_cells(start..end, consolidated.clone());
-                tui.frame_requester().schedule_frame();
-            }
+                SpliceShape::Revision
+            };
+            self.commit_transcript_splice(
+                tui,
+                TranscriptSplice {
+                    range: start..end,
+                    cells: vec![consolidated],
+                    shape,
+                },
+            );
 
             self.finish_agent_message_consolidation(tui, scrollback_reflow)?;
         } else {

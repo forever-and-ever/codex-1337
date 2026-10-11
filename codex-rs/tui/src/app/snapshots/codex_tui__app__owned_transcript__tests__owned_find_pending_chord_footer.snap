@@ -1,7 +1,8 @@
 ---
 source: tui/src/app/owned_transcript_tests.rs
+assertion_line: 991
 expression: "rendered.lines().skip(usize::from(cursor.y)).take(3).map(str::trim).collect::<Vec<_>>().join(\"\\n\")"
 ---
 Find: alpha betax
-ctrl+x then · h move line start · esc cancel
+⌃x then · h move line start · esc cancel
 ────────────────────────────────────────────────────────────────────────────────

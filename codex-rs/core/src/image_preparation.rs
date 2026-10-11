@@ -53,6 +53,7 @@ pub(crate) fn unified_image_budget_enabled(
 #[derive(Clone, Copy, Debug)]
 struct ImageOrigin<'a> {
     thread_id: &'a str,
+    ephemeral: bool,
     message_role: Option<&'a str>,
     item_id: Option<&'a str>,
 }
@@ -120,6 +121,7 @@ impl ImagePreparationError {
 
 pub(crate) async fn prepare_response_items(
     thread_id: &str,
+    ephemeral: bool,
     items: &mut Vec<ResponseItem>,
     mode: ImagePreparationMode,
     resize_notice_mode: ImageResizeNoticeMode,
@@ -138,6 +140,7 @@ pub(crate) async fn prepare_response_items(
                     &mut content,
                     ImageOrigin {
                         thread_id,
+                        ephemeral,
                         message_role: Some(role.as_str()),
                         item_id: None,
                     },
@@ -161,6 +164,7 @@ pub(crate) async fn prepare_response_items(
             } => {
                 prepare_tool_output(
                     thread_id,
+                    ephemeral,
                     output,
                     call_id.as_deref(),
                     resize_notice_mode,
@@ -175,6 +179,7 @@ pub(crate) async fn prepare_response_items(
             } => {
                 prepare_tool_output(
                     thread_id,
+                    ephemeral,
                     output,
                     Some(call_id.as_str()),
                     resize_notice_mode,
@@ -211,8 +216,10 @@ pub(crate) async fn prepare_response_items(
     metadata
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn prepare_tool_output(
     thread_id: &str,
+    ephemeral: bool,
     output: &mut FunctionCallOutputPayload,
     item_id: Option<&str>,
     resize_notice_mode: ImageResizeNoticeMode,
@@ -225,6 +232,7 @@ async fn prepare_tool_output(
         content,
         ImageOrigin {
             thread_id,
+            ephemeral,
             message_role: None,
             item_id,
         },
@@ -359,6 +367,7 @@ async fn prepare_image(
     let resize = prepared.resize;
     let request = UploadRequest {
         thread_id: origin.thread_id.to_owned(),
+        ephemeral: origin.ephemeral,
         file_name: None,
         data: prepared.encoded.bytes.to_vec(),
     };

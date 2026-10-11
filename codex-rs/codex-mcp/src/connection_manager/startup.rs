@@ -38,6 +38,10 @@ pub(super) fn should_share_codex_apps_tools_cache(
     server_name == CODEX_APPS_MCP_SERVER_NAME && !uses_env_bearer_token
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "forwards the channel error with its unsent event, without another allocation"
+)]
 pub(super) async fn emit_update(
     submit_id: &str,
     tx_event: &Sender<Event>,

@@ -10,11 +10,11 @@ expression: "format!(\"{}\\n{}\",\nlines_to_single_string(&app.transcript_cells.
 • Queued follow-up inputs
   ↳ only once
   ↳ queued before disconnect
-    shift+← edit last · ⌥x cancel
+    ⇧← edit last · ⌥x cancel
 
 › keep this draft!
 
 ────────────────────────────────────────────────────────────────────────────────
   Activity  —
 ────────────────────────────────────────────────────────────────────────────────
-  ctrl+c quit
+  ⌃c quit

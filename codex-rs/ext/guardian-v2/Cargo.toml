@@ -30,6 +30,7 @@ codex-model-provider = { workspace = true }
 codex-models-manager = { workspace = true }
 codex-protocol = { workspace = true }
 codex-prompts = { workspace = true }
+codex-websocket-client = { workspace = true }
 dirs = { workspace = true }
 http = { workspace = true }
 serde_json = { workspace = true }

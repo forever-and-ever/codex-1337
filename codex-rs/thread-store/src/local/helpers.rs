@@ -240,23 +240,47 @@ pub(super) async fn resolve_thread_section_metadata(
         .unwrap_or_default()
 }
 
+/// DB-only listings require complete names; ordinary listings retain best-effort enrichment.
 pub(super) async fn resolve_thread_names(
     store: &LocalThreadStore,
     thread_history_modes: &HashMap<ThreadId, ThreadHistoryMode>,
-) -> HashMap<ThreadId, String> {
+    use_state_db_only: bool,
+) -> ThreadStoreResult<HashMap<ThreadId, String>> {
     let legacy_thread_ids = thread_history_modes
         .iter()
         .filter_map(|(&thread_id, &history_mode)| {
             (history_mode == ThreadHistoryMode::Legacy).then_some(thread_id)
         })
         .collect::<HashSet<_>>();
-    let mut names = HashMap::new();
+    let mut names =
+        match find_thread_names_by_ids(store.config.codex_home.as_path(), &legacy_thread_ids).await
+        {
+            Ok(names) => names,
+            Err(err) if use_state_db_only => {
+                return Err(ThreadStoreError::Internal {
+                    message: format!("failed to read indexed thread names: {err}"),
+                });
+            }
+            Err(_) => HashMap::new(),
+        };
     if let Some(state_db_ctx) = store.state_db().await {
+        let thread_ids = thread_history_modes.keys().copied().collect::<Vec<_>>();
+        let metadata_by_id = match state_db_ctx.get_threads(&thread_ids).await {
+            Ok(metadata) => metadata,
+            Err(err) if use_state_db_only => {
+                return Err(ThreadStoreError::Internal {
+                    message: format!("failed to read thread names from state DB: {err}"),
+                });
+            }
+            Err(_) => return Ok(names),
+        };
         for &thread_id in thread_history_modes.keys() {
-            let Ok(Some(metadata)) = state_db_ctx.get_thread(thread_id).await else {
+            let Some(metadata) = metadata_by_id.get(&thread_id) else {
                 continue;
             };
-            if let Some(name) = sqlite_thread_name(&metadata) {
+            let name = sqlite_thread_name(metadata);
+            if let Some(name) = name {
+                // Legacy names were imported before listing; explicit SQLite claims win.
                 names.insert(thread_id, name);
             }
         }
@@ -265,7 +289,7 @@ pub(super) async fn resolve_thread_names(
             .await
             .unwrap_or_default();
     }
-    names
+    Ok(names)
 }
 
 /// Identifies the derived Guardian label, which must yield to legacy indexed names.

@@ -14,13 +14,13 @@ use crate::client::ModelClientSession;
 use crate::compact::CompactedHistoryMetadata;
 use crate::compact::CompactionAnalyticsDetails;
 use crate::compact::CompactionWindow;
-use crate::compact::InitialContextInjection;
 use crate::compact::SUMMARY_PREFIX;
 use crate::compact::build_compacted_history;
-use crate::compact::build_compaction_initial_context;
+use crate::compact::build_compaction_replacement_history;
 use crate::compact::collect_annotated_user_messages;
-use crate::compact::insert_initial_context_before_last_real_user_or_summary;
 use crate::compact_remote_history::trim_function_call_history_to_fit_context_window;
+use crate::context::UserGoalUpdate;
+use crate::context::world_state::WorldState;
 use crate::context_manager::estimate_item_token_count;
 use crate::responses_metadata::CompactionTurnMetadata;
 use crate::session::session::Session;
@@ -42,7 +42,6 @@ use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::InputModality;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::TokenUsage;
-use codex_protocol::protocol::TurnContextItem;
 use codex_protocol::protocol::WarningEvent;
 use codex_rollout_trace::CompactionCheckpointTracePayload;
 use codex_rollout_trace::CompactionTraceContext;
@@ -114,7 +113,8 @@ pub(crate) async fn run_native_compaction(
     sess: &Arc<Session>,
     step_context: &Arc<StepContext>,
     client_session: Option<&mut ModelClientSession>,
-    initial_context_injection: InitialContextInjection,
+    replacement_step_context: &StepContext,
+    world_state: &WorldState,
     compaction_metadata: CompactionTurnMetadata,
     analytics_details: &mut CompactionAnalyticsDetails,
 ) -> CodexResult<()> {
@@ -209,7 +209,8 @@ pub(crate) async fn run_native_compaction(
         install_checkpoint(
             sess,
             turn_context,
-            initial_context_injection,
+            replacement_step_context,
+            world_state,
             &compaction_trace,
             analytics_details,
             source,
@@ -225,7 +226,14 @@ pub(crate) async fn run_native_compaction(
             .await;
         return Ok(());
     }
-    install_reset(sess, turn_context, initial_context_injection, source).await?;
+    install_reset(
+        sess,
+        turn_context,
+        replacement_step_context,
+        world_state,
+        source,
+    )
+    .await?;
     let message = format!(
         "Claude could not compact this conversation ({}). It was reset to your recent messages and Claude's last reply; earlier tool results and work are gone.",
         describe_all(&rejections)
@@ -349,15 +357,6 @@ fn reset_history(source: &[ResponseItemEnvelope]) -> (Vec<ResponseItemEnvelope>,
     (history, summary)
 }
 
-fn reference_context_item(injection: &InitialContextInjection) -> Option<TurnContextItem> {
-    match injection {
-        InitialContextInjection::DoNotInject => None,
-        InitialContextInjection::BeforeLastUserMessage { step_context, .. } => {
-            Some(step_context.to_turn_context_item())
-        }
-    }
-}
-
 #[expect(
     clippy::too_many_arguments,
     reason = "installation joins the ladder's shared state"
@@ -365,7 +364,8 @@ fn reference_context_item(injection: &InitialContextInjection) -> Option<TurnCon
 async fn install_checkpoint(
     sess: &Arc<Session>,
     turn_context: &TurnContext,
-    initial_context_injection: InitialContextInjection,
+    replacement_step_context: &StepContext,
+    world_state: &WorldState,
     compaction_trace: &CompactionTraceContext,
     analytics_details: &mut CompactionAnalyticsDetails,
     source: Arc<Vec<ResponseItemEnvelope>>,
@@ -385,8 +385,13 @@ async fn install_checkpoint(
         analytics_details.cache_write_input_tokens = Some(token_usage.cache_write_input_tokens);
     }
     analytics_details.retained_image_count = Some(0);
-    let (initial_context, world_state_baseline) =
-        build_compaction_initial_context(sess.as_ref(), &initial_context_injection).await;
+    let (initial_context, world_state_baseline) = build_compaction_replacement_history(
+        sess.as_ref(),
+        replacement_step_context,
+        world_state,
+        Vec::new(),
+    )
+    .await;
     // Anthropic requires its signed checkpoint before conversation messages, and initial
     // context can contain user-role AGENTS.md and environment fragments.
     let history = std::iter::once(ResponseItemEnvelope::new(item))
@@ -394,9 +399,12 @@ async fn install_checkpoint(
         .collect();
     sess.replace_compacted_history(
         history,
-        reference_context_item(&initial_context_injection),
+        replacement_step_context.to_turn_context_item(),
         world_state_baseline,
         CompactedHistoryMetadata {
+            input_goal_ids: UserGoalUpdate::message_ids(
+                source.iter().map(|envelope| &envelope.item),
+            ),
             source_history: Some(source),
             message: String::new(),
             window: CompactionWindow::Advance,
@@ -426,20 +434,26 @@ async fn install_checkpoint(
 async fn install_reset(
     sess: &Arc<Session>,
     turn_context: &TurnContext,
-    initial_context_injection: InitialContextInjection,
+    replacement_step_context: &StepContext,
+    world_state: &WorldState,
     source: Arc<Vec<ResponseItemEnvelope>>,
 ) -> CodexResult<()> {
-    let (mut history, summary) = reset_history(&source);
-    let (initial_context, world_state_baseline) =
-        build_compaction_initial_context(sess.as_ref(), &initial_context_injection).await;
-    if !initial_context.is_empty() {
-        history = insert_initial_context_before_last_real_user_or_summary(history, initial_context);
-    }
+    let (history, summary) = reset_history(&source);
+    let (history, world_state_baseline) = build_compaction_replacement_history(
+        sess.as_ref(),
+        replacement_step_context,
+        world_state,
+        history,
+    )
+    .await;
     sess.replace_compacted_history(
         history,
-        reference_context_item(&initial_context_injection),
+        replacement_step_context.to_turn_context_item(),
         world_state_baseline,
         CompactedHistoryMetadata {
+            input_goal_ids: UserGoalUpdate::message_ids(
+                source.iter().map(|envelope| &envelope.item),
+            ),
             source_history: Some(source),
             message: summary,
             window: CompactionWindow::Advance,

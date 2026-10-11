@@ -3,7 +3,7 @@ source: tui/src/chatwidget/tests/questions_tests.rs
 expression: "format!(\"OPEN\\n{open}\\n\\nONLY QUESTIONS\\n{completed}\")"
 ---
 OPEN
-• Working (0s • ctrl+c to interrupt)
+• Working (0s • ⌃c to interrupt)
 
 • Queued follow-up inputs
   ↳ queued follow-up
@@ -11,4 +11,4 @@ OPEN
 ONLY QUESTIONS
 • Queued follow-up inputs
   ? 2 questions
-    shift+← to answer
+    ⇧← to answer

@@ -912,7 +912,7 @@ async fn multi_agent_v2_full_history_fork_keeps_service_tier_controls_independen
 }
 
 #[tokio::test]
-async fn multi_agent_v2_spawn_partial_fork_turns_allows_agent_type_override() {
+async fn multi_agent_v2_spawn_without_history_allows_agent_type_override() {
     let (mut session, mut turn) = make_session_and_context().await;
     let role_name = install_role_with_model_override(&mut turn).await;
     let manager = thread_manager();
@@ -939,17 +939,17 @@ async fn multi_agent_v2_spawn_partial_fork_turns_allows_agent_type_override() {
             "spawn_agent",
             function_payload(json!({
                 "message": "inspect this repo",
-                "task_name": "partial_fork",
+                "task_name": "fresh_agent",
                 "agent_type": role_name,
-                "fork_turns": "1"
+                "fork_turns": "none"
             })),
         ))
         .await
-        .expect("partial fork should allow agent_type overrides");
+        .expect("fresh agent should allow agent_type overrides");
     let (content, _) = expect_text_output(output);
     let result: serde_json::Value =
         serde_json::from_str(&content).expect("spawn_agent result should be json");
-    assert_eq!(result["task_name"], "/root/partial_fork");
+    assert_eq!(result["task_name"], "/root/fresh_agent");
     let agent_id = manager
         .captured_ops()
         .into_iter()
@@ -1173,12 +1173,13 @@ async fn multi_agent_v2_spawn_returns_path_and_send_message_accepts_relative_pat
             )
     }));
 
+    let step_context = StepContext::for_test(Arc::clone(&turn));
     let world_state = session
-        .build_world_state_for_step(&StepContext::for_test(Arc::clone(&turn)))
+        .build_world_state_for_step(&step_context, /*new_window*/ true)
         .await
         .expect("world state should build");
     assert_eq!(
-        world_state.snapshot().into_object()["environments"]["subagents"],
+        world_state.render_full().0.into_object()["environments"]["subagents"],
         json!(r#"<agent name="/root/test_process" />"#),
     );
 
@@ -1623,8 +1624,10 @@ async fn multi_agent_v2_spawn_rejects_legacy_fork_context() {
     );
 }
 
+#[test_case::test_case("banana"; "invalid string")]
+#[test_case::test_case("0"; "zero turns")]
 #[tokio::test]
-async fn multi_agent_v2_spawn_rejects_invalid_fork_turns_string() {
+async fn multi_agent_v2_spawn_rejects_invalid_fork_turns_string(fork_turns: &str) {
     let (mut session, mut turn) = make_session_and_context().await;
     let manager = thread_manager();
     let root = manager
@@ -1648,7 +1651,7 @@ async fn multi_agent_v2_spawn_rejects_invalid_fork_turns_string() {
             function_payload(json!({
                 "message": "inspect this repo",
                 "task_name": "worker",
-                "fork_turns": "banana"
+                "fork_turns": fork_turns
             })),
         ))
         .await
@@ -1657,49 +1660,7 @@ async fn multi_agent_v2_spawn_rejects_invalid_fork_turns_string() {
 
     assert_eq!(
         err,
-        FunctionCallError::RespondToModel(
-            "fork_turns must be `none`, `all`, or a positive integer string".to_string()
-        )
-    );
-}
-
-#[tokio::test]
-async fn multi_agent_v2_spawn_rejects_zero_fork_turns() {
-    let (mut session, mut turn) = make_session_and_context().await;
-    let manager = thread_manager();
-    let root = manager
-        .start_thread(StartThreadOptions::new((*turn.config).clone()))
-        .await
-        .expect("root thread should start");
-    set_agent_control(&mut session, manager.agent_control());
-    session.thread_id = root.thread_id;
-    let mut config = (*turn.config).clone();
-    config
-        .features
-        .enable(Feature::MultiAgentV2)
-        .expect("test config should allow feature update");
-    set_turn_config(&mut turn, config);
-
-    let err = SpawnAgentHandlerV2::default()
-        .handle(invocation(
-            Arc::new(session),
-            Arc::new(turn),
-            "spawn_agent",
-            function_payload(json!({
-                "message": "inspect this repo",
-                "task_name": "worker",
-                "fork_turns": "0"
-            })),
-        ))
-        .await
-        .err()
-        .expect("zero turn count should be rejected");
-
-    assert_eq!(
-        err,
-        FunctionCallError::RespondToModel(
-            "fork_turns must be `none`, `all`, or a positive integer string".to_string()
-        )
+        FunctionCallError::RespondToModel("fork_turns must be `none` or `all`".to_string())
     );
 }
 
@@ -1909,6 +1870,7 @@ async fn multi_agent_v2_list_agents_returns_completed_status() {
         .send_event(
             child_turn.as_ref(),
             EventMsg::TurnComplete(TurnCompleteEvent {
+                root_turn_id: None,
                 turn_id: child_turn.sub_id.clone(),
                 started_at: None,
                 last_agent_message: Some("done".to_string()),
@@ -2346,6 +2308,7 @@ async fn multi_agent_v2_followup_task_completion_notifies_parent_on_every_turn()
         .send_event(
             first_turn.as_ref(),
             EventMsg::TurnComplete(TurnCompleteEvent {
+                root_turn_id: None,
                 turn_id: first_turn.sub_id.clone(),
                 started_at: None,
                 last_agent_message: Some("first done".to_string()),
@@ -2388,6 +2351,7 @@ async fn multi_agent_v2_followup_task_completion_notifies_parent_on_every_turn()
         .send_event(
             second_turn.as_ref(),
             EventMsg::TurnComplete(TurnCompleteEvent {
+                root_turn_id: None,
                 turn_id: second_turn.sub_id.clone(),
                 started_at: None,
                 last_agent_message: Some("second done".to_string()),
@@ -2551,6 +2515,7 @@ async fn multi_agent_v2_interrupted_turn_does_not_notify_parent() {
         .send_event(
             aborted_turn.as_ref(),
             EventMsg::TurnAborted(TurnAbortedEvent {
+                root_turn_id: None,
                 turn_id: Some(aborted_turn.sub_id.clone()),
                 started_at: None,
                 reason: TurnAbortReason::Interrupted,

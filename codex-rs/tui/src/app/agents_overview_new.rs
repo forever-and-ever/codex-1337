@@ -1,41 +1,11 @@
 //! Creates empty sessions from the command center without interrupting other agents.
-//! Worktrees start at the repository default branch and bind only the new session.
 
 use super::*;
 use crate::startup_draft::StartupDraftInitialScreen;
 use crate::startup_draft::StartupDraftPump;
 use crate::startup_draft::StartupDraftSessionAction;
 
-/// Owns a freshly created checkout until the UI accepts its completion event.
-/// Dropping a cancelled worker or undelivered event removes only a clean checkout.
-#[derive(Debug)]
-pub(crate) struct PendingWorktree {
-    pub(in crate::app) manager: codex_worktree::WorktreeManager,
-    pub(in crate::app) checkout: Option<codex_worktree::ManagedWorktree>,
-}
-
-impl Drop for PendingWorktree {
-    fn drop(&mut self) {
-        if let Some(checkout) = &self.checkout {
-            let result = dunce::canonicalize(&checkout.root)
-                .map_err(anyhow::Error::from)
-                .and_then(|root| self.manager.remove(&checkout.source_cwd, &root));
-            if let Err(error) = result {
-                tracing::error!(path = %checkout.root.display(), %error, "Could not remove unclaimed worktree");
-            }
-        }
-    }
-}
-
 impl App {
-    fn agents_overview_retained_worktree_error(
-        &mut self,
-        checkout: &codex_worktree::ManagedWorktree,
-        reason: impl std::fmt::Display,
-    ) {
-        self.add_agents_overview_error(format!("{reason} A checkout was retained at {}; remove it with `git worktree remove <checkout-path>` from the source repository if it is no longer needed.", checkout.root.display()));
-    }
-
     pub(in crate::app) async fn new_agents_overview_session(
         &mut self,
         tui: &mut tui::Tui,
@@ -64,17 +34,15 @@ impl App {
         if let Some(cwd) = cwd.as_ref() {
             display_config.cwd = cwd.clone();
         }
-        draft.apply_config(&display_config);
+        draft.apply_settings(
+            &crate::local_settings::LocalSettings::from(&display_config),
+            display_config.cwd.as_path(),
+        );
         draft.show(tui)?;
         // Keep the large session-start future off the TUI's stack in dev builds.
-        let result = Box::pin(self.start_agents_overview_session(
-            tui,
-            app_server,
-            cwd,
-            /*managed_worktree*/ None,
-            Some(&mut draft),
-        ))
-        .await;
+        let result =
+            Box::pin(self.start_agents_overview_session(tui, app_server, cwd, Some(&mut draft)))
+                .await;
         if self.current_displayed_thread_id() != previous_thread {
             draft.flush_pending_paste_newline(tui).await?;
             self.chat_widget
@@ -96,34 +64,25 @@ impl App {
         tui: &mut tui::Tui,
         app_server: &mut AppServerSession,
         cwd: Option<AbsolutePathBuf>,
-        managed_worktree: Option<(
-            codex_worktree::WorktreeManager,
-            codex_worktree::ManagedWorktree,
-        )>,
         mut startup_draft: Option<&mut StartupDraftPump>,
     ) -> Result<AppRunControl> {
         if self.reconnect.offline || self.windows_sandbox_blocks_thread_switch() {
-            if let Some((_, checkout)) = &managed_worktree {
-                self.agents_overview_retained_worktree_error(
-                    checkout,
-                    "Could not start the session.",
-                );
-            }
             return Ok(AppRunControl::Continue);
         }
         let Some((config, remote_cwd)) = self
             .agents_overview_session_config(tui, app_server, cwd, startup_draft.as_deref_mut())
             .await
         else {
-            if let Some((_, checkout)) = &managed_worktree {
-                self.agents_overview_retained_worktree_error(
-                    checkout,
-                    "Could not load the new session settings.",
-                );
-            }
             return Ok(AppRunControl::Continue);
         };
         let selected_profile = self.chat_widget.thread_id().and_then(|thread_id| {
+            if let Some(selection) = self
+                .agents_overview
+                .requested_permission_profiles
+                .get(&thread_id)
+            {
+                return Some(selection.clone());
+            }
             let source = self.chat_widget.config_ref();
             let active = source.permissions.active_permission_profile()?;
             (self
@@ -140,7 +99,7 @@ impl App {
         });
         let local_settings = self.local_settings.reloaded(&config);
         if let Some(draft) = startup_draft.as_deref_mut() {
-            draft.apply_config(&config);
+            draft.apply_settings(&local_settings, config.cwd.as_path());
         }
         let result = StartupDraftPump::run_with_optional_draft(
             startup_draft.as_deref_mut(),
@@ -157,14 +116,7 @@ impl App {
         let started = match result {
             Ok(started) => started,
             Err(error) => {
-                if let Some((_, checkout)) = &managed_worktree {
-                    self.agents_overview_retained_worktree_error(
-                        checkout,
-                        format!("Failed to start session: {error}"),
-                    );
-                } else {
-                    self.add_agents_overview_error(format!("Failed to start session: {error}"));
-                }
+                self.add_agents_overview_error(format!("Failed to start session: {error}"));
                 return Ok(AppRunControl::Continue);
             }
         };
@@ -173,22 +125,6 @@ impl App {
             self.agents_overview
                 .selected_permission_profiles
                 .insert(thread_id, selected.profile_id);
-        }
-        if let Some((manager, checkout)) = &managed_worktree {
-            let result =
-                if crate::session_resume::cwds_differ(started.session.cwd.as_path(), &checkout.cwd)
-                {
-                    Err(anyhow::anyhow!(
-                        "The server did not apply the worktree directory."
-                    ))
-                } else {
-                    manager.bind_thread(&checkout.root, &thread_id.to_string())
-                };
-            if let Err(error) = result {
-                let _ = app_server.thread_unsubscribe(thread_id).await;
-                self.agents_overview_retained_worktree_error(checkout, error);
-                return Ok(AppRunControl::Continue);
-            }
         }
         self.agents_overview
             .blank_sessions
@@ -206,93 +142,7 @@ impl App {
         if self.current_displayed_thread_id() != Some(thread_id) {
             self.agents_overview.blank_sessions.remove(&thread_id);
             let _ = app_server.thread_unsubscribe(thread_id).await;
-            if let Some((_, checkout)) = &managed_worktree {
-                self.agents_overview_retained_worktree_error(
-                    checkout,
-                    "Could not open the new session.",
-                );
-            }
         }
         Ok(control)
-    }
-
-    pub(in crate::app) async fn new_agents_overview_worktree(
-        &mut self,
-        tui: &mut tui::Tui,
-        app_server: &mut AppServerSession,
-        cwd: Option<AbsolutePathBuf>,
-    ) {
-        if self.reconnect.offline
-            || self.pending_managed_worktree_creation
-            || self.windows_sandbox_blocks_thread_switch()
-        {
-            return;
-        }
-        if !self.config.features.enabled(Feature::Worktrees)
-            || crate::uses_remote_workspace_or_environment(
-                &self.app_server_target,
-                self.environment_manager.as_ref(),
-            )
-        {
-            self.add_agents_overview_error(
-                "Managed worktrees require local worktree support.".to_string(),
-            );
-            return;
-        }
-        let Some((config, _)) = self
-            .agents_overview_session_config(tui, app_server, cwd, /*startup_draft*/ None)
-            .await
-        else {
-            return;
-        };
-        let setup = async {
-            anyhow::ensure!(
-                !config.active_project.is_untrusted(),
-                "The source project is not trusted."
-            );
-            let host = crate::legacy_core::config::load_config_toml_with_layer_stack(
-                &self.config.codex_home,
-                /*cwd*/ None,
-                Vec::new(),
-                codex_config::ConfigLoadOptions::default(),
-            )
-            .await?;
-            let settings = codex_worktree::WorktreeSettings::for_cli(
-                &self.config.codex_home,
-                host.config_toml.desktop.as_ref(),
-            )?;
-            anyhow::Ok(codex_worktree::WorktreeManager::new(settings))
-        }
-        .await;
-        let manager = match setup {
-            Ok(value) => value,
-            Err(error) => return self.add_agents_overview_error(error.to_string()),
-        };
-        self.pending_managed_worktree_creation = true;
-        self.agents_overview
-            .view_state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .creating_worktree = true;
-        let sender = self.app_event_tx.clone();
-        tokio::spawn(async move {
-            let result = tokio::task::spawn_blocking(move || {
-                codex_worktree::default_worktree_base(config.cwd.as_path())
-                    .and_then(|base| {
-                        manager.create(&codex_worktree::CreateWorktree {
-                            source_cwd: config.cwd.to_path_buf(),
-                            base: Some(base),
-                        })
-                    })
-                    .map(|checkout| PendingWorktree {
-                        manager,
-                        checkout: Some(checkout),
-                    })
-                    .map_err(|error| error.to_string())
-            })
-            .await
-            .unwrap_or_else(|error| Err(format!("Worktree creation task failed: {error}")));
-            sender.send(AppEvent::AgentsOverviewWorktreeCreated(result));
-        });
     }
 }

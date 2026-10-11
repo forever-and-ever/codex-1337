@@ -33,6 +33,15 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Pressure: 0.162 rewrites the same builders: #51209 (ranked `tool_search` in Code Mode), #50562 (discovery guidance always present), #50536 (shared MCP types always present in Code Mode Only), #50687 (strict third-party deferral) edit `description.rs`, `spec_plan.rs` or `execute_spec.rs`.
 - Evidence: 9b8fa789f6.
 
+### append-only-tool-declarations
+
+- Telos: a tool catalog change appends context instead of invalidating the conversation's cached prefix.
+- Holds: `incremental_tools` defaults on; new Responses Lite context windows retain their initial declarations and append changed declarations and removal notices. The compact MCP roster remains eager where tool search does not defer it, including strict third-party mode; full MCP contracts remain on demand. Unsupported protocols retain their existing declaration path. An explicit `incremental_tools = false` selects that path for new windows; existing windows keep their established mode until replacement.
+- Owners: `codex-rs/features/src/lib.rs` (`Feature::IncrementalTools`), `codex-rs/core/src/session/step_context.rs` (`incremental_tools_enabled`), `codex-rs/core/src/session/world_state.rs` (`current_window_uses_incremental_tools`, `build_world_state_for_step`).
+- Tripwire: `incremental_tools_append_changed_catalog_without_rewriting_history`, `tool_removal_appends_a_standalone_notice_without_rewriting_history` (`codex-rs/core/tests/suite/scenarios_incremental_tools.rs`), `strict_3p_mcp_refresh_preserves_cache_while_exec_tracks_available_tools` (`codex-rs/core/tests/suite/scenarios_strict_3p_cache.rs`), resume and opt-out cases in `codex-rs/core/tests/suite/scenarios_incremental_tools_resume.rs`.
+- Pressure: upstream defaults this feature off; strict-third-party cache tests assume that no roster declaration changes, rather than permitting append-only updates.
+- Evidence: release integration decision, 2026-10-11.
+
 ### compact-contracts
 
 - Telos: discovery shows a compact summary; full contracts and output schemas cost tokens only when requested.
@@ -87,6 +96,33 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Pressure: 0.162 #51812 enables `instant_interrupt` by default, which decides whether an `Interjection` cuts off streaming, and edits `pending_input.rs`; #51209 edits `code_mode/mod.rs` and `execute_handler.rs`; #51332 edits `multi_agents_v2/wait.rs`; #50962 and #50741 edit `exec_command.rs` and `write_stdin.rs`.
 - Evidence: 25226df915, 2d9f646044, 9050de4515, cc4701d2fe.
 
+### local-coprocessor
+
+- Telos: local computation and bounded file transfers need no shell quoting or extra model turn.
+- Holds: raw Python and Bash source executes through the selected executor with ordinary execution policy, approval and cancellation; script execution does not acquire shell startup, snapshot or command-prefix approval semantics. Code Mode filesystem helpers use the captured step's environment and granted permissions, never the host's ambient filesystem authority; each transfer is bounded to 1 MiB.
+- Owners: `codex-rs/core/src/tools/script_exec.rs` (`ExecutionMode`), `codex-rs/core/src/tools/handlers/script_exec/`, `codex-rs/core/src/exec_policy/script_exec.rs`, `codex-rs/core/src/tools/handlers/code_mode_fs.rs`, `codex-rs/code-mode-runtime/src/runtime/filesystem.rs`; seams in `tools/spec_plan.rs`, `tools/handlers/unified_exec/exec_command.rs`, `tools/runtimes/unified_exec.rs` and `unified_exec/process_manager.rs` under `codex-rs/core/src/`.
+- Tripwire: `raw_script_execution_contract` (`codex-rs/core/tests/suite/raw_script_exec.rs`), `filesystem_authority_and_transfer_bounds` (`codex-rs/core/tests/suite/code_mode_pipeline.rs`).
+- Pressure: changes to shell invocation, snapshot preparation, executor selection or turn permission grants must preserve script-versus-shell authority; Code Mode description overrides must not hide the filesystem helpers.
+- Evidence: 0dc126edd9, 0a51b60ef1.
+
+### response-order-fences
+
+- Telos: dependent execution stages fit in one model response without racing or running after a failed prerequisite.
+- Holds: calls enter their response batch in stream order; a fence admits the next stage only after every preceding call has completed successfully. Cancellation, dropped calls, yielded cells, background processes and nested failures fail closed; catching a nested error does not erase it. Admission waits occur outside execution locks, and Code Mode coordinators hold no lock while their nested tools execute. A new model response starts a new batch.
+- Owners: `codex-rs/core/src/tools/fence.rs`, `codex-rs/core/src/tools/parallel.rs`, `codex-rs/core/src/stream_events_utils.rs`, `codex-rs/core/src/session/turn.rs`, `codex-rs/core/src/tools/code_mode/delegate.rs`, `codex-rs/core/src/tools/spec_plan.rs`, `codex-rs/code-mode-protocol/src/description.rs`.
+- Tripwire: `response_stage_pipeline` (`codex-rs/core/tests/suite/code_mode_pipeline.rs`) covers successful and failed stages; scheduler and cancellation cases live beside the fence implementation.
+- Pressure: stream dispatch, parallel-tool locking and Code Mode worker boundaries can lose ordering or nested failure attribution; model description overrides must retain the fence contract.
+- Evidence: 7e44726e4e.
+
+### retained-goal-rules
+
+- Telos: continuing a goal pays for its full rules once per retained context, rather than once per continuation.
+- Holds: the goal extension contributes full continuation rules as an owned world-state section and emits short subsequent reminders. A saved section snapshot cannot suppress rules absent from retained history; only a complete, kind-aligned fragment with matching provenance proves presence, never unannotated matching user text.
+- Owners: `codex-rs/ext/goal/src/world_state.rs`, `codex-rs/ext/goal/src/extension.rs`, `codex-rs/ext/goal/src/runtime.rs`, `codex-rs/core/src/context/world_state/mod.rs`; prompt text remains in `codex-rs/ext/goal/templates/goals/`.
+- Tripwire: `missing_retained_fragment_is_rendered_again` (`codex-rs/core/src/context/world_state/world_state_tests.rs`); existing goal continuation cases cover the emitted reminders.
+- Pressure: compaction, history truncation and changes to world-state rendering or content-kind alignment must not drop rules or restore repeated full instructions.
+- Evidence: a7c3becfcf.
+
 ## Prompt-cache stability
 
 ### reminders-not-system
@@ -130,8 +166,8 @@ During a merge, look up each conflicted path in the index at the end and resolve
 ### token-bills
 
 - Telos: the human sees what consumes the context.
-- Holds: every tool output, MCP result and Code Mode result disclosure shows its approximate model-visible tokens, after truncation for native Claude; each completed model response yields a human-only Thought with its reported reasoning tokens; bills render in the fixed rich-transcript gutter; the first request of a runtime and each request whose base instructions or tool set changed carries a Preamble census.
-- Owners: `codex-rs/core/src/session/tool_output_tokens.rs`, `codex-rs/utils/output-truncation/src/token_count.rs`, `codex-rs/core/src/session/response_thought.rs`, `codex-rs/app-server-protocol/src/protocol/v2/thought.rs`, `codex-rs/protocol/src/preamble.rs`, `codex-rs/tui/src/transcript_view/text_gutter.rs`, `codex-rs/tui/src/history_cell/preamble.rs`.
+- Holds: every tool output, MCP result and Code Mode result disclosure shows its approximate model-visible tokens, after truncation for native Claude; each completed model response yields a human-only Thought with its reported reasoning tokens; bills render in the fixed rich-transcript gutter. Preamble counts the initial instructions and tools, whether declared directly or in history, and is refreshed when that prefix changes; append-only catalog deltas are step-admission arrivals, not replacement prefixes. Census work never blocks response-usage recording or cancellation cleanup.
+- Owners: `codex-rs/core/src/session/tool_output_tokens.rs`, `codex-rs/utils/output-truncation/src/token_count.rs`, `codex-rs/core/src/session/response_thought.rs`, `codex-rs/core/src/session/preamble.rs`, `codex-rs/app-server-protocol/src/protocol/v2/thought.rs`, `codex-rs/protocol/src/preamble.rs`, `codex-rs/tui/src/transcript_view/text_gutter.rs`, `codex-rs/tui/src/history_cell/preamble.rs`.
 - Tripwire: `tool_text_matches_reference_tokenizer_without_interpreting_control_markers` (`codex-rs/utils/output-truncation/src/token_count_tests.rs`), `thought_completion_is_self_contained_and_response_scoped` (`codex-rs/app-server-protocol/src/protocol/thread_history_projection_tests.rs`), `structured_content_remains_disclosable_in_direct_and_code_mode_results` (`codex-rs/tui/src/history_cell/mcp_tests.rs`), `tool_output_disclosure_shows_fixed_token_column` (`codex-rs/tui/src/transcript_view/layout_tests.rs`), `preamble_discloses_parts_largest_first` (`codex-rs/tui/src/history_cell/preamble_tests.rs`).
 - Pressure: none in 0.162; every owner is fork-owned.
 - Evidence: 5b6e3b5096, 0a2e39ff0f, 86f8dba3aa, cabee7f17e, 2213557e47, 40394ab352.
@@ -252,6 +288,17 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Pressure: 0.162 #50199 (account email in `/status`) and #49715 (account security reminders) edit the TUI account paths in `app.rs`, `reconnect.rs` and `lib.rs`.
 - Evidence: 8bc33e5acd, 0ec65fe8c4, df24f7a816, 9733575fc3.
 
+## Repository policy
+
+### policy-owned-worktrees
+
+- Telos: checkout policy belongs to each repository, not to a competing Git worktree manager inside Codex. Agents use ordinary Git commands under the user's and repository's instructions.
+- Holds: Codex neither allocates nor deletes managed Git worktrees, offers worktree commands or a browser, nor couples conversation creation or `/fork` to checkout creation. Conversation history forks, ordinary working-directory selection and execution of Git commands remain supported. Branch choice, detached state, checkout placement and retention are repository policy.
+- Owners: `Feature::Worktrees` is a removed capability. No dedicated worktree crate, TUI lifecycle service, browser, checkout picker, CLI option or model tool remains. Unrelated Git inspection and generic attachment support remain.
+- Tripwire: worktree commands and dependencies must not return. Conversation forks and ordinary cwd selection retain history, trust, permissions and background-terminal safeguards; thread pickers match the chosen cwd rather than expanding it to every linked checkout.
+- Pressure: 0.162 #50148 adds model-facing managed-worktree tools hosted by the TUI; #50416 expands checkout choices for new and forked conversations. Neither should restore a product-owned worktree lifecycle.
+- Evidence: maintainer decision on 2026-10-11 during 0.162.1 merge triage; CLI-wide locked checks and focused exact-cwd picker checks after removal.
+
 ## Build economy
 
 ### one-dependency-graph
@@ -287,7 +334,7 @@ During a merge, look up each conflicted path in the index at the end and resolve
 
 - Telos: the fork maintains one frontend, the owned screen.
 - Holds: no inline-renderer parity; the transcript flows from events through an owned reducer into immutable cells, and replacements go only through `App::commit_transcript_splice`; each tool history header is one compact row with source-safe disclosure; clocks and token bills sit in a fixed leading gutter; Code Mode blocks render their owned children.
-- Owners: `AGENTS.override.md`, `codex-rs/tui/src/app/transcript_splice.rs`, `codex-rs/tui/src/exec_cell/compact.rs`, `codex-rs/tui/src/transcript_view/text_activity.rs`, `codex-rs/tui/src/transcript_view/text_gutter.rs`, `codex-rs/tui/src/history_cell/code_mode.rs`, `codex-rs/tui/src/history_cell/code_mode_projection.rs`.
+- Owners: `AGENTS.md`, `codex-rs/tui/src/app/transcript_splice.rs`, `codex-rs/tui/src/exec_cell/compact.rs`, `codex-rs/tui/src/transcript_view/text_activity.rs`, `codex-rs/tui/src/transcript_view/text_gutter.rs`, `codex-rs/tui/src/history_cell/code_mode.rs`, `codex-rs/tui/src/history_cell/code_mode_projection.rs`.
 - Tripwire: gutter: `token_gutter_rounding_color_and_reflow_preserve_source` (`codex-rs/tui/src/transcript_view/text_tests.rs`), `tool_output_disclosure_shows_fixed_token_column` (`codex-rs/tui/src/transcript_view/layout_tests.rs`). Headers and Code Mode blocks: noisy (`codex-rs/tui/src/**/snapshots/*.snap`). Splice-only replacement: none.
 - Pressure: 0.162 #50434 adds keyboard copy selection to the owned transcript; #50808 prunes TUI snapshots; #50109 bounds fullscreen prompts.
 - Evidence: 1cf770bb6b, b78ff3aff3, eaefb734ab, ae20fc5bef, cdc2ec4845.
@@ -324,9 +371,9 @@ During a merge, look up each conflicted path in the index at the end and resolve
 ### minimal-upstream-delta
 
 - Telos: each upstream merge conflicts only where the fork has a reason to differ.
-- Holds: an upstream file differs from upstream only by seams (module declaration, call, match arm, field holding fork state); `AGENTS.md`, `.github/workflows/rust-ci-full-nextest-platform.yml` and `.github/workflows/rust-release.yml` equal their bytes at the merged release tag; fork instructions live in `AGENTS.override.md`; a stub keeps upstream call sites unchanged.
-- Owners: `AGENTS.override.md`, `AGENTS.md`.
-- Tripwire: none; `git diff --quiet <release tag> HEAD -- AGENTS.md .github/workflows` would be one.
+- Holds: an upstream file differs from upstream only by seams (module declaration, call, match arm, field holding fork state); `.github/workflows/rust-ci-full-nextest-platform.yml` and `.github/workflows/rust-release.yml` equal their bytes at the merged release tag; fork instructions live in fork-owned `AGENTS.md`; a stub keeps upstream call sites unchanged.
+- Owners: `AGENTS.md`.
+- Tripwire: none; `git diff --quiet <release tag> HEAD -- .github/workflows/rust-ci-full-nextest-platform.yml .github/workflows/rust-release.yml` would be one.
 - Pressure: every upstream merge.
 - Evidence: 311bcd0f11, 69467ed11f, e4b9e0a34f, 6aa3fee801.
 
@@ -345,14 +392,16 @@ During a merge, look up each conflicted path in the index at the end and resolve
 
 Upstream files, where merge conflicts arise:
 
-- `AGENTS.md`: minimal-upstream-delta
+- `codex-rs/features/src/lib.rs`: append-only-tool-declarations
+- `codex-rs/core/src/session/step_context.rs`: append-only-tool-declarations
+- `codex-rs/core/src/session/world_state.rs`: append-only-tool-declarations
 - `codex-rs/Cargo.toml`: one-dependency-graph, pipelined-crate-graph, removed-stacks
 - `codex-rs/app-server-client/Cargo.toml`: pipelined-crate-graph
 - `codex-rs/app-server/src/request_processors/thread_queue_processor.rs`: server-hosted-agents
 - `codex-rs/app-server/src/turn_admission.rs`: shared-daemon
 - `codex-rs/cli/Cargo.toml`: removed-stacks
 - `codex-rs/cli/src/main.rs`: pipelined-crate-graph, removed-stacks
-- `codex-rs/code-mode-protocol/src/description.rs`: mcp-roster, standing-context-trims
+- `codex-rs/code-mode-protocol/src/description.rs`: mcp-roster, standing-context-trims, local-coprocessor, response-order-fences
 - `codex-rs/code-mode-protocol/src/json_schema_types.rs`: compact-contracts
 - `codex-rs/codex-mcp/src/binding.rs`: standing-context-trims
 - `codex-rs/codex-mcp/src/client_tool_catalog.rs`: catalog-at-model-boundaries
@@ -367,12 +416,14 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/core/src/compact_model_fallback.rs`: compaction-stops-on-uncertainty
 - `codex-rs/core/src/compact_remote_v2.rs`: compaction-stops-on-uncertainty
 - `codex-rs/core/src/config/mod.rs`: adapter-not-transport
+- `codex-rs/core/src/context/world_state/mod.rs`: retained-goal-rules
 - `codex-rs/core/src/mcp_tool_call.rs`: human-only-facts, catalog-at-model-boundaries
 - `codex-rs/core/src/responses_retry.rs`: backpressure-waits
 - `codex-rs/core/src/session/context_window.rs`: adapter-not-transport
-- `codex-rs/core/src/session/turn.rs`: native-robustness
+- `codex-rs/core/src/session/turn.rs`: native-robustness, response-order-fences
 - `codex-rs/core/src/session/world_state.rs`: standing-context-trims
-- `codex-rs/core/src/stream_events_utils.rs`: native-robustness
+- `codex-rs/core/src/stream_events_utils.rs`: native-robustness, response-order-fences
+- `codex-rs/core/src/tools/code_mode/delegate.rs`: response-order-fences
 - `codex-rs/core/src/tools/code_mode/execute_handler.rs`: compact-contracts, turn-economy
 - `codex-rs/core/src/tools/code_mode/execute_spec.rs`: mcp-roster
 - `codex-rs/core/src/tools/code_mode/output.rs`: terse-exec-envelope
@@ -380,8 +431,13 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/core/src/tools/context.rs`: terse-exec-envelope
 - `codex-rs/core/src/tools/handlers/mcp.rs`: compact-contracts
 - `codex-rs/core/src/tools/handlers/shell_spec.rs`: standing-context-trims
-- `codex-rs/core/src/tools/handlers/unified_exec/exec_command.rs`: standing-context-trims
-- `codex-rs/core/src/tools/spec_plan.rs`: mcp-roster, standing-context-trims, turn-economy
+- `codex-rs/core/src/tools/handlers/unified_exec/exec_command.rs`: standing-context-trims, local-coprocessor
+- `codex-rs/core/src/tools/parallel.rs`: response-order-fences
+- `codex-rs/core/src/tools/runtimes/unified_exec.rs`: local-coprocessor
+- `codex-rs/core/src/tools/spec_plan.rs`: mcp-roster, standing-context-trims, turn-economy, local-coprocessor, response-order-fences
+- `codex-rs/core/src/unified_exec/process_manager.rs`: local-coprocessor
+- `codex-rs/ext/goal/src/extension.rs`: retained-goal-rules
+- `codex-rs/ext/goal/src/runtime.rs`: retained-goal-rules
 - `codex-rs/ext/goal/src/spec.rs`: standing-context-trims
 - `codex-rs/ext/queue/src/service.rs`: server-hosted-agents
 - `codex-rs/model-provider-info/src/lib.rs`: subscription-boundary, adapter-not-transport
@@ -411,7 +467,8 @@ Upstream files, where merge conflicts arise:
 
 Fork-owned files, absent upstream:
 
-- `AGENTS.override.md`: fullscreen-only, minimal-upstream-delta
+
+- `AGENTS.md`: fullscreen-only, minimal-upstream-delta
 - `codex-rs/app-server-embedding/src/lib.rs`: pipelined-crate-graph
 - `codex-rs/app-server-protocol/src/delegation.rs`: server-hosted-agents
 - `codex-rs/app-server-protocol/src/protocol/v2/prompt_cache.rs`: cache-ttl-and-warming
@@ -432,6 +489,7 @@ Fork-owned files, absent upstream:
 - `codex-rs/code-mode-protocol/src/discovery.rs`: compact-contracts
 - `codex-rs/code-mode-protocol/src/roster.rs`: mcp-roster
 - `codex-rs/code-mode-runtime/src/runtime/discovery.rs`: compact-contracts
+- `codex-rs/code-mode-runtime/src/runtime/filesystem.rs`: local-coprocessor
 - `codex-rs/code-mode-runtime/src/runtime/native_result.rs`: terse-exec-envelope
 - `codex-rs/codex-api/src/anthropic/cache.rs`: cache-ttl-and-warming
 - `codex-rs/codex-api/src/anthropic/client.rs`: backpressure-waits
@@ -452,17 +510,24 @@ Fork-owned files, absent upstream:
 - `codex-rs/core/src/compact_native_request.rs`: messages-from-canonical-history, native-robustness
 - `codex-rs/core/src/config/models_cache.rs`: adapter-not-transport
 - `codex-rs/core/src/context/environment_context/workspace_root_folding.rs`: standing-context-trims
+- `codex-rs/core/src/exec_policy/script_exec.rs`: local-coprocessor
 - `codex-rs/core/src/guardian/reviewer_route.rs`: provider-parity
 - `codex-rs/core/src/session/account.rs`: pinned-accounts
 - `codex-rs/core/src/session/input_queue/interjection.rs`: turn-economy
 - `codex-rs/core/src/session/response_thought.rs`: human-only-facts, token-bills
+- `codex-rs/core/src/session/preamble.rs`: token-bills
 - `codex-rs/core/src/session/tool_output_tokens.rs`: token-bills
+- `codex-rs/core/src/tools/fence.rs`: response-order-fences
+- `codex-rs/core/src/tools/handlers/code_mode_fs.rs`: local-coprocessor
 - `codex-rs/core/src/tools/handlers/multi_agents_v2/retire_agent.rs`: server-hosted-agents
 - `codex-rs/core/src/tools/handlers/multi_agents_v2/wake_batch.rs`: turn-economy
+- `codex-rs/core/src/tools/handlers/script_exec/`: local-coprocessor
 - `codex-rs/core/src/tools/handlers/unified_exec/exec_command/cell.rs`: turn-economy
 - `codex-rs/core/src/tools/handlers/unified_exec/write_stdin/cell.rs`: turn-economy
 - `codex-rs/core/src/tools/handlers/work_status.rs`: human-only-facts
+- `codex-rs/core/src/tools/script_exec.rs`: local-coprocessor
 - `codex-rs/core/src/unified_exec/initial_wait.rs`: turn-economy
+- `codex-rs/ext/goal/src/world_state.rs`: retained-goal-rules
 - `codex-rs/feature-floor/Cargo.toml`: one-dependency-graph
 - `codex-rs/history/src/tool_failure.rs`: stable-native-identities
 - `codex-rs/model-provider/src/claude_catalog.rs`: claude-native-voice
