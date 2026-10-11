@@ -578,7 +578,9 @@ fn build_model_visible_specs(
         }
 
         let tool_name = tool.runtime.tool_name();
-        if is_hidden_by_code_mode_only(turn_context, model_info, &tool_name, exposure) {
+        if is_hidden_by_code_mode_only(turn_context, model_info, &tool_name, exposure)
+            && !crate::tools::handlers::script_exec::is_process_continuation(registry, &tool_name)
+        {
             continue;
         }
 
@@ -1145,6 +1147,11 @@ fn add_shell_tools(context: &CoreToolPlanContext<'_>, registry: &mut ToolRegistr
         ),
         include_windows_shell_guidance: should_include_windows_shell_guidance(context.environments),
     };
+    crate::tools::handlers::script_exec::register(
+        registry,
+        options,
+        features.enabled(Feature::UnifiedExec),
+    );
     if features.enabled(Feature::UnifiedExec) {
         if effective_tool_mode(turn_context, context.model_info) == ToolMode::CodeModeOnly {
             registry.add(ExecCommandHandler::cell(options));

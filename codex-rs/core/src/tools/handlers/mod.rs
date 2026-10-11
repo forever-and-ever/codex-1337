@@ -618,3 +618,5 @@ mod tests {
         );
     }
 }
+
+pub(crate) mod script_exec;

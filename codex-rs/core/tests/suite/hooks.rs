@@ -3369,6 +3369,10 @@ async fn pre_tool_use_json_deny_blocks_exec_command_before_execution() -> Result
     let marker = marker_dir.path().join("pretooluse-exec-command-marker");
     let command = format!("git init --quiet {}", marker.display());
     let args = serde_json::json!({ "cmd": command });
+    let python_source = format!(
+        "from pathlib import Path\nPath({}).mkdir()\n",
+        serde_json::to_string(&marker.to_string_lossy())?
+    );
     let responses = mount_sse_sequence(
         &server,
         vec![
@@ -3379,6 +3383,12 @@ async fn pre_tool_use_json_deny_blocks_exec_command_before_execution() -> Result
                     "exec_command",
                     &serde_json::to_string(&args)?,
                 ),
+                core_test_support::responses::ev_custom_tool_call(
+                    "raw-python",
+                    "python",
+                    &python_source,
+                ),
+                core_test_support::responses::ev_custom_tool_call("raw-bash", "bash", &command),
                 ev_completed("resp-1"),
             ]),
             sse(vec![
@@ -3425,12 +3435,44 @@ async fn pre_tool_use_json_deny_blocks_exec_command_before_execution() -> Result
     );
 
     let hook_inputs = read_pre_tool_use_hook_inputs(test.codex_home_path())?;
-    assert_eq!(hook_inputs.len(), 1);
-    assert_eq!(hook_inputs[0]["hook_event_name"], "PreToolUse");
-    assert_eq!(hook_inputs[0]["tool_name"], "Bash");
-    assert_eq!(hook_inputs[0]["tool_use_id"], call_id);
-    assert_eq!(hook_inputs[0]["tool_input"]["command"], command);
-    let transcript_path = hook_inputs[0]["transcript_path"]
+    assert_eq!(hook_inputs.len(), 3);
+    let hook_input = hook_inputs
+        .iter()
+        .find(|input| input["tool_use_id"] == call_id)
+        .expect("exec hook input");
+    for (id, argv) in [
+        (
+            "raw-python",
+            vec!["python3", "-u", "-c", python_source.as_str()],
+        ),
+        ("raw-bash", vec!["bash", "-c", command.as_str()]),
+    ] {
+        let output = requests[1].custom_tool_call_output(id);
+        assert!(
+            output["output"]
+                .as_str()
+                .expect("raw rejection")
+                .contains("blocked by pre hook")
+        );
+        let input = hook_inputs
+            .iter()
+            .find(|input| input["tool_use_id"] == id)
+            .expect("raw hook input");
+        assert_eq!(input["tool_name"], "Bash");
+        let reviewed = input["tool_input"]["command"]
+            .as_str()
+            .expect("historical command string");
+        assert_eq!(shlex::split(reviewed).expect("round-trip argv"), argv);
+    }
+    assert!(
+        !marker.exists(),
+        "all process tools must honor the historical Bash guard"
+    );
+    assert_eq!(hook_input["hook_event_name"], "PreToolUse");
+    assert_eq!(hook_input["tool_name"], "Bash");
+    assert_eq!(hook_input["tool_use_id"], call_id);
+    assert_eq!(hook_input["tool_input"]["command"], command);
+    let transcript_path = hook_input["transcript_path"]
         .as_str()
         .expect("pre tool use hook transcript_path");
     assert!(
@@ -3442,7 +3484,7 @@ async fn pre_tool_use_json_deny_blocks_exec_command_before_execution() -> Result
         "pre tool use hook transcript_path should be materialized on disk",
     );
     assert!(
-        hook_inputs[0]["turn_id"]
+        hook_input["turn_id"]
             .as_str()
             .is_some_and(|turn_id| !turn_id.is_empty())
     );

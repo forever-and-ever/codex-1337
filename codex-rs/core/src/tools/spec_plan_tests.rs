@@ -967,8 +967,8 @@ async fn shell_family_registers_only_unified_exec_tools() {
     })
     .await;
 
-    plan.assert_visible_contains(&["exec_command", "write_stdin"]);
-    plan.assert_registered_contains(&["exec_command", "write_stdin"]);
+    plan.assert_visible_contains(&["exec_command", "write_stdin", "python", "bash"]);
+    plan.assert_registered_contains(&["exec_command", "write_stdin", "python", "bash"]);
     assert!(plan.has_terminal_controls);
     assert!(has_parameter(plan.visible_spec("exec_command"), "shell"));
 }
@@ -1105,8 +1105,8 @@ async fn disabling_shell_tools_disables_command_tools_for_all_environments() {
         );
     })
     .await;
-    remote_environment.assert_visible_lacks(&["exec_command", "write_stdin"]);
-    remote_environment.assert_registered_lacks(&["exec_command", "write_stdin"]);
+    remote_environment.assert_visible_lacks(&["exec_command", "write_stdin", "python", "bash"]);
+    remote_environment.assert_registered_lacks(&["exec_command", "write_stdin", "python", "bash"]);
     assert!(!remote_environment.has_terminal_controls);
 
     let multiple_local_environments = probe(|turn| {
@@ -1117,8 +1117,18 @@ async fn disabling_shell_tools_disables_command_tools_for_all_environments() {
         duplicate_primary_environment(turn);
     })
     .await;
-    multiple_local_environments.assert_visible_lacks(&["exec_command", "write_stdin"]);
-    multiple_local_environments.assert_registered_lacks(&["exec_command", "write_stdin"]);
+    multiple_local_environments.assert_visible_lacks(&[
+        "exec_command",
+        "write_stdin",
+        "python",
+        "bash",
+    ]);
+    multiple_local_environments.assert_registered_lacks(&[
+        "exec_command",
+        "write_stdin",
+        "python",
+        "bash",
+    ]);
 }
 
 #[tokio::test]

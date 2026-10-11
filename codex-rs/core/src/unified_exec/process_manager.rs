@@ -1459,7 +1459,7 @@ impl UnifiedExecProcessManager {
         };
         let shell_snapshot = shell_snapshot_request(request, &cwd, context);
         let mut orchestrator = ToolOrchestrator::new();
-        let mut runtime = UnifiedExecRuntime::new(self, request.shell_mode.clone());
+        let mut runtime = UnifiedExecRuntime::new(self);
         let session_shell = context.session.user_shell();
         let configured_shell = request
             .turn_environment
@@ -1473,11 +1473,10 @@ impl UnifiedExecProcessManager {
             Some("windows") | Some(_) => DangerousCommandPlatform::Windows,
             None => DangerousCommandPlatform::host(),
         };
-        let exec_approval_requirement = context
-            .session
-            .services
-            .exec_policy
-            .create_exec_approval_requirement_for_shell(
+        let exec_approval_requirement = request
+            .execution
+            .approval_requirement(
+                &context.session.services.exec_policy,
                 ExecApprovalRequest {
                     command: &request.command,
                     approval_policy: context.step_context.settings.approval_policy(),
@@ -1496,13 +1495,12 @@ impl UnifiedExecProcessManager {
                     allow_prefix_rules: context.step_context.turn.allow_prefix_rules(),
                 },
                 configured_shell,
-                &request.shell_mode,
                 command_platform,
             )
             .await;
         let req = UnifiedExecToolRequest {
             command: request.command.clone(),
-            shell_type: request.shell_type,
+            execution: request.execution.clone(),
             hook_command: request.hook_command.clone(),
             process_id: request.process_id,
             cwd,
@@ -1526,7 +1524,7 @@ impl UnifiedExecProcessManager {
             step_context: Arc::clone(&context.step_context),
             cancellation_token: context.cancellation_token.clone(),
             call_id: context.call_id.clone(),
-            tool_name: ToolName::plain("exec_command"),
+            tool_name: ToolName::plain(request.execution.tool_name()),
         };
         let result = orchestrator
             .run(&mut runtime, &req, &tool_ctx)

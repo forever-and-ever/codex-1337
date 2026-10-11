@@ -147,3 +147,5 @@ fn build_content_with_timeout(exec_output: &ExecToolCallOutput) -> String {
         exec_output.aggregated_output.text.clone()
     }
 }
+
+pub(crate) mod script_exec;

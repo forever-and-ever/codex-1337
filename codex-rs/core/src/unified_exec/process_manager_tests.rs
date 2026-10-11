@@ -461,7 +461,10 @@ async fn failed_initial_end_for_unstored_process_uses_fallback_output() {
             "-lc".to_string(),
             "echo before".to_string(),
         ],
-        shell_type: crate::shell::ShellType::Sh,
+        execution: crate::tools::script_exec::ExecutionMode::Shell {
+            shell_type: crate::shell::ShellType::Sh,
+            shell_mode: codex_tools::UnifiedExecShellMode::Direct,
+        },
         hook_command: "echo before".to_string(),
         process_id: 123,
         initial_wait: crate::unified_exec::InitialWait::Yield(1000),
@@ -475,7 +478,6 @@ async fn failed_initial_end_for_unstored_process_uses_fallback_output() {
             .primary()
             .cloned()
             .expect("primary environment"),
-        shell_mode: codex_tools::UnifiedExecShellMode::Direct,
         network: None,
         tty: true,
         sandbox_permissions: crate::sandboxing::SandboxPermissions::UseDefault,

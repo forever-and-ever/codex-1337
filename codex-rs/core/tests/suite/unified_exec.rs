@@ -3155,6 +3155,26 @@ shell_tool = true
             sse(vec![
                 ev_response_created("resp-1"),
                 ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
+                core_test_support::responses::ev_custom_tool_call(
+                    "python-background",
+                    "python",
+                    "# @exec: {\"background\":true}\nprint('forbidden background')",
+                ),
+                core_test_support::responses::ev_custom_tool_call(
+                    "bash-background",
+                    "bash",
+                    "# @exec: {\"background\":true}\nprintf 'forbidden background'",
+                ),
+                core_test_support::responses::ev_custom_tool_call(
+                    "python-foreground",
+                    "python",
+                    "print('one-shot-script')",
+                ),
+                core_test_support::responses::ev_custom_tool_call(
+                    "bash-foreground",
+                    "bash",
+                    "printf 'one-shot-script\\n'",
+                ),
                 ev_completed("resp-1"),
             ]),
             sse(vec![
@@ -3182,6 +3202,31 @@ shell_tool = true
     assert_eq!(output.process_id, None);
     assert_eq!(output.exit_code, Some(124));
 
+    let requests = request_log.requests();
+    // Both successful raw languages share one model response and one follow-up, with no JS cell.
+    assert_eq!(requests.len(), 2);
+    let tools = requests[0].body_json()["tools"]
+        .as_array()
+        .expect("model tools")
+        .clone();
+    assert!(!tools.iter().any(|tool| tool["name"] == "write_stdin"));
+    let last = requests.last().expect("follow-up request");
+    for language in ["python", "bash"] {
+        let rejected = last.custom_tool_call_output(&format!("{language}-background"));
+        assert!(
+            rejected["output"]
+                .as_str()
+                .expect("background rejection")
+                .contains("Background execution is disabled")
+        );
+        let completed = last.custom_tool_call_output(&format!("{language}-foreground"));
+        let output =
+            parse_unified_exec_output(completed["output"].as_str().expect("foreground output"))?;
+        assert_eq!(
+            (output.exit_code, output.process_id, output.output),
+            (Some(0), None, "one-shot-script\n".to_string())
+        );
+    }
     tokio::time::sleep(Duration::from_millis(1_100)).await;
     assert!(
         fs::metadata(late_marker.as_path()).is_err(),
@@ -3851,3 +3896,6 @@ fn assert_command(command: &[String], expected_args: &str, expected_cmd: &str) {
     assert_eq!(command[1], expected_args);
     assert_eq!(command[2], expected_cmd);
 }
+
+#[path = "raw_script_exec.rs"]
+mod raw_script_exec;

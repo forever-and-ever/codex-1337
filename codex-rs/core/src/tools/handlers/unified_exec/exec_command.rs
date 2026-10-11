@@ -1,3 +1,5 @@
+use crate::tools::handlers::script_exec::PreparedExec;
+use crate::tools::script_exec::ExecutionMode;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -152,14 +154,15 @@ impl ToolExecutor<ToolInvocation> for ExecCommandHandler {
     where
         ToolInvocation: 'a,
     {
-        Box::pin(self.handle_call(invocation))
+        Box::pin(self.handle_prepared(invocation, PreparedExec::Shell))
     }
 }
 
 impl ExecCommandHandler {
-    async fn handle_call(
+    pub(crate) async fn handle_prepared(
         &self,
         invocation: ToolInvocation,
+        prepared: PreparedExec,
     ) -> Result<Box<dyn crate::tools::context::ToolOutput>, FunctionCallError> {
         let ToolInvocation {
             session,
@@ -259,53 +262,73 @@ impl ExecCommandHandler {
         }
         let sandbox_permissions =
             resolve_sandbox_permissions(args.sandbox_permissions, args.justification.as_deref())?;
-        let hook_command = args.cmd.clone();
-        maybe_emit_implicit_skill_invocation(
-            session.as_ref(),
-            context.step_context.turn.as_ref(),
-            &hook_command,
-            &cwd,
-            native_cwd.as_ref(),
-            &turn_environment.selection.environment_id,
-        )
-        .await;
-        let shell_mode =
-            shell_mode_for_environment(&turn.unified_exec_shell_mode, environment.as_ref());
-        // Remote environments may use a different OS and must build commands with their native
-        // shell; fall back to the session shell when the environment did not report one.
-        let shell = turn_environment
-            .shell
-            .clone()
-            .map(Arc::new)
-            .unwrap_or_else(|| session.user_shell());
-        // TODO(anp): Resolve requested shells in remote environments instead of restricting
-        // commands to the reported default shell.
-        if environment.is_remote()
-            && let Some(requested_shell) = args.shell.take()
-        {
-            let Some(remote_shell) = turn_environment.shell.as_ref() else {
-                return Err(FunctionCallError::RespondToModel(format!(
-                    "environment `{}` does not report a shell",
-                    turn_environment.selection.environment_id
-                )));
-            };
-            if detect_shell_type(Path::new(&requested_shell)) != Some(remote_shell.shell_type) {
-                return Err(FunctionCallError::RespondToModel(format!(
-                    "environment `{}` only supports `{}`",
-                    turn_environment.selection.environment_id,
-                    remote_shell.name()
-                )));
-            }
+        let hook_command = match &prepared {
+            PreparedExec::Shell => args.cmd.clone(),
+            PreparedExec::Script { language, .. } => language.review_command(&args.cmd)?,
+        };
+        if matches!(prepared, PreparedExec::Shell) {
+            maybe_emit_implicit_skill_invocation(
+                session.as_ref(),
+                context.step_context.turn.as_ref(),
+                &hook_command,
+                &cwd,
+                native_cwd.as_ref(),
+                &turn_environment.selection.environment_id,
+            )
+            .await;
         }
-        let resolved_command = get_command(
-            &args,
-            shell,
-            &shell_mode,
-            turn_environment.config().allow_login_shell,
-        )
-        .map_err(FunctionCallError::RespondToModel)?;
-        let command = resolved_command.command;
-        let shell_type = resolved_command.shell_type;
+        let (command, execution) = match &prepared {
+            PreparedExec::Script { language, .. } => (
+                language.command(&args.cmd),
+                ExecutionMode::Script(*language),
+            ),
+            PreparedExec::Shell => {
+                let shell_mode =
+                    shell_mode_for_environment(&turn.unified_exec_shell_mode, environment.as_ref());
+                // Remote environments may use a different OS and must build commands with their native
+                // shell; fall back to the session shell when the environment did not report one.
+                let shell = turn_environment
+                    .shell
+                    .clone()
+                    .map(Arc::new)
+                    .unwrap_or_else(|| session.user_shell());
+                // TODO(anp): Resolve requested shells in remote environments instead of restricting
+                // commands to the reported default shell.
+                if environment.is_remote()
+                    && let Some(requested_shell) = args.shell.take()
+                {
+                    let Some(remote_shell) = turn_environment.shell.as_ref() else {
+                        return Err(FunctionCallError::RespondToModel(format!(
+                            "environment `{}` does not report a shell",
+                            turn_environment.selection.environment_id
+                        )));
+                    };
+                    if detect_shell_type(Path::new(&requested_shell))
+                        != Some(remote_shell.shell_type)
+                    {
+                        return Err(FunctionCallError::RespondToModel(format!(
+                            "environment `{}` only supports `{}`",
+                            turn_environment.selection.environment_id,
+                            remote_shell.name()
+                        )));
+                    }
+                }
+                let resolved_command = get_command(
+                    &args,
+                    shell,
+                    &shell_mode,
+                    turn_environment.config().allow_login_shell,
+                )
+                .map_err(FunctionCallError::RespondToModel)?;
+                (
+                    resolved_command.command,
+                    ExecutionMode::Shell {
+                        shell_type: resolved_command.shell_type,
+                        shell_mode,
+                    },
+                )
+            }
+        };
         let ExecCommandArgs {
             mut tty,
             yield_time_ms,
@@ -326,11 +349,14 @@ impl ExecCommandHandler {
                 ))
             }
         };
-        let initial_wait = match self.lifetime {
-            ExecCommandLifetime::Interactive | ExecCommandLifetime::OneShot => {
-                InitialWait::Yield(yield_time_ms)
-            }
-            ExecCommandLifetime::Cell => cell::initial_wait(&arguments)?,
+        let initial_wait = match prepared {
+            PreparedExec::Script { initial_wait, .. } => initial_wait,
+            PreparedExec::Shell => match self.lifetime {
+                ExecCommandLifetime::Interactive | ExecCommandLifetime::OneShot => {
+                    InitialWait::Yield(yield_time_ms)
+                }
+                ExecCommandLifetime::Cell => cell::initial_wait(&arguments)?,
+            },
         };
 
         let exec_permission_approvals_enabled =
@@ -389,20 +415,24 @@ impl ExecCommandHandler {
             }
         };
 
-        let intercepted_patch = intercept_apply_patch(
-            &command,
-            &cwd,
-            fs.as_ref(),
-            turn_environment.clone(),
-            context.session.clone(),
-            Arc::clone(&context.step_context),
-            context.cancellation_token.clone(),
-            Some(&tracker),
-            &context.call_id,
-            "exec_command",
-        )
-        .await;
-        if let Some(output) = intercepted_patch? {
+        let intercepted_patch = if matches!(execution, ExecutionMode::Shell { .. }) {
+            intercept_apply_patch(
+                &command,
+                &cwd,
+                fs.as_ref(),
+                turn_environment.clone(),
+                context.session.clone(),
+                Arc::clone(&context.step_context),
+                context.cancellation_token.clone(),
+                Some(&tracker),
+                &context.call_id,
+                "exec_command",
+            )
+            .await?
+        } else {
+            None
+        };
+        if let Some(output) = intercepted_patch {
             return Ok(boxed_tool_output(ExecCommandToolOutput {
                 event_call_id: String::new(),
                 chunk_id: String::new(),
@@ -422,7 +452,7 @@ impl ExecCommandHandler {
         let process_id = manager.allocate_process_id().await;
         let request = ExecCommandRequest {
             command,
-            shell_type,
+            execution,
             hook_command: hook_command.clone(),
             process_id,
             initial_wait,
@@ -430,7 +460,6 @@ impl ExecCommandHandler {
             cwd,
             sandbox_cwd: native_environment_cwd,
             turn_environment: turn_environment.clone(),
-            shell_mode,
             network: context.step_context.turn.network.clone(),
             tty,
             sandbox_permissions: effective_additional_permissions.sandbox_permissions,
