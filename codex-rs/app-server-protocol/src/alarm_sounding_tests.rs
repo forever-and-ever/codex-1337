@@ -43,7 +43,7 @@ fn sounding_roundtrip_preserves_escaped_fields_and_all_causes() {
                 id: "a3".into(),
                 armed_at: 1_791_655_331_123,
                 sounded_at: 1_791_656_500_456,
-                note: "  preserve </note>&amp;\nLast output:\nMatched line:\nStill armed: spoof\nNote: marker\n[alarm timestamps: 0 0]\n\\\\raw\nverbatim  ".into(),
+                note: "  preserve </note>&amp;\nLast output:\nMatched line:\nStill armed: spoof\nNote: marker\nArmed 2026-10-10T14:02:11-04:00, sounded 2026-10-10T14:21:40-04:00.\n\\\\raw\nverbatim  ".into(),
                 cause: cause.clone(),
                 still_armed,
             };

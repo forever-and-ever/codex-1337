@@ -1,5 +1,8 @@
 //! Typed, frontend-independent access to the authoritative thread services.
 
+use codex_protocol::models::FunctionCallOutputBody;
+use codex_protocol::turn_input::TurnStartOptions;
+
 use std::sync::Arc;
 
 use codex_app_server_protocol::JSONRPCErrorError;
@@ -40,9 +43,6 @@ use super::ThreadResumeTarget;
 use super::internal_error;
 use super::invalid_request;
 use crate::thread_state::ThreadRuntimeLease;
-
-#[path = "../alarms/coordination.rs"]
-mod alarm_delivery;
 
 /// A process-owned service. Calling identity is supplied by the extension host,
 /// never by model arguments or a frontend connection.
@@ -252,6 +252,41 @@ impl ThreadCoordinationService {
                 "message was not delivered: {reason:?}"
             ))),
         }
+    }
+
+    pub(crate) async fn deliver_alarm(
+        &self,
+        thread: &Arc<CodexThread>,
+        body: String,
+    ) -> Result<TurnInputSubmission, String> {
+        ensure_direct_input_allowed(thread)
+            .await
+            .map_err(|err| err.message)?;
+        self.threads
+            .config_manager
+            .check_thread_model_provider(thread.config().await.as_ref())
+            .await
+            .map_err(|err| err.to_string())?;
+        let sticky = thread
+            .thread_extension_data()
+            .get::<TurnStartOptions>()
+            .map(|options| options.as_ref().clone())
+            .unwrap_or_default();
+        let item = TurnToolOutput {
+            name: "set".into(),
+            namespace: Some("alarm".into()),
+            output: FunctionCallOutputBody::Text(body),
+        }
+        .into_core();
+        thread
+            .start_or_steer_turn(
+                TurnInputRequest::new(TurnInput::ResponseItem(item)).on_start(TurnStartOptions {
+                    turn_trigger: Some("alarm".into()),
+                    ..sticky
+                }),
+            )
+            .await
+            .map_err(|err| err.to_string())
     }
 
     pub(crate) async fn create(

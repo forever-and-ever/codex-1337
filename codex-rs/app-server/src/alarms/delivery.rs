@@ -89,18 +89,13 @@ pub(super) async fn watch(
         tokio::select! {
             biased;
             (observed_at, event) = &mut terminal => {
-                if deadline.is_some_and(|at| observed_at > at) {
+                if deadline.is_some_and(|at| observed_at > at)
+                    && !watch.has_exited()
+                    && !matches!(event, TerminalWatchEvent::Lost)
+                {
                     return AlarmCause::Deadline { session_id, command };
                 }
-                return match event {
-                    TerminalWatchEvent::Matched(line) => AlarmCause::Matched {
-                        session_id, command, line: line.chars().take(500).collect(),
-                    },
-                    TerminalWatchEvent::Exited { code, tail } => AlarmCause::Exited {
-                        session_id, command, code, tail,
-                    },
-                    TerminalWatchEvent::Lost => AlarmCause::Lost { session_id, command },
-                };
+                return terminal_cause(event, session_id, command);
             }
             () = async {
                 match delay {
@@ -109,10 +104,34 @@ pub(super) async fn watch(
                 }
             } => {
                 if deadline.is_some_and(|at| super::now() >= at) {
+                    if watch.has_exited() {
+                        let (_, event) = (&mut terminal).await;
+                        return terminal_cause(event, session_id, command);
+                    }
                     return AlarmCause::Deadline { session_id, command };
                 }
             }
         }
+    }
+}
+
+fn terminal_cause(event: TerminalWatchEvent, session_id: i32, command: String) -> AlarmCause {
+    match event {
+        TerminalWatchEvent::Matched(line) => AlarmCause::Matched {
+            session_id,
+            command,
+            line,
+        },
+        TerminalWatchEvent::Exited { code, tail } => AlarmCause::Exited {
+            session_id,
+            command,
+            code,
+            tail,
+        },
+        TerminalWatchEvent::Lost => AlarmCause::Lost {
+            session_id,
+            command,
+        },
     }
 }
 

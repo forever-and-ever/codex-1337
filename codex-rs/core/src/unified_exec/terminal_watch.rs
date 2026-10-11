@@ -3,7 +3,6 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
-use std::time::Duration;
 use std::time::SystemTime;
 
 use regex::Regex;
@@ -54,7 +53,7 @@ pub struct TerminalWatch {
     runtime: std::sync::Weak<crate::session::session::Session>,
     watches: Arc<TerminalWatches>,
     id: u64,
-    signal: oneshot::Receiver<Signal>,
+    signal: Mutex<Option<oneshot::Receiver<Signal>>>,
     command: String,
     retained: String,
     pattern: Option<Arc<Regex>>,
@@ -229,7 +228,7 @@ impl CodexThread {
             runtime: Arc::downgrade(&self.session),
             watches,
             id,
-            signal,
+            signal: Mutex::new(Some(signal)),
             command,
             retained,
             pattern,
@@ -256,20 +255,29 @@ impl TerminalWatch {
         &self.retained
     }
 
-    pub async fn wait(mut self) -> (i64, TerminalWatchEvent) {
-        match (&mut self.signal).await {
+    pub fn has_exited(&self) -> bool {
+        self.process.has_exited()
+    }
+
+    /// Wait once for this watch's match or exit while keeping its exit state inspectable.
+    #[expect(
+        clippy::expect_used,
+        reason = "Each watch has one waiter; a claimed or poisoned signal cannot be recovered."
+    )]
+    pub async fn wait(&self) -> (i64, TerminalWatchEvent) {
+        let signal = self
+            .signal
+            .lock()
+            .expect("terminal watch signal poisoned")
+            .take()
+            .expect("terminal watch already awaited");
+        match signal.await {
             Ok(Signal::Matched { at, line }) => (at, TerminalWatchEvent::Matched(line)),
             Ok(Signal::Closed { at }) => {
+                self.process.cancellation_token().cancelled().await;
+                let exited_at = timestamp().max(at);
                 if self.runtime_closed().await {
-                    return (at, TerminalWatchEvent::Lost);
-                }
-                let mut exited_at = at;
-                while !self.process.has_exited() {
-                    if self.runtime_closed().await {
-                        return (timestamp(), TerminalWatchEvent::Lost);
-                    }
-                    tokio::time::sleep(Duration::from_millis(10)).await;
-                    exited_at = timestamp();
+                    return (exited_at, TerminalWatchEvent::Lost);
                 }
                 let output = self.process.output_handles().output_buffer.lock().await;
                 let text = String::from_utf8_lossy(&output.transcript.to_bytes()).into_owned();

@@ -115,19 +115,16 @@ impl AlarmSounding {
                 String::new(),
             ),
         };
-        let armed = local_time(self.armed_at, "%H:%M:%S");
-        let sounded = local_time(self.sounded_at, "%H:%M:%S");
-        let offset = local_time(self.sounded_at, "%:z");
+        let armed = local_time(self.armed_at);
+        let sounded = local_time(self.sounded_at);
         let still_armed = if self.still_armed.is_empty() {
             "none".to_string()
         } else {
             self.still_armed.join(", ")
         };
         format!(
-            "Alarm {} sounded: {cause}\nArmed {armed}, sounded {sounded} ({offset}).\n[alarm timestamps: {} {}]\nNote: {}{detail}\nStill armed: {still_armed}",
+            "Alarm {} sounded: {cause}\nArmed {armed}, sounded {sounded}.\nNote: {}{detail}\nStill armed: {still_armed}",
             self.id,
-            self.armed_at,
-            self.sounded_at,
             escape_lines(&self.note),
         )
     }
@@ -140,11 +137,14 @@ impl AlarmSounding {
             still_armed.split(", ").map(str::to_string).collect()
         };
         let (header, payload) = body.split_once("\nNote: ")?;
-        let (header, timestamps) = header.rsplit_once("\n[alarm timestamps: ")?;
-        let (armed_at, sounded_at) = timestamps.strip_suffix(']')?.split_once(' ')?;
-        let armed_at = armed_at.parse().ok()?;
-        let sounded_at = sounded_at.parse().ok()?;
-        let (header, _) = header.rsplit_once("\nArmed ")?;
+        let (header, timestamps) = header.rsplit_once("\nArmed ")?;
+        let (armed_at, sounded_at) = timestamps.strip_suffix('.')?.split_once(", sounded ")?;
+        let armed_at = DateTime::parse_from_rfc3339(armed_at)
+            .ok()?
+            .timestamp_millis();
+        let sounded_at = DateTime::parse_from_rfc3339(sounded_at)
+            .ok()?
+            .timestamp_millis();
         let (id, description) = header.strip_prefix("Alarm ")?.split_once(" sounded: ")?;
         let (cause, note) = if description == "the set time came." {
             (
@@ -234,10 +234,15 @@ impl AlarmSounding {
     }
 }
 
-fn local_time(millis: i64, format: &str) -> String {
+#[expect(
+    clippy::expect_used,
+    reason = "alarm timestamps come from server system time or validated RFC3339 input"
+)]
+fn local_time(millis: i64) -> String {
     DateTime::from_timestamp_millis(millis)
-        .map(|time| time.with_timezone(&Local).format(format).to_string())
-        .unwrap_or_else(|| "out of range".to_string())
+        .expect("server alarm timestamp is within the RFC3339 range")
+        .with_timezone(&Local)
+        .to_rfc3339()
 }
 
 // A backslash protects only marker-like lines and existing leading backslashes;
@@ -252,7 +257,6 @@ fn escape_lines(text: &str) -> String {
                 "Matched line:",
                 "Still armed:",
                 "Armed ",
-                "[alarm timestamps:",
             ]
             .iter()
             .any(|marker| line.starts_with(marker))
