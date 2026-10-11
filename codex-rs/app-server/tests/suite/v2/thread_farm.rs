@@ -250,6 +250,10 @@ async fn farm_spawns_and_replays_without_steering_parent(
         "the configured farm executor wins over role effort too"
     );
     let input = children[0]["input"].to_string();
+    assert!(
+        !input.contains("\"encrypted_content\""),
+        "a human farm task must never become provider ciphertext",
+    );
     assert_eq!(
         input.contains(BACKGROUND),
         mode == ThreadFarmMode::FullHistory && !matches!(parent_state, ParentState::Pristine)

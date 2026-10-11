@@ -2212,14 +2212,24 @@ async fn spawned_multi_agent_v2_child_inherits_parent_developer_context() -> Res
     Ok(())
 }
 
-#[test_case(None, false; "encrypted")]
-#[test_case(None, true; "plaintext")]
-#[test_case(Some("gpt-5.6-luna"), false; "luna encrypted leaf")]
-#[test_case(Some("gpt-5.5"), false; "legacy encrypted leaf")]
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SpawnMessageSource {
+    ResponsesEncrypted,
+    ResponsesPlaintext,
+    CodeMode,
+}
+
+#[test_case(None, SpawnMessageSource::ResponsesEncrypted, None; "encrypted")]
+#[test_case(None, SpawnMessageSource::ResponsesPlaintext, None; "plaintext")]
+#[test_case(None, SpawnMessageSource::CodeMode, Some("none"); "code_mode_fresh_plaintext")]
+#[test_case(None, SpawnMessageSource::CodeMode, Some("all"); "code_mode_history_plaintext")]
+#[test_case(Some("gpt-5.6-luna"), SpawnMessageSource::ResponsesEncrypted, None; "luna encrypted leaf")]
+#[test_case(Some("gpt-5.5"), SpawnMessageSource::ResponsesEncrypted, None; "legacy encrypted leaf")]
 #[tokio::test]
 async fn multi_agent_v2_spawn_sends_agent_message_to_child(
     model: Option<&str>,
-    plaintext: bool,
+    source: SpawnMessageSource,
+    fork_turns: Option<&str>,
 ) -> Result<()> {
     let output: &'static Mutex<Vec<u8>> = Box::leak(Box::new(Mutex::new(Vec::new())));
     let subscriber = tracing_subscriber::fmt()
@@ -2235,6 +2245,7 @@ async fn multi_agent_v2_spawn_sends_agent_message_to_child(
     );
 
     let server = start_mock_server().await;
+    let plaintext = source != SpawnMessageSource::ResponsesEncrypted;
     let message = if plaintext {
         "plaintext delegated task"
     } else {
@@ -2250,16 +2261,31 @@ async fn multi_agent_v2_spawn_sends_agent_message_to_child(
             spawn_args["fork_turns"] = json!("none");
         }
     }
-    let spawn_args = serde_json::to_string(&spawn_args)?;
-    let mut spawn_event = ev_function_call_with_namespace(
-        SPAWN_CALL_ID,
-        MULTI_AGENT_V2_NAMESPACE,
-        "spawn_agent",
-        &spawn_args,
-    );
-    if plaintext {
-        spawn_event["item"]["encrypted_function_args"] = json!([]);
+    if let Some(fork_turns) = fork_turns {
+        spawn_args["fork_turns"] = json!(fork_turns);
     }
+    let spawn_args = serde_json::to_string(&spawn_args)?;
+    // Code Mode's JS string never passed through Responses' encrypted-argument
+    // schema. Treating it as ciphertext gives the child invalid_encrypted_content.
+    let spawn_event = match source {
+        SpawnMessageSource::CodeMode => core_test_support::responses::ev_custom_tool_call(
+            SPAWN_CALL_ID,
+            "exec",
+            &format!("text(await tools.wrangler_agents__spawn_agent({spawn_args}));"),
+        ),
+        SpawnMessageSource::ResponsesEncrypted | SpawnMessageSource::ResponsesPlaintext => {
+            let mut event = ev_function_call_with_namespace(
+                SPAWN_CALL_ID,
+                MULTI_AGENT_V2_NAMESPACE,
+                "spawn_agent",
+                &spawn_args,
+            );
+            if plaintext {
+                event["item"]["encrypted_function_args"] = json!([]);
+            }
+            event
+        }
+    };
     mount_sse_once_match(
         &server,
         |req: &wiremock::Request| body_contains(req, TURN_1_PROMPT),
@@ -2308,6 +2334,12 @@ async fn multi_agent_v2_spawn_sends_agent_message_to_child(
                 .features
                 .enable(Feature::MultiAgentV2)
                 .expect("test config should allow feature update");
+            if source == SpawnMessageSource::CodeMode {
+                config
+                    .features
+                    .enable(Feature::CodeMode)
+                    .expect("test config should enable Code Mode");
+            }
             if plaintext {
                 config
                     .features
@@ -2336,6 +2368,15 @@ async fn multi_agent_v2_spawn_sends_agent_message_to_child(
         }
         sleep(Duration::from_millis(10)).await;
     };
+    if source == SpawnMessageSource::CodeMode {
+        assert_eq!(
+            json!(child_request.input())
+                .to_string()
+                .contains(TURN_1_PROMPT),
+            fork_turns == Some("all"),
+            "plaintext provenance must not expand the requested child history",
+        );
+    }
     let content = if plaintext {
         vec![json!({
             "type": "input_text",
@@ -2376,7 +2417,7 @@ async fn multi_agent_v2_spawn_sends_agent_message_to_child(
             "leaf workers must not receive collaboration tools",
         );
     }
-    if plaintext {
+    if source == SpawnMessageSource::ResponsesPlaintext {
         let parent_request = parent_request_log
             .requests()
             .into_iter()

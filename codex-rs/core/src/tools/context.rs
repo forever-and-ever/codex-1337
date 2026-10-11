@@ -53,10 +53,12 @@ pub(crate) struct ToolCallState {
     pub(crate) delivered_assistant_message: OnceLock<String>,
 }
 
+pub use crate::agent::types::AgentMessageEncoding;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ToolCallSource {
     Direct,
-    DirectPlaintextMessage,
+    DirectAgentMessage(AgentMessageEncoding),
     CodeMode {
         /// Runtime cell that issued the nested tool request.
         cell_id: String,

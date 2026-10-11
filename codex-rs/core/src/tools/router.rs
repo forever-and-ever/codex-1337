@@ -32,6 +32,7 @@ use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use tracing::instrument;
 
+use crate::tools::context::AgentMessageEncoding;
 pub use crate::tools::context::ToolCallSource;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -66,17 +67,21 @@ impl ToolCall {
     }
 
     pub(crate) fn direct_source(&self) -> ToolCallSource {
-        if self.is_agent_message_tool()
-            && (self
-                .encrypted_function_args
-                .as_ref()
-                .is_some_and(Vec::is_empty)
-                || has_plaintext_message_argument(&self.payload))
-        {
-            ToolCallSource::DirectPlaintextMessage
-        } else {
-            ToolCallSource::Direct
+        if !self.is_agent_message_tool() {
+            return ToolCallSource::Direct;
         }
+        // Responses encrypts the schema-marked message unless it reports otherwise.
+        // Native Messages supplies an explicit empty list; Code Mode has its own origin.
+        let encoding = match &self.encrypted_function_args {
+            Some(fields) if !fields.iter().any(|field| field == "message") => {
+                AgentMessageEncoding::Plaintext
+            }
+            None if has_plaintext_message_argument(&self.payload) => {
+                AgentMessageEncoding::Plaintext
+            }
+            None | Some(_) => AgentMessageEncoding::Encrypted,
+        };
+        ToolCallSource::DirectAgentMessage(encoding)
     }
 }
 
@@ -91,8 +96,15 @@ pub(crate) fn tool_log_payload<'a>(
     payload: &'a ToolPayload,
     source: &ToolCallSource,
 ) -> Cow<'a, str> {
-    if matches!(source, ToolCallSource::DirectPlaintextMessage)
-        || has_plaintext_message_argument(payload)
+    if matches!(
+        source,
+        ToolCallSource::DirectAgentMessage(AgentMessageEncoding::Plaintext)
+    ) || has_plaintext_message_argument(payload)
+        || matches!(source, ToolCallSource::CodeMode { .. })
+            && matches!(payload, ToolPayload::Function { arguments }
+            if serde_json::from_str::<serde_json::Value>(arguments).is_ok_and(|arguments| {
+                arguments.get("message").is_some_and(serde_json::Value::is_string)
+            }))
     {
         return Cow::Borrowed("[plaintext arguments]");
     }

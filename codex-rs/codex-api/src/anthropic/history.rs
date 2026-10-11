@@ -307,7 +307,10 @@ impl<'a> Encoder<'a> {
                 call_id,
                 ..
             } => {
-                if encrypted_function_args.is_some() {
+                if encrypted_function_args
+                    .as_ref()
+                    .is_some_and(|fields| !fields.is_empty())
+                {
                     return Err(invalid(
                         "Anthropic cannot replay encrypted function arguments",
                     ));

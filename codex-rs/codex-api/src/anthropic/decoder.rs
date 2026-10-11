@@ -502,7 +502,7 @@ impl<'a> Decoder<'a> {
                             name: name.clone(),
                             namespace: namespace.clone(),
                             arguments,
-                            encrypted_function_args: None,
+                            encrypted_function_args: Some(Vec::new()),
                             call_id: call_id.clone(),
                             internal_chat_message_metadata_passthrough: None,
                         }

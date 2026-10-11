@@ -110,7 +110,13 @@ fn invocation(
         tracker: Arc::new(Mutex::new(TurnDiffTracker::default())),
         call_id: "call-1".to_string(),
         tool_name: codex_tools::ToolName::plain(tool_name),
-        source: crate::tools::context::ToolCallSource::Direct,
+        source: if matches!(tool_name, "spawn_agent" | "send_message" | "followup_task") {
+            crate::tools::context::ToolCallSource::DirectAgentMessage(
+                crate::tools::context::AgentMessageEncoding::Encrypted,
+            )
+        } else {
+            crate::tools::context::ToolCallSource::Direct
+        },
         payload,
     }
 }
@@ -1100,6 +1106,8 @@ async fn multi_agent_v2_spawn_returns_path_and_send_message_accepts_relative_pat
     set_agent_control(&mut session, control.clone());
     session.thread_id = root.thread_id;
     let mut config = (*turn.config).clone();
+    config.agent_max_threads = Some(7);
+    config.multi_agent_v2.max_concurrent_threads_per_session = 8;
     config
         .features
         .enable(Feature::MultiAgentV2)
@@ -1317,6 +1325,21 @@ async fn multi_agent_v2_spawn_returns_path_and_send_message_accepts_relative_pat
         .expect("explicit plaintext followup should cross providers");
     // Equal provider IDs do not grant native Anthropic a ciphertext decoder.
     let mut native_config = (*turn.config).clone();
+    let account = codex_login::anthropic::AccountStore::new(
+        root.thread.auth_manager().runtime_config().codex_home,
+    )
+    .upsert(
+        codex_login::anthropic::AccountInfo {
+            identity: codex_login::anthropic::AccountIdentity::new("matrix-native").unwrap(),
+            email: None,
+            organization_uuid: None,
+            organization_name: None,
+        },
+        codex_login::anthropic::SubscriptionGrant::bearer_only("matrix-bearer".into()).unwrap(),
+    )
+    .await
+    .unwrap();
+    native_config.wrangler.default_claude_account = Some(account.to_string());
     native_config.model_provider =
         codex_model_provider_info::built_in_model_providers(/*openai_base_url*/ None)
             .remove(codex_model_provider_info::CLAUDE_SUBSCRIPTION_PROVIDER_ID)
@@ -1367,7 +1390,7 @@ async fn multi_agent_v2_spawn_returns_path_and_send_message_accepts_relative_pat
         .agent_control
         .spawn(SpawnRequest {
             caller: session.thread_id,
-            config: native_config,
+            config: native_config.clone(),
             input: AgentInput::Message {
                 message: AgentMessage::Plaintext("readable native task".into()),
                 mode: MessageDeliveryMode::TriggerTurn,
@@ -1401,6 +1424,114 @@ async fn multi_agent_v2_spawn_returns_path_and_send_message_accepts_relative_pat
         assert!(error.to_string().contains("retry using plaintext_message"));
     }
     assert_eq!(manager.captured_ops().len(), ops_before);
+    // Human input and JS-origin tasks share the same spawn boundary but never
+    // acquire Responses ciphertext semantics, irrespective of the target adapter.
+    for (provider, config) in [
+        ("openai", (*turn.config).clone()),
+        ("anthropic", native_config),
+    ] {
+        for (origin, input) in [
+            (
+                "human",
+                AgentInput::UserInput(vec![UserInput::Text {
+                    text: "matrix human task".into(),
+                    text_elements: Vec::new(),
+                }]),
+            ),
+            (
+                "code_mode",
+                AgentInput::Message {
+                    message: crate::tools::handlers::multi_agents_message::parse_agent_message(
+                        Some("matrix JS task".into()),
+                        None,
+                        &crate::tools::context::ToolCallSource::CodeMode {
+                            cell_id: "matrix-cell".into(),
+                            runtime_tool_call_id: "matrix-call".into(),
+                        },
+                    )
+                    .unwrap(),
+                    mode: MessageDeliveryMode::TriggerTurn,
+                },
+            ),
+        ] {
+            let task_name = format!("matrix_{origin}_{provider}");
+            let (agent, _) = session
+                .services
+                .agent_control
+                .spawn(SpawnRequest {
+                    caller: session.thread_id,
+                    config: config.clone(),
+                    input,
+                    source: SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+                        parent_thread_id: session.thread_id,
+                        depth: 1,
+                        agent_path: Some(AgentPath::root().join(&task_name).unwrap()),
+                        agent_nickname: None,
+                        agent_role: None,
+                    }),
+                    options: SpawnAgentOptions::default(),
+                })
+                .await
+                .unwrap_or_else(|error| panic!("matrix route {task_name} must start: {error:?}"));
+            if origin == "human" {
+                let thread = manager.get_thread(agent.thread_id).await.unwrap();
+                wait_for_recorded_user_input(
+                    &thread,
+                    &[UserInput::Text {
+                        text: "matrix human task".into(),
+                        text_elements: Vec::new(),
+                    }],
+                )
+                .await;
+            } else {
+                assert!(manager.captured_ops().iter().any(|(id, op)| {
+                    *id == agent.thread_id
+                        && match op {
+                            Op::InterAgentCommunication { communication, .. } => {
+                                communication.encrypted_content.is_none()
+                                    && communication.content.contains("matrix JS task")
+                            }
+                            _ => false,
+                        }
+                }));
+            }
+            for tool in ["send_message", "followup_task"] {
+                let mut invocation = invocation(
+                    session.clone(),
+                    turn.clone(),
+                    tool,
+                    function_payload(json!({"target": task_name, "message": "matrix JS followup"})),
+                );
+                invocation.source = crate::tools::context::ToolCallSource::CodeMode {
+                    cell_id: "matrix-cell".into(),
+                    runtime_tool_call_id: tool.into(),
+                };
+                match tool {
+                    "send_message" => {
+                        SendMessageHandlerV2.handle(invocation).await.unwrap();
+                    }
+                    "followup_task" => {
+                        FollowupTaskHandlerV2.handle(invocation).await.unwrap();
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            let communications = manager
+                .captured_ops()
+                .into_iter()
+                .filter_map(|(id, op)| match op {
+                    Op::InterAgentCommunication { communication, .. }
+                        if id == agent.thread_id
+                            && communication.content.contains("matrix JS followup") =>
+                    {
+                        Some((communication.encrypted_content, communication.trigger_turn))
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(communications, vec![(None, false), (None, true)]);
+        }
+    }
     // A family account handoff can leave the caller on its earlier credential.
     // Provider equality must not permit ciphertext to cross that boundary.
     control.runtime.account_selection.select(

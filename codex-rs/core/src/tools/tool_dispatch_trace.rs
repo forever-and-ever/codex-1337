@@ -61,7 +61,7 @@ impl ToolDispatchTrace {
 
 fn tool_dispatch_invocation(invocation: &ToolInvocation) -> Option<ToolDispatchInvocation> {
     let requester = match &invocation.source {
-        ToolCallSource::Direct | ToolCallSource::DirectPlaintextMessage => {
+        ToolCallSource::Direct | ToolCallSource::DirectAgentMessage(_) => {
             ToolDispatchRequester::Model {
                 model_visible_call_id: invocation.call_id.clone(),
             }
@@ -98,7 +98,7 @@ fn tool_dispatch_result(
     result: &dyn ToolOutput,
 ) -> Option<ToolDispatchResult> {
     match invocation.source {
-        ToolCallSource::Direct | ToolCallSource::DirectPlaintextMessage => {
+        ToolCallSource::Direct | ToolCallSource::DirectAgentMessage(_) => {
             Some(ToolDispatchResult::DirectResponse {
                 response_item: result.to_response_item(call_id, payload),
             })

@@ -50,7 +50,10 @@ fn tool_log_payload_redacts_plaintext_multi_agent_messages() {
         arguments: json!({"target": "/root/worker", "message": "secret message"}).to_string(),
     };
     assert_eq!(
-        tool_log_payload(&payload, &ToolCallSource::DirectPlaintextMessage),
+        tool_log_payload(
+            &payload,
+            &ToolCallSource::DirectAgentMessage(super::AgentMessageEncoding::Plaintext)
+        ),
         "[plaintext arguments]"
     );
     assert_eq!(
@@ -75,7 +78,10 @@ fn tool_log_payload_redacts_plaintext_multi_agent_messages() {
             payload: payload.clone(),
             encrypted_function_args: None,
         };
-        assert_eq!(call.direct_source(), ToolCallSource::DirectPlaintextMessage);
+        assert_eq!(
+            call.direct_source(),
+            ToolCallSource::DirectAgentMessage(super::AgentMessageEncoding::Plaintext)
+        );
         assert_eq!(
             tool_log_payload(&payload, &ToolCallSource::Direct),
             "[plaintext arguments]"

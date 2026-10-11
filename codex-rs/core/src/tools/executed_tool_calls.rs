@@ -483,7 +483,7 @@ impl ExecutedToolCalls {
             return;
         }
         match source {
-            ToolCallSource::Direct | ToolCallSource::DirectPlaintextMessage => {
+            ToolCallSource::Direct | ToolCallSource::DirectAgentMessage(_) => {
                 let mut state = self.lock_state();
                 let Some(state) = state.as_mut() else {
                     return;

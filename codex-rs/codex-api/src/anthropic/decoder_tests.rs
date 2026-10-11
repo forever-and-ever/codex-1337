@@ -294,7 +294,7 @@ fn interleaved_tools_signed_blocks_and_cumulative_usage() {
         json!([
         {"type":"reasoning","id":"msg_0","summary":[{"type":"summary_text","text":"Exact α\n"}],"content":null,"encrypted_content":"first+second/=="},
             {"type":"custom_tool_call","id":"msg_1","call_id":"exec1","name":"exec","namespace":"functions","input":"text('α');\n"},
-            {"type":"function_call","id":"msg_2","call_id":"send1","name":"send","arguments":"{ \"target\" : \"worker\" }"},
+            {"type":"function_call","id":"msg_2","call_id":"send1","name":"send","arguments":"{ \"target\" : \"worker\" }","encrypted_function_args":[]},
             {"type":"native_compaction","id":"msg_3","provider":"anthropic","content":"Exact checkpoint. ","signature":"signed/=="}
         ])
     );

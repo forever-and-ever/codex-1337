@@ -41,7 +41,7 @@ fn signed_history_and_parallel_tool_results_preserve_cache_prefix() {
         {"type":"message","role":"user","content":[{"type":"input_text","text":"Continue."}]},
         {"type":"reasoning","summary":[{"type":"summary_text","text":"Signed α\n"}],"encrypted_content":"sig/+=="},
         {"type":"custom_tool_call","call_id":"exec1","name":"exec","namespace":"functions","input":"text('α');\n"},
-        {"type":"function_call","call_id":"msg1","name":"send_message","arguments":"{\"message\":\"α\"}"},
+        {"type":"function_call","call_id":"msg1","name":"send_message","encrypted_function_args":[],"arguments":"{\"message\":\"α\"}"},
         {"type":"custom_tool_call_output","call_id":"exec1","output":"first"},
         {"type":"function_call_output","call_id":"msg1","output":[{"type":"input_image","image_url":"data:image/png;base64,YQ=="}]}
     ])).unwrap();

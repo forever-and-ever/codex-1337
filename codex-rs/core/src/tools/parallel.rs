@@ -174,7 +174,7 @@ impl ToolCallRuntime {
         let dispatch_call = call.clone();
         let thread_id = session.thread_id;
         let trace_source = match &source {
-            ToolCallSource::Direct | ToolCallSource::DirectPlaintextMessage => {
+            ToolCallSource::Direct | ToolCallSource::DirectAgentMessage(_) => {
                 call_trace::Source::Direct
             }
             ToolCallSource::CodeMode { .. } => call_trace::Source::CodeMode,
@@ -369,7 +369,7 @@ impl ToolCallTimingGuard {
         // not mistake overlapping events for independent tool-call latency.
         if !matches!(
             source,
-            ToolCallSource::Direct | ToolCallSource::DirectPlaintextMessage
+            ToolCallSource::Direct | ToolCallSource::DirectAgentMessage(_)
         ) {
             return None;
         }

@@ -2,6 +2,7 @@
 
 use crate::agent::types::AgentMessage;
 use crate::function_tool::FunctionCallError;
+use crate::tools::context::AgentMessageEncoding;
 use crate::tools::context::ToolCallSource;
 use codex_tools::JsonSchema;
 use std::collections::BTreeMap;
@@ -33,12 +34,21 @@ pub(super) fn parse_agent_message(
     plaintext_message: Option<String>,
     source: &ToolCallSource,
 ) -> Result<AgentMessage, FunctionCallError> {
-    let (content, plaintext) = match (message, plaintext_message) {
-        (Some(message), None) => (
-            message,
-            matches!(source, ToolCallSource::DirectPlaintextMessage),
-        ),
-        (None, Some(message)) => (message, true),
+    let (content, encoding) = match (message, plaintext_message) {
+        (Some(message), None) => {
+            let encoding = match source {
+                ToolCallSource::DirectAgentMessage(encoding) => *encoding,
+                // Nested arguments are JS values, not schema-encrypted Responses arguments.
+                ToolCallSource::CodeMode { .. } => AgentMessageEncoding::Plaintext,
+                ToolCallSource::Direct => {
+                    return Err(FunctionCallError::RespondToModel(
+                        "Agent message is missing its argument encoding".into(),
+                    ));
+                }
+            };
+            (message, encoding)
+        }
+        (None, Some(message)) => (message, AgentMessageEncoding::Plaintext),
         _ => {
             return Err(FunctionCallError::RespondToModel(
                 "Provide exactly one of message or plaintext_message".into(),
@@ -50,9 +60,8 @@ pub(super) fn parse_agent_message(
             "Empty message can't be sent to an agent".into(),
         ));
     }
-    Ok(if plaintext {
-        AgentMessage::Plaintext(content)
-    } else {
-        AgentMessage::Encrypted(content)
+    Ok(match encoding {
+        AgentMessageEncoding::Plaintext => AgentMessage::Plaintext(content),
+        AgentMessageEncoding::Encrypted => AgentMessage::Encrypted(content),
     })
 }

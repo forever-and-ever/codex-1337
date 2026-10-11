@@ -89,6 +89,12 @@ pub enum MessageDeliveryMode {
     TriggerTurn,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AgentMessageEncoding {
+    Plaintext,
+    Encrypted,
+}
+
 /// Keeps model-provided encrypted content distinct from text that needs a context wrapper.
 pub enum AgentMessage {
     Plaintext(String),
