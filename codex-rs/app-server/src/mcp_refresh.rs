@@ -342,6 +342,7 @@ enabled = false
                     queue_service: None,
                     turn_start_admission: None,
                     coordination: None,
+                    alarms: None,
                 }),
                 Arc::new(CodexHomeUserInstructionsProvider::new(
                     good_config.codex_home.clone(),

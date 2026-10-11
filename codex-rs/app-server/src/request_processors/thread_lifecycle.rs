@@ -829,6 +829,7 @@ pub(super) async fn handle_pending_thread_resume_request(
         .prompt_cache
         .publish_to(connection_id, conversation_id, conversation.as_ref())
         .await;
+    crate::alarms::publish_to(connection_id, conversation_id, conversation.as_ref()).await;
     outgoing
         .replay_requests_to_connection_for_thread(connection_id, conversation_id)
         .await;

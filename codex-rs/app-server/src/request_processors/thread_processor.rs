@@ -483,6 +483,7 @@ pub(crate) struct ThreadRequestProcessor {
     pub(super) initial_config_warnings: Arc<Vec<ConfigWarningNotification>>,
     extension_leases: Arc<Mutex<HashMap<ThreadId, extension_lease::ExtensionLease>>>,
     pub(super) prompt_cache: crate::prompt_cache::PromptCache,
+    pub(super) alarms: crate::alarms::Alarms,
 }
 
 /// Whether resume attaches a client or restores a cold runtime during daemon startup.
@@ -525,6 +526,7 @@ impl ThreadRequestProcessor {
         turn_cost_worker: Option<crate::turn_cost_worker::TurnCostWorkerHandle>,
         initial_config_warnings: Vec<ConfigWarningNotification>,
         prompt_cache: crate::prompt_cache::PromptCache,
+        alarms: crate::alarms::Alarms,
     ) -> Self {
         Self {
             auth_manager,
@@ -547,6 +549,7 @@ impl ThreadRequestProcessor {
             initial_config_warnings: Arc::new(initial_config_warnings),
             extension_leases: Arc::new(Mutex::new(HashMap::new())),
             prompt_cache,
+            alarms,
         }
     }
 
@@ -1855,6 +1858,7 @@ impl ThreadRequestProcessor {
             return Ok((ThreadArchiveResponse {}, Vec::new()));
         }
 
+        let _alarm_guard = self.alarms.archive_guard().await.map_err(internal_error)?;
         archive_thread_ids[1..].reverse();
         // Collaboration may resume an archived descendant without unarchiving it.
         self.prepare_thread_for_archive(thread_id).await?;
@@ -1873,7 +1877,17 @@ impl ThreadRequestProcessor {
             .map_err(|err| thread_store_mutation_error("archive", err))?
             .into_iter()
             .map(|thread_id| thread_id.to_string())
-            .collect();
+            .collect::<Vec<_>>();
+        for archived in &archived_thread_ids {
+            self.alarms
+                .discard_locked(
+                    ThreadId::from_string(archived).map_err(|err| {
+                        internal_error(format!("invalid archived thread id: {err}"))
+                    })?,
+                )
+                .await
+                .map_err(internal_error)?;
+        }
         Ok((ThreadArchiveResponse {}, archived_thread_ids))
     }
 
@@ -4311,6 +4325,7 @@ impl ThreadRequestProcessor {
                 self.prompt_cache
                     .publish_to(connection_id, thread_id, codex_thread.as_ref())
                     .await;
+                crate::alarms::publish_to(connection_id, thread_id, codex_thread.as_ref()).await;
                 codex_thread
                     .emit_thread_idle_lifecycle_if_idle(ThreadIdleCause::Completed)
                     .await;

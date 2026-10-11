@@ -119,6 +119,7 @@ fn server_notification_requires_delivery(notification: &ServerNotification) -> b
             | ServerNotification::ThreadQueueChanged(_)
             | ServerNotification::ThreadSettingsUpdated(_)
             | ServerNotification::ThreadAttachmentUpdated(_)
+            | ServerNotification::ThreadAlarmsUpdated(_)
             | ServerNotification::ThreadPromptCacheUpdated(_)
             | ServerNotification::ThreadPromptCacheMissed(_)
             | ServerNotification::ThreadWarmingStopped(_)
@@ -494,6 +495,7 @@ async fn start_uninitialized(mut args: InProcessStartArgs) -> IoResult<InProcess
                 feedback: args.feedback,
                 log_db: args.log_db,
                 state_db: args.state_db,
+                alarm_owner: None,
                 config_warnings: args.config_warnings,
                 session_source: args.session_source,
                 user_verification: Arc::new(crate::user_verification::Service::new(Arc::clone(

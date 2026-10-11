@@ -81,15 +81,18 @@ pub(crate) struct OutputHandles<const MAX_BYTES: usize = UNIFIED_EXEC_OUTPUT_MAX
     pub(crate) output_closed: Arc<AtomicBool>,
     pub(crate) output_closed_notify: Arc<Notify>,
     pub(crate) cancellation_token: CancellationToken,
+    pub(super) terminal_watches: Arc<super::terminal_watch::TerminalWatches>,
 }
 
 struct OutputTaskGuard {
     output_closed: Arc<AtomicBool>,
     output_closed_notify: Arc<Notify>,
+    terminal_watches: Arc<super::terminal_watch::TerminalWatches>,
 }
 
 impl Drop for OutputTaskGuard {
     fn drop(&mut self) {
+        self.terminal_watches.close();
         self.output_closed.store(true, Ordering::Release);
         self.output_closed_notify.notify_waiters();
     }
@@ -136,6 +139,7 @@ impl UnifiedExecProcess {
         spawn_lifecycle: Option<SpawnLifecycleHandle>,
     ) -> Self {
         let output = OutputHandles {
+            terminal_watches: Arc::default(),
             output_buffer: Arc::new(Mutex::new(OutputBuffers::default())),
             output_notify: Arc::new(Notify::new()),
             output_closed: Arc::new(AtomicBool::new(false)),
@@ -456,6 +460,7 @@ impl UnifiedExecProcess {
         state_tx: watch::Sender<ProcessState>,
     ) -> JoinHandle<()> {
         let OutputHandles {
+            terminal_watches,
             output_buffer,
             output_notify,
             output_closed,
@@ -466,6 +471,7 @@ impl UnifiedExecProcess {
         let mut events = process.subscribe_events();
         tokio::spawn(async move {
             let _output_task_guard = OutputTaskGuard {
+                terminal_watches: Arc::clone(&terminal_watches),
                 output_closed: Arc::clone(&output_closed),
                 output_closed_notify: Arc::clone(&output_closed_notify),
             };
@@ -532,10 +538,13 @@ impl UnifiedExecProcess {
                     } = response;
                     for chunk in chunks.into_iter().filter(|chunk| chunk.seq > last_seq) {
                         let bytes = chunk.chunk.into_inner();
-                        let mut guard = output_buffer.lock().await;
-                        guard.push_chunk(&bytes);
-                        drop(guard);
-                        let _ = output_tx.send(bytes);
+                        super::terminal_watch::publish_output(
+                            &output_buffer,
+                            &output_tx,
+                            &terminal_watches,
+                            bytes,
+                        )
+                        .await;
                         output_notify.notify_waiters();
                     }
                     last_seq = last_seq.max(next_seq.saturating_sub(1));
@@ -575,10 +584,13 @@ impl UnifiedExecProcess {
                         }
                         last_seq = chunk.seq;
                         let bytes = chunk.chunk.into_inner();
-                        let mut guard = output_buffer.lock().await;
-                        guard.push_chunk(&bytes);
-                        drop(guard);
-                        let _ = output_tx.send(bytes);
+                        super::terminal_watch::publish_output(
+                            &output_buffer,
+                            &output_tx,
+                            &terminal_watches,
+                            bytes,
+                        )
+                        .await;
                         output_notify.notify_waiters();
                     }
                     ExecProcessEvent::Exited {
@@ -622,6 +634,7 @@ impl UnifiedExecProcess {
         output_tx: broadcast::Sender<Vec<u8>>,
     ) -> JoinHandle<()> {
         let OutputHandles {
+            terminal_watches,
             output_buffer,
             output_notify,
             output_closed,
@@ -630,16 +643,20 @@ impl UnifiedExecProcess {
         } = output_handles;
         tokio::spawn(async move {
             let _output_task_guard = OutputTaskGuard {
+                terminal_watches: Arc::clone(&terminal_watches),
                 output_closed: Arc::clone(&output_closed),
                 output_closed_notify: Arc::clone(&output_closed_notify),
             };
             loop {
                 match receiver.recv().await {
                     Ok(chunk) => {
-                        let mut guard = output_buffer.lock().await;
-                        guard.push_chunk(&chunk);
-                        drop(guard);
-                        let _ = output_tx.send(chunk);
+                        super::terminal_watch::publish_output(
+                            &output_buffer,
+                            &output_tx,
+                            &terminal_watches,
+                            chunk,
+                        )
+                        .await;
                         output_notify.notify_waiters();
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,

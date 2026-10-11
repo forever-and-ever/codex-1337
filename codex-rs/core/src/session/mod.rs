@@ -270,6 +270,7 @@ mod step_activation;
 pub(crate) mod step_admission;
 pub(crate) mod step_context;
 pub(crate) mod step_settings;
+mod terminal_watch;
 pub(crate) mod thread_settings;
 pub(crate) mod time_reminder;
 mod token_budget;

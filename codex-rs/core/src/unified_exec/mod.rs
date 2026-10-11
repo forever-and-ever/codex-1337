@@ -57,6 +57,7 @@ mod process_manager;
 mod process_state;
 mod shell_snapshot;
 mod stdin_approval;
+pub(crate) mod terminal_watch;
 
 pub(crate) fn set_deterministic_process_ids_for_tests(enabled: bool) {
     process_manager::set_deterministic_process_ids_for_tests(enabled);

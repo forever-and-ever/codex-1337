@@ -46,6 +46,7 @@ pub(crate) struct ThreadExtensionDependencies {
     pub(crate) queue_service: Option<Arc<QueuedItemService>>,
     pub(crate) turn_start_admission: Option<Arc<dyn TurnStartAdmission>>,
     pub(crate) coordination: Option<crate::thread_tools::CoordinationSlot>,
+    pub(crate) alarms: Option<crate::alarms::Alarms>,
 }
 
 pub(crate) fn thread_extensions(
@@ -65,10 +66,14 @@ pub(crate) fn thread_extensions(
         queue_service,
         turn_start_admission,
         coordination,
+        alarms,
     } = dependencies;
     let mut builder = ExtensionRegistryBuilder::<Config>::with_event_sink(Arc::clone(&event_sink));
     if let Some(coordination) = coordination {
         crate::thread_tools::install(&mut builder, coordination);
+    }
+    if let Some(alarms) = alarms {
+        crate::alarms::install(&mut builder, alarms);
     }
     if let Some(admission) = turn_start_admission {
         builder.turn_start_admission(admission);

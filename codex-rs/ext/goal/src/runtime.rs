@@ -451,6 +451,14 @@ impl GoalRuntimeHandle {
             return Ok(());
         };
 
+        if thread
+            .thread_extension_data()
+            .get::<codex_core::idle_hold::IdleHold>()
+            .is_some_and(|hold| hold.is_held())
+        {
+            return Ok(());
+        }
+
         let Some(goal) = self
             .inner
             .state_dbs

@@ -39,6 +39,8 @@ use std::sync::atomic::AtomicI64;
 use std::time::Instant;
 use tracing::warn;
 
+mod alarms;
+
 mod backfill;
 mod comms;
 mod context_role;
@@ -62,6 +64,9 @@ mod thread_section_order;
 mod thread_sections;
 mod threads;
 
+pub use alarms::AlarmTrigger;
+pub use alarms::ThreadAlarm;
+pub use alarms::ThreadAlarmState;
 pub use external_agent_config_imports::ExternalAgentConfigImportDetailsRecord;
 pub use external_agent_config_imports::ExternalAgentConfigImportFailureRecord;
 pub use external_agent_config_imports::ExternalAgentConfigImportHistoryRecord;

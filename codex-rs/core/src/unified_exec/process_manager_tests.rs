@@ -347,6 +347,7 @@ async fn output_collection_stays_bounded_across_repeated_drains() {
     let output_closed_notify = Arc::new(Notify::new());
     let cancellation_token = CancellationToken::new();
     let output = OutputHandles {
+        terminal_watches: Arc::default(),
         output_buffer: Arc::clone(&output_buffer),
         output_notify: Arc::clone(&output_notify),
         output_closed: Arc::clone(&output_closed),
@@ -405,6 +406,7 @@ async fn output_collection_preserves_omissions_from_drained_buffer() {
     let cancellation_token = CancellationToken::new();
     cancellation_token.cancel();
     let output = OutputHandles {
+        terminal_watches: Arc::default(),
         output_buffer,
         output_notify,
         output_closed,

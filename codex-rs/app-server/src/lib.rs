@@ -97,6 +97,7 @@ fn is_unsupported_untrusted_approval_policy_error(err: &std::io::Error) -> bool 
     )
 }
 
+mod alarms;
 mod analytics_utils;
 mod app_info;
 mod app_server_tracing;
@@ -858,6 +859,7 @@ pub async fn run_main_with_transport_options(
             feedback: feedback.clone(),
             log_db,
             state_db: state_db.clone(),
+            alarm_owner: managed_daemon.then(codex_install_context::Channel::current),
             config_warnings,
             session_source,
             user_verification: Arc::new(crate::user_verification::Service::new(Arc::clone(

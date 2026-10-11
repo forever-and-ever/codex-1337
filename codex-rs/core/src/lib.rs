@@ -46,6 +46,7 @@ mod compact_native;
 mod compact_remote_history;
 mod compact_remote_v2;
 mod compact_token_budget;
+pub mod idle_hold;
 mod thread_startup_metadata;
 pub use codex_network_proxy::EnvironmentNetworkPolicy;
 pub use codex_network_proxy::NetworkDomainPermission;
@@ -152,6 +153,10 @@ pub(crate) use skills::skills_load_input_from_config;
 mod stream_events_utils;
 pub mod test_support;
 mod unified_exec;
+
+pub use unified_exec::terminal_watch::TerminalWatch;
+pub use unified_exec::terminal_watch::TerminalWatchError;
+pub use unified_exec::terminal_watch::TerminalWatchEvent;
 pub mod windows_sandbox;
 #[cfg(windows)]
 mod windows_system_config;

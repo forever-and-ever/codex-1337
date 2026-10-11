@@ -41,6 +41,9 @@ use super::internal_error;
 use super::invalid_request;
 use crate::thread_state::ThreadRuntimeLease;
 
+#[path = "../alarms/coordination.rs"]
+mod alarm_delivery;
+
 /// A process-owned service. Calling identity is supplied by the extension host,
 /// never by model arguments or a frontend connection.
 pub(crate) struct ThreadCoordinationService {

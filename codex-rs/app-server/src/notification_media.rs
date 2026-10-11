@@ -78,6 +78,7 @@ pub(crate) fn without_notification_media(notification: ServerNotification) -> Se
         | ServerNotification::ThreadGoalUpdated(_)
         | ServerNotification::ThreadGoalCleared(_)
         | ServerNotification::ThreadWorkStatusUpdated(_)
+        | ServerNotification::ThreadAlarmsUpdated(_)
         | ServerNotification::ThreadPromptCacheUpdated(_)
         | ServerNotification::ThreadPromptCacheMissed(_)
         | ServerNotification::ThreadWarmingStopped(_)

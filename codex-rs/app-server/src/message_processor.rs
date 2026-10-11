@@ -171,6 +171,8 @@ pub(crate) struct MessageProcessor {
     turn_processor: TurnRequestProcessor,
     windows_sandbox_processor: WindowsSandboxRequestProcessor,
     request_serialization_queues: RequestSerializationQueues,
+    alarms: crate::alarms::Alarms,
+    _alarm_worker: crate::alarms::RunningAlarmWorker,
 }
 
 #[derive(Debug)]
@@ -257,6 +259,7 @@ pub(crate) struct MessageProcessorArgs {
     pub(crate) feedback: CodexFeedback,
     pub(crate) log_db: Option<LogDbLayer>,
     pub(crate) state_db: Option<StateDbHandle>,
+    pub(crate) alarm_owner: Option<codex_install_context::Channel>,
     pub(crate) config_warnings: Vec<ConfigWarningNotification>,
     pub(crate) session_source: SessionSource,
     pub(crate) auth_manager: Arc<AuthManager>,
@@ -283,6 +286,7 @@ impl MessageProcessor {
             feedback,
             log_db,
             state_db,
+            alarm_owner,
             config_warnings,
             session_source,
             auth_manager,
@@ -329,6 +333,12 @@ impl MessageProcessor {
         let coordination = Arc::new(OnceLock::new());
         let (prompt_cache, prompt_cache_worker) =
             crate::prompt_cache::PromptCache::spawn(outgoing.clone());
+        let (alarms, alarm_worker) = crate::alarms::Alarms::spawn(
+            alarm_owner,
+            state_db.clone(),
+            Arc::clone(&coordination),
+            outgoing.clone(),
+        );
         let thread_manager = Arc::new_cyclic(|thread_manager| {
             queue_service = queue_store.map(|queue| {
                 Arc::new(QueuedItemService::new(
@@ -358,6 +368,7 @@ impl MessageProcessor {
                     queue_service: queue_service.clone(),
                     turn_start_admission: Some(Arc::clone(&turn_start_admission)),
                     coordination: Some(Arc::clone(&coordination)),
+                    alarms: alarms.available().then(|| alarms.clone()),
                 }),
                 Arc::new(CodexHomeUserInstructionsProvider::new(
                     config.codex_home.clone(),
@@ -535,11 +546,13 @@ impl MessageProcessor {
             turn_cost_worker.as_ref().map(TurnCostWorker::handle),
             config_warnings,
             prompt_cache,
+            alarms.clone(),
         );
         let thread_coordination = Arc::new(
             crate::request_processors::ThreadCoordinationService::new(thread_processor.clone()),
         );
         let _ = coordination.set(Arc::downgrade(&thread_coordination));
+        let alarm_worker = alarm_worker.start();
         let turn_processor = TurnRequestProcessor::new(
             auth_manager,
             Arc::clone(&thread_manager),
@@ -599,6 +612,8 @@ impl MessageProcessor {
 
         Self {
             turn_admission,
+            alarms,
+            _alarm_worker: alarm_worker,
             _thread_coordination: thread_coordination,
             user_verification,
             outgoing,
@@ -1384,6 +1399,9 @@ impl MessageProcessor {
             }
             ClientRequest::ThreadSetContextRole { params, .. } => {
                 self.thread_processor.thread_set_context_role(params).await
+            }
+            ClientRequest::ThreadAlarmDisarm { params, .. } => {
+                crate::alarms::disarm_request(&self.alarms, params).await
             }
             ClientRequest::ThreadSetWarming { params, .. } => {
                 self.thread_processor.thread_set_warming(params).await
