@@ -39,13 +39,15 @@ const EXEC_DESCRIPTION_TEMPLATE: &str = r#"Run JavaScript code to orchestrate/co
 - All nested tools are available on the global `tools` object, for example `await tools.exec_command(...)`. Tool names are exposed as normalized JavaScript identifiers, for example `await tools.mcp__ologs__get_profile(...)`.
 - Nested tool methods take either a string or an object as their input argument.
 - Nested tools return either an object or a string, based on the description.
-- Runs raw JavaScript -- no Node, no file system, no network access, no console.
+- Runs raw JavaScript -- no Node, no direct network access, no console. When available, `fs` accesses the selected executor's sandboxed filesystem, not the JavaScript host.
 - Accepts raw JavaScript source text, not JSON, quoted strings, or markdown code fences.
 - You may optionally start the tool input with a first-line pragma like `// @exec: {"max_output_tokens": 1000}`.
 - `max_output_tokens` sets the token budget for direct `exec` results. Defaults to 10000 tokens.
 - `exec` blocks until the script finishes. To keep working while a script runs, call `yield_control()` in it.
 - `exec` returns `Script running with cell ID ...` early when new user or agent input arrives, or after {{ max_yield_time_ms }} ms; the script keeps running.
 - When the JS code is fully evaluated, the isolate's lifetime ends and unawaited promises are silently discarded.
+
+- `exec` and `wait` may be batched with other top-level calls. They do not impose ordering: put `fence({})` between dependent stages. A fence fails on background/yielded work or any failed prerequisite, including nested calls; caught errors do not erase failures.
 
 - Global helpers:
 - `exit()`: Immediately ends the current script successfully (like an early return from the top level).
@@ -268,6 +270,13 @@ pub fn build_exec_tool_description(
         .replace("{{ image_helper }}", media_helpers.image_helper());
     if !description.is_empty() {
         sections.push(description);
+    }
+    if enabled_tools
+        .iter()
+        .chain(undeclared_tools.iter().map(UndeclaredTool::definition))
+        .any(|tool| tool.tool_name.is_default_namespace() && tool.tool_name.name == "fs")
+    {
+        sections.push("- `fs.readFile(path, options?)`: returns a Uint8Array, or an exact UTF-8 string with `\"utf8\"` or `{encoding: \"utf8\"}`.\n- `fs.writeFile(path, data, options?)`: writes a string as UTF-8 or a Uint8Array; resolves after the write. Both accept `{environment_id: \"...\"}` options, default to the primary executor, and resolve relative paths against its cwd. Await each operation. Transfers over 1 MiB fail; content enters model context only through explicit output. No filesystem escalation; normal permissions apply.".into());
     }
     sections.push(TOOL_DISCOVERY_GUIDANCE.to_string());
     sections.push(EXECUTION_OUTPUT_GUIDANCE.to_string());

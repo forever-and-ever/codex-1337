@@ -30,7 +30,6 @@ use crate::session::session::Session;
 use crate::session::step_context::StepContext;
 use crate::tools::ExecutedToolCalls;
 use crate::tools::call_trace;
-use crate::tools::context::SharedTurnDiffTracker;
 use crate::tools::parallel::ToolCallRuntime;
 
 pub(super) struct CodeModeDispatchBroker {
@@ -46,6 +45,7 @@ pub(super) struct CodeModeCellDelegate {
     pub(super) broker: Arc<CodeModeDispatchBroker>,
     pub(super) step_context: Arc<StepContext>,
     pub(super) scope: Arc<super::lifecycle::ExecutionScope>,
+    pub(super) fence: crate::tools::fence::Prerequisite,
 }
 
 struct CellDispatchGate {
@@ -119,10 +119,8 @@ impl CodeModeDispatchBroker {
     pub(super) fn start_turn_worker(
         &self,
         session: Arc<Session>,
-        step_context: Arc<StepContext>,
-        tracker: SharedTurnDiffTracker,
+        tool_runtime: ToolCallRuntime,
     ) -> CodeModeDispatchWorker {
-        let tool_runtime = ToolCallRuntime::new(Arc::clone(&session), step_context, tracker);
         let host = Arc::new(CoreTurnHost {
             session,
             tool_runtime,
@@ -165,6 +163,7 @@ impl CodeModeDispatchBroker {
                         let _ = response_tx.send(response);
                     }
                     DispatchMessage::InvokeTool {
+                        fence,
                         invocation,
                         step_context,
                         mut dispatch_trace,
@@ -228,12 +227,14 @@ impl CodeModeDispatchBroker {
                                 // Submission and cell closure share this gate.
                                 span.in_scope(|| {
                                     dispatch_trace.interruption = None;
-                                    host.submit_tool(
-                                        invocation,
-                                        step_context,
-                                        dispatch_trace.call_id.clone(),
-                                        cancellation_token.clone(),
-                                    )
+                                    fence.enter(|| {
+                                        host.submit_tool(
+                                            invocation,
+                                            step_context,
+                                            dispatch_trace.call_id.clone(),
+                                            cancellation_token.clone(),
+                                        )
+                                    })
                                 })
                                 .instrument(span)
                             };
@@ -326,6 +327,7 @@ impl CodeModeSessionDelegate for CodeModeCellDelegate {
         invocation: CodeModeNestedToolCall,
         cancellation_token: CancellationToken,
     ) -> ToolInvocationFuture<'a> {
+        let member = self.fence.member();
         Box::pin(async move {
             let call_id = format!("{PUBLIC_TOOL_NAME}-{}", uuid::Uuid::new_v4());
             call_trace::received(
@@ -348,6 +350,7 @@ impl CodeModeSessionDelegate for CodeModeCellDelegate {
             self.broker
                 .dispatch_tx
                 .send(DispatchMessage::InvokeTool {
+                    fence: self.fence.clone(),
                     invocation,
                     step_context: Arc::downgrade(&self.step_context),
                     dispatch_trace,
@@ -357,13 +360,17 @@ impl CodeModeSessionDelegate for CodeModeCellDelegate {
                 })
                 .await
                 .map_err(|_| "code mode nested tool dispatcher is unavailable".to_string())?;
-            tokio::select! {
+            let result = tokio::select! {
                 response = response_rx => response
                     .map_err(|_| "code mode nested tool dispatcher stopped".to_string())?,
                 _ = cancellation_token.cancelled() => {
                     Err("code mode nested tool call cancelled".to_string())
                 }
+            };
+            if result.is_ok() {
+                member.complete();
             }
+            result
         })
     }
 
@@ -441,6 +448,7 @@ impl Drop for CodeModeCellDelegate {
 
 enum DispatchMessage {
     InvokeTool {
+        fence: crate::tools::fence::Prerequisite,
         scope: Arc<super::lifecycle::ExecutionScope>,
         invocation: CodeModeNestedToolCall,
         // The delegate owns the step while the callback is live; stale queued work must not.

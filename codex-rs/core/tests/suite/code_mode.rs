@@ -807,6 +807,9 @@ text(await tools.write_stdin({session_id: running.session_id, chars: "continue\n
 text(await tools.exec_command({cmd: "sleep 1; printf finished", yield_time_ms: 250}));
 await sh("printf one", {}, "exit 3", {cmd: "printf two"});
 sh("printf unawaited");
+await fs.writeFile('code-mode-bytes', new Uint8Array([0, 255, 10, 128]));
+const bytes = await fs.readFile('code-mode-bytes');
+if (!(bytes instanceof Uint8Array) || String(bytes) !== '0,255,10,128') throw new Error('filesystem byte corruption');
 "#,
         move |config| {
             if tool_mode == ToolMode::CodeModeOnly {
@@ -963,6 +966,7 @@ async fn code_mode_only_restricts_prompt_tools() -> Result<()> {
         vec![
             "exec".to_string(),
             "wait".to_string(),
+            "fence".to_string(),
             "python".to_string(),
             "bash".to_string(),
             "write_stdin".to_string(),
@@ -6119,10 +6123,6 @@ async fn code_mode_interrupt_terminates_active_cells_and_nested_tools() -> Resul
                         "cell_id": background_cell_id,
                     }))?,
                 ),
-                ev_completed("resp-wait-background"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-wait-active"),
                 responses::ev_function_call(
                     "call-wait-active",
                     "wait",
@@ -6130,10 +6130,6 @@ async fn code_mode_interrupt_terminates_active_cells_and_nested_tools() -> Resul
                         "cell_id": active_cell_id,
                     }))?,
                 ),
-                ev_completed("resp-wait-active"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-recovery"),
                 ev_custom_tool_call("call-recovery", "exec", r#"text(load("persisted"));"#),
                 ev_completed("resp-recovery"),
             ]),
@@ -6148,6 +6144,7 @@ async fn code_mode_interrupt_terminates_active_cells_and_nested_tools() -> Resul
     test.submit_turn("verify interrupted cells and reuse their session")
         .await?;
     let requests = recovery.requests();
+    assert_eq!(requests.len(), 2, "both waits and exec share one response");
     let metadata = &requests[0].custom_tool_call_output("call-interrupted")["internal_chat_message_metadata_passthrough"];
     assert_eq!(
         metadata["executed_tool_calls"],
@@ -6156,9 +6153,9 @@ async fn code_mode_interrupt_terminates_active_cells_and_nested_tools() -> Resul
     assert_eq!(metadata["tool_calls_complete"], Value::Bool(true));
     let background_output = function_tool_output_items(&requests[1], "call-wait-background");
     assert!(text_item(&background_output, /*index*/ 1).contains("not found"));
-    let active_output = function_tool_output_items(&requests[2], "call-wait-active");
+    let active_output = function_tool_output_items(&requests[1], "call-wait-active");
     assert!(text_item(&active_output, /*index*/ 1).contains("not found"));
-    let recovery_items = custom_tool_output_items(&requests[3], "call-recovery");
+    let recovery_items = custom_tool_output_items(&requests[1], "call-recovery");
     assert_eq!(text_item(&recovery_items, /*index*/ 1), "preserved");
 
     Ok(())
@@ -9377,3 +9374,6 @@ await new Promise(() => {});
     server.shutdown().await;
     Ok(())
 }
+
+#[path = "code_mode_pipeline.rs"]
+mod pipeline;

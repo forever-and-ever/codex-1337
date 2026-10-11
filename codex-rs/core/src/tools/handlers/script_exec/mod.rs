@@ -105,6 +105,7 @@ impl ToolExecutor<ToolInvocation> for ScriptExecHandler {
                 ));
             }
             let initial_wait = if metadata.background {
+                crate::tools::fence::Prerequisite::detached();
                 InitialWait::Yield(MIN_YIELD_TIME_MS)
             } else {
                 InitialWait::Exit

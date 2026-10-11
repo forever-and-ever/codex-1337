@@ -619,4 +619,5 @@ mod tests {
     }
 }
 
+pub(crate) mod code_mode_fs;
 pub(crate) mod script_exec;

@@ -22,6 +22,9 @@ pub(super) fn install_globals(scope: &mut v8::PinScope<'_, '_>) -> Result<(), St
     delete_global(scope, global, "WebAssembly")?;
 
     let tools = build_tools_object(scope)?;
+    if let Some(fs) = super::filesystem::helper(scope, tools)? {
+        set_global(scope, global, "fs", fs)?;
+    }
     let all_tools = build_all_tools_value(scope)?;
     let describe_tool = helper_function(scope, "describe_tool", describe_tool_callback)?;
     let search_tools = helper_function(scope, "search_tools", search_tools_callback)?;

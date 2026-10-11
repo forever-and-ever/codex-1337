@@ -27,6 +27,7 @@ use crate::session::step_context::StepContext;
 use crate::session::tests::make_session_and_context;
 use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::ToolInvocation;
+use crate::tools::parallel::ToolCallRuntime;
 use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::ToolExecutor;
 use crate::tools::registry::ToolRegistry;
@@ -150,14 +151,18 @@ async fn detached_code_mode_callback_keeps_thread_id_on_dispatch_span() -> anyho
     let _untraced = tracing::Dispatch::new(tracing::subscriber::NoSubscriber::default());
     let _subscriber = tracing::subscriber::set_default(subscriber);
     let delegate = CodeModeCellDelegate {
+        fence: Default::default(),
         scope: execution_scope(&session, &turn, &cell_id).await,
         broker: Arc::clone(&broker),
         step_context: Arc::clone(&step),
     };
     let _worker = broker.start_turn_worker(
         Arc::clone(&session),
-        step,
-        Arc::new(tokio::sync::Mutex::new(TurnDiffTracker::new())),
+        ToolCallRuntime::new(
+            Arc::clone(&session),
+            step,
+            Arc::new(tokio::sync::Mutex::new(TurnDiffTracker::new())),
+        ),
     );
     // Process-owned code-mode callbacks run on a fresh task without a turn span.
     let result = tokio::spawn(async move {
@@ -219,6 +224,7 @@ async fn dropped_tool_callbacks_release_the_origin_before_dispatch() {
         /*executed_tool_calls*/ Default::default(),
     ));
     let delegate = CodeModeCellDelegate {
+        fence: Default::default(),
         scope: execution_scope(&session, &turn, &CellId::new("queued-cell".to_string())).await,
         broker: Arc::clone(&broker),
         step_context: StepContext::for_test(Arc::clone(&turn)),
@@ -260,8 +266,11 @@ async fn dropped_tool_callbacks_release_the_origin_before_dispatch() {
     broker.mark_cell_ready_for_dispatch(&cell_id, /*originating_call*/ None);
     let _worker = broker.start_turn_worker(
         Arc::clone(&session),
-        StepContext::for_test(Arc::clone(&turn)),
-        Arc::new(tokio::sync::Mutex::new(TurnDiffTracker::new())),
+        ToolCallRuntime::new(
+            Arc::clone(&session),
+            StepContext::for_test(Arc::clone(&turn)),
+            Arc::new(tokio::sync::Mutex::new(TurnDiffTracker::new())),
+        ),
     );
     let response = response_rx.await;
     assert_eq!(

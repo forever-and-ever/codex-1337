@@ -398,6 +398,7 @@ pub(crate) async fn handle_output_item_done(
         }
         // The tool request should be answered directly (or was denied); push that response into the transcript.
         Err(FunctionCallError::RespondToModel(message)) => {
+            ctx.tool_runtime.batch.reject(&item);
             ctx.sess
                 .services
                 .executed_tool_calls
