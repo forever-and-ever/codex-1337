@@ -47,6 +47,8 @@ const EXEC_DESCRIPTION_TEMPLATE: &str = r#"Run JavaScript code to orchestrate/co
 - `exec` returns `Script running with cell ID ...` early when new user or agent input arrives, or after {{ max_yield_time_ms }} ms; the script keeps running.
 - When the JS code is fully evaluated, the isolate's lifetime ends and unawaited promises are silently discarded.
 
+- `exec` and `wait` may be batched with other top-level calls. They do not impose ordering: put `fence({})` between dependent stages. A fence fails on background/yielded work or any failed prerequisite, including nested calls; caught errors do not erase failures.
+
 - Global helpers:
 - `exit()`: Immediately ends the current script successfully (like an early return from the top level).
 - `text(value, options?: {metadata?: boolean})`: Appends a text item; see Execution output rules below for native execution results and generic serialization.

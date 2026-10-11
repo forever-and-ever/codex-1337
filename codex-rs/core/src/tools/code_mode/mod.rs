@@ -38,7 +38,6 @@ use crate::session::turn_context::TurnContext;
 use crate::tools::ExecutedToolCalls;
 use crate::tools::call_trace;
 use crate::tools::context::FunctionToolOutput;
-use crate::tools::context::SharedTurnDiffTracker;
 use crate::tools::context::ToolPayload;
 use crate::tools::parallel::ToolCallRuntime;
 use crate::tools::router::ToolCall;
@@ -149,6 +148,7 @@ impl CodeModeService {
             broker: Arc::clone(&self.dispatch_broker),
             step_context,
             scope: starting.scope(),
+            fence: crate::tools::fence::Prerequisite::current(),
         });
         let result = match self.session().await {
             Ok(runtime) => runtime.execute(request, delegate, Some(news)).await,
@@ -282,7 +282,7 @@ impl CodeModeService {
         &self,
         session: &Arc<Session>,
         step_context: Arc<StepContext>,
-        tracker: SharedTurnDiffTracker,
+        tool_runtime: ToolCallRuntime,
     ) -> Option<CodeModeDispatchWorker> {
         if !step_context.tool_router.requires_code_mode_worker() {
             return None;
@@ -290,7 +290,7 @@ impl CodeModeService {
 
         Some(
             self.dispatch_broker
-                .start_turn_worker(Arc::clone(session), step_context, tracker),
+                .start_turn_worker(Arc::clone(session), tool_runtime),
         )
     }
 
@@ -330,6 +330,12 @@ fn handle_runtime_response(
     wall_time: Duration,
     experimental_show_cell_overhead: bool,
 ) -> CodeModeToolOutput {
+    if matches!(&response, RuntimeResponse::Yielded { .. }) {
+        crate::tools::fence::Prerequisite::detached();
+    }
+    if matches!(&response, RuntimeResponse::Terminated { .. }) {
+        let _ = crate::tools::fence::Prerequisite::current().finish(/*success*/ false);
+    }
     let script_status = format_script_status(&response);
     let supports_original = can_request_original_image_detail(model_info);
     let host_duration = response.code_mode_host_duration();
@@ -476,6 +482,7 @@ fn submit_nested_tool(
         },
         cancellation_token,
         Arc::default(),
+        /*admission*/ None,
     );
     Ok(async move { Ok(result.await?.code_mode_result()) })
 }
@@ -533,6 +540,7 @@ mod tests {
     use crate::session::step_context::StepContext;
     use crate::session::tests::make_session_and_context;
     use crate::tools::context::ToolPayload;
+    use crate::tools::parallel::ToolCallRuntime;
     use crate::tools::registry::ToolRegistry;
     use crate::tools::router::ToolRouter;
     use crate::turn_diff_tracker::TurnDiffTracker;
@@ -562,11 +570,11 @@ mod tests {
         let step_context = step_context.with_tool_router_for_test(router);
         let tracker = Arc::new(tokio::sync::Mutex::new(TurnDiffTracker::new()));
 
-        let worker =
-            session
-                .services
-                .code_mode_service
-                .start_turn_worker(&session, step_context, tracker);
+        let worker = session.services.code_mode_service.start_turn_worker(
+            &session,
+            Arc::clone(&step_context),
+            ToolCallRuntime::new(Arc::clone(&session), step_context, tracker),
+        );
 
         assert!(worker.is_some());
     }

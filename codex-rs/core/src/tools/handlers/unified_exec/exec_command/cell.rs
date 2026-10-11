@@ -47,6 +47,7 @@ struct CellArgs {
 pub(super) fn initial_wait(arguments: &str) -> Result<InitialWait, FunctionCallError> {
     let CellArgs { background } = parse_arguments(arguments)?;
     Ok(if background {
+        crate::tools::fence::Prerequisite::detached();
         InitialWait::Yield(MIN_YIELD_TIME_MS)
     } else {
         InitialWait::Exit

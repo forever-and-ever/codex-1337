@@ -148,4 +148,5 @@ fn build_content_with_timeout(exec_output: &ExecToolCallOutput) -> String {
     }
 }
 
+pub(crate) mod fence;
 pub(crate) mod script_exec;

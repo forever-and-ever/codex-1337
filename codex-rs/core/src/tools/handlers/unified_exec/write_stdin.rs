@@ -122,6 +122,7 @@ impl WriteStdinHandler {
                 FunctionCallError::RespondToModel(message)
             })?;
 
+        crate::tools::fence::Prerequisite::process_result(&response);
         Ok(boxed_tool_output(response))
     }
 }

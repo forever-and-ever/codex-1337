@@ -1723,7 +1723,7 @@ async fn run_sampling_request(
     let _code_mode_worker = sess.services.code_mode_service.start_turn_worker(
         &sess,
         Arc::clone(&step_context),
-        Arc::clone(&turn_diff_tracker),
+        tool_runtime.clone(),
     );
     let max_retries = turn_context.provider.info().stream_max_retries();
     let mut retry_state = ResponsesStreamRetryState::default();
@@ -1764,8 +1764,10 @@ async fn run_sampling_request(
             )
             .await?;
         }
+        let mut response_runtime = tool_runtime.clone();
+        response_runtime.batch = Arc::default();
         let err = match try_run_sampling_request(
-            tool_runtime.clone(),
+            response_runtime,
             Arc::clone(&sess),
             Arc::clone(&step_context),
             Arc::clone(&turn_store),

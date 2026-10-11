@@ -188,6 +188,10 @@ impl ToolExecutor<ToolInvocation> for CodeModeExecuteHandler {
     {
         Box::pin(self.handle_call(invocation))
     }
+
+    fn supports_parallel_tool_calls(&self) -> bool {
+        true
+    }
 }
 
 impl CodeModeExecuteHandler {

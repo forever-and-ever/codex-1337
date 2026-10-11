@@ -56,6 +56,10 @@ impl ToolExecutor<ToolInvocation> for CodeModeWaitHandler {
     {
         Box::pin(self.handle_call(invocation))
     }
+
+    fn supports_parallel_tool_calls(&self) -> bool {
+        true
+    }
 }
 
 impl CodeModeWaitHandler {

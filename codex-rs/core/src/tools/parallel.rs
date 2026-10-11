@@ -48,6 +48,7 @@ pub(crate) struct ToolCallRuntime {
     step_context: Arc<StepContext>,
     tracker: SharedTurnDiffTracker,
     parallel_execution: Arc<RwLock<()>>,
+    pub(crate) batch: Arc<super::fence::ResponseBatch>,
 }
 
 impl ToolCallRuntime {
@@ -61,6 +62,7 @@ impl ToolCallRuntime {
             step_context,
             tracker,
             parallel_execution: Arc::new(RwLock::new(())),
+            batch: Arc::default(),
         }
     }
 
@@ -79,6 +81,7 @@ impl ToolCallRuntime {
         call: ToolCall,
         cancellation_token: CancellationToken,
     ) -> impl std::future::Future<Output = Result<ResponseItemEnvelope, CodexErr>> {
+        let admission = self.batch.admit(&call);
         let error_call = call.clone();
         let source = call.direct_source();
         let recorder = self.session.services.executed_tool_calls.clone();
@@ -91,6 +94,7 @@ impl ToolCallRuntime {
             source,
             cancellation_token,
             Arc::clone(&call_state),
+            Some(admission),
         );
         async move {
             let result = future.await;
@@ -122,16 +126,17 @@ impl ToolCallRuntime {
     }
 
     #[instrument(level = "trace", skip_all)]
-    pub(crate) fn handle_tool_call_with_source(
+    pub(super) fn handle_tool_call_with_source(
         self,
         step_context: Arc<StepContext>,
         call: ToolCall,
         source: ToolCallSource,
         cancellation_token: CancellationToken,
         call_state: Arc<ToolCallState>,
+        admission: Option<super::fence::Admission>,
     ) -> impl std::future::Future<Output = Result<AnyToolResult, FunctionCallError>> {
-        let message_admission =
-            super::user_messaging::admit_code_mode_send(&self.session, &source, &call.tool_name);
+        let fence = super::fence::Prerequisite::current();
+        let coordinator = super::fence::is_coordinator(&call.tool_name);
         self.session
             .services
             .executed_tool_calls
@@ -195,37 +200,68 @@ impl ToolCallRuntime {
 
         let mut dispatch_handle = AbortOnDropHandle::new(tokio::spawn(
             async move {
-                let _message_admission = message_admission?;
-                if let Some(tool_runtime) = tool_runtime
-                    && let Some(readiness) = tool_runtime.wait_until_ready(&session)
-                {
-                    readiness.await;
-                }
+                let result = fence
+                    .run(admission, async {
+                        let _message_admission = super::user_messaging::admit_code_mode_send(
+                            &session,
+                            &source,
+                            &dispatch_call.tool_name,
+                        )?;
+                        if let Some(tool_runtime) = tool_runtime
+                            && let Some(readiness) = tool_runtime.wait_until_ready(&session)
+                        {
+                            readiness.await;
+                        }
 
-                let guard = if supports_parallel {
-                    Either::Left(lock.read().await)
-                } else {
-                    Either::Right(lock.write().await)
-                };
-                // Admission through the parallel-execution gate marks the end
-                // of dispatch waiting and the start of handler execution.
-                if let Some(execution_started_at) = execution_started_at {
-                    let _ = execution_started_at.set(Instant::now());
-                }
+                        // Coordinators must not hold an operation lock while awaiting nested work.
+                        let guard = if coordinator {
+                            None
+                        } else if supports_parallel {
+                            Some(Either::Left(lock.read().await))
+                        } else {
+                            Some(Either::Right(lock.write().await))
+                        };
+                        // Cancellation can arrive while this task is queued behind a fence or readiness.
+                        // The response collector need not have polled its cancellation branch yet.
+                        if invocation_cancellation_token.is_cancelled() {
+                            let _ = dispatch_call_state
+                                .terminal_outcome
+                                .set(ToolCallOutcome::Aborted);
+                            notify_tool_aborted(
+                                &session,
+                                &turn,
+                                &dispatch_call.call_id,
+                                &dispatch_call.tool_name,
+                                source,
+                            )
+                            .await;
+                            return Ok(Self::aborted_response(
+                                &dispatch_call,
+                                started.elapsed().as_secs_f32().max(0.1),
+                            ));
+                        }
+                        // Admission through the parallel-execution gate marks the end
+                        // of dispatch waiting and the start of handler execution.
+                        if let Some(execution_started_at) = execution_started_at {
+                            let _ = execution_started_at.set(Instant::now());
+                        }
 
-                let result = router
-                    .dispatch_tool_call_with_state(
-                        session,
-                        step_context,
-                        invocation_cancellation_token,
-                        tracker,
-                        dispatch_call,
-                        source,
-                        dispatch_call_state,
-                    )
-                    .instrument(dispatch_span.clone())
+                        let result = router
+                            .dispatch_tool_call_with_state(
+                                session,
+                                step_context,
+                                invocation_cancellation_token,
+                                tracker,
+                                dispatch_call,
+                                source,
+                                dispatch_call_state,
+                            )
+                            .instrument(dispatch_span.clone())
+                            .await;
+                        drop(guard);
+                        result
+                    })
                     .await;
-                drop(guard);
                 // The sampling loop collects results in order only after its stream ends.
                 // Record readiness here, before either caller encodes or collects the result.
                 // A fatal error still propagates to the caller instead of producing a tool
@@ -613,8 +649,26 @@ mod tests {
             },
             encrypted_function_args: None,
         };
-        let response_task =
-            tokio::spawn(runtime.handle_tool_call(call, cancellation_token.clone()));
+        let response_task = tokio::spawn(
+            runtime
+                .clone()
+                .handle_tool_call(call.clone(), cancellation_token.clone()),
+        );
+        let fence = runtime.clone().handle_tool_call(
+            ToolCall {
+                tool_name: codex_tools::ToolName::plain("fence"),
+                call_id: "fence".into(),
+                ..call.clone()
+            },
+            CancellationToken::new(),
+        );
+        let successor = runtime.handle_tool_call(
+            ToolCall {
+                call_id: "successor".into(),
+                ..call
+            },
+            CancellationToken::new(),
+        );
         cancellation_token.cancel();
         tokio::time::timeout(Duration::from_secs(1), response_task)
             .await
@@ -661,6 +715,19 @@ mod tests {
             dispatch_duration_ms, total_duration_ms,
             "tool cancelled before admission should attribute all elapsed time to dispatch: {timing_event}"
         );
+        // Both must fail before the operation gate is released: no later handler is admitted.
+        for response in [
+            tokio::time::timeout(Duration::from_secs(1), fence).await??,
+            tokio::time::timeout(Duration::from_secs(1), successor).await??,
+        ] {
+            let codex_protocol::models::ResponseItem::FunctionCallOutput { output, .. } =
+                response.item
+            else {
+                panic!("paired tool output");
+            };
+            assert_eq!(output.success, Some(false));
+            assert!(output.body.to_text().unwrap().contains("Skipped by fence"));
+        }
         release_execution_gate_tx
             .send(())
             .expect("execution gate task should remain available");
