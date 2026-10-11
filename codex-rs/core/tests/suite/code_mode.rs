@@ -807,6 +807,9 @@ text(await tools.write_stdin({session_id: running.session_id, chars: "continue\n
 text(await tools.exec_command({cmd: "sleep 1; printf finished", yield_time_ms: 250}));
 await sh("printf one", {}, "exit 3", {cmd: "printf two"});
 sh("printf unawaited");
+await fs.writeFile('code-mode-bytes', new Uint8Array([0, 255, 10, 128]));
+const bytes = await fs.readFile('code-mode-bytes');
+if (!(bytes instanceof Uint8Array) || String(bytes) !== '0,255,10,128') throw new Error('filesystem byte corruption');
 "#,
         move |config| {
             if tool_mode == ToolMode::CodeModeOnly {
@@ -9377,3 +9380,6 @@ await new Promise(() => {});
     server.shutdown().await;
     Ok(())
 }
+
+#[path = "code_mode_pipeline.rs"]
+mod pipeline;

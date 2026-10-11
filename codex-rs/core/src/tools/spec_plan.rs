@@ -1068,6 +1068,17 @@ fn add_core_tool_sources(context: &CoreToolPlanContext<'_>, registry: &mut ToolR
         return;
     }
 
+    if context.environments.primary().is_some()
+        && matches!(
+            effective_tool_mode(context.turn_context, context.model_info),
+            ToolMode::CodeMode | ToolMode::CodeModeOnly
+        )
+    {
+        registry.add_with_exposure(
+            super::handlers::code_mode_fs::FileSystemHandler,
+            ToolExposure::CodeModeOnly,
+        );
+    }
     add_shell_tools(context, registry);
     add_mcp_resource_tools(context, registry);
     add_core_utility_tools(context, registry);
