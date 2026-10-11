@@ -21,6 +21,8 @@ mod turn_submissions;
 pub(crate) use turn_submissions::turn_start_params;
 mod warming;
 
+mod alarms;
+
 #[cfg(test)]
 #[path = "app_server_session/collaboration_catalog_tests.rs"]
 mod collaboration_catalog_tests;

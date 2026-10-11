@@ -12,7 +12,7 @@ pub(crate) fn queued_message_text(item: &QueuedSubmission) -> Option<String> {
             return None;
         };
         return Some(
-            crate::dynamic_tools::parse_delegated_tool_output(
+            crate::dynamic_tools::DelegatedMessage::from_tool_output(
                 &output.name,
                 output.namespace.as_deref(),
                 &output.output,
@@ -64,7 +64,7 @@ impl ChatWidget {
                 .tool_output
                 .as_ref()
                 .and_then(|output| {
-                    crate::dynamic_tools::parse_delegated_tool_output(
+                    crate::dynamic_tools::DelegatedMessage::from_tool_output(
                         &output.name,
                         output.namespace.as_deref(),
                         &output.output,

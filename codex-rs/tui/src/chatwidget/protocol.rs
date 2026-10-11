@@ -70,6 +70,9 @@ impl ChatWidget {
             ServerNotification::ThreadGoalUpdated(notification) => {
                 self.on_thread_goal_updated(notification.goal, notification.turn_id);
             }
+            ServerNotification::ThreadAlarmsUpdated(notification) => {
+                self.on_alarms_updated(notification)
+            }
             ServerNotification::ThreadPromptCacheUpdated(notification) => {
                 self.on_prompt_cache_updated(notification);
             }

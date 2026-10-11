@@ -1061,6 +1061,7 @@ impl App {
             AppEvent::ContextRole { thread_id, command } => {
                 self.context_role(app_server, thread_id, command).await;
             }
+            AppEvent::DisarmAlarm { thread_id, id } => self.disarm_alarm(app_server, thread_id, id).await,
             AppEvent::SetWarming { thread_id, enabled } => {
                 self.set_warming(app_server, thread_id, enabled).await;
             }

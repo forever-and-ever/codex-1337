@@ -384,6 +384,9 @@ use codex_protocol::user_input::MAX_USER_INPUT_TEXT_CHARS;
 use codex_protocol::user_input::TextElement;
 
 mod agents_navigation;
+mod alarm_indicator;
+
+pub(crate) use alarm_indicator::alarm_detail;
 mod attachment_state;
 mod child_input;
 mod completion_target;
@@ -396,6 +399,8 @@ mod inline_input;
 mod mouse;
 mod paste_input;
 mod popup_state;
+pub(crate) use alarm_indicator::alarm_label;
+
 mod prompt_cache_glyphs;
 pub(crate) use prompt_cache_glyphs::PromptCacheGlyphs;
 mod reconnect;
@@ -4862,7 +4867,7 @@ impl ChatComposer {
             self.cursor_pos_with_options(area, options),
             buf,
         );
-        self.render_prompt_cache_glyphs(composer_rect, options, buf);
+        self.render_bottom_row_indicators(composer_rect, options, buf);
         if options.footer.is_some_and(|footer| footer.is_interactive) {
             buf.set_style(composer_rect, Style::default().dim());
         }

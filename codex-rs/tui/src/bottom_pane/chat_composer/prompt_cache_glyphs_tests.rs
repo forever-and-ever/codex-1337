@@ -10,9 +10,11 @@ fn rows(
     width: u16,
     prompt_cache: PromptCacheGlyphs,
     reserve: u16,
+    alarms: &[codex_app_server_protocol::AlarmSummary],
 ) -> String {
     let options = composer.resolve_render_options(ComposerRenderOptions {
         prompt_cache,
+        alarms,
         textarea_right_reserve: reserve,
         ..Default::default()
     });
@@ -60,9 +62,50 @@ fn warming_and_cold_glyphs_share_the_bottom_padding_row() {
         estimate: PromptCacheEstimate::Cold,
         warming: PromptCacheWarming::Holding { ends_at },
     };
+    let alarms = [
+        codex_app_server_protocol::AlarmSummary {
+            id: "wake".into(),
+            armed_at: 0,
+            note: "Wake up".into(),
+            condition: codex_app_server_protocol::AlarmCondition::Clock { at: ends_at * 1000 },
+        },
+        codex_app_server_protocol::AlarmSummary {
+            id: "watch".into(),
+            armed_at: 0,
+            note: "Check tests".into(),
+            condition: codex_app_server_protocol::AlarmCondition::Watch {
+                session_id: 27,
+                command: "just test".into(),
+                pattern: None,
+                deadline: None,
+            },
+        },
+    ];
     insta::assert_snapshot!(format!(
-        "{}\n---\n{}",
-        rows(&composer, /*width*/ 48, glyphs, /*reserve*/ 0),
-        rows(&composer, /*width*/ 48, glyphs, /*reserve*/ 8)
+        "{}\n---\n{}\n---\n{}\n---\n{}",
+        rows(
+            &composer,
+            /*width*/ 48,
+            glyphs,
+            /*reserve*/ 0,
+            &[]
+        ),
+        rows(
+            &composer,
+            /*width*/ 48,
+            glyphs,
+            /*reserve*/ 8,
+            &[]
+        ),
+        rows(
+            &composer, /*width*/ 68, glyphs, /*reserve*/ 8, &alarms
+        ),
+        rows(
+            &composer,
+            /*width*/ 48,
+            PromptCacheGlyphs::default(),
+            /*reserve*/ 0,
+            &alarms[1..]
+        )
     ));
 }

@@ -480,12 +480,13 @@ impl ChatWidget {
                 namespace,
                 output,
             } => {
-                if let Some(message) = crate::dynamic_tools::parse_delegated_tool_output(
+                if let Some(cell) = crate::dynamic_tools::unsolicited_tool_output(
+                    call_id.as_deref(),
                     &name,
                     namespace.as_deref(),
                     &output,
                 ) {
-                    self.add_to_history(history_cell::DelegatedMessageCell(message));
+                    self.add_boxed_history(cell);
                 } else if let Some(cell) = history_cell::ToolOutputCell::from_output(
                     &id,
                     call_id.as_deref(),

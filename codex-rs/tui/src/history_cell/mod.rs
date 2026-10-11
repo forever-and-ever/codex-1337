@@ -10,6 +10,9 @@
 //! bumps the active-cell revision tracked by `ChatWidget`, so the cache key changes whenever the
 //! rendered transcript output can change.
 
+mod alarm;
+pub(crate) use alarm::AlarmSoundingCell;
+
 mod activity_group;
 mod code_mode;
 mod tool_item;

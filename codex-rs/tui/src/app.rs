@@ -261,6 +261,7 @@ mod queued_messages;
 mod rate_limit_refresh;
 pub(crate) mod turn_submissions;
 pub(crate) use queued_messages::QueueEvent;
+mod alarms;
 mod comms;
 mod context_role;
 mod mouse_paste;

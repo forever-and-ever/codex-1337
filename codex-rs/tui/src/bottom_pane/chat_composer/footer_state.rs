@@ -78,6 +78,7 @@ pub(crate) struct ComposerRenderOptions<'a> {
     pub(crate) warning_count: usize,
     pub(crate) textarea_right_reserve: u16,
     pub(crate) prompt_cache: super::PromptCacheGlyphs,
+    pub(crate) alarms: &'a [codex_app_server_protocol::AlarmSummary],
     /// Keep configured status below the composer, separate from hints.
     pub(crate) separate_status_line: bool,
     pub(crate) hint_placement: ComposerHintPlacement,

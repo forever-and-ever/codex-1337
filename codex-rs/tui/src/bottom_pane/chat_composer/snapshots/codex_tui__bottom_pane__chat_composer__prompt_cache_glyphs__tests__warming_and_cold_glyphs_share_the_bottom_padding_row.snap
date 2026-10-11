@@ -1,6 +1,6 @@
 ---
 source: tui/src/bottom_pane/chat_composer/prompt_cache_glyphs_tests.rs
-expression: "format!(\"{}\\n---\\n{}\", rows(&composer, 48, glyphs, 0),\nrows(&composer, 48, glyphs, 8))"
+expression: "format!(\"{}\\n---\\n{}\\n---\\n{}\\n---\\n{}\", rows(&composer, 48, glyphs, 0, &[]),\nrows(&composer, 48, glyphs, 8, &[]), rows(&composer, 68, glyphs, 8, &alarms),\nrows(&composer, 48, PromptCacheGlyphs::default(), 0, &alarms[1..]))"
 ---
                                                 
 › keep this draft                               
@@ -10,4 +10,14 @@ expression: "format!(\"{}\\n---\\n{}\", rows(&composer, 48, glyphs, 0),\nrows(&c
                                                 
 › keep this draft                               
                         󰐸 until 03:12 󰜗         
+                             100% context left  
+---
+                                                                    
+› keep this draft                                                   
+                          󰐸 until 03:12 󰜗  ◷ 10-09 03:12 +1         
+                                                 100% context left  
+---
+                                                
+› keep this draft                               
+                                          ◷ #27 
                              100% context left

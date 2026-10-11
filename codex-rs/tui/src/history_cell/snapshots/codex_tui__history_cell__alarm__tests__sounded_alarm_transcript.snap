@@ -1,0 +1,60 @@
+---
+source: tui/src/history_cell/alarm_tests.rs
+expression: rendered
+---
+◷ Alarm check-tests · time reached · 12s late
+  Check test results
+  The server was not running.
+  Still armed: follow-up
+Header: BOLD; note: DIM
+---
+◷ Alarm check-tests · session #27 exited 1
+  Check test results
+  just test
+    └ output line 1
+      output line 2
+  … +10 lines (ctrl+t to view transcript)
+      output line 13
+      output line 14
+  Still armed: follow-up
+Header: BOLD; note: DIM
+Expanded:
+◷ Alarm check-tests · session #27 exited 1
+  Check test results
+  just test
+  output line 1
+  output line 2
+  output line 3
+  output line 4
+  output line 5
+  output line 6
+  output line 7
+  output line 8
+  output line 9
+  output line 10
+  output line 11
+  output line 12
+  output line 13
+  output line 14
+  Still armed: follow-up
+---
+◷ Alarm check-tests · session #27 matched
+  Check test results
+  just test
+  test result: ok
+  Still armed: follow-up
+Header: BOLD; note: DIM
+---
+◷ Alarm check-tests · session #27 deadline reached
+  Check test results
+  just test
+  Still running.
+  Still armed: follow-up
+Header: BOLD; note: DIM
+---
+◷ Alarm check-tests · session #27 lost
+  Check test results
+  just test
+  Session is no longer present.
+  Still armed: follow-up
+Header: BOLD; note: DIM

@@ -338,6 +338,7 @@ impl ChatWidget {
                 self.app_event_tx.compact();
             }
             SlashCommand::Warm => self.toggle_warming(),
+            SlashCommand::Alarms => self.open_alarms(),
             SlashCommand::Recap => {
                 let Some(thread_id) = self.thread_id else {
                     self.add_error_message(
@@ -1325,6 +1326,7 @@ impl ChatWidget {
             | SlashCommand::Model
             | SlashCommand::Account
             | SlashCommand::Plan
+            | SlashCommand::Alarms
             | SlashCommand::Goal
             | SlashCommand::Side
             | SlashCommand::Btw

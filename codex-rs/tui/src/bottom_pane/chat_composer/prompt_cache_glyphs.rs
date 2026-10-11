@@ -62,20 +62,38 @@ impl PromptCacheGlyphs {
 
 impl ChatComposer {
     /// Right-aligned beside the ambient pet's reserve; skipped when the row would clip it.
-    pub(super) fn render_prompt_cache_glyphs(
+    pub(super) fn render_bottom_row_indicators(
         &self,
         composer: Rect,
         options: ComposerRenderOptions<'_>,
         buf: &mut Buffer,
     ) {
-        let Some(line) = options.prompt_cache.line(chrono::Utc::now().timestamp()) else {
-            return;
-        };
-        let width = u16::try_from(line.width()).unwrap_or(u16::MAX);
         let right = composer
             .right()
             .saturating_sub(1)
             .saturating_sub(options.textarea_right_reserve);
+        let available = usize::from(
+            right.saturating_sub(
+                composer
+                    .x
+                    .saturating_add(LIVE_PREFIX_COLS)
+                    .saturating_add(1),
+            ),
+        );
+        let cache = options.prompt_cache.line(chrono::Utc::now().timestamp());
+        let alarms = super::alarm_indicator::line(options.alarms);
+        let line = match (cache, alarms) {
+            (Some(mut cache), Some(alarms)) if cache.width() + 2 + alarms.width() <= available => {
+                cache.push_span("  ");
+                cache.extend(alarms.spans);
+                cache
+            }
+            (_, Some(alarms)) if alarms.width() <= available => alarms,
+            (Some(cache), _) => cache,
+            (None, Some(alarms)) => alarms,
+            (None, None) => return,
+        };
+        let width = u16::try_from(line.width()).unwrap_or(u16::MAX);
         let left = right.saturating_sub(width);
         if composer.height < 3 || left <= composer.x.saturating_add(LIVE_PREFIX_COLS) {
             return;

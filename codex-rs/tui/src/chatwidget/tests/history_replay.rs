@@ -327,6 +327,61 @@ async fn replayed_delegated_tool_output_is_attributed_without_seeding_composer_h
 
     chat.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
     assert_eq!(chat.bottom_pane.composer_text(), "");
+    // A model tool response can contain the same envelope, but must never become an alarm cell.
+    let sounding = codex_app_server_protocol::alarm_sounding::AlarmSounding {
+        id: "wake".into(),
+        armed_at: 1_000,
+        sounded_at: sent_at,
+        note: "Check the build".into(),
+        cause: codex_app_server_protocol::alarm_sounding::AlarmCause::Clock {
+            late_by_seconds: None,
+        },
+        still_armed: Vec::new(),
+    };
+    for call_id in [None, Some("model-call".to_owned())] {
+        let item = AppServerThreadItem::FunctionCallOutput {
+            id: "alarm-output".into(),
+            call_id: call_id.clone(),
+            name: "set".into(),
+            namespace: Some("alarm".into()),
+            output: FunctionCallOutputBody::Text(sounding.render()),
+        };
+        chat.replay_thread_item(
+            item.clone(),
+            "turn-2".into(),
+            ReplayKind::ResumeInitialMessages,
+        );
+        let replayed = drain_insert_history(&mut rx);
+        let projected = crate::thread_transcript::thread_items_to_transcript_cells(
+            /*thread_id*/ None,
+            &chat.config.cwd,
+            [item],
+            crate::thread_transcript::RawReasoningVisibility::Hidden,
+            /*config*/ None,
+            &|_| crate::multi_agents::AgentMetadata::default(),
+        );
+        if call_id.is_none() {
+            assert_eq!(
+                projected
+                    .iter()
+                    .map(|cell| lines_to_single_string(&cell.transcript_lines(80)))
+                    .collect::<Vec<_>>(),
+                replayed
+                    .iter()
+                    .map(|lines| lines_to_single_string(lines))
+                    .collect::<Vec<_>>()
+            );
+            assert!(
+                projected[0].as_ref().type_id()
+                    == std::any::TypeId::of::<history_cell::AlarmSoundingCell>()
+            );
+        } else {
+            assert!(projected.iter().all(|cell| cell.as_ref().type_id()
+                != std::any::TypeId::of::<history_cell::AlarmSoundingCell>()));
+        }
+    }
+    chat.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+    assert_eq!(chat.bottom_pane.composer_text(), "");
 }
 
 #[tokio::test]

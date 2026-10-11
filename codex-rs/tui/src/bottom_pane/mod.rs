@@ -2476,6 +2476,9 @@ impl Renderable for BottomPane {
     }
 }
 
+pub(crate) use chat_composer::alarm_detail;
+pub(crate) use chat_composer::alarm_label;
+
 #[cfg(test)]
 mod tests {
     #[path = "actionable_banner_tests.rs"]

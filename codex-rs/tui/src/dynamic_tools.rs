@@ -11,12 +11,26 @@ pub(crate) fn failure_response(message: impl Into<String>) -> DynamicToolCallRes
         success: false,
     }
 }
-pub(crate) fn parse_delegated_tool_output(
+pub(crate) fn unsolicited_tool_output(
+    call_id: Option<&str>,
     name: &str,
     namespace: Option<&str>,
     output: &FunctionCallOutputBody,
-) -> Option<DelegatedMessage> {
-    DelegatedMessage::from_tool_output(name, namespace, output)
+) -> Option<Box<dyn crate::history_cell::HistoryCell>> {
+    if let Some(message) = DelegatedMessage::from_tool_output(name, namespace, output) {
+        return Some(Box::new(crate::history_cell::DelegatedMessageCell(message)));
+    }
+    if call_id.is_none() {
+        codex_app_server_protocol::alarm_sounding::AlarmSounding::from_tool_output(
+            name, namespace, output,
+        )
+        .map(|alarm| {
+            Box::new(crate::history_cell::AlarmSoundingCell(alarm))
+                as Box<dyn crate::history_cell::HistoryCell>
+        })
+    } else {
+        None
+    }
 }
 
 fn truncate(text: &str, limit: usize) -> String {

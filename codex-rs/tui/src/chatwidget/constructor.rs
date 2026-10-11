@@ -287,6 +287,7 @@ impl ChatWidget {
             current_goal_status: None,
             current_work_status: None,
             prompt_cache: Default::default(),
+            alarms: Default::default(),
             subagent_roster: Default::default(),
             external_editor_state: ExternalEditorState::Closed,
             last_rendered_user_message_display: None,

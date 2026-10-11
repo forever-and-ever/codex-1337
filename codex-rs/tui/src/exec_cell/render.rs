@@ -1,5 +1,8 @@
 //! Command previews and full transcripts, retaining logical text through display wrapping.
 
+mod alarm;
+pub(crate) use alarm::alarm_output_lines;
+
 use std::time::Instant;
 
 use super::model::CommandOutput;

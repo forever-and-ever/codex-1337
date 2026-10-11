@@ -1733,6 +1733,10 @@ pub(crate) enum AppEvent {
         turn_revision: usize,
         result: Result<String, String>,
     },
+    DisarmAlarm {
+        thread_id: ThreadId,
+        id: String,
+    },
 }
 
 /// Named profile selection to apply after any required UI guardrails complete.
