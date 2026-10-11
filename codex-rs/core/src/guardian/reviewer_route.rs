@@ -2,10 +2,9 @@
 
 use super::GuardianReviewContext;
 use crate::agent::child_config::switch_agent_provider;
+use crate::chatgpt_delegate::uses_chatgpt_login;
 use crate::config::Config;
 use crate::session::session::Session;
-use crate::thread_manager::accounts::AccountInheritance;
-use crate::thread_manager::accounts::account_auth_for_provider;
 use codex_guardian_reviewer::GuardianReviewError;
 use codex_guardian_reviewer::GuardianReviewOutcome;
 use codex_guardian_reviewer::ReviewModel;
@@ -75,26 +74,10 @@ impl ReviewerRoute {
             return Self::ParentProvider;
         }
         tokio::time::timeout(Duration::from_secs(/*secs*/ 5), async {
-            let mut candidate = config.as_ref().clone();
-            switch_agent_provider(&mut candidate, OPENAI_PROVIDER_ID);
-            if !uses_chatgpt_login(&candidate.model_provider) {
-                return None;
-            }
-            let auth = account_auth_for_provider(
-                &candidate,
-                &session.services.local_agent_runtime.account_selection,
-                &session.services.auth_manager,
-                /*persisted*/ None,
-                &AccountInheritance::OtherProvider,
-            )
-            .await
-            .ok()??;
-            if !auth
-                .auth_cached()
-                .is_some_and(|auth| auth.is_chatgpt_auth())
-            {
-                return None;
-            }
+            let (candidate, auth, manager) =
+                crate::chatgpt_delegate::borrow_chatgpt(session, config)
+                    .await
+                    .ok()?;
             let account_id = auth.selected_account_id()?;
             if session
                 .services
@@ -105,7 +88,6 @@ impl ReviewerRoute {
             {
                 return None;
             }
-            let manager = session.agent_models_manager(&candidate).await.ok()?;
             let models = manager
                 .list_models(
                     RefreshStrategy::OnlineIfUncached,
@@ -267,14 +249,6 @@ where
         result = run(route).await;
     }
     result
-}
-
-fn uses_chatgpt_login(provider: &ModelProviderInfo) -> bool {
-    provider.requires_openai_auth
-        && provider.adapter == ModelProviderAdapter::OpenaiCompatible
-        && provider.env_key.is_none()
-        && provider.experimental_bearer_token.is_none()
-        && provider.auth.is_none()
 }
 
 #[cfg(test)]

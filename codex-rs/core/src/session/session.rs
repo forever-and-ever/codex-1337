@@ -1912,6 +1912,7 @@ impl Session {
                 next_internal_sub_id: AtomicU64::new(0),
                 next_fork_recording_id: AtomicU64::new(0),
             });
+            crate::chatgpt_delegate::ChatgptDelegate::install(&sess, &config);
             if let Some(startup) = &startup {
                 let _ = startup.session.set(Arc::clone(&sess));
             }

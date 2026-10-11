@@ -1073,14 +1073,7 @@ fn add_core_tool_sources(context: &CoreToolPlanContext<'_>, registry: &mut ToolR
 }
 
 fn standalone_web_search_enabled(turn_context: &TurnContext, model_info: &ModelInfo) -> bool {
-    namespace_tools_enabled(turn_context)
-        && turn_context.provider.capabilities().web_search
-        && (model_info.use_responses_lite
-            || turn_context
-                .config
-                .features
-                .get()
-                .enabled(Feature::StandaloneWebSearch))
+    crate::chatgpt_delegate::standalone_web_search_enabled(turn_context, model_info)
 }
 
 fn tool_environment_mode(environments: &TurnEnvironmentSnapshot) -> ToolEnvironmentMode {

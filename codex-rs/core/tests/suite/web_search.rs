@@ -313,3 +313,239 @@ async fn indexed_web_search_mode_sets_indexed_access() {
         (Some(true), Some(true))
     );
 }
+
+#[tokio::test]
+async fn claude_standalone_search_borrows_chatgpt() -> anyhow::Result<()> {
+    assert_claude_standalone_search(SearchLogin::Chatgpt).await
+}
+
+#[tokio::test]
+async fn claude_standalone_search_refuses_api_key_billing() -> anyhow::Result<()> {
+    assert_claude_standalone_search(SearchLogin::ApiKeyOnly).await
+}
+
+#[derive(Clone, Copy)]
+enum SearchLogin {
+    Chatgpt,
+    ApiKeyOnly,
+}
+
+async fn assert_claude_standalone_search(login: SearchLogin) -> anyhow::Result<()> {
+    use codex_extension_api::ConversationHistory;
+    use codex_extension_api::ExtensionData;
+    use codex_extension_api::ExtensionRegistryBuilder;
+    use codex_extension_api::FunctionCallError;
+    use codex_extension_api::NoopTurnItemEmitter;
+    use codex_extension_api::ToolCall;
+    use codex_extension_api::ToolCallSource;
+    use codex_extension_api::ToolName;
+    use codex_extension_api::ToolPayload;
+    use codex_http_client::HttpClientFactory;
+    use codex_http_client::NetworkPolicy;
+    use codex_http_client::OutboundProxyPolicy;
+    use codex_login::AuthCredentialsStoreMode;
+    use codex_login::AuthKeyringBackendKind;
+    use codex_login::AuthManager;
+    use codex_login::AuthRouteConfig;
+    use codex_login::CodexAuth;
+    use codex_model_provider_info::ModelProviderAdapter;
+    use codex_model_provider_info::ModelProviderInfo;
+    use codex_protocol::models::ResponseItem;
+    use codex_protocol::openai_models::AnthropicModelCapabilities;
+    use codex_protocol::openai_models::AnthropicThinkingMode;
+    use codex_protocol::openai_models::ModelVisibility;
+    use codex_utils_output_truncation::TruncationPolicy;
+    use wiremock::Mock;
+    use wiremock::ResponseTemplate;
+    use wiremock::matchers::method;
+    use wiremock::matchers::path;
+
+    skip_if_no_network!(Ok(()));
+    let server = wiremock::MockServer::start().await;
+    let home = Arc::new(tempfile::TempDir::new()?);
+    let policy = NetworkPolicy::default().restrict_to_endpoints(
+        [
+            format!(
+                "{}/v1/models?client_version={}",
+                server.uri(),
+                codex_models_manager::client_version_to_whole()
+            )
+            .parse()?,
+            format!("{}/v1/alpha/search", server.uri()).parse()?,
+        ]
+        .into(),
+    );
+    let auth = match login {
+        SearchLogin::Chatgpt => {
+            std::fs::write(
+                home.path().join("auth.json"),
+                serde_json::to_vec(&json!({
+                    "auth_mode": "chatgpt",
+                    "tokens": {
+                        "id_token": "e30.e30.signature",
+                        "access_token": "search-chatgpt-token",
+                        "refresh_token": "search-refresh-token",
+                        "account_id": "search-chatgpt-account"
+                    },
+                    "last_refresh": chrono::Utc::now()
+                }))?,
+            )?;
+            AuthManager::shared(
+                home.path().to_path_buf(),
+                /*enable_codex_api_key_env*/ false,
+                AuthCredentialsStoreMode::File,
+                /*forced_chatgpt_workspace_id*/ None,
+                /*chatgpt_base_url*/ None,
+                AuthKeyringBackendKind::default(),
+                AuthRouteConfig::from_http_client_factory(
+                    HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault)
+                        .with_network_policy(policy.clone()),
+                ),
+            )
+            .await
+        }
+        SearchLogin::ApiKeyOnly => codex_core::test_support::auth_manager_from_auth_with_home(
+            CodexAuth::from_api_key("must-not-bill"),
+            home.path().to_path_buf(),
+        ),
+    };
+    let mut openai_catalog = codex_models_manager::bundled_models_response()?;
+    openai_catalog.models.truncate(1);
+    openai_catalog.models[0].slug = "openai-search-default".into();
+    openai_catalog.models[0].visibility = ModelVisibility::List;
+    Mock::given(method("GET"))
+        .and(path("/v1/models"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(&openai_catalog))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/alpha/search"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "encrypted_output": "ciphertext", "output": "Search result"
+        })))
+        .expect(match login {
+            SearchLogin::Chatgpt => 1,
+            SearchLogin::ApiKeyOnly => 0,
+        })
+        .mount(&server)
+        .await;
+    let mut claude_catalog = openai_catalog;
+    claude_catalog.models[0].slug = "claude-search-fixture".into();
+    claude_catalog.models[0].anthropic = Some(AnthropicModelCapabilities {
+        thinking: AnthropicThinkingMode::Disabled,
+        max_output_tokens: std::num::NonZeroU32::new(8192).unwrap(),
+        supported_efforts: Vec::new(),
+        supports_structured_outputs: false,
+    });
+    let mut registry = ExtensionRegistryBuilder::new();
+    codex_web_search_extension::install(&mut registry, auth.clone());
+    let registry = Arc::new(registry.build());
+    let extensions = registry.clone();
+    // Native subscription endpoints are intentionally not redirectable. Build a real
+    // Claude thread, but invoke its executor without sending Claude inference.
+    let mut builder = test_codex()
+        .with_home(home)
+        .with_auth_manager(auth)
+        .with_extensions(registry)
+        .with_config(move |config| {
+            config.application_network_policy = policy;
+            config
+                .model_providers
+                .insert("openai".into(), config.model_provider.clone());
+            config.model_provider_id = "claude_subscription".into();
+            config.model_provider = ModelProviderInfo {
+                name: "Claude subscription".into(),
+                adapter: ModelProviderAdapter::ClaudeSubscription,
+                ..Default::default()
+            };
+            config.model_providers.insert(
+                config.model_provider_id.clone(),
+                config.model_provider.clone(),
+            );
+            config.model = Some("claude-search-fixture".into());
+            config.model_catalog = Some(claude_catalog);
+            config.web_search_mode.set(WebSearchMode::Live).unwrap();
+            config
+                .features
+                .disable(Feature::StandaloneWebSearch)
+                .unwrap();
+        });
+    let test = builder.build_with_auto_env(&server).await?;
+    let session_store = ExtensionData::new("search-session");
+    let executor = extensions
+        .tool_contributors()
+        .iter()
+        .flat_map(|contributor| {
+            contributor.tools(&session_store, test.codex.thread_extension_data())
+        })
+        .find(|tool| tool.tool_name() == ToolName::namespaced("web", "run"))
+        .expect("Claude thread contributes web.run");
+    let history: Vec<ResponseItem> = serde_json::from_value(json!([
+        {"type":"message","role":"user","content":[{"type":"input_text","text":"Previous user"}]},
+        {"type":"message","role":"assistant","content":[{"type":"output_text","text":"Previous Claude answer"}]},
+        {"type":"message","role":"user","content":[{"type":"input_text","text":"Search the web"}]}
+    ]))?;
+    let payload = ToolPayload::Function {
+        arguments: json!({"search_query":[{"q":"standalone web search"}]}).to_string(),
+    };
+    let result = executor
+        .handle(ToolCall {
+            turn_id: "search-turn".into(),
+            call_id: "search-call".into(),
+            tool_name: ToolName::namespaced("web", "run"),
+            model: "claude-search-fixture".into(),
+            codex_turn_metadata: None,
+            truncation_policy: TruncationPolicy::Tokens(2000),
+            source: ToolCallSource::Direct,
+            conversation_history: ConversationHistory::new(history.clone()),
+            turn_item_emitter: Arc::new(NoopTurnItemEmitter),
+            environments: Vec::new(),
+            payload: payload.clone(),
+        })
+        .await;
+    match login {
+        SearchLogin::Chatgpt => {
+            let output = result?;
+            assert_eq!(
+                serde_json::to_value(output.to_response_item("search-call", &payload))?,
+                json!({"type":"function_call_output","call_id":"search-call",
+                    "output":[{"type":"input_text","text":"Search result"}]})
+            );
+            let requests = server.received_requests().await.unwrap();
+            let search = requests
+                .iter()
+                .find(|r| r.url.path() == "/v1/alpha/search")
+                .expect("delegated search");
+            assert_eq!(
+                (
+                    search.headers["authorization"].to_str()?,
+                    search.headers["chatgpt-account-id"].to_str()?
+                ),
+                ("Bearer search-chatgpt-token", "search-chatgpt-account"),
+            );
+            assert!(
+                requests
+                    .iter()
+                    .any(|request| request.url.path() == "/v1/models")
+            );
+            let body = search.body_json::<Value>()?;
+            assert_eq!(
+                (&body["model"], &body["input"]),
+                (
+                    &json!("openai-search-default"),
+                    &serde_json::to_value(history)?
+                )
+            );
+        }
+        SearchLogin::ApiKeyOnly => {
+            assert!(
+                matches!(result, Err(FunctionCallError::RespondToModel(message))
+                if message == "Web search for Claude conversations needs an active ChatGPT login; choose one with /account.")
+            );
+            assert!(server.received_requests().await.unwrap().is_empty());
+        }
+    }
+    test.codex.shutdown_and_wait().await?;
+    server.verify().await;
+    Ok(())
+}

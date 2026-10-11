@@ -19,8 +19,6 @@ use codex_extension_api::ThreadStartInput;
 use codex_extension_api::ToolContributor;
 use codex_http_client::HttpClientFactory;
 use codex_login::AuthManager;
-use codex_model_provider::create_model_provider;
-use codex_model_provider_info::ModelProviderInfo;
 use codex_protocol::config_types::WebSearchContextSize;
 use codex_protocol::config_types::WebSearchMode;
 
@@ -33,9 +31,8 @@ struct WebSearchExtension {
 
 #[derive(Clone)]
 struct WebSearchExtensionConfig {
-    available: bool,
+    route: codex_model_provider_info::SearchRoute,
     http_client_factory: HttpClientFactory,
-    provider: ModelProviderInfo,
     settings: SearchSettings,
 }
 
@@ -43,13 +40,12 @@ impl From<&Config> for WebSearchExtensionConfig {
     fn from(config: &Config) -> Self {
         let web_search_mode = config.web_search_mode.value();
         Self {
-            // Core selects this executor per turn using the feature flag or model metadata.
-            available: (config.model_provider.is_openai()
-                || config.model_provider.uses_openai_actor_authorization()
-                || config.model_provider.supports_standalone_web_search)
-                && web_search_mode != WebSearchMode::Disabled,
+            route: codex_model_provider_info::SearchRoute::classify(
+                &config.model_provider,
+                &config.model_providers,
+                web_search_mode,
+            ),
             http_client_factory: config.http_client_factory(),
-            provider: config.model_provider.clone(),
             settings: search_settings(config, web_search_mode),
         }
     }
@@ -130,23 +126,18 @@ impl ToolContributor for WebSearchExtension {
         let Some(config) = thread_store.get::<WebSearchExtensionConfig>() else {
             return Vec::new();
         };
-        if !config.available {
+        let Some(route) = crate::search_route::SearchExecutor::from_route(
+            &config.route,
+            thread_store,
+            &self.auth_manager,
+        ) else {
             return Vec::new();
-        }
+        };
 
         vec![Arc::new(WebSearchTool {
             session_id: session_store.level_id().to_string(),
             http_client_factory: config.http_client_factory.clone(),
-            provider: create_model_provider(
-                config.provider.clone(),
-                Some(
-                    thread_store
-                        .get::<Arc<AuthManager>>()
-                        .as_deref()
-                        .cloned()
-                        .unwrap_or_else(|| self.auth_manager.clone()),
-                ),
-            ),
+            route,
             settings: config.settings.clone(),
             originator: thread_store
                 .get::<ThreadOriginator>()
@@ -214,9 +205,12 @@ mod tests {
         let session_store = ExtensionData::new("session");
         let thread_store = ExtensionData::new("11111111-1111-4111-8111-111111111111");
         thread_store.insert(WebSearchExtensionConfig {
-            available: true,
+            route: codex_model_provider_info::SearchRoute::Own {
+                provider: Box::new(ModelProviderInfo::create_openai_provider(
+                    /*base_url*/ None,
+                )),
+            },
             http_client_factory: HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault),
-            provider: ModelProviderInfo::create_openai_provider(/*base_url*/ None),
             settings: Default::default(),
         });
 

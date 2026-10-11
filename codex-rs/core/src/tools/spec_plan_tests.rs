@@ -3403,4 +3403,32 @@ async fn hosted_web_search_and_standalone_image_generation_follow_runtime_gates(
     )
     .await;
     standalone_web_search.assert_visible_lacks(&["web_search"]);
+    let claude_search = probe_with(
+        |turn| {
+            set_feature(turn, Feature::StandaloneWebSearch, /*enabled*/ false);
+            set_web_search_mode(turn, WebSearchMode::Live);
+            let config = Arc::make_mut(&mut turn.config);
+            config.model_provider_id = "claude_subscription".into();
+            config.model_provider = ModelProviderInfo {
+                adapter: codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription,
+                ..ModelProviderInfo::default()
+            };
+            turn.provider =
+                create_model_provider(config.model_provider.clone(), /*auth_manager*/ None);
+            update_turn_settings_for_test(turn, |settings| {
+                Arc::make_mut(&mut settings.model_info).use_responses_lite = false;
+            });
+        },
+        ToolPlanInputs {
+            extension_tool_executors: vec![Arc::new(TestNamespaceExtensionTool {
+                namespace: "web",
+                tool_name: "run",
+            })],
+            ..Default::default()
+        },
+    )
+    .await;
+    claude_search.assert_visible_contains(&["web"]);
+    assert_eq!(claude_search.namespace_function_names("web"), &["run"]);
+    claude_search.assert_visible_lacks(&["web_search"]);
 }

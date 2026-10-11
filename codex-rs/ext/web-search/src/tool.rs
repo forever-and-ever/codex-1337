@@ -21,7 +21,6 @@ use codex_http_client::ClientRouteClass;
 use codex_http_client::HttpClientFactory;
 use codex_login::default_client::add_originator_header;
 use codex_login::default_client::create_transport_for_routes_async;
-use codex_model_provider::SharedModelProvider;
 use codex_protocol::models::WebSearchAction as CoreWebSearchAction;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::WebSearchBeginEvent;
@@ -46,7 +45,7 @@ const RESULTS_PAYLOAD_BYTES_METRIC: &str = "codex.web_search.results.payload_byt
 pub(crate) struct WebSearchTool {
     pub(crate) session_id: String,
     pub(crate) http_client_factory: HttpClientFactory,
-    pub(crate) provider: SharedModelProvider,
+    pub(crate) route: crate::search_route::SearchExecutor,
     pub(crate) settings: SearchSettings,
     pub(crate) originator: Option<String>,
 }
@@ -100,13 +99,12 @@ impl WebSearchTool {
     ) -> Result<Box<dyn ToolOutput>, FunctionCallError> {
         let commands = parse_commands(&call)?;
         let command_action = command_action(&commands);
-        let provider = self
-            .provider
+        let (search_provider, model) = self.route.resolve(&call.model).await?;
+        let provider = search_provider
             .api_provider()
             .await
             .map_err(|err| FunctionCallError::Fatal(err.to_string()))?;
-        let auth = self
-            .provider
+        let auth = search_provider
             .api_auth()
             .await
             .map_err(|err| FunctionCallError::Fatal(err.to_string()))?;
@@ -119,7 +117,7 @@ impl WebSearchTool {
         let client = SearchClient::new(transport, provider, auth);
         let request = SearchRequest {
             id: self.session_id.clone(),
-            model: call.model.clone(),
+            model,
             reasoning: None,
             input: recent_input(call.conversation_history.items()),
             commands: Some(commands),
