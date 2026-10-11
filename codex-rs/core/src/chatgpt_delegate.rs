@@ -7,7 +7,6 @@ use crate::session::turn_context::TurnContext;
 use crate::thread_manager::accounts::AccountInheritance;
 use crate::thread_manager::accounts::account_auth_for_provider;
 use crate::thread_manager::build_models_manager;
-use codex_features::Feature;
 use codex_login::AuthManager;
 use codex_model_provider::SharedModelProvider;
 use codex_model_provider::create_model_provider;
@@ -17,7 +16,6 @@ use codex_model_provider_info::OPENAI_PROVIDER_ID;
 use codex_model_provider_info::SearchRoute;
 use codex_models_manager::manager::RefreshStrategy;
 use codex_models_manager::manager::SharedModelsManager;
-use codex_protocol::openai_models::ModelInfo;
 use std::sync::Arc;
 use std::sync::Weak;
 use std::time::Duration;
@@ -117,23 +115,15 @@ pub(crate) fn uses_chatgpt_login(provider: &ModelProviderInfo) -> bool {
         && provider.auth.is_none()
 }
 
-pub(crate) fn standalone_web_search_enabled(turn: &TurnContext, model: &ModelInfo) -> bool {
-    turn.provider.capabilities().namespace_tools
-        && match SearchRoute::classify(
+/// Anthropic conversations search through a borrowed ChatGPT login, so the hosted-search
+/// capability and its rollout flag do not gate them.
+pub(crate) fn delegates_web_search(turn: &TurnContext) -> bool {
+    matches!(
+        SearchRoute::classify(
             &turn.config.model_provider,
             &turn.config.model_providers,
             turn.config.web_search_mode.value(),
-        ) {
-            SearchRoute::Unavailable => false,
-            SearchRoute::ChatgptDelegate => true,
-            SearchRoute::Own { .. } => {
-                turn.provider.capabilities().web_search
-                    && (model.use_responses_lite
-                        || turn
-                            .config
-                            .features
-                            .get()
-                            .enabled(Feature::StandaloneWebSearch))
-            }
-        }
+        ),
+        SearchRoute::ChatgptDelegate
+    )
 }
