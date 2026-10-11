@@ -146,6 +146,29 @@ async fn work_status_below_composer_clears_with_activity_transcript_entries() {
         .collect::<Vec<_>>()
         .join("\n");
     insta::assert_snapshot!("work_status_transcript_spacing", transcript);
+    for (width, detailed) in [(80, false), (30, false), (30, true)] {
+        let area = Rect::new(/*x*/ 0, /*y*/ 0, width, /*height*/ 32);
+        let mut buffer = Buffer::empty(area);
+        let mut view = crate::transcript_view::TranscriptView::default();
+        view.set_presentation(detailed, history_cell::HistoryRenderMode::Rich);
+        view.render(area, &mut buffer, &history);
+        let activity_columns: Vec<_> = buffer
+            .content()
+            .chunks(usize::from(width))
+            .filter_map(|row| {
+                let line = row
+                    .iter()
+                    .map(ratatui::buffer::Cell::symbol)
+                    .collect::<String>();
+                line.find("Activity ")
+                    .map(|index| line[..index].chars().count())
+            })
+            .collect();
+        assert_eq!(
+            activity_columns,
+            vec![usize::from(crate::transcript_geometry::TITLE_COLUMN); 2],
+        );
+    }
     let mut cleared = notification.clone();
     if let ServerNotification::ThreadWorkStatusUpdated(update) = &mut cleared {
         update.status.activity.clear();

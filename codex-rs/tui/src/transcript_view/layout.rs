@@ -388,6 +388,21 @@ impl TranscriptView {
                 // Detailed content and markerless cards share the gutter without acquiring
                 // synthetic markers, disclosure identities, or expansion controls.
                 _ if !disclosure => {
+                    let columns = if seat.content == Content::Beheaded {
+                        crate::transcript_geometry::NESTED_COLUMNS
+                    } else if cell.as_any().is::<crate::history_cell::WorkStatusCell>() {
+                        crate::transcript_geometry::TITLE_COLUMN
+                            - crate::transcript_geometry::MARKER_COLUMNS
+                    } else {
+                        crate::transcript_geometry::GUTTER_COLUMNS
+                    };
+                    let content_width = if mode == HistoryRenderMode::Rich
+                        && cell.as_any().is::<crate::history_cell::WorkStatusCell>()
+                    {
+                        width.saturating_sub(columns).max(/*other*/ 1)
+                    } else {
+                        content_width
+                    };
                     let mut lines = crate::history_cell::fullscreen_session_lines(
                         cell.as_ref(),
                         content_width,
@@ -395,12 +410,9 @@ impl TranscriptView {
                         mode,
                     );
                     if mode == HistoryRenderMode::Rich {
-                        let columns = if seat.content == Content::Beheaded {
+                        if seat.content == Content::Beheaded {
                             feed::behead(&mut lines);
-                            crate::transcript_geometry::NESTED_COLUMNS
-                        } else {
-                            crate::transcript_geometry::GUTTER_COLUMNS
-                        };
+                        }
                         TextLayout::new(
                             crate::transcript_geometry::gutter_lines(
                                 crate::transcript_geometry::clock_lines(lines, timestamp),

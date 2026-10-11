@@ -2,8 +2,7 @@
 
 use super::ChatWidget;
 use crate::history_cell::HistoryTimestamp;
-use crate::history_cell::PrefixedWrappedHistoryCell;
-use crate::history_cell::agent_prefix;
+use crate::history_cell::WorkStatusCell;
 use crate::line_truncation::truncate_line_to_width;
 use crate::render::renderable::Renderable;
 use crate::ui_consts::LIVE_PREFIX_COLS;
@@ -35,13 +34,7 @@ impl ChatWidget {
             .emitted_at
             .unwrap_or_else(|| chrono::Utc::now().timestamp());
         let timestamp = HistoryTimestamp::from_millis(emitted_at.saturating_mul(1000));
-        let mut cell = PrefixedWrappedHistoryCell::new(
-            Line::from(vec!["Activity ".bold(), status.activity.clone().into()]),
-            Line::from(agent_prefix(/*first*/ true)),
-            Line::from(agent_prefix(/*first*/ false)),
-        );
-        cell.timestamp = timestamp;
-        self.add_to_history(cell);
+        self.add_to_history(WorkStatusCell::new(status.activity.clone(), timestamp));
         self.current_work_status = Some(status);
         self.request_redraw();
     }

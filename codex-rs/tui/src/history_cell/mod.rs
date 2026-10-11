@@ -146,6 +146,7 @@ mod timestamp;
 mod tool_output;
 mod tool_output_group;
 mod warnings;
+mod work_status;
 
 pub(crate) use activity_details::ActivityDetails;
 pub(crate) use activity_lifecycle::has_running_tool_calls;
@@ -182,6 +183,7 @@ pub(crate) use warnings::WarningId;
 pub(crate) use warnings::WarningKey;
 pub(crate) use warnings::warning_count;
 pub(crate) use warnings::warning_entries;
+pub(crate) use work_status::WorkStatusCell;
 
 #[cfg(test)]
 mod tests;

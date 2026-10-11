@@ -1,10 +1,10 @@
 //! Rich transcript geometry. Clocks, controls and token figures never enter selectable source.
-//! Every row shares one grid: clock, control, then content at `GUTTER_COLUMNS`, two columns
-//! right of a Feed Item header's title, whether an item claims the row or not; nothing moves
-//! sideways when the feed regroups a cell or the view turns detailed. The normal view trails a
-//! row's tokens after its first line; the detailed view has no controls and puts the tokens in
-//! their column. Marker-bearing entries share the content column; cards retain cell-owned
-//! markers.
+//! Feed Item titles and Activity headings share `TITLE_COLUMN`. Ordinary row content starts
+//! at `GUTTER_COLUMNS`, two columns to their right, whether an item claims the row or not;
+//! nothing moves sideways when the feed regroups a cell or the view turns detailed. The normal
+//! view trails a row's tokens after its first line; the detailed view has no controls and puts
+//! the tokens in their column. Marker-bearing content entries share the content column; cards
+//! retain cell-owned markers.
 
 use crate::history_cell::HistoryCell;
 use crate::history_cell::HistoryRenderMode;
