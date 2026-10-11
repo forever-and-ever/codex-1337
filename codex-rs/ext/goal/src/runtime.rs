@@ -479,10 +479,7 @@ impl GoalRuntimeHandle {
             .get::<TurnStartOptions>()
             .map(|options| options.as_ref().clone())
             .unwrap_or_default();
-        let item = continuation_steering_item(
-            &protocol_goal_from_state(goal),
-            thread.config().await.update_plan_enabled,
-        );
+        let item = continuation_steering_item(&protocol_goal_from_state(goal));
 
         match thread
             .start_turn_if_idle(

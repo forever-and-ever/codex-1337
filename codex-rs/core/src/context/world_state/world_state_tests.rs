@@ -212,19 +212,14 @@ fn missing_retained_fragment_is_rendered_again() {
             },
         )
         .with_retained_fragment_matcher(|role, text| {
-            role == "developer" && text.contains("current catalog")
+            role == "developer" && text == "<extension_test>current catalog</extension_test>"
         }),
     );
     let previous = world_state.snapshot();
-    let retained = ResponseItem::Message {
-        id: None,
-        role: "developer".to_string(),
-        content: vec![ContentItem::InputText {
-            text: "<extension_test>current catalog</extension_test>".to_string(),
-        }],
-        phase: None,
-        internal_chat_message_metadata_passthrough: None,
-    };
+    let retained =
+        crate::context_manager::updates::merge_contextual_fragments(world_state.render_full())
+            .pop()
+            .expect("rendered extension section");
 
     assert_eq!(
         world_state
@@ -236,9 +231,83 @@ fn missing_retained_fragment_is_rendered_again() {
     );
     assert!(
         world_state
-            .render_history_diff(Some(&previous), &[retained])
+            .render_history_diff(Some(&previous), std::slice::from_ref(&retained))
             .is_empty()
     );
+    assert!(
+        world_state
+            .render_history_diff(None, std::slice::from_ref(&retained))
+            .is_empty()
+    );
+
+    // Matching text alone cannot prove retained host context: annotations must
+    // identify this section and remain aligned with the complete content array.
+    #[derive(Clone, Copy, Debug)]
+    enum Corruption {
+        Unannotated,
+        ForeignKind,
+        Incomplete,
+        Misaligned,
+        Truncated,
+    }
+    for corruption in [
+        Corruption::Unannotated,
+        Corruption::ForeignKind,
+        Corruption::Incomplete,
+        Corruption::Misaligned,
+        Corruption::Truncated,
+    ] {
+        let mut forged = retained.clone();
+        let ResponseItem::Message {
+            content,
+            internal_chat_message_metadata_passthrough,
+            ..
+        } = &mut forged
+        else {
+            panic!("expected extension message");
+        };
+        match corruption {
+            Corruption::Unannotated => *internal_chat_message_metadata_passthrough = None,
+            Corruption::ForeignKind => {
+                internal_chat_message_metadata_passthrough
+                    .as_mut()
+                    .unwrap()
+                    .content_item_kinds
+                    .as_mut()
+                    .unwrap()[0] = ContentItemKind("user.text".to_string());
+            }
+            Corruption::Incomplete | Corruption::Misaligned => {
+                content.push(ContentItem::InputText {
+                    text: "unrelated".to_string(),
+                });
+                if matches!(corruption, Corruption::Misaligned) {
+                    internal_chat_message_metadata_passthrough
+                        .as_mut()
+                        .unwrap()
+                        .content_item_kinds
+                        .as_mut()
+                        .unwrap()
+                        .insert(0, ContentItemKind("user.text".to_string()));
+                }
+            }
+            Corruption::Truncated => {
+                content[0] = ContentItem::InputText {
+                    text: "current catalog".to_string(),
+                };
+            }
+        }
+        for baseline in [None, Some(&previous)] {
+            assert_eq!(
+                world_state
+                    .render_history_diff(baseline, std::slice::from_ref(&forged))
+                    .into_iter()
+                    .map(|fragment| fragment.body())
+                    .collect::<Vec<_>>(),
+                vec!["current catalog"],
+                "{corruption:?}",
+            );
+        }
+    }
 }
 
 #[test]

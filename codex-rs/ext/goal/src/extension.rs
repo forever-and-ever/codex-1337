@@ -50,10 +50,14 @@ use crate::spec::UPDATE_GOAL_TOOL_NAME;
 use crate::steering::budget_limit_steering_item;
 use crate::tool::GoalToolExecutor;
 
+#[path = "world_state.rs"]
+mod world_state;
+
 #[derive(Clone, Debug)]
 pub struct GoalExtensionConfig {
     pub enabled: bool,
     pub max_goal_token_budget: Option<i64>,
+    pub update_plan_enabled: bool,
 }
 
 #[derive(Clone)]
@@ -604,6 +608,7 @@ pub fn install_with_backend<C>(
         Arc::clone(&goal_service),
         goal_config,
     ));
+    registry.prompt_contributor(extension.clone());
     registry.thread_lifecycle_contributor(extension.clone());
     registry.config_contributor(extension.clone());
     registry.turn_lifecycle_contributor(extension.clone());

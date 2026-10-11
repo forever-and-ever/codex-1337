@@ -61,7 +61,12 @@ trait ErasedWorldStateSection: Send + Sync {
 
     fn has_retained_fragment_matcher(&self) -> bool;
 
-    fn matches_retained_fragment(&self, role: &str, text: &str) -> bool;
+    fn matches_retained_fragment(
+        &self,
+        role: &str,
+        text: &str,
+        kind: Option<&ContentItemKind>,
+    ) -> bool;
 
     fn render_diff(
         &self,
@@ -104,7 +109,12 @@ impl<S: WorldStateSection> ErasedWorldStateSection for S {
         S::has_retained_fragment_matcher()
     }
 
-    fn matches_retained_fragment(&self, role: &str, text: &str) -> bool {
+    fn matches_retained_fragment(
+        &self,
+        role: &str,
+        text: &str,
+        _kind: Option<&ContentItemKind>,
+    ) -> bool {
         S::matches_retained_fragment(role, text)
     }
 
@@ -155,8 +165,14 @@ impl ErasedWorldStateSection for ExtensionWorldStateSection {
         self.0.has_retained_fragment_matcher()
     }
 
-    fn matches_retained_fragment(&self, role: &str, text: &str) -> bool {
-        self.0.matches_retained_fragment(role, text)
+    fn matches_retained_fragment(
+        &self,
+        role: &str,
+        text: &str,
+        kind: Option<&ContentItemKind>,
+    ) -> bool {
+        kind.is_some_and(|kind| kind.0.strip_suffix(".instructions") == Some(self.0.id()))
+            && self.0.matches_retained_fragment(role, text)
     }
 
     fn render_diff(
@@ -426,7 +442,10 @@ impl WorldState {
                 } else {
                     PreviousSectionState::Known(previous)
                 }
-            } else if has_legacy_fragment(items.clone(), section) {
+            } else if (section.has_retained_fragment_matcher()
+                && has_retained_fragment(items.clone(), section))
+                || has_legacy_fragment(items.clone(), section)
+            {
                 PreviousSectionState::Unknown
             } else {
                 PreviousSectionState::Absent
@@ -450,17 +469,31 @@ fn has_retained_fragment<'a>(
     section: &dyn ErasedWorldStateSection,
 ) -> bool {
     items.into_iter().any(|item| {
-        matches!(
-            item,
-            ResponseItem::Message { role, content, .. }
-                if content.iter().any(|content| {
-                    matches!(
-                        content,
-                        ContentItem::InputText { text }
-                            if section.matches_retained_fragment(role, text)
+        let ResponseItem::Message {
+            role,
+            content,
+            internal_chat_message_metadata_passthrough,
+            ..
+        } = item
+        else {
+            return false;
+        };
+        // An annotation proves provenance only for its aligned content item.
+        let kinds = internal_chat_message_metadata_passthrough
+            .as_ref()
+            .and_then(|metadata| metadata.content_item_kinds.as_ref())
+            .filter(|kinds| kinds.len() == content.len());
+        content.iter().enumerate().any(|(index, content)| {
+            matches!(
+                content,
+                ContentItem::InputText { text }
+                    if section.matches_retained_fragment(
+                        role,
+                        text,
+                        kinds.and_then(|kinds| kinds.get(index)),
                     )
-                })
-        )
+            )
+        })
     })
 }
 
