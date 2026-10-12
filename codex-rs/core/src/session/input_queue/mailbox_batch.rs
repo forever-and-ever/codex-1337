@@ -52,6 +52,15 @@ impl Session {
         start_options: TurnStartOptions,
         submission_id: String,
     ) {
+        match self.receive_accepted_agent_mail(&communication).await {
+            Ok(true) => {}
+            Ok(false) => return,
+            Err(error) => {
+                tracing::error!(%error, "accepted agent-mail publication is blocked; durable inbox retained");
+                return;
+            }
+        }
+        let accepted_mail_id = communication.id.clone();
         let config = self.get_config().await;
         let active = *self
             .services
@@ -65,6 +74,8 @@ impl Session {
                 config.multi_agent_v2.wait_agent_batch_window_ms,
                 active,
             )
+            .await;
+        self.agent_mail_projection_published(accepted_mail_id.as_ref())
             .await;
         crate::agent_communication::emit_agent_communication_receive(&submission_id);
         if self.input_queue.has_pending_mailbox_items().await {

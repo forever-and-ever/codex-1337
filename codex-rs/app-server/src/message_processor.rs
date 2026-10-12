@@ -812,6 +812,11 @@ impl MessageProcessor {
         self.thread_processor.daemon_recovery_snapshot().await
     }
 
+    pub(crate) fn start_accepted_mail_recovery(&self) -> tokio_util::task::AbortOnDropHandle<()> {
+        self.thread_processor
+            .start_accepted_mail_recovery(self.turn_admission.clone())
+    }
+
     pub(crate) async fn restore_daemon_threads(
         &self,
         mut snapshot: codex_app_server_transport::daemon_recovery::RecoverySnapshot,

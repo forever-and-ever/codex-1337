@@ -2064,7 +2064,18 @@ async fn record_inter_agent_communication_preserves_item_id_in_rollout_and_resum
     .await;
     let rollout_path =
         attach_thread_persistence(Arc::get_mut(&mut session).expect("unique session")).await;
-    let communication = InterAgentCommunication::new(
+    let config = session.get_config().await;
+    let db = codex_state::StateRuntime::init(
+        config.sqlite_config().clone(),
+        config.model_provider_id.clone(),
+    )
+    .await
+    .expect("authoritative inbox");
+    Arc::get_mut(&mut session)
+        .expect("unique session")
+        .services
+        .state_db = Some(db.clone());
+    let mut communication = InterAgentCommunication::new(
         AgentPath::root().join("worker").expect("worker path"),
         AgentPath::root(),
         Vec::new(),
@@ -2072,9 +2083,121 @@ async fn record_inter_agent_communication_preserves_item_id_in_rollout_and_resum
         /*trigger_turn*/ false,
     );
 
+    let payload = serde_json::to_string(&communication).unwrap();
+    let sender = ThreadId::new();
+    let accepted_id = ResponseItemId::new("amsg_mail");
+    let digest = "a".repeat(64);
+    let record = db
+        .thread_queue()
+        .accept_agent_mail(
+            &accepted_id,
+            session.thread_id,
+            sender,
+            session.thread_id,
+            "original-turn/original-call",
+            &digest,
+            &payload,
+        )
+        .await
+        .unwrap();
+    // Deterministic cut: acceptance committed, but no queue/history admission yet.
+    let reopened = codex_state::StateRuntime::init(
+        config.sqlite_config().clone(),
+        config.model_provider_id.clone(),
+    )
+    .await
+    .unwrap();
+    let replay = reopened
+        .thread_queue()
+        .pending_agent_mail(session.thread_id)
+        .await
+        .unwrap();
+    assert_eq!(replay, vec![record.clone()]);
+    let retry = reopened
+        .thread_queue()
+        .accept_agent_mail(
+            &ResponseItemId::new("amsg_mail"),
+            session.thread_id,
+            sender,
+            session.thread_id,
+            "original-turn/original-call",
+            &digest,
+            &payload,
+        )
+        .await
+        .unwrap();
+    assert_eq!(retry.id, record.id);
+    assert!(
+        reopened
+            .thread_queue()
+            .accept_agent_mail(
+                &ResponseItemId::new("amsg_mail"),
+                session.thread_id,
+                sender,
+                session.thread_id,
+                "original-turn/original-call",
+                &"b".repeat(64),
+                &payload,
+            )
+            .await
+            .is_err()
+    );
+    communication.id = Some(record.id.clone());
+    // A concurrent recovery pass must not steal newly submitted mail before its
+    // actor handles batching; only abandoned/restarted projections become ready.
+    assert!(session.reserve_agent_mail_submission(&record.id).await);
+    session.recover_accepted_agent_mail().await.unwrap();
+    assert!(!session.input_queue.has_pending_mailbox_items().await);
+    assert!(
+        session
+            .receive_accepted_agent_mail(&communication)
+            .await
+            .unwrap()
+    );
+    let mut spoofed = communication.clone();
+    spoofed.content = "different sender payload".into();
+    assert!(session.receive_accepted_agent_mail(&spoofed).await.is_err());
+
+    // Deterministic cut: canonical append completed, but its inbox acknowledgment did not.
     session
-        .record_inter_agent_communication(&turn_context, turn_context.model_info(), communication)
+        .record_inter_agent_communication(
+            &turn_context,
+            turn_context.model_info(),
+            communication.clone(),
+        )
         .await;
+    assert!(matches!(
+        db.thread_queue()
+            .agent_mail(session.thread_id, &record.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .state,
+        codex_state::AgentMailState::Pending(_)
+    ));
+    session
+        .record_accepted_agent_mail(&turn_context, turn_context.model_info(), &communication)
+        .await
+        .unwrap();
+    session
+        .record_accepted_agent_mail(&turn_context, turn_context.model_info(), &communication)
+        .await
+        .unwrap();
+    let tombstone = reopened
+        .thread_queue()
+        .accept_agent_mail(
+            &ResponseItemId::new("amsg_mail"),
+            session.thread_id,
+            sender,
+            session.thread_id,
+            "original-turn/original-call",
+            &digest,
+            &payload,
+        )
+        .await
+        .unwrap();
+    assert_eq!(tombstone.id, record.id);
+    assert_eq!(tombstone.state, codex_state::AgentMailState::Admitted);
 
     let live_history = session.clone_history().await;
     let live_items = raw_history_items(&live_history);
@@ -6220,6 +6343,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         forked_from_ordinal_exclusive: None,
         next_internal_sub_id: AtomicU64::new(0),
         next_fork_recording_id: AtomicU64::new(0),
+        agent_mail: Default::default(),
     };
     let per_turn_config = session.build_per_turn_config(
         &session_configuration,
@@ -8279,6 +8403,7 @@ where
         forked_from_ordinal_exclusive: None,
         next_internal_sub_id: AtomicU64::new(0),
         next_fork_recording_id: AtomicU64::new(0),
+        agent_mail: Default::default(),
     });
     let per_turn_config = session.build_per_turn_config(
         &session_configuration,

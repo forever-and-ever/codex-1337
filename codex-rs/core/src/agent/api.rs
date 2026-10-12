@@ -38,8 +38,9 @@ const _: Option<&dyn AgentControl> = None;
 ///
 /// Implementations preserve the existing wake modes and keep loading and delivery behind
 /// complete operations. Successful delivery means accepted, not read by the model. The
-/// local backend retains its current best-effort reporting and runtime observation policy;
-/// remote ownership, retries and recovery are separate backend work.
+/// local backend commits ordinary mail to its authoritative inbox before acknowledgment;
+/// canonical-history admission is idempotent across process crashes with intact storage.
+/// This does not promise provider observation or exactly-once external effects.
 /// Boxed Send futures allow callers to use `Arc<dyn AgentControl>`.
 pub trait AgentControl: Send + Sync {
     fn identity(&self) -> SessionId;
@@ -161,8 +162,8 @@ pub trait AgentControl: Send + Sync {
     fn record_usage(&self, usage: TokenUsage) -> BoxFuture<'_, Result<()>>;
 
     /// Report the terminal result to the parent and completion activity to the task
-    /// initiator. Local delivery remains best effort and uses the reporting runtime's
-    /// diagnostic trace; it is not deduplicated.
+    /// initiator. Accepted ordinary completion mail is durable and deduplicated by its
+    /// originating turn; reporting before acceptance remains best effort.
     fn turn_finished<'a>(
         &'a self,
         outcome: AgentTurnOutcome,
@@ -251,6 +252,8 @@ pub struct SpawnRequest {
 
 pub struct SendRequest {
     pub caller: ThreadId,
+    /// Stable within the originating conversation, reused when retrying this send.
+    pub message_origin: Option<String>,
     pub target: AgentTarget,
     /// Captured caller settings used if the recipient must be restored.
     pub resume_config: Config,

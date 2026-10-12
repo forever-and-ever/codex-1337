@@ -55,6 +55,7 @@ pub(super) async fn handle_agent_message_tool(
         .agent_control
         .send(SendRequest {
             caller: session.thread_id,
+            message_origin: Some(serde_json::json!([turn.sub_id, call_id]).to_string()),
             target: AgentTarget::Id(receiver_thread_id),
             resume_config,
             input: AgentInput::Message { message, mode },

@@ -77,6 +77,8 @@ pub use model::ThreadSection;
 pub use model::ThreadSectionAppearance;
 pub use model::ThreadSectionsPage;
 pub use model::ThreadsPage;
+pub use runtime::AgentMailRecord;
+pub use runtime::AgentMailState;
 pub use runtime::AlarmTrigger;
 pub use runtime::ExternalAgentConfigImportDetailsRecord;
 pub use runtime::ExternalAgentConfigImportFailureRecord;

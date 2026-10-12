@@ -209,6 +209,8 @@ impl V2Residency {
                     .await
                     .into_iter()
                     .map(|mail| mail.communication)
+                    // Accepted mail already has a durable owner; replay restores it.
+                    .filter(|mail| !crate::session::agent_mail::is_accepted_agent_mail(mail))
                     .collect();
                 // A concurrent tree shutdown deliberately discards its unread mail.
                 let _ = candidate_thread

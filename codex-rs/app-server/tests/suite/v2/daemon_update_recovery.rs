@@ -186,19 +186,129 @@ async fn managed_restart_resumes_loaded_threads_and_goal_without_client() -> Res
     Ok(())
 }
 
+#[test_case::test_case(false; "forced_shutdown")]
+#[cfg_attr(unix, test_case::test_case(true; "accepted_mail_crash"))]
 #[tokio::test]
-async fn managed_force_shutdown_exits_with_active_work() -> Result<()> {
+async fn managed_force_shutdown_exits_with_active_work(accepted_mail: bool) -> Result<()> {
     let home = TempDir::new()?;
     let (_release_response, response_gate) = oneshot::channel();
-    let (mock, _completions) =
-        start_streaming_sse_server(vec![vec![stream_chunk(Some(response_gate), "Done")?]]).await;
+    let (mock, _completions) = start_streaming_sse_server(vec![
+        vec![stream_chunk(Some(response_gate), "Done")?],
+        vec![stream_chunk(None, "Recovered mail")?],
+    ])
+    .await;
     create_config_toml(home.path(), mock.uri(), "never")?;
+    if accepted_mail {
+        let path = home.path().join("config.toml");
+        let config = std::fs::read_to_string(&path)?;
+        std::fs::write(
+            path,
+            format!("{config}\n[features.multi_agent_v2]\nenabled = true\n"),
+        )?;
+    }
     let socket_path = home.path().join("control/server.sock");
     let mut server = spawn_server(home.path(), &socket_path)?;
     let mut client = connect_default_daemon_client(&socket_path).await?;
     let thread = start_thread(&mut client, /*id*/ 2, json!({})).await?;
     start_turn(&mut client, /*id*/ 3, &thread.thread.id).await?;
     wait_for_requests(&mock, /*count*/ 1).await?;
+    #[cfg(unix)]
+    if accepted_mail {
+        use codex_utils_absolute_path::AsAbsolutePath;
+
+        let root = codex_protocol::ThreadId::from_string(&thread.thread.id)?;
+        // Freeze the old runtime at the acceptance/admission cut. Commit the same
+        // authoritative inbox operation used by send(), then kill the process:
+        // no timer, receiver, or frontend can admit the seeded row before the crash.
+        let sqlite =
+            codex_state::SqliteConfig::new_for_testing(home.path().canonicalize()?.as_path().abs());
+        let db = codex_state::StateRuntime::init(sqlite.clone(), "mock_provider".into()).await?;
+        let id = codex_protocol::ResponseItemId::new("amsg_mail");
+        let mail = codex_protocol::protocol::InterAgentCommunication::new(
+            codex_protocol::AgentPath::root().join("worker")?,
+            codex_protocol::AgentPath::root(),
+            Vec::new(),
+            "crash-safe worker mail".into(),
+            false,
+        );
+        assert!(
+            StdCommand::new("kill")
+                .arg("-STOP")
+                .arg(server.id().context("old server PID")?.to_string())
+                .status()?
+                .success()
+        );
+        db.thread_queue()
+            .accept_agent_mail(
+                &id,
+                root,
+                codex_protocol::ThreadId::new(),
+                root,
+                "crash-cut",
+                &"a".repeat(64),
+                &serde_json::to_string(&mail)?,
+            )
+            .await?;
+        assert_eq!(db.thread_queue().pending_agent_mail(root).await?.len(), 1);
+        server.kill().await?;
+        assert!(!daemon_recovery_file_path(home.path()).exists());
+        let mut successor = spawn_server(home.path(), &socket_path)?;
+        // The accepted row alone restores and wakes its original recipient.
+        wait_for_requests(&mock, 2).await?;
+        let requests = mock.requests().await;
+        let recovered: serde_json::Value = serde_json::from_slice(&requests[1])?;
+        let messages = recovered["input"]
+            .as_array()
+            .context("recovered input")?
+            .iter()
+            .filter(|item| item["type"] == "agent_message")
+            .collect::<Vec<_>>();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0]["id"], id.as_str());
+        assert_eq!(messages[0]["author"], "/root/worker");
+        assert_eq!(messages[0]["recipient"], "/root");
+        assert!(
+            messages[0]["content"]
+                .to_string()
+                .contains("crash-safe worker mail")
+        );
+        assert_eq!(
+            db.thread_queue()
+                .agent_mail(root, &id)
+                .await?
+                .context("origin tombstone")?
+                .state,
+            codex_state::AgentMailState::Admitted
+        );
+        successor.kill().await?;
+        let mut again = spawn_server(home.path(), &socket_path)?;
+        let mut reconnected = connect_default_daemon_client(&socket_path).await?;
+        request(
+            &mut reconnected,
+            2,
+            "thread/resume",
+            json!({"threadId":root.to_string(),"excludeTurns":true}),
+        )
+        .await?;
+        let (history, _, _) = codex_rollout::RolloutRecorder::load_rollout_items(
+            thread.thread.path.as_ref().context("saved root history")?,
+        )
+        .await?;
+        assert_eq!(
+            history
+                .iter()
+                .filter(|item| matches!(item,
+                    codex_rollout::RolloutItem::ResponseItem(item) if item.id() == Some(&id)
+                ))
+                .count(),
+            1
+        );
+        assert_eq!(mock.requests().await.len(), 2);
+        again.kill().await?;
+        return Ok(());
+    }
+    #[cfg(not(unix))]
+    let _ = accepted_mail;
     request_shutdown(&server, &socket_path).await?;
     assert_still_running(&mut server, "graceful shutdown must wait").await;
     request_shutdown(&server, &socket_path).await?;

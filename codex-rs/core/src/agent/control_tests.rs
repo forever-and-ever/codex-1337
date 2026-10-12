@@ -178,7 +178,13 @@ fn captured_op_matches(actual: &(ThreadId, Op), expected: &(ThreadId, Op)) -> bo
                 communication: expected,
                 ..
             },
-        ) => actual == expected,
+        ) => {
+            let mut expected = expected.clone();
+            if expected.id.is_none() && crate::session::agent_mail::is_accepted_agent_mail(actual) {
+                expected.id = actual.id.clone();
+            }
+            *actual == expected
+        }
         _ => false,
     }
 }
@@ -936,7 +942,12 @@ async fn send_input_submits_user_message() {
 async fn send_inter_agent_communication_without_turn_preserves_message_attribution() {
     let harness = AgentControlHarness::new().await;
     let (thread_id, thread) = harness.start_thread().await;
-    let communication = InterAgentCommunication::new(
+    harness
+        .control
+        .runtime
+        .registry
+        .register_root_thread(thread_id);
+    let mut communication = InterAgentCommunication::new(
         AgentPath::root(),
         AgentPath::try_from("/root/worker").expect("agent path"),
         Vec::new(),
@@ -949,12 +960,13 @@ async fn send_inter_agent_communication_without_turn_preserves_message_attributi
         .send_inter_agent_communication(
             thread_id,
             communication.clone(),
-            AgentCommunicationContext::new(AgentCommunicationKind::Message, ThreadId::new()),
+            AgentCommunicationContext::new(AgentCommunicationKind::Message, thread_id),
             Default::default(),
         )
         .await
         .expect("send_inter_agent_communication should succeed");
     assert!(!submission_id.is_empty());
+    communication.id = Some(codex_protocol::ResponseItemId::from_server(submission_id));
 
     let expected = (
         thread_id,
@@ -1896,6 +1908,7 @@ async fn cold_resume_with_thread_instructions_preserves_lazy_v2_child_inheritanc
             .services
             .agent_control
             .send(crate::SendRequest {
+                message_origin: None,
                 caller: parent_thread_id,
                 target: crate::AgentTarget::Id(target_thread_id),
                 resume_config: crate::agent::child_config::build_agent_resume_config(&turn)
@@ -2045,6 +2058,7 @@ async fn v2_reload_preserves_shared_instructions_after_root_unloads(
         .services
         .agent_control
         .send(crate::SendRequest {
+            message_origin: None,
             caller: sender_id,
             target: crate::AgentTarget::Id(target_id),
             resume_config: crate::agent::child_config::build_agent_resume_config(&sender_turn)

@@ -967,7 +967,7 @@ pub(crate) async fn run_hooks_and_record_inputs(
             } else {
                 persist_context
             };
-            record_pending_input(
+            if let Err(error) = record_pending_input(
                 sess,
                 turn_context,
                 model_info,
@@ -975,7 +975,19 @@ pub(crate) async fn run_hooks_and_record_inputs(
                 hook_outcome.additional_contexts,
                 input_persist_context,
             )
-            .await;
+            .await
+            {
+                sess.send_event(
+                    turn_context,
+                    EventMsg::Error(codex_protocol::protocol::ErrorEvent {
+                        message: error.to_string(),
+                        codex_error_info: Some(codex_protocol::protocol::CodexErrorInfo::Other),
+                        misalignment: None,
+                    }),
+                )
+                .await;
+                return true;
+            }
         }
     }
     blocked_input && !accepted_user_input

@@ -134,6 +134,14 @@ impl LocalAgentControl {
                     CodexErr::Fatal(format!("failed to persist agent retirement: {err}"))
                 })?;
         }
+        if let Some(db) = state.get_thread(caller).await?.session.state_db() {
+            db.thread_queue()
+                .cancel_agent_mail_recipients(&ids)
+                .await
+                .map_err(|error| {
+                    CodexErr::Fatal(format!("cannot cancel retired agent mail: {error:#}"))
+                })?;
+        }
         for id in &ids {
             self.runtime.registry.release_spawned_thread(*id);
             self.forget_v2_residency(*id);

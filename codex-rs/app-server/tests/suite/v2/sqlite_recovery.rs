@@ -77,6 +77,22 @@ async fn startup_reports_shared_and_fallback_recovery() -> Result<()> {
     backup_pool.close().await;
     server.start_thread(ThreadStartParams::default()).await?;
     timeout(read_timeout, server.shutdown_gracefully()).await??;
+    // The same outer fallback must not rebuild authoritative accepted-mail/user-input data.
+    let damaged_queue = b"damaged authoritative queue";
+    tokio::fs::write(sqlite.queue_db_path(), damaged_queue).await?;
+    let blocked = TestAppServer::builder()
+        .with_codex_home(sqlite.home())
+        .build_initialized_with_timeout(read_timeout)
+        .await;
+    assert!(blocked.is_err());
+    assert_eq!(
+        tokio::fs::read(sqlite.queue_db_path()).await?,
+        damaged_queue
+    );
+    assert_eq!(
+        std::fs::read_dir(sqlite.home().join("db-backups"))?.count(),
+        2
+    );
     Ok(())
 }
 

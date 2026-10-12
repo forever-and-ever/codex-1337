@@ -106,6 +106,7 @@ pub(crate) struct Session {
     pub(crate) active_turn: Mutex<Option<ActiveTurn>>,
     pub(crate) async_hook_results: async_channel::Receiver<HookCompletedEvent>,
     pub(crate) input_queue: InputQueue,
+    pub(crate) agent_mail: super::agent_mail::AgentMailRuntime,
     pub(crate) services: SessionServices,
     pub(super) git_enrichment_policy: GitEnrichmentPolicy,
     pub(super) fork_persistence: ForkPersistence,
@@ -1948,6 +1949,7 @@ impl Session {
                 forked_from_ordinal_exclusive,
                 next_internal_sub_id: AtomicU64::new(0),
                 next_fork_recording_id: AtomicU64::new(0),
+                agent_mail: Default::default(),
             });
             crate::chatgpt_delegate::ChatgptDelegate::install(&sess, &config);
             if let Some(startup) = &startup {

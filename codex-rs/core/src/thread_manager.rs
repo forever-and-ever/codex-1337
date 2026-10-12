@@ -1,3 +1,4 @@
+mod agent_mail;
 mod managed;
 mod prompt_cache;
 mod shared_instructions;

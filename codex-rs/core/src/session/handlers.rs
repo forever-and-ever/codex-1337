@@ -450,6 +450,9 @@ pub(super) async fn submission_loop(
     rx_sub: Receiver<Submission>,
 ) {
     // Session shutdown and tree shutdown both use the existing teardown handler.
+    if let Err(error) = sess.recover_accepted_agent_mail().await {
+        tracing::error!(%error, "accepted agent-mail recovery is blocked; durable inbox retained");
+    }
     let mut shutdown_received = false;
     let mut mailbox = sess.input_queue.mailbox_updates();
     let mut active_subagents = sess.services.local_agent_runtime.active_subagents();

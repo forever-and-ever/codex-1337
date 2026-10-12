@@ -199,6 +199,45 @@ async fn idle_mail_wakes_without_user_input(nested: bool, completion: bool) -> R
             .iter()
             .any(|item| item.to_string().contains("NEW_TASK"))
     );
+    if completion {
+        let path = test.codex.rollout_path().expect("saved parent history");
+        let (history, _, _) = codex_rollout::RolloutRecorder::load_rollout_items(&path).await?;
+        let id = history.iter().find_map(|item| match item {
+            codex_rollout::RolloutItem::ResponseItem(item)
+                if matches!(&item.item, codex_protocol::models::ResponseItem::AgentMessage { author, content, .. }
+                    if author == "/root/first" && content.iter().any(|part| format!("{part:?}").contains(MAIL))) =>
+            {
+                item.id().cloned()
+            }
+            _ => None,
+        }).expect("canonical accepted completion mail");
+        assert!(id.as_str().starts_with("amsg_mail_"));
+        let db = codex_state::StateRuntime::init(
+            test.config.sqlite_config().clone(),
+            test.config.model_provider_id.clone(),
+        )
+        .await?;
+        let receipt = db
+            .thread_queue()
+            .agent_mail(test.session_configured.thread_id, &id)
+            .await?
+            .expect("completion origin tombstone");
+        assert_eq!(receipt.state, codex_state::AgentMailState::Admitted);
+        assert!(
+            db.thread_queue()
+                .pending_agent_mail(test.session_configured.thread_id)
+                .await?
+                .is_empty()
+        );
+        // Repeated recovery reconciles canonical identity without another model request.
+        test.thread_manager
+            .recover_accepted_agent_mail(
+                test.session_configured.thread_id,
+                test.session_configured.thread_id,
+            )
+            .await?;
+        assert_eq!(resumed.requests().len(), 1);
+    }
     drop(grandchild);
     test.thread_manager
         .shutdown_all_threads_bounded(Duration::from_secs(5))

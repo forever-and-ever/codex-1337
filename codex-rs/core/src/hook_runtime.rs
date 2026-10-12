@@ -717,7 +717,7 @@ pub(crate) async fn record_pending_input(
     pending_input: TurnInput,
     additional_contexts: Vec<String>,
     persist_context: PersistContext,
-) {
+) -> codex_protocol::error::Result<()> {
     match pending_input {
         TurnInput::CodeModeNotification => {}
         TurnInput::UserInput {
@@ -764,12 +764,18 @@ pub(crate) async fn record_pending_input(
             sess.ensure_rollout_materialized(persist_context).await;
         }
         TurnInput::InterAgentCommunication(communication) => {
-            sess.record_inter_agent_communication(turn_context, model_info, communication)
-                .await;
+            if !sess
+                .record_accepted_agent_mail(turn_context, model_info, &communication)
+                .await?
+            {
+                sess.record_inter_agent_communication(turn_context, model_info, communication)
+                    .await;
+            }
             sess.ensure_rollout_materialized(persist_context).await;
         }
     }
     record_additional_contexts(sess, turn_context, additional_contexts).await;
+    Ok(())
 }
 
 /// Processes finished async hook results at a safe turn boundary.

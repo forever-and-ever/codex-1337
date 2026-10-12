@@ -901,6 +901,8 @@ pub async fn run_main_with_transport_options(
         let mut remote_control_status = remote_control_status_rx.borrow().clone();
         let transport_shutdown_token = transport_shutdown_token.clone();
         async move {
+            let _accepted_mail_recovery =
+                managed_daemon.then(|| processor.start_accepted_mail_recovery());
             let recovery_task = if managed_daemon {
                 match daemon_thread_recovery::start_recovery(
                     recovery_file.clone(),
@@ -1311,6 +1313,10 @@ async fn init_sqlite_state_db_with_fresh_start_on_corruption(
                 return Err(err);
             }
 
+            // Queue data is authoritative, unlike the rebuildable state/history views.
+            if database_path == config.sqlite_config().queue_db_path() {
+                return Err(err.context("authoritative queue database cannot be rebuilt; preserve it and restore it explicitly"));
+            }
             if !attempted_backups.insert(database_path.clone()) {
                 return Err(anyhow::anyhow!(
                     "failed to initialize sqlite state runtime after moving damaged database file into a backup folder: {err}"

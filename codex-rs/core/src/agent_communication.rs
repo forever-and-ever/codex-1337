@@ -6,7 +6,8 @@ pub(crate) static PENDING_MAILBOX_MESSAGES: codex_diagnostics::Gauge =
 
 const AGENT_COMMUNICATION_TARGET: &str = "codex_otel.agent_communication";
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum AgentCommunicationKind {
     Spawn,
     Message,
@@ -28,7 +29,8 @@ impl AgentCommunicationKind {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct AgentCommunicationContext {
     kind: AgentCommunicationKind,
-    sender_thread_id: ThreadId,
+    pub(crate) sender_thread_id: ThreadId,
+    pub(crate) origin: Option<String>,
 }
 
 impl AgentCommunicationContext {
@@ -36,7 +38,17 @@ impl AgentCommunicationContext {
         Self {
             kind,
             sender_thread_id,
+            origin: None,
         }
+    }
+
+    pub(crate) fn with_origin(mut self, origin: Option<String>) -> Self {
+        self.origin = origin;
+        self
+    }
+
+    pub(crate) fn durable_origin(&self, fallback: &str) -> String {
+        serde_json::json!([self.kind, self.origin.as_deref().unwrap_or(fallback)]).to_string()
     }
 }
 

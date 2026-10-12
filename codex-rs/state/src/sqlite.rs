@@ -118,7 +118,8 @@ const QUEUE_DB: RuntimeDbSpec = RuntimeDbSpec {
     open_phase: "open_queue",
     migrate_phase: "migrate_queue",
     background_reclamation: false,
-    recovery: RecoveryMode::BackupAndRebuild,
+    // Accepted mail and queued input have no rebuildable canonical copy.
+    recovery: RecoveryMode::Unavailable,
 };
 
 const THREAD_HISTORY_DB: RuntimeDbSpec = RuntimeDbSpec {
@@ -428,6 +429,10 @@ impl SqliteConfig {
         if result == validation::QuickCheckOutcome::CorruptedNeedsFixed {
             tracing::error!(database = %path.display(), "SQLite quick check detected corruption");
             telemetry::record_corruption(telemetry_override, recover_spec.map(|spec| spec.kind));
+            if matches!(recover_spec.map(|spec| spec.kind), Some(DbKind::Queue)) {
+                return Err(anyhow::Error::new(libsqlite3_sys::Error::new(libsqlite3_sys::SQLITE_CORRUPT))
+                    .context(format!("authoritative queue database at {} is corrupt; preserve it and restore it explicitly before accepting mail or queued input", path.display())));
+            }
             if recovery == RecoveryMode::BackupAndRebuild {
                 pool.close().await;
                 let backups = crate::backup_runtime_db_for_fresh_start(path).await?;

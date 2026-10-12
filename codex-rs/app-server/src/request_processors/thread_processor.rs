@@ -1,3 +1,6 @@
+#[path = "agent_mail.rs"]
+mod agent_mail;
+
 #[path = "daemon_continuation.rs"]
 mod daemon_continuation;
 

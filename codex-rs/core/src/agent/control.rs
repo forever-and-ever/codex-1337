@@ -72,6 +72,7 @@ mod delivery;
 mod execution;
 
 pub(crate) use execution::FamilyExecution;
+mod accepted_mail;
 mod inspection;
 mod interrupt;
 mod legacy;
@@ -198,6 +199,18 @@ impl LocalAgentControl {
     ) -> CodexResult<String> {
         self.ensure_message_recipient_loaded(agent_id, &communication.author)
             .await?;
+        if !communication.trigger_turn {
+            let state = self.runtime.upgrade()?;
+            return self
+                .submit_accepted_agent_mail(
+                    agent_id,
+                    &state,
+                    communication,
+                    agent_communication_context,
+                    start_options,
+                )
+                .await;
+        }
         let _lifecycle = self.runtime.lifecycle.read().await;
         let state = self.runtime.upgrade()?;
         if communication.trigger_turn {
@@ -291,6 +304,11 @@ impl LocalAgentControl {
         context: AgentCommunicationContext,
         start_options: TurnStartOptions,
     ) -> CodexResult<String> {
+        if !communication.trigger_turn {
+            return self
+                .submit_accepted_agent_mail(agent_id, state, communication, context, start_options)
+                .await;
+        }
         let communication_for_log =
             crate::agent_communication::logging_enabled().then(|| communication.clone());
         // Loaded recipients retain submission ordering with follow-ups and interrupts.

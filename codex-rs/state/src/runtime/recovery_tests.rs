@@ -80,22 +80,28 @@ fn sqlite_error_detail_classifies_lock_errors() {
 #[tokio::test]
 async fn runtime_db_path_for_corruption_error_returns_failed_database_path() -> std::io::Result<()>
 {
-    let sqlite_home = unique_temp_dir();
-    tokio::fs::create_dir_all(sqlite_home.as_path()).await?;
-    let path = crate::SqliteConfig::new_for_testing(sqlite_home.as_path().abs()).state_db_path();
-    tokio::fs::write(path.as_path(), b"not sqlite").await?;
-
-    let err = match super::super::StateRuntime::init(
-        crate::SqliteConfig::new_for_testing(sqlite_home.as_path().abs()),
-        "openai".to_string(),
-    )
-    .await
-    {
-        Ok(_) => panic!("malformed sqlite should fail to initialize"),
-        Err(err) => err,
-    };
-
-    assert_eq!(runtime_db_path_for_corruption_error(&err), Some(path));
+    for queue in [false, true] {
+        let sqlite_home = unique_temp_dir();
+        tokio::fs::create_dir_all(sqlite_home.as_path()).await?;
+        let sqlite = crate::SqliteConfig::new_for_testing(sqlite_home.as_path().abs());
+        let path = if queue {
+            sqlite.queue_db_path()
+        } else {
+            sqlite.state_db_path()
+        };
+        tokio::fs::write(&path, b"not sqlite").await?;
+        let err = match super::super::StateRuntime::init(sqlite, "openai".to_string()).await {
+            Ok(_) => panic!("malformed sqlite should fail to initialize"),
+            Err(err) => err,
+        };
+        assert_eq!(
+            runtime_db_path_for_corruption_error(&err),
+            Some(path.clone())
+        );
+        assert!(is_sqlite_corruption_error(&err));
+        assert_eq!(tokio::fs::read(&path).await?, b"not sqlite");
+        assert!(!sqlite_home.join("db-backups").exists());
+    }
     Ok(())
 }
 

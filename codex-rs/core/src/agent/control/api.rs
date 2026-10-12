@@ -138,6 +138,7 @@ impl AgentControl for LocalAgentControl {
         Box::pin(async move {
             let SendRequest {
                 caller,
+                message_origin,
                 target,
                 resume_config,
                 input,
@@ -200,7 +201,8 @@ impl AgentControl for LocalAgentControl {
                         .send_inter_agent_communication(
                             target,
                             communication,
-                            AgentCommunicationContext::new(kind, caller),
+                            AgentCommunicationContext::new(kind, caller)
+                                .with_origin(message_origin),
                             start_options,
                         )
                         .await?;

@@ -41,6 +41,7 @@ use tracing::warn;
 
 mod alarms;
 
+mod agent_mail;
 mod backfill;
 mod comms;
 mod context_role;
@@ -52,6 +53,9 @@ mod logs_maintenance;
 mod memories;
 mod memory_versions;
 mod projects;
+pub use agent_mail::AgentMailRecord;
+pub use agent_mail::AgentMailState;
+
 mod queued_items;
 pub(crate) mod reclamation;
 pub(crate) mod recovery;

@@ -118,7 +118,10 @@ impl LocalAgentControl {
             /*trigger_turn*/ false,
         );
         let context =
-            AgentCommunicationContext::new(AgentCommunicationKind::Result, outcome.thread_id);
+            AgentCommunicationContext::new(AgentCommunicationKind::Result, outcome.thread_id)
+                .with_origin(Some(
+                    serde_json::json!(["result", outcome.turn_id]).to_string(),
+                ));
         let delivery = self
             .send_inter_agent_communication(
                 parent_thread_id,

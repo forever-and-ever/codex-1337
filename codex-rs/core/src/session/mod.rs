@@ -240,6 +240,7 @@ use codex_protocol::error::Result as CodexResult;
 use codex_protocol::exec_output::StreamOutput;
 
 mod account;
+pub(crate) mod agent_mail;
 mod code_mode_notifications;
 mod code_mode_warning;
 mod config_refresh;
@@ -1061,11 +1062,11 @@ impl SessionIo {
         root_turn_id: Option<String>,
         residency_guard: Option<tokio::sync::OwnedRwLockReadGuard<()>>,
     ) -> CodexResult<String> {
-        let id = new_submission_id();
         let WithTurnExtensionData {
             request: op,
             turn_extension_init,
         } = op.into();
+        let id = agent_mail::accepted_mail_submission_id(&op).unwrap_or_else(new_submission_id);
         let sub = Submission {
             id: id.clone(),
             op,

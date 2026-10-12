@@ -1410,6 +1410,7 @@ async fn multi_agent_v2_spawn_returns_path_and_send_message_accepts_relative_pat
             .services
             .agent_control
             .send(crate::agent::api::SendRequest {
+                message_origin: None,
                 caller: session.thread_id,
                 target: crate::agent::api::AgentTarget::Id(native.thread_id),
                 resume_config: (*turn.config).clone(),
