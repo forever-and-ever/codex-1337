@@ -7,6 +7,7 @@ use codex_app_server_protocol::ThreadReadResponse;
 
 pub(crate) enum HistoryPaginationUpdate {
     Untracked,
+    Summary(ThreadId),
     Legacy(ThreadId),
     Paginated {
         thread_id: ThreadId,
@@ -18,6 +19,9 @@ impl AppServerSession {
     pub(crate) fn apply_history_preparation(&mut self, update: HistoryPaginationUpdate) {
         match update {
             HistoryPaginationUpdate::Untracked => {}
+            HistoryPaginationUpdate::Summary(thread_id) => {
+                self.history_pagination.remove(&thread_id);
+            }
             HistoryPaginationUpdate::Legacy(thread_id) => {
                 self.history_pagination.entry(thread_id).or_default();
             }

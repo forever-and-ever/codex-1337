@@ -7,6 +7,7 @@ use codex_app_server_protocol as api;
 pub(in crate::app) enum DetachScope {
     Exit,
     VoiceOnly,
+    Navigation { destination: Option<ThreadId> },
 }
 
 #[derive(Clone)]
@@ -126,7 +127,13 @@ pub(super) async fn send(
 
 impl App {
     pub(in crate::app) async fn prepare_detach_plan(&mut self, scope: DetachScope) -> DetachPlan {
-        let voice = {
+        let destination = match scope {
+            DetachScope::Navigation { destination } => destination,
+            _ => None,
+        };
+        let voice = if matches!(scope, DetachScope::Navigation { .. }) {
+            None
+        } else {
             let thread_id = self
                 .background_voice
                 .as_mut()
@@ -136,7 +143,7 @@ impl App {
             thread_id
         };
         match scope {
-            DetachScope::Exit => {}
+            DetachScope::Exit | DetachScope::Navigation { .. } => {}
             DetachScope::VoiceOnly => {
                 return DetachPlan {
                     targets: Vec::new(),
@@ -147,6 +154,9 @@ impl App {
         let mut targets = Vec::new();
         // Side conversations stop before unsubscribing; ordinary conversations keep running.
         for thread_id in self.side_threads.keys().copied().collect::<Vec<_>>() {
+            if destination == Some(thread_id) {
+                continue;
+            }
             let channel = self.ensure_thread_channel(thread_id);
             let store = Arc::clone(&channel.store);
             let replay_only = channel.attachment() == ThreadEventAttachment::ReplayOnly;
@@ -164,7 +174,8 @@ impl App {
             });
         }
         for (&thread_id, channel) in &self.thread_event_channels {
-            if self.side_threads.contains_key(&thread_id)
+            if destination == Some(thread_id)
+                || self.side_threads.contains_key(&thread_id)
                 || self.voice_owner_thread_id() == Some(thread_id)
                 || self
                     .agents_overview

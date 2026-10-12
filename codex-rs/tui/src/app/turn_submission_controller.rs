@@ -487,10 +487,12 @@ impl App {
                 }
             }
             SubmissionEvent::CancelNavigation { id } => {
-                self.server_operations.navigation.cancel(id);
+                self.cancel_pending_navigation(id);
+                self.drain_local_navigation_recovery().await;
             }
             SubmissionEvent::Retire => {
-                self.server_operations.navigation.retire_current();
+                self.supersede_pending_navigation();
+                self.drain_local_navigation_recovery().await;
                 self.server_operations.epoch = self
                     .server_operations
                     .epoch
@@ -579,6 +581,10 @@ impl App {
         completion: ServerCompletion,
     ) -> Result<AppRunControl> {
         match completion {
+            ServerCompletion::RecoverDraft(recovery) => {
+                self.recover_local_navigation_draft(recovery).await;
+                Ok(AppRunControl::Continue)
+            }
             ServerCompletion::Request(completion) => {
                 self.finish_submission(
                     server,
@@ -940,7 +946,7 @@ impl App {
         Ok(())
     }
 
-    async fn restore_submission_drafts(
+    pub(super) async fn restore_submission_drafts(
         &mut self,
         thread_id: ThreadId,
         drafts: Vec<SubmissionDraft>,
@@ -1036,7 +1042,9 @@ impl App {
         server: &mut AppServerSession,
     ) -> Result<()> {
         tokio::time::timeout(Duration::from_secs(5), async {
-            while !self.server_operations.navigation.is_empty() {
+            while !self.server_operations.navigation.is_empty()
+                || !self.server_operations.control_rx.is_empty()
+            {
                 tokio::select! {
                     completion = self.thread_delivery.completion_rx.recv() => {
                         let completion = completion.expect("local receipt channel open");
@@ -1052,6 +1060,21 @@ impl App {
         })
         .await??;
         Ok(())
+    }
+    #[cfg(test)]
+    pub(in crate::app) async fn start_fresh_session_and_settle(
+        &mut self,
+        tui: &mut tui::Tui,
+        server: &mut AppServerSession,
+        source: Option<ThreadStartSource>,
+        message: Option<UserMessage>,
+        name: Option<String>,
+    ) {
+        self.start_fresh_session(tui, server, source, message, name)
+            .await;
+        self.settle_navigation(tui, server)
+            .await
+            .expect("fresh navigation settled");
     }
     #[cfg(test)]
     pub(in crate::app) async fn select_agent_thread_and_settle(

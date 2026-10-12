@@ -742,42 +742,14 @@ impl AppServerSession {
         &mut self,
         local_settings: &LocalSettings,
         config: &Config,
-        mut params: ThreadStartParams,
+        params: ThreadStartParams,
     ) -> Result<AppServerStartedThread> {
-        let request_id = self.next_request_id();
-        if self.history_support == ThreadHistorySupport::LegacyOnly {
-            params.history_mode = None;
-        }
-        let selected_profile = params.permissions.is_some();
-        let request_handle = self.request_handle();
-        let (response, history_support, task_tools_available) =
-            request_thread_start_with_history_fallback(&request_handle, request_id, params)
-                .await
-                .map_err(|err| {
-                    bootstrap_request_error("thread/start failed during TUI bootstrap", err)
-                })?;
-        if history_support == ThreadHistorySupport::LegacyOnly {
-            self.history_support = ThreadHistorySupport::LegacyOnly;
-        }
-        // An explicit server selection must not reuse the client's local display policy.
-        let selected_permissions = selected_profile.then(|| {
-            PermissionProfile::from_legacy_sandbox_policy_for_cwd(
-                &response.sandbox.to_core(),
-                response.cwd.as_path(),
-            )
-        });
-        let mut started = started_thread_from_start_response(
-            response,
-            local_settings,
-            config,
-            self.thread_params_mode(),
-        )
-        .await?;
-        if let Some(permissions) = selected_permissions {
-            started.session.permission_profile = permissions;
-        }
-        started.task_tools_available = task_tools_available;
-        Ok(started)
+        let prepared = self
+            .prepare_start_with_params(local_settings, config, params)
+            .run()
+            .await;
+        self.apply_session_observations(prepared.observations);
+        prepared.result
     }
 
     #[cfg(test)]

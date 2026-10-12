@@ -147,7 +147,11 @@ impl App {
             event => (event, None),
         };
         match event {
-            AppEvent::ServerOperationExitReady(reason) => return Ok(AppRunControl::Exit(reason)),
+            AppEvent::ServerOperationExitReady(reason) => {
+                self.supersede_pending_navigation();
+                self.drain_local_navigation_recovery().await;
+                return Ok(AppRunControl::Exit(reason));
+            },
             AppEvent::LocalShellRequest(_) | AppEvent::LocalShellUpdate(_) => {
                 unreachable!("Local-shell events are consumed before agent routing")
             }
@@ -3429,6 +3433,8 @@ impl App {
         app_server: &mut AppServerSession,
         mode: ExitMode,
     ) -> AppRunControl {
+        self.supersede_pending_navigation();
+        self.drain_local_navigation_recovery().await;
         let reason = if mode == ExitMode::ShutdownAfterInterrupt {
             ExitReason::TurnInterrupted
         } else {

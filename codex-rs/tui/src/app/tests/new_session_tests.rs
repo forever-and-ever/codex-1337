@@ -41,7 +41,7 @@ async fn new_sessions_preserve_yolo_launch_and_later_permission_choices() -> Res
                 ))?;
             app.adopt_server_permissions();
         }
-        app.start_fresh_session(
+        app.start_fresh_session_and_settle(
             &mut tui,
             &mut server,
             /*session_start_source*/ None,
@@ -102,7 +102,7 @@ async fn new_session_preserves_vim_line_yank() -> Result<()> {
     )
     .await?;
     let mut tui = crate::tui::test_support::make_test_tui()?;
-    app.start_fresh_session(
+    app.start_fresh_session_and_settle(
         &mut tui,
         &mut server,
         /*session_start_source*/ None,
@@ -254,7 +254,7 @@ async fn replacement_uses_server_defaults_and_preserves_explicit_launch_settings
             app.open_agents_overview(&server);
         }
         let mut tui = crate::tui::test_support::make_test_tui()?;
-        app.start_fresh_session(
+        app.start_fresh_session_and_settle(
             &mut tui,
             &mut server,
             /*session_start_source*/ None,
@@ -345,7 +345,7 @@ async fn replacement_failure_keeps_current_task_and_restores_input() -> Result<(
             std::fs::write(home.path().join("config.toml"), "invalid = [")?;
         }
         let mut tui = crate::tui::test_support::make_test_tui()?;
-        app.start_fresh_session(
+        app.start_fresh_session_and_settle(
             &mut tui,
             &mut server,
             /*session_start_source*/ None,
@@ -413,7 +413,7 @@ async fn replacement_preserves_remote_launch_paths_and_older_servers() -> Result
         .await?;
         let mut server = server.with_remote_cwd_override(remote_cwd.clone());
         let mut tui = crate::tui::test_support::make_test_tui()?;
-        app.start_fresh_session(
+        app.start_fresh_session_and_settle(
             &mut tui,
             &mut server,
             /*session_start_source*/ None,

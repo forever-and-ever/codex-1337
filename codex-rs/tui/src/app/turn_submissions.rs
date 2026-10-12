@@ -45,6 +45,7 @@ pub(in crate::app) use control::GoalStop;
 pub(in crate::app) enum ServerCompletion {
     Request(ControlCompletion),
     Navigation(navigation::NavigationCompletion),
+    RecoverDraft(LocalDraftRecovery),
 }
 
 #[derive(Debug)]
@@ -123,6 +124,17 @@ enum OperationOrigin {
         store: Arc<Mutex<ThreadEventStore>>,
     },
     Connection,
+}
+
+pub(in crate::app) struct LocalDraftRecovery {
+    origin: OperationOrigin,
+    message: UserMessage,
+}
+
+impl std::fmt::Debug for LocalDraftRecovery {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LocalDraftRecovery").finish_non_exhaustive()
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(in crate::app) enum OperationScope {
@@ -533,7 +545,7 @@ impl ServerOperations {
     }
 
     pub(super) fn is_empty(&self) -> bool {
-        self.lanes.is_empty() && self.navigation.is_empty()
+        self.lanes.is_empty() && self.navigation.is_empty() && self.control_rx.is_empty()
     }
 
     pub(in crate::app) fn preview(&self, thread_id: Option<ThreadId>) -> SubmissionPreview {

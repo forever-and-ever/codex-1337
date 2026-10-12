@@ -13,25 +13,6 @@ use codex_protocol::openai_models::ModelPreset;
 use uuid::Uuid;
 
 impl AppServerSession {
-    pub(crate) async fn start_provider_thread(
-        &mut self,
-        local_settings: &crate::local_settings::LocalSettings,
-        config: &crate::legacy_core::config::Config,
-        provider: &str,
-    ) -> color_eyre::Result<super::AppServerStartedThread> {
-        let mut params = super::thread_start_params_from_config(
-            config,
-            self.thread_params_mode(),
-            self.remote_cwd_override.as_deref(),
-            /*session_start_source*/ None,
-        );
-        // Unlike ambient client config, this is an explicit user choice from the
-        // connected server's provider list and applies equally over SSH.
-        params.model_provider = Some(provider.to_owned());
-        self.start_thread_with_params(local_settings, config, params)
-            .await
-    }
-
     pub(crate) fn set_available_models(&mut self, models: Vec<ModelPreset>) {
         if let Some(default) = models
             .iter()

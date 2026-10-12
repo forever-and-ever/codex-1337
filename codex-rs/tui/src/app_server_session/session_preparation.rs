@@ -126,6 +126,232 @@ pub(in crate::app_server_session) async fn request<T: serde::de::DeserializeOwne
     })
 }
 
+pub(crate) enum ThreadStartChoice {
+    Configured(Option<ThreadStartSource>),
+    Provider(String),
+}
+pub(crate) struct StartPreparation {
+    handle: AppServerRequestHandle,
+    params: ThreadStartParams,
+    config: Config,
+    local_settings: LocalSettings,
+    mode: ThreadParamsMode,
+    history_support: ThreadHistorySupport,
+}
+impl AppServerSession {
+    pub(crate) fn prepare_start_thread(
+        &self,
+        local_settings: &LocalSettings,
+        config: &Config,
+        choice: ThreadStartChoice,
+    ) -> StartPreparation {
+        let params = match choice {
+            ThreadStartChoice::Configured(source) => {
+                let session_config = self.session_config_with_effective_service_tier(config);
+                let mut params = thread_start_params_from_config(
+                    &session_config,
+                    self.thread_params_mode(),
+                    self.remote_cwd_override.as_deref(),
+                    source,
+                );
+                params.model_provider = self.explicit_model_provider(config);
+                params.daybreak_enabled =
+                    (config.daybreak_enabled && !config.ephemeral).then_some(true);
+                params
+            }
+            ThreadStartChoice::Provider(provider) => {
+                let mut params = thread_start_params_from_config(
+                    config,
+                    self.thread_params_mode(),
+                    self.remote_cwd_override.as_deref(),
+                    None,
+                );
+                params.model_provider = Some(provider);
+                params
+            }
+        };
+        self.prepare_start_with_params(local_settings, config, params)
+    }
+    pub(in crate::app_server_session) fn prepare_start_with_params(
+        &self,
+        local_settings: &LocalSettings,
+        config: &Config,
+        mut params: ThreadStartParams,
+    ) -> StartPreparation {
+        if self.history_support == ThreadHistorySupport::LegacyOnly {
+            params.history_mode = None;
+        }
+        StartPreparation {
+            handle: self.request_handle(),
+            params,
+            config: config.clone(),
+            local_settings: local_settings.clone(),
+            mode: self.thread_params_mode(),
+            history_support: self.history_support,
+        }
+    }
+}
+impl StartPreparation {
+    pub(crate) async fn run(self) -> PreparedSession {
+        let Self {
+            handle,
+            params,
+            config,
+            local_settings,
+            mode,
+            history_support,
+        } = self;
+        let mut observations = SessionObservations {
+            history: HistoryPaginationUpdate::Untracked,
+            history_support,
+        };
+        let mut custody = SubscriptionCustody::NewThreadUncertain;
+        let selected_profile = params.permissions.is_some();
+        let result = async {
+            let request_id = RequestId::String(format!("tui-start-{}", uuid::Uuid::new_v4()));
+            let (response, support, task_tools_available) =
+                request_thread_start_with_history_fallback(&handle, request_id, params)
+                    .await
+                    .map_err(|error| {
+                        if matches!(error, TypedRequestError::Server { .. }) {
+                            custody = SubscriptionCustody::None;
+                        }
+                        bootstrap_request_error("thread/start failed during TUI bootstrap", error)
+                    })?;
+            let thread_id = ThreadId::from_string(&response.thread.id)?;
+            custody = SubscriptionCustody::Subscribed(thread_id);
+            if support == ThreadHistorySupport::LegacyOnly {
+                observations.history_support = support;
+            }
+            let permissions = selected_profile.then(|| {
+                PermissionProfile::from_legacy_sandbox_policy_for_cwd(
+                    &response.sandbox.to_core(),
+                    response.cwd.as_path(),
+                )
+            });
+            let mut started =
+                started_thread_from_start_response(response, &local_settings, &config, mode)
+                    .await?;
+            if let Some(permissions) = permissions {
+                started.session.permission_profile = permissions;
+            }
+            started.task_tools_available = task_tools_available;
+            Ok(started)
+        }
+        .await;
+        PreparedSession {
+            result,
+            custody,
+            observations,
+        }
+    }
+}
+
+pub(crate) struct ViewPreparation {
+    handle: AppServerRequestHandle,
+    thread_id: ThreadId,
+    config: Config,
+    local_settings: LocalSettings,
+    policy: RequestPolicy,
+    history_support: ThreadHistorySupport,
+}
+pub(crate) struct PreparedView {
+    pub(crate) result: Result<(AppServerStartedThread, Option<&'static str>)>,
+    pub(crate) observations: SessionObservations,
+}
+impl AppServerSession {
+    pub(crate) fn prepare_thread_view(
+        &self,
+        policy: RequestPolicy,
+        config: &Config,
+        local_settings: &LocalSettings,
+        thread_id: ThreadId,
+    ) -> ViewPreparation {
+        ViewPreparation {
+            handle: self.request_handle(),
+            thread_id,
+            config: config.clone(),
+            local_settings: local_settings.clone(),
+            policy,
+            history_support: self.history_support,
+        }
+    }
+}
+impl ViewPreparation {
+    pub(crate) async fn run(self) -> PreparedView {
+        let Self {
+            handle,
+            thread_id,
+            config,
+            local_settings,
+            policy,
+            history_support,
+        } = self;
+        let mut observations = SessionObservations {
+            history: HistoryPaginationUpdate::Untracked,
+            history_support,
+        };
+        let result = async {
+            let mut thread = read_thread(policy, &handle, thread_id).await?;
+            let (history, update) = history::preparation::prepare_initial_thread_history(
+                policy, &handle, &mut thread, None, None, Some(&config), Some(&local_settings), HistoryHydrationScope::Initial,
+            ).await;
+            observations.history = update;
+            let mut history_notice = None;
+            if let Err(error) = history {
+                if thread.history_mode == ThreadHistoryMode::Legacy { return Err(error); }
+                tracing::warn!("Failed to page read-only thread history; trying summary pages");
+                let page: ThreadTurnsListResponse = request(policy, &handle, ClientRequest::ThreadTurnsList {
+                    request_id: RequestId::String(format!("tui-read-only-{}", uuid::Uuid::new_v4())),
+                    params: ThreadTurnsListParams {
+                        thread_id: thread_id.to_string(), cursor: None, limit: Some(100),
+                        sort_direction: Some(SortDirection::Desc), items_view: Some(TurnItemsView::Summary),
+                    },
+                }).await?;
+                thread.turns = page.data.into_iter().rev().collect();
+                observations.history = HistoryPaginationUpdate::Summary(thread_id);
+                history_notice = Some("Showing up to 100 recent prompts and final replies. Intermediate messages and tool activity are unavailable.");
+            }
+        let session = thread_session_state_from_thread_response(
+            &thread.id,
+            crate::windows_sandbox::host_from_environments(thread.environments.as_deref()),
+            thread.forked_from_id.clone(),
+            thread.name.clone(),
+            thread.path.clone(),
+            thread.model.clone().unwrap_or_default(),
+            thread.model_provider.clone(),
+            config.service_tier.clone(),
+            AskForApproval::from(config.permissions.approval_policy.value()),
+            config.approvals_reviewer,
+            config.permissions.permission_profile().clone(),
+            config.permissions.active_permission_profile(),
+            thread.cwd.clone(),
+            config.workspace_roots.clone(),
+            Vec::new(),
+            thread.reasoning_effort,
+            &local_settings,
+        )
+        .await
+        .map_err(color_eyre::eyre::Report::msg)?;
+        Ok((
+            AppServerStartedThread {
+                can_accept_text_input: false,
+                session,
+                turns: thread.turns,
+                blocks_direct_input: false,
+                history_notice: None,
+                task_tools_available: handle.supports_thread_coordination(),
+            },
+            history_notice,
+        ))
+        }.await;
+        PreparedView {
+            result,
+            observations,
+        }
+    }
+}
+
 pub(crate) struct ResumePreparation {
     handle: AppServerRequestHandle,
     policy: RequestPolicy,
@@ -144,6 +370,7 @@ pub(crate) enum SubscriptionCustody {
     None,
     Subscribed(ThreadId),
     Uncertain(ThreadId),
+    NewThreadUncertain,
 }
 
 pub(crate) struct SessionObservations {

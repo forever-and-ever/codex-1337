@@ -6,6 +6,8 @@ use futures::FutureExt;
 
 #[path = "server_agent_discovery.rs"]
 mod discovery;
+#[path = "server_fresh_navigation.rs"]
+mod fresh;
 #[path = "server_thread_selection.rs"]
 mod selection;
 
@@ -36,6 +38,7 @@ enum NavigationIntent {
     PickerDefaults(Box<PickerPreparation>),
     PickerStarting,
     ClosePicker,
+    Fresh(fresh::FreshStage),
 }
 
 struct PickerPreparation {
@@ -61,6 +64,7 @@ enum NavigationReceipt {
     PickerClosed,
     Discovered(discovery::DiscoveryReceipt),
     Selected(selection::SelectionReceipt),
+    Fresh(fresh::FreshReceipt),
 }
 
 impl std::fmt::Debug for NavigationCompletion {
@@ -87,7 +91,15 @@ impl NavigationOwner {
     }
 
     pub(super) fn precedes_thread(&self, thread_id: ThreadId, order: u64, epoch: u64) -> bool {
-        self.current.iter().chain(&self.retired).any(|operation| operation.epoch == epoch && operation.order < order && matches!(&operation.intent, NavigationIntent::Select(stage) if stage.thread_id() == thread_id))
+        self.current.iter().chain(&self.retired).any(|operation| {
+            operation.epoch == epoch
+                && operation.order < order
+                && match &operation.intent {
+                    NavigationIntent::Select(stage) => stage.thread_id() == thread_id,
+                    NavigationIntent::Fresh(stage) => stage.fences_thread(thread_id),
+                    _ => false,
+                }
+        })
     }
     pub(super) fn retire_epoch(&mut self, epoch: u64) {
         self.retired.retain(|operation| {
@@ -122,6 +134,7 @@ impl NavigationOwner {
             .expect("navigation generation exhausted");
         if let Some(operation) = self.current.take()
             && !matches!(operation.state, LaneState::Queued)
+            && !matches!(&operation.intent, NavigationIntent::Fresh(stage) if stage.is_read_only())
             && !matches!(
                 operation.intent,
                 NavigationIntent::Discover(_)
@@ -150,7 +163,103 @@ impl NavigationOwner {
 }
 
 impl App {
+    fn recover_pending_navigation_draft(&mut self) {
+        let recovery = self
+            .server_operations
+            .navigation
+            .current
+            .as_mut()
+            .and_then(|operation| match &mut operation.intent {
+                NavigationIntent::Fresh(stage) => stage.take_draft(),
+                _ => None,
+            });
+        if let Some(recovery) = recovery {
+            self.queue_local_draft_recovery(recovery);
+        }
+    }
+
+    pub(super) fn cancel_pending_navigation(&mut self, id: Uuid) {
+        if self
+            .server_operations
+            .navigation
+            .current
+            .as_ref()
+            .is_some_and(|operation| operation.id == id)
+        {
+            self.recover_pending_navigation_draft();
+            self.server_operations.navigation.cancel(id);
+        }
+    }
+
+    #[cfg(test)]
+    pub(in crate::app) fn pending_navigation_order(&self) -> Option<(u64, u64)> {
+        self.server_operations
+            .navigation
+            .current
+            .as_ref()
+            .map(|operation| (operation.order, operation.epoch))
+    }
+
+    fn recovery_draft(message: UserMessage) -> SubmissionDraft {
+        SubmissionDraft {
+            client_id: Uuid::new_v4().to_string(),
+            message,
+            origin: DraftOrigin::Message {
+                source: crate::chatwidget::UserMessageSource::Prompt,
+            },
+        }
+    }
+
+    fn queue_local_draft_recovery(&mut self, recovery: LocalDraftRecovery) {
+        if let Err(error) = self
+            .server_operations
+            .control_tx
+            .send(ServerCompletion::RecoverDraft(recovery))
+        {
+            let ServerCompletion::RecoverDraft(recovery) = error.0 else {
+                unreachable!("local recovery send returned another payload")
+            };
+            self.chat_widget.recover_submission_drafts(
+                vec![Self::recovery_draft(recovery.message)],
+                DraftDisposition::Edit,
+            );
+            self.chat_widget.add_warning_message("The recovery channel is closed. Unsent new-conversation text was recovered into this draft.".into());
+        }
+    }
+
+    pub(super) async fn recover_local_navigation_draft(&mut self, recovery: LocalDraftRecovery) {
+        let draft = Self::recovery_draft(recovery.message);
+        match recovery.origin {
+            OperationOrigin::Thread { thread_id, .. } => {
+                self.restore_submission_drafts(thread_id, vec![draft], DraftDisposition::Edit)
+                    .await
+            }
+            OperationOrigin::Connection => self
+                .chat_widget
+                .recover_submission_drafts(vec![draft], DraftDisposition::Edit),
+        }
+    }
+
+    pub(in crate::app) async fn drain_local_navigation_recovery(&mut self) {
+        let mut retained = Vec::new();
+        while let Ok(completion) = self.server_operations.control_rx.try_recv() {
+            match completion {
+                ServerCompletion::RecoverDraft(recovery) => {
+                    self.recover_local_navigation_draft(recovery).await
+                }
+                completion => retained.push(completion),
+            }
+        }
+        for completion in retained {
+            self.server_operations
+                .control_tx
+                .send(completion)
+                .expect("the owned completion receiver is live during recovery");
+        }
+    }
+
     pub(in crate::app) fn supersede_pending_navigation(&mut self) {
+        self.recover_pending_navigation_draft();
         self.server_operations.navigation.retire_current();
         self.refresh_submission_preview();
     }
@@ -160,7 +269,7 @@ impl App {
     }
 
     fn enqueue_navigation(&mut self, server: &AppServerSession, intent: NavigationIntent) {
-        self.server_operations.navigation.retire_current();
+        self.supersede_pending_navigation();
         let order = self.server_operations.next_order;
         self.server_operations.next_order =
             order.checked_add(1).expect("operation sequence exhausted");
@@ -204,6 +313,11 @@ impl App {
         {
             let thread_id = *thread_id;
             self.dispatch_selection_liveness(server, &mut operation, thread_id);
+            self.server_operations.navigation.current = Some(operation);
+            return;
+        }
+        if matches!(operation.intent, NavigationIntent::Fresh(_)) {
+            self.dispatch_fresh_defaults(server, &mut operation);
             self.server_operations.navigation.current = Some(operation);
             return;
         }
@@ -292,6 +406,10 @@ impl App {
         let Some(mut operation) = operation else {
             // Only canceled read-only work can finish without a retained owner.
             assert!(
+                !matches!(&completion.receipt, NavigationReceipt::Fresh(receipt) if receipt.requires_owner()),
+                "fresh resource-producing receipt lost its owner"
+            );
+            assert!(
                 !matches!(
                     &completion.receipt,
                     NavigationReceipt::Selected(
@@ -314,6 +432,10 @@ impl App {
             return Ok(AppRunControl::Continue);
         };
         match completion.receipt {
+            NavigationReceipt::Fresh(receipt) => {
+                self.finish_fresh_navigation(tui, server, operation, matching, receipt)
+                    .await?;
+            }
             NavigationReceipt::Discovered(receipt) if matching => {
                 self.finish_discovery(tui, server, operation, receipt)
                     .await?;

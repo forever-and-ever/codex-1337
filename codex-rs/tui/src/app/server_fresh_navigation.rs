@@ -1,0 +1,624 @@
+//! Fresh acquisition retains the unsent initial draft independently of subscription custody.
+
+use super::*;
+use crate::app_server_session::session_preparation::{
+    PreparedSession, StartPreparation, SubscriptionCustody, ThreadStartChoice,
+};
+use crate::local_settings::LocalSettings;
+use codex_app_server_client::AppServerRequestHandle;
+use codex_app_server_protocol as api;
+
+pub(super) struct FreshInput {
+    origin: OperationOrigin,
+    message: Option<UserMessage>,
+    source: Option<ThreadStartSource>,
+    name: Option<String>,
+    provider: Option<ProviderModelChoice>,
+}
+
+pub(super) struct FreshContext {
+    input: FreshInput,
+    config: Config,
+    settings: LocalSettings,
+}
+
+pub(super) struct FreshReady {
+    context: FreshContext,
+    started: AppServerStartedThread,
+    name_error: Option<String>,
+}
+
+pub(super) enum FreshStage {
+    Admitted(FreshInput),
+    Defaults {
+        input: FreshInput,
+        cwd: PathBuf,
+    },
+    Starting(Box<FreshContext>),
+    Naming(Box<FreshReady>),
+    Detaching {
+        ready: Box<FreshReady>,
+        plan: detach::DetachPlan,
+    },
+    Cleaning {
+        thread_id: ThreadId,
+        fences: Vec<ThreadId>,
+    },
+    Uncertain(Vec<ThreadId>),
+}
+
+pub(super) struct FreshReceipt {
+    handle: AppServerRequestHandle,
+    outcome: FreshOutcome,
+}
+
+impl FreshReceipt {
+    pub(super) fn requires_owner(&self) -> bool {
+        matches!(
+            self.outcome,
+            FreshOutcome::Started(_)
+                | FreshOutcome::Named(_)
+                | FreshOutcome::Detached(_)
+                | FreshOutcome::Cleaned(_)
+        )
+    }
+}
+
+enum FreshOutcome {
+    Defaults(Result<Option<crate::config_update::EffectiveConfig>, String>),
+    Started(PreparedSession),
+    Named(Result<String, String>),
+    Detached(detach::DetachReceipt),
+    Cleaned(Result<(), String>),
+    Terminated,
+}
+
+enum FreshEffect {
+    Defaults(PathBuf),
+    Start(StartPreparation),
+    Name { thread_id: ThreadId, name: String },
+    Detach(detach::DetachPlan),
+    Cleanup(ThreadId),
+}
+
+impl FreshStage {
+    pub(super) fn is_read_only(&self) -> bool {
+        matches!(self, Self::Admitted(_) | Self::Defaults { .. })
+    }
+
+    pub(super) fn fences_thread(&self, id: ThreadId) -> bool {
+        match self {
+            Self::Naming(ready) => ready.started.session.thread_id == id,
+            Self::Detaching { ready, plan } => {
+                ready.started.session.thread_id == id
+                    || plan.targets.iter().any(|target| target.thread_id == id)
+            }
+            Self::Cleaning { thread_id, fences } => *thread_id == id || fences.contains(&id),
+            Self::Uncertain(fences) => fences.contains(&id),
+            _ => false,
+        }
+    }
+
+    pub(super) fn take_draft(&mut self) -> Option<LocalDraftRecovery> {
+        let input = match self {
+            Self::Admitted(input) | Self::Defaults { input, .. } => input,
+            Self::Starting(context) => &mut context.input,
+            Self::Naming(ready) | Self::Detaching { ready, .. } => &mut ready.context.input,
+            Self::Cleaning { .. } | Self::Uncertain(_) => return None,
+        };
+        input.message.take().map(|message| LocalDraftRecovery {
+            origin: input.origin.clone(),
+            message,
+        })
+    }
+}
+
+impl App {
+    pub(in crate::app) fn enqueue_fresh_navigation(
+        &mut self,
+        server: &AppServerSession,
+        source: Option<ThreadStartSource>,
+        message: Option<UserMessage>,
+        name: Option<String>,
+        provider: Option<ProviderModelChoice>,
+    ) {
+        let origin =
+            self.chat_widget
+                .thread_id()
+                .map_or(OperationOrigin::Connection, |thread_id| {
+                    OperationOrigin::Thread {
+                        thread_id,
+                        store: Arc::clone(&self.ensure_thread_channel(thread_id).store),
+                    }
+                });
+        self.enqueue_navigation(
+            server,
+            NavigationIntent::Fresh(FreshStage::Admitted(FreshInput {
+                origin,
+                message,
+                source,
+                name,
+                provider,
+            })),
+        );
+    }
+
+    pub(super) fn dispatch_fresh_defaults(
+        &self,
+        server: &AppServerSession,
+        operation: &mut PendingNavigation,
+    ) {
+        let NavigationIntent::Fresh(FreshStage::Admitted(input)) =
+            std::mem::replace(&mut operation.intent, NavigationIntent::Transitioning)
+        else {
+            unreachable!("fresh defaults require admitted input");
+        };
+        let cwd = self.chat_widget.config_ref().cwd.to_path_buf();
+        let defaults_cwd = match server.thread_params_mode() {
+            crate::app_server_session::ThreadParamsMode::Embedded => cwd.clone(),
+            crate::app_server_session::ThreadParamsMode::Remote => server
+                .remote_cwd_override()
+                .unwrap_or(Path::new("."))
+                .to_path_buf(),
+        };
+        operation.intent = NavigationIntent::Fresh(FreshStage::Defaults { input, cwd });
+        self.spawn_fresh_effect(
+            operation,
+            server.request_handle(),
+            FreshEffect::Defaults(defaults_cwd),
+        );
+    }
+
+    fn spawn_fresh_effect(
+        &self,
+        operation: &mut PendingNavigation,
+        handle: AppServerRequestHandle,
+        effect: FreshEffect,
+    ) {
+        let completions = self.server_operations.control_tx.clone();
+        let (id, order, epoch, generation) = (
+            operation.id,
+            operation.order,
+            operation.epoch,
+            operation.generation,
+        );
+        operation.state = LaneState::Running(AbortOnDropHandle::new(tokio::spawn(async move {
+            let outcome = std::panic::AssertUnwindSafe(async {
+                match effect {
+                    FreshEffect::Defaults(cwd) => FreshOutcome::Defaults(
+                        tokio::time::timeout(
+                            ACK_TIMEOUT,
+                            crate::config_update::read_effective_config_if_supported(
+                                handle.clone(),
+                                &cwd,
+                            ),
+                        )
+                        .await
+                        .map_err(|_| "New-session defaults read timed out".to_string())
+                        .and_then(|result| result.map_err(|error| error.to_string())),
+                    ),
+                    FreshEffect::Start(plan) => FreshOutcome::Started(plan.run().await),
+                    FreshEffect::Name { thread_id, name } => {
+                        let result = tokio::time::timeout(
+                            ACK_TIMEOUT,
+                            handle.request_typed::<api::ThreadSetNameResponse>(
+                                api::ClientRequest::ThreadSetName {
+                                    request_id: api::RequestId::String(format!(
+                                        "tui-operation-{id}-name"
+                                    )),
+                                    params: api::ThreadSetNameParams {
+                                        thread_id: thread_id.to_string(),
+                                        name: name.clone(),
+                                        naming_mode: Some(api::ThreadNameMode::Explicit),
+                                        conflict_thread_ids: None,
+                                    },
+                                },
+                            ),
+                        )
+                        .await
+                        .map_err(|_| {
+                            "Name acknowledgement timed out; the name write may still complete"
+                                .to_string()
+                        })
+                        .and_then(|result| {
+                            result
+                                .map(|response| response.thread_name.unwrap_or(name))
+                                .map_err(|error| error.to_string())
+                        });
+                        FreshOutcome::Named(result)
+                    }
+                    FreshEffect::Detach(plan) => FreshOutcome::Detached(
+                        match tokio::time::timeout(ACK_TIMEOUT, detach::send(&handle, id, &plan))
+                            .await
+                        {
+                            Ok(results) => detach::DetachReceipt::Complete(results),
+                            Err(_) => detach::DetachReceipt::BudgetExpired,
+                        },
+                    ),
+                    FreshEffect::Cleanup(thread_id) => FreshOutcome::Cleaned(
+                        tokio::time::timeout(
+                            ACK_TIMEOUT,
+                            detach::unsubscribe(&handle, id, thread_id),
+                        )
+                        .await
+                        .map_err(|_| {
+                            "Unsubscribe acknowledgement timed out; it may still complete"
+                                .to_string()
+                        })
+                        .and_then(|result| result.map_err(|error| error.to_string())),
+                    ),
+                }
+            })
+            .catch_unwind()
+            .await
+            .unwrap_or(FreshOutcome::Terminated);
+            let _ = completions.send(ServerCompletion::Navigation(NavigationCompletion {
+                id,
+                order,
+                epoch,
+                generation,
+                receipt: NavigationReceipt::Fresh(FreshReceipt { handle, outcome }),
+            }));
+        })));
+    }
+
+    fn retain_fresh_uncertainty(
+        &mut self,
+        mut operation: PendingNavigation,
+        fences: Vec<ThreadId>,
+    ) {
+        operation.intent = NavigationIntent::Fresh(FreshStage::Uncertain(fences));
+        operation.state = LaneState::Uncertain;
+        self.server_operations.navigation.retired.push(operation);
+    }
+
+    fn cleanup_fresh_subscription(
+        &mut self,
+        mut operation: PendingNavigation,
+        handle: AppServerRequestHandle,
+        thread_id: ThreadId,
+        fences: Vec<ThreadId>,
+    ) {
+        operation.intent = NavigationIntent::Fresh(FreshStage::Cleaning { thread_id, fences });
+        self.spawn_fresh_effect(&mut operation, handle, FreshEffect::Cleanup(thread_id));
+        self.server_operations.navigation.retired.push(operation);
+    }
+
+    fn recover_fresh_input(&mut self, input: &mut FreshInput) {
+        if let Some(message) = input.message.take() {
+            self.queue_local_draft_recovery(LocalDraftRecovery {
+                origin: input.origin.clone(),
+                message,
+            });
+        }
+    }
+
+    async fn detach_for_fresh_commit(
+        &mut self,
+        server: &AppServerSession,
+        mut operation: PendingNavigation,
+        ready: Box<FreshReady>,
+    ) {
+        let plan = self
+            .prepare_detach_plan(detach::DetachScope::Navigation {
+                destination: Some(ready.started.session.thread_id),
+            })
+            .await;
+        operation.intent = NavigationIntent::Fresh(FreshStage::Detaching {
+            ready,
+            plan: plan.clone(),
+        });
+        self.spawn_fresh_effect(
+            &mut operation,
+            server.request_handle(),
+            FreshEffect::Detach(plan),
+        );
+        self.server_operations.navigation.current = Some(operation);
+    }
+
+    pub(super) async fn finish_fresh_navigation(
+        &mut self,
+        tui: &mut tui::Tui,
+        server: &mut AppServerSession,
+        mut operation: PendingNavigation,
+        matching: bool,
+        receipt: FreshReceipt,
+    ) -> Result<()> {
+        let same_epoch = operation.epoch == self.server_operations.epoch;
+        let NavigationIntent::Fresh(stage) =
+            std::mem::replace(&mut operation.intent, NavigationIntent::Transitioning)
+        else {
+            unreachable!("fresh receipt without fresh operation");
+        };
+        let FreshReceipt { handle, outcome } = receipt;
+        match (stage, outcome) {
+            (FreshStage::Defaults { mut input, cwd }, FreshOutcome::Defaults(result)) => {
+                if !matching {
+                    self.recover_fresh_input(&mut input);
+                    return Ok(());
+                }
+                let result = match result {
+                    Ok(defaults) => self.project_new_session_config(server, cwd, defaults).await,
+                    Err(error) => Err(color_eyre::eyre::eyre!(error)),
+                };
+                let (mut config, settings) = match result {
+                    Ok(result) => result,
+                    Err(error) => {
+                        self.recover_fresh_input(&mut input);
+                        self.chat_widget.add_error_message(format!(
+                            "Failed to read new session defaults: {error}"
+                        ));
+                        return Ok(());
+                    }
+                };
+                apply_managed_new_thread_defaults(
+                    &mut config,
+                    server.managed_new_thread_defaults(),
+                    &self.cli_kv_overrides,
+                    &self.harness_overrides,
+                );
+                let choice = if let Some(choice) = &input.provider {
+                    config.model_provider_id = choice.provider.id.clone();
+                    if let Some(info) = config.model_providers.get(&choice.provider.id) {
+                        config.model_provider = info.clone();
+                    }
+                    config.model = Some(choice.model.model.clone());
+                    config.model_reasoning_effort = Some(choice.effort.clone());
+                    config.service_tier = Some("default".into());
+                    ThreadStartChoice::Provider(choice.provider.id.clone())
+                } else {
+                    ThreadStartChoice::Configured(input.source.clone())
+                };
+                let plan = server.prepare_start_thread(&self.local_settings, &config, choice);
+                operation.intent =
+                    NavigationIntent::Fresh(FreshStage::Starting(Box::new(FreshContext {
+                        input,
+                        config,
+                        settings,
+                    })));
+                self.spawn_fresh_effect(&mut operation, handle, FreshEffect::Start(plan));
+                self.server_operations.navigation.current = Some(operation);
+            }
+            (FreshStage::Starting(mut context), FreshOutcome::Started(prepared)) => {
+                let PreparedSession {
+                    result,
+                    custody,
+                    observations,
+                } = prepared;
+                if same_epoch {
+                    server.apply_session_observations(observations);
+                }
+                if !matching || result.is_err() {
+                    self.recover_fresh_input(&mut context.input);
+                    if matching && let Err(error) = &result {
+                        self.chat_widget.add_error_message(format!(
+                            "Failed to start a fresh session through the app server: {error}"
+                        ));
+                    }
+                    match custody {
+                        SubscriptionCustody::Subscribed(thread_id) => self
+                            .cleanup_fresh_subscription(operation, handle, thread_id, Vec::new()),
+                        SubscriptionCustody::NewThreadUncertain
+                        | SubscriptionCustody::Uncertain(_)
+                            if same_epoch =>
+                        {
+                            self.chat_widget.add_error_message("New conversation acquisition outcome is unknown. No start was retried. Close and reopen this TUI to resynchronize; the earlier request may still complete.".into());
+                            self.retain_fresh_uncertainty(operation, Vec::new());
+                        }
+                        _ => {}
+                    }
+                    return Ok(());
+                }
+                let ready = Box::new(FreshReady {
+                    context: *context,
+                    started: result.expect("successful fresh preparation"),
+                    name_error: None,
+                });
+                if let Some(name) = ready.context.input.name.clone() {
+                    let thread_id = ready.started.session.thread_id;
+                    operation.intent = NavigationIntent::Fresh(FreshStage::Naming(ready));
+                    self.spawn_fresh_effect(
+                        &mut operation,
+                        handle,
+                        FreshEffect::Name { thread_id, name },
+                    );
+                    self.server_operations.navigation.current = Some(operation);
+                } else {
+                    self.detach_for_fresh_commit(server, operation, ready).await;
+                }
+            }
+            (FreshStage::Naming(mut ready), FreshOutcome::Named(result)) => {
+                if !matching {
+                    self.recover_fresh_input(&mut ready.context.input);
+                    self.cleanup_fresh_subscription(
+                        operation,
+                        handle,
+                        ready.started.session.thread_id,
+                        Vec::new(),
+                    );
+                    return Ok(());
+                }
+                match result {
+                    Ok(name) => ready.started.session.thread_name = Some(name),
+                    Err(error) => {
+                        ready.name_error = Some(format!(
+                            "Failed to name the new session: {error}. No name write was retried."
+                        ))
+                    }
+                }
+                self.detach_for_fresh_commit(server, operation, ready).await;
+            }
+            (FreshStage::Detaching { mut ready, plan }, FreshOutcome::Detached(receipt)) => {
+                let fences = match &receipt {
+                    detach::DetachReceipt::Complete(results) => results
+                        .iter()
+                        .filter(|result| result.result.is_err())
+                        .map(|result| result.thread_id)
+                        .collect::<Vec<_>>(),
+                    detach::DetachReceipt::BudgetExpired => {
+                        plan.targets.iter().map(|target| target.thread_id).collect()
+                    }
+                };
+                if same_epoch && let detach::DetachReceipt::Complete(results) = receipt {
+                    // An unconfirmed unsubscribe is not authority to retire its local listener.
+                    let confirmed = results
+                        .into_iter()
+                        .filter(|result| result.result.is_ok())
+                        .collect();
+                    self.finish_detach_plan(&plan, detach::DetachReceipt::Complete(confirmed))
+                        .await;
+                }
+                if !matching || !fences.is_empty() {
+                    self.recover_fresh_input(&mut ready.context.input);
+                    if same_epoch && !fences.is_empty() {
+                        self.chat_widget.add_error_message("Navigation detachment was not confirmed. The old conversation remains selected; close and reopen this TUI to resynchronize. No detach was retried.".into());
+                    }
+                    self.cleanup_fresh_subscription(
+                        operation,
+                        handle,
+                        ready.started.session.thread_id,
+                        if same_epoch { fences } else { Vec::new() },
+                    );
+                } else {
+                    self.commit_fresh_navigation(tui, server, operation, *ready)
+                        .await?;
+                }
+            }
+            (
+                FreshStage::Cleaning {
+                    thread_id,
+                    mut fences,
+                },
+                FreshOutcome::Cleaned(result),
+            ) => {
+                if same_epoch {
+                    if let Err(error) = result {
+                        self.chat_widget.add_error_message(format!("Detaching superseded fresh conversation {thread_id} was not confirmed: {error}. Close and reopen this TUI to resynchronize; no retry was sent."));
+                        fences.push(thread_id);
+                    }
+                    if !fences.is_empty() {
+                        self.retain_fresh_uncertainty(operation, fences);
+                    }
+                }
+            }
+            (mut stage, FreshOutcome::Terminated) => {
+                if let Some(draft) = stage.take_draft() {
+                    self.queue_local_draft_recovery(draft);
+                }
+                self.chat_widget.add_error_message("New conversation preparation terminated unexpectedly. No request was retried; close and reopen this TUI to resynchronize.".into());
+                match stage {
+                    FreshStage::Starting(_) if same_epoch => {
+                        self.retain_fresh_uncertainty(operation, Vec::new())
+                    }
+                    FreshStage::Naming(ready) => self.cleanup_fresh_subscription(
+                        operation,
+                        handle,
+                        ready.started.session.thread_id,
+                        Vec::new(),
+                    ),
+                    FreshStage::Detaching { ready, plan } => self.cleanup_fresh_subscription(
+                        operation,
+                        handle,
+                        ready.started.session.thread_id,
+                        if same_epoch {
+                            plan.targets.iter().map(|target| target.thread_id).collect()
+                        } else {
+                            Vec::new()
+                        },
+                    ),
+                    FreshStage::Cleaning {
+                        thread_id,
+                        mut fences,
+                    } if same_epoch => {
+                        fences.push(thread_id);
+                        self.retain_fresh_uncertainty(operation, fences);
+                    }
+                    _ => {}
+                }
+            }
+            _ => unreachable!("fresh stage received a different stage's receipt"),
+        }
+        Ok(())
+    }
+
+    async fn commit_fresh_navigation(
+        &mut self,
+        tui: &mut tui::Tui,
+        server: &mut AppServerSession,
+        operation: PendingNavigation,
+        mut ready: FreshReady,
+    ) -> Result<()> {
+        if let Some(thread_id) = self.current_displayed_thread_id()
+            && let Some(blank) = self.agents_overview.blank_sessions.get_mut(&thread_id)
+        {
+            if let Some(channel) = self.thread_event_channels.get(&thread_id)
+                && let Some(session) = channel.store.lock().await.session.as_ref()
+            {
+                blank.session = session.clone();
+            }
+            if let Some(input) = self.chat_widget.capture_thread_input_state() {
+                self.agents_overview.input_states.insert(thread_id, input);
+            }
+        }
+        if let Some(choice) = &ready.context.input.provider {
+            let catalog = Arc::make_mut(&mut self.model_catalog);
+            catalog.models = vec![choice.model.clone()];
+            server.set_available_models(catalog.models.clone());
+        }
+        self.local_settings = ready.context.settings;
+        self.config = ready.context.config;
+        self.refresh_server_version_overview_notice(CODEX_CLI_VERSION);
+        self.remember_launch_permissions();
+        let thread_id = ready.started.session.thread_id;
+        if !self.config.ephemeral && !matches!(self.app_server_target, AppServerTarget::Embedded) {
+            self.agents_overview
+                .blank_sessions
+                .insert(thread_id, ready.started.clone());
+        }
+        // Keep the move-only draft out of the fallible renderer. Admit it only after installation.
+        if let Err(error) = self
+            .replace_chat_widget_with_app_server_thread(
+                tui,
+                ready.started,
+                ThreadAttachPresentation::Fresh,
+                None,
+            )
+            .await
+        {
+            self.agents_overview.blank_sessions.remove(&thread_id);
+            self.recover_fresh_input(&mut ready.context.input);
+            self.chat_widget.add_error_message(format!(
+                "Failed to attach to fresh app-server thread: {error}"
+            ));
+            if self.chat_widget.thread_id() != Some(thread_id) {
+                self.cleanup_fresh_subscription(
+                    operation,
+                    server.request_handle(),
+                    thread_id,
+                    Vec::new(),
+                );
+            }
+            return Ok(());
+        }
+        self.chat_widget.initial_user_message = ready.context.input.message.take();
+        self.chat_widget.submit_initial_user_message_if_pending();
+        if let Some(choice) = ready.context.input.provider {
+            self.enqueue_connection_operation(
+                server,
+                ServerOperation::Connection(ConnectionMutation::ModelDefaults {
+                    edits: crate::config_update::build_model_selection_edits(
+                        &choice.provider.id,
+                        &choice.model.model,
+                        Some(choice.effort),
+                    ),
+                    setting: "default provider, model, and reasoning effort".into(),
+                }),
+            );
+        }
+        if let Some(error) = ready.name_error {
+            self.chat_widget.add_error_message(error);
+        }
+        tui.frame_requester().schedule_frame();
+        Ok(())
+    }
+}

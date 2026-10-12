@@ -38,6 +38,10 @@ pub(in crate::app) enum CatalogRequest {
 pub(in crate::app) enum ConnectionMutation {
     ReloadUserConfig,
     Voice(super::voice_preferences::VoicePreferenceOperation),
+    ModelDefaults {
+        edits: Vec<api::ConfigEdit>,
+        setting: String,
+    },
 }
 
 #[derive(Clone)]
@@ -94,6 +98,7 @@ pub(in crate::app) enum OperationReceipt {
     RealtimeDiscarded,
     RealtimeStopped,
     ServerRequestDelivered,
+    ModelDefaultsSaved(api::ConfigWriteResponse),
 }
 
 impl ServerOperation {
@@ -121,6 +126,7 @@ impl ServerOperation {
             },
             Self::Catalog(CatalogRequest::Skills { .. }) => "Loading skills",
             Self::Connection(ConnectionMutation::ReloadUserConfig) => "Reloading settings",
+            Self::Connection(ConnectionMutation::ModelDefaults { .. }) => "Saving default model",
             Self::Connection(ConnectionMutation::Voice(operation)) => match operation {
                 super::voice_preferences::VoicePreferenceOperation::Open { .. } => {
                     "Loading voice preferences"
@@ -193,6 +199,20 @@ pub(super) async fn send(
                 })
                 .await?;
             return Ok(OperationReceipt::ConfigReloaded);
+        }
+        ServerOperation::Connection(ConnectionMutation::ModelDefaults { edits, .. }) => {
+            let response = handle
+                .request_typed(api::ClientRequest::ConfigBatchWrite {
+                    request_id,
+                    params: api::ConfigBatchWriteParams {
+                        edits,
+                        file_path: None,
+                        expected_version: None,
+                        reload_user_config: true,
+                    },
+                })
+                .await?;
+            return Ok(OperationReceipt::ModelDefaultsSaved(response));
         }
         ServerOperation::Connection(ConnectionMutation::Voice(operation)) => {
             return super::voice_preferences::send(handle, id, operation).await;
@@ -340,6 +360,16 @@ impl App {
         operation: &ServerOperation,
         receipt: OperationReceipt,
     ) -> Result<()> {
+        if let (
+            ServerOperation::Connection(ConnectionMutation::ModelDefaults { setting, .. }),
+            OperationReceipt::ModelDefaultsSaved(response),
+        ) = (operation, &receipt)
+        {
+            if response.status == api::WriteStatus::OkOverridden {
+                self.chat_widget.add_warning_message(format!("Saved {setting}, but a higher-priority configuration layer overrides the saved value."));
+            }
+            return Ok(());
+        }
         if matches!(origin, OperationOrigin::Connection) {
             if let ServerOperation::Connection(ConnectionMutation::Voice(operation)) = operation
                 && let OperationReceipt::VoicePreference(receipt) = receipt
@@ -437,6 +467,9 @@ impl App {
                 }
             }
             OperationReceipt::SettingsUnsupported => {}
+            OperationReceipt::ModelDefaultsSaved(_) => {
+                unreachable!("model defaults handled before origin projection")
+            }
             OperationReceipt::VoicePreference(_) => {
                 unreachable!("voice preferences have connection origin")
             }

@@ -48,7 +48,7 @@ sandbox = "unelevated"
     let mut server = crate::start_embedded_app_server_for_picker(&app.config).await?;
     let mut tui = crate::tui::test_support::make_test_tui()?;
     tui.pause_events();
-    app.start_fresh_session(
+    app.start_fresh_session_and_settle(
         &mut tui,
         &mut server,
         /*session_start_source*/ None,

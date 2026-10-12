@@ -725,6 +725,114 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     .await?;
     assert!(app.server_operations.is_empty());
     assert_eq!(app.current_displayed_thread_id(), visible_before);
+    // A real resource-producing resume is retained after cancellation. The same target
+    // cannot reacquire, but an unrelated target must still dispatch its liveness read.
+    // Admission order intentionally exceeds epoch: these are different coordinates.
+    let acquisition_x = server.start_thread(&app.config).await?.session.thread_id;
+    let acquisition_y = server.start_thread(&app.config).await?.session.thread_id;
+    let resumes_for = |id: ThreadId| {
+        recorded_params(&requests, "thread/resume")
+            .into_iter()
+            .filter(|params| params["threadId"] == id.to_string())
+            .count()
+    };
+    app.select_agent_thread(&mut tui, &mut server, acquisition_x)
+        .await?;
+    let (order, epoch) = app
+        .pending_navigation_order()
+        .expect("admitted acquisition");
+    assert!(order > epoch);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while resumes_for(acquisition_x) == 0 {
+            tokio::select! {
+                completion = app.server_operations.control_rx.recv() => {
+                    app.handle_server_completion(&mut tui, &mut server, completion.expect("liveness receipt")).await?;
+                }
+                _ = tokio::task::yield_now() => {}
+            }
+        }
+        Ok::<_, color_eyre::Report>(())
+    })
+    .await??;
+    let pending = match app.server_operations.preview(visible_before).navigation {
+        Some(crate::app::turn_submissions::NavigationPreview::Preparing { id }) => id,
+        _ => panic!("running acquisition remains cancellable"),
+    };
+    app.handle_submission_event(
+        &server,
+        crate::app::turn_submissions::SubmissionEvent::CancelNavigation { id: pending },
+    )
+    .await;
+    assert_eq!(app.current_displayed_thread_id(), visible_before);
+    app.select_agent_thread(&mut tui, &mut server, acquisition_y)
+        .await?;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while resumes_for(acquisition_y) == 0 {
+            tokio::select! {
+                completion = app.server_operations.control_rx.recv() => {
+                    app.handle_server_completion(&mut tui, &mut server, completion.expect("unrelated liveness receipt")).await?;
+                }
+                _ = tokio::task::yield_now() => {}
+            }
+        }
+        Ok::<_, color_eyre::Report>(())
+    })
+    .await??;
+    assert_eq!(
+        recorded_params(&requests, "thread/read")
+            .iter()
+            .filter(|params| params["threadId"] == acquisition_y.to_string())
+            .count(),
+        1
+    );
+    app.select_agent_thread(&mut tui, &mut server, acquisition_x)
+        .await?;
+    assert_eq!(resumes_for(acquisition_x), 1);
+    assert_eq!(
+        recorded_params(&requests, "thread/read")
+            .iter()
+            .filter(|params| params["threadId"] == acquisition_x.to_string())
+            .count(),
+        1
+    );
+    assert!(matches!(
+        app.server_operations.preview(visible_before).navigation,
+        Some(crate::app::turn_submissions::NavigationPreview::Preparing { .. })
+    ));
+    // Canceling a fresh defaults read recovers its never-admitted rich input, independently
+    // of the older resource owners and without replacing text typed after admission.
+    app.chat_widget.apply_external_edit("newer draft".into());
+    let configs_before = recorded_params(&requests, "config/read").len();
+    app.start_fresh_session(&mut tui, &mut server, None, Some(rich_prompt.clone()), None)
+        .await;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while recorded_params(&requests, "config/read").len() == configs_before {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await?;
+    let pending = match app.server_operations.preview(visible_before).navigation {
+        Some(crate::app::turn_submissions::NavigationPreview::Preparing { id }) => id,
+        _ => panic!("fresh defaults remain cancellable"),
+    };
+    app.handle_submission_event(
+        &server,
+        crate::app::turn_submissions::SubmissionEvent::CancelNavigation { id: pending },
+    )
+    .await;
+    let recovered = recovered_message(&mut app);
+    assert!(recovered.text.contains("stalled ordinary prompt"));
+    assert!(recovered.text.contains("newer draft"));
+    assert_eq!(recovered.remote_image_urls, rich_prompt.remote_image_urls);
+    assert_eq!(recovered.local_images.len(), rich_prompt.local_images.len());
+    assert_eq!(
+        recovered.local_images[0].path,
+        rich_prompt.local_images[0].path
+    );
+    assert_eq!(app.current_displayed_thread_id(), visible_before);
+    assert_eq!(recorded_params(&requests, "turn/start").len(), 2);
+    assert_eq!(resumes_for(acquisition_x), 1);
+    assert_eq!(resumes_for(acquisition_y), 1);
     server.shutdown().await?;
     proxy.await??;
     Ok(())

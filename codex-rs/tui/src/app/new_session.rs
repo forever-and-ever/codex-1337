@@ -66,6 +66,16 @@ impl App {
             defaults_cwd,
         )
         .await?;
+        self.project_new_session_config(app_server, cwd, defaults)
+            .await
+    }
+
+    pub(super) async fn project_new_session_config(
+        &mut self,
+        app_server: &AppServerSession,
+        cwd: PathBuf,
+        defaults: Option<crate::config_update::EffectiveConfig>,
+    ) -> Result<(Config, crate::local_settings::LocalSettings)> {
         // Stage local preferences and permission carryover without changing the active task.
         let (mut config, local_settings) = match self.rebuild_config_for_cwd(cwd).await {
             Ok(config) => {

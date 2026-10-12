@@ -438,11 +438,12 @@ pub(super) async fn start_recording_app_server_with_realtime_speech(
                     {
                         continue;
                     }
-                    if history_capabilities == HistoryCapabilities::TurnSubmissionStalls
-                        && request.method == "thread/read"
-                        && request_sink.lock().expect("request recorder lock").iter().any(|seen| seen.method == "thread/realtime/listVoices")
-                    {
-                        continue;
+                    if history_capabilities == HistoryCapabilities::TurnSubmissionStalls {
+                        let seen = request_sink.lock().expect("request recorder lock");
+                        let after_voice = seen.iter().skip_while(|seen| seen.method != "thread/realtime/listVoices").collect::<Vec<_>>();
+                        if !after_voice.is_empty() && (matches!(request.method.as_str(), "thread/resume" | "config/read") || (request.method == "thread/read" && after_voice.iter().filter(|seen| seen.method == "thread/read").count() == 1)) {
+                            continue;
+                        }
                     }
                     if history_capabilities == HistoryCapabilities::TurnSubmissionStalls
                         && matches!(request.method.as_str(), "turn/start" | "turn/steer" | "skills/list" | "turn/interrupt" | "thread/realtime/listVoices")
@@ -2682,7 +2683,7 @@ async fn changing_directory_preserves_project_trust_permissions_history_and_hook
     let (rec, plain, req) = (recorded_params, crate::key_hint::plain, &requests);
     let mut tui = crate::tui::test_support::make_test_tui()?;
     let (source, message, name) = (None, None, Some("Previous project".to_string()));
-    app.start_fresh_session(&mut tui, &mut server, source, message, name)
+    app.start_fresh_session_and_settle(&mut tui, &mut server, source, message, name)
         .await;
     let original = app.chat_widget.thread_id().expect("original thread");
     let rollout = app.chat_widget.rollout_path().expect("original rollout");
@@ -3038,7 +3039,7 @@ fn fresh_session_applies_requested_name() -> Result<()> {
                 .await?;
                 let mut tui = crate::tui::test_support::make_test_tui()?;
 
-                app.start_fresh_session(
+                app.start_fresh_session_and_settle(
                     &mut tui,
                     &mut app_server,
                     /*session_start_source*/ None,
@@ -3219,7 +3220,7 @@ fn session_lifecycle_avoids_redundant_subagent_metadata_reads() -> Result<()> {
                 );
                 assert!(matches!(take_backfill_counts(&requests), (0, 0) | (0, 1)));
 
-                app.start_fresh_session(
+                app.start_fresh_session_and_settle(
                     &mut tui,
                     &mut app_server,
                     /*session_start_source*/ None,
