@@ -423,6 +423,50 @@ class ArrivalKind(Enum):
     user = "user"
 
 
+class LegacyArrivalSource(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    kind: Literal["legacy"]
+
+
+class ArrivalSource1(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    blocks: list[str]
+    kind: Literal["captured"]
+
+
+class ArrivalSource2(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    kind: Literal["toolDeclarations"]
+    text: str
+
+
+class UnavailableArrivalSource(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    kind: Literal["unavailable"]
+
+
+class ArrivalSource(
+    RootModel[LegacyArrivalSource | ArrivalSource1 | ArrivalSource2 | UnavailableArrivalSource]
+):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: Annotated[
+        LegacyArrivalSource | ArrivalSource1 | ArrivalSource2 | UnavailableArrivalSource,
+        Field(
+            description="Exact readable text blocks, a client declaration representation, or unavailable evidence."
+        ),
+    ]
+
+
 class AskForApprovalValue(Enum):
     untrusted = "untrusted"
     on_request = "on-request"
@@ -640,22 +684,6 @@ class ToolCallCodeModeEvent(BaseModel):
     )
     call_id: str
     type: Annotated[Literal["toolCall"], Field(title="ToolCallCodeModeEventType")]
-
-
-class WaitStartedCodeModeEvent(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    call_id: str
-    type: Annotated[Literal["waitStarted"], Field(title="WaitStartedCodeModeEventType")]
-
-
-class WaitCompletedCodeModeEvent(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    call_id: str
-    type: Annotated[Literal["waitCompleted"], Field(title="WaitCompletedCodeModeEventType")]
 
 
 class CodeModeStatus(Enum):
@@ -1266,6 +1294,35 @@ class ContextCompactedNotification(BaseModel):
     )
     thread_id: Annotated[str, Field(alias="threadId")]
     turn_id: Annotated[str, Field(alias="turnId")]
+
+
+class ContextSource1(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    kind: Literal["prompt"]
+    label: str
+    text: str
+
+
+class ContextSource2(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    kind: Literal["toolDeclarations"]
+    text: str
+
+
+class ContextSource(RootModel[ContextSource1 | ContextSource2]):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: Annotated[
+        ContextSource1 | ContextSource2,
+        Field(
+            description="Captured text and a client serialization of declarations are different evidence."
+        ),
+    ]
 
 
 class ConversationTextRole(Enum):
@@ -4121,6 +4178,38 @@ class RequestId(RootModel[str | int]):
     root: str | int
 
 
+class GlobalResetCreditScope(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Annotated[Literal["global"], Field(title="GlobalResetCreditScopeType")]
+
+
+class ThreadResetCreditScope(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    thread_id: str
+    type: Annotated[Literal["thread"], Field(title="ThreadResetCreditScopeType")]
+
+
+class NewThreadResetCreditScope(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    params: NewThreadAccountParams
+    type: Annotated[Literal["newThread"], Field(title="NewThreadResetCreditScopeType")]
+
+
+class ResetCreditScope(
+    RootModel[GlobalResetCreditScope | ThreadResetCreditScope | NewThreadResetCreditScope]
+):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: GlobalResetCreditScope | ThreadResetCreditScope | NewThreadResetCreditScope
+
+
 class ResidencyRequirement(RootModel[Literal["us"]]):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -5784,10 +5873,11 @@ class ArrivalThreadItem(BaseModel):
     response_id: Annotated[
         str, Field(alias="responseId", description="The response whose step admits it.")
     ]
+    source: Annotated[ArrivalSource | None, Field()] = {"kind": "legacy"}
     text: Annotated[
         str | None,
         Field(
-            description="The readable content of an injection or of a plaintext message from another agent."
+            description="Legacy flattened text, without captured block boundaries or provenance."
         ),
     ] = None
     type: Annotated[Literal["arrival"], Field(title="ArrivalThreadItemType")]
@@ -6927,6 +7017,18 @@ class ToolExposureSurface(Enum):
     code_mode = "code_mode"
     deferred = "deferred"
     direct = "direct"
+
+
+class ToolPolicyCeiling(RootModel[Literal["noTools"]]):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: Annotated[
+        Literal["noTools"],
+        Field(
+            description="A restriction captured at thread startup, independent of tool exposure."
+        ),
+    ]
 
 
 class TurnDiffUpdatedNotification(BaseModel):
@@ -8517,29 +8619,6 @@ class FinishedCodeModeEvent(BaseModel):
     type: Annotated[Literal["finished"], Field(title="FinishedCodeModeEventType")]
 
 
-class CodeModeEvent(
-    RootModel[
-        StartedCodeModeEvent
-        | AllocatedCodeModeEvent
-        | ToolCallCodeModeEvent
-        | WaitStartedCodeModeEvent
-        | WaitCompletedCodeModeEvent
-        | FinishedCodeModeEvent
-    ]
-):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    root: (
-        StartedCodeModeEvent
-        | AllocatedCodeModeEvent
-        | ToolCallCodeModeEvent
-        | WaitStartedCodeModeEvent
-        | WaitCompletedCodeModeEvent
-        | FinishedCodeModeEvent
-    )
-
-
 class CodeModeOwner(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -8855,34 +8934,6 @@ class ConfigurationReasoning(BaseModel):
         populate_by_name=True,
     )
     effort: ReasoningEffort
-
-
-class ConsumeAccountRateLimitResetCreditParams(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    credit_id: Annotated[
-        str | None,
-        Field(
-            alias="creditId",
-            description="Opaque reset-credit identifier to redeem. When omitted, the backend selects the next available credit.",
-        ),
-    ] = None
-    idempotency_key: Annotated[
-        str,
-        Field(
-            alias="idempotencyKey",
-            description="Identifies one logical reset attempt. A UUID is recommended; reuse the same value when retrying that attempt.",
-        ),
-    ]
-    new_thread: Annotated[
-        NewThreadAccountParams | None,
-        Field(
-            alias="newThread",
-            description="Spend a fresh root conversation's reset credit instead of the global login's. Cannot be combined with `threadId`.",
-        ),
-    ] = None
-    thread_id: Annotated[str | None, Field(alias="threadId")] = None
 
 
 class InputImageContentItem(BaseModel):
@@ -10063,6 +10114,19 @@ class RawResponseCompletedNotification(BaseModel):
     usage_metadata: Annotated[ResponseUsageMetadata | None, Field(alias="usageMetadata")] = None
 
 
+class ResetCreditConfirmation(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    scope: ResetCreditScope
+    token: Annotated[
+        str,
+        Field(
+            description="Opaque server-issued binding to the payer observed during this usage read."
+        ),
+    ]
+
+
 class MessageResponseItem(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -11084,29 +11148,6 @@ class ThreadGoalUpdatedNotification(BaseModel):
     turn_id: Annotated[str | None, Field(alias="turnId")] = None
 
 
-class CodeModeThreadItem(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    cell_id: Annotated[
-        str | None,
-        Field(
-            alias="cellId", description="Full runtime identity, including its session generation."
-        ),
-    ] = None
-    created_at: Annotated[int, Field(alias="createdAt")]
-    event: CodeModeEvent
-    exec_call_id: Annotated[
-        str,
-        Field(
-            alias="execCallId",
-            description="Original exec invocation: durable within the thread even if a runtime restarts.",
-        ),
-    ]
-    id: str
-    type: Annotated[Literal["codeMode"], Field(title="CodeModeThreadItemType")]
-
-
 class UserMessageThreadItem(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -11148,6 +11189,7 @@ class PreambleThreadItem(BaseModel):
         ),
     ] = None
     response_id: Annotated[str, Field(alias="responseId")]
+    sources: list[ContextSource] | None = None
     type: Annotated[Literal["preamble"], Field(title="PreambleThreadItemType")]
     window_id: Annotated[str | None, Field(alias="windowId")] = None
 
@@ -11596,6 +11638,13 @@ class ThreadStartParams(BaseModel):
             description="Optional client-supplied analytics source classification for this thread.",
         ),
     ] = None
+    tool_policy: Annotated[
+        ToolPolicyCeiling | None,
+        Field(
+            alias="toolPolicy",
+            description="Immutable startup ceiling for ephemeral threads, which cannot be resumed or forked. Omission preserves inherited tool restrictions.",
+        ),
+    ] = None
 
 
 class RealtimeThreadTimelineEntry(BaseModel):
@@ -12017,18 +12066,6 @@ class AccountRateLimitsReadRequest(BaseModel):
     params: GetAccountRateLimitsParams | None = None
 
 
-class AccountRateLimitResetCreditConsumeRequest(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    id: RequestId
-    method: Annotated[
-        Literal["account/rateLimitResetCredit/consume"],
-        Field(title="Account/rateLimitResetCredit/consumeRequestMethod"),
-    ]
-    params: ConsumeAccountRateLimitResetCreditParams
-
-
 class AccountWorkspaceMessagesReadRequest(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -12077,6 +12114,47 @@ class AccountReadRequest(BaseModel):
     id: RequestId
     method: Annotated[Literal["account/read"], Field(title="Account/readRequestMethod")]
     params: GetAccountParams
+
+
+class WaitStartedCodeModeEvent(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    call_id: str
+    target: CodeModeOwner | None = None
+    type: Annotated[Literal["waitStarted"], Field(title="WaitStartedCodeModeEventType")]
+
+
+class WaitCompletedCodeModeEvent(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    call_id: str
+    target: CodeModeOwner | None = None
+    type: Annotated[Literal["waitCompleted"], Field(title="WaitCompletedCodeModeEventType")]
+
+
+class CodeModeEvent(
+    RootModel[
+        StartedCodeModeEvent
+        | AllocatedCodeModeEvent
+        | ToolCallCodeModeEvent
+        | WaitStartedCodeModeEvent
+        | WaitCompletedCodeModeEvent
+        | FinishedCodeModeEvent
+    ]
+):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: (
+        StartedCodeModeEvent
+        | AllocatedCodeModeEvent
+        | ToolCallCodeModeEvent
+        | WaitStartedCodeModeEvent
+        | WaitCompletedCodeModeEvent
+        | FinishedCodeModeEvent
+    )
 
 
 class ComputerUseConfig(BaseModel):
@@ -12171,12 +12249,47 @@ class ConfigWriteResponse(BaseModel):
     version: str
 
 
+class ConsumeAccountRateLimitResetCreditParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    confirmation: Annotated[
+        ResetCreditConfirmation | None,
+        Field(description="Reuse the usage read's binding for confirmation and every retry."),
+    ] = None
+    credit_id: Annotated[
+        str | None,
+        Field(
+            alias="creditId",
+            description="Opaque reset-credit identifier to redeem. When omitted, the backend selects the next available credit.",
+        ),
+    ] = None
+    idempotency_key: Annotated[
+        str,
+        Field(
+            alias="idempotencyKey",
+            description="Identifies one logical reset attempt. A UUID is recommended; reuse the same value when retrying that attempt.",
+        ),
+    ]
+    new_thread: Annotated[
+        NewThreadAccountParams | None,
+        Field(
+            alias="newThread",
+            description="Spend a fresh root conversation's reset credit instead of the global login's. Cannot be combined with `threadId`.",
+        ),
+    ] = None
+    thread_id: Annotated[str | None, Field(alias="threadId")] = None
+
+
 class ContextInventory(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
     parts: list[PreamblePart]
-    raw: str
+    raw: Annotated[
+        str | None, Field(description="Legacy mixed capture; new records use typed sources.")
+    ] = ""
+    sources: list[ContextSource] | None = None
 
 
 class ErrorNotification(BaseModel):
@@ -12326,6 +12439,13 @@ class GetAccountRateLimitsResponse(BaseModel):
         Field(
             alias="rateLimitsByLimitId",
             description="Multi-bucket view keyed by metered `limit_id` (for example, `codex`).",
+        ),
+    ] = None
+    reset_credit_confirmation: Annotated[
+        ResetCreditConfirmation | None,
+        Field(
+            alias="resetCreditConfirmation",
+            description="Confirmation required to spend this read's payer's reset credits.",
         ),
     ] = None
 
@@ -12919,6 +13039,29 @@ class ThreadContextInventoryResponse(BaseModel):
     inventory: ContextInventory
 
 
+class CodeModeThreadItem(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    cell_id: Annotated[
+        str | None,
+        Field(
+            alias="cellId", description="Full runtime identity, including its session generation."
+        ),
+    ] = None
+    created_at: Annotated[int, Field(alias="createdAt")]
+    event: CodeModeEvent
+    exec_call_id: Annotated[
+        str,
+        Field(
+            alias="execCallId",
+            description="Original exec invocation: durable within the thread even if a runtime restarts.",
+        ),
+    ]
+    id: str
+    type: Annotated[Literal["codeMode"], Field(title="CodeModeThreadItemType")]
+
+
 class StepAdmissionThreadItem(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -13071,6 +13214,18 @@ class PluginShareSaveRequest(BaseModel):
     id: RequestId
     method: Annotated[Literal["plugin/share/save"], Field(title="Plugin/share/saveRequestMethod")]
     params: PluginShareSaveParams
+
+
+class AccountRateLimitResetCreditConsumeRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[
+        Literal["account/rateLimitResetCredit/consume"],
+        Field(title="Account/rateLimitResetCredit/consumeRequestMethod"),
+    ]
+    params: ConsumeAccountRateLimitResetCreditParams
 
 
 class ConfigBatchWriteRequest(BaseModel):
@@ -14717,6 +14872,13 @@ class ThreadStartResponse(BaseModel):
     ]
     service_tier: Annotated[str | None, Field(alias="serviceTier")] = None
     thread: Thread
+    tool_policy: Annotated[
+        ToolPolicyCeiling | None,
+        Field(
+            alias="toolPolicy",
+            description="Startup ceiling enforced by this server. Missing on older servers.",
+        ),
+    ] = None
 
 
 class ThreadStartedNotification(BaseModel):

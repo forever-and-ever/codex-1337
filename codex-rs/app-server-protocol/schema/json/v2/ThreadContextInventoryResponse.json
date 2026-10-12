@@ -11,14 +11,67 @@
           "type": "array"
         },
         "raw": {
+          "default": "",
+          "description": "Legacy mixed capture; new records use typed sources.",
           "type": "string"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/definitions/ContextSource"
+          },
+          "type": "array"
         }
       },
       "required": [
-        "parts",
-        "raw"
+        "parts"
       ],
       "type": "object"
+    },
+    "ContextSource": {
+      "description": "Captured text and a client serialization of declarations are different evidence.",
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "prompt"
+              ],
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "label",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The declarations supplied to the provider, serialized by this client for inspection. This is not the provider's internal prompt serialization.",
+          "properties": {
+            "kind": {
+              "enum": [
+                "toolDeclarations"
+              ],
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "text"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "PreamblePart": {
       "properties": {

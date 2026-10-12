@@ -16,6 +16,7 @@ export type { CollaborationMode } from "./CollaborationMode";
 export type { ConfigurationReasoning } from "./ConfigurationReasoning";
 export type { ContentItem } from "./ContentItem";
 export type { ContextInventory } from "./ContextInventory";
+export type { ContextSource } from "./ContextSource";
 export type { ConversationGitInfo } from "./ConversationGitInfo";
 export type { ConversationSummary } from "./ConversationSummary";
 export type { ConversationTextRole } from "./ConversationTextRole";

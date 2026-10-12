@@ -1656,6 +1656,82 @@
         }
       ]
     },
+    "ArrivalSource": {
+      "description": "Exact readable text blocks, a client declaration representation, or unavailable evidence.",
+      "oneOf": [
+        {
+          "description": "Older records retain only the unclassified, potentially flattened `text` field.",
+          "properties": {
+            "kind": {
+              "enum": [
+                "legacy"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "title": "LegacyArrivalSource",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "blocks": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "enum": [
+                "captured"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "blocks",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "toolDeclarations"
+              ],
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "No readable capture is available. This does not identify why it is unavailable.",
+          "properties": {
+            "kind": {
+              "enum": [
+                "unavailable"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "title": "UnavailableArrivalSource",
+          "type": "object"
+        }
+      ]
+    },
     "AskForApproval": {
       "oneOf": [
         {
@@ -5176,6 +5252,16 @@
             "call_id": {
               "type": "string"
             },
+            "target": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/CodeModeOwner"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "type": {
               "enum": [
                 "waitStarted"
@@ -5195,6 +5281,16 @@
           "properties": {
             "call_id": {
               "type": "string"
+            },
+            "target": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/CodeModeOwner"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "type": {
               "enum": [
@@ -7419,6 +7515,17 @@
     "ConsumeAccountRateLimitResetCreditParams": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
+        "confirmation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ResetCreditConfirmation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Reuse the usage read's binding for confirmation and every retry."
+        },
         "creditId": {
           "description": "Opaque reset-credit identifier to redeem. When omitted, the backend selects the next available credit.",
           "type": [
@@ -7611,14 +7718,67 @@
           "type": "array"
         },
         "raw": {
+          "default": "",
+          "description": "Legacy mixed capture; new records use typed sources.",
           "type": "string"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/definitions/ContextSource"
+          },
+          "type": "array"
         }
       },
       "required": [
-        "parts",
-        "raw"
+        "parts"
       ],
       "type": "object"
+    },
+    "ContextSource": {
+      "description": "Captured text and a client serialization of declarations are different evidence.",
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "prompt"
+              ],
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "label",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The declarations supplied to the provider, serialized by this client for inspection. This is not the provider's internal prompt serialization.",
+          "properties": {
+            "kind": {
+              "enum": [
+                "toolDeclarations"
+              ],
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "text"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "ConversationTextRole": {
       "enum": [
@@ -9808,6 +9968,17 @@
             "object",
             "null"
           ]
+        },
+        "resetCreditConfirmation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ResetCreditConfirmation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Confirmation required to spend this read's payer's reset credits."
         }
       },
       "required": [
@@ -16267,6 +16438,82 @@
       },
       "type": "object"
     },
+    "ResetCreditConfirmation": {
+      "properties": {
+        "scope": {
+          "$ref": "#/definitions/ResetCreditScope"
+        },
+        "token": {
+          "description": "Opaque server-issued binding to the payer observed during this usage read.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scope",
+        "token"
+      ],
+      "type": "object"
+    },
+    "ResetCreditScope": {
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "global"
+              ],
+              "title": "GlobalResetCreditScopeType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "GlobalResetCreditScope",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "thread_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "thread"
+              ],
+              "title": "ThreadResetCreditScopeType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "thread_id",
+            "type"
+          ],
+          "title": "ThreadResetCreditScope",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "params": {
+              "$ref": "#/definitions/NewThreadAccountParams"
+            },
+            "type": {
+              "enum": [
+                "newThread"
+              ],
+              "title": "NewThreadResetCreditScopeType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "params",
+            "type"
+          ],
+          "title": "NewThreadResetCreditScope",
+          "type": "object"
+        }
+      ]
+    },
     "ResidencyRequirement": {
       "enum": [
         "us"
@@ -22106,8 +22353,18 @@
               "description": "The response whose step admits it.",
               "type": "string"
             },
+            "source": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/ArrivalSource"
+                }
+              ],
+              "default": {
+                "kind": "legacy"
+              }
+            },
             "text": {
-              "description": "The readable content of an injection or of a plaintext message from another agent.",
+              "description": "Legacy flattened text, without captured block boundaries or provenance.",
               "type": [
                 "string",
                 "null"
@@ -22489,6 +22746,12 @@
             },
             "responseId": {
               "type": "string"
+            },
+            "sources": {
+              "items": {
+                "$ref": "#/definitions/ContextSource"
+              },
+              "type": "array"
             },
             "type": {
               "enum": [
@@ -25451,6 +25714,17 @@
             }
           ],
           "description": "Optional client-supplied analytics source classification for this thread."
+        },
+        "toolPolicy": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ToolPolicyCeiling"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Immutable startup ceiling for ephemeral threads, which cannot be resumed or forked. Omission preserves inherited tool restrictions."
         }
       },
       "title": "ThreadStartParams",
@@ -25521,6 +25795,17 @@
         },
         "thread": {
           "$ref": "#/definitions/Thread"
+        },
+        "toolPolicy": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ToolPolicyCeiling"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Startup ceiling enforced by this server. Missing on older servers."
         }
       },
       "required": [
@@ -26247,6 +26532,13 @@
           "type": "string"
         }
       ]
+    },
+    "ToolPolicyCeiling": {
+      "description": "A restriction captured at thread startup, independent of tool exposure.",
+      "enum": [
+        "noTools"
+      ],
+      "type": "string"
     },
     "ToolsV2": {
       "properties": {

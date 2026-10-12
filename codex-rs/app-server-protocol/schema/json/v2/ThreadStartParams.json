@@ -275,6 +275,13 @@
       ],
       "type": "string"
     },
+    "ToolPolicyCeiling": {
+      "description": "A restriction captured at thread startup, independent of tool exposure.",
+      "enum": [
+        "noTools"
+      ],
+      "type": "string"
+    },
     "TurnEnvironmentParams": {
       "properties": {
         "cwd": {
@@ -419,6 +426,17 @@
         }
       ],
       "description": "Optional client-supplied analytics source classification for this thread."
+    },
+    "toolPolicy": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ToolPolicyCeiling"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Immutable startup ceiling for ephemeral threads, which cannot be resumed or forked. Omission preserves inherited tool restrictions."
     }
   },
   "title": "ThreadStartParams",

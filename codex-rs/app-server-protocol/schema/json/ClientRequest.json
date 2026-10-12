@@ -677,6 +677,17 @@
     },
     "ConsumeAccountRateLimitResetCreditParams": {
       "properties": {
+        "confirmation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ResetCreditConfirmation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Reuse the usage read's binding for confirmation and every retry."
+        },
         "creditId": {
           "description": "Opaque reset-credit identifier to redeem. When omitted, the backend selects the next available credit.",
           "type": [
@@ -3236,6 +3247,82 @@
         {
           "format": "int64",
           "type": "integer"
+        }
+      ]
+    },
+    "ResetCreditConfirmation": {
+      "properties": {
+        "scope": {
+          "$ref": "#/definitions/ResetCreditScope"
+        },
+        "token": {
+          "description": "Opaque server-issued binding to the payer observed during this usage read.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scope",
+        "token"
+      ],
+      "type": "object"
+    },
+    "ResetCreditScope": {
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "global"
+              ],
+              "title": "GlobalResetCreditScopeType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "GlobalResetCreditScope",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "thread_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "thread"
+              ],
+              "title": "ThreadResetCreditScopeType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "thread_id",
+            "type"
+          ],
+          "title": "ThreadResetCreditScope",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "params": {
+              "$ref": "#/definitions/NewThreadAccountParams"
+            },
+            "type": {
+              "enum": [
+                "newThread"
+              ],
+              "title": "NewThreadResetCreditScopeType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "params",
+            "type"
+          ],
+          "title": "NewThreadResetCreditScope",
+          "type": "object"
         }
       ]
     },
@@ -6169,6 +6256,17 @@
             }
           ],
           "description": "Optional client-supplied analytics source classification for this thread."
+        },
+        "toolPolicy": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ToolPolicyCeiling"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Immutable startup ceiling for ephemeral threads, which cannot be resumed or forked. Omission preserves inherited tool restrictions."
         }
       },
       "type": "object"
@@ -6269,6 +6367,13 @@
           "type": "string"
         }
       ]
+    },
+    "ToolPolicyCeiling": {
+      "description": "A restriction captured at thread startup, independent of tool exposure.",
+      "enum": [
+        "noTools"
+      ],
+      "type": "string"
     },
     "TurnEnvironmentParams": {
       "properties": {

@@ -4,6 +4,7 @@
 import type { JsonValue } from "../serde_json/JsonValue";
 import type { RateLimitResetCreditsSummary } from "./RateLimitResetCreditsSummary";
 import type { RateLimitSnapshot } from "./RateLimitSnapshot";
+import type { ResetCreditConfirmation } from "./ResetCreditConfirmation";
 
 export type GetAccountRateLimitsResponse = {
 /**
@@ -27,4 +28,8 @@ accountId: string | null,
  * Optional backend-owned banner from the same usage read. Its nested keys retain the
  * backend's snake_case contract; an absent banner leaves the client's existing UI unchanged.
  */
-rateLimitUpsell: JsonValue | null, };
+rateLimitUpsell: JsonValue | null,
+/**
+ * Confirmation required to spend this read's payer's reset credits.
+ */
+resetCreditConfirmation: ResetCreditConfirmation | null, };

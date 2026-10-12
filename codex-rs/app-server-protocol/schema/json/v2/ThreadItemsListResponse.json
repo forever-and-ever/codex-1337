@@ -164,6 +164,82 @@
         }
       ]
     },
+    "ArrivalSource": {
+      "description": "Exact readable text blocks, a client declaration representation, or unavailable evidence.",
+      "oneOf": [
+        {
+          "description": "Older records retain only the unclassified, potentially flattened `text` field.",
+          "properties": {
+            "kind": {
+              "enum": [
+                "legacy"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "title": "LegacyArrivalSource",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "blocks": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "enum": [
+                "captured"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "blocks",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "toolDeclarations"
+              ],
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "No readable capture is available. This does not identify why it is unavailable.",
+          "properties": {
+            "kind": {
+              "enum": [
+                "unavailable"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "title": "UnavailableArrivalSource",
+          "type": "object"
+        }
+      ]
+    },
     "AsyncUserInputQuestion": {
       "additionalProperties": false,
       "properties": {
@@ -274,6 +350,16 @@
             "call_id": {
               "type": "string"
             },
+            "target": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/CodeModeOwner"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "type": {
               "enum": [
                 "waitStarted"
@@ -293,6 +379,16 @@
           "properties": {
             "call_id": {
               "type": "string"
+            },
+            "target": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/CodeModeOwner"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "type": {
               "enum": [
@@ -545,6 +641,52 @@
         "declined"
       ],
       "type": "string"
+    },
+    "ContextSource": {
+      "description": "Captured text and a client serialization of declarations are different evidence.",
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "prompt"
+              ],
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "label",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The declarations supplied to the provider, serialized by this client for inspection. This is not the provider's internal prompt serialization.",
+          "properties": {
+            "kind": {
+              "enum": [
+                "toolDeclarations"
+              ],
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "text"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "DynamicToolCallOutputContentItem": {
       "oneOf": [
@@ -1330,8 +1472,18 @@
               "description": "The response whose step admits it.",
               "type": "string"
             },
+            "source": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/ArrivalSource"
+                }
+              ],
+              "default": {
+                "kind": "legacy"
+              }
+            },
             "text": {
-              "description": "The readable content of an injection or of a plaintext message from another agent.",
+              "description": "Legacy flattened text, without captured block boundaries or provenance.",
               "type": [
                 "string",
                 "null"
@@ -1713,6 +1865,12 @@
             },
             "responseId": {
               "type": "string"
+            },
+            "sources": {
+              "items": {
+                "$ref": "#/definitions/ContextSource"
+              },
+              "type": "array"
             },
             "type": {
               "enum": [

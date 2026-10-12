@@ -595,12 +595,6 @@
           "format": "uint64",
           "minimum": 1.0,
           "type": "integer"
-        },
-        "tool_input_schema_max_bytes": {
-          "description": "Maximum UTF-8 bytes per rendered tool input type, with a 16,000-byte minimum and default. For ordinary MCP tools, this is also at least their server's explicitly configured input limit.",
-          "format": "uint",
-          "minimum": 1.0,
-          "type": "integer"
         }
       },
       "type": "object"
@@ -3893,7 +3887,7 @@
         },
         "tool_input_schema_max_bytes": {
           "default": null,
-          "description": "UTF-8 byte threshold for compacting each ordinary MCP tool input schema. Defaults to 5,000 bytes. Code Mode also uses an explicitly configured limit when rendering each tool's input type. Larger limits preserve more parameter descriptions.",
+          "description": "UTF-8 byte threshold for compacting each ordinary MCP tool input schema. Defaults to 5,000 bytes. Larger limits preserve more parameter descriptions.",
           "format": "uint",
           "minimum": 1.0,
           "type": "integer"

@@ -8,6 +8,7 @@ import type { AskForApproval } from "./AskForApproval";
 import type { SandboxMode } from "./SandboxMode";
 import type { ThreadSource } from "./ThreadSource";
 import type { ThreadStartSource } from "./ThreadStartSource";
+import type { ToolPolicyCeiling } from "./ToolPolicyCeiling";
 
 export type ThreadStartParams = {model?: string | null, modelProvider?: string | null, serviceTier?: string | null | null, cwd?: string | null, approvalPolicy?: AskForApproval | null, /**
  * Override where approval requests are routed for review on this thread
@@ -19,4 +20,8 @@ approvalsReviewer?: ApprovalsReviewer | null, sandbox?: SandboxMode | null, conf
 personality?: Personality | null, ephemeral?: boolean | null, sessionStartSource?: ThreadStartSource | null, /**
  * Optional client-supplied analytics source classification for this thread.
  */
-threadSource?: ThreadSource | null};
+threadSource?: ThreadSource | null, /**
+ * Immutable startup ceiling for ephemeral threads, which cannot be resumed or forked.
+ * Omission preserves inherited tool restrictions.
+ */
+toolPolicy?: ToolPolicyCeiling};

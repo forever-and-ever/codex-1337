@@ -22,6 +22,40 @@
       ],
       "type": "object"
     },
+    "LegacyAppPathString": {
+      "type": "string"
+    },
+    "NewThreadAccountParams": {
+      "properties": {
+        "config": {
+          "additionalProperties": true,
+          "description": "Configuration overrides, as in `thread/start`.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "cwd": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LegacyAppPathString"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Absolute working directory used to resolve the new conversation's configuration."
+        },
+        "modelProvider": {
+          "description": "Provider override, as in `thread/start`; omission uses the server default.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "PlanType": {
       "enum": [
         "free",
@@ -258,6 +292,82 @@
       ],
       "type": "object"
     },
+    "ResetCreditConfirmation": {
+      "properties": {
+        "scope": {
+          "$ref": "#/definitions/ResetCreditScope"
+        },
+        "token": {
+          "description": "Opaque server-issued binding to the payer observed during this usage read.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scope",
+        "token"
+      ],
+      "type": "object"
+    },
+    "ResetCreditScope": {
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "global"
+              ],
+              "title": "GlobalResetCreditScopeType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "GlobalResetCreditScope",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "thread_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "thread"
+              ],
+              "title": "ThreadResetCreditScopeType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "thread_id",
+            "type"
+          ],
+          "title": "ThreadResetCreditScope",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "params": {
+              "$ref": "#/definitions/NewThreadAccountParams"
+            },
+            "type": {
+              "enum": [
+                "newThread"
+              ],
+              "title": "NewThreadResetCreditScopeType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "params",
+            "type"
+          ],
+          "title": "NewThreadResetCreditScope",
+          "type": "object"
+        }
+      ]
+    },
     "SpendControlLimitSnapshot": {
       "properties": {
         "limit": {
@@ -329,6 +439,17 @@
         "object",
         "null"
       ]
+    },
+    "resetCreditConfirmation": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ResetCreditConfirmation"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Confirmation required to spend this read's payer's reset credits."
     }
   },
   "required": [
