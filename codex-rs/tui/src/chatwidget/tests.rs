@@ -217,7 +217,9 @@ fn next_goal_draft(
     loop {
         let event = rx.try_recv().expect("expected goal draft event");
         if let AppEvent::SetThreadGoalDraft {
-            thread_id, draft, mode
+            thread_id,
+            draft,
+            mode,
         } = event
         {
             assert_eq!(thread_id, expected_thread_id);

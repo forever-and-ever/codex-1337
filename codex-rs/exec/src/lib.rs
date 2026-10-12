@@ -719,10 +719,7 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
         && !matches!(&command, ExecCommand::Review(_))
     {
         anyhow::ensure!(
-            !oss || matches!(
-                &command,
-                ExecCommand::Resume(_) | ExecCommand::Fork(_)
-            ),
+            !oss || matches!(&command, ExecCommand::Resume(_) | ExecCommand::Fork(_)),
             "Daybreak requires the OpenAI model provider"
         );
     }
@@ -763,16 +760,13 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
             (InitialOperation::Review { review_request }, summary)
         }
         (ExecCommand::Resume(args), imgs) => {
-            let prompt_arg = args
-                .prompt
-                .clone()
-                .or_else(|| {
-                    if args.last {
-                        args.session_id.clone()
-                    } else {
-                        None
-                    }
-                });
+            let prompt_arg = args.prompt.clone().or_else(|| {
+                if args.last {
+                    args.session_id.clone()
+                } else {
+                    None
+                }
+            });
             let prompt_text = resolve_prompt(prompt_arg);
             let mut items: Vec<UserInput> = imgs
                 .into_iter()
@@ -866,7 +860,8 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
 
     let mut daybreak_enabled = config.daybreak_enabled;
     // Resolve resume and fork through existing app-server thread lifecycle APIs.
-    let (primary_thread_id, fallback_session_configured) = if let ExecCommand::Resume(args) = &command
+    let (primary_thread_id, fallback_session_configured) = if let ExecCommand::Resume(args) =
+        &command
     {
         if let Some(thread_id) =
             resolve_resume_thread_id(&client, &config, state_db.as_ref(), args).await?

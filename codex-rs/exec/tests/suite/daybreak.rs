@@ -26,7 +26,8 @@ async fn exec_rejects_daybreak_for_api_keys_and_allows_an_override() -> anyhow::
     std::fs::remove_file(test.home_path().join("auth.json"))?;
     let response = responses::mount_sse_once(&server, responses::sse_completed("response")).await;
 
-    test.cmd_with_server(&server).arg("run")
+    test.cmd_with_server(&server)
+        .arg("run")
         .env_remove("CODEX_ACCESS_TOKEN")
         .arg("--skip-git-repo-check")
         .arg("hello")
@@ -37,7 +38,8 @@ async fn exec_rejects_daybreak_for_api_keys_and_allows_an_override() -> anyhow::
         ));
     assert!(response.requests().is_empty());
 
-    test.cmd_with_server(&server).arg("run")
+    test.cmd_with_server(&server)
+        .arg("run")
         .env_remove("CODEX_ACCESS_TOKEN")
         .arg("--skip-git-repo-check")
         .arg("-c")
@@ -62,7 +64,8 @@ async fn exec_rejects_daybreak_for_non_openai_provider() -> anyhow::Result<()> {
     )?;
     let response = responses::mount_sse_once(&server, responses::sse_completed("response")).await;
 
-    test.cmd_with_server(&server).arg("run")
+    test.cmd_with_server(&server)
+        .arg("run")
         .env_remove("CODEX_ACCESS_TOKEN")
         .args([
             "--oss",
@@ -141,7 +144,8 @@ async fn exec_resumes_and_forks_the_saved_daybreak_choice() -> anyhow::Result<()
     let (test, server) = configured_daybreak_exec().await?;
     let response = responses::mount_sse_once(&server, responses::sse_completed("started")).await;
     let output = test
-        .cmd_with_server(&server).arg("run")
+        .cmd_with_server(&server)
+        .arg("run")
         .env_remove("CODEX_ACCESS_TOKEN")
         .env_remove("CODEX_API_KEY")
         .env_remove("OPENAI_API_KEY")
@@ -228,7 +232,8 @@ async fn exec_explicit_cyber_program_overrides_daybreak_for_one_turn() -> anyhow
     let response =
         responses::mount_sse_once(&server, responses::sse_completed("explicit-program")).await;
     let output = test
-        .cmd_with_server(&server).arg("run")
+        .cmd_with_server(&server)
+        .arg("run")
         .env_remove("CODEX_ACCESS_TOKEN")
         .env_remove("CODEX_API_KEY")
         .env_remove("OPENAI_API_KEY")
@@ -270,7 +275,8 @@ async fn exec_resume_override_does_not_change_a_standard_thread() -> anyhow::Res
     let response =
         responses::mount_sse_once(&server, responses::sse_completed("started-standard")).await;
     let output = test
-        .cmd_with_server(&server).arg("run")
+        .cmd_with_server(&server)
+        .arg("run")
         .env_remove("CODEX_ACCESS_TOKEN")
         .env_remove("CODEX_API_KEY")
         .env_remove("OPENAI_API_KEY")

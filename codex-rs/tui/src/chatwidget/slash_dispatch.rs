@@ -5,8 +5,8 @@
 //! dispatch step and records the staged entry once the command has been handled, so
 //! slash-command recall follows the same submitted-input rule as ordinary text.
 
-use super::*;
 use super::goal_command::GOAL_USAGE_HINT;
+use super::*;
 use crate::app::WindowsSandboxHost;
 use crate::bottom_pane::prompt_args::parse_slash_name;
 use crate::bottom_pane::slash_commands::BuiltinCommandFlags;

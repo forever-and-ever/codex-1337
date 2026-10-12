@@ -78,7 +78,8 @@ async fn test_apply_patch_tool() -> anyhow::Result<()> {
     let server = start_mock_server().await;
     mount_sse_sequence(&server, response_streams).await;
 
-    test.cmd_with_server(&server).arg("run")
+    test.cmd_with_server(&server)
+        .arg("run")
         .arg("--skip-git-repo-check")
         .arg("-s")
         .arg("danger-full-access")
@@ -128,7 +129,8 @@ async fn test_apply_patch_freeform_tool() -> anyhow::Result<()> {
     let server = start_mock_server().await;
     mount_sse_sequence(&server, response_streams).await;
 
-    test.cmd_with_server(&server).arg("run")
+    test.cmd_with_server(&server)
+        .arg("run")
         .arg("--skip-git-repo-check")
         .arg("-s")
         .arg("danger-full-access")

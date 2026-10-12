@@ -31,14 +31,14 @@ impl ContextRoleCommand {
 
 impl ChatWidget {
     pub(super) fn reject_invalid_context_role_command(&mut self, args: &str) -> bool {
-            match ContextRoleCommand::parse(args) {
-                Ok(_) => false,
-                Err(error) => {
-                    self.add_error_message(error);
-                    true
-                }
+        match ContextRoleCommand::parse(args) {
+            Ok(_) => false,
+            Err(error) => {
+                self.add_error_message(error);
+                true
             }
         }
+    }
 
     pub(super) fn dispatch_context_role(&mut self, argument: &str) {
         let command = match ContextRoleCommand::parse(argument) {

@@ -14,7 +14,8 @@ use strum_macros::EnumString;
 
 pub(crate) const GOAL_USAGE: &str = "Usage: /goal [set <objective>|clear|edit|pause|resume]";
 pub(super) const GOAL_USAGE_HINT: &str = "Example: /goal set improve benchmark coverage";
-pub(crate) const GOAL_DESCRIPTION: &str = "view the goal; /goal set <objective> sets or replaces it";
+pub(crate) const GOAL_DESCRIPTION: &str =
+    "view the goal; /goal set <objective> sets or replaces it";
 
 #[derive(EnumString)]
 #[strum(serialize_all = "lowercase", ascii_case_insensitive)]
@@ -26,34 +27,48 @@ enum GoalVerb {
     Resume,
 }
 
-impl GoalVerb {
-    fn parse_args(args: &str) -> Result<(Self, &str), String> {
+enum GoalCommand<'a> {
+    Set(&'a str),
+    Edit,
+    Control(GoalControl),
+}
+
+enum GoalControl {
+    Clear,
+    Status(ThreadGoalStatus),
+}
+
+impl<'a> GoalCommand<'a> {
+    fn parse_args(args: &'a str) -> Result<Self, String> {
         let trimmed = args.trim();
         let (verb, payload) = trimmed
             .split_once(char::is_whitespace)
             .map_or((trimmed, ""), |(verb, rest)| (verb, rest.trim_start()));
         let command = verb
-            .parse::<Self>()
+            .parse::<GoalVerb>()
             .map_err(|_| format!("Unknown /goal command '{verb}'. {GOAL_USAGE}"))?;
         match command {
-            Self::Set if payload.is_empty() => Err("Usage: /goal set <objective>".to_string()),
-            Self::Set => Ok((command, payload)),
+            GoalVerb::Set if payload.is_empty() => Err("Usage: /goal set <objective>".to_string()),
+            GoalVerb::Set => Ok(Self::Set(payload)),
             _ if !payload.is_empty() => Err(GOAL_USAGE.to_string()),
-            _ => Ok((command, payload)),
+            GoalVerb::Edit => Ok(Self::Edit),
+            GoalVerb::Clear => Ok(Self::Control(GoalControl::Clear)),
+            GoalVerb::Pause => Ok(Self::Control(GoalControl::Status(ThreadGoalStatus::Paused))),
+            GoalVerb::Resume => Ok(Self::Control(GoalControl::Status(ThreadGoalStatus::Active))),
         }
     }
 }
 
 impl ChatWidget {
     pub(super) fn reject_invalid_goal_command(&mut self, args: &str) -> bool {
-            match GoalVerb::parse_args(args) {
-                Ok(_) => false,
-                Err(error) => {
-                    self.add_error_message(error);
-                    true
-                }
+        match GoalCommand::parse_args(args) {
+            Ok(_) => false,
+            Err(error) => {
+                self.add_error_message(error);
+                true
             }
         }
+    }
 
     pub(super) fn dispatch_goal_command(
         &mut self,
@@ -72,16 +87,16 @@ impl ChatWidget {
         }
 
         // TELOS(explicit-command-verbs): queued inputs must pass the same boundary as live input.
-        let (command, payload) = match GoalVerb::parse_args(&args) {
+        let command = match GoalCommand::parse_args(&args) {
             Ok(parsed) => parsed,
             Err(error) => {
                 self.add_error_message(error);
                 return;
             }
         };
-        match command {
-            GoalVerb::Set => {}
-            GoalVerb::Edit => {
+        let payload = match command {
+            GoalCommand::Set(payload) => payload,
+            GoalCommand::Edit => {
                 self.app_event_tx.send(AppEvent::OpenThreadGoalEditor {
                     thread_id: self.thread_id,
                 });
@@ -90,7 +105,7 @@ impl ChatWidget {
                 }
                 return;
             }
-            GoalVerb::Clear | GoalVerb::Pause | GoalVerb::Resume => {
+            GoalCommand::Control(control) => {
                 let Some(thread_id) = self.thread_id else {
                     self.add_info_message(
                         GOAL_USAGE.to_string(),
@@ -101,23 +116,15 @@ impl ChatWidget {
                     }
                     return;
                 };
-                match command {
-                    GoalVerb::Clear => {
-                        self.app_event_tx.send(AppEvent::ClearThreadGoal { thread_id });
+                match control {
+                    GoalControl::Clear => {
+                        self.app_event_tx
+                            .send(AppEvent::ClearThreadGoal { thread_id });
                     }
-                    GoalVerb::Pause => {
-                        self.app_event_tx.send(AppEvent::SetThreadGoalStatus {
-                            thread_id,
-                            status: ThreadGoalStatus::Paused,
-                        });
+                    GoalControl::Status(status) => {
+                        self.app_event_tx
+                            .send(AppEvent::SetThreadGoalStatus { thread_id, status });
                     }
-                    GoalVerb::Resume => {
-                        self.app_event_tx.send(AppEvent::SetThreadGoalStatus {
-                            thread_id,
-                            status: ThreadGoalStatus::Active,
-                        });
-                    }
-                    _ => unreachable!(),
                 }
                 self.append_message_history_entry(format!("/goal {}", args.trim()));
                 if source == SlashCommandDispatchSource::Live {
@@ -125,10 +132,11 @@ impl ChatWidget {
                 }
                 return;
             }
-        }
+        };
 
         let payload_offset = args.trim_end().len() - payload.len();
-        let text_elements = Self::slash_command_args_elements(payload, payload_offset, &text_elements);
+        let text_elements =
+            Self::slash_command_args_elements(payload, payload_offset, &text_elements);
         let draft = GoalDraft {
             objective: payload.to_string(),
             text_elements,

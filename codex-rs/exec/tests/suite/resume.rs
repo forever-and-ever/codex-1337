@@ -142,7 +142,8 @@ async fn exec_falls_back_to_legacy_history_when_thread_store_cannot_paginate() -
     let _response_mock = mount_exec_responses(&server, /*count*/ 1).await;
     let store_id = Uuid::new_v4();
 
-    test.cmd_with_server(&server).arg("run")
+    test.cmd_with_server(&server)
+        .arg("run")
         .arg("--skip-git-repo-check")
         .arg("-c")
         .arg(format!(
@@ -179,7 +180,8 @@ async fn exec_resume_last_appends_to_existing_file() -> anyhow::Result<()> {
     let marker = format!("resume-last-{}", Uuid::new_v4());
     let prompt = format!("echo {marker}");
 
-    test.cmd_with_server(&server).arg("run")
+    test.cmd_with_server(&server)
+        .arg("run")
         .arg("--skip-git-repo-check")
         .arg("-C")
         .arg(&repo_root)
@@ -266,7 +268,8 @@ async fn exec_resume_last_repairs_rollout_missing_from_state_db() -> anyhow::Res
     let repo_root = exec_repo_root()?;
 
     let marker = format!("resume-last-repair-{}", Uuid::new_v4());
-    test.cmd_with_server(&server).arg("run")
+    test.cmd_with_server(&server)
+        .arg("run")
         .arg("--skip-git-repo-check")
         .arg("-C")
         .arg(&repo_root)
@@ -319,7 +322,8 @@ async fn exec_resume_last_trusts_usable_state_db_candidate() -> anyhow::Result<(
     let sessions_dir = test.home_path().join("sessions");
 
     let older_marker = format!("resume-last-indexed-{}", Uuid::new_v4());
-    test.cmd_with_server(&server).arg("run")
+    test.cmd_with_server(&server)
+        .arg("run")
         .arg("--skip-git-repo-check")
         .arg("-C")
         .arg(&repo_root)
@@ -330,7 +334,8 @@ async fn exec_resume_last_trusts_usable_state_db_candidate() -> anyhow::Result<(
         .expect("no indexed session file after first run");
 
     let newer_marker = format!("resume-last-unindexed-{}", Uuid::new_v4());
-    test.cmd_with_server(&server).arg("run")
+    test.cmd_with_server(&server)
+        .arg("run")
         .arg("--skip-git-repo-check")
         .arg("-C")
         .arg(&repo_root)
@@ -390,7 +395,8 @@ async fn exec_resume_last_skips_mismatched_state_db_candidate() -> anyhow::Resul
     let sessions_dir = test.home_path().join("sessions");
 
     let older_marker = format!("resume-last-valid-{}", Uuid::new_v4());
-    test.cmd_with_server(&server).arg("run")
+    test.cmd_with_server(&server)
+        .arg("run")
         .arg("--skip-git-repo-check")
         .arg("-C")
         .arg(&repo_root)
@@ -401,7 +407,8 @@ async fn exec_resume_last_skips_mismatched_state_db_candidate() -> anyhow::Resul
         .expect("no valid session file after first run");
 
     let newer_marker = format!("resume-last-mismatched-{}", Uuid::new_v4());
-    test.cmd_with_server(&server).arg("run")
+    test.cmd_with_server(&server)
+        .arg("run")
         .arg("--skip-git-repo-check")
         .arg("-C")
         .arg(&repo_root)
@@ -456,7 +463,8 @@ async fn exec_resume_last_accepts_prompt_after_flag_in_json_mode() -> anyhow::Re
     let marker = format!("resume-last-json-{}", Uuid::new_v4());
     let prompt = format!("echo {marker}");
 
-    test.cmd_with_server(&server).arg("run")
+    test.cmd_with_server(&server)
+        .arg("run")
         .arg("--skip-git-repo-check")
         .arg("-C")
         .arg(&repo_root)
@@ -509,7 +517,8 @@ async fn exec_resume_last_respects_cwd_filter_and_all_flag() -> anyhow::Result<(
 
     let marker_a = format!("resume-cwd-a-{}", Uuid::new_v4());
     let prompt_a = format!("echo {marker_a}");
-    test.cmd_with_server(&server).arg("run")
+    test.cmd_with_server(&server)
+        .arg("run")
         .arg("--skip-git-repo-check")
         .arg("-C")
         .arg(dir_a.path())
@@ -519,7 +528,8 @@ async fn exec_resume_last_respects_cwd_filter_and_all_flag() -> anyhow::Result<(
 
     let marker_b = format!("resume-cwd-b-{}", Uuid::new_v4());
     let prompt_b = format!("echo {marker_b}");
-    test.cmd_with_server(&server).arg("run")
+    test.cmd_with_server(&server)
+        .arg("run")
         .arg("--skip-git-repo-check")
         .arg("-C")
         .arg(dir_b.path())
@@ -618,7 +628,8 @@ async fn exec_resume_accepts_global_flags_after_subcommand() -> anyhow::Result<(
     let _response_mock = mount_exec_responses(&server, /*count*/ 2).await;
 
     // Seed a session.
-    test.cmd_with_server(&server).arg("run")
+    test.cmd_with_server(&server)
+        .arg("run")
         .arg("--skip-git-repo-check")
         .arg("echo seed-resume-session")
         .assert()
@@ -665,7 +676,8 @@ async fn exec_resume_includes_output_schema_in_request() -> anyhow::Result<()> {
     let schema_path = test.cwd_path().join("schema.json");
     std::fs::write(&schema_path, serde_json::to_vec_pretty(&schema_contents)?)?;
 
-    test.cmd_with_server(&server).arg("run")
+    test.cmd_with_server(&server)
+        .arg("run")
         .arg("--skip-git-repo-check")
         .arg("echo seed-resume-session")
         .assert()
@@ -715,7 +727,8 @@ async fn exec_resume_by_id_appends_to_existing_file() -> anyhow::Result<()> {
     let marker = format!("resume-by-id-{}", Uuid::new_v4());
     let prompt = format!("echo {marker}");
 
-    test.cmd_with_server(&server).arg("run")
+    test.cmd_with_server(&server)
+        .arg("run")
         .arg("--skip-git-repo-check")
         .arg("-C")
         .arg(&repo_root)
@@ -770,7 +783,8 @@ async fn exec_resume_preserves_cli_configuration_overrides() -> anyhow::Result<(
     let marker = format!("resume-config-{}", Uuid::new_v4());
     let prompt = format!("echo {marker}");
 
-    test.cmd_with_server(&server).arg("run")
+    test.cmd_with_server(&server)
+        .arg("run")
         .arg("--skip-git-repo-check")
         .arg("--sandbox")
         .arg("workspace-write")
@@ -845,7 +859,8 @@ async fn exec_resume_accepts_images_after_subcommand() -> anyhow::Result<()> {
     let marker = format!("resume-image-{}", Uuid::new_v4());
     let prompt = format!("echo {marker}");
 
-    test.cmd_with_server(&server).arg("run")
+    test.cmd_with_server(&server)
+        .arg("run")
         .arg("--skip-git-repo-check")
         .arg("-C")
         .arg(&repo_root)
@@ -902,7 +917,8 @@ async fn exec_fork_creates_distinct_threads_with_and_without_a_prompt() -> anyho
     let response_mock = mount_exec_responses(&server, /*count*/ 2).await;
     let source_marker = format!("fork-source-{}", Uuid::new_v4());
 
-    test.cmd_with_server(&server).arg("run")
+    test.cmd_with_server(&server)
+        .arg("run")
         .arg("--skip-git-repo-check")
         .arg("--thread-source")
         .arg("source_feature")

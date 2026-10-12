@@ -180,7 +180,10 @@ async fn goal_slash_command_emits_only_inserted_paste_text_element() {
         "expected literal placeholder and inserted paste placeholder, got {:?}",
         draft.objective
     );
-    let inserted_start = draft.objective.rfind(&placeholder).expect("inserted placeholder");
+    let inserted_start = draft
+        .objective
+        .rfind(&placeholder)
+        .expect("inserted placeholder");
     assert_eq!(draft.text_elements.len(), 1);
     assert_eq!(
         draft.text_elements[0].byte_range,

@@ -61,11 +61,21 @@ pub struct Cli {
     pub color: Color,
 
     /// Print events to stdout as JSONL.
-    #[arg(long = "json", alias = "experimental-json", default_value_t = false, global = true)]
+    #[arg(
+        long = "json",
+        alias = "experimental-json",
+        default_value_t = false,
+        global = true
+    )]
     pub json: bool,
 
     /// Write the last agent message to this file.
-    #[arg(long = "output-last-message", short = 'o', value_name = "FILE", global = true)]
+    #[arg(
+        long = "output-last-message",
+        short = 'o',
+        value_name = "FILE",
+        global = true
+    )]
     pub last_message_file: Option<PathBuf>,
 }
 
@@ -89,7 +99,12 @@ pub struct RunArgs {
     pub prompt: Option<String>,
 
     /// Images attached to the new task.
-    #[arg(long = "image", short = 'i', value_name = "FILE", value_delimiter = ',')]
+    #[arg(
+        long = "image",
+        short = 'i',
+        value_name = "FILE",
+        value_delimiter = ','
+    )]
     pub images: Vec<PathBuf>,
 }
 
@@ -100,5 +115,6 @@ pub(crate) fn mark_exec_global_args(cmd: clap::Command) -> clap::Command {
         .filter(|arg| arg.get_id().as_str() != "images")
         .map(|arg| arg.get_id().clone())
         .collect::<Vec<_>>();
-    ids.into_iter().fold(cmd, |cmd, id| cmd.mut_arg(id, |arg| arg.global(true)))
+    ids.into_iter()
+        .fold(cmd, |cmd, id| cmd.mut_arg(id, |arg| arg.global(true)))
 }

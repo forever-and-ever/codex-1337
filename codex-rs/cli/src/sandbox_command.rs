@@ -41,7 +41,8 @@ impl SandboxCommand {
                 .config_overrides
                 .parse_overrides()
                 .map_err(anyhow::Error::msg)?;
-            return super::sandbox_setup::run(setup_cli, config_profile.cloned(), cli_overrides).await;
+            return super::sandbox_setup::run(setup_cli, config_profile.cloned(), cli_overrides)
+                .await;
         }
         let loader_overrides = loader_overrides_for_profile(config_profile)?;
         #[cfg(target_os = "macos")]

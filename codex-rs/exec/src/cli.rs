@@ -1,7 +1,7 @@
-#[cfg(test)]
-use clap::Parser;
 use clap::Args;
 use clap::FromArgMatches;
+#[cfg(test)]
+use clap::Parser;
 use clap::ValueEnum;
 #[cfg(test)]
 use codex_protocol::protocol::ThreadSource;

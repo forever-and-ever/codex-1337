@@ -85,7 +85,8 @@ async fn ignores_unrelated_turn_completion_before_backfilling_primary_turn() -> 
         server.uri()
     );
     let output = test
-        .cmd().arg("run")
+        .cmd()
+        .arg("run")
         .env(
             "RUST_LOG",
             "codex_app_server::message_processor=trace,codex_app_server::outgoing_message=trace",

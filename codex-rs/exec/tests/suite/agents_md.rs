@@ -16,7 +16,8 @@ async fn exec_includes_workspace_agents_md_in_request() -> anyhow::Result<()> {
     ]);
     let response_mock = responses::mount_sse_once(&server, body).await;
 
-    test.cmd_with_server(&server).arg("run")
+    test.cmd_with_server(&server)
+        .arg("run")
         .arg("--skip-git-repo-check")
         .arg("tell me something")
         .assert()
@@ -50,7 +51,8 @@ async fn exec_prefers_workspace_agents_override_md() -> anyhow::Result<()> {
     ]);
     let response_mock = responses::mount_sse_once(&server, body).await;
 
-    test.cmd_with_server(&server).arg("run")
+    test.cmd_with_server(&server)
+        .arg("run")
         .arg("--skip-git-repo-check")
         .arg("tell me something")
         .assert()

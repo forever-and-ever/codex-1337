@@ -88,10 +88,10 @@ mod plugin_cmd;
 mod queue_cmd;
 mod reload_probe;
 mod remote_control_cmd;
+mod sandbox_command;
 #[cfg(target_os = "windows")]
 mod sandbox_setup;
 mod sandbox_uninstall;
-mod sandbox_command;
 mod staging;
 mod state_db_recovery;
 #[cfg(not(windows))]
@@ -1639,11 +1639,13 @@ async fn cli_main(
                 root_remote_auth_token_env.as_deref(),
                 "sandbox",
             )?;
-            command.run(
-                interactive.config_profile_v2.as_ref(),
-                root_config_overrides.clone(),
-                arg0_paths.clone(),
-            ).await?;
+            command
+                .run(
+                    interactive.config_profile_v2.as_ref(),
+                    root_config_overrides.clone(),
+                    arg0_paths.clone(),
+                )
+                .await?;
         }
         Some(Subcommand::Debug(DebugCommand { subcommand })) => match subcommand {
             DebugSubcommand::TuiRestartProbe | DebugSubcommand::TuiReloadProbe { .. } => {
@@ -3010,7 +3012,8 @@ mod tests {
 
     #[test]
     fn approve_for_me_defaults_propagate_from_root_to_exec() {
-        let exec = finalize_exec_from_args(&["codex", "--approve-for-me", "exec", "run", "summarize"]);
+        let exec =
+            finalize_exec_from_args(&["codex", "--approve-for-me", "exec", "run", "summarize"]);
 
         assert_eq!(
             exec.config_overrides.raw_overrides,
@@ -3386,7 +3389,10 @@ mod tests {
         ])
         .expect("parse");
 
-        let Some(Subcommand::Sandbox(SandboxCommand { subcommand: SandboxSubcommand::Run(command) })) = cli.subcommand else {
+        let Some(Subcommand::Sandbox(SandboxCommand {
+            subcommand: SandboxSubcommand::Run(command),
+        })) = cli.subcommand
+        else {
             panic!("expected sandbox command");
         };
 
@@ -3408,7 +3414,10 @@ mod tests {
         ])
         .expect("parse");
 
-        let Some(Subcommand::Sandbox(SandboxCommand { subcommand: SandboxSubcommand::Run(command) })) = cli.subcommand else {
+        let Some(Subcommand::Sandbox(SandboxCommand {
+            subcommand: SandboxSubcommand::Run(command),
+        })) = cli.subcommand
+        else {
             panic!("expected sandbox command");
         };
 
@@ -3427,11 +3436,21 @@ mod tests {
     #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
     #[test]
     fn sandbox_parses_permissions_profile_short_alias() {
-        let cli =
-            MultitoolCli::try_parse_from(["codex", "sandbox", "run", "-P", ":workspace", "--", "echo"])
-                .expect("parse");
+        let cli = MultitoolCli::try_parse_from([
+            "codex",
+            "sandbox",
+            "run",
+            "-P",
+            ":workspace",
+            "--",
+            "echo",
+        ])
+        .expect("parse");
 
-        let Some(Subcommand::Sandbox(SandboxCommand { subcommand: SandboxSubcommand::Run(command) })) = cli.subcommand else {
+        let Some(Subcommand::Sandbox(SandboxCommand {
+            subcommand: SandboxSubcommand::Run(command),
+        })) = cli.subcommand
+        else {
             panic!("expected sandbox command");
         };
 
@@ -3442,11 +3461,21 @@ mod tests {
     #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
     #[test]
     fn sandbox_parses_config_profile() {
-        let cli =
-            MultitoolCli::try_parse_from(["codex", "sandbox", "run", "--profile", "work", "--", "echo"])
-                .expect("parse");
+        let cli = MultitoolCli::try_parse_from([
+            "codex",
+            "sandbox",
+            "run",
+            "--profile",
+            "work",
+            "--",
+            "echo",
+        ])
+        .expect("parse");
 
-        let Some(Subcommand::Sandbox(SandboxCommand { subcommand: SandboxSubcommand::Run(command) })) = cli.subcommand else {
+        let Some(Subcommand::Sandbox(SandboxCommand {
+            subcommand: SandboxSubcommand::Run(command),
+        })) = cli.subcommand
+        else {
             panic!("expected sandbox command");
         };
 
