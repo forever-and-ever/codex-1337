@@ -175,9 +175,6 @@ impl InputQueueState {
 }
 impl ThreadInputState {
     pub(crate) fn pause_unavailable_thread(&mut self) {
-        if let Some(questions) = &mut self.questions {
-            questions.delivery_enabled = false;
-        }
         self.agent_turn_running = false;
         self.task_running = false;
         self.input_queue.pause_unavailable_thread();
