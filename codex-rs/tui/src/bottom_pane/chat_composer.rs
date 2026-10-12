@@ -9174,27 +9174,8 @@ mod tests {
         // When a slash command is dispatched, the composer should return a
         // Command result (not submit literal text) and clear its textarea.
         match result {
-            InputResult::Command(cmd) => {
-                assert_eq!(cmd.command(), "init");
-            }
-            InputResult::CommandWithArgs(_, _, _) => {
-                panic!("expected command dispatch without args for '/init'")
-            }
-            InputResult::ServiceTierCommand(command) => {
-                panic!("expected init command, got service tier {command:?}")
-            }
-            InputResult::Submitted { text, .. } => {
-                panic!("expected command dispatch, but composer submitted literal text: {text}")
-            }
-            InputResult::Queued { .. } => {
-                panic!("expected command dispatch, but composer queued literal text")
-            }
-            InputResult::ParentOwnedInputBlocked => {
-                panic!("expected command dispatch, but parent-owned input was blocked")
-            }
-            InputResult::None | InputResult::NavigationDownBoundary => {
-                panic!("expected Command result for '/init'")
-            }
+            InputResult::Command(command) => assert_eq!(command.command(), "init"),
+            _ => panic!("expected Command result for '/init'"),
         }
         assert!(
             composer.draft.textarea.is_empty(),
@@ -9688,25 +9669,8 @@ mod tests {
         let (result, _needs_redraw) =
             composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         match result {
-            InputResult::Command(cmd) => assert_eq!(cmd.command(), "diff"),
-            InputResult::CommandWithArgs(_, _, _) => {
-                panic!("expected command dispatch without args for '/diff'")
-            }
-            InputResult::ServiceTierCommand(command) => {
-                panic!("expected diff command, got service tier {command:?}")
-            }
-            InputResult::Submitted { text, .. } => {
-                panic!("expected command dispatch after Tab completion, got literal submit: {text}")
-            }
-            InputResult::Queued { .. } => {
-                panic!("expected command dispatch after Tab completion, got literal queue")
-            }
-            InputResult::ParentOwnedInputBlocked => {
-                panic!("expected command dispatch, but parent-owned input was blocked")
-            }
-            InputResult::None | InputResult::NavigationDownBoundary => {
-                panic!("expected Command result for '/diff'")
-            }
+            InputResult::Command(command) => assert_eq!(command.command(), "diff"),
+            _ => panic!("expected Command result for '/diff'"),
         }
         assert!(composer.draft.textarea.is_empty());
     }
@@ -9888,27 +9852,8 @@ mod tests {
             composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
         match result {
-            InputResult::Command(cmd) => {
-                assert_eq!(cmd.command(), "mention");
-            }
-            InputResult::CommandWithArgs(_, _, _) => {
-                panic!("expected command dispatch without args for '/mention'")
-            }
-            InputResult::ServiceTierCommand(command) => {
-                panic!("expected mention command, got service tier {command:?}")
-            }
-            InputResult::Submitted { text, .. } => {
-                panic!("expected command dispatch, but composer submitted literal text: {text}")
-            }
-            InputResult::Queued { .. } => {
-                panic!("expected command dispatch, but composer queued literal text")
-            }
-            InputResult::ParentOwnedInputBlocked => {
-                panic!("expected command dispatch, but parent-owned input was blocked")
-            }
-            InputResult::None | InputResult::NavigationDownBoundary => {
-                panic!("expected Command result for '/mention'")
-            }
+            InputResult::Command(command) => assert_eq!(command.command(), "mention"),
+            _ => panic!("expected Command result for '/mention'"),
         }
         assert!(
             composer.draft.textarea.is_empty(),

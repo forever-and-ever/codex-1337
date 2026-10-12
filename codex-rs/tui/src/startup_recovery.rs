@@ -82,6 +82,7 @@ pub(crate) fn submitted(result: &InputResult) {
         | InputResult::NavigationDownBoundary
         | InputResult::ParentOwnedInputBlocked
         | InputResult::Command(_)
+        | InputResult::LocalShell(_)
         | InputResult::ServiceTierCommand(_)
         | InputResult::CommandWithArgs(..) => return,
     };
