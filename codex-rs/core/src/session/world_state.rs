@@ -142,12 +142,39 @@ impl Session {
             String::new()
         };
         let mut world_state = WorldState::default();
+        let inspection_instructions = if incremental_tools {
+            String::new()
+        } else if new_window {
+            base_instructions.clone()
+        } else {
+            self.state
+                .lock()
+                .await
+                .history
+                .raw_items()
+                .find_map(crate::context::BaseInstructionsFragment::text)
+                .unwrap_or(&base_instructions)
+                .to_string()
+        };
+        world_state.add_section(super::context_inventory::InspectionPrefix {
+            instructions: inspection_instructions,
+            tools: if incremental_tools {
+                Vec::new()
+            } else {
+                step_context
+                    .tool_router
+                    .model_visible_specs()
+                    .iter()
+                    .map(serde_json::to_value)
+                    .collect::<Result<Vec<_>, _>>()?
+            },
+        });
         if incremental_tools {
             let specs = step_context.tool_router.model_visible_specs();
             let definitions = codex_tools::create_tools_json_for_responses_lite(&specs)?;
             world_state.add_section(TopLevelToolsState::new(definitions)?);
-            world_state.add_section(BaseInstructionsState(base_instructions));
         }
+        world_state.add_instruction_section(BaseInstructionsState(base_instructions));
         world_state.add_section(ModelInstructionsState::new(
             &model_info.slug,
             previous_model.as_deref(),
@@ -194,7 +221,8 @@ impl Session {
                 .as_ref()
                 .and_then(|instructions| instructions.end.as_deref()),
         ));
-        world_state.add_section(AgentsMdState::new(step_context.loaded_agents_md.as_deref()));
+        world_state
+            .add_instruction_section(AgentsMdState::new(step_context.loaded_agents_md.as_deref()));
         // Codex-1337 keeps approved command prefixes out of the model context: the sandbox
         // applies them when a command runs, whatever the model knew.
         let exec_policy = codex_execpolicy::Policy::empty();
@@ -216,7 +244,7 @@ impl Session {
                 .unwrap_or_else(|| turn_context.cwd.clone());
             let approval_context =
                 ApprovalPromptContext::new(settings.approvals_reviewer(), model_messages);
-            world_state.add_section(PermissionsState::new(
+            world_state.add_instruction_section(PermissionsState::new(
                 &permission_profile,
                 settings.approval_policy(),
                 match effective_tool_mode(turn_context, model_info) {
@@ -239,7 +267,7 @@ impl Session {
             world_state.add_section(CompactPermissionsState::new(&exec_policy));
         }
         if turn_context.config.include_collaboration_mode_instructions {
-            world_state.add_section(CollaborationModeState::from_collaboration_mode(
+            world_state.add_instruction_section(CollaborationModeState::from_collaboration_mode(
                 &settings.effective_collaboration_mode(),
                 model_messages.collaboration_modes(),
                 turn_context.config.update_plan_enabled,
@@ -283,7 +311,7 @@ impl Session {
                 .with_subagents(environment_subagents),
             );
         }
-        world_state.add_section(EnvironmentsInstructionsState::new(
+        world_state.add_instruction_section(EnvironmentsInstructionsState::new(
             turn_context.config.include_environment_context
                 && turn_context
                     .config
@@ -303,12 +331,12 @@ impl Session {
             };
         let apps_usage_instructions_available =
             apps_available && model_info.include_apps_usage_instructions;
-        world_state.add_section(AppsInstructionsState::new(
+        world_state.add_instruction_section(AppsInstructionsState::new(
             apps_usage_instructions_available,
         ));
         let plugins_usage_instructions_available =
             step_context.mcp.plugins_available() && model_info.include_plugin_usage_instructions;
-        world_state.add_section(PluginsInstructionsState::new(
+        world_state.add_instruction_section(PluginsInstructionsState::new(
             plugins_usage_instructions_available,
         ));
         let extension_metrics = super::extension_metrics::from_session_telemetry(
@@ -360,9 +388,9 @@ impl Session {
         if let Some(usage_hint_text) = super::multi_agents::usage_hint_text(step_context) {
             let usage_hint = MultiAgentUsageHintState::new(usage_hint_text);
             multi_agent_mode = multi_agent_mode.with_usage_hint(&usage_hint);
-            world_state.add_section(usage_hint);
+            world_state.add_instruction_section(usage_hint);
         }
-        world_state.add_section(multi_agent_mode);
+        world_state.add_instruction_section(multi_agent_mode);
         let spawn_tool = match turn_context.multi_agent_version {
             MultiAgentVersion::Disabled => None,
             MultiAgentVersion::V1 => Some(ToolName::new(
@@ -398,7 +426,7 @@ impl Session {
             },
         );
         if !crate::guardian::is_basic_session_source(&turn_context.session_source) {
-            world_state.add_section(ManagedDeveloperInstructionsState::new(
+            world_state.add_instruction_section(ManagedDeveloperInstructionsState::new(
                 turn_context
                     .config
                     .config_layer_stack

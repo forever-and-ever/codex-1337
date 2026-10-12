@@ -206,6 +206,12 @@ impl ChatWidget {
 
         match cmd {
             SlashCommand::Comms => self.dispatch_comms(""),
+            SlashCommand::Context => {
+                if let Some(thread_id) = self.thread_id {
+                    self.app_event_tx
+                        .send(AppEvent::ContextInventory { thread_id });
+                }
+            }
             SlashCommand::ContextRole => self.dispatch_context_role(""),
             SlashCommand::Daybreak => {
                 if !self.config.features.enabled(Feature::CliDaybreak) {
@@ -1316,6 +1322,7 @@ impl ChatWidget {
         match cmd {
             SlashCommand::Ide
             | SlashCommand::Status
+            | SlashCommand::Context
             | SlashCommand::Comms
             | SlashCommand::ContextRole
             | SlashCommand::Daemon

@@ -603,6 +603,11 @@ client_request_definitions! {
         serialization: None,
         response: v2::ThreadFarmResponse,
     },
+    ThreadContextInventory => "thread/context/inventory" {
+        params: v2::ThreadContextInventoryParams,
+        serialization: None,
+        response: v2::ThreadContextInventoryResponse,
+    },
     ThreadSetContextRole => "thread/contextRole/set" {
         params: v2::ThreadSetContextRoleParams,
         serialization: thread_id(params.thread_id),

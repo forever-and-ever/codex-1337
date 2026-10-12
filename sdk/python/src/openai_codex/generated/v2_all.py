@@ -5643,6 +5643,13 @@ class ThreadCompactStartResponse(BaseModel):
     )
 
 
+class ThreadContextInventoryParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    thread_id: Annotated[str, Field(alias="threadId")]
+
+
 class ThreadDeleteParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -7632,6 +7639,17 @@ class ThreadUnsubscribeRequest(BaseModel):
     id: RequestId
     method: Annotated[Literal["thread/unsubscribe"], Field(title="Thread/unsubscribeRequestMethod")]
     params: ThreadUnsubscribeParams
+
+
+class ThreadContextInventoryRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[
+        Literal["thread/context/inventory"], Field(title="Thread/context/inventoryRequestMethod")
+    ]
+    params: ThreadContextInventoryParams
 
 
 class ThreadContextRoleSetRequest(BaseModel):
@@ -11119,6 +11137,7 @@ class PreambleThreadItem(BaseModel):
     completed_at_ms: Annotated[int, Field(alias="completedAtMs")]
     id: str
     parts: list[PreamblePart]
+    raw: str | None = None
     reported_input_tokens: Annotated[
         int | None,
         Field(
@@ -11129,6 +11148,7 @@ class PreambleThreadItem(BaseModel):
     ] = None
     response_id: Annotated[str, Field(alias="responseId")]
     type: Annotated[Literal["preamble"], Field(title="PreambleThreadItemType")]
+    window_id: Annotated[str | None, Field(alias="windowId")] = None
 
 
 class CommandExecutionThreadItem(BaseModel):
@@ -12150,6 +12170,14 @@ class ConfigWriteResponse(BaseModel):
     version: str
 
 
+class ContextInventory(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    parts: list[PreamblePart]
+    raw: str
+
+
 class ErrorNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -12883,6 +12911,13 @@ class SessionSource(RootModel[SessionSourceValue | CustomSessionSource | SubAgen
     root: SessionSourceValue | CustomSessionSource | SubAgentSessionSource
 
 
+class ThreadContextInventoryResponse(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    inventory: ContextInventory
+
+
 class StepAdmissionThreadItem(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -13455,6 +13490,7 @@ class ClientRequest(
         | ThreadUnsubscribeRequest
         | ThreadJiraRequest
         | ThreadFarmRequest
+        | ThreadContextInventoryRequest
         | ThreadContextRoleSetRequest
         | ThreadAlarmDisarmRequest
         | ThreadWarmingSetRequest
@@ -13579,6 +13615,7 @@ class ClientRequest(
         | ThreadUnsubscribeRequest
         | ThreadJiraRequest
         | ThreadFarmRequest
+        | ThreadContextInventoryRequest
         | ThreadContextRoleSetRequest
         | ThreadAlarmDisarmRequest
         | ThreadWarmingSetRequest

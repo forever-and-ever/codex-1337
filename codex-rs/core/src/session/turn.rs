@@ -1638,12 +1638,17 @@ pub(super) fn collect_explicit_app_ids_from_skill_items(
 
 #[instrument(level = "trace", skip_all)]
 pub(crate) fn build_prompt(
-    input: Vec<ResponseItem>,
+    mut input: Vec<ResponseItem>,
     step_context: &StepContext,
-    base_instructions: BaseInstructions,
+    mut base_instructions: BaseInstructions,
     incremental_tools: bool,
 ) -> Prompt {
     let turn_context = &step_context.turn;
+    if !incremental_tools
+        && let Some(text) = crate::context::BaseInstructionsFragment::take_prefix(&mut input)
+    {
+        base_instructions.text = text;
+    }
     Prompt {
         input,
         tools: if incremental_tools {

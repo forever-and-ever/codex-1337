@@ -219,6 +219,25 @@ async fn compact_resume_and_fork_preserve_model_history_view() {
     );
 
     shutdown_conversation(&base).await;
+    let preambles = |path: &Path| {
+        std::fs::read_to_string(path)
+            .expect("rollout")
+            .lines()
+            .map(codex_rollout::parse_rollout_line)
+            .collect::<Result<Vec<_>, _>>()
+            .expect("parsed rollout")
+            .into_iter()
+            .filter_map(|line| match line.item {
+                RolloutItem::EventMsg(EventMsg::ItemCompleted(event)) => match event.item {
+                    codex_protocol::items::TurnItem::Preamble(item) => Some(item),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let before_resume = preambles(&base_path);
+    assert_eq!(before_resume.len(), 2);
     let resumed = resume_conversation(&manager, &config, base_path).await;
     user_turn(&resumed, "AFTER_RESUME").await;
     let resumed_path = fetch_conversation_path(&resumed);
@@ -345,6 +364,10 @@ async fn compact_resume_and_fork_preserve_model_history_view() {
         }
     }
     assert_eq!(requests.len(), 5);
+    shutdown_conversation(&resumed).await;
+    // Reopening a retained window does not create another initial-context item.
+    assert_eq!(preambles(&fetch_conversation_path(&resumed)), before_resume);
+    shutdown_conversation(&forked).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

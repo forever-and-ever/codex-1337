@@ -39,6 +39,7 @@ use crate::web_search::web_search_action_detail;
 
 const CONTEXTUAL_DEVELOPER_PREFIXES: &[&str] = &[
     "<permissions instructions>",
+    "<instruction_diff>",
     APPROVED_COMMAND_PREFIX_SAVED_MESSAGE_PREFIX,
     "<model_switch>",
     "<managed_developer_instructions>",

@@ -39,15 +39,19 @@ pub(super) async fn run_remote_compact_v2_attempt(
     compaction_trace: &CompactionTraceContext,
     compaction_metadata: CompactionTurnMetadata,
     analytics_details: &mut CompactionAnalyticsDetails,
+    world_state: &crate::context::world_state::WorldState,
 ) -> CodexResult<RemoteCompactV2Attempt> {
     let turn_context = &step_context.turn;
-    let mut history = sess.clone_history().await;
+    let mut history = sess
+        .clone_history()
+        .await
+        .for_compaction(&world_state.render_full().0);
     let input_goal_ids = UserGoalUpdate::message_ids(history.raw_items());
     let tools_in_history = step_context.settings.model_info.use_responses_lite
         && history
             .raw_items()
             .any(|item| matches!(item, ResponseItem::AdditionalTools { .. }));
-    let base_instructions = if tools_in_history {
+    let mut base_instructions = if tools_in_history {
         BaseInstructions {
             text: String::new(),
             provenance: None,
@@ -55,6 +59,9 @@ pub(super) async fn run_remote_compact_v2_attempt(
     } else {
         sess.get_prompt_base_instructions().await
     };
+    if !tools_in_history && let Some(text) = history.take_base_instructions() {
+        base_instructions.text = text;
+    }
     let (rewritten_outputs, estimated_deleted_tokens) =
         trim_function_call_history_to_fit_context_window(
             &mut history,

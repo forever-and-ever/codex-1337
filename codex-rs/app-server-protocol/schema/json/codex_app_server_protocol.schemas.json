@@ -451,6 +451,30 @@
             },
             "method": {
               "enum": [
+                "thread/context/inventory"
+              ],
+              "title": "Thread/context/inventoryRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/ThreadContextInventoryParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Thread/context/inventoryRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/v2/RequestId"
+            },
+            "method": {
+              "enum": [
                 "thread/contextRole/set"
               ],
               "title": "Thread/contextRole/setRequestMethod",
@@ -11904,6 +11928,25 @@
           "turnId"
         ],
         "title": "ContextCompactedNotification",
+        "type": "object"
+      },
+      "ContextInventory": {
+        "description": "Retained special material, including superseded instructions and their amendments. An inventory is not an arrival and is never inserted into model history.",
+        "properties": {
+          "parts": {
+            "items": {
+              "$ref": "#/definitions/v2/PreamblePart"
+            },
+            "type": "array"
+          },
+          "raw": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "parts",
+          "raw"
+        ],
         "type": "object"
       },
       "ConversationTextRole": {
@@ -23594,6 +23637,32 @@
         "title": "ThreadCompactStartResponse",
         "type": "object"
       },
+      "ThreadContextInventoryParams": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "threadId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "threadId"
+        ],
+        "title": "ThreadContextInventoryParams",
+        "type": "object"
+      },
+      "ThreadContextInventoryResponse": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "inventory": {
+            "$ref": "#/definitions/v2/ContextInventory"
+          }
+        },
+        "required": [
+          "inventory"
+        ],
+        "title": "ThreadContextInventoryResponse",
+        "type": "object"
+      },
       "ThreadDeleteParams": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "properties": {
@@ -24688,7 +24757,7 @@
             "type": "object"
           },
           {
-            "description": "Human-only census of the standing model context one request carried, not model input.",
+            "description": "Initial context of a window, recorded for inspection and never model input.",
             "properties": {
               "change": {
                 "anyOf": [
@@ -24713,6 +24782,12 @@
                 },
                 "type": "array"
               },
+              "raw": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "reportedInputTokens": {
                 "description": "Provider-reported input of the whole request, conversation included.",
                 "format": "uint64",
@@ -24731,6 +24806,12 @@
                 ],
                 "title": "PreambleThreadItemType",
                 "type": "string"
+              },
+              "windowId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             },
             "required": [

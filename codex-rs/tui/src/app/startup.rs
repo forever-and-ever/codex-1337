@@ -759,10 +759,10 @@ impl App {
                         return Ok(cancel_session_start(app_server).await);
                     }
                 };
-                if let Some(forked) = &forked {
-                    if config.model_reasoning_effort.is_none() {
-                        config.model_reasoning_effort = forked.session.reasoning_effort.clone();
-                    }
+                if let Some(forked) = &forked
+                    && config.model_reasoning_effort.is_none()
+                {
+                    config.model_reasoning_effort = forked.session.reasoning_effort.clone();
                 }
                 let init = crate::chatwidget::ChatWidgetInit {
                     local_settings: local_settings.clone(),

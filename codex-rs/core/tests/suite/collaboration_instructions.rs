@@ -115,6 +115,39 @@ fn count_messages_containing(texts: &[String], target: &str) -> usize {
     texts.iter().filter(|text| text.contains(target)).count()
 }
 
+fn collaboration_amendments(texts: &[String]) -> Vec<&str> {
+    texts
+        .iter()
+        .filter(|text| {
+            text.starts_with("<instruction_diff>") && text.contains("--- collaboration_mode/")
+        })
+        .map(String::as_str)
+        .collect()
+}
+
+fn assert_collaboration_amendment(texts: &[String], before: &str, after: &str) {
+    let full = texts
+        .iter()
+        .filter(|text| !text.starts_with("<instruction_diff>"))
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(count_messages_containing(&full, &collab_xml(before)), 1);
+    assert_eq!(count_messages_containing(&full, &collab_xml(after)), 0);
+    let amendments = collaboration_amendments(texts);
+    assert_eq!(amendments.len(), 1);
+    for (sign, expected) in [('-', before), ('+', after)] {
+        let changed = amendments[0]
+            .lines()
+            .filter_map(|line| line.strip_prefix(sign))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            changed.contains(expected.trim()),
+            "{sign} {expected:?}: {changed}"
+        );
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn no_collaboration_instructions_by_default() -> Result<()> {
     skip_if_no_network!(Ok(()));
@@ -220,14 +253,7 @@ async fn catalog_collaboration_messages_track_mode_changes() -> Result<()> {
     test.submit_text_turn("plan turn").await?;
 
     let second_dev_texts = developer_texts(&req2.single_request().input());
-    assert_eq!(
-        count_messages_containing(&second_dev_texts, &collab_xml(default_text)),
-        1
-    );
-    assert_eq!(
-        count_messages_containing(&second_dev_texts, &collab_xml(plan_text)),
-        1
-    );
+    assert_collaboration_amendment(&second_dev_texts, default_text, plan_text);
     assert_eq!(
         count_messages_containing(&second_dev_texts, "legacy plan instructions"),
         0
@@ -292,14 +318,13 @@ async fn catalog_collaboration_messages_refresh_without_mode_or_model_change(
     )
     .await?;
 
-    let history = [ORIGINAL, UPDATED, ""];
     let mut requests = Vec::new();
-    for (turn, etag, refreshed_instructions, expected) in [
-        ("original", ETAG_2, Some(UPDATED), &history[..1]),
-        ("updated", ETAG_2, None, &history[..2]),
-        ("unchanged", ETAG_3, Some(""), &history[..2]),
-        ("cleared", ETAG_3, None, &history[..]),
-        ("still-cleared", ETAG_3, None, &history[..]),
+    for (turn, etag, refreshed_instructions, amendments) in [
+        ("original", ETAG_2, Some(UPDATED), 0),
+        ("updated", ETAG_2, None, 1),
+        ("unchanged", ETAG_3, Some(""), 1),
+        ("cleared", ETAG_3, None, 2),
+        ("still-cleared", ETAG_3, None, 2),
     ] {
         if let Some(instructions) = refreshed_instructions {
             models_mocks
@@ -315,16 +340,52 @@ async fn catalog_collaboration_messages_refresh_without_mode_or_model_change(
         test.submit_text_turn(turn).await?;
         let request = response.single_request();
         let dev_texts = request.message_input_texts("developer");
-        let collaboration_instructions = dev_texts
+        // Catalog refresh must preserve the old prefix and append amendments at the
+        // same authority, not repeatedly replace the instruction document in full.
+        assert_eq!(
+            dev_texts
+                .iter()
+                .filter(|text| text.starts_with(COLLABORATION_MODE_OPEN_TAG))
+                .count(),
+            1,
+            "{turn}"
+        );
+        let patches = dev_texts
             .iter()
-            .flat_map(|text| text.split(COLLABORATION_MODE_OPEN_TAG).skip(1))
-            .map(|text| {
-                text.split_once(COLLABORATION_MODE_CLOSE_TAG)
-                    .expect("collaboration fragment should have a closing tag")
-                    .0
+            .filter(|text| {
+                text.contains("<instruction_diff>") && text.contains("collaboration_mode/")
             })
             .collect::<Vec<_>>();
-        assert_eq!(collaboration_instructions.as_slice(), expected, "{turn}");
+        assert_eq!(patches.len(), amendments, "{turn}");
+        if let Some(patch) = patches.first() {
+            assert!(
+                patch
+                    .lines()
+                    .any(|line| line.starts_with('-') && line.contains(ORIGINAL))
+            );
+            assert!(
+                patch
+                    .lines()
+                    .any(|line| line.starts_with('+') && line.contains(UPDATED))
+            );
+        }
+        if let Some(patch) = patches.get(1) {
+            assert!(
+                patch
+                    .lines()
+                    .any(|line| line.starts_with('-') && line.contains(UPDATED))
+            );
+        }
+        let inventory = test
+            .codex
+            .context_inventory()
+            .await
+            .map_err(anyhow::Error::msg)?;
+        assert!(inventory.raw.contains(ORIGINAL));
+        assert_eq!(
+            inventory.raw.matches("<instruction_diff>").count(),
+            amendments
+        );
         requests.push(request);
     }
 
@@ -397,15 +458,16 @@ async fn empty_collaboration_guidance_clears_prior_instructions_once(
         test.submit_text_turn(turn).await?;
 
         let dev_texts = response.single_request().message_input_texts("developer");
-        assert_eq!(
-            (
-                count_messages_containing(&dev_texts, &collab_xml(default_text)),
-                count_messages_containing(&dev_texts, &collab_xml("")),
-                count_messages_containing(&dev_texts, fallback_text),
-            ),
-            (1, clear_count, 0),
-            "{turn}"
-        );
+        let amendments = collaboration_amendments(&dev_texts);
+        assert_eq!(amendments.len(), clear_count, "{turn}");
+        assert_eq!(count_messages_containing(&dev_texts, fallback_text), 0);
+        if clear_count > 0 {
+            assert!(
+                amendments[0]
+                    .lines()
+                    .any(|line| line.starts_with('-') && line.contains(default_text))
+            );
+        }
     }
 
     Ok(())
@@ -468,14 +530,7 @@ async fn model_change_appends_new_catalog_collaboration_message() -> Result<()> 
     test.submit_text_turn("second").await?;
 
     let dev_texts = developer_texts(&req2.single_request().input());
-    assert_eq!(
-        count_messages_containing(&dev_texts, &collab_xml(first_text)),
-        1
-    );
-    assert_eq!(
-        count_messages_containing(&dev_texts, &collab_xml(second_text)),
-        1
-    );
+    assert_collaboration_amendment(&dev_texts, first_text, second_text);
 
     Ok(())
 }
@@ -728,10 +783,7 @@ async fn collaboration_mode_update_appends_instruction_changes_within_same_mode(
 
     let input = req2.single_request().input();
     let dev_texts = developer_texts(&input);
-    let first_text = collab_xml(first_text);
-    let second_text = collab_xml(second_text);
-    assert_eq!(count_messages_containing(&dev_texts, &first_text), 1);
-    assert_eq!(count_messages_containing(&dev_texts, &second_text), 1);
+    assert_collaboration_amendment(&dev_texts, first_text, second_text);
 
     Ok(())
 }
@@ -859,10 +911,7 @@ async fn collaboration_mode_update_emits_new_instruction_message_when_mode_chang
 
     let input = req2.single_request().input();
     let dev_texts = developer_texts(&input);
-    let default_text = collab_xml(default_text);
-    let plan_text = collab_xml(plan_text);
-    assert_eq!(count_messages_containing(&dev_texts, &default_text), 1);
-    assert_eq!(count_messages_containing(&dev_texts, &plan_text), 1);
+    assert_collaboration_amendment(&dev_texts, default_text, plan_text);
 
     Ok(())
 }
@@ -1051,6 +1100,9 @@ async fn cold_resume_refreshes_legacy_collaboration_snapshot_once(
                 && let Some(snapshot) = world_state.state.get_mut("collaboration_mode")
             {
                 *snapshot = legacy_snapshot.clone();
+                world_state
+                    .state
+                    .remove("codex.instruction/collaboration_mode");
                 rewrote_snapshot = true;
                 serde_json::to_string(&line)
             } else {

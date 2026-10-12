@@ -384,11 +384,10 @@ impl MessageProcessor {
                     outgoing.clone(),
                     thread_state_manager.clone(),
                 )),
-                Some({
-                    let time_provider =
-                        app_server_time_provider(outgoing.clone(), thread_state_manager.clone());
-                    time_provider
-                }),
+                Some(app_server_time_provider(
+                    outgoing.clone(),
+                    thread_state_manager.clone(),
+                )),
             );
             let manager = codex_core::PromptCacheManager::with_prompt_cache_observer(
                 manager,
@@ -1406,6 +1405,9 @@ impl MessageProcessor {
                 self.thread_processor
                     .thread_decrement_elicitation(params)
                     .await
+            }
+            ClientRequest::ThreadContextInventory { params, .. } => {
+                self.thread_processor.thread_context_inventory(params).await
             }
             ClientRequest::ThreadSetContextRole { params, .. } => {
                 self.thread_processor.thread_set_context_role(params).await

@@ -1874,7 +1874,7 @@
           "type": "object"
         },
         {
-          "description": "Human-only census of the standing model context one request carried, not model input.",
+          "description": "Initial context of a window, recorded for inspection and never model input.",
           "properties": {
             "change": {
               "anyOf": [
@@ -1899,6 +1899,12 @@
               },
               "type": "array"
             },
+            "raw": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "reportedInputTokens": {
               "description": "Provider-reported input of the whole request, conversation included.",
               "format": "uint64",
@@ -1917,6 +1923,12 @@
               ],
               "title": "PreambleThreadItemType",
               "type": "string"
+            },
+            "windowId": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [

@@ -5664,13 +5664,13 @@ async fn manual_compaction_refreshes_global_instructions_for_next_turn() -> Resu
     .await;
     test.submit_turn("after compact").await?;
 
-    // Compaction summarizes the existing history; the next turn injects the refreshed instructions.
+    // The compactor sees current instructions, as does the replacement window.
     let requests = response_mock.requests();
     assert_eq!(requests.len(), 3);
     let old_fragment = expected_instruction_fragment(OLD_GLOBAL_INSTRUCTIONS);
     let new_fragment = expected_instruction_fragment(NEW_GLOBAL_INSTRUCTIONS);
     assert_single_instruction_fragment(&requests[0], &old_fragment);
-    assert_single_instruction_fragment(&requests[1], &old_fragment);
+    assert_single_instruction_fragment(&requests[1], &new_fragment);
     assert_single_instruction_fragment(&requests[2], &new_fragment);
     assert_eq!(
         test.codex.instruction_sources().await,
@@ -5806,13 +5806,13 @@ async fn remote_v2_compaction_refreshes_instructions_and_preserves_them_on_cold_
     test.submit_turn("after remote v2 compaction").await?;
     test.codex.flush_rollout().await?;
 
-    // Compaction summarizes the existing history; the follow-up injects the refreshed instructions.
+    // The compactor and cold-resumed replacement window share current instructions.
     let requests = response_mock.requests();
     assert_eq!(requests.len(), 3);
     let old_fragment = expected_instruction_fragment(OLD_GLOBAL_INSTRUCTIONS);
     let new_fragment = expected_instruction_fragment(NEW_GLOBAL_INSTRUCTIONS);
     assert_single_instruction_fragment(&requests[0], &old_fragment);
-    assert_single_instruction_fragment(&requests[1], &old_fragment);
+    assert_single_instruction_fragment(&requests[1], &new_fragment);
     assert_single_instruction_fragment(&requests[2], &new_fragment);
     assert_eq!(
         requests[1].input().last(),
@@ -5860,10 +5860,19 @@ async fn remote_v2_compaction_refreshes_instructions_and_preserves_them_on_cold_
     assert_eq!(requests.len(), 4);
     assert_single_instruction_fragment(&requests[3], &new_fragment);
     let resumed_input = requests[3].input();
+    // The retained base declaration becomes the legacy protocol's separate prefix;
+    // every remaining history item still replays verbatim.
+    let (base, retained) = replacement_history
+        .split_first()
+        .expect("replacement prefix");
     assert_eq!(
-        resumed_input.get(1..=replacement_history.len()),
-        Some(replacement_history.as_slice()),
-        "remote-v2 cold resume should replay persisted replacement history verbatim"
+        requests[3].instructions_text(),
+        base["content"][0]["text"].as_str().expect("base text")
+    );
+    assert_eq!(
+        resumed_input.get(1..=retained.len()),
+        Some(retained),
+        "remote-v2 cold resume should replay persisted history after projecting the base prefix"
     );
     let post_compact_input = requests[2].input();
     assert_eq!(

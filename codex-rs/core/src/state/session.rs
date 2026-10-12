@@ -98,8 +98,8 @@ pub(crate) struct SessionState {
     pub(crate) startup_prewarm: Option<SessionStartupPrewarmHandle>,
     /// Retained after completion so later turns do not repeat speculative captures.
     pub(crate) shell_snapshot_prewarm: Option<AbortOnDropHandle<()>>,
-    /// The standing model context the runtime last censused.
-    pub(crate) preamble_mark: Option<crate::session::preamble::PreambleMark>,
+    /// The initial context already reported for the current window.
+    pub(crate) preamble_window: Option<uuid::Uuid>,
     /// The latest completed request, whose step the next one seals.
     pub(crate) step_mark: Option<crate::session::step_admission::StepMark>,
     pub(crate) current_time_reminder: CurrentTimeReminderState,
@@ -143,7 +143,7 @@ impl SessionState {
             shutting_down: false,
             startup_prewarm: None,
             shell_snapshot_prewarm: None,
-            preamble_mark: None,
+            preamble_window: None,
             step_mark: None,
             current_time_reminder: CurrentTimeReminderState::default(),
             active_connector_selection: HashSet::new(),

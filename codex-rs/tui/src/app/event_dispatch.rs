@@ -1020,6 +1020,9 @@ impl App {
             AppEvent::AppendMessageHistoryEntry { thread_id, text } => {
                 self.append_message_history_entry(thread_id, text);
             }
+            AppEvent::ContextInventory { thread_id } => {
+                self.context_inventory(tui, app_server, thread_id).await;
+            }
             AppEvent::ContextRole { thread_id, command } => {
                 self.context_role(app_server, thread_id, command).await;
             }

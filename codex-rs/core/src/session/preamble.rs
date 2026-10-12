@@ -1,11 +1,9 @@
-//! Census of the standing model context, recorded for a runtime's first request and
-//! whenever its instructions or tool set change. Counts are local o200k estimates.
+//! Initial special context, recorded once per context window with its raw contents.
+//! Counts are local o200k estimates; later changes are step-admission arrivals.
 
 use std::borrow::Cow;
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use codex_protocol::PreambleChange;
 use codex_protocol::PreambleItem;
 use codex_protocol::PreamblePart;
 use codex_protocol::PreambleSection;
@@ -28,8 +26,13 @@ use crate::context::BaseInstructionsFragment;
 use crate::context::is_contextual_user_fragment;
 use tokio_util::task::AbortOnDropHandle;
 
+pub(super) struct InjectedText {
+    pub(super) role: String,
+    pub(super) text: String,
+}
+
 #[derive(PartialEq)]
-enum PreambleTools<'a> {
+pub(super) enum PreambleTools<'a> {
     Direct(Arc<[ToolSpec]>),
     History(Cow<'a, [Value]>),
 }
@@ -43,11 +46,39 @@ impl PreambleTools<'_> {
     }
 }
 
-/// The prefix described by the runtime's latest census.
+/// The initial context already reported for this window, not a rolling inventory.
 pub(crate) struct PreambleMark {
-    instructions: String,
-    tools: PreambleTools<'static>,
+    window_id: uuid::Uuid,
     parts: Vec<PreamblePart>,
+    raw: String,
+}
+
+impl PreambleMark {
+    pub(super) fn restore(
+        rollout: &[codex_history::RolloutItem],
+        window_id: uuid::Uuid,
+    ) -> Option<uuid::Uuid> {
+        let mut legacy_window = true;
+        for item in rollout.iter().rev() {
+            match item {
+                codex_history::RolloutItem::Compacted(_) => legacy_window = false,
+                codex_history::RolloutItem::EventMsg(EventMsg::ItemCompleted(
+                    ItemCompletedEvent {
+                        item: TurnItem::Preamble(item),
+                        ..
+                    },
+                )) if item
+                    .window_id
+                    .as_deref()
+                    .map_or(legacy_window, |id| id == window_id.to_string()) =>
+                {
+                    return Some(window_id);
+                }
+                _ => {}
+            }
+        }
+        None
+    }
 }
 
 impl Session {
@@ -55,6 +86,14 @@ impl Session {
         &self,
         prompt: &Prompt,
     ) -> Option<AbortOnDropHandle<PreambleMark>> {
+        let window_id = {
+            let state = self.state.lock().await;
+            let id = state.auto_compact_window_ids().window_id;
+            if state.preamble_window == Some(id) {
+                return None;
+            }
+            id
+        };
         // The first history declaration is the window's prefix. Later declarations
         // are append-only changes, already billed as step admission arrivals.
         let tools = if prompt.tools.is_empty() {
@@ -91,19 +130,9 @@ impl Session {
         } else {
             &prompt.base_instructions.text
         };
-        if self
-            .state
-            .lock()
-            .await
-            .preamble_mark
-            .as_ref()
-            .is_some_and(|mark| mark.instructions == instructions && mark.tools == tools)
-        {
-            return None;
-        }
         let instructions = instructions.to_string();
         let tools = tools.into_owned();
-        let context: Vec<String> = prompt
+        let context: Vec<InjectedText> = prompt
             .input
             .iter()
             .filter_map(|item| {
@@ -120,7 +149,10 @@ impl Session {
                     ContentItem::InputText { text }
                         if role == "developer" || is_contextual_user_fragment(content) =>
                     {
-                        Some(text.clone())
+                        Some(InjectedText {
+                            role: role.clone(),
+                            text: text.clone(),
+                        })
                     }
                     _ => None,
                 })
@@ -128,11 +160,12 @@ impl Session {
             .collect();
         Some(AbortOnDropHandle::new(tokio::task::spawn_blocking(
             move || {
+                let raw = raw_context(&instructions, &tools, &context);
                 let parts = census(&instructions, &tools, context);
                 PreambleMark {
-                    instructions,
-                    tools,
+                    window_id,
                     parts,
+                    raw,
                 }
             },
         )))
@@ -147,24 +180,22 @@ impl Session {
         response_id: &str,
         usage: Option<&TokenUsage>,
     ) {
-        let parts = mark.parts.clone();
-        let change = {
-            let mut state = self.state.lock().await;
-            let change = state
-                .preamble_mark
-                .as_ref()
-                .map(|previous| change(&previous.parts, &parts));
-            state.preamble_mark = Some(mark);
-            change
-        };
+        let PreambleMark {
+            window_id,
+            parts,
+            raw,
+        } = mark;
+        self.state.lock().await.preamble_window = Some(window_id);
         let turn_id = &turn_context.sub_id;
         let completed_at_ms = crate::turn_timing::now_unix_timestamp_ms();
         let preamble = PreambleItem {
             id: format!("preamble:{turn_id}:{response_id}"),
             response_id: response_id.to_string(),
+            window_id: Some(window_id.to_string()),
             completed_at_ms,
             parts,
-            change,
+            raw: Some(raw),
+            change: None,
             reported_input_tokens: usage.and_then(|usage| u64::try_from(usage.input_tokens).ok()),
         };
         self.send_event(
@@ -181,10 +212,32 @@ impl Session {
     }
 }
 
-fn census(
+#[expect(
+    clippy::expect_used,
+    reason = "tool schemas contain only JSON-serializable values"
+)]
+pub(super) fn raw_context(
     instructions: &str,
     tools: &PreambleTools<'_>,
-    context: Vec<String>,
+    context: &[InjectedText],
+) -> String {
+    let tools = match tools {
+        PreambleTools::Direct(tools) => serde_json::to_string_pretty(tools),
+        PreambleTools::History(tools) => serde_json::to_string_pretty(tools),
+    }
+    .expect("tool declarations are serializable");
+    let mut raw =
+        format!("--- Base instructions ---\n{instructions}\n\n--- Tool declarations ---\n{tools}");
+    for fragment in context {
+        raw.push_str(&format!("\n\n--- {} ---\n{}", fragment.role, fragment.text));
+    }
+    raw
+}
+
+pub(super) fn census(
+    instructions: &str,
+    tools: &PreambleTools<'_>,
+    context: Vec<InjectedText>,
 ) -> Vec<PreamblePart> {
     let mut parts = vec![PreamblePart {
         section: PreambleSection::Instructions,
@@ -204,7 +257,7 @@ fn census(
             }
         }
     }
-    for text in context {
+    for InjectedText { text, .. } in context {
         parts.push(PreamblePart {
             section: PreambleSection::Context,
             group: None,
@@ -366,6 +419,19 @@ fn serialized_tokens(value: &impl Serialize) -> u64 {
 
 /// Injected fragments open with a tag or a heading; anything else shows its first line.
 pub(super) fn context_label(text: &str) -> String {
+    if text.starts_with("<instruction_diff>")
+        && let Some(section) = text.lines().find_map(|line| {
+            line.strip_prefix("--- ")
+                .and_then(|header| header.rsplit_once('/').map(|(section, _)| section))
+        })
+    {
+        let name = if section == "agents_md" {
+            "AGENTS.md".to_string()
+        } else {
+            section.replace('_', " ")
+        };
+        return format!("{name} update");
+    }
     let line = text.lines().next().unwrap_or_default().trim();
     if let Some(path) = line.strip_prefix("# AGENTS.md instructions for ") {
         return format!("AGENTS.md {path}");
@@ -377,39 +443,6 @@ pub(super) fn context_label(text: &str) -> String {
     match line.char_indices().nth(WIDTH) {
         Some((end, _)) => format!("{}…", &line[..end]),
         None => line.to_string(),
-    }
-}
-
-fn change(previous: &[PreamblePart], parts: &[PreamblePart]) -> PreambleChange {
-    fn totals(parts: &[PreamblePart]) -> BTreeMap<String, u64> {
-        let mut totals = BTreeMap::new();
-        for part in parts {
-            let key = match &part.group {
-                Some(group) => format!("{group}/{}", part.label),
-                None => part.label.clone(),
-            };
-            *totals.entry(key).or_default() += part.tokens;
-        }
-        totals
-    }
-    let (before, after) = (totals(previous), totals(parts));
-    PreambleChange {
-        previous_tokens: before.values().sum(),
-        added: after
-            .keys()
-            .filter(|key| !before.contains_key(*key))
-            .cloned()
-            .collect(),
-        removed: before
-            .keys()
-            .filter(|key| !after.contains_key(*key))
-            .cloned()
-            .collect(),
-        resized: after
-            .iter()
-            .filter(|(key, tokens)| before.get(*key).is_some_and(|previous| previous != *tokens))
-            .map(|(key, _)| key.clone())
-            .collect(),
     }
 }
 

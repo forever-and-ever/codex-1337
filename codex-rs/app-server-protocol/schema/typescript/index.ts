@@ -15,6 +15,7 @@ export type { CodexResponseHandoffMode } from "./CodexResponseHandoffMode";
 export type { CollaborationMode } from "./CollaborationMode";
 export type { ConfigurationReasoning } from "./ConfigurationReasoning";
 export type { ContentItem } from "./ContentItem";
+export type { ContextInventory } from "./ContextInventory";
 export type { ConversationGitInfo } from "./ConversationGitInfo";
 export type { ConversationSummary } from "./ConversationSummary";
 export type { ConversationTextRole } from "./ConversationTextRole";

@@ -323,15 +323,19 @@ pub enum ThreadItem {
         #[ts(type = "number | null")]
         reported_reasoning_tokens: Option<u64>,
     },
-    /// Human-only census of the standing model context one request carried, not model input.
+    /// Initial context of a window, recorded for inspection and never model input.
     #[serde(rename_all = "camelCase")]
     #[ts(rename_all = "camelCase")]
     Preamble {
         id: String,
         response_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        window_id: Option<String>,
         #[ts(type = "number")]
         completed_at_ms: i64,
         parts: Vec<codex_protocol::PreamblePart>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        raw: Option<String>,
         change: Option<codex_protocol::PreambleChange>,
         /// Provider-reported input of the whole request, conversation included.
         #[ts(type = "number | null")]
@@ -981,9 +985,11 @@ impl From<CoreTurnItem> for ThreadItem {
             },
             CoreTurnItem::Preamble(preamble) => ThreadItem::Preamble {
                 id: preamble.id,
+                window_id: preamble.window_id,
                 response_id: preamble.response_id,
                 completed_at_ms: preamble.completed_at_ms,
                 parts: preamble.parts,
+                raw: preamble.raw,
                 change: preamble.change,
                 reported_input_tokens: preamble.reported_input_tokens,
             },

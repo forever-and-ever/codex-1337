@@ -137,7 +137,11 @@ pub(crate) async fn run_native_compaction(
     let mut history = sess.clone_history().await;
     // Whichever rung succeeds replaces this snapshot; appends made meanwhile survive.
     let source = history.clone().into_shared_annotated_items();
-    let base_instructions = sess.get_prompt_base_instructions().await;
+    history = history.for_compaction(&world_state.render_full().0);
+    let mut base_instructions = sess.get_prompt_base_instructions().await;
+    if let Some(text) = history.take_base_instructions() {
+        base_instructions.text = text;
+    }
     let (_, estimated_deleted_tokens) = trim_function_call_history_to_fit_context_window(
         &mut history,
         turn_context.as_ref(),

@@ -1,3 +1,6 @@
+#[path = "world_state_instruction.rs"]
+mod instruction;
+
 use std::sync::Arc;
 
 use codex_exec_server_protocol::ExecutorCapabilityDiscoverySnapshot;
@@ -90,6 +93,7 @@ pub struct WorldStateSectionContribution {
     render_diff: Arc<RenderDiff>,
     matches_legacy_fragment: Arc<LegacyFragmentMatcher>,
     matches_retained_fragment: Option<Arc<LegacyFragmentMatcher>>,
+    instruction_amendments: bool,
 }
 
 impl WorldStateSectionContribution {
@@ -110,6 +114,7 @@ impl WorldStateSectionContribution {
             render_diff: Arc::new(render_diff),
             matches_legacy_fragment: Arc::new(|_, _| false),
             matches_retained_fragment: None,
+            instruction_amendments: false,
         }
     }
 

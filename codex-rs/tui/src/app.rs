@@ -264,6 +264,7 @@ pub(crate) mod turn_submissions;
 pub(crate) use queued_messages::QueueEvent;
 mod alarms;
 mod comms;
+mod context_inventory;
 mod context_role;
 mod mouse_paste;
 mod realtime_delivery;

@@ -27,7 +27,8 @@ impl WorldStateSection for TestSection {
                 Some(Box::new(TestFragment(self.value.clone())))
             }
             PreviousSectionState::Unknown => Some(Box::new(TestFragment("unknown".to_string()))),
-            PreviousSectionState::Absent | PreviousSectionState::Known(_) => None,
+            PreviousSectionState::Absent => Some(Box::new(TestFragment(self.value.clone()))),
+            PreviousSectionState::Known(_) => None,
         };
         (
             Some(current),
@@ -115,30 +116,110 @@ fn snapshot_uses_stable_section_ids_and_omits_null_fields() {
 
 #[test]
 fn render_diff_restores_the_typed_section_snapshot() {
-    let mut previous = WorldState::default();
-    previous.add_section(TestSection {
-        value: "before".to_string(),
-        optional: None,
-        array: Vec::new(),
-    });
-    let mut current = WorldState::default();
-    current.add_section(TestSection {
-        value: "after".to_string(),
-        optional: None,
-        array: Vec::new(),
-    });
-
-    let rendered = current
-        .render_history_fragment_diff(Some(&previous.render_full().0), &[])
-        .1;
-
-    assert_eq!(
-        vec!["after"],
-        rendered
-            .into_iter()
-            .map(|fragment| fragment.body())
-            .collect::<Vec<_>>()
+    let state = |value: &str| {
+        let mut state = WorldState::default();
+        state.add_instruction_section(TestSection {
+            value: value.to_string(),
+            optional: None,
+            array: Vec::new(),
+        });
+        state
+    };
+    let before = state("before");
+    let after = state("after");
+    let (snapshot, initial) = before.render_full();
+    let mut history = crate::context_manager::updates::merge_world_state_updates(initial);
+    let original = history.clone();
+    let (snapshot, amendment) = after.render_history_diff(Some(&snapshot), &history);
+    let amendment = crate::context_manager::updates::merge_world_state_updates(amendment);
+    assert_eq!(amendment.len(), 1);
+    let ResponseItem::Message { content, .. } = &amendment[0] else {
+        panic!("expected amendment");
+    };
+    let ContentItem::InputText { text } = &content[0] else {
+        panic!("expected text");
+    };
+    assert!(text.contains("<instruction_diff>"));
+    assert!(text.contains("-before"));
+    assert!(text.contains("+after"));
+    history.extend(amendment);
+    let restored = WorldStateSnapshot::from(&snapshot.into_object());
+    assert!(
+        after
+            .render_history_diff(Some(&restored), &history)
+            .1
+            .is_empty()
     );
+
+    // Replay must retain the complete patch ancestry; a surviving tip alone is not enough.
+    let (_, replacement) = after.render_history_diff(Some(&restored), &history[1..]);
+    let replacement = crate::context_manager::updates::merge_world_state_updates(replacement);
+    let (fresh, full) = after.render_full();
+    let full = crate::context_manager::updates::merge_world_state_updates(full);
+    assert_eq!(replacement, full);
+    let materialized = restored
+        .materialize_instructions(
+            &fresh,
+            history
+                .iter()
+                .cloned()
+                .map(codex_history::ResponseItemEnvelope::new)
+                .collect(),
+        )
+        .into_iter()
+        .map(codex_history::ResponseItemEnvelope::into_item)
+        .collect::<Vec<_>>();
+    assert_eq!(materialized, full);
+    assert_eq!(history[0], original[0]);
+
+    // Compaction edits host-owned instructions, never opaque provider state or
+    // unannotated/partially annotated user evidence, even when its text matches.
+    let checkpoint: ResponseItem = serde_json::from_value(serde_json::json!({
+        "type": "native_compaction", "id": "cmp_signed", "provider": "anthropic",
+        "content": "summary", "signature": "exact-signed+/block="
+    }))
+    .unwrap();
+    let user: ResponseItem = serde_json::from_value(serde_json::json!({
+        "type": "message", "role": "user",
+        "content": [{"type": "input_text", "text": "before"}]
+    }))
+    .unwrap();
+    let mut partial = original[0].clone();
+    if let ResponseItem::Message { content, .. } = &mut partial {
+        content.push(ContentItem::InputText {
+            text: "user authorization".into(),
+        });
+    }
+    let protected = vec![user, partial];
+    let mut source = vec![checkpoint.clone()];
+    source.extend(history.clone());
+    source.extend(replacement);
+    source.extend(protected.clone());
+    let project = |snapshot: &WorldStateSnapshot, current: &WorldStateSnapshot| {
+        snapshot
+            .materialize_instructions(
+                current,
+                source
+                    .iter()
+                    .cloned()
+                    .map(codex_history::ResponseItemEnvelope::new)
+                    .collect(),
+            )
+            .into_iter()
+            .map(codex_history::ResponseItemEnvelope::into_item)
+            .collect::<Vec<_>>()
+    };
+    // A fresh ledger still recognizes earlier host-owned amendments by section identity.
+    let expected = std::iter::once(checkpoint.clone())
+        .chain(full)
+        .chain(protected.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(project(&fresh, &fresh), expected);
+    let removed = WorldState::default().render_full().0;
+    let expected = std::iter::once(checkpoint)
+        .chain(protected)
+        .collect::<Vec<_>>();
+    assert_eq!(project(&restored, &removed), expected);
 }
 
 #[test]

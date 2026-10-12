@@ -22,6 +22,7 @@ use super::world_state::EnvironmentsState;
 
 const CONTEXTUAL_USER_FRAGMENT_MATCHERS: &[fn(&str) -> bool] = &[
     UserInstructions::matches_text,
+    super::world_state::is_instruction_diff,
     UserDelegationReceipt::matches_text,
     EnvironmentsState::matches_text,
     AdditionalContextUserFragment::matches_text,

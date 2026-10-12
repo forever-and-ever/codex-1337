@@ -17,6 +17,9 @@ mod thread_naming;
 #[path = "context_role.rs"]
 mod context_role;
 
+#[path = "context_inventory.rs"]
+mod context_inventory;
+
 #[path = "jira.rs"]
 mod jira;
 

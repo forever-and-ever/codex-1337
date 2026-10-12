@@ -7,6 +7,12 @@ Sections routed from `AGENTS.md`.
 These terms have several meanings in the code or name fork concepts. Use the
 qualified forms.
 
+- Preamble: the initial instructions, tools and managed context of one context
+  window. Injections are subsequent arrivals, not refreshed preambles. Both
+  disclose their raw contents on expansion. `/context` opens a read-only Context
+  snapshot of retained special material, including superseded copies and amendments;
+  it neither injects text nor wakes an unloaded thread. Older windows without a
+  saved inspection prefix become inspectable after their next model request.
 - alarm: a thread-owned clock or exec-session watch that sounds once and queues
   a model-visible result. An alarm sounding is its delivered result. Heartbeats
   are upstream user-authored scheduled tasks (`UserInputOrigin::Heartbeat`),

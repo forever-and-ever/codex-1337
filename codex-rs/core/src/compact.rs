@@ -7,7 +7,6 @@ use crate::Prompt;
 use crate::backpressure::Backpressure;
 use crate::client::ModelClientSession;
 use crate::client_common::ResponseEvent;
-use crate::context::BaseInstructionsFragment;
 use crate::context::CompactionSummary;
 use crate::context::ContextualUserFragment;
 use crate::context::world_state::WorldState;
@@ -279,7 +278,25 @@ async fn run_compact_task_inner_impl(
         .await;
     let initial_input_for_turn: ResponseInputItem = ResponseInputItem::from(input);
 
-    let mut history = sess.clone_history().await;
+    let mut history = sess
+        .clone_history()
+        .await
+        .for_compaction(&world_state.render_full().0);
+    let base_instructions = if history
+        .raw_items()
+        .any(|item| matches!(item, ResponseItem::AdditionalTools { .. }))
+    {
+        BaseInstructions {
+            text: String::new(),
+            provenance: None,
+        }
+    } else {
+        let mut instructions = sess.get_prompt_base_instructions().await;
+        if let Some(text) = history.take_base_instructions() {
+            instructions.text = text;
+        }
+        instructions
+    };
     let input_goal_ids = UserGoalUpdate::message_ids(history.raw_items());
     history.record_items(
         &[initial_input_for_turn.into()],
@@ -304,20 +321,9 @@ async fn run_compact_task_inner_impl(
             .executed_tool_calls
             .attach_to_compaction_prompt(&mut turn_input);
         let turn_input_len = turn_input.len();
-        let base_instructions = if turn_input
-            .iter()
-            .any(BaseInstructionsFragment::matches_item)
-        {
-            BaseInstructions {
-                text: String::new(),
-                provenance: None,
-            }
-        } else {
-            sess.get_prompt_base_instructions().await
-        };
         let prompt = Prompt {
             input: turn_input,
-            base_instructions,
+            base_instructions: base_instructions.clone(),
             cyber_access_program: turn_context.cyber_access_program,
             ..Default::default()
         };

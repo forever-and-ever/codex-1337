@@ -5,6 +5,7 @@
 
 mod account;
 mod comms;
+mod context_inventory;
 mod context_role;
 mod external_agent_config;
 pub(crate) mod fs;

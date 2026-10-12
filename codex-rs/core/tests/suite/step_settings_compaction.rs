@@ -58,7 +58,12 @@ async fn compaction_preserves_updated_summary(mode: CompactionMode) -> Result<()
         })
         .build_with_auto_env(&server)
         .await?;
+    const OLD: &str = "standing-instruction-before-amendment";
+    const CURRENT: &str = "standing-instruction-after-amendment";
+    let agents = test.home.path().join("AGENTS.md");
+    std::fs::write(&agents, OLD)?;
     let pause = start_paused_turn(&test.codex).await?;
+    std::fs::write(&agents, CURRENT)?;
     assert_eq!(
         submit_turn_settings(
             &test.codex,
@@ -80,6 +85,22 @@ async fn compaction_preserves_updated_summary(mode: CompactionMode) -> Result<()
 
     let requests = responses.requests();
     assert_eq!(requests.len(), 4);
+    // Live requests are append-only. The compactor alone sees a materialized
+    // instruction view, and its replacement window starts from that same full value.
+    let first = serde_json::to_string(&requests[0].input())?;
+    let live = serde_json::to_string(&requests[1].input())?;
+    assert!(first.contains(OLD));
+    assert!(live.contains(OLD) && live.contains(CURRENT) && live.contains("<instruction_diff>"));
+    assert_eq!(
+        requests[1].input().get(..requests[0].input().len()),
+        Some(requests[0].input().as_slice())
+    );
+    for request in &requests[2..] {
+        let materialized = serde_json::to_string(&request.input())?;
+        assert!(materialized.contains(CURRENT));
+        assert!(!materialized.contains(OLD));
+        assert!(!materialized.contains("<instruction_diff>"));
+    }
     assert_eq!(
         [
             requests[0].body_json()["reasoning"]["summary"].clone(),
@@ -94,6 +115,30 @@ async fn compaction_preserves_updated_summary(mode: CompactionMode) -> Result<()
         .lines()
         .map(codex_rollout::parse_rollout_line)
         .collect::<std::result::Result<Vec<_>, _>>()?;
+    let preambles = items
+        .iter()
+        .filter_map(|line| match &line.item {
+            RolloutItem::EventMsg(EventMsg::ItemCompleted(event)) => match &event.item {
+                codex_protocol::items::TurnItem::Preamble(item) => Some(item),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(preambles.len(), 2);
+    assert_ne!(preambles[0].window_id, preambles[1].window_id);
+    assert!(
+        preambles[0]
+            .raw
+            .as_ref()
+            .is_some_and(|raw| raw.contains(OLD) && !raw.contains(CURRENT))
+    );
+    assert!(
+        preambles[1]
+            .raw
+            .as_ref()
+            .is_some_and(|raw| raw.contains(CURRENT) && !raw.contains(OLD))
+    );
     let checkpoint = items
         .iter()
         .skip_while(|line| !matches!(line.item, RolloutItem::Compacted(_)))

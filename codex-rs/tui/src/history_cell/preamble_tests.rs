@@ -71,6 +71,8 @@ fn preamble_discloses_parts_largest_first() {
             resized: vec!["Base instructions".to_string()],
         }),
         reported_input_tokens: Some(31_208),
+        raw: None,
+        window_id: None,
     });
     let text = visible_lines(cell.expanded_hyperlink_lines(/*width*/ 80))
         .iter()

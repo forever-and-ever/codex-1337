@@ -1,6 +1,8 @@
 pub use codex_protocol::CommsGate;
 pub use codex_protocol::ContextRole;
+mod context_inventory;
 mod context_role;
+pub use context_inventory::*;
 pub use context_role::*;
 mod shared;
 

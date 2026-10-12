@@ -6,6 +6,8 @@ pub mod account;
 mod agent_path;
 pub mod auth;
 mod preamble;
+
+pub use preamble::ContextInventory;
 mod response_item_id;
 mod response_usage;
 mod sanitized_git_url;

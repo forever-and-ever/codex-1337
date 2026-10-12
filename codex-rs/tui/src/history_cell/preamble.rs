@@ -1,4 +1,4 @@
-//! The census of the standing model context one request carried, with its parts disclosed.
+//! Initial context, with a token summary and the retained raw value on expansion.
 
 use super::ActivityDisclosure;
 use super::HistoryCell;
@@ -24,6 +24,7 @@ pub(crate) struct PreambleCell {
     id: String,
     timestamp: Option<HistoryTimestamp>,
     parts: Vec<PreamblePart>,
+    raw: Option<String>,
     change: Option<PreambleChange>,
     reported_input_tokens: Option<u64>,
 }
@@ -34,6 +35,7 @@ impl PreambleCell {
             id,
             completed_at_ms,
             parts,
+            raw,
             change,
             reported_input_tokens,
             ..
@@ -45,6 +47,7 @@ impl PreambleCell {
             id,
             timestamp: HistoryTimestamp::from_millis(completed_at_ms),
             parts,
+            raw,
             change,
             reported_input_tokens,
         }
@@ -56,7 +59,14 @@ impl PreambleCell {
 
     fn heading(&self) -> Line<'static> {
         let mut heading = Line::default();
-        heading.push_span("Preamble".bold());
+        heading.push_span(
+            if self.raw.is_some() {
+                "Preamble"
+            } else {
+                "Context census (legacy)"
+            }
+            .bold(),
+        );
         if let Some(change) = &self.change {
             let (after, before) = (self.tokens(), change.previous_tokens);
             let delta = if after >= before {
@@ -146,6 +156,15 @@ impl PreambleCell {
                 }
                 lines.push(Line::from(listed.dim()));
             }
+        }
+        if let Some(raw) = &self.raw {
+            lines.push(Line::default());
+            lines.push(Line::from("Raw context".bold()));
+            lines.extend(
+                super::sanitize_user_text(raw.as_str().into())
+                    .lines()
+                    .map(|line| Line::from(line.to_string())),
+            );
         }
         lines
     }
@@ -249,7 +268,15 @@ impl HistoryCell for PreambleCell {
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
-        self.display_lines(u16::MAX)
+        self.raw.as_ref().map_or_else(
+            || self.detail_lines(),
+            |raw| {
+                super::sanitize_user_text(raw.as_str().into())
+                    .lines()
+                    .map(|line| Line::from(line.to_string()))
+                    .collect()
+            },
+        )
     }
 
     fn transcript_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {

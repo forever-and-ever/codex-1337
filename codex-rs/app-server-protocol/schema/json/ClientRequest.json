@@ -4848,6 +4848,17 @@
       ],
       "type": "object"
     },
+    "ThreadContextInventoryParams": {
+      "properties": {
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "threadId"
+      ],
+      "type": "object"
+    },
     "ThreadDeleteParams": {
       "properties": {
         "threadId": {
@@ -7046,6 +7057,30 @@
         "params"
       ],
       "title": "Thread/farmRequest",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "enum": [
+            "thread/context/inventory"
+          ],
+          "title": "Thread/context/inventoryRequestMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ThreadContextInventoryParams"
+        }
+      },
+      "required": [
+        "id",
+        "method",
+        "params"
+      ],
+      "title": "Thread/context/inventoryRequest",
       "type": "object"
     },
     {

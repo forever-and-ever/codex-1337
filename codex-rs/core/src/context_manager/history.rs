@@ -39,6 +39,9 @@ use codex_guardian_context::TranscriptHistory;
 use codex_history::CodexHarnessMetadata;
 use codex_history::GuardianHistoryCheckpoint;
 use codex_history::ResponseItemEnvelope;
+
+#[path = "instruction_projection.rs"]
+mod instruction_projection;
 use codex_history::RetainedContext;
 use codex_history::RetainedContextEntry;
 use codex_history::RetainedContextEvent;

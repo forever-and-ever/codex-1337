@@ -1,3 +1,5 @@
+#[path = "codex_thread_context_inventory.rs"]
+mod context_inventory;
 #[path = "codex_thread_prompt_cache.rs"]
 mod prompt_cache;
 

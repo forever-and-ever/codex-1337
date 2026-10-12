@@ -259,6 +259,7 @@ mod input_queue;
 mod mcp;
 mod mcp_extension;
 pub(crate) use mcp_extension::CONNECTION_LEASE_SOURCE_ID;
+mod context_inventory;
 mod mcp_prewarm;
 mod mcp_refresh;
 mod mcp_runtime;
@@ -1864,6 +1865,7 @@ impl Session {
                     window_id,
                 },
             );
+            state.preamble_window = preamble::PreambleMark::restore(rollout_items, window_id);
             state.set_previous_turn_settings(previous_turn_settings.clone());
         }
         let prefix_tokens = if matches!(

@@ -1,3 +1,6 @@
+mod instruction_diff;
+pub(crate) use instruction_diff::is_instruction_diff;
+
 mod agents_md;
 mod apps_instructions;
 mod base_instructions;
@@ -399,7 +402,7 @@ fn hash_component(hasher: &mut Sha1, value: &str) {
 /// Live model-visible state, keyed by the same stable section IDs used in rollouts.
 #[derive(Default)]
 pub(crate) struct WorldState {
-    sections: IndexMap<&'static str, Box<dyn ErasedWorldStateSection>>,
+    sections: IndexMap<&'static str, instruction_diff::Entry>,
 }
 
 /// Compact comparison state for each model-visible world-state section.
@@ -477,7 +480,8 @@ impl WorldState {
             !self.sections.contains_key(id),
             "duplicate world-state section ID: {id}"
         );
-        self.sections.insert(id, Box::new(section));
+        self.sections
+            .insert(id, instruction_diff::Entry::Context(Box::new(section)));
     }
 
     pub(crate) fn add_extension_section(&mut self, section: WorldStateSectionContribution) {
@@ -486,7 +490,14 @@ impl WorldState {
             !self.sections.contains_key(id),
             "duplicate world-state section ID: {id}"
         );
-        let section = Box::new(ExtensionWorldStateSection(section));
+        let section = if section.uses_instruction_amendments() {
+            instruction_diff::Entry::Instruction(
+                Box::new(ExtensionWorldStateSection(section)),
+                instruction_diff::Amendment::Semantic,
+            )
+        } else {
+            instruction_diff::Entry::Context(Box::new(ExtensionWorldStateSection(section)))
+        };
         if id == "host_skills"
             && let Some(index) = self.sections.get_index_of(PermissionsState::ID)
         {
@@ -498,7 +509,11 @@ impl WorldState {
 
     /// Renders every section as new, preserving update order and placement.
     pub(crate) fn render_full(&self) -> (WorldStateSnapshot, Vec<WorldStateUpdate>) {
-        self.render_with(/*stored*/ None, |_, _| PreviousSectionState::Absent)
+        self.render_with(
+            /*stored*/ None,
+            &[],
+            |_, _| PreviousSectionState::Absent,
+        )
     }
 
     /// Falls back to retained model history when no exact persisted snapshot is available.
@@ -507,7 +522,20 @@ impl WorldState {
         previous: Option<&WorldStateSnapshot>,
         items: impl IntoIterator<Item = &'a ResponseItem> + Clone,
     ) -> (WorldStateSnapshot, Vec<WorldStateUpdate>) {
-        self.render_with(previous, |id, section| {
+        let retained = instruction_diff::retained(items.clone());
+        self.render_with(previous, &retained, |id, section| {
+            if let Some(snapshot) = previous
+                && let Some(present) = instruction_diff::has_revision(snapshot, id, &retained)
+            {
+                return if present {
+                    snapshot
+                        .sections
+                        .get(id)
+                        .map_or(PreviousSectionState::Absent, PreviousSectionState::Known)
+                } else {
+                    PreviousSectionState::Absent
+                };
+            }
             if let Some(previous) = previous.and_then(|previous| previous.sections.get(id)) {
                 if section.has_retained_fragment_matcher()
                     && !has_retained_fragment(items.clone(), section)
@@ -530,13 +558,15 @@ impl WorldState {
     fn render_with<'a>(
         &self,
         stored: Option<&WorldStateSnapshot>,
+        retained: &[WorldStateHash],
         mut previous: impl FnMut(&str, &dyn ErasedWorldStateSection) -> PreviousSectionState<'a, Value>,
     ) -> (WorldStateSnapshot, Vec<WorldStateUpdate>) {
         let mut snapshot = WorldStateSnapshot::default();
         let mut updates = Vec::new();
         for (id, section) in &self.sections {
-            let prior = previous(id, section.as_ref());
-            let (section_snapshot, section_updates) = section.render_diff(prior);
+            let prior = previous(id, section.renderer());
+            let (section_snapshot, section_updates) =
+                section.render(id, prior, stored, retained, &mut snapshot);
             // A skipped snapshot retains stored state even if history required a fresh render.
             let section_snapshot = section_snapshot.or_else(|| {
                 stored
@@ -552,6 +582,11 @@ impl WorldState {
             }
             updates.extend(section_updates);
         }
+        updates.extend(instruction_diff::retire_missing(
+            stored,
+            &mut snapshot,
+            retained,
+        ));
         (snapshot, updates)
     }
 }

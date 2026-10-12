@@ -559,6 +559,9 @@ pub(crate) enum AppEvent {
         text: String,
     },
 
+    ContextInventory {
+        thread_id: ThreadId,
+    },
     ContextRole {
         thread_id: ThreadId,
         command: crate::chatwidget::ContextRoleCommand,

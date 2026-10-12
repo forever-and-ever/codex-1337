@@ -102,7 +102,7 @@ impl HistoryCell for ArrivalCell {
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
-        self.display_lines(u16::MAX)
+        self.body(u16::MAX)
     }
 
     fn transcript_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {

@@ -41,8 +41,14 @@ use crate::context::is_contextual_user_fragment;
 pub(crate) struct StepMark {
     item: StepAdmissionItem,
     turn_id: String,
-    /// What the next request is measured against; absent when an earlier process sent it.
-    baseline: Option<Baseline>,
+    basis: StepBasis,
+    announced: usize,
+}
+
+enum StepBasis {
+    Measured(Baseline),
+    // Replay proves where new arrivals begin, but not a cross-process token delta.
+    Replayed(Option<codex_protocol::ResponseItemId>),
 }
 
 /// The marked request as this process sent it.
@@ -52,8 +58,6 @@ struct Baseline {
     prompt_len: usize,
     /// The response's whole output, which the next request re-sends.
     output_tokens: u64,
-    /// Arrivals already announced, so that a retried request announces only the rest.
-    announced: usize,
 }
 
 impl Baseline {
@@ -66,25 +70,51 @@ impl Baseline {
 }
 
 impl StepMark {
-    /// The step a resumed rollout left pending: the last pending bill no later record closed.
     pub(super) fn orphaned(rollout: &[RolloutItem]) -> Option<Self> {
-        let mut orphan = None;
-        for item in rollout {
-            if let RolloutItem::EventMsg(EventMsg::ItemCompleted(ItemCompletedEvent {
-                turn_id,
-                item: TurnItem::StepAdmission(item),
-                ..
-            })) = item
-            {
-                if item.admission == Admission::Pending {
-                    orphan = Some(Self {
-                        item: item.clone(),
-                        turn_id: turn_id.clone(),
-                        baseline: None,
-                    });
-                } else if orphan.as_ref().is_some_and(|mark| mark.item.id == item.id) {
-                    orphan = None;
+        let mut orphan: Option<Self> = None;
+        let mut tip = None;
+        for entry in rollout {
+            match entry {
+                RolloutItem::ResponseItem(item) => {
+                    if let Some(id) = item.id() {
+                        tip = Some(id.clone());
+                    }
                 }
+                RolloutItem::Compacted(_) => tip = None,
+                RolloutItem::EventMsg(EventMsg::ItemCompleted(ItemCompletedEvent {
+                    turn_id,
+                    item,
+                    ..
+                })) => match item {
+                    TurnItem::StepAdmission(item) if item.admission == Admission::Pending => {
+                        orphan = Some(Self {
+                            item: item.clone(),
+                            turn_id: turn_id.clone(),
+                            basis: StepBasis::Replayed(tip.clone()),
+                            announced: 0,
+                        });
+                    }
+                    TurnItem::StepAdmission(item)
+                        if orphan.as_ref().is_some_and(|mark| mark.item.id == item.id) =>
+                    {
+                        orphan = None
+                    }
+                    TurnItem::Arrival(item) => {
+                        if let Some(mark) = orphan
+                            .as_mut()
+                            .filter(|mark| mark.item.response_id == item.response_id)
+                            && let Some(index) = item
+                                .id
+                                .rsplit(':')
+                                .next()
+                                .and_then(|index| index.parse::<usize>().ok())
+                        {
+                            mark.announced = mark.announced.max(index + 1);
+                        }
+                    }
+                    _ => {}
+                },
+                _ => {}
             }
         }
         orphan
@@ -173,12 +203,12 @@ impl Session {
                         admission: Admission::Pending,
                     },
                     turn_id: turn_context.sub_id.clone(),
-                    baseline: Some(Baseline {
+                    announced: 0,
+                    basis: StepBasis::Measured(Baseline {
                         model: model.to_string(),
                         history_version,
                         prompt_len: prompt.input.len(),
                         output_tokens,
-                        announced: 0,
                     }),
                 }
             });
@@ -201,7 +231,10 @@ impl Session {
             return;
         };
         let measured = read_tokens
-            .zip(previous.baseline.as_ref())
+            .zip(match &previous.basis {
+                StepBasis::Measured(baseline) => Some(baseline),
+                StepBasis::Replayed(_) => None,
+            })
             .filter(|(_, baseline)| baseline.extended_by(prompt, model, history_version));
         let Some((read_tokens, baseline)) = measured else {
             previous.item.admission = Admission::Severed;
@@ -241,16 +274,23 @@ impl Session {
             let Some(mark) = state.step_mark.as_mut() else {
                 return;
             };
-            let Some(baseline) = mark
-                .baseline
-                .as_mut()
-                .filter(|baseline| baseline.extended_by(prompt, model, history_version))
-            else {
-                return;
+            let start = match &mark.basis {
+                StepBasis::Measured(baseline)
+                    if baseline.extended_by(prompt, model, history_version) =>
+                {
+                    Some(baseline.prompt_len)
+                }
+                StepBasis::Replayed(Some(tip)) => prompt
+                    .input
+                    .iter()
+                    .rposition(|item| item.id() == Some(tip))
+                    .map(|index| index + 1),
+                _ => None,
             };
-            let arrivals = admit(&prompt.input[baseline.prompt_len..]).arrivals;
-            let announced = baseline.announced;
-            baseline.announced = announced.max(arrivals.len());
+            let Some(start) = start else { return };
+            let arrivals = admit(&prompt.input[start..]).arrivals;
+            let announced = mark.announced;
+            mark.announced = announced.max(arrivals.len());
             let fresh = arrivals.into_iter().enumerate().skip(announced);
             (mark.item.response_id.clone(), fresh.collect::<Vec<_>>())
         };

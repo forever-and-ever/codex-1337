@@ -125,6 +125,14 @@ During a merge, look up each conflicted path in the index at the end and resolve
 
 ## Prompt-cache stability
 
+### instruction-amendments
+
+- Telos: ordinary instruction changes append amendments rather than rewrite the Preamble.
+- Holds: managed instructions retain their original authority and use literal unified diffs. The harness keeps canonical full values and requires complete, kind-aligned retained ancestry before suppressing a reinjection. Compaction receives a disposable view with current full instructions substituted for their older versions and amendments; conversation evidence and opaque provider checkpoints remain intact. Only successful compaction replaces live history and starts a new window. Model/capability changes, local tip repairs and unsupported incremental tool protocols retain their existing behavior; rollback has no special optimization.
+- Owners: `codex-rs/core/src/context/world_state/instruction_diff.rs`, `codex-rs/core/src/context/world_state/instruction_projection.rs`, `codex-rs/core/src/context_manager/instruction_projection.rs`, `codex-rs/core/src/context/base_instructions.rs`.
+- Tripwire: `render_diff_restores_the_typed_section_snapshot`, `catalog_collaboration_messages_refresh_without_mode_or_model_change`, `compaction_preserves_updated_summary`.
+- Pressure: instruction providers must expose a canonical full value; fragment provenance and authority must survive replay. Semantic amendments opt in through `WorldStateSectionContribution::with_instruction_amendments` and share the same retention and compaction machinery.
+
 ### reminders-not-system
 
 - Telos: an instruction update never rewrites an earlier cached prefix.
@@ -166,7 +174,7 @@ During a merge, look up each conflicted path in the index at the end and resolve
 ### token-bills
 
 - Telos: the human sees what consumes the context.
-- Holds: every tool output, MCP result and Code Mode result disclosure shows its approximate model-visible tokens, after truncation for native Claude; each completed model response yields a human-only Thought with its reported reasoning tokens; bills render in the fixed rich-transcript gutter. Preamble counts the initial instructions and tools, whether declared directly or in history, and is refreshed when that prefix changes; append-only catalog deltas are step-admission arrivals, not replacement prefixes. Census work never blocks response-usage recording or cancellation cleanup.
+- Holds: every tool output, MCP result and Code Mode result disclosure shows its approximate model-visible tokens, after truncation for native Claude; each completed model response yields a human-only Thought with its reported reasoning tokens; bills render in the fixed rich-transcript gutter. Preamble records a window's initial special material once, with raw contents, and survives reconnect and restart without a new census. Later changes appear as Injections; `/context` inspects retained special material without injecting it. Legacy rolling censuses remain readable under their own label. Census work never blocks response-usage recording or cancellation cleanup.
 - Owners: `codex-rs/core/src/session/tool_output_tokens.rs`, `codex-rs/utils/output-truncation/src/token_count.rs`, `codex-rs/core/src/session/response_thought.rs`, `codex-rs/core/src/session/preamble.rs`, `codex-rs/app-server-protocol/src/protocol/v2/thought.rs`, `codex-rs/protocol/src/preamble.rs`, `codex-rs/tui/src/transcript_view/text_gutter.rs`, `codex-rs/tui/src/history_cell/preamble.rs`.
 - Tripwire: `tool_text_matches_reference_tokenizer_without_interpreting_control_markers` (`codex-rs/utils/output-truncation/src/token_count_tests.rs`), `thought_completion_is_self_contained_and_response_scoped` (`codex-rs/app-server-protocol/src/protocol/thread_history_projection_tests.rs`), `structured_content_remains_disclosable_in_direct_and_code_mode_results` (`codex-rs/tui/src/history_cell/mcp_tests.rs`), `tool_output_disclosure_shows_fixed_token_column` (`codex-rs/tui/src/transcript_view/layout_tests.rs`), `preamble_discloses_parts_largest_first` (`codex-rs/tui/src/history_cell/preamble_tests.rs`).
 - Pressure: none in 0.162; every owner is fork-owned.
@@ -510,12 +518,17 @@ Fork-owned files, absent upstream:
 - `codex-rs/core/src/compact_native_request.rs`: messages-from-canonical-history, native-robustness
 - `codex-rs/core/src/config/models_cache.rs`: adapter-not-transport
 - `codex-rs/core/src/context/environment_context/workspace_root_folding.rs`: standing-context-trims
+- `codex-rs/core/src/context/base_instructions.rs`: instruction-amendments
+- `codex-rs/core/src/context/world_state/instruction_diff.rs`: instruction-amendments
+- `codex-rs/core/src/context/world_state/instruction_projection.rs`: instruction-amendments
+- `codex-rs/core/src/context_manager/instruction_projection.rs`: instruction-amendments
 - `codex-rs/core/src/exec_policy/script_exec.rs`: local-coprocessor
 - `codex-rs/core/src/guardian/reviewer_route.rs`: provider-parity
 - `codex-rs/core/src/session/account.rs`: pinned-accounts
 - `codex-rs/core/src/session/input_queue/interjection.rs`: turn-economy
 - `codex-rs/core/src/session/response_thought.rs`: human-only-facts, token-bills
 - `codex-rs/core/src/session/preamble.rs`: token-bills
+- `codex-rs/core/src/session/context_inventory.rs`: token-bills
 - `codex-rs/core/src/session/tool_output_tokens.rs`: token-bills
 - `codex-rs/core/src/tools/fence.rs`: response-order-fences
 - `codex-rs/core/src/tools/handlers/code_mode_fs.rs`: local-coprocessor

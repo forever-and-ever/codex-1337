@@ -1047,7 +1047,13 @@ goals = true
         if let AppEvent::InsertHistoryCell(cell) = event
             && !cell.as_any().is::<PreambleCell>()
         {
-            let rendered = lines_to_single_string(&cell.transcript_lines(/*width*/ 80));
+            // Safety retry owns prompt preservation, not the injected instruction wording.
+            let lines = if cell.as_any().is::<crate::history_cell::ArrivalCell>() {
+                cell.display_lines(/*width*/ 80)
+            } else {
+                cell.transcript_lines(/*width*/ 80)
+            };
+            let rendered = lines_to_single_string(&lines);
             if cell
                 .as_any()
                 .is::<crate::history_cell::FinalMessageSeparator>()
