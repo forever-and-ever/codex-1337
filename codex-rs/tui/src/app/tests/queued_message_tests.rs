@@ -713,6 +713,18 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         recorded_params(&requests, "thread/read").len(),
         reads_before + 1
     );
+    // Selecting the already-visible target is also a new navigation intent:
+    // its fast path must retire the previous selection, not let it win later.
+    app.select_agent_thread(&mut tui, &mut server, thread_id)
+        .await?;
+    app.select_agent_thread(
+        &mut tui,
+        &mut server,
+        visible_before.expect("original visible conversation"),
+    )
+    .await?;
+    assert!(app.server_operations.is_empty());
+    assert_eq!(app.current_displayed_thread_id(), visible_before);
     server.shutdown().await?;
     proxy.await??;
     Ok(())

@@ -5,8 +5,6 @@ use codex_app_server_protocol as api;
 use codex_protocol::protocol::RealtimeVoice;
 use codex_protocol::protocol::RealtimeVoicesList;
 
-
-
 #[derive(Clone)]
 pub(in crate::app) enum VoicePreferenceOperation {
     Open {
