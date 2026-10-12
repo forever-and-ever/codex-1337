@@ -190,6 +190,7 @@ async fn unavailable_thread_new_and_clear_start_a_writable_session() -> Result<(
                 break;
             }
         }
+        app.settle_navigation(&mut tui, &mut session).await?;
         let new_id = app.chat_widget.thread_id().expect("new thread");
         assert_ne!(new_id, id, "{command}");
         assert!(!app.thread_unavailable(new_id), "{command}");
