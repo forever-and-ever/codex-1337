@@ -1445,6 +1445,112 @@ async fn v2_family_survives_unload_until_idle_subtree_retirement() {
             .is_ok()
     );
     *reviewer.session.active_turn.lock().await = None;
+
+    // Neither persistence nor live ancestry alone spans this family: an unloaded
+    // retained reviewer owns a live ephemeral child with an unloaded retained child.
+    let ephemeral_path = reviewer_path.join("ephemeral").expect("ephemeral path");
+    let mut ephemeral_config = harness.config.clone();
+    ephemeral_config.ephemeral = true;
+    let ephemeral_id = resumed_control
+        .spawn_agent(
+            ephemeral_config,
+            text_input("child task"),
+            Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+                parent_thread_id: reviewer_thread_id,
+                depth: 3,
+                agent_path: Some(ephemeral_path.clone()),
+                agent_nickname: None,
+                agent_role: None,
+            })),
+        )
+        .await
+        .expect("ephemeral child should spawn");
+    let retained_id = resumed_control
+        .spawn_agent(
+            harness.config.clone(),
+            text_input("child task"),
+            Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+                parent_thread_id: ephemeral_id,
+                depth: 4,
+                agent_path: Some(ephemeral_path.join("retained").expect("retained path")),
+                agent_nickname: None,
+                agent_role: None,
+            })),
+        )
+        .await
+        .expect("retained grandchild should spawn");
+    resumed_manager
+        .get_thread(ephemeral_id)
+        .await
+        .expect("ephemeral child should be live")
+        .session
+        .abort_all_tasks(TurnAbortReason::Interrupted)
+        .await;
+    resumed_control
+        .shutdown_live_agent(reviewer_thread_id)
+        .await
+        .expect("reviewer should unload");
+    let retained = resumed_manager
+        .get_thread(retained_id)
+        .await
+        .expect("retained grandchild should be live");
+    persist_thread_for_tree_resume(&retained, "retained grandchild persisted").await;
+    resumed_control
+        .shutdown_live_agent(retained_id)
+        .await
+        .expect("retained grandchild should unload");
+    let retired = resumed_control
+        .retire_agent(parent_thread_id, ephemeral_id)
+        .await
+        .expect("mixed live and retained ancestry should authorize retirement");
+    assert_eq!(retired.len(), 2);
+    assert!(retired.contains(&ephemeral_id));
+    assert!(retired.contains(&retained_id));
+    assert_thread_not_loaded(&resumed_manager, ephemeral_id).await;
+    assert_thread_not_loaded(&resumed_manager, retained_id).await;
+    assert!(
+        resumed_manager
+            .ensure_multi_agent_v2_child_loaded(retained_id)
+            .await
+            .is_err()
+    );
+    // Cold family restoration must not adopt an orphan's still-open historical edge.
+    let cold_manager = ThreadManager::with_models_provider_home_and_state_for_tests(
+        CodexAuth::from_api_key("dummy"),
+        harness.config.model_provider.clone(),
+        harness.config.codex_home.to_path_buf(),
+        std::sync::Arc::new(codex_exec_server::EnvironmentManager::default_for_tests()),
+        harness.state_db.clone(),
+    );
+    let cold_control = cold_manager.agent_control();
+    cold_control
+        .restore_v2_agent_metadata(&harness.config, parent_thread_id)
+        .await;
+    assert!(
+        cold_control
+            .runtime
+            .ensure_agent_known(reviewer_thread_id)
+            .is_ok()
+    );
+    assert!(
+        cold_control
+            .runtime
+            .resolve_path_reference(&AgentPath::root(), ephemeral_path.as_str())
+            .is_err()
+    );
+    assert!(
+        cold_control
+            .runtime
+            .resolve_path_reference(
+                &AgentPath::root(),
+                ephemeral_path
+                    .join("retained")
+                    .expect("retained path")
+                    .as_str(),
+            )
+            .is_err()
+    );
+
     resumed_control
         .retire_agent(parent_thread_id, worker_thread_id)
         .await
@@ -1463,6 +1569,42 @@ async fn v2_family_survives_unload_until_idle_subtree_retirement() {
     );
     assert!(surviving_sibling.is_ok());
     assert_thread_not_loaded(&resumed_manager, sibling_thread_id).await;
+    // Public history resume preserves the recorded spawn source; it does not
+    // grant the old family authority over the independently reopened conversation.
+    let stored_worker = worker_thread
+        .read_thread(
+            /*include_archived*/ true, /*include_history*/ true,
+        )
+        .await
+        .expect("retirement should preserve readable worker history");
+    let reopened = resumed_manager
+        .resume_thread_with_history(
+            harness.config.clone(),
+            InitialHistory::Resumed(ResumedHistory {
+                history_revision: None,
+                conversation_id: worker_thread_id,
+                history: Arc::new(stored_worker.history.expect("worker history").items),
+                rollout_path: stored_worker.rollout_path,
+            }),
+            resumed_manager.auth_manager(),
+            /*parent_trace*/ None,
+            ClientMcpExtensions::default(),
+        )
+        .await
+        .expect("retired conversation history should reopen independently");
+    assert_eq!(
+        reopened.thread.session_source.parent_thread_id(),
+        Some(parent_thread_id),
+    );
+    let error = resumed_control
+        .retire_agent(parent_thread_id, worker_thread_id)
+        .await
+        .expect_err("historical source must not restore old retirement authority");
+    assert!(matches!(
+        error,
+        CodexErr::InvalidRequest(message) if message == "Only retained descendants may be retired."
+    ));
+    assert!(resumed_manager.get_thread(worker_thread_id).await.is_ok());
 }
 
 struct TestThreadInstructionsProvider {
@@ -2063,17 +2205,29 @@ async fn pending_environment_failure_reaches_child_and_grandchild() {
     .expect("both descendants should receive the root failure");
 }
 
+#[test_case::test_case(true; "with_state")]
+#[test_case::test_case(false; "without_state")]
 #[tokio::test]
-async fn ephemeral_spawn_does_not_persist_agent_graph_edge() {
+async fn ephemeral_spawn_does_not_persist_agent_graph_edge(with_state: bool) {
     let (home, mut config) = test_config().await;
     config.ephemeral = true;
-    let harness = AgentControlHarness::new_with_config(home, config).await;
+    let mut harness = AgentControlHarness::new_with_config(home, config).await;
+    if !with_state {
+        harness.manager = ThreadManager::with_models_provider_and_home_for_tests(
+            CodexAuth::from_api_key("dummy"),
+            harness.config.model_provider.clone(),
+            harness.config.codex_home.to_path_buf(),
+            std::sync::Arc::new(codex_exec_server::EnvironmentManager::default_for_tests()),
+        );
+        harness.control = harness.manager.agent_control();
+        harness.state_db = None;
+    }
     let (parent_thread_id, _parent_thread) = harness.start_thread().await;
     let child_thread_id = harness
         .control
         .spawn_agent(
             harness.config.clone(),
-            text_input("spawned"),
+            text_input("child task"),
             Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
                 parent_thread_id,
                 depth: 1,
@@ -2085,18 +2239,28 @@ async fn ephemeral_spawn_does_not_persist_agent_graph_edge() {
         .await
         .expect("ephemeral agent spawn should succeed");
 
-    let persisted_children = harness
-        .state_db
-        .as_ref()
-        .expect("manager should retain state db")
-        .list_thread_spawn_children(parent_thread_id)
+    if let Some(state_db) = &harness.state_db {
+        let persisted_children = state_db
+            .list_thread_spawn_children(parent_thread_id)
+            .await
+            .expect("persisted child list should load");
+        assert_eq!(persisted_children, Vec::<ThreadId>::new());
+    }
+    harness
+        .manager
+        .get_thread(child_thread_id)
         .await
-        .expect("persisted child list should load");
-    assert_eq!(persisted_children, Vec::<ThreadId>::new());
-    assert!(
-        harness.manager.get_thread(child_thread_id).await.is_ok(),
-        "ephemeral child should remain live"
-    );
+        .expect("ephemeral child should remain live")
+        .session
+        .abort_all_tasks(TurnAbortReason::Interrupted)
+        .await;
+    let retired = harness
+        .control
+        .retire_agent(parent_thread_id, child_thread_id)
+        .await
+        .expect("stopped ephemeral descendant should retire without a persisted edge");
+    assert_eq!(retired, vec![child_thread_id]);
+    assert_thread_not_loaded(&harness.manager, child_thread_id).await;
 }
 
 #[tokio::test]
