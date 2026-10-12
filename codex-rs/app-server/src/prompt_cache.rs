@@ -283,54 +283,14 @@ impl PromptCache {
         Ok(ThreadSetWarmingResponse { estimate, warming })
     }
 
-    /// Sends a client its state after it attaches, seeding a thread this server has not seen from
-    /// its saved history.
-    pub(crate) async fn publish_to(
-        &self,
-        connection: ConnectionId,
-        thread_id: ThreadId,
-        thread: &CodexThread,
-    ) {
-        let known = self.0.lock().contains_key(&thread_id);
-        let seeded = if known {
-            None
-        } else {
-            Some(seed(thread).await)
-        };
+    /// Publishes observed cache state; thread metadata cannot reconstruct a request lease.
+    pub(crate) fn publish_to(&self, connection: ConnectionId, thread_id: ThreadId) {
         let mut registry = self.0.lock();
-        let entry = registry.entry(thread_id).or_insert_with(|| Entry {
-            cache: seeded.unwrap_or_default(),
-            ..Entry::default()
-        });
+        let entry = registry.entry(thread_id).or_default();
         self.0.send(Publication::To(
             connection,
             state_notification(thread_id, entry.view()),
         ));
-    }
-}
-
-/// The last saved write approximates the last request: a false cold costs nothing.
-async fn seed(thread: &CodexThread) -> Cache {
-    let Some(lore) = thread.prompt_cache_lore().await else {
-        return Cache::Unknown;
-    };
-    let Ok(stored) = thread
-        .read_thread(
-            /*include_archived*/ true, /*include_history*/ false,
-        )
-        .await
-    else {
-        return Cache::Unknown;
-    };
-    let refreshed = RequestStart::at(stored.updated_at.into());
-    if refreshed.age() < lore.lifetime() {
-        Cache::Warm {
-            refreshed,
-            lore,
-            replay: None,
-        }
-    } else {
-        Cache::Cold
     }
 }
 

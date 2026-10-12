@@ -337,17 +337,6 @@ impl RequestStart {
         }
     }
 
-    /// A start recovered from saved history.
-    pub fn at(wall: SystemTime) -> Self {
-        let elapsed = wall.elapsed().unwrap_or_default();
-        Self {
-            wall,
-            monotonic: Instant::now()
-                .checked_sub(elapsed)
-                .unwrap_or_else(Instant::now),
-        }
-    }
-
     pub fn wall(self) -> SystemTime {
         self.wall
     }
