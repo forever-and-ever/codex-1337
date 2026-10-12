@@ -35,7 +35,7 @@ use codex_app_server_protocol::RequestId as AppServerRequestId;
 use codex_app_server_protocol::SkillsListResponse;
 use codex_app_server_protocol::Thread;
 use codex_app_server_protocol::ThreadGoalStatus;
-use codex_app_server_protocol::ThreadItemsListResponse;
+
 use codex_connectors::AppInfo;
 use codex_file_search::FileMatch;
 use codex_message_history::HistoryBatchCursor;
@@ -514,8 +514,8 @@ pub(crate) enum AppEvent {
     /// One background-loaded page of older Ctrl+T transcript history.
     OlderThreadHistoryLoaded {
         thread_id: ThreadId,
-        cursor: String,
-        result: Result<ThreadItemsListResponse, String>,
+        cursor: crate::app_server_session::HistoryCursor,
+        result: Result<crate::app_server_session::HistoryResponse, String>,
     },
 
     /// Open the filename prompt for an on-demand Markdown transcript export.

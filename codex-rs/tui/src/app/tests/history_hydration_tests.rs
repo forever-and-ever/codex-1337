@@ -4,6 +4,7 @@ use super::session_lifecycle_requests::recorded_params;
 use super::session_lifecycle_requests::start_recording_app_server;
 use super::*;
 use crate::app_server_session::HistoryHydrationScope;
+use crate::app_server_session::HistoryPage;
 use crate::legacy_core::config::TerminalResizeReflowMaxRows;
 use crate::pager_overlay::TranscriptHistoryState;
 use crate::session_start::SessionStartAction;
@@ -29,6 +30,7 @@ use pretty_assertions::assert_ne;
 
 async fn history_fixture(
     item_counts: &[usize],
+    failed_turn: Option<usize>,
 ) -> Result<(Box<App>, tempfile::TempDir, SessionTarget)> {
     let mut app = make_test_app().await;
     let codex_home = tempdir()?;
@@ -83,9 +85,13 @@ async fn history_fixture(
             root_turn_id: None,
             turn_id,
             last_agent_message: None,
-            error: None,
+            error: (failed_turn == Some(index)).then(|| codex_protocol::protocol::ErrorEvent {
+                message: "oldest zero-item failure".to_string(),
+                codex_error_info: None,
+                misalignment: None,
+            }),
             started_at: None,
-            completed_at: None,
+            completed_at: (failed_turn == Some(index)).then_some(1_767_312_000),
             duration_ms: None,
             time_to_first_token_ms: None,
         }));
@@ -115,7 +121,7 @@ async fn history_fixture(
 async fn history_hydration_metadata_tracks_missing_turns_and_stale_completions_keep_new_request()
 -> Result<()> {
     let (mut app, _codex_home, target) =
-        history_fixture(&[1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1]).await?;
+        history_fixture(&[0, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1], Some(0)).await?;
     app.local_settings.transcript_mode = TranscriptMode::Terminal;
     app.local_settings.tui.terminal_resize_reflow_max_rows = Some(1);
     let (mut server, requests, proxy) = start_recording_app_server(
@@ -162,17 +168,20 @@ async fn history_hydration_metadata_tracks_missing_turns_and_stale_completions_k
     let old_cursor = server
         .begin_older_history_page(target.thread_id)
         .expect("older page");
-    let page = server
-        .thread_items_page(
+    let page = old_cursor
+        .load(
+            &server.request_handle(),
+            server.next_request_id(),
             target.thread_id,
-            /*turn_id*/ None,
-            Some(old_cursor.clone()),
-            /*limit*/ 2,
+            2,
         )
         .await?;
-    let items = server
+    let HistoryPage::Items(items) = server
         .apply_older_history_page(target.thread_id, &old_cursor, page, &mut thread.turns)
-        .await?;
+        .await?
+    else {
+        panic!("item content");
+    };
     assert_eq!(
         items.iter().map(ThreadItem::id).collect::<Vec<_>>(),
         vec!["item-3-0", "item-5-0"]
@@ -214,11 +223,11 @@ async fn history_hydration_metadata_tracks_missing_turns_and_stale_completions_k
     app.transcript_view.history = TranscriptHistoryState::LoadingOlder;
     for result in [
         Err("obsolete transport failure".to_string()),
-        Ok(ThreadItemsListResponse {
+        Ok(HistoryPage::Items(ThreadItemsListResponse {
             data: Vec::new(),
             next_cursor: None,
             backwards_cursor: None,
-        }),
+        })),
     ] {
         app.handle_event(
             &mut tui,
@@ -236,6 +245,72 @@ async fn history_hydration_metadata_tracks_missing_turns_and_stale_completions_k
             TranscriptHistoryState::LoadingOlder
         );
     }
+    // The last item page cannot discover an older turn with no items. Its independent
+    // metadata frontier must stay traversable after item exhaustion.
+    let page = cursor
+        .load(
+            &server.request_handle(),
+            server.next_request_id(),
+            target.thread_id,
+            100,
+        )
+        .await?;
+    let HistoryPage::Items(items) = server
+        .apply_older_history_page(target.thread_id, &cursor, page, &mut thread.turns)
+        .await?
+    else {
+        panic!("remaining item page");
+    };
+    assert_eq!(
+        items.iter().map(ThreadItem::id).collect::<Vec<_>>(),
+        vec!["item-1-0", "item-2-0"]
+    );
+    assert!(!thread.turns.iter().any(|turn| turn.id == "turn-0"));
+    assert!(server.has_older_history(target.thread_id));
+    let cursor = server
+        .begin_older_history_page(target.thread_id)
+        .expect("metadata frontier");
+    assert!(matches!(&cursor, HistoryPage::Turns(_)));
+    let page = cursor
+        .load(
+            &server.request_handle(),
+            server.next_request_id(),
+            target.thread_id,
+            1,
+        )
+        .await?;
+    let HistoryPage::Turns(admitted) = server
+        .apply_older_history_page(target.thread_id, &cursor, page, &mut thread.turns)
+        .await?
+    else {
+        panic!("metadata admission");
+    };
+    assert_eq!(admitted.len(), 1);
+    assert_eq!(admitted[0].id, "turn-0");
+    assert!(admitted[0].items.is_empty());
+    assert_eq!(
+        admitted[0].status,
+        codex_app_server_protocol::TurnStatus::Failed
+    );
+    assert_eq!(
+        admitted[0].error.as_ref().unwrap().message,
+        "oldest zero-item failure"
+    );
+    assert_eq!(admitted[0].completed_at, Some(1_767_312_000));
+    assert!(!server.has_older_history(target.thread_id));
+    assert_eq!(thread.turns.first().unwrap().id, "turn-0");
+
+    server
+        .hydrate_initial_thread_history(
+            &mut thread,
+            None,
+            None,
+            Some(&app.config),
+            Some(&app.local_settings),
+            HistoryHydrationScope::Complete,
+        )
+        .await?;
+    assert_eq!(thread.turns.first().unwrap(), &admitted[0]);
     server.shutdown().await?;
     proxy.await??;
     Ok(())
@@ -251,7 +326,7 @@ async fn history_hydration_archived_retry_uses_first_attempt_runtime_settings() 
         SessionStartAction::Fork(crate::app_server_session::ForkPermissionMode::InheritSaved),
     ] {
         for mode in [TranscriptMode::Terminal, TranscriptMode::Owned] {
-            let (mut app, codex_home, mut target) = history_fixture(&[500]).await?;
+            let (mut app, codex_home, mut target) = history_fixture(&[500], None).await?;
             app.config.tui_fullscreen_transcript = !mode.is_owned();
             app.config.tui_alternate_screen = codex_config::types::AltScreenMode::Always;
             app.config.terminal_resize_reflow.max_rows = TerminalResizeReflowMaxRows::Limit(1);
