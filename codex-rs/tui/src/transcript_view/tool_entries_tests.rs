@@ -453,6 +453,62 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
                 );
                 backgrounds.push(styles[0].1);
             }
+            // Authorship survives source-backed and streaming raw projections alike;
+            // treating every non-message cell as a client annotation repaints plans/reasoning.
+            let cwd = std::path::Path::new(".");
+            let assistant_cells: [Box<dyn HistoryCell>; 4] = [
+                Box::new(crate::history_cell::ReasoningSummaryCell::new(
+                    "Reasoning".into(),
+                    "Consider the constraint.".into(),
+                    cwd,
+                    false,
+                )),
+                Box::new(crate::history_cell::new_proposed_plan(
+                    "Inspect the source.".into(),
+                    cwd,
+                )),
+                Box::new(crate::history_cell::new_proposed_plan_stream(
+                    vec!["Inspect the source."],
+                    false,
+                )),
+                Box::new(crate::history_cell::StreamingPlanTailCell::new(
+                    vec!["Inspect the source.".into()],
+                    false,
+                )),
+            ];
+            for cell in assistant_cells {
+                let lines =
+                    crate::history_cell::output_provenance::raw_cell_lines(cell.as_ref(), 80);
+                assert!(!lines.is_empty());
+                for line in lines {
+                    assert_eq!(
+                        line.line.style.bg,
+                        crate::style::history_response_style().bg
+                    );
+                    assert!(line.source.as_ref().is_none_or(
+                        |source| source.output_provenance == OutputProvenance::Unspecified
+                    ));
+                }
+            }
+            let thought = crate::history_cell::ThoughtCell::from_item(
+                codex_app_server_protocol::ThreadItem::Thought {
+                    id: "thought-author".into(),
+                    response_id: "response".into(),
+                    completed_at_ms: 0,
+                    summary: vec!["Readable reasoning.".into()],
+                    content: Vec::new(),
+                    reported_reasoning_tokens: Some(12),
+                },
+                cwd,
+                crate::history_cell::ThoughtTextVisibility::Summary,
+            );
+            let lines = crate::history_cell::output_provenance::raw_cell_lines(&thought, 80);
+            assert!(!lines.is_empty());
+            assert!(lines.iter().all(|line| {
+                line.source
+                    .as_ref()
+                    .is_some_and(|source| source.output_provenance == OutputProvenance::Client)
+            }));
         },
     );
     let blocks = [json.to_owned(), "  trailing\n".to_owned()];

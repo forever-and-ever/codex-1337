@@ -186,9 +186,14 @@ pub(crate) fn raw_cell_lines(cell: &dyn super::HistoryCell, width: u16) -> Vec<H
     } else if any.is::<super::AgentMessageCell>()
         || any.is::<super::AgentMarkdownCell>()
         || any.is::<super::StreamingAgentTailCell>()
+        || any.is::<super::ReasoningSummaryCell>()
+        || any.is::<super::ProposedPlanCell>()
+        || any.is::<super::ProposedPlanStreamCell>()
+        || any.is::<super::StreamingPlanTailCell>()
     {
         Some(ContextAuthor::Assistant)
     } else {
+        // Thought's raw projection is only a generated heading, not its reasoning body.
         None
     };
     let mut lines = crate::terminal_hyperlinks::plain_hyperlink_lines(cell.live_raw_lines());
