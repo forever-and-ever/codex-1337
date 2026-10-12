@@ -312,10 +312,7 @@ impl App {
                 .empty_state_animation
                 .borrow_mut()
                 .render_first_screen(
-                    Rect {
-                        width: screen_size.width,
-                        ..view.remaining_area()
-                    },
+                    view.remaining_area(),
                     frame.buffer,
                     composer,
                     MotionMode::from_animations_enabled(

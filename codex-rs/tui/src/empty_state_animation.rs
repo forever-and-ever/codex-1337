@@ -1,7 +1,8 @@
 //! The blossom welcome animation for onboarding, with a full-color final pose.
-//! Visible time pauses while hidden. Fresh conversations start settled and can replay on a click.
+//! Visible time pauses while hidden. Fresh fullscreen decoration is static and client-only.
 
 mod geometry;
+mod landing_page;
 mod lighting;
 mod paths;
 mod policy;
@@ -203,40 +204,9 @@ impl EmptyStateAnimation {
         available: Rect,
         buffer: &mut Buffer,
         composer: Option<ComposerState>,
-        motion: MotionMode,
+        _motion: MotionMode,
     ) -> Option<Duration> {
-        const STAGE_ROWS: u16 = 21;
-        const MIN_STAGE_ROWS: u16 = 14;
-        let screen = buffer.area;
-        let width = screen.width.saturating_sub(/*rhs*/ 4).min(MAX_COLUMNS);
-        let height = width * STAGE_ROWS / MAX_COLUMNS;
-        if motion == MotionMode::Reduced
-            || composer != Some(ComposerState::Empty)
-            || height < MIN_STAGE_ROWS
-            || height > screen.height
-        {
-            self.cancel_replay();
-            return None;
-        }
-        let stage = Rect::new(
-            screen.x + (screen.width - width) / 2,
-            screen.y + (screen.height - height) / 2,
-            width,
-            height,
-        );
-        if stage.intersection(available) != stage {
-            self.cancel_replay();
-            return None;
-        }
-        self.stage = Some(stage);
-        if self.replaying {
-            if let Some(delay) = self.render_in(stage, buffer, Presentation::Animated) {
-                return Some(delay);
-            }
-            // The replay has faded back to the idle pose and no longer needs redraws.
-            self.replaying = false;
-        }
-        self.paint_frame(stage, buffer, SETTLED_BLOSSOM, sequence::STATIC_OPACITY);
+        self.render_landing_page(available, buffer, composer);
         None
     }
 
