@@ -1,6 +1,8 @@
 //! Direct-user spawn reservations, not a job queue. An identity is never executed twice.
 
 use super::*;
+use codex_protocol::error::CodexErr;
+use codex_protocol::error::CodexErrorDetails;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FarmReceipt {
@@ -15,10 +17,48 @@ pub enum FarmRejectionKind {
     Fatal,
 }
 
+impl FarmRejectionKind {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::InvalidRequest => "invalid_request",
+            Self::UnsupportedOperation => "unsupported_operation",
+            Self::Fatal => "fatal",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FarmRejection {
     pub kind: FarmRejectionKind,
     pub message: String,
+}
+
+impl From<&CodexErr> for FarmRejection {
+    fn from(error: &CodexErr) -> Self {
+        let (kind, message) = match error.details() {
+            CodexErrorDetails::InvalidRequest(message) => {
+                (FarmRejectionKind::InvalidRequest, message.clone())
+            }
+            CodexErrorDetails::UnsupportedOperation(message) => {
+                (FarmRejectionKind::UnsupportedOperation, message.clone())
+            }
+            CodexErrorDetails::Fatal(message) => (FarmRejectionKind::Fatal, message.clone()),
+            _ => (FarmRejectionKind::Fatal, error.to_string()),
+        };
+        Self { kind, message }
+    }
+}
+
+impl From<FarmRejection> for CodexErr {
+    fn from(rejection: FarmRejection) -> Self {
+        match rejection.kind {
+            FarmRejectionKind::InvalidRequest => Self::InvalidRequest(rejection.message),
+            FarmRejectionKind::UnsupportedOperation => {
+                Self::UnsupportedOperation(rejection.message)
+            }
+            FarmRejectionKind::Fatal => Self::Fatal(rejection.message),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -155,13 +195,14 @@ impl StateRuntime {
         parent: ThreadId,
         request_id: &str,
         payload_sha256: &str,
-        message: &str,
+        rejection: &FarmRejection,
     ) -> anyhow::Result<FarmRequestRecord> {
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         sqlx::query(
-            "INSERT INTO thread_farm_requests (parent_thread_id, request_id, payload_sha256, state, rejection_kind, rejection_message) VALUES (?, ?, ?, 'rejected', 'invalid_request', ?) ON CONFLICT (parent_thread_id, request_id) DO NOTHING",
+            "INSERT INTO thread_farm_requests (parent_thread_id, request_id, payload_sha256, state, rejection_kind, rejection_message) VALUES (?, ?, ?, 'rejected', ?, ?) ON CONFLICT (parent_thread_id, request_id) DO NOTHING",
         )
-        .bind(parent.to_string()).bind(request_id).bind(payload_sha256).bind(message)
+        .bind(parent.to_string()).bind(request_id).bind(payload_sha256)
+        .bind(rejection.kind.as_str()).bind(&rejection.message)
         .execute(&mut *tx).await?;
         let row = sqlx::query(
             "SELECT * FROM thread_farm_requests WHERE parent_thread_id = ? AND request_id = ?",
@@ -182,11 +223,7 @@ impl StateRuntime {
         request_id: &str,
         rejection: &FarmRejection,
     ) -> anyhow::Result<()> {
-        let kind = match rejection.kind {
-            FarmRejectionKind::InvalidRequest => "invalid_request",
-            FarmRejectionKind::UnsupportedOperation => "unsupported_operation",
-            FarmRejectionKind::Fatal => "fatal",
-        };
+        let kind = rejection.kind.as_str();
         let result = sqlx::query(
             "UPDATE thread_farm_requests SET state = 'rejected', agent_path = NULL, rejection_kind = ?, rejection_message = ? WHERE parent_thread_id = ? AND request_id = ? AND state = 'reserved'",
         )

@@ -342,6 +342,36 @@ async fn farm_spawns_and_replays_without_steering_parent(
             .await?;
     }
     if params.task_name.is_some() {
+        // Invalid input is checked before protected identity access. It cannot
+        // overwrite the accepted same-ID outcome with a safe-to-resubmit rejection.
+        let mut invalid = params.clone();
+        invalid.input.push(UserInput::Image {
+            image: codex_app_server_protocol::ImageReference::Inline {
+                url: "https://example.invalid/private.png".into(),
+            },
+            detail: None,
+        });
+        let id = app
+            .send_request("thread/farm", Some(serde_json::to_value(&invalid)?))
+            .await?;
+        let error = app
+            .read_stream_until_error_message(RequestId::Integer(id))
+            .await?;
+        assert_eq!(error.error.code, -32600);
+        assert_eq!(
+            error.error.data,
+            Some(
+                json!({"farmOutcome": "uncertain", "requestId": params.request_id, "childThreadId": null, "agentPath": null})
+            )
+        );
+        let replay: ThreadFarmResponse = app
+            .request(|request_id| ClientRequest::ThreadFarm {
+                request_id,
+                params: params.clone(),
+            })
+            .await?;
+        assert_eq!(replay, receipt);
+
         let pool = config
             .sqlite
             .open_read_write_pool(&config.sqlite.state_db_path())
@@ -656,11 +686,58 @@ async fn farm_provider_lock_rejects_before_claiming_request(mode: ThreadFarmMode
     let db =
         codex_state::StateRuntime::init(config.sqlite.clone(), config.model_provider_id.clone())
             .await?;
-    assert_eq!(
-        db.farm_request(ThreadId::from_string(&parent.id)?, &params.request_id)
-            .await?,
-        None
-    );
+    let record = db
+        .farm_request(ThreadId::from_string(&parent.id)?, &params.request_id)
+        .await?;
+    if mode == ThreadFarmMode::FullHistory {
+        assert!(matches!(
+            record.map(|record| record.state),
+            Some(codex_state::FarmRequestState::Rejected(
+                codex_state::FarmRejection {
+                    kind: codex_state::FarmRejectionKind::InvalidRequest,
+                    ..
+                }
+            ))
+        ));
+        let id = app
+            .send_request("thread/farm", Some(serde_json::to_value(&params)?))
+            .await?;
+        let replay = app
+            .read_stream_until_error_message(RequestId::Integer(id))
+            .await?;
+        assert!(
+            replay
+                .error
+                .message
+                .contains("retain the parent model provider")
+        );
+        assert_eq!(
+            replay.error.data,
+            Some(json!({"farmOutcome": "rejected", "requestId": params.request_id}))
+        );
+        let mut mismatch = params.clone();
+        mismatch.input = vec![UserInput::Text {
+            text: "Changed rejected submission".to_owned(),
+            text_elements: Vec::new(),
+        }];
+        let id = app
+            .send_request("thread/farm", Some(serde_json::to_value(&mismatch)?))
+            .await?;
+        let error = app
+            .read_stream_until_error_message(RequestId::Integer(id))
+            .await?;
+        assert_eq!(
+            error.error.data,
+            Some(
+                json!({"farmOutcome": "identityMismatch", "requestId": params.request_id, "childThreadId": null, "agentPath": null})
+            )
+        );
+        // The durable rejection owns its ID, but no child path. Use a new
+        // identity for the interrupted-reservation fixture below.
+        params.request_id = uuid::Uuid::new_v4().to_string();
+    } else {
+        assert_eq!(record, None);
+    }
     assert!(
         server
             .received_requests()
