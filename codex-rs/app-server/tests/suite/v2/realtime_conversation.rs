@@ -71,6 +71,7 @@ use codex_protocol::protocol::RealtimeConversationVersion;
 use codex_protocol::protocol::RealtimeOutputModality;
 use codex_protocol::protocol::RealtimeVoice;
 use codex_protocol::protocol::RealtimeVoicesList;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::responses::WebSocketConnectionConfig;
 use core_test_support::responses::WebSocketRequest;
@@ -83,6 +84,7 @@ use pretty_assertions::assert_eq;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use serde_json::json;
+use std::borrow::Borrow;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::path::Path;
@@ -230,15 +232,17 @@ struct RealtimeSidebandScript {
     connections: Vec<WebSocketConnectionConfig>,
 }
 
-struct RealtimeE2eHarness {
+struct RealtimeE2eHarness<S = MockServer> {
     mcp: TestAppServer,
     _codex_home: TempDir,
-    main_loop_responses_server: MockServer,
+    main_loop_responses_server: S,
     realtime_server: WebSocketTestServer,
     call_capture: RealtimeCallRequestCapture,
     thread_id: String,
 }
 
+// Default factories use unchecked response scripts and install no armed expectations.
+// Armed custom servers stay owned by the caller across setup and mutable harness use.
 impl RealtimeE2eHarness {
     // Owns the full mocked app-server realtime route: MCP client, Responses mocks, WebRTC call
     // creation capture, sideband WebSocket server, login, config, and a started thread.
@@ -274,10 +278,12 @@ impl RealtimeE2eHarness {
         )
         .await
     }
+}
 
+impl<'server> RealtimeE2eHarness<&'server MockServer> {
     async fn new_with_main_loop_responses_server(
         realtime_version: RealtimeTestVersion,
-        main_loop_responses_server: MockServer,
+        main_loop_responses_server: &'server MockServer,
         realtime_sideband: RealtimeSidebandScript,
     ) -> Result<Self> {
         Self::new_with_main_loop_responses_server_and_sandbox(
@@ -288,10 +294,12 @@ impl RealtimeE2eHarness {
         )
         .await
     }
+}
 
+impl<S: Borrow<MockServer>> RealtimeE2eHarness<S> {
     async fn new_with_main_loop_responses_server_and_sandbox(
         realtime_version: RealtimeTestVersion,
-        main_loop_responses_server: MockServer,
+        main_loop_responses_server: S,
         realtime_sideband: RealtimeSidebandScript,
         sandbox: RealtimeTestSandbox,
     ) -> Result<Self> {
@@ -304,7 +312,7 @@ impl RealtimeE2eHarness {
                     .insert_header("Location", "/v1/realtime/calls/rtc_e2e")
                     .set_body_string("v=answer\r\n"),
             )
-            .mount(&main_loop_responses_server)
+            .mount(main_loop_responses_server.borrow())
             .await;
         Mock::given(method("POST"))
             .and(path("/v1/live"))
@@ -314,7 +322,7 @@ impl RealtimeE2eHarness {
                     .insert_header("Location", "/v1/live/rtc_e2e")
                     .set_body_string("v=answer\r\n"),
             )
-            .mount(&main_loop_responses_server)
+            .mount(main_loop_responses_server.borrow())
             .await;
 
         let realtime_server =
@@ -322,7 +330,7 @@ impl RealtimeE2eHarness {
         let codex_home = TempDir::new()?;
         create_config_toml_with_realtime_version(
             codex_home.path(),
-            &main_loop_responses_server.uri(),
+            &main_loop_responses_server.borrow().uri(),
             realtime_server.uri(),
             StartupContextConfig::Override("startup context"),
             realtime_version,
@@ -606,7 +614,7 @@ impl RealtimeE2eHarness {
     }
 
     async fn main_loop_responses_requests(&self) -> Result<Vec<Value>> {
-        responses_requests(&self.main_loop_responses_server).await
+        responses_requests(self.main_loop_responses_server.borrow()).await
     }
 
     async fn shutdown(self) {
@@ -1206,6 +1214,7 @@ async fn realtime_timeline_splits_accepted_steering_and_persists_promoted_artifa
     skip_if_no_network!(Ok(()));
 
     let responses_server = responses::start_mock_server().await;
+    mock_server::run(&[&responses_server], async {
     let (gate_tx, gate_rx) = mpsc::channel();
     Mock::given(method("POST"))
         .and(path_regex(".*/responses$"))
@@ -1226,7 +1235,7 @@ async fn realtime_timeline_splits_accepted_steering_and_persists_promoted_artifa
 
     let mut harness = RealtimeE2eHarness::new_with_main_loop_responses_server(
         RealtimeTestVersion::V2,
-        responses_server,
+        &responses_server,
         realtime_sideband(vec![open_realtime_sideband_connection(vec![
             vec![session_updated("voice-steering")],
             vec![json!({
@@ -1451,6 +1460,8 @@ async fn realtime_timeline_splits_accepted_steering_and_persists_promoted_artifa
 
     harness.shutdown().await;
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test]
@@ -3741,79 +3752,82 @@ async fn websocket_v2_background_agent_steering_ack_requests_response_create() -
     // the background-agent handoff stays active while realtime sends a second
     // tool call that should steer the active task.
     let main_loop_responses_server = responses::start_mock_server().await;
-    let (gate_completed_tx, gate_completed_rx) = mpsc::channel();
-    let gated_response = responses::sse(vec![
-        responses::ev_response_created("resp-1"),
-        responses::ev_assistant_message("msg-1", "first task finished"),
-        responses::ev_completed("resp-1"),
-    ]);
-    Mock::given(method("POST"))
-        .and(path_regex(".*/responses$"))
-        .respond_with(GatedSseResponse {
-            gate_rx: Mutex::new(Some(gate_completed_rx)),
-            response: gated_response,
-        })
-        .expect(2)
-        .mount(&main_loop_responses_server)
-        .await;
+    mock_server::run(&[&main_loop_responses_server], async {
+        let (gate_completed_tx, gate_completed_rx) = mpsc::channel();
+        let gated_response = responses::sse(vec![
+            responses::ev_response_created("resp-1"),
+            responses::ev_assistant_message("msg-1", "first task finished"),
+            responses::ev_completed("resp-1"),
+        ]);
+        Mock::given(method("POST"))
+            .and(path_regex(".*/responses$"))
+            .respond_with(GatedSseResponse {
+                gate_rx: Mutex::new(Some(gate_completed_rx)),
+                response: gated_response,
+            })
+            .expect(2)
+            .mount(&main_loop_responses_server)
+            .await;
 
-    let mut harness = RealtimeE2eHarness::new_with_main_loop_responses_server(
-        RealtimeTestVersion::V2,
-        main_loop_responses_server,
-        realtime_sideband(vec![realtime_sideband_connection(vec![
-            vec![
-                session_updated("sess_v2_steering_ack"),
-                v2_background_agent_tool_call("call_active", "start a task"),
-                v2_background_agent_tool_call("call_steer", "steer the active task"),
-            ],
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-        ])]),
-    )
-    .await?;
-
-    let started = harness.start_websocket_realtime().await?;
-    assert_eq!(started.version, RealtimeConversationVersion::V2);
-    assert_v2_session_update(&harness.sideband_outbound_request(/*request_index*/ 0).await)?;
-    let turn_started = harness
-        .read_notification::<TurnStartedNotification>("turn/started")
+        let mut harness = RealtimeE2eHarness::new_with_main_loop_responses_server(
+            RealtimeTestVersion::V2,
+            &main_loop_responses_server,
+            realtime_sideband(vec![realtime_sideband_connection(vec![
+                vec![
+                    session_updated("sess_v2_steering_ack"),
+                    v2_background_agent_tool_call("call_active", "start a task"),
+                    v2_background_agent_tool_call("call_steer", "steer the active task"),
+                ],
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+            ])]),
+        )
         .await?;
-    assert_eq!(turn_started.thread_id, harness.thread_id);
 
-    // Phase 2: the second tool call happens while `call_active` is still
-    // running, so app-server sends a steering acknowledgement as a function-call
-    // output for the second call.
-    assert_v2_function_call_output(
-        &harness.sideband_outbound_request(/*request_index*/ 1).await,
-        "call_steer",
-        V2_STEERING_ACKNOWLEDGEMENT,
-    );
+        let started = harness.start_websocket_realtime().await?;
+        assert_eq!(started.version, RealtimeConversationVersion::V2);
+        assert_v2_session_update(&harness.sideband_outbound_request(/*request_index*/ 0).await)?;
+        let turn_started = harness
+            .read_notification::<TurnStartedNotification>("turn/started")
+            .await?;
+        assert_eq!(turn_started.thread_id, harness.thread_id);
 
-    // Phase 3: realtime needs a `response.create` after the steering
-    // acknowledgement so it can surface that acknowledgement to the user.
-    assert_v2_response_create(&harness.sideband_outbound_request(/*request_index*/ 2).await);
+        // Phase 2: the second tool call happens while `call_active` is still
+        // running, so app-server sends a steering acknowledgement as a function-call
+        // output for the second call.
+        assert_v2_function_call_output(
+            &harness.sideband_outbound_request(/*request_index*/ 1).await,
+            "call_steer",
+            V2_STEERING_ACKNOWLEDGEMENT,
+        );
 
-    // Phase 4: release the gated delegated turn. Codex should then continue
-    // the same run with the steering text included in the follow-up Responses
-    // request, proving realtime did not merely acknowledge and drop it.
-    let _ = gate_completed_tx.send(());
-    let turn_completed = harness
-        .read_notification::<TurnCompletedNotification>("turn/completed")
-        .await?;
-    assert_eq!(turn_completed.thread_id, harness.thread_id);
+        // Phase 3: realtime needs a `response.create` after the steering
+        // acknowledgement so it can surface that acknowledgement to the user.
+        assert_v2_response_create(&harness.sideband_outbound_request(/*request_index*/ 2).await);
 
-    let requests = harness.main_loop_responses_requests().await?;
-    assert_eq!(requests.len(), 2);
-    assert!(
-        response_request_contains_text(&requests[1], "steer the active task"),
-        "follow-up Responses request should contain steering prompt: {}",
-        requests[1]
-    );
+        // Phase 4: release the gated delegated turn. Codex should then continue
+        // the same run with the steering text included in the follow-up Responses
+        // request, proving realtime did not merely acknowledge and drop it.
+        let _ = gate_completed_tx.send(());
+        let turn_completed = harness
+            .read_notification::<TurnCompletedNotification>("turn/completed")
+            .await?;
+        assert_eq!(turn_completed.thread_id, harness.thread_id);
 
-    harness.shutdown().await;
-    Ok(())
+        let requests = harness.main_loop_responses_requests().await?;
+        assert_eq!(requests.len(), 2);
+        assert!(
+            response_request_contains_text(&requests[1], "steer the active task"),
+            "follow-up Responses request should contain steering prompt: {}",
+            requests[1]
+        );
+
+        harness.shutdown().await;
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test]
@@ -3963,77 +3977,80 @@ async fn websocket_v2_tool_call_does_not_block_sideband_audio() -> Result<()> {
     // Phase 1: gate the delegated Responses stream so the sideband can send audio while the tool
     // call is still waiting on its delegated turn.
     let main_loop_responses_server = responses::start_mock_server().await;
-    let (gate_completed_tx, gate_completed_rx) = mpsc::channel();
-    let gated_response = responses::sse(vec![
-        responses::ev_response_created("resp-1"),
-        responses::ev_assistant_message("msg-1", "late delegated result"),
-        responses::ev_completed("resp-1"),
-    ]);
-    Mock::given(method("POST"))
-        .and(path_regex(".*/responses$"))
-        .respond_with(GatedSseResponse {
-            gate_rx: Mutex::new(Some(gate_completed_rx)),
-            response: gated_response,
-        })
-        .expect(1)
-        .mount(&main_loop_responses_server)
-        .await;
+    mock_server::run(&[&main_loop_responses_server], async {
+        let (gate_completed_tx, gate_completed_rx) = mpsc::channel();
+        let gated_response = responses::sse(vec![
+            responses::ev_response_created("resp-1"),
+            responses::ev_assistant_message("msg-1", "late delegated result"),
+            responses::ev_completed("resp-1"),
+        ]);
+        Mock::given(method("POST"))
+            .and(path_regex(".*/responses$"))
+            .respond_with(GatedSseResponse {
+                gate_rx: Mutex::new(Some(gate_completed_rx)),
+                response: gated_response,
+            })
+            .expect(1)
+            .mount(&main_loop_responses_server)
+            .await;
 
-    let mut harness = RealtimeE2eHarness::new_with_main_loop_responses_server(
-        RealtimeTestVersion::V2,
-        main_loop_responses_server,
-        realtime_sideband(vec![realtime_sideband_connection(vec![
-            vec![
-                session_updated("sess_v2_nonblocking"),
-                v2_background_agent_tool_call("call_audio", "delegate while audio continues"),
-                json!({
-                    "type": "response.output_audio.delta",
-                    "delta": "CQoL",
-                    "sample_rate": 24_000,
-                    "channels": 1,
-                    "samples_per_channel": 256
-                }),
-            ],
-            vec![],
-            vec![],
-        ])]),
-    )
-    .await?;
-
-    let _ = harness.start_websocket_realtime().await?;
-    let _ = harness
-        .read_notification::<TurnStartedNotification>("turn/started")
-        .await?;
-
-    // Phase 2: require app-server to fan out sideband audio before the delegated tool call is
-    // allowed to finish.
-    let audio = harness
-        .read_notification::<ThreadRealtimeOutputAudioDeltaNotification>(
-            "thread/realtime/outputAudio/delta",
+        let mut harness = RealtimeE2eHarness::new_with_main_loop_responses_server(
+            RealtimeTestVersion::V2,
+            &main_loop_responses_server,
+            realtime_sideband(vec![realtime_sideband_connection(vec![
+                vec![
+                    session_updated("sess_v2_nonblocking"),
+                    v2_background_agent_tool_call("call_audio", "delegate while audio continues"),
+                    json!({
+                        "type": "response.output_audio.delta",
+                        "delta": "CQoL",
+                        "sample_rate": 24_000,
+                        "channels": 1,
+                        "samples_per_channel": 256
+                    }),
+                ],
+                vec![],
+                vec![],
+            ])]),
         )
         .await?;
-    assert_eq!(audio.audio.data, "CQoL");
 
-    // Phase 3: release the delegated turn and assert the sideband function-call output is delivered
-    // after the nonblocking audio.
-    let _ = gate_completed_tx.send(());
-    let turn_completed = harness
-        .read_notification::<TurnCompletedNotification>("turn/completed")
-        .await?;
-    assert_eq!(turn_completed.thread_id, harness.thread_id);
+        let _ = harness.start_websocket_realtime().await?;
+        let _ = harness
+            .read_notification::<TurnStartedNotification>("turn/started")
+            .await?;
 
-    let progress = harness.sideband_outbound_request(/*request_index*/ 1).await;
-    assert_v2_progress_update(&progress, "late delegated result");
+        // Phase 2: require app-server to fan out sideband audio before the delegated tool call is
+        // allowed to finish.
+        let audio = harness
+            .read_notification::<ThreadRealtimeOutputAudioDeltaNotification>(
+                "thread/realtime/outputAudio/delta",
+            )
+            .await?;
+        assert_eq!(audio.audio.data, "CQoL");
 
-    let tool_output = harness.sideband_outbound_request(/*request_index*/ 2).await;
-    assert_v2_function_call_output(
-        &tool_output,
-        "call_audio",
-        V2_HANDOFF_COMPLETE_ACKNOWLEDGEMENT,
-    );
+        // Phase 3: release the delegated turn and assert the sideband function-call output is delivered
+        // after the nonblocking audio.
+        let _ = gate_completed_tx.send(());
+        let turn_completed = harness
+            .read_notification::<TurnCompletedNotification>("turn/completed")
+            .await?;
+        assert_eq!(turn_completed.thread_id, harness.thread_id);
 
-    harness.shutdown().await;
-    Ok(())
+        let progress = harness.sideband_outbound_request(/*request_index*/ 1).await;
+        assert_v2_progress_update(&progress, "late delegated result");
+
+        let tool_output = harness.sideband_outbound_request(/*request_index*/ 2).await;
+        assert_v2_function_call_output(
+            &tool_output,
+            "call_audio",
+            V2_HANDOFF_COMPLETE_ACKNOWLEDGEMENT,
+        );
+
+        harness.shutdown().await;
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test]
