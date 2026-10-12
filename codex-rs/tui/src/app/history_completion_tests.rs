@@ -33,11 +33,11 @@ fn split_turn_only_completes_on_the_page_with_its_last_item() {
         &["first", "second", "last"],
     )];
     assert_eq!(
-        group_completed_turn_items(turns[0].items[1..].to_vec(), &turns),
+        group_turn_items(turns[0].items[1..].to_vec(), &turns),
         vec![(turns[0].items[1..].to_vec(), Some(&turns[0]))],
     );
     assert_eq!(
-        group_completed_turn_items(turns[0].items[..1].to_vec(), &turns),
+        group_turn_items(turns[0].items[..1].to_vec(), &turns),
         vec![(turns[0].items[..1].to_vec(), None)],
     );
 }
@@ -50,7 +50,7 @@ fn multiple_turns_keep_item_groups_and_completion_order() {
     ];
     let items = turns.iter().flat_map(|turn| turn.items.clone()).collect();
     assert_eq!(
-        group_completed_turn_items(items, &turns),
+        group_turn_items(items, &turns),
         vec![
             (turns[0].items.clone(), Some(&turns[0])),
             (turns[1].items.clone(), Some(&turns[1])),
@@ -59,7 +59,7 @@ fn multiple_turns_keep_item_groups_and_completion_order() {
 }
 
 #[test]
-fn unsuccessful_and_running_turns_separate_groups_without_completion_metadata() {
+fn failures_keep_their_boundary_while_interrupted_and_running_turns_only_separate_groups() {
     let turns = vec![
         turn("failed", TurnStatus::Failed, &["a"]),
         turn("interrupted", TurnStatus::Interrupted, &["b"]),
@@ -70,10 +70,13 @@ fn unsuccessful_and_running_turns_separate_groups_without_completion_metadata() 
         .flat_map(|turn| turn.items.clone())
         .collect::<Vec<_>>();
     assert_eq!(
-        group_completed_turn_items(items, &turns),
+        group_turn_items(items, &turns),
         turns
             .iter()
-            .map(|turn| (turn.items.clone(), None))
+            .map(|turn| (
+                turn.items.clone(),
+                (turn.status == TurnStatus::Failed).then_some(turn)
+            ))
             .collect::<Vec<_>>(),
     );
 }

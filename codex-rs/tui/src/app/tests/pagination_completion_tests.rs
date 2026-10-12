@@ -186,6 +186,183 @@ async fn older_pagination_completion_footers_follow_answers_without_overlap_dupl
     ));
     app_server.shutdown().await?;
     proxy.await??;
+
+    // Metadata precedes item pages: failures must move with their own items,
+    // while a real zero-item failure must never wait for a nonexistent item.
+    let (mut app, _codex_home, thread_id) =
+        completed_history_app(&["Oldest", "Middle", "Newer", "Newest"]).await?;
+    let (chat, tx, mut rx, _ops) = make_chatwidget_manual_with_sender().await;
+    app.chat_widget = chat;
+    app.app_event_tx = tx;
+    let (mut app_server, _requests, proxy) =
+        start_recording_app_server(&app.config, None, None).await?;
+    let mut started = app_server
+        .resume_thread(
+            &app.local_settings,
+            app.config.clone(),
+            thread_id,
+            crate::app_server_session::ResumeModelSettings::RestoreFromThread,
+        )
+        .await?;
+    let error = codex_app_server_protocol::TurnError {
+        message: "Anthropic tool result has no call ID".to_string(),
+        codex_error_info: None,
+        additional_details: Some("saved source detail".to_string()),
+        misalignment: None,
+    };
+    for turn in &mut started.turns {
+        if turn.id == "turn-0" || turn.id == "turn-2" {
+            turn.status = TurnStatus::Failed;
+            turn.error = Some(error.clone());
+        }
+    }
+    assert_eq!(started.turns.len(), 4);
+    assert!(started.turns[0].items.is_empty());
+    let oldest_completed_at = started.turns[0].completed_at;
+    let mut empty = test_turn("empty-failure", TurnStatus::Failed, Vec::new());
+    empty.items_view = codex_app_server_protocol::TurnItemsView::NotLoaded;
+    empty.error = Some(error.clone());
+    // Source order, not a guessed clock, owns chronology.
+    empty.completed_at = None;
+    started.turns.insert(1, empty);
+    let session = started.session.clone();
+    app.enqueue_primary_thread_session(started.session, started.turns)
+        .await?;
+    // Buffered errors can replay after the completion that already supplied the clock.
+    app.chat_widget.handle_server_notification(
+        ServerNotification::Error(codex_app_server_protocol::ErrorNotification {
+            thread_id: thread_id.to_string(),
+            turn_id: "turn-0".to_string(),
+            error: error.clone(),
+            will_retry: false,
+        }),
+        Some(ReplayKind::ThreadSnapshot),
+    );
+    let mut tui = crate::tui::test_support::make_test_tui()?;
+    while let Ok(event) = rx.try_recv() {
+        if let AppEvent::InsertHistoryCell(cell) = event {
+            app.insert_retained_history_cell(&mut tui, Arc::from(cell));
+        }
+    }
+    let failures = |app: &App| {
+        app.transcript_cells
+            .iter()
+            .filter_map(|cell| {
+                cell.as_any()
+                    .downcast_ref::<history_cell::FailedTurnCell>()
+                    .map(|failure| {
+                        (
+                            failure.turn_id.clone(),
+                            failure.completed_at,
+                            failure.error.clone(),
+                        )
+                    })
+            })
+            .collect::<Vec<_>>()
+    };
+    let original_failures = failures(&app);
+    let failure_text = app
+        .transcript_cells
+        .iter()
+        .filter(|cell| cell.as_any().is::<history_cell::FailedTurnCell>())
+        .map(|cell| lines_to_single_string(&cell.raw_lines()))
+        .collect::<String>();
+    assert_eq!(failure_text.matches(error.message.as_str()).count(), 3);
+    assert!(failure_text.contains("Sep 6, 2000 at"));
+    assert!(!failure_text.contains("Worked for"));
+    assert_eq!(original_failures.len(), 3);
+    assert_eq!(
+        original_failures[0],
+        ("turn-0".to_string(), oldest_completed_at, error.clone())
+    );
+    assert_eq!(
+        original_failures[1],
+        ("empty-failure".to_string(), None, error.clone())
+    );
+    let initial_cells = app.transcript_cells.clone();
+    app.local_settings.tui.terminal_resize_reflow_max_rows = None;
+    app.open_transcript_overlay(&mut tui);
+    let mut overlapping = None;
+    while app_server.has_older_history(thread_id) {
+        let cursor = app_server
+            .begin_older_history_page(thread_id)
+            .expect("older page");
+        let mut page = app_server
+            .thread_items_page(thread_id, None, Some(cursor.clone()), 1)
+            .await?;
+        if let Some(item) = overlapping.take() {
+            page.data.insert(0, item);
+        }
+        overlapping = page.data.last().cloned();
+        app.handle_older_history_page(&mut tui, &mut app_server, thread_id, &cursor, Ok(page))
+            .await?;
+        assert_eq!(failures(&app), original_failures);
+    }
+    // Repeated messages retain distinct turn identities and the same immutable cells.
+    for original in &initial_cells {
+        if original.as_any().is::<history_cell::FailedTurnCell>() {
+            assert!(
+                app.transcript_cells
+                    .iter()
+                    .any(|cell| Arc::ptr_eq(cell, original))
+            );
+        }
+    }
+    let chronology = |app: &App| {
+        app.transcript_cells
+            .iter()
+            .filter_map(|cell| {
+                if let Some(failure) = cell.as_any().downcast_ref::<history_cell::FailedTurnCell>()
+                {
+                    Some(failure.turn_id.clone())
+                } else {
+                    let text = lines_to_single_string(&cell.raw_lines());
+                    [
+                        "Oldest answer",
+                        "Middle answer",
+                        "Newer answer",
+                        "Newest answer",
+                    ]
+                    .into_iter()
+                    .find(|answer| text.contains(*answer))
+                    .map(str::to_string)
+                }
+            })
+            .collect::<Vec<_>>()
+    };
+    let ordered = chronology(&app);
+    assert_eq!(
+        ordered,
+        vec![
+            "Oldest answer",
+            "turn-0",
+            "empty-failure",
+            "Middle answer",
+            "Newer answer",
+            "turn-2",
+            "Newest answer",
+        ]
+    );
+    let restored_turns = app.thread_event_channels[&thread_id]
+        .store
+        .lock()
+        .await
+        .turns
+        .clone();
+    app.overlay = None;
+    app.transcript_cells.clear();
+    app.chat_widget.handle_thread_session(session);
+    app.chat_widget
+        .replay_thread_turns(restored_turns, ReplayKind::ThreadSnapshot);
+    while let Ok(event) = rx.try_recv() {
+        if let AppEvent::InsertHistoryCell(cell) = event {
+            app.insert_retained_history_cell(&mut tui, Arc::from(cell));
+        }
+    }
+    assert_eq!(chronology(&app), ordered);
+    assert_eq!(failures(&app), original_failures);
+    app_server.shutdown().await?;
+    proxy.await??;
     Ok(())
 }
 
