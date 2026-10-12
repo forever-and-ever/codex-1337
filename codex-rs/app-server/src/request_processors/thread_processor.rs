@@ -26,6 +26,12 @@ mod jira;
 #[path = "thread_warming.rs"]
 mod thread_warming;
 
+#[path = "thread_start.rs"]
+mod thread_start;
+
+use thread_start::FrontendStart;
+use thread_start::ThreadStartOrigin;
+
 use super::persisted_resume_settings::PersistedResumeSettings;
 use super::persisted_resume_settings::latest_persisted_resume_settings;
 use super::thread_enrichment::enrich_loaded_threads;
@@ -566,12 +572,11 @@ impl ThreadRequestProcessor {
         request_context: RequestContext,
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
         self.thread_start_inner(
-            Some(request_id),
+            FrontendStart::new(request_id, &request_context, params.experimental_raw_events),
             params,
             app_server_client_name,
             app_server_client_version,
             client_mcp_extensions,
-            Some(request_context),
         )
         .await
         .map(|_| None)
@@ -1160,21 +1165,14 @@ impl ThreadRequestProcessor {
         .await
     }
 
-    async fn thread_start_inner(
+    async fn thread_start_inner<S: ThreadStartOrigin>(
         &self,
-        request_id: Option<ConnectionRequestId>,
+        origin: S,
         params: ThreadStartParams,
         app_server_client_name: Option<String>,
         app_server_client_version: Option<String>,
         client_mcp_extensions: ClientMcpExtensions,
-        request_context: Option<RequestContext>,
-    ) -> Result<
-        (
-            ThreadStartResponse,
-            Option<crate::thread_state::ThreadRuntimeLease>,
-        ),
-        JSONRPCErrorError,
-    > {
+    ) -> Result<(ThreadStartResponse, S::RuntimePin), JSONRPCErrorError> {
         let ThreadStartParams {
             model,
             model_provider,
@@ -1194,7 +1192,7 @@ impl ThreadRequestProcessor {
             tool_policy,
             selected_capability_roots,
             mock_experimental_field: _mock_experimental_field,
-            experimental_raw_events,
+            experimental_raw_events: _,
             personality,
             multi_agent_mode: _multi_agent_mode,
             ephemeral,
@@ -1271,9 +1269,7 @@ impl ThreadRequestProcessor {
             skills_watcher: Arc::clone(&self.skills_watcher),
             turn_cost_worker: self.turn_cost_worker.clone(),
         };
-        let request_trace = request_context
-            .as_ref()
-            .and_then(RequestContext::request_trace);
+        let span = origin.span();
         let config_manager = self.config_manager.clone();
         let thread_store = Arc::clone(&self.thread_store);
         let initial_config_warnings = Arc::clone(&self.initial_config_warnings);
@@ -1282,7 +1278,7 @@ impl ThreadRequestProcessor {
                 listener_task_context,
                 thread_store,
                 config_manager,
-                request_id,
+                origin,
                 app_server_client_name,
                 app_server_client_version,
                 client_mcp_extensions,
@@ -1299,20 +1295,12 @@ impl ThreadRequestProcessor {
                 environment_requests,
                 service_name,
                 allow_provider_model_fallback,
-                experimental_raw_events,
-                request_trace,
                 initial_config_warnings,
             )
             .await
         };
         self.background_tasks
-            .spawn(
-                thread_start_task.instrument(
-                    request_context
-                        .as_ref()
-                        .map_or_else(tracing::Span::current, RequestContext::span),
-                ),
-            )
+            .spawn(thread_start_task.instrument(span))
             .await
             .map_err(|_| internal_error("thread startup task stopped before completing"))?
     }
@@ -1363,11 +1351,11 @@ impl ThreadRequestProcessor {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn thread_start_task(
+    async fn thread_start_task<S: ThreadStartOrigin>(
         listener_task_context: ListenerTaskContext,
         thread_store: Arc<dyn ThreadStore>,
         config_manager: ConfigManager,
-        request_id: Option<ConnectionRequestId>,
+        origin: S,
         app_server_client_name: Option<String>,
         app_server_client_version: Option<String>,
         client_mcp_extensions: ClientMcpExtensions,
@@ -1384,16 +1372,8 @@ impl ThreadRequestProcessor {
         environment_requests: Option<Vec<TurnEnvironmentRequest>>,
         service_name: Option<String>,
         allow_provider_model_fallback: bool,
-        experimental_raw_events: bool,
-        request_trace: Option<W3cTraceContext>,
         initial_config_warnings: Arc<Vec<ConfigWarningNotification>>,
-    ) -> Result<
-        (
-            ThreadStartResponse,
-            Option<crate::thread_state::ThreadRuntimeLease>,
-        ),
-        JSONRPCErrorError,
-    > {
+    ) -> Result<(ThreadStartResponse, S::RuntimePin), JSONRPCErrorError> {
         let thread_start_started_at = std::time::Instant::now();
         let requested_cwd = typesafe_overrides.cwd.clone();
         let mut config = config_manager
@@ -1490,17 +1470,7 @@ impl ThreadRequestProcessor {
         }
         for notification in config_warnings {
             if !initial_config_warnings.contains(&notification) {
-                if let Some(request_id) = &request_id {
-                    listener_task_context
-                        .outgoing
-                        .send_server_notification_to_connections(
-                            &[request_id.connection_id],
-                            ServerNotification::ConfigWarning(notification),
-                        )
-                        .await;
-                } else {
-                    tracing::warn!(summary = %notification.summary, "headless thread startup warning");
-                }
+                origin.warn(&listener_task_context, notification).await;
             }
         }
 
@@ -1553,12 +1523,9 @@ impl ThreadRequestProcessor {
         start_options.reserved_thread_id = Some(thread_id);
         // Startup can prewarm the Responses socket before start_thread returns.
         // Register the creating client first so that handshake can request attestation.
-        if let Some(request_id) = &request_id {
-            listener_task_context
-                .thread_state_manager
-                .try_add_connection_to_thread(thread_id, request_id.connection_id)
-                .await;
-        }
+        origin
+            .register_client(&listener_task_context, thread_id)
+            .await;
         let create_thread_started_at = std::time::Instant::now();
         let new_thread = listener_task_context
             .thread_manager
@@ -1574,7 +1541,7 @@ impl ThreadRequestProcessor {
                 thread_source,
                 dynamic_tools,
                 metrics_service_name: service_name,
-                parent_trace: request_trace,
+                parent_trace: origin.request_trace(),
                 environments: Some(environment_requests),
                 thread_extension_init,
                 client_mcp_extensions,
@@ -1641,53 +1608,9 @@ impl ThreadRequestProcessor {
         thread.project_id = project_id.clone();
         thread.daybreak_enabled = daybreak_enabled;
 
-        // Observe every runtime; only frontend requests subscribe a connection.
-        let runtime_lease = if request_id.is_none() {
-            Some(
-                listener_task_context
-                    .thread_state_manager
-                    .lease_runtime(thread_id)
-                    .await,
-            )
-        } else {
-            None
-        };
-        if let Some(request_id) = &request_id {
-            log_listener_attach_result(
-                super::thread_lifecycle::ensure_conversation_listener(
-                    listener_task_context.clone(),
-                    thread_id,
-                    request_id.connection_id,
-                    experimental_raw_events,
-                )
-                .instrument(tracing::info_span!(
-                    "app_server.thread_start.attach_listener",
-                    otel.name = "app_server.thread_start.attach_listener",
-                    thread_start.experimental_raw_events = experimental_raw_events,
-                ))
-                .await,
-                thread_id,
-                request_id.connection_id,
-                "thread",
-            );
-        } else {
-            let runtime = listener_task_context
-                .thread_manager
-                .get_thread(thread_id)
-                .await
-                .map_err(|err| internal_error(format!("new thread disappeared: {err}")))?;
-            let state = listener_task_context
-                .thread_state_manager
-                .thread_state(thread_id)
-                .await;
-            super::thread_lifecycle::ensure_listener_task_running(
-                listener_task_context.clone(),
-                thread_id,
-                runtime,
-                state,
-            )
+        let runtime_pin = origin
+            .observe_runtime(&listener_task_context, thread_id)
             .await?;
-        }
 
         listener_task_context
             .thread_watch_manager
@@ -1734,20 +1657,9 @@ impl ThreadRequestProcessor {
             multi_agent_mode: MultiAgentMode::ExplicitRequestOnly,
         };
         let notif = thread_started_notification(thread);
-        if let Some(request_id) = request_id {
-            listener_task_context
-                .outgoing
-                .send_response_with_thread_originator(
-                    request_id,
-                    response.clone(),
-                    thread_originator,
-                )
-                .instrument(tracing::info_span!(
-                    "app_server.thread_start.send_response",
-                    otel.name = "app_server.thread_start.send_response",
-                ))
-                .await;
-        }
+        origin
+            .publish(&listener_task_context, &response, thread_originator)
+            .await;
 
         listener_task_context
             .outgoing
@@ -1762,7 +1674,7 @@ impl ThreadRequestProcessor {
             thread_start_started_at.elapsed(),
             Some("ready"),
         );
-        Ok((response, runtime_lease))
+        Ok((response, runtime_pin))
     }
 
     #[allow(clippy::too_many_arguments)]

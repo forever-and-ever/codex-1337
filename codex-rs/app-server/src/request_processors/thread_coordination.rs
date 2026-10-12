@@ -42,6 +42,7 @@ use super::ThreadRequestProcessor;
 use super::ThreadResumeTarget;
 use super::internal_error;
 use super::invalid_request;
+use super::thread_start::HeadlessStart;
 use crate::thread_state::ThreadRuntimeLease;
 
 /// A process-owned service. Calling identity is supplied by the extension host,
@@ -365,16 +366,13 @@ impl ThreadCoordinationService {
         let (mut response, lease) = self
             .threads
             .thread_start_inner(
-                /*request_id*/ None,
+                HeadlessStart,
                 params,
                 /*app_server_client_name*/ None,
                 /*app_server_client_version*/ None,
                 source.client_mcp_extensions(),
-                /*request_context*/ None,
             )
             .await?;
-        let lease = lease
-            .ok_or_else(|| internal_error("headless startup did not retain its runtime lease"))?;
         if let Some(name) = name {
             let id = ThreadId::from_string(&response.thread.id)
                 .map_err(|err| internal_error(format!("invalid created thread id: {err}")))?;
