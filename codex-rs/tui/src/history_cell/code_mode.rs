@@ -154,7 +154,17 @@ pub(crate) struct CodeModeCell {
 
 impl CodeModeCell {
     pub(crate) fn is_active(&self) -> bool {
-        self.live && self.status().is_none()
+        (self.live && self.status().is_none()) || self.has_live_command()
+    }
+
+    fn has_live_command(&self) -> bool {
+        self.pending_children.iter().any(|(id, item)| {
+            matches!(
+                item,
+                codex_app_server_protocol::ThreadItem::CommandExecution { .. }
+            ) && self.child_versions.get(id)
+                == Some(&(crate::code_mode_transcript::Source::Live, false))
+        })
     }
 
     /// The block's Greek name, stable across redraw, replay and process restarts.
@@ -181,7 +191,7 @@ impl CodeModeCell {
             marker,
             " ".into(),
             "Running".bold(),
-            format!(" (for {})", self.tetrad()).dim(),
+            format!(" ({})", self.tetrad()).dim(),
         ])];
         for member in &self.members {
             if let Some(exec) = member.as_any().downcast_ref::<ExecCell>() {
@@ -209,7 +219,7 @@ impl CodeModeCell {
                 marker,
                 " ".into(),
                 "Waiting".bold(),
-                format!(" (for {})", self.tetrad()).dim(),
+                format!(" ({})", self.tetrad()).dim(),
             ]));
         }
         lines

@@ -265,14 +265,36 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
     app.transcript_view
         .jump_to_entry(&app.transcript_cells, a_index);
     let held = render(&mut app.transcript_view, &app.transcript_cells);
-    for item in [
-        call("child-a", ActivityKind::Exploration, "completed"),
+    // A JS result is not a process exit: its background command keeps its own lease.
+    app.handle_thread_event_now(ThreadBufferedEvent::Notification(Box::new(notification(
+        &a,
         code_mode(
             "exec-a",
             CodeModeEvent::Finished {
                 status: CodeModeStatus::Completed,
             },
         ),
+    ))));
+    drain(&mut app, &mut rx, &mut tui);
+    let background = app
+        .transcript_cells
+        .iter()
+        .find_map(|cell| {
+            cell.as_any()
+                .downcast_ref::<history_cell::CodeModeCell>()
+                .filter(|cell| cell.owner.as_ref() == Some(&a))
+        })
+        .unwrap();
+    assert!(background.terminal());
+    assert!(background.is_active());
+    assert!(
+        background.live_lines()[0]
+            .to_string()
+            .contains(&format!("Running ({})", background.tetrad()))
+    );
+
+    for item in [
+        call("child-a", ActivityKind::Exploration, "completed"),
         code_mode(
             "exec-a",
             CodeModeEvent::WaitStarted {
@@ -332,6 +354,8 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
         })
         .unwrap()
         .clone();
+    assert!(!terminal.is_active());
+    assert!(terminal.live_lines().is_empty());
     let before_child = terminal.children.clone();
     assert_eq!(
         app.transcript_view
