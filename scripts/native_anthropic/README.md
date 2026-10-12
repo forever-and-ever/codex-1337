@@ -167,11 +167,13 @@ Live Sonnet 5 controls established that the fixed leading system block
 subscription endpoint: adding only that block changed HTTP 429 to successful
 inference; removing it restored the rejection. The successful minimal request
 needed neither extra client-identification headers nor subscription metadata.
-Native encoding adds the block before cache marking, without rewriting canonical
-history or the following instructions.
+Native encoding adds that identity block and a fixed Codex-1337 harness block
+before cache marking, without rewriting canonical history or the following
+instructions. The harness identifies AGENTS.md as the project authority and
+clarifies that Claude Code tools and commands are unavailable.
 
-Apart from that block, native encoding must not add prompt text, and it must
-preserve the authority and exact content of system and developer instructions.
+Apart from those fixed blocks, native encoding must not add prompt text, and it
+must preserve the authority and exact content of system and developer instructions.
 Tools need stable names and exact call/result pairing; `functions.exec` remains
 Code Mode, `send_message` remains a direct family tool, and fixtures never
 dispatch either. Root conversations mark cache breakpoints with a one-hour TTL
