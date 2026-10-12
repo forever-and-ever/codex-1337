@@ -241,22 +241,6 @@ impl ChatWidget {
         true
     }
 
-    pub(crate) fn finish_pending_steer_cancellation(
-        &mut self,
-        action: crate::app_command::PendingSteerCancelAction,
-    ) -> bool {
-        let Some(client_id) = self
-            .input_queue
-            .pending_steer
-            .client_id()
-            .map(str::to_owned)
-        else {
-            return false;
-        };
-        self.finish_submission_cancel(&client_id, action, true);
-        true
-    }
-
     /// Handle a turn aborted due to user interrupt, budget exhaustion,
     /// or review completion.
     /// When there are queued user messages, restore them into the composer

@@ -3,7 +3,6 @@
 //! Only persisted member adjacency within one turn permits joins. Overlay callbacks retain the
 //! displayed source revision before canonical cells are replaced or absorbed into the live tail.
 
-use super::transcript_splice::SpliceShape;
 use super::transcript_splice::TranscriptSplice;
 use super::*;
 use crate::thread_transcript::join_computer_groups;
@@ -24,10 +23,10 @@ impl App {
                 .collect();
             self.commit_transcript_splice(
                 tui,
-                TranscriptSplice {
+                TranscriptSplice::Members {
                     range,
                     cells: replacements,
-                    shape: SpliceShape::Members(retained),
+                    retained,
                 },
             );
             self.native_history.retain(&self.transcript_cells);
@@ -112,10 +111,10 @@ impl App {
                 .collect::<Vec<_>>();
             self.commit_transcript_splice(
                 tui,
-                TranscriptSplice {
+                TranscriptSplice::Members {
                     range,
                     cells: replacements,
-                    shape: SpliceShape::Members(retained),
+                    retained,
                 },
             );
             return;
@@ -138,14 +137,14 @@ impl App {
             );
             start = merged_start;
             let range = start..newer_index;
-            self.native_history
-                .consolidate(&self.transcript_cells[range.clone()], &older);
-            self.transcript_view
-                .replace_group(&self.transcript_cells, range.clone(), &older);
-            if let Some(Overlay::Transcript(overlay)) = self.overlay.as_mut() {
-                overlay.regroup_cells(range.clone(), Arc::clone(&older));
-            }
-            self.transcript_cells.splice(range, [older]);
+            self.commit_transcript_splice(
+                tui,
+                TranscriptSplice::Members {
+                    range,
+                    cells: vec![older],
+                    retained: Vec::new(),
+                },
+            );
             newer_index = start + 1;
         }
         if newer_index == self.transcript_cells.len() {
@@ -155,16 +154,13 @@ impl App {
             else {
                 return;
             };
-            self.transcript_view.absorb_tail_into_live(
-                &self.transcript_cells,
-                previous_revision,
-                hydrated_revision,
+            self.commit_transcript_splice(
+                tui,
+                TranscriptSplice::AbsorbTail {
+                    previous_revision,
+                    hydrated_revision,
+                },
             );
-            if let Some(Overlay::Transcript(overlay)) = self.overlay.as_mut() {
-                overlay.absorb_tail_into_live(previous_revision, hydrated_revision);
-            }
-            self.transcript_cells.pop();
-            self.native_history.retain(&self.transcript_cells);
             return;
         }
         let Some(newer) = self.transcript_cells.get(newer_index) else {
@@ -180,14 +176,14 @@ impl App {
         let (start, group) =
             history_cell::ToolOutputGroup::join_prefix(&self.transcript_cells, start, group, turns);
         let range = start..newer_index + 1;
-        self.native_history
-            .consolidate(&self.transcript_cells[range.clone()], &group);
-        self.transcript_view
-            .replace_group(&self.transcript_cells, range.clone(), &group);
-        if let Some(Overlay::Transcript(overlay)) = self.overlay.as_mut() {
-            overlay.regroup_cells(range.clone(), Arc::clone(&group));
-        }
-        self.transcript_cells.splice(range, [group]);
+        self.commit_transcript_splice(
+            tui,
+            TranscriptSplice::Members {
+                range,
+                cells: vec![group],
+                retained: Vec::new(),
+            },
+        );
     }
 }
 

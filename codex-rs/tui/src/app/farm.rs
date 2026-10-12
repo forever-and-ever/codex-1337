@@ -2,7 +2,6 @@
 //! replacement while a request awaits its receipt or its outcome is unknown; loss of a
 //! response is not a failed spawn. A rejection spawned nothing, so it retains nothing.
 
-use super::transcript_splice::SpliceShape;
 use super::transcript_splice::TranscriptSplice;
 use super::*;
 use crate::chatwidget::FarmSubmission;
@@ -389,10 +388,9 @@ impl App {
             let receipt: Arc<dyn HistoryCell> = receipt.into();
             self.commit_transcript_splice(
                 tui,
-                TranscriptSplice {
+                TranscriptSplice::Revision {
                     range: index..index + 1,
-                    cells: vec![receipt],
-                    shape: SpliceShape::Revision,
+                    cell: receipt,
                 },
             );
         } else {

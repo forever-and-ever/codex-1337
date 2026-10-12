@@ -1658,7 +1658,8 @@ async fn replay_thread_snapshot_does_not_submit_queue_before_replay_catches_up()
         .expect("expected queued follow-up state");
     let client_id = input_state
         .input_queue
-        .pending_steer_client_id()
+        .pending_steer
+        .client_id()
         .unwrap()
         .to_owned();
     input_state.reconnect_pending = true;

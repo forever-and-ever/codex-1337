@@ -1822,34 +1822,30 @@ async fn pending_steer_edit_and_remove_shortcuts_cancel_the_single_slot() {
     );
 
     chat.handle_key_event(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::ALT));
-    assert_matches!(
-        op_rx.try_recv(),
-        Ok(Op::CancelPendingSteer {
-            action: crate::app_command::PendingSteerCancelAction::Edit,
-            ..
-        })
-    );
-    assert!(
-        chat.finish_pending_steer_cancellation(crate::app_command::PendingSteerCancelAction::Edit)
-    );
+    let Ok(Op::CancelPendingSteer {
+        client_user_message_id,
+        action,
+    }) = op_rx.try_recv()
+    else {
+        panic!("expected pending-steer cancellation");
+    };
+    assert_eq!(action, crate::app_command::PendingSteerCancelAction::Edit);
+    chat.finish_submission_cancel(&client_user_message_id, action, true);
     assert_eq!(chat.bottom_pane.composer_text(), "edit me");
 
     chat.input_queue
         .pending_steer
         .set(Some(pending_steer("remove me")));
     chat.handle_key_event(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::ALT));
-    assert_matches!(
-        op_rx.try_recv(),
-        Ok(Op::CancelPendingSteer {
-            action: crate::app_command::PendingSteerCancelAction::Remove,
-            ..
-        })
-    );
-    assert!(
-        chat.finish_pending_steer_cancellation(
-            crate::app_command::PendingSteerCancelAction::Remove
-        )
-    );
+    let Ok(Op::CancelPendingSteer {
+        client_user_message_id,
+        action,
+    }) = op_rx.try_recv()
+    else {
+        panic!("expected pending-steer cancellation");
+    };
+    assert_eq!(action, crate::app_command::PendingSteerCancelAction::Remove);
+    chat.finish_submission_cancel(&client_user_message_id, action, true);
     assert!(chat.input_queue.pending_steer.is_none());
     assert_eq!(chat.bottom_pane.composer_text(), "edit me");
     assert!(

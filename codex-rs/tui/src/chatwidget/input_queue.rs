@@ -297,10 +297,6 @@ impl InputQueueState {
         }
     }
 
-    pub(crate) fn pending_steer_client_id(&self) -> Option<&str> {
-        self.pending_steer.client_id()
-    }
-
     pub(crate) fn discard_pending_steer(&mut self, client_id: &str) -> bool {
         if self.pending_steer.client_id() != Some(client_id) {
             return false;

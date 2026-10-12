@@ -14,7 +14,6 @@ use color_eyre::eyre::Result;
 
 use super::App;
 use super::resize_reflow::trailing_run_start;
-use super::transcript_splice::SpliceShape;
 use super::transcript_splice::TranscriptSplice;
 use crate::app_event::ConsolidationScrollbackReflow;
 use crate::history_cell;
@@ -62,19 +61,19 @@ impl App {
                 .downcast_ref::<history_cell::AgentMessageCell>()
                 .and_then(|cell| cell.timestamp);
             let consolidated: Arc<dyn HistoryCell> = Arc::new(consolidated);
-            let shape = if tui.is_owned_screen() {
-                SpliceShape::Members(Vec::new())
-            } else {
-                SpliceShape::Revision
-            };
-            self.commit_transcript_splice(
-                tui,
-                TranscriptSplice {
+            let splice = if tui.is_owned_screen() {
+                TranscriptSplice::Members {
                     range: start..end,
                     cells: vec![consolidated],
-                    shape,
-                },
-            );
+                    retained: Vec::new(),
+                }
+            } else {
+                TranscriptSplice::Revision {
+                    range: start..end,
+                    cell: consolidated,
+                }
+            };
+            self.commit_transcript_splice(tui, splice);
 
             self.finish_agent_message_consolidation(tui, scrollback_reflow)?;
         } else {

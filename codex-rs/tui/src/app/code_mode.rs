@@ -1,5 +1,4 @@
 //! Apply canonical scoped blocks through the existing retained-history/reading snapshot boundary.
-use super::transcript_splice::SpliceShape;
 use super::transcript_splice::TranscriptSplice;
 use super::*;
 use crate::code_mode_transcript::Admission;
@@ -219,10 +218,10 @@ impl App {
             }
             self.commit_transcript_splice(
                 tui,
-                TranscriptSplice {
+                TranscriptSplice::Members {
                     range: index..index + 1,
                     cells: vec![incoming],
-                    shape: SpliceShape::Members(Vec::new()),
+                    retained: Vec::new(),
                 },
             );
         } else {

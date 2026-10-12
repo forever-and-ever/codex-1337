@@ -4,7 +4,6 @@
 //! state, and resetting transcript-related app state after `/clear` or Ctrl-L. Owned-screen sessions
 //! keep committed cells as the render source and never enqueue terminal-scrollback rows here.
 
-use super::transcript_splice::SpliceShape;
 use super::transcript_splice::TranscriptSplice;
 use super::*;
 use crate::terminal_hyperlinks::HyperlinkLine;
@@ -52,10 +51,9 @@ impl App {
             if existing.completed_at.is_none() || failure.completed_at.is_some() {
                 self.commit_transcript_splice(
                     tui,
-                    TranscriptSplice {
+                    TranscriptSplice::Revision {
                         range: index..index + 1,
-                        cells: vec![cell],
-                        shape: SpliceShape::Revision,
+                        cell: cell,
                     },
                 );
             }
@@ -123,10 +121,10 @@ impl App {
                 .collect::<Vec<_>>();
             self.commit_transcript_splice(
                 tui,
-                TranscriptSplice {
+                TranscriptSplice::Members {
                     range,
                     cells: replacements,
-                    shape: SpliceShape::Members(retained),
+                    retained,
                 },
             );
             return;
@@ -139,10 +137,9 @@ impl App {
                 }
                 self.commit_transcript_splice(
                     tui,
-                    TranscriptSplice {
+                    TranscriptSplice::Revision {
                         range: index..index + 1,
-                        cells: vec![replacement],
-                        shape: SpliceShape::Revision,
+                        cell: replacement,
                     },
                 );
             }
@@ -165,10 +162,10 @@ impl App {
                 .collect::<Vec<_>>();
             self.commit_transcript_splice(
                 tui,
-                TranscriptSplice {
+                TranscriptSplice::Members {
                     range,
                     cells: replacements,
-                    shape: SpliceShape::Members(retained),
+                    retained,
                 },
             );
             return;

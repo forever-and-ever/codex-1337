@@ -3,7 +3,6 @@
 use std::collections::HashSet;
 use std::ops::Range;
 
-use super::transcript_splice::SpliceShape;
 use super::transcript_splice::TranscriptSplice;
 use super::*;
 use crate::app_server_session::HISTORY_ITEM_PAGE_LIMIT;
@@ -353,10 +352,10 @@ impl App {
         for index in removed.into_iter().rev() {
             self.commit_transcript_splice(
                 tui,
-                TranscriptSplice {
+                TranscriptSplice::Members {
                     range: index..index + 1,
                     cells: Vec::new(),
-                    shape: SpliceShape::Members(Vec::new()),
+                    retained: Vec::new(),
                 },
             );
         }

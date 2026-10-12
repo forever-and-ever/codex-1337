@@ -1,4 +1,4 @@
-use super::transcript_splice::{SpliceShape, TranscriptSplice};
+use super::transcript_splice::TranscriptSplice;
 use super::*;
 
 fn source_item_id(cell: &dyn HistoryCell) -> Option<&str> {
@@ -34,10 +34,10 @@ impl App {
             .collect();
         self.commit_transcript_splice(
             tui,
-            TranscriptSplice {
+            TranscriptSplice::Members {
                 range: start..end,
                 cells: retained.clone(),
-                shape: SpliceShape::Members(retained),
+                retained,
             },
         );
     }

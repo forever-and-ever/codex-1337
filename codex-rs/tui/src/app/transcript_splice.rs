@@ -1,15 +1,20 @@
 use super::*;
 use std::ops::Range;
 
-pub(super) enum SpliceShape {
-    Revision,
-    Members(Vec<Arc<dyn HistoryCell>>),
-}
-
-pub(super) struct TranscriptSplice {
-    pub(super) range: Range<usize>,
-    pub(super) cells: Vec<Arc<dyn HistoryCell>>,
-    pub(super) shape: SpliceShape,
+pub(super) enum TranscriptSplice {
+    Revision {
+        range: Range<usize>,
+        cell: Arc<dyn HistoryCell>,
+    },
+    Members {
+        range: Range<usize>,
+        cells: Vec<Arc<dyn HistoryCell>>,
+        retained: Vec<Arc<dyn HistoryCell>>,
+    },
+    AbsorbTail {
+        previous_revision: u64,
+        hydrated_revision: u64,
+    },
 }
 
 impl App {
@@ -18,48 +23,61 @@ impl App {
         tui: &mut tui::Tui,
         splice: TranscriptSplice,
     ) {
-        let retained = match &splice.shape {
-            SpliceShape::Revision => &[][..],
-            SpliceShape::Members(retained) => retained.as_slice(),
-        };
-        let previous = self.transcript_cells[splice.range.clone()]
-            .iter()
-            .filter(|old| !retained.iter().any(|cell| Arc::ptr_eq(old, cell)))
-            .cloned()
-            .collect::<Vec<_>>();
-        if let Some(replacement) = splice
-            .cells
-            .iter()
-            .find(|new| !retained.iter().any(|cell| Arc::ptr_eq(new, cell)))
-        {
-            self.native_history.consolidate(&previous, replacement);
-        } else {
-            self.native_history.discard(&previous);
-        }
-        match splice.shape {
-            SpliceShape::Revision => {
-                let replacement = &splice.cells[0];
-                self.transcript_view.replace_range(
-                    &self.transcript_cells,
-                    splice.range.clone(),
-                    replacement,
-                );
+        match splice {
+            TranscriptSplice::Revision { range, cell } => {
+                self.native_history
+                    .consolidate(&self.transcript_cells[range.clone()], &cell);
+                self.transcript_view
+                    .replace_range(&self.transcript_cells, range.clone(), &cell);
                 if let Some(Overlay::Transcript(overlay)) = self.overlay.as_mut() {
-                    overlay.regroup_cell_members(splice.range.clone(), &splice.cells);
+                    overlay.regroup_cell_members(range.clone(), std::slice::from_ref(&cell));
                 }
+                self.transcript_cells.splice(range, [cell]);
             }
-            SpliceShape::Members(_) => {
+            TranscriptSplice::Members {
+                range,
+                cells,
+                retained,
+            } => {
+                let previous = self.transcript_cells[range.clone()]
+                    .iter()
+                    .filter(|old| !retained.iter().any(|cell| Arc::ptr_eq(old, cell)))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                if let Some(replacement) = cells
+                    .iter()
+                    .find(|new| !retained.iter().any(|cell| Arc::ptr_eq(new, cell)))
+                {
+                    self.native_history.consolidate(&previous, replacement);
+                } else {
+                    self.native_history.discard(&previous);
+                }
                 self.transcript_view.replace_group_members(
                     &self.transcript_cells,
-                    splice.range.clone(),
-                    &splice.cells,
+                    range.clone(),
+                    &cells,
                 );
                 if let Some(Overlay::Transcript(overlay)) = self.overlay.as_mut() {
-                    overlay.regroup_cell_members(splice.range.clone(), &splice.cells);
+                    overlay.regroup_cell_members(range.clone(), &cells);
                 }
+                self.transcript_cells.splice(range, cells);
+            }
+            TranscriptSplice::AbsorbTail {
+                previous_revision,
+                hydrated_revision,
+            } => {
+                self.transcript_view.absorb_tail_into_live(
+                    &self.transcript_cells,
+                    previous_revision,
+                    hydrated_revision,
+                );
+                if let Some(Overlay::Transcript(overlay)) = self.overlay.as_mut() {
+                    overlay.absorb_tail_into_live(previous_revision, hydrated_revision);
+                }
+                self.transcript_cells.pop();
+                self.native_history.retain(&self.transcript_cells);
             }
         }
-        self.transcript_cells.splice(splice.range, splice.cells);
         tui.frame_requester().schedule_frame();
         self.chat_widget.request_pending_usage_output_insertion();
     }
@@ -76,9 +94,9 @@ impl App {
         cells.rotate_right(/*k*/ 1);
         self.commit_transcript_splice(
             tui,
-            TranscriptSplice {
+            TranscriptSplice::Members {
                 range,
-                shape: SpliceShape::Members(cells.clone()),
+                retained: cells.clone(),
                 cells,
             },
         );
