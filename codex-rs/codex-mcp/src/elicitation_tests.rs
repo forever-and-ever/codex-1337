@@ -23,11 +23,16 @@ struct RecordingReviewer {
 
 impl crate::IssuingElicitationReviewer for RecordingReviewer {
     fn approval_authority(
-        &self,
-        _request: ElicitationReviewRequest,
-    ) -> BoxFuture<'static, Option<crate::ElicitationApprovalAuthority>> {
+        self: Arc<Self>,
+        request: ElicitationReviewRequest,
+    ) -> BoxFuture<'static, anyhow::Result<Option<crate::PreparedElicitationReview>>> {
         let authority = self.authority.clone();
-        Box::pin(async move { authority })
+        Box::pin(async move {
+            Ok(authority.map(|authority| crate::PreparedElicitationReview {
+                authority,
+                review: Box::pin(async move { self.review(request).await }),
+            }))
+        })
     }
 }
 

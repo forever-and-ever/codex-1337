@@ -8660,11 +8660,76 @@ async fn mcp_elicitation_reviewer_keeps_issuing_step_authority(live_update: bool
         invocation: None,
         metadata: crate::mcp_tool_call::McpToolApprovalMetadata::default(),
         step_context: issued_step,
+        cancellation_token: session
+            .active_turn_context_and_cancellation_token()
+            .await
+            .expect("active issuing turn")
+            .1,
     });
     session.mcp_tool_approval_metadata.lock().unwrap().insert(
         ("browser-use".to_string(), "issued-call".to_string()),
         Arc::downgrade(&approval_metadata),
     );
+    let mut request = codex_mcp::ElicitationReviewRequest {
+        server_name: "browser-use".to_string(),
+        request_id: rmcp::model::NumberOrString::Number(7),
+        elicitation: codex_rmcp_client::Elicitation::Mcp(
+            rmcp::model::ElicitRequestParams::FormElicitationParams {
+                meta: Some(rmcp::model::RequestMetaObject::from(
+                    serde_json::Map::from_iter([
+                        ("callId".to_string(), json!("issued-call")),
+                        ("codex_approval_kind".to_string(), json!("mcp_tool_call")),
+                        ("codex_request_type".to_string(), json!("approval_request")),
+                        ("tool_name".to_string(), json!("access_browser_origin")),
+                    ]),
+                )),
+                message: "Allow origin?".to_string(),
+                requested_schema: rmcp::model::ElicitationSchema::builder()
+                    .build()
+                    .expect("schema should build"),
+            },
+        ),
+    };
+    let prepare = || async {
+        session
+            .mcp_elicitation_reviewer()
+            .approval_authority(request.clone())
+            .await
+            .expect("preparation should succeed")
+            .expect("session-owned authority")
+    };
+    let [
+        first_review,
+        policy_review,
+        permissions_review,
+        cancelled_review,
+    ] = [
+        prepare().await,
+        prepare().await,
+        prepare().await,
+        prepare().await,
+    ];
+    for prepared in [
+        &first_review,
+        &policy_review,
+        &permissions_review,
+        &cancelled_review,
+    ] {
+        assert_eq!(
+            prepared.authority.approval_policy,
+            AskForApproval::OnRequest
+        );
+        assert!(
+            prepared
+                .authority
+                .permission_profile
+                .as_ref()
+                .is_some_and(|profile| !matches!(profile, PermissionProfile::Disabled))
+        );
+    }
+    // A received request must retain its issuing context even after the tool
+    // guard disappears and live or future settings change before review.
+    drop(approval_metadata);
     if live_update {
         assert_eq!(
             session
@@ -8692,30 +8757,9 @@ async fn mcp_elicitation_reviewer_keeps_issuing_step_authority(live_update: bool
         session.refresh_mcp_if_dirty().await;
     }
 
-    let request = codex_mcp::ElicitationReviewRequest {
-        server_name: "browser-use".to_string(),
-        request_id: rmcp::model::NumberOrString::Number(7),
-        elicitation: codex_rmcp_client::Elicitation::Mcp(
-            rmcp::model::ElicitRequestParams::FormElicitationParams {
-                meta: Some(rmcp::model::RequestMetaObject::from(
-                    serde_json::Map::from_iter([
-                        ("callId".to_string(), json!("issued-call")),
-                        ("codex_approval_kind".to_string(), json!("mcp_tool_call")),
-                        ("codex_request_type".to_string(), json!("approval_request")),
-                        ("tool_name".to_string(), json!("access_browser_origin")),
-                    ]),
-                )),
-                message: "Allow origin?".to_string(),
-                requested_schema: rmcp::model::ElicitationSchema::builder()
-                    .build()
-                    .expect("schema should build"),
-            },
-        ),
-    };
     assert!(
-        session
-            .mcp_elicitation_reviewer()
-            .review(request.clone())
+        first_review
+            .review
             .await
             .expect("elicitation review should succeed")
             .is_some()
@@ -8738,9 +8782,8 @@ async fn mcp_elicitation_reviewer_keeps_issuing_step_authority(live_update: bool
         .expect("approval policy should update");
     session.refresh_mcp_if_dirty().await;
     assert_eq!(
-        session
-            .mcp_elicitation_reviewer()
-            .review(request.clone())
+        policy_review
+            .review
             .await
             .expect("elicitation review should succeed"),
         Some(ElicitationResponse {
@@ -8759,9 +8802,8 @@ async fn mcp_elicitation_reviewer_keeps_issuing_step_authority(live_update: bool
         .expect("permission profile should update");
     session.refresh_mcp_if_dirty().await;
     assert_eq!(
-        session
-            .mcp_elicitation_reviewer()
-            .review(request.clone())
+        permissions_review
+            .review
             .await
             .expect("elicitation review should succeed"),
         Some(ElicitationResponse {
@@ -8771,19 +8813,32 @@ async fn mcp_elicitation_reviewer_keeps_issuing_step_authority(live_update: bool
         })
     );
 
-    // Saved settings affect future turns, never an action already dispatched.
-    let issued_authority = session
-        .mcp_elicitation_reviewer()
-        .approval_authority(request.clone())
-        .await
-        .expect("issued authority");
-    assert_eq!(issued_authority.approval_policy, AskForApproval::OnRequest);
-    assert!(!matches!(
-        issued_authority.permission_profile,
-        Some(PermissionProfile::Disabled)
-    ));
-    drop(approval_metadata);
+    assert!(
+        session
+            .mcp_elicitation_reviewer()
+            .approval_authority(request.clone())
+            .await
+            .is_err(),
+        "an expired invocation must not become a server-initiated request"
+    );
+    if let codex_rmcp_client::Elicitation::Mcp(
+        rmcp::model::ElicitRequestParams::FormElicitationParams {
+            meta: Some(meta), ..
+        },
+    ) = &mut request.elicitation
+    {
+        meta.remove("callId");
+    }
     session.abort_all_tasks(TurnAbortReason::Interrupted).await;
+    assert_eq!(
+        cancelled_review
+            .review
+            .await
+            .expect("cancelled review")
+            .expect("cancel response")
+            .action,
+        ElicitationAction::Cancel
+    );
     let (next_turn, _) = session
         .new_turn_with_sub_id(
             "next-turn".to_string(),
@@ -8845,7 +8900,7 @@ async fn mcp_elicitation_reviewer_keeps_issuing_step_authority(live_update: bool
     assert_eq!(
         session
             .mcp_elicitation_reviewer()
-            .review(request)
+            .review(request.clone())
             .await
             .expect("elicitation review should succeed"),
         Some(ElicitationResponse {
@@ -8856,6 +8911,14 @@ async fn mcp_elicitation_reviewer_keeps_issuing_step_authority(live_update: bool
     );
 
     session.abort_all_tasks(TurnAbortReason::Interrupted).await;
+    assert!(
+        session
+            .mcp_elicitation_reviewer()
+            .approval_authority(request)
+            .await
+            .is_err(),
+        "a session-bound reviewer without an active turn cannot use connection defaults"
+    );
 }
 
 #[tokio::test]

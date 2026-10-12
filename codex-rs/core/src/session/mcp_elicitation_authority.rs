@@ -5,57 +5,111 @@ use codex_mcp::IssuingElicitationReviewer;
 
 impl IssuingElicitationReviewer for GuardianMcpElicitationReviewer {
     fn approval_authority(
-        &self,
+        self: Arc<Self>,
         request: ElicitationReviewRequest,
-    ) -> futures::future::BoxFuture<'static, Option<ElicitationApprovalAuthority>> {
+    ) -> futures::future::BoxFuture<
+        'static,
+        anyhow::Result<Option<codex_mcp::PreparedElicitationReview>>,
+    > {
         let session = self.session.clone();
         Box::pin(async move {
-            let session = session.upgrade()?;
-            let (turn, _) = session.active_turn_context_and_cancellation_token().await?;
-            let (context, config) = issuing_context(&session, &request, &turn)?;
-            Some(project_authority(&context, &config, &request.server_name))
+            let session = session
+                .upgrade()
+                .ok_or_else(|| anyhow::anyhow!("MCP elicitation session is unavailable"))?;
+            let context = issuing_context(&session, &request).await?;
+            anyhow::ensure!(
+                !context.cancellation.is_cancelled(),
+                "MCP elicitation issuing turn was cancelled"
+            );
+            let authority =
+                project_authority(&context.review, &context.config, &request.server_name);
+            Ok(Some(codex_mcp::PreparedElicitationReview {
+                authority,
+                review: Box::pin(review_bound_elicitation(session, request, context)),
+            }))
         })
     }
 }
 
-fn invocation_call_id(request: &ElicitationReviewRequest) -> Option<&str> {
-    request
-        .elicitation
-        .meta()
-        .and_then(|meta| match request.server_name.as_str() {
-            CODEX_APPS_MCP_SERVER_NAME => meta.get(MCP_TOOL_CODEX_APPS_META_KEY)?.get("call_id"),
-            _ => meta.get("callId"),
+fn invocation_call_id(request: &ElicitationReviewRequest) -> anyhow::Result<Option<&str>> {
+    let Some(meta) = request.elicitation.meta() else {
+        return Ok(None);
+    };
+    let value = match request.server_name.as_str() {
+        CODEX_APPS_MCP_SERVER_NAME => match meta.get(MCP_TOOL_CODEX_APPS_META_KEY) {
+            Some(value) => value
+                .as_object()
+                .ok_or_else(|| anyhow::anyhow!("invalid MCP invocation metadata"))?
+                .get("call_id"),
+            None => None,
+        },
+        _ => meta.get("callId"),
+    };
+    value
+        .map(|value| {
+            value
+                .as_str()
+                .ok_or_else(|| anyhow::anyhow!("invalid MCP invocation call ID"))
         })
-        .and_then(Value::as_str)
+        .transpose()
 }
 
-fn issuing_context(
+struct ElicitationReviewContext {
+    review: crate::guardian::GuardianReviewContext,
+    config: Arc<codex_mcp::McpConfig>,
+    invocation: Option<McpToolApprovalContext>,
+    cancellation: CancellationToken,
+}
+
+async fn issuing_context(
     session: &Session,
     request: &ElicitationReviewRequest,
-    turn: &Arc<TurnContext>,
-) -> Option<(
-    crate::guardian::GuardianReviewContext,
-    Arc<codex_mcp::McpConfig>,
-)> {
-    if let Some(invocation) = invocation_call_id(request)
-        .and_then(|call_id| session.mcp_tool_approval_metadata(&request.server_name, call_id))
-    {
-        return Some((
+) -> anyhow::Result<ElicitationReviewContext> {
+    // Pin the invocation before the first await: the registry is weak and its
+    // running-tool guard may be dropped while this request is still waiting.
+    let invocation = invocation_call_id(request)?
+        .map(|call_id| {
+            session
+                .mcp_tool_approval_metadata(&request.server_name, call_id)
+                .ok_or_else(|| {
+                    anyhow::anyhow!("MCP elicitation invocation {call_id} is unavailable")
+                })
+        })
+        .transpose()?;
+    let (turn, active_cancellation) = session
+        .active_turn_context_and_cancellation_token()
+        .await
+        .ok_or_else(|| anyhow::anyhow!("MCP elicitation has no active turn"))?;
+    let (review, config, cancellation) = if let Some(invocation) = invocation.as_ref() {
+        (
             crate::guardian::GuardianReviewContext::from(&invocation.step_context),
             Arc::clone(invocation.step_context.mcp.config()),
-        ));
-    }
-    // Server-initiated requests have no issuing invocation. They belong to the
-    // active turn, including explicit live updates, not saved future-turn settings.
-    let settings = turn.next_step_settings.load_full();
-    Some((
-        crate::guardian::GuardianReviewContext::from_resolved_settings(
-            Arc::clone(turn),
-            &settings,
-            &turn.initial_environments,
-        ),
-        session.services.mcp_runtime.current_config()?,
-    ))
+            invocation.cancellation_token.child_token(),
+        )
+    } else {
+        // Only requests without an invocation identity are server-initiated.
+        // They belong to active-turn settings, never saved future-turn defaults.
+        let settings = turn.next_step_settings.load_full();
+        (
+            crate::guardian::GuardianReviewContext::from_resolved_settings(
+                Arc::clone(&turn),
+                &settings,
+                &turn.initial_environments,
+            ),
+            session
+                .services
+                .mcp_runtime
+                .current_config()
+                .ok_or_else(|| anyhow::anyhow!("MCP elicitation runtime is unavailable"))?,
+            active_cancellation,
+        )
+    };
+    Ok(ElicitationReviewContext {
+        review,
+        config,
+        invocation,
+        cancellation,
+    })
 }
 
 fn project_authority(
@@ -95,21 +149,32 @@ pub(super) async fn review_guardian_mcp_elicitation(
     session: Arc<Session>,
     request: ElicitationReviewRequest,
 ) -> anyhow::Result<Option<ElicitationResponse>> {
-    let Some((turn_context, cancellation_token)) =
-        session.active_turn_context_and_cancellation_token().await
-    else {
-        return Ok(None);
-    };
+    let context = issuing_context(&session, &request).await?;
+    review_bound_elicitation(session, request, context).await
+}
 
-    let Some((mut review_context, mcp_config)) = issuing_context(&session, &request, &turn_context)
-    else {
-        return Ok(None);
-    };
+async fn review_bound_elicitation(
+    session: Arc<Session>,
+    request: ElicitationReviewRequest,
+    context: ElicitationReviewContext,
+) -> anyhow::Result<Option<ElicitationResponse>> {
+    let ElicitationReviewContext {
+        review: mut review_context,
+        config: mcp_config,
+        invocation: approval_context,
+        cancellation: cancellation_token,
+    } = context;
     let authority = project_authority(&review_context, &mcp_config, &request.server_name);
     let Some(permission_profile) = authority.permission_profile.as_ref() else {
         return Ok(Some(mcp_elicitation_decline_without_message()));
     };
     let model_info = Arc::clone(&review_context.model_info);
+    if cancellation_token.is_cancelled() {
+        return Ok(Some(mcp_elicitation_response_from_guardian_decision(
+            ReviewDecision::Abort,
+            &model_info,
+        )));
+    }
     let turn_context = Arc::clone(review_context.turn());
 
     // User approval skips ordinary CUA checks, not separate sensitive requests.
@@ -151,9 +216,7 @@ pub(super) async fn review_guardian_mcp_elicitation(
 
     // The invocation identifies the tool event, but a nested elicitation can
     // review a different action and connector than the enclosing JavaScript.
-    let call_id = invocation_call_id(&request);
-    let approval_context = call_id
-        .and_then(|call_id| session.mcp_tool_approval_metadata(&request.server_name, call_id));
+    let call_id = invocation_call_id(&request)?;
     let (originating_call_id, guardian_scope) = if let Some(call_id) = call_id
         && let Some(McpToolApprovalContext {
             invocation: Some(invocation),

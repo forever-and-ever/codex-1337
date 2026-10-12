@@ -266,6 +266,7 @@ pub(crate) async fn handle_mcp_tool_call(
         &invocation,
         metadata.clone(),
         Arc::clone(step_context),
+        cancellation_token,
     );
     notify_mcp_tool_call_started(
         sess.as_ref(),
@@ -1214,6 +1215,7 @@ pub(crate) struct McpToolApprovalContext {
     pub(crate) invocation: Option<McpInvocation>,
     pub(crate) metadata: McpToolApprovalMetadata,
     pub(crate) step_context: Arc<StepContext>,
+    pub(crate) cancellation_token: CancellationToken,
 }
 
 impl Session {
@@ -1223,6 +1225,7 @@ impl Session {
         invocation: &McpInvocation,
         metadata: McpToolApprovalMetadata,
         step_context: Arc<StepContext>,
+        cancellation_token: &CancellationToken,
     ) -> Arc<McpToolApprovalContext> {
         let key = (invocation.server.clone(), call_id.to_string());
         let metadata = Arc::new(McpToolApprovalContext {
@@ -1231,6 +1234,7 @@ impl Session {
             .then(|| invocation.clone()),
             metadata,
             step_context,
+            cancellation_token: cancellation_token.clone(),
         });
         let mut registry = self
             .mcp_tool_approval_metadata
