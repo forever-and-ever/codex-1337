@@ -448,8 +448,8 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     )
     .await;
     assert!(app.chat_widget.composer_text_with_pending().is_empty());
-    let rename_id = match app.server_operations.preview(Some(thread_id)) {
-        crate::app::turn_submissions::SubmissionPreview::Sending { waiting, .. } => waiting
+    let rename_id = match app.server_operations.preview(Some(thread_id)).thread {
+        crate::app::turn_submissions::ThreadSubmissionPreview::Sending { waiting, .. } => waiting
             .into_iter()
             .find_map(|entry| match entry {
                 crate::app::turn_submissions::SubmissionPreviewEntry::Operation {

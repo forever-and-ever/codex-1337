@@ -257,26 +257,19 @@ pub(crate) enum NavigationPreview {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) enum SubmissionPreview {
+pub(crate) struct SubmissionPreview {
+    pub(crate) navigation: Option<NavigationPreview>,
+    pub(crate) thread: ThreadSubmissionPreview,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) enum ThreadSubmissionPreview {
     #[default]
     Idle,
-    Navigation {
-        navigation: NavigationPreview,
-        submissions: Box<SubmissionPreview>,
-    },
     Sending {
         active: SubmissionPreviewEntry,
         waiting: Vec<SubmissionPreviewEntry>,
     },
-}
-
-impl SubmissionPreview {
-    pub(crate) fn thread_preview(&self) -> &Self {
-        match self {
-            Self::Navigation { submissions, .. } => submissions.thread_preview(),
-            _ => self,
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -466,19 +459,18 @@ impl ServerOperations {
     }
 
     pub(in crate::app) fn preview(&self, thread_id: Option<ThreadId>) -> SubmissionPreview {
-        let submissions = self.thread_preview(thread_id);
-        match self.navigation.preview() {
-            Some(navigation) => SubmissionPreview::Navigation {
-                navigation,
-                submissions: Box::new(submissions),
-            },
-            None => submissions,
+        SubmissionPreview {
+            navigation: self.navigation.preview(),
+            thread: self.thread_preview(thread_id),
         }
     }
 
-    pub(in crate::app) fn thread_preview(&self, thread_id: Option<ThreadId>) -> SubmissionPreview {
+    pub(in crate::app) fn thread_preview(
+        &self,
+        thread_id: Option<ThreadId>,
+    ) -> ThreadSubmissionPreview {
         let Some(thread_id) = thread_id else {
-            return SubmissionPreview::Idle;
+            return ThreadSubmissionPreview::Idle;
         };
         let mut entries = Vec::new();
         for key in [
@@ -498,14 +490,14 @@ impl ServerOperations {
         }
         entries.sort_by_key(|(entry, _, _)| entry.order);
         let Some((first, queued, uncertain)) = entries.first() else {
-            return SubmissionPreview::Idle;
+            return ThreadSubmissionPreview::Idle;
         };
         let active = if *queued {
-            SubmissionPreviewEntry::Cancellation {
+            ThreadSubmissionPreviewEntry::Cancellation {
                 text: "Waiting for earlier work",
             }
         } else if *uncertain {
-            SubmissionPreviewEntry::Cancellation {
+            ThreadSubmissionPreviewEntry::Cancellation {
                 text: "Operation outcome unknown; no retry sent",
             }
         } else {
@@ -516,7 +508,7 @@ impl ServerOperations {
             .skip(usize::from(!*queued))
             .map(|(entry, _, _)| entry.preview())
             .collect();
-        SubmissionPreview::Sending { active, waiting }
+        ThreadSubmissionPreview::Sending { active, waiting }
     }
 }
 

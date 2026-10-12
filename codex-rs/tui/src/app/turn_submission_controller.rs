@@ -327,7 +327,7 @@ impl App {
                 .expect("queued operation lane disappeared");
             self.start_submission(server, lane.active.thread_id, lane.active, lane.waiting);
         }
-        self.drive_navigation_operation();
+        self.drive_navigation_operation(server);
     }
 
     fn start_submission(

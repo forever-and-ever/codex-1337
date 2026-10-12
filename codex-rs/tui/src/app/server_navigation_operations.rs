@@ -2,6 +2,8 @@
 
 use super::*;
 
+use futures::FutureExt;
+
 #[derive(Default)]
 pub(super) struct NavigationOwner {
     current: Option<PendingNavigation>,
@@ -19,7 +21,9 @@ struct PendingNavigation {
 }
 
 enum NavigationIntent {
-    Picker(Arc<PickerPreparation>),
+    Picker,
+    PickerDefaults(Box<PickerPreparation>),
+    PickerStarting,
     ClosePicker,
 }
 
@@ -41,6 +45,7 @@ pub(crate) struct NavigationCompletion {
 }
 
 enum NavigationReceipt {
+    PickerDefaults(Result<Option<crate::config_update::EffectiveConfig>, String>),
     Picker(Result<AppServerSession, String>),
     PickerClosed,
 }
@@ -115,14 +120,7 @@ impl App {
         let order = self.server_operations.next_order;
         self.server_operations.next_order =
             order.checked_add(1).expect("operation sequence exhausted");
-        let intent = NavigationIntent::Picker(Arc::new(PickerPreparation {
-            config: self.config.clone(),
-            target: self.app_server_target.clone(),
-            cli_kv_overrides: self.cli_kv_overrides.clone(),
-            loader_overrides: self.loader_overrides.clone(),
-            state_db: self.state_db.clone(),
-            environment_manager: Arc::clone(&self.environment_manager),
-        }));
+        let intent = NavigationIntent::Picker;
         self.server_operations.navigation.current = Some(PendingNavigation {
             id: Uuid::new_v4(),
             order,
@@ -135,7 +133,7 @@ impl App {
         self.refresh_submission_preview();
     }
 
-    pub(super) fn drive_navigation_operation(&mut self) {
+    pub(super) fn drive_navigation_operation(&mut self, server: &AppServerSession) {
         let barrier = self
             .server_operations
             .lanes
@@ -149,10 +147,25 @@ impl App {
         {
             return;
         }
-        let NavigationIntent::Picker(preparation) = &operation.intent else {
-            unreachable!("cleanup is dispatched with its owned session");
+        // Config is captured only after earlier connection mutations have settled.
+        let preparation = Box::new(PickerPreparation {
+            config: self.config.clone(),
+            target: self.app_server_target.clone(),
+            cli_kv_overrides: self.cli_kv_overrides.clone(),
+            loader_overrides: self.loader_overrides.clone(),
+            state_db: self.state_db.clone(),
+            environment_manager: Arc::clone(&self.environment_manager),
+        });
+        let cwd = match server.thread_params_mode() {
+            crate::app_server_session::ThreadParamsMode::Embedded => {
+                preparation.config.cwd.to_path_buf()
+            }
+            crate::app_server_session::ThreadParamsMode::Remote => server
+                .remote_cwd_override()
+                .unwrap_or(Path::new("."))
+                .to_path_buf(),
         };
-        let preparation = Arc::clone(preparation);
+        operation.intent = NavigationIntent::PickerDefaults(preparation);
         let (id, order, epoch, generation) = (
             operation.id,
             operation.order,
@@ -160,24 +173,22 @@ impl App {
             operation.generation,
         );
         let events = self.app_event_tx.clone();
+        let handle = server.request_handle();
         operation.state = LaneState::Running(AbortOnDropHandle::new(tokio::spawn(async move {
-            let result = crate::start_app_server_for_picker(
-                &preparation.config,
-                &preparation.target,
-                preparation.cli_kv_overrides.clone(),
-                preparation.loader_overrides.clone(),
-                preparation.state_db.clone(),
-                Arc::clone(&preparation.environment_manager),
+            let result = std::panic::AssertUnwindSafe(
+                crate::config_update::read_effective_config_if_supported(handle, &cwd),
             )
+            .catch_unwind()
             .await
-            .map_err(|error| error.to_string());
+            .map_err(|_| "Picker defaults task terminated unexpectedly".to_string())
+            .and_then(|result| result.map_err(|error| error.to_string()));
             events.send(AppEvent::ServerNavigationPrepared(Box::new(
                 NavigationCompletion {
                     id,
                     order,
                     epoch,
                     generation,
-                    receipt: NavigationReceipt::Picker(result),
+                    receipt: NavigationReceipt::PickerDefaults(result),
                 },
             )));
         })));
@@ -224,6 +235,37 @@ impl App {
             return Ok(AppRunControl::Continue);
         };
         match completion.receipt {
+            NavigationReceipt::PickerDefaults(Ok(defaults)) if matching => {
+                let NavigationIntent::PickerDefaults(mut preparation) =
+                    std::mem::replace(&mut operation.intent, NavigationIntent::PickerStarting)
+                else {
+                    unreachable!("only the defaults stage emits a defaults receipt");
+                };
+                if let Some(defaults) = defaults {
+                    crate::projectless::apply_defaults(
+                        &mut preparation.config,
+                        &self.harness_overrides,
+                        server,
+                        &self.environment_manager,
+                        &defaults,
+                    );
+                    super::new_session::overlay_new_session_defaults(
+                        &mut preparation.config,
+                        &defaults.config,
+                        &preparation.cli_kv_overrides,
+                        &self.harness_overrides,
+                    );
+                }
+                self.spawn_picker_preparation(&mut operation, *preparation);
+                self.server_operations.navigation.current = Some(operation);
+            }
+            NavigationReceipt::PickerDefaults(Err(error)) if matching => {
+                self.add_session_picker_error(format!(
+                    "Failed to read session picker defaults: {error}"
+                ));
+                self.chat_widget.maybe_send_next_queued_input();
+            }
+            NavigationReceipt::PickerDefaults(_) => {}
             NavigationReceipt::Picker(Ok(mut picker)) if matching => {
                 picker.model_provider_override = self.harness_overrides.model_provider.clone();
                 self.drive_server_operations(server);
@@ -294,6 +336,44 @@ impl App {
         self.server_operations.navigation.retired.push(operation);
     }
 
+    fn spawn_picker_preparation(
+        &self,
+        operation: &mut PendingNavigation,
+        preparation: PickerPreparation,
+    ) {
+        let events = self.app_event_tx.clone();
+        let (id, order, epoch, generation) = (
+            operation.id,
+            operation.order,
+            operation.epoch,
+            operation.generation,
+        );
+        operation.intent = NavigationIntent::PickerStarting;
+        operation.state = LaneState::Running(AbortOnDropHandle::new(tokio::spawn(async move {
+            let result = std::panic::AssertUnwindSafe(crate::start_app_server_for_picker(
+                &preparation.config,
+                &preparation.target,
+                preparation.cli_kv_overrides,
+                preparation.loader_overrides,
+                preparation.state_db,
+                preparation.environment_manager,
+            ))
+            .catch_unwind()
+            .await
+            .map_err(|_| "Picker preparation task terminated unexpectedly".to_string())
+            .and_then(|result| result.map_err(|error| error.to_string()));
+            events.send(AppEvent::ServerNavigationPrepared(Box::new(
+                NavigationCompletion {
+                    id,
+                    order,
+                    epoch,
+                    generation,
+                    receipt: NavigationReceipt::Picker(result),
+                },
+            )));
+        })));
+    }
+
     fn spawn_picker_cleanup(&self, operation: &mut PendingNavigation, session: AppServerSession) {
         let events = self.app_event_tx.clone();
         let (id, order, epoch, generation) = (
@@ -303,8 +383,15 @@ impl App {
             operation.generation,
         );
         operation.state = LaneState::Running(AbortOnDropHandle::new(tokio::spawn(async move {
-            if let Err(error) = session.shutdown().await {
-                tracing::warn!(%error, "failed to close superseded picker session");
+            match std::panic::AssertUnwindSafe(session.shutdown())
+                .catch_unwind()
+                .await
+            {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => {
+                    tracing::warn!(%error, "failed to close superseded picker session")
+                }
+                Err(_) => tracing::warn!("superseded picker cleanup task terminated unexpectedly"),
             }
             events.send(AppEvent::ServerNavigationPrepared(Box::new(
                 NavigationCompletion {

@@ -7,6 +7,7 @@ use crate::app::turn_submissions::SubmissionDraft;
 use crate::app::turn_submissions::SubmissionEvent;
 use crate::app::turn_submissions::SubmissionPreview;
 use crate::app::turn_submissions::SubmissionPreviewEntry;
+use crate::app::turn_submissions::ThreadSubmissionPreview;
 use crate::app_command::PendingSteerCancelAction;
 use std::collections::VecDeque;
 
@@ -50,7 +51,7 @@ impl ChatWidget {
         }
     }
     pub(super) fn has_waiting_submission(&self) -> bool {
-        matches!(self.submission_preview.thread_preview(), SubmissionPreview::Sending { waiting, .. } if waiting.iter().any(|entry| matches!(entry, SubmissionPreviewEntry::Message { .. })))
+        matches!(&self.submission_preview.thread, ThreadSubmissionPreview::Sending { waiting, .. } if waiting.iter().any(|entry| matches!(entry, SubmissionPreviewEntry::Message { .. })))
     }
 
     pub(super) fn edit_submission_after_questions(
@@ -90,9 +91,9 @@ impl ChatWidget {
     }
 
     pub(super) fn submission_previews(&self) -> Vec<String> {
-        let mut previews = match self.submission_preview.thread_preview() {
-            SubmissionPreview::Idle => Vec::new(),
-            SubmissionPreview::Sending { active, waiting } => {
+        let mut previews = match &self.submission_preview.thread {
+            ThreadSubmissionPreview::Idle => Vec::new(),
+            ThreadSubmissionPreview::Sending { active, waiting } => {
                 std::iter::once(format!("Sending… {}", active.text()))
                     .chain(
                         waiting
@@ -101,9 +102,8 @@ impl ChatWidget {
                     )
                     .collect()
             }
-            SubmissionPreview::Navigation { .. } => unreachable!("thread preview is unwrapped"),
         };
-        if let SubmissionPreview::Navigation { navigation, .. } = &self.submission_preview {
+        if let Some(navigation) = &self.submission_preview.navigation {
             previews.push(match navigation {
                 crate::app::turn_submissions::NavigationPreview::Preparing { .. } => {
                     "Preparing session picker…".into()
@@ -117,7 +117,7 @@ impl ChatWidget {
     }
 
     pub(super) fn edit_waiting_submission(&mut self, action: PendingSteerCancelAction) -> bool {
-        if let SubmissionPreview::Sending { waiting, .. } = self.submission_preview.thread_preview()
+        if let ThreadSubmissionPreview::Sending { waiting, .. } = &self.submission_preview.thread
             && let Some(id) = waiting.iter().rev().find_map(|entry| match entry {
                 SubmissionPreviewEntry::Message { id, .. } => Some(*id),
                 SubmissionPreviewEntry::Operation { id, .. }
@@ -139,10 +139,8 @@ impl ChatWidget {
             return true;
         }
         if action == PendingSteerCancelAction::Remove
-            && let SubmissionPreview::Navigation {
-                navigation: crate::app::turn_submissions::NavigationPreview::Preparing { id },
-                ..
-            } = &self.submission_preview
+            && let Some(crate::app::turn_submissions::NavigationPreview::Preparing { id }) =
+                &self.submission_preview.navigation
         {
             self.app_event_tx
                 .send(AppEvent::Submission(SubmissionEvent::CancelNavigation {
@@ -154,12 +152,16 @@ impl ChatWidget {
     }
 
     pub(super) fn explain_sending_submission(&mut self) -> bool {
-        if matches!(self.submission_preview, SubmissionPreview::Idle) {
+        if matches!(
+            self.submission_preview.thread,
+            ThreadSubmissionPreview::Idle
+        ) && self.submission_preview.navigation.is_none()
+        {
             return false;
         }
         let message = if matches!(
-            self.submission_preview.thread_preview(),
-            SubmissionPreview::Idle
+            self.submission_preview.thread,
+            ThreadSubmissionPreview::Idle
         ) {
             "Session navigation is preparing or closing; it cannot be edited."
         } else {
