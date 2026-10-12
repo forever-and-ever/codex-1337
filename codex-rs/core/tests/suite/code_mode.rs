@@ -4175,7 +4175,7 @@ async fn code_mode_write_stdin_calls_run_in_parallel_across_sessions() -> Result
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
-    let (_test, second_mock) = run_code_mode_turn(
+    let (test, second_mock) = run_code_mode_turn(
         &server,
         "write to independent terminal sessions in parallel",
         r#"
@@ -4205,6 +4205,53 @@ text(JSON.stringify([results[0].output.includes("code-alpha-ready"), results[1].
     let items = custom_tool_output_items(&second_mock.single_request(), "call-1");
     let result: Value = serde_json::from_str(text_item(&items, /*index*/ 1))?;
     assert_eq!(result, serde_json::json!([true, true]));
+
+    // Process polling has its own invocation identity, even when both sessions share a cell.
+    test.codex.flush_rollout().await?;
+    let (rollout, _, _) = codex_rollout::RolloutRecorder::load_rollout_items(
+        test.session_configured
+            .rollout_path
+            .as_ref()
+            .expect("persisted rollout"),
+    )
+    .await?;
+    let mut waiting = HashMap::new();
+    let mut completed = Vec::new();
+    for item in rollout {
+        let codex_rollout::RolloutItem::EventMsg(EventMsg::CodeModeOwned(owned)) = item else {
+            continue;
+        };
+        let actor = owned.owner.clone();
+        let (_, event) = owned.into_parts();
+        let EventMsg::ItemCompleted(event) = *event else {
+            continue;
+        };
+        let codex_protocol::items::TurnItem::CodeMode(fact) = event.item else {
+            continue;
+        };
+        match fact.event {
+            codex_protocol::code_mode::CodeModeEvent::WaitStarted {
+                call_id,
+                target: Some(target),
+            } => {
+                assert_eq!(actor.exec_call_id, "call-1");
+                assert_eq!(actor, target);
+                assert!(waiting.insert(call_id, target).is_none());
+            }
+            codex_protocol::code_mode::CodeModeEvent::WaitCompleted { call_id, target } => {
+                assert_eq!(target.as_ref(), waiting.get(&call_id));
+                completed.push(call_id);
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(waiting.len(), 2);
+    assert_eq!(completed.len(), 2);
+    assert!(
+        completed
+            .iter()
+            .all(|call_id| waiting.contains_key(call_id))
+    );
 
     Ok(())
 }

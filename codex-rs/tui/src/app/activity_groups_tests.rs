@@ -299,12 +299,14 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
             "exec-a",
             CodeModeEvent::WaitStarted {
                 call_id: "wait-a".into(),
+                target: None,
             },
         ),
         code_mode(
             "exec-a",
             CodeModeEvent::WaitCompleted {
                 call_id: "wait-a".into(),
+                target: None,
             },
         ),
         output("notify-a", "exec-a", "{\"answer\":42}"),
@@ -551,6 +553,160 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
     });
     assert!(Admission::notification(&misrouted, Source::Live).is_err());
 
+    // Concurrent process waits belong to their actor, not to the target's command.
+    let mut wait_bank = Reducers::default();
+    let mut apply = |owner: &CodeModeOwner, item| {
+        wait_bank
+            .admit(
+                thread,
+                Admission::notification(&notification(owner, item), Source::Live)
+                    .unwrap()
+                    .unwrap(),
+                &app.chat_widget.config_ref().cwd,
+                false,
+                &|_| crate::multi_agents::AgentMetadata::default(),
+            )
+            .unwrap()
+    };
+    let live = |block: &Arc<dyn HistoryCell>| {
+        block
+            .as_any()
+            .downcast_ref::<history_cell::CodeModeCell>()
+            .unwrap()
+            .live_lines()
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let c = owner("exec-c");
+    let actor = history_cell::CodeModeCell::owned(a.clone(), false).tetrad();
+    let target = history_cell::CodeModeCell::owned(b.clone(), false).tetrad();
+    let other_target = history_cell::CodeModeCell::owned(c.clone(), false).tetrad();
+    for owner in [&a, &b] {
+        apply(
+            owner,
+            code_mode(
+                &owner.exec_call_id,
+                CodeModeEvent::Started {
+                    call_id: owner.exec_call_id.clone(),
+                    script: None,
+                },
+            ),
+        );
+    }
+    apply(
+        &b,
+        call("background-b", ActivityKind::Exploration, "inProgress"),
+    );
+    let background_b = apply(
+        &b,
+        code_mode(
+            "exec-b",
+            CodeModeEvent::Finished {
+                status: CodeModeStatus::Completed,
+            },
+        ),
+    );
+    assert!(live(&background_b.block).contains(&format!("Running ({target})")));
+    for (call, target) in [("poll-1", &b), ("poll-2", &c)] {
+        let waiting = apply(
+            &a,
+            code_mode(
+                "exec-a",
+                CodeModeEvent::WaitStarted {
+                    call_id: call.into(),
+                    target: Some(target.clone()),
+                },
+            ),
+        );
+        assert!(waiting.wait.is_none());
+    }
+    let concurrent = apply(
+        &a,
+        call("concurrent-a", ActivityKind::Computer, "inProgress"),
+    );
+    assert!(live(&concurrent.block).contains(&format!("Running ({actor})")));
+    let waiting = apply(
+        &a,
+        call("concurrent-a", ActivityKind::Computer, "completed"),
+    );
+    let before_completion = Arc::clone(&waiting.block);
+    assert!(!live(&waiting.block).contains("Running"));
+    assert!(live(&waiting.block).contains(&format!("Waiting for {target} ({actor})")));
+    assert!(live(&waiting.block).contains(&format!("Waiting for {other_target} ({actor})")));
+    let one_left = apply(
+        &a,
+        code_mode(
+            "exec-a",
+            CodeModeEvent::WaitCompleted {
+                call_id: "poll-1".into(),
+                target: Some(b.clone()),
+            },
+        ),
+    );
+    assert!(one_left.wait.is_none());
+    assert!(!live(&one_left.block).contains(&format!("Waiting for {target} ({actor})")));
+    assert!(live(&one_left.block).contains(&format!("Waiting for {other_target} ({actor})")));
+    assert!(live(&before_completion).contains(&format!("Waiting for {target} ({actor})")));
+    let resumed = apply(
+        &a,
+        code_mode(
+            "exec-a",
+            CodeModeEvent::WaitCompleted {
+                call_id: "poll-2".into(),
+                target: Some(c.clone()),
+            },
+        ),
+    );
+    assert_eq!(live(&resumed.block), format!("• Running ({actor})"));
+    let exited = apply(
+        &b,
+        call("background-b", ActivityKind::Exploration, "completed"),
+    );
+    assert!(live(&exited.block).is_empty());
+    assert!(live(&background_b.block).contains(&format!("Running ({target})")));
+
+    // A suffix is self-describing, and loading its older start cannot resurrect a wait.
+    let mut late_wait = Reducers::default();
+    for (source, event) in [
+        (
+            Source::Historical,
+            CodeModeEvent::WaitCompleted {
+                call_id: "late-poll".into(),
+                target: Some(b.clone()),
+            },
+        ),
+        (
+            Source::Live,
+            CodeModeEvent::Started {
+                call_id: "exec-a".into(),
+                script: None,
+            },
+        ),
+        (
+            Source::Historical,
+            CodeModeEvent::WaitStarted {
+                call_id: "late-poll".into(),
+                target: Some(b.clone()),
+            },
+        ),
+    ] {
+        let projected = late_wait
+            .admit(
+                thread,
+                Admission::notification(&notification(&a, code_mode("exec-a", event)), source)
+                    .unwrap()
+                    .unwrap(),
+                &app.chat_widget.config_ref().cwd,
+                false,
+                &|_| crate::multi_agents::AgentMetadata::default(),
+            )
+            .unwrap();
+        assert!(projected.wait.is_none());
+        assert!(!live(&projected.block).contains("Waiting"));
+    }
+
     let history = vec![
         owned_item(
             &a,
@@ -579,6 +735,7 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
                 "exec-a",
                 CodeModeEvent::WaitStarted {
                     call_id: "wait-a".into(),
+                    target: None,
                 },
             ),
         ),
@@ -588,6 +745,7 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
                 "exec-a",
                 CodeModeEvent::WaitCompleted {
                     call_id: "wait-a".into(),
+                    target: None,
                 },
             ),
         ),
@@ -1019,6 +1177,7 @@ async fn interleaved_scripts_keep_exact_ownership_after_terminal_wait_and_replay
             "exec-a",
             CodeModeEvent::WaitStarted {
                 call_id: "wait-a".into(),
+                target: None,
             },
         ),
         code_mode(
@@ -1038,6 +1197,7 @@ async fn interleaved_scripts_keep_exact_ownership_after_terminal_wait_and_replay
             "exec-a",
             CodeModeEvent::WaitCompleted {
                 call_id: "wait-a".into(),
+                target: None,
             },
         ),
         output("wait-output-a", "wait-a", "wait"),

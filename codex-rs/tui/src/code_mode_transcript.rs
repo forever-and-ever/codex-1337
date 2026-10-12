@@ -405,10 +405,11 @@ impl Block {
                 {
                     return Err(AdmissionFault::ConflictingFact);
                 }
-                if matches!(
-                    fact.event,
-                    CodeModeEvent::WaitStarted { .. } | CodeModeEvent::WaitCompleted { .. }
-                ) {
+                if match &fact.event {
+                    CodeModeEvent::WaitStarted { target, .. }
+                    | CodeModeEvent::WaitCompleted { target, .. } => target.is_none(),
+                    _ => false,
+                } {
                     *wait = Some(Arc::new(CodeModeWaitCell(
                         CodeModeFactCell(fact.clone(), false),
                         owner.clone(),

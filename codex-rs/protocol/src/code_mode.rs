@@ -191,9 +191,15 @@ pub enum CodeModeEvent {
     },
     WaitStarted {
         call_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        target: Option<CodeModeOwner>,
     },
     WaitCompleted {
         call_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        target: Option<CodeModeOwner>,
     },
     Finished {
         status: CodeModeStatus,

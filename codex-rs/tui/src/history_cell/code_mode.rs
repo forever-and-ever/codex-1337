@@ -68,9 +68,8 @@ impl HistoryCell for CodeModeWaitCell {
     }
     fn activity_ids(&self) -> Vec<String> {
         let call = match &self.0.0.event {
-            CodeModeEvent::WaitStarted { call_id } | CodeModeEvent::WaitCompleted { call_id } => {
-                call_id
-            }
+            CodeModeEvent::WaitStarted { call_id, .. }
+            | CodeModeEvent::WaitCompleted { call_id, .. } => call_id,
             _ => return Vec::new(),
         };
         vec![format!(
@@ -174,25 +173,26 @@ impl CodeModeCell {
             .map_or_else(|| label(&self.exec_call_id), owner_label)
     }
 
-    /// The block as live work under the transcript's closing rule: a heading naming the block,
-    /// each of its running commands and other running calls two columns in, then whether the
-    /// model waits for it. The block draws them in place too.
     pub(crate) fn live_lines(&self) -> Vec<Line<'static>> {
         if !self.is_active() {
             return Vec::new();
         }
+        let waits = self.waits();
         let marker = activity_indicator(
             Some(self.start_time),
             MotionMode::from_animations_enabled(self.animations_enabled),
             ReducedMotionIndicator::StaticBullet,
         )
         .unwrap_or_else(|| "•".dim());
-        let mut lines = vec![Line::from(vec![
-            marker,
-            " ".into(),
-            "Running".bold(),
-            format!(" ({})", self.tetrad()).dim(),
-        ])];
+        let mut lines = Vec::new();
+        if !waits.iter().any(|(_, target)| target.is_some()) || !self.pending_children.is_empty() {
+            lines.push(Line::from(vec![
+                marker.clone(),
+                " ".into(),
+                "Running".bold(),
+                format!(" ({})", self.tetrad()).dim(),
+            ]));
+        }
         for member in &self.members {
             if let Some(exec) = member.as_any().downcast_ref::<ExecCell>() {
                 for call in exec.iter_calls().filter(|call| call.duration.is_none()) {
@@ -208,38 +208,42 @@ impl CodeModeCell {
                 lines.push(Line::from(spans));
             }
         }
-        if self.awaited() {
-            let marker = activity_indicator(
-                /*start_time*/ None,
-                MotionMode::from_animations_enabled(self.animations_enabled),
-                ReducedMotionIndicator::StaticBullet,
-            )
-            .unwrap_or_else(|| "•".dim());
-            lines.push(Line::from(vec![
-                marker,
+        for (_, target) in waits {
+            let mut spans = vec![
+                marker.clone(),
                 " ".into(),
-                "Waiting".bold(),
-                format!(" ({})", self.tetrad()).dim(),
-            ]));
+                "Waiting for ".bold(),
+                target.map_or_else(|| self.tetrad(), owner_label).into(),
+            ];
+            if target.is_some() {
+                spans.push(format!(" ({})", self.tetrad()).dim());
+            }
+            lines.push(Line::from(spans));
         }
         lines
     }
 
-    /// Whether the model is waiting for the block: a wait started that has not completed.
-    fn awaited(&self) -> bool {
-        let mut waits = HashSet::new();
-        for fact in &self.facts {
-            match &fact.event {
-                CodeModeEvent::WaitStarted { call_id } => {
-                    waits.insert(call_id.as_str());
+    fn waits(&self) -> Vec<(&str, Option<&CodeModeOwner>)> {
+        // A wait invocation is one-shot; completion wins even when older pages arrive last.
+        let completed = self
+            .facts
+            .iter()
+            .filter_map(|fact| match &fact.event {
+                CodeModeEvent::WaitCompleted { call_id, .. } => Some(call_id.as_str()),
+                _ => None,
+            })
+            .collect::<HashSet<_>>();
+        self.facts
+            .iter()
+            .filter_map(|fact| match &fact.event {
+                CodeModeEvent::WaitStarted { call_id, target }
+                    if !completed.contains(call_id.as_str()) =>
+                {
+                    Some((call_id.as_str(), target.as_ref()))
                 }
-                CodeModeEvent::WaitCompleted { call_id } => {
-                    waits.remove(call_id.as_str());
-                }
-                _ => {}
-            }
-        }
-        !waits.is_empty()
+                _ => None,
+            })
+            .collect()
     }
 
     fn from_fact(fact: CodeModeItem, animations_enabled: bool) -> Self {
@@ -382,8 +386,8 @@ impl CodeModeCell {
             .chain(self.facts.iter().filter_map(|fact| match &fact.event {
                 CodeModeEvent::Started { call_id, .. }
                 | CodeModeEvent::ToolCall { call_id }
-                | CodeModeEvent::WaitStarted { call_id }
-                | CodeModeEvent::WaitCompleted { call_id } => Some(call_id.as_str()),
+                | CodeModeEvent::WaitStarted { call_id, .. }
+                | CodeModeEvent::WaitCompleted { call_id, .. } => Some(call_id.as_str()),
                 CodeModeEvent::Allocated | CodeModeEvent::Finished { .. } => None,
             }))
             .collect()
