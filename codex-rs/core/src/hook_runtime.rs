@@ -702,7 +702,9 @@ pub(crate) async fn inspect_pending_input(
             )
             .await
         }
-        TurnInput::ResponseItem(_) | TurnInput::FunctionCallOutput(_) => HookRuntimeOutcome {
+        TurnInput::ResponseItem(_)
+        | TurnInput::FunctionCallOutput(_)
+        | TurnInput::CodeModeNotification => HookRuntimeOutcome {
             should_stop: false,
             additional_contexts: Vec::new(),
         },
@@ -722,6 +724,7 @@ pub(crate) async fn record_pending_input(
     persist_context: PersistContext,
 ) {
     match pending_input {
+        TurnInput::CodeModeNotification => {}
         TurnInput::UserInput {
             content,
             client_id,

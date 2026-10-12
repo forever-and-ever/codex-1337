@@ -52,6 +52,8 @@ pub enum TurnInput {
     // through the in-memory queue.
     ResponseItem(#[serde(with = "turn_input_response_item")] ResponseItemEnvelope),
     InterAgentCommunication(InterAgentCommunication),
+    // History already owns this notification; only model consumption is pending.
+    CodeModeNotification,
 }
 
 mod turn_input_response_item {
@@ -553,7 +555,9 @@ impl TurnInputQueue {
         if self.items.iter().any(|input| {
             matches!(
                 input,
-                TurnInput::UserInput { .. } | TurnInput::FunctionCallOutput(_)
+                TurnInput::UserInput { .. }
+                    | TurnInput::FunctionCallOutput(_)
+                    | TurnInput::CodeModeNotification
             )
         }) {
             Some(InputQueueActivity::Steer)

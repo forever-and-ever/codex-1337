@@ -6323,9 +6323,11 @@ async fn code_mode_notify_injects_additional_exec_tool_output_into_active_contex
         &server,
         "use exec notify helper",
         r#"
+text("PRE_MARKER|");
 notify("code_mode_notify_marker");
 notify("second marker");
-text("done");
+await new Promise(resolve => setTimeout(resolve, 200));
+text("FINAL_MARKER");
 "#,
         |config| {
             let _ = config.features.enable(Feature::CodeModeHost);
@@ -6334,6 +6336,31 @@ text("done");
     .await?;
 
     let req = second_mock.single_request();
+    // Runtime completion drains callbacks, but enqueueing notify as turn input used
+    // to defer its history admission until after the returned exec output.
+    let outputs = req.inputs_of_type("custom_tool_call_output");
+    let bodies = outputs
+        .iter()
+        .map(|item| match &item["output"] {
+            Value::String(text) => text.clone(),
+            Value::Array(items) => items
+                .iter()
+                .map(|item| item["text"].as_str().expect("text content item"))
+                .collect::<String>(),
+            output => panic!("expected text output, got {output:?}"),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(bodies.len(), 3);
+    assert!(
+        bodies[..2]
+            .iter()
+            .any(|body| body == "code_mode_notify_marker")
+    );
+    assert!(
+        bodies[..2].iter().any(|body| body == "second marker"),
+        "notification must precede final output: {bodies:?}"
+    );
+    assert!(bodies[2].contains("PRE_MARKER|FINAL_MARKER"));
     let has_notify_output = req
         .inputs_of_type("custom_tool_call_output")
         .iter()
