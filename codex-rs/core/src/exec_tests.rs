@@ -29,18 +29,37 @@ fn make_exec_output(
 }
 
 #[test]
-fn sandbox_detection_requires_keywords() {
-    let output = make_exec_output(/*exit_code*/ 1, "", "", "");
-    assert!(!is_likely_sandbox_denied(
-        SandboxType::LinuxSeccomp,
-        &output
-    ));
+fn sandbox_detection_requires_denial_evidence() {
+    // Repository prose and unrelated write failures must not enter the
+    // sandbox approval/retry path merely because the command also failed.
+    for text in [
+        "",
+        "sandbox policy documentation",
+        "seccomp filters are installed",
+        "landlock ruleset",
+        "Failed to write file: No space left on device",
+    ] {
+        let output = make_exec_output(/*exit_code*/ 1, text, text, text);
+        assert!(
+            !is_likely_sandbox_denied(SandboxType::LinuxSeccomp, &output),
+            "{text:?} is not a denial diagnostic"
+        );
+    }
 }
 
 #[test]
-fn sandbox_detection_identifies_keyword_in_stderr() {
-    let output = make_exec_output(/*exit_code*/ 1, "", "Operation not permitted", "");
-    assert!(is_likely_sandbox_denied(SandboxType::LinuxSeccomp, &output));
+fn sandbox_detection_identifies_denial_diagnostics_in_stderr() {
+    for diagnostic in [
+        "Operation not permitted",
+        "Permission denied",
+        "Read-only file system",
+    ] {
+        let output = make_exec_output(/*exit_code*/ 1, "", diagnostic, "");
+        assert!(
+            is_likely_sandbox_denied(SandboxType::LinuxSeccomp, &output),
+            "missed denial diagnostic: {diagnostic}"
+        );
+    }
 }
 
 #[test]
