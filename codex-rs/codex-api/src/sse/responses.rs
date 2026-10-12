@@ -343,7 +343,7 @@ impl ResponsesEventError {
     }
 }
 
-pub fn process_responses_event(
+pub(crate) fn process_responses_event(
     event: ResponsesStreamEvent,
     identity: &mut identity::ResponsesItemIdentity,
 ) -> std::result::Result<Option<ResponseEvent>, ResponsesEventError> {
