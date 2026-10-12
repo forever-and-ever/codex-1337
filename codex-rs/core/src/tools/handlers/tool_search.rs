@@ -254,11 +254,6 @@ impl ToolSearchHandler {
                 query,
                 limit.min(20),
                 &step_context.tool_router,
-                step_context
-                    .turn
-                    .config
-                    .code_mode
-                    .tool_input_schema_max_bytes,
                 &indirect_prefixes,
             );
             return Ok(boxed_tool_output(JsonToolOutput::new(serde_json::json!({
@@ -285,7 +280,6 @@ impl ToolSearchHandler {
         query: &str,
         limit: usize,
         router: &ToolRouter,
-        code_mode_input_schema_max_bytes: Option<usize>,
         indirect_prefixes: &IndirectNamespacePrefixes<'_>,
     ) -> Vec<CodeModeSearchResult> {
         let mut tools = Vec::new();
@@ -309,11 +303,10 @@ impl ToolSearchHandler {
                 let Some(runtime) = router.tool_runtime(tool_name) else {
                     continue;
                 };
-                let definitions = prepare_code_mode_tool_definitions(
-                    Some(runtime.as_ref()),
-                    || Cow::Owned(runtime.spec()),
-                    code_mode_input_schema_max_bytes,
-                );
+                let definitions =
+                    prepare_code_mode_tool_definitions(Some(runtime.as_ref()), || {
+                        Cow::Owned(runtime.spec())
+                    });
                 let Some(definition) = definitions.iter().find(|definition| {
                     definition.tool_name.clone().with_default_namespace() == candidate_name
                 }) else {

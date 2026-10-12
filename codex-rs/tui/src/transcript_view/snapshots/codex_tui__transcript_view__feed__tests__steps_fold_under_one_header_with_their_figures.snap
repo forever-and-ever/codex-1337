@@ -12,6 +12,7 @@ unfolded
               • I'll run the tests first.
         [+]   test parse ... FAILED
   HH:MM [-] Injection · environment_context          ≈84
+                Context [Raw] [Fmt]
                 <environment_context>cwd</environment_context>
 
   HH:MM [-] Response                                 154    120     34           (thought, output, self)
@@ -37,7 +38,6 @@ unfolded
 
 
 
-
 script
         [-] User
               › Fix the failing test
@@ -48,6 +48,7 @@ script
               • I'll run the tests first.
         [+]   test parse ... FAILED
   HH:MM [-] Injection · environment_context          ≈84
+                Context [Raw] [Fmt]
                 <environment_context>cwd</environment_context>
 
   HH:MM [-] Response                                 154    120     34           (thought, output, self)
@@ -73,7 +74,6 @@ script
 
 
 
-
 folded
         [-] User
               › Fix the failing test
@@ -81,6 +81,7 @@ folded
   HH:MM [+] Command · failed cargo test -p codex…   1342    120     34    ≈1188  (thought, output, self)
               • I'll run the tests first.
   HH:MM [-] Injection · environment_context          ≈84
+                Context [Raw] [Fmt]
                 <environment_context>cwd</environment_context>
 
   HH:MM [-] Response                                 154    120     34           (thought, output, self)

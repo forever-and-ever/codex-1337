@@ -110,7 +110,6 @@ fn native_result_presentation_follows_each_promise_and_current_values() {
                     description: String::new(),
                     kind: CodeModeToolKind::Function,
                     input_schema: None,
-                    input_schema_max_bytes: None,
                     output_schema: None,
                 })
             })

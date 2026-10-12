@@ -29,3 +29,31 @@ completed plan
 ## User
 
 [Image #1] describe this
+
+## Activity
+
+    [Client annotation]
+    Context snapshot
+    [Client annotation or representation]
+    Instructions
+    [Captured context]
+    Keep these bytes.
+
+
+    [Client annotation or representation]
+    Tool Declarations — client representation of supplied schemas; provider prompt not observable
+    {"tools":[{"name":"tool"}]}
+
+## Activity
+
+    [Client annotation]
+    Message from Scout
+    [Client annotation or representation]
+    Text block 1
+    [Captured context]
+    First block.
+
+    [Client annotation or representation]
+    Text block 2
+    [Captured context]
+    Second block.

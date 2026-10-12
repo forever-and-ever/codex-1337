@@ -127,10 +127,9 @@ pub fn mcp_tool_to_responses_api_tool(
         Some(max_bytes) => parse_mcp_tool_with_schema_max_bytes(tool, max_bytes)?,
         None => parse_mcp_tool(tool)?,
     };
-    let mut tool =
-        tool_definition_to_responses_api_tool(definition.renamed(tool_name.name.clone()));
-    tool.parameters.mcp_input_schema_max_bytes = schema_max_bytes;
-    Ok(tool)
+    Ok(tool_definition_to_responses_api_tool(
+        definition.renamed(tool_name.name.clone()),
+    ))
 }
 
 pub fn agent_plugin_mcp_tool_to_responses_api_tool(

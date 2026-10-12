@@ -1,7 +1,6 @@
 //! Verifies V2 catalog tool messages change only their selected description or parameter schema.
 
 use anyhow::Result;
-use codex_code_mode::render_json_schema_to_typescript;
 use codex_core::config::AgentRoleConfig;
 use codex_features::Feature;
 use codex_protocol::openai_models::ToolMessages;
@@ -245,7 +244,7 @@ async fn multi_agent_catalog_messages_change_only_selected_tool_fields(
                     .as_str()
                     .expect("bundled description");
                 let declaration = bundled
-                    .find("\n\nexec tool declaration:")
+                    .find("\n\nCall: await ")
                     .map(|index| &bundled[index..])
                     .unwrap_or_default();
                 if matches!(exposure, Exposure::CodeMode) && name != "wait_agent" {
@@ -254,6 +253,12 @@ async fn multi_agent_catalog_messages_change_only_selected_tool_fields(
                         "Code Mode description for {name}: {bundled}"
                     );
                 }
+                let description = if matches!(exposure, Exposure::CodeMode) && name != "wait_agent"
+                {
+                    description.trim()
+                } else {
+                    description
+                };
                 let replacement = if name == "spawn_agent" {
                     let actual_description = actual_tool["description"]
                         .as_str()
@@ -284,13 +289,29 @@ async fn multi_agent_catalog_messages_change_only_selected_tool_fields(
                 }
                 if matches!(exposure, Exposure::CodeMode) && name != "wait_agent" {
                     let description = expected_tool["description"].as_str().expect("description");
-                    let (prefix, signature) =
-                        description.rsplit_once("(args: ").expect("arguments");
-                    let (_, result) = signature.split_once("): Promise").expect("result type");
-                    let parameters =
-                        render_json_schema_to_typescript(&expected_tool["parameters"]).root_type;
-                    expected_tool["description"] =
-                        json!(format!("{prefix}(args: {parameters}): Promise{result}"));
+                    let (prefix, contract) =
+                        description.split_once("\nParameters:").expect("parameters");
+                    let (_, result) = contract.split_once("\nReturns:").expect("return shape");
+                    let rendered =
+                        codex_code_mode::augment_tool_definition(codex_code_mode::ToolDefinition {
+                            name: name.into(),
+                            tool_name: codex_tools::ToolName::plain(name),
+                            summary: String::new(),
+                            description: String::new(),
+                            kind: codex_code_mode::CodeModeToolKind::Function,
+                            input_schema: Some(expected_tool["parameters"].clone()),
+                            output_schema: None,
+                        })
+                        .description;
+                    let (_, parameters) = rendered
+                        .split_once("\nParameters:")
+                        .expect("rendered parameters");
+                    let (parameters, _) = parameters
+                        .split_once("\nReturns:")
+                        .expect("rendered return shape");
+                    expected_tool["description"] = json!(format!(
+                        "{prefix}\nParameters:{parameters}\nReturns:{result}"
+                    ));
                 }
             }
         }
@@ -400,7 +421,7 @@ async fn channel_catalog_descriptions_change_only_selected_tools(exposure: Expos
             if let Some(description) = message["multi_agent"][name]["description"].as_str() {
                 let declaration = if matches!(exposure, Exposure::CodeMode) {
                     let offset = bundled
-                        .find("\n\nexec tool declaration:")
+                        .find("\n\nCall: await ")
                         .expect("Code Mode declaration");
                     &bundled[offset..]
                 } else {

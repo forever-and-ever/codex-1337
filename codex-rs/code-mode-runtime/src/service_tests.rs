@@ -532,7 +532,6 @@ fn echo_tool() -> ToolDefinition {
         description: String::new(),
         kind: CodeModeToolKind::Function,
         input_schema: None,
-        input_schema_max_bytes: None,
         output_schema: None,
     }
 }
@@ -1105,6 +1104,9 @@ async fn global_scope_contains_only_allowed_items() {
         .map(|tool| serde_json::json!({"name": tool.global_name, "description": tool.summary}))
         .collect::<Vec<_>>();
     let full_description = enabled_tools[0].description.clone();
+    let first_metadata = codex_code_mode_protocol::enabled_tool_metadata(&enabled_tools[0]);
+    let output_description = first_metadata.describe_output();
+    let schemas: JsonValue = serde_json::from_str(&first_metadata.describe_schema()).unwrap();
 
     let response = service
         .execute(
@@ -1126,6 +1128,7 @@ text(describe_tool(page.matches[0].name));
 text(describe_tool(page.matches[0].name, {detail: "output"}));
 text(describe_tool(page.matches[0].name, {detail: "contract"}));
 text(describe_tool("other__echo", {detail: "output"}));
+text(describe_tool(page.matches[0].name, {detail: "schema"}));
 text(await tools[page.matches[0].name]({message: "same input"}));
 text([() => describe_tool("missing"), () => search_tools("", {limit: 0}),
       () => search_tools("", {offset: -1}),
@@ -1281,11 +1284,10 @@ text([() => describe_tool("missing"), () => search_tools("", {limit: 0}),
             serde_json::json!({"matches": [], "truncated": false, "next_offset": null}),
             metadata[0].clone(),
             serde_json::json!(full_description),
-            serde_json::json!(
-                "mcp__sample__echo_00 output:\n```ts\ntype T_Node = { next: T_Node; };\ntype ToolOutput = CallToolResult<T_Node>;\n```"
-            ),
+            serde_json::json!(output_description),
             serde_json::json!(full_description),
             serde_json::json!("other__echo: no declared output schema"),
+            schemas,
             JsonValue::Null,
             serde_json::json!([true, true, true, true, true]),
         ]

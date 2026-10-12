@@ -193,15 +193,7 @@ fn legacy_mcp_tool_accepts_oversized_schema() {
     let schema_bytes = serde_json::to_vec(tool.input_schema.as_ref())
         .expect("MCP input schema JSON")
         .len();
-    assert!(schema_bytes > codex_code_mode::DEFAULT_INPUT_SCHEMA_MAX_BYTES);
-    for (server_limit, expected_limit, expected_type) in [
-        (
-            None,
-            codex_code_mode::DEFAULT_INPUT_SCHEMA_MAX_BYTES,
-            "args: unknown",
-        ),
-        (Some(schema_bytes), schema_bytes, "property_1023?: string;"),
-    ] {
+    for server_limit in [None, Some(schema_bytes)] {
         let tool = super::mcp_tool_to_responses_api_tool(
             &ToolName::from("oversized"),
             &tool,
@@ -211,8 +203,17 @@ fn legacy_mcp_tool_accepts_oversized_schema() {
         let definition =
             crate::tool_spec_to_code_mode_tool_definition(&crate::ToolSpec::Function(tool))
                 .expect("Code Mode tool");
-        assert_eq!(definition.input_schema_max_bytes, Some(expected_limit));
-        assert!(definition.description.contains(expected_type));
+        assert!(
+            definition
+                .description
+                .contains("property_1023 (optional): string")
+        );
+        let metadata = codex_code_mode::enabled_tool_metadata(&definition);
+        let schemas: serde_json::Value = serde_json::from_str(&metadata.describe_schema()).unwrap();
+        assert_eq!(
+            schemas["input"]["properties"].as_object().unwrap().len(),
+            1_024
+        );
     }
 }
 

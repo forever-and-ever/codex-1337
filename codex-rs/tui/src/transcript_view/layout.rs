@@ -416,10 +416,21 @@ impl TranscriptView {
             let mut layout = match seat.content {
                 Content::Hidden => TextLayout::new(Vec::new(), width),
                 Content::Body => {
-                    let parts = feed::entry_body(cell.as_ref(), content_width, expanded_parts)
-                        .expect("feed body requires a feed entry");
+                    let parts =
+                        feed::entry_body(cell.as_ref(), content_width, expanded_parts, output_mode)
+                            .expect("feed body requires a feed entry");
                     let mut layout =
                         TextLayout::new(crate::transcript_geometry::rich_lines(parts.lines), width);
+                    if cell.has_formatted_output()
+                        && parts.controls.last().is_none_or(|control| control.expanded)
+                    {
+                        let offset = parts
+                            .controls
+                            .last()
+                            .map_or(0, |control| layout.line_offset(control.line))
+                            + parts.header.map_or(0, |header| header.source_offset);
+                        layout = layout.with_output_controls(offset, output_mode);
+                    }
                     for control in parts.controls {
                         layout = layout.with_part_control(control);
                     }

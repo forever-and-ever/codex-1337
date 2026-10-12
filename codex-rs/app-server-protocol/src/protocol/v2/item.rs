@@ -334,6 +334,9 @@ pub enum ThreadItem {
         #[ts(type = "number")]
         completed_at_ms: i64,
         parts: Vec<codex_protocol::PreamblePart>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        #[ts(optional, as = "Option<_>")]
+        sources: Vec<codex_protocol::ContextSource>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         raw: Option<String>,
         change: Option<codex_protocol::PreambleChange>,
@@ -990,6 +993,7 @@ impl From<CoreTurnItem> for ThreadItem {
                 completed_at_ms: preamble.completed_at_ms,
                 parts: preamble.parts,
                 raw: preamble.raw,
+                sources: preamble.sources,
                 change: preamble.change,
                 reported_input_tokens: preamble.reported_input_tokens,
             },

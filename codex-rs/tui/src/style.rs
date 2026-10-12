@@ -90,6 +90,22 @@ pub(crate) fn history_response_style() -> Style {
     speaker_style(&MODEL_TINT)
 }
 
+pub(crate) fn context_message_style() -> Style {
+    speaker_style(&Tint {
+        hue: (165, 105, 220),
+        dark: 0.10,
+        light: 0.05,
+    })
+}
+
+pub(crate) fn subagent_message_style() -> Style {
+    speaker_style(&Tint {
+        hue: (155, 200, 90),
+        dark: 0.10,
+        light: 0.05,
+    })
+}
+
 /// Words neither speaker said, such as client notices and other threads' messages: a neutral
 /// fill, lighter than the editable composer's in either theme.
 pub(crate) fn aside_style() -> Style {

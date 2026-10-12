@@ -12,7 +12,6 @@ use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::terminal_hyperlinks::visible_lines;
 use crate::transcript_view::FeedEntry;
 use crate::wrapping::RtOptions;
-use crate::wrapping::adaptive_wrap_lines;
 use codex_app_server_protocol::ArrivalItem;
 use codex_protocol::step_admission::ArrivalKind;
 use ratatui::style::Stylize;
@@ -46,13 +45,47 @@ impl ArrivalCell {
         Line::from(vec![kind.bold(), joint.dim(), label.into()])
     }
 
-    fn body(&self, width: u16) -> Vec<Line<'static>> {
-        let Some(text) = &self.0.text else {
-            return vec!["encrypted".dim().italic().into()];
+    pub(crate) fn source_lines(
+        &self,
+        mode: super::output_provenance::OutputMode,
+    ) -> Vec<HyperlinkLine> {
+        use super::output_provenance::{
+            ContextAuthor, captured_blocks, client_lines, client_notice, context_sources,
         };
-        let text = sanitize_user_text(text.as_str().into());
-        adaptive_wrap_lines(
-            text.lines().map(|line| Line::from(line.to_owned())),
+        use codex_protocol::step_admission::ArrivalSource;
+        let author = match self.0.kind {
+            ArrivalKind::InterAgent => ContextAuthor::Subagent,
+            ArrivalKind::User => ContextAuthor::User,
+            ArrivalKind::Injection => ContextAuthor::Environment,
+        };
+        match &self.0.source {
+            ArrivalSource::Captured { blocks } => captured_blocks(blocks, author, mode),
+            ArrivalSource::Unavailable => {
+                vec![client_notice("Readable context capture unavailable")]
+            }
+            ArrivalSource::ToolDeclarations { text } => context_sources(
+                &[codex_protocol::ContextSource::ToolDeclarations { text: text.clone() }],
+                mode,
+            ),
+            ArrivalSource::Legacy => {
+                let mut lines = vec![client_notice(
+                    "Legacy arrival — exact context provenance was not recorded",
+                )];
+                if let Some(text) = &self.0.text {
+                    lines.extend(client_lines(text, mode));
+                }
+                lines
+            }
+        }
+    }
+
+    pub(super) fn context_lines(
+        &self,
+        width: u16,
+        mode: super::output_provenance::OutputMode,
+    ) -> Vec<HyperlinkLine> {
+        crate::terminal_hyperlinks::adaptive_wrap_hyperlink_lines(
+            &self.source_lines(mode),
             RtOptions::new(width.saturating_sub(2).max(1) as usize),
         )
     }
@@ -63,14 +96,28 @@ impl FeedEntry for ArrivalCell {
         self.heading()
     }
 
-    fn feed_body(&self, width: u16, _expanded: &HashSet<String>) -> ActivityParts {
+    fn feed_body(
+        &self,
+        width: u16,
+        _expanded: &HashSet<String>,
+        mode: super::output_provenance::OutputMode,
+    ) -> ActivityParts {
+        let mut lines = vec![HyperlinkLine::from("Context")];
+        super::output_provenance::mark_lines(
+            &mut lines,
+            super::output_provenance::OutputProvenance::Client,
+        );
+        lines.extend(self.context_lines(width, mode));
         ActivityParts {
             lines: crate::terminal_hyperlinks::prefix_hyperlink_lines(
-                self.body(width).into_iter().map(Into::into).collect(),
+                lines,
                 "  ".into(),
                 "  ".into(),
             ),
-            header: None,
+            header: Some(ActivityHeader {
+                source_offset: "Context".len(),
+                expand_on_truncation: false,
+            }),
             output: None,
             controls: Vec::new(),
         }
@@ -80,6 +127,17 @@ impl FeedEntry for ArrivalCell {
 impl HistoryCell for ArrivalCell {
     fn transcript_timestamp(&self) -> Option<HistoryTimestamp> {
         HistoryTimestamp::from_millis(self.0.announced_at_ms)
+    }
+
+    fn has_formatted_output(&self) -> bool {
+        match &self.0.source {
+            codex_protocol::step_admission::ArrivalSource::Captured { blocks } => {
+                !blocks.is_empty()
+            }
+            codex_protocol::step_admission::ArrivalSource::ToolDeclarations { .. } => true,
+            codex_protocol::step_admission::ArrivalSource::Legacy => self.0.text.is_some(),
+            codex_protocol::step_admission::ArrivalSource::Unavailable => false,
+        }
     }
 
     fn activity_ids(&self) -> Vec<String> {
@@ -109,7 +167,15 @@ impl HistoryCell for ArrivalCell {
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
-        self.body(u16::MAX)
+        self.source_lines(super::output_provenance::OutputMode::Raw)
+            .into_iter()
+            .filter(|line| {
+                line.source
+                    .as_ref()
+                    .is_some_and(|source| source.prefix_bytes == 0)
+            })
+            .map(|line| line.line)
+            .collect()
     }
 
     fn transcript_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
@@ -119,7 +185,7 @@ impl HistoryCell for ArrivalCell {
     fn expanded_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         let mut lines = self.display_hyperlink_lines(width);
         lines.extend(crate::terminal_hyperlinks::prefix_hyperlink_lines(
-            self.body(width).into_iter().map(Into::into).collect(),
+            self.context_lines(width, super::output_provenance::OutputMode::Raw),
             "  ".into(),
             "  ".into(),
         ));

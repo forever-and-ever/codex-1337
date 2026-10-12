@@ -106,8 +106,30 @@ pub struct ArrivalItem {
     pub announced_at_ms: i64,
     pub kind: ArrivalKind,
     pub label: String,
-    /// The readable content of an injection or of a plaintext message from another agent.
+    /// Legacy flattened text, without captured block boundaries or provenance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
+    #[serde(default)]
+    #[ts(optional, as = "Option<_>")]
+    pub source: ArrivalSource,
+}
+
+/// Exact readable text blocks, a client declaration representation, or unavailable evidence.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize, Serialize, TS, JsonSchema)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+#[ts(tag = "kind", rename_all = "camelCase", export_to = "v2/")]
+pub enum ArrivalSource {
+    /// Older records retain only the unclassified, potentially flattened `text` field.
+    #[default]
+    Legacy,
+    Captured {
+        blocks: Vec<String>,
+    },
+    ToolDeclarations {
+        text: String,
+    },
+    /// No readable capture is available. This does not identify why it is unavailable.
+    Unavailable,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS, JsonSchema)]

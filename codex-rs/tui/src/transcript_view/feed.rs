@@ -63,7 +63,7 @@ use std::ops::Range;
 pub(crate) trait FeedEntry {
     fn feed_title(&self) -> Line<'static>;
     /// The body and its controls share one projection of the viewer's disclosure state.
-    fn feed_body(&self, width: u16, expanded: &HashSet<String>) -> ActivityParts;
+    fn feed_body(&self, width: u16, expanded: &HashSet<String>, mode: OutputMode) -> ActivityParts;
 }
 
 fn feed_entry(cell: &dyn HistoryCell) -> Option<&dyn FeedEntry> {
@@ -79,8 +79,9 @@ pub(super) fn entry_body(
     cell: &dyn HistoryCell,
     width: u16,
     expanded: &HashSet<String>,
+    mode: OutputMode,
 ) -> Option<ActivityParts> {
-    feed_entry(cell).map(|entry| entry.feed_body(width, expanded))
+    feed_entry(cell).map(|entry| entry.feed_body(width, expanded, mode))
 }
 
 #[derive(Default)]

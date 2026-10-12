@@ -53,6 +53,34 @@ fn markdown_transcript_preserves_messages_and_formats_activity() {
         ])),
         user("", vec!["image.png".into()]),
         user("[Image #1] describe this", vec!["image.png".into()]),
+        Arc::new(crate::history_cell::PreambleCell::inventory(
+            codex_protocol::ContextInventory {
+                parts: Vec::new(),
+                raw: String::new(),
+                sources: vec![
+                    codex_protocol::ContextSource::Prompt {
+                        label: "Instructions".into(),
+                        text: "Keep these bytes.\n".into(),
+                    },
+                    codex_protocol::ContextSource::ToolDeclarations {
+                        text: r#"{"tools":[{"name":"tool"}]}"#.into(),
+                    },
+                ],
+            },
+        )),
+        Arc::new(crate::history_cell::ArrivalCell::new(
+            codex_protocol::step_admission::ArrivalItem {
+                id: "arrival".into(),
+                response_id: "response".into(),
+                announced_at_ms: 0,
+                kind: codex_protocol::step_admission::ArrivalKind::InterAgent,
+                label: "Scout".into(),
+                text: None,
+                source: codex_protocol::step_admission::ArrivalSource::Captured {
+                    blocks: vec!["First block.\n".into(), "Second block.".into()],
+                },
+            },
+        )),
     ];
 
     insta::assert_snapshot!(

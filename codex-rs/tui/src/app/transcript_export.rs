@@ -227,6 +227,48 @@ fn visible_export_items(turns: Vec<Turn>) -> Vec<ThreadItem> {
     visible
 }
 
+/// Markdown has no provenance fill; frame the shared source projection explicitly.
+fn context_export_lines(cell: &dyn HistoryCell) -> Option<Vec<ratatui::text::Line<'static>>> {
+    use crate::history_cell::ArrivalCell;
+    use crate::history_cell::PreambleCell;
+    use crate::history_cell::output_provenance::OutputMode;
+    use crate::history_cell::output_provenance::OutputProvenance;
+    use crate::transcript_view::FeedEntry;
+
+    let (title, sources) = if let Some(preamble) = cell.as_any().downcast_ref::<PreambleCell>() {
+        (
+            preamble.feed_title(),
+            preamble.source_lines(OutputMode::Raw),
+        )
+    } else if let Some(arrival) = cell.as_any().downcast_ref::<ArrivalCell>() {
+        (arrival.feed_title(), arrival.source_lines(OutputMode::Raw))
+    } else {
+        return None;
+    };
+    let mut lines = vec!["[Client annotation]".into(), title];
+    let mut previous = None;
+    for line in sources {
+        let provenance = line
+            .source
+            .as_ref()
+            .map_or(OutputProvenance::Unspecified, |source| {
+                source.output_provenance
+            });
+        let label = match provenance {
+            OutputProvenance::Captured => Some("[Captured context]"),
+            OutputProvenance::Formatted => Some("[Context with control characters escaped]"),
+            OutputProvenance::Client => Some("[Client annotation or representation]"),
+            OutputProvenance::Unspecified => None,
+        };
+        if let Some(label) = label.filter(|_| previous != Some(provenance)) {
+            lines.push(label.into());
+            previous = Some(provenance);
+        }
+        lines.push(line.line);
+    }
+    Some(lines)
+}
+
 fn render_markdown_transcript(cells: &[Arc<dyn HistoryCell>]) -> Result<String, String> {
     let mut markdown = String::from("# Codex conversation\n");
     for cell in cells {
@@ -247,6 +289,8 @@ fn render_markdown_transcript(cells: &[Arc<dyn HistoryCell>]) -> Result<String, 
             lines
         } else if let Some(reasoning) = cell.as_any().downcast_ref::<ReasoningSummaryCell>() {
             raw_lines_from_source(reasoning.markdown_source().trim())
+        } else if let Some(lines) = context_export_lines(cell.as_ref()) {
+            lines
         } else {
             cell.raw_lines()
         };
@@ -281,7 +325,7 @@ fn render_markdown_transcript(cells: &[Arc<dyn HistoryCell>]) -> Result<String, 
         };
         markdown.push_str(&format!("\n## {heading}\n\n"));
         for line in lines {
-            if indent {
+            if indent && line.spans.iter().any(|span| !span.content.is_empty()) {
                 markdown.push_str("    ");
             }
             for span in line.spans {

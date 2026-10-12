@@ -1,4 +1,4 @@
-use super::augment_tool_spec_for_code_mode as augment_tool_spec_with_budget;
+use super::augment_tool_spec_for_code_mode;
 use super::code_mode_name_for_tool_name;
 use super::tool_spec_to_code_mode_tool_definition;
 use crate::AdditionalProperties;
@@ -13,27 +13,6 @@ use crate::ToolSpec;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 use std::collections::BTreeMap;
-
-fn augment_tool_spec_for_code_mode(spec: ToolSpec) -> ToolSpec {
-    augment_tool_spec_with_budget(spec, /*code_mode_input_schema_max_bytes*/ None)
-}
-
-#[test]
-fn code_mode_input_schema_uses_the_larger_budget() {
-    let default_code_mode = codex_code_mode::DEFAULT_INPUT_SCHEMA_MAX_BYTES;
-    for (mcp, code_mode, expected) in [
-        (None, None, default_code_mode),
-        (Some(5_000), Some(1_000), default_code_mode),
-        (None, Some(1_000), default_code_mode),
-        (Some(30_000), Some(20_000), 30_000),
-        (Some(20_000), Some(30_000), 30_000),
-    ] {
-        assert_eq!(
-            super::effective_input_schema_max_bytes(mcp, code_mode),
-            expected
-        );
-    }
-}
 
 #[test]
 fn code_mode_materializes_mcp_output_schemas() {
@@ -55,14 +34,8 @@ fn code_mode_materializes_mcp_output_schemas() {
         ..parsed.clone()
     };
     assert_eq!(
-        super::collect_code_mode_tool_definitions(
-            [&ToolSpec::Function(parsed)],
-            /*code_mode_input_schema_max_bytes*/ None,
-        ),
-        super::collect_code_mode_tool_definitions(
-            [&ToolSpec::Function(eager)],
-            /*code_mode_input_schema_max_bytes*/ None,
-        ),
+        super::collect_code_mode_tool_definitions([&ToolSpec::Function(parsed)],),
+        super::collect_code_mode_tool_definitions([&ToolSpec::Function(eager)],),
     );
 }
 
@@ -119,10 +92,12 @@ fn augment_tool_spec_for_code_mode_augments_function_tools() {
             name: "lookup_order".to_string(),
             description: r#"Look up an order
 
-exec tool declaration:
-```ts
-declare const tools: { lookup_order(args: { order_id: string; }): Promise<{ ok: boolean; }>; };
-```"#
+Call: await tools.lookup_order(args).
+Parameters: object
+  order_id (required): string
+  Other fields forbidden.
+Returns: object
+  ok (required): boolean"#
                 .to_string(),
             strict: false,
             defer_loading: Some(true),
@@ -195,14 +170,11 @@ fn tool_spec_to_code_mode_tool_definition_returns_augmented_nested_tools() {
             tool_name: ToolName::plain("apply_patch"),
             description: r#"Apply a patch
 
-exec tool declaration:
-```ts
-declare const tools: { apply_patch(input: string): Promise<unknown>; };
-```"#
+Call: await tools.apply_patch(input). Input is a raw string, not a JSON envelope.
+Returns: no declared shape."#
                 .to_string(),
             kind: codex_code_mode::CodeModeToolKind::Freeform,
             input_schema: None,
-            input_schema_max_bytes: None,
             output_schema: None,
         })
     );
@@ -233,21 +205,15 @@ fn tool_spec_to_code_mode_tool_definition_supports_namespaced_custom_tools() {
             tool_name: ToolName::namespaced("editor", "apply_patch"),
             description: r#"Apply a patch
 
-exec tool declaration:
-```ts
-declare const tools: { editor__apply_patch(input: string): Promise<unknown>; };
-```"#
+Call: await tools.editor__apply_patch(input). Input is a raw string, not a JSON envelope.
+Returns: no declared shape."#
                 .to_string(),
             kind: codex_code_mode::CodeModeToolKind::Freeform,
             input_schema: None,
-            input_schema_max_bytes: None,
             output_schema: None,
         })
     );
-    let definitions = super::collect_code_mode_tool_definitions(
-        [&spec],
-        /*code_mode_input_schema_max_bytes*/ None,
-    );
+    let definitions = super::collect_code_mode_tool_definitions([&spec]);
     let [definition] = definitions.as_slice() else {
         panic!("expected the namespaced custom tool");
     };
@@ -261,7 +227,7 @@ declare const tools: { editor__apply_patch(input: string): Promise<unknown>; };
     assert!(
         metadata
             .description
-            .contains("editor__apply_patch(input: string)")
+            .contains("tools.editor__apply_patch(input)")
     );
 }
 
@@ -285,7 +251,6 @@ fn tool_search_spec_converts_to_a_callable_code_mode_definition() {
             &definition.name,
             &definition.tool_name,
             &definition.input_schema,
-            definition.input_schema_max_bytes,
         ),
         (
             &"tool_search".to_string(),
@@ -298,13 +263,8 @@ fn tool_search_spec_converts_to_a_callable_code_mode_definition() {
                 "required": ["query"],
                 "additionalProperties": false,
             })),
-            Some(codex_code_mode::DEFAULT_INPUT_SCHEMA_MAX_BYTES),
         ),
     );
-    assert!(
-        definition
-            .description
-            .contains("tool_search(args: { query: string; })")
-    );
+    assert!(definition.description.contains("query (required): string"));
     assert!(!definition.description.contains("Native tool discovery"));
 }

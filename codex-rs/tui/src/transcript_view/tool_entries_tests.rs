@@ -180,6 +180,13 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
         older,
         output.clone() as Arc<dyn HistoryCell>,
     ])];
+    let grouped_raw =
+        crate::history_cell::output_provenance::raw_cell_lines(regrouped[0].as_ref(), u16::MAX);
+    assert!(grouped_raw.iter().all(|line| {
+        line.source
+            .as_ref()
+            .is_some_and(|source| source.output_provenance == OutputProvenance::Captured)
+    }));
     tests::render(&mut view, &regrouped, /*width*/ 80, /*height*/ 20);
     assert_eq!(
         view.disclosure.output_mode(&regrouped[0].activity_ids()),
@@ -338,6 +345,156 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
         }
         painted.push(format!("escaped capture\n{buffer:?}"));
     }
+    // Context inspectors and replay use the same evidence boundary as tool output.
+    // A declaration representation must never become captured context merely because its
+    // arrival kind is Injection; old records retain explicit uncertainty.
+    use codex_protocol::step_admission::{ArrivalItem, ArrivalKind, ArrivalSource};
+    for (source, kind, expected) in [
+        (
+            ArrivalSource::Captured {
+                blocks: vec![json.into()],
+            },
+            ArrivalKind::Injection,
+            OutputProvenance::Captured,
+        ),
+        (
+            ArrivalSource::Captured {
+                blocks: vec![json.into()],
+            },
+            ArrivalKind::InterAgent,
+            OutputProvenance::Captured,
+        ),
+        (
+            ArrivalSource::ToolDeclarations { text: json.into() },
+            ArrivalKind::Injection,
+            OutputProvenance::Client,
+        ),
+        (
+            ArrivalSource::Legacy,
+            ArrivalKind::Injection,
+            OutputProvenance::Client,
+        ),
+    ] {
+        let mut encoded = serde_json::to_value(ArrivalItem {
+            id: "arrival-provenance".into(),
+            response_id: "response".into(),
+            announced_at_ms: 0,
+            kind,
+            source: source.clone(),
+            label: "arbitrary label — not a discriminator".into(),
+            text: (source == ArrivalSource::Legacy).then(|| json.into()),
+        })
+        .unwrap();
+        if source == ArrivalSource::Legacy {
+            encoded.as_object_mut().unwrap().remove("source");
+        }
+        let replay =
+            crate::history_cell::ArrivalCell::new(serde_json::from_value(encoded).unwrap());
+        let raw = crate::history_cell::output_provenance::raw_cell_lines(&replay, u16::MAX);
+        assert_eq!(TextLayout::new(raw.clone(), u16::MAX).text(), json);
+        let body = raw
+            .iter()
+            .find(|line| line.line.to_string().contains("9007199254740993123456789"))
+            .unwrap();
+        assert_eq!(body.source.as_ref().unwrap().output_provenance, expected);
+        if matches!(source, ArrivalSource::Captured { .. }) {
+            let style = if kind == ArrivalKind::InterAgent {
+                crate::style::subagent_message_style()
+            } else {
+                crate::style::context_message_style()
+            };
+            assert_eq!(body.line.style.bg, style.bg);
+        }
+        for mode in [OutputMode::Raw, OutputMode::Fmt] {
+            let body = crate::transcript_view::FeedEntry::feed_body(
+                &replay,
+                u16::MAX,
+                &Default::default(),
+                mode,
+            );
+            let layout = TextLayout::new(body.lines, u16::MAX);
+            assert!(layout.text().contains("9007199254740993123456789"));
+            assert!(layout.text().contains("1.2300e+04"));
+            assert_eq!(layout.text().matches("\"a\":").count(), 2);
+            assert!(!layout.text().contains("Legacy arrival"));
+            assert!(!layout.text().contains("Tool Declarations"));
+        }
+    }
+    crate::terminal_palette::with_test_default_colors(
+        crate::terminal_probe::DefaultColors {
+            fg: (230, 230, 230),
+            bg: (20, 20, 20),
+        },
+        || {
+            use crate::history_cell::output_provenance::{ContextAuthor, captured_lines};
+            let mut backgrounds = Vec::new();
+            for author in [
+                ContextAuthor::User,
+                ContextAuthor::Assistant,
+                ContextAuthor::Subagent,
+                ContextAuthor::Environment,
+            ] {
+                let mut styles = Vec::new();
+                for mode in [OutputMode::Raw, OutputMode::Fmt] {
+                    let layout = TextLayout::new(captured_lines("source", author, mode), 20);
+                    let area = Rect::new(0, 0, 20, 1);
+                    let mut buffer = Buffer::empty(area);
+                    layout.render(area, &mut buffer, 0);
+                    styles.push((buffer[(0, 0)].fg, buffer[(0, 0)].bg));
+                }
+                assert_eq!(
+                    styles[0].1, styles[1].1,
+                    "Fmt must retain the author's fill"
+                );
+                assert_ne!(styles[0].0, styles[1].0, "Fmt must announce repainting");
+                assert!(
+                    !backgrounds.contains(&styles[0].1),
+                    "Authors have distinct fills"
+                );
+                backgrounds.push(styles[0].1);
+            }
+        },
+    );
+    let blocks = [json.to_owned(), "  trailing\n".to_owned()];
+    let projected = crate::history_cell::output_provenance::captured_blocks(
+        &blocks,
+        crate::history_cell::output_provenance::ContextAuthor::Subagent,
+        OutputMode::Raw,
+    );
+    assert_eq!(
+        projected
+            .iter()
+            .filter(
+                |line| line.source.as_ref().unwrap().output_provenance == OutputProvenance::Client
+            )
+            .count(),
+        2
+    );
+    assert_eq!(
+        TextLayout::new(projected, u16::MAX).text(),
+        blocks.join("\n")
+    );
+    let sources = [
+        codex_protocol::ContextSource::Prompt {
+            label: "instructions".into(),
+            text: json.into(),
+        },
+        codex_protocol::ContextSource::ToolDeclarations { text: json.into() },
+    ];
+    let lines = crate::history_cell::output_provenance::context_sources(&sources, OutputMode::Raw);
+    let evidence: Vec<_> = lines
+        .iter()
+        .filter(|line| line.line.to_string() == json)
+        .collect();
+    assert_eq!(evidence.len(), 2);
+    assert_eq!(
+        evidence[0].source.as_ref().unwrap().output_provenance,
+        OutputProvenance::Captured
+    );
+    assert_eq!(
+        evidence[1].source.as_ref().unwrap().output_provenance,
+        OutputProvenance::Client
+    );
     insta::assert_snapshot!(painted.join("\n"));
 }
 

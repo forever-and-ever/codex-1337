@@ -32,6 +32,7 @@ enum DescriptionDetail {
     #[default]
     Contract,
     Output,
+    Schema,
 }
 
 pub(super) fn describe_tool_callback(
@@ -66,6 +67,7 @@ pub(super) fn describe_tool_callback(
             .map(|tool| match options.detail {
                 DescriptionDetail::Contract => tool.description.clone(),
                 DescriptionDetail::Output => tool.describe_output(),
+                DescriptionDetail::Schema => tool.describe_schema(),
             })
     });
     let Some(description) = description else {

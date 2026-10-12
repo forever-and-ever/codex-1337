@@ -8,7 +8,6 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::num::NonZeroU64;
-use std::num::NonZeroUsize;
 
 /// Connection to a board provisioned by the research host.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
@@ -48,10 +47,6 @@ pub struct CodeModeConfigToml {
     /// Experimental: this option and the response format may change or be removed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub experimental_show_cell_overhead: Option<bool>,
-    /// Maximum UTF-8 bytes per rendered tool input type, with a 16,000-byte minimum and default.
-    /// For ordinary MCP tools, this is also at least their server's explicitly configured input limit.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_input_schema_max_bytes: Option<NonZeroUsize>,
     /// Exact tool namespaces to omit from the code-mode nested tool surface.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub excluded_tool_namespaces: Option<Vec<String>>,

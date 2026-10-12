@@ -3,6 +3,19 @@ use pretty_assertions::assert_eq;
 
 #[test]
 fn apportion_measures_splits_and_releases() {
+    // Token accounting may join blocks for its estimate; retained evidence must not.
+    let original = vec!["first".to_owned(), "  second\n".to_owned()];
+    let item: ResponseItem = serde_json::from_value(serde_json::json!({
+        "type": "message",
+        "role": "developer",
+        "content": original.iter().map(|text| serde_json::json!({"type": "input_text", "text": text})).collect::<Vec<_>>(),
+    })).unwrap();
+    let admitted = admit(&[item]);
+    assert_eq!(admitted.arrivals.len(), 1);
+    assert_eq!(
+        admitted.arrivals[0].source,
+        codex_protocol::step_admission::ArrivalSource::Captured { blocks: original },
+    );
     use AdmissionPrecision::Apportioned;
     use AdmissionPrecision::Disturbed;
     use AdmissionPrecision::Exact;

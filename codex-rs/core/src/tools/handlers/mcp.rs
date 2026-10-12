@@ -51,7 +51,7 @@ const MAX_MCP_NAMESPACE_DESCRIPTION_BYTES: usize = 512 * 1024;
 pub struct McpHandler {
     tool_info: ToolInfo,
     spec: Arc<ToolSpec>,
-    code_mode_tool_definitions: OnceLock<(Option<usize>, Vec<codex_code_mode::ToolDefinition>)>,
+    code_mode_tool_definitions: OnceLock<Vec<codex_code_mode::ToolDefinition>>,
 }
 
 impl McpHandler {
@@ -281,22 +281,16 @@ impl CoreToolRuntime for McpHandler {
         Some(&self.spec)
     }
 
-    fn cached_code_mode_definitions(
-        &self,
-        code_mode_input_schema_max_bytes: Option<usize>,
-    ) -> Option<&[codex_code_mode::ToolDefinition]> {
-        let (cached_budget, definitions) = self.code_mode_tool_definitions.get_or_init(|| {
-            let mut definitions = codex_tools::collect_code_mode_tool_definitions(
-                std::iter::once(self.spec.as_ref()),
-                code_mode_input_schema_max_bytes,
-            );
-            for definition in &mut definitions {
-                definition.input_schema = None;
-            }
-            (code_mode_input_schema_max_bytes, definitions)
-        });
-        // A config change must not reuse descriptions rendered under the previous budget.
-        (*cached_budget == code_mode_input_schema_max_bytes).then_some(definitions.as_slice())
+    fn cached_code_mode_definitions(&self) -> Option<&[codex_code_mode::ToolDefinition]> {
+        Some(
+            self.code_mode_tool_definitions
+                .get_or_init(|| {
+                    codex_tools::collect_code_mode_tool_definitions(std::iter::once(
+                        self.spec.as_ref(),
+                    ))
+                })
+                .as_slice(),
+        )
     }
 
     fn wait_until_ready<'a>(&'a self, session: &'a Arc<Session>) -> Option<BoxFuture<'a, ()>> {
@@ -832,17 +826,16 @@ mod tests {
         ));
 
         let first = handler
-            .cached_code_mode_definitions(/*code_mode_input_schema_max_bytes*/ None)
+            .cached_code_mode_definitions()
             .expect("MCP definitions should be cached");
         assert_eq!(first.len(), 1);
-        assert!(first[0].input_schema.is_none());
+        assert!(first[0].input_schema.is_some());
         assert!(first[0].output_schema.is_some());
 
         let second = handler
-            .cached_code_mode_definitions(/*code_mode_input_schema_max_bytes*/ None)
+            .cached_code_mode_definitions()
             .expect("MCP definitions should be cached");
         assert!(std::ptr::eq(first, second));
-        assert!(handler.cached_code_mode_definitions(Some(32_000)).is_none());
     }
 
     #[test]

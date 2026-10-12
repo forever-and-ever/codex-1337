@@ -477,11 +477,11 @@ pub(super) fn portable_tool_schema(tool: &Value) -> Value {
     };
     if definition.get("name").and_then(Value::as_str) == Some("exec") {
         if let Some(Value::String(description)) = definition.get_mut("description") {
-            // Code mode embeds the exec_command description and its TypeScript declaration
+            // Code Mode embeds the exec_command description and its porcelain contract
             // inside the exec tool. Apply the same narrow platform normalization there.
             if let Some((start, section)) = description.split_once("### `exec_command`\n")
                 && let Some(rest) = section.strip_prefix(BASE)
-                && let Some((suffix, _)) = rest.split_once("\n\nexec tool declaration:")
+                && let Some((suffix, _)) = rest.split_once("\n\nCall: await ")
                 && suffix.starts_with("\n\nWindows safety rules:")
                 && fnv1a(normalize_line_endings(suffix).as_bytes()) == WINDOWS_SAFETY_SUFFIX_HASH
             {
@@ -490,8 +490,8 @@ pub(super) fn portable_tool_schema(tool: &Value) -> Value {
             }
             for platform_wait in [UNIX_WAIT, WINDOWS_WAIT] {
                 *description = description.replace(
-                    &format!("  // {platform_wait}"),
-                    "  // <PLATFORM_WAIT_GUIDANCE>",
+                    &format!("  yield_time_ms (optional): number. {platform_wait}"),
+                    "  yield_time_ms (optional): number. <PLATFORM_WAIT_GUIDANCE>",
                 );
             }
         }
@@ -503,7 +503,7 @@ pub(super) fn portable_tool_schema(tool: &Value) -> Value {
     if let Some(Value::String(description)) = definition.get_mut("description") {
         if let Some(rest) = description.strip_prefix(BASE) {
             let suffix = rest
-                .split_once("\n\nexec tool declaration:")
+                .split_once("\n\nCall: await ")
                 .map_or(rest, |(suffix, _)| suffix);
             if suffix.starts_with("\n\nWindows safety rules:")
                 && fnv1a(normalize_line_endings(suffix).as_bytes()) == WINDOWS_SAFETY_SUFFIX_HASH
@@ -512,8 +512,8 @@ pub(super) fn portable_tool_schema(tool: &Value) -> Value {
             }
         }
         *description = description.replace(
-            &format!("  // {WINDOWS_WAIT}"),
-            &format!("  // {UNIX_WAIT}"),
+            &format!("  yield_time_ms (optional): number. {WINDOWS_WAIT}"),
+            &format!("  yield_time_ms (optional): number. {UNIX_WAIT}"),
         );
     }
     if let Some(Value::String(wait)) =

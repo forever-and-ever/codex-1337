@@ -72,6 +72,7 @@ fn preamble_discloses_parts_largest_first() {
         }),
         reported_input_tokens: Some(31_208),
         raw: None,
+        sources: Vec::new(),
         window_id: None,
     });
     let text = visible_lines(cell.expanded_hyperlink_lines(/*width*/ 80))

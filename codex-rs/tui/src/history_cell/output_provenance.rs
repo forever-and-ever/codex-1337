@@ -5,8 +5,8 @@ use ratatui::style::Style;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum OutputMode {
-    Raw,
     #[default]
+    Raw,
     Fmt,
 }
 
@@ -19,11 +19,200 @@ pub(crate) enum OutputProvenance {
     Client,
 }
 
+/// Authorship and captured-versus-client provenance are independent.
+#[derive(Clone, Copy)]
+pub(crate) enum ContextAuthor {
+    User,
+    Assistant,
+    Subagent,
+    Environment,
+}
+
+impl ContextAuthor {
+    pub(crate) fn style(self) -> Style {
+        match self {
+            Self::User => crate::style::history_prompt_style(),
+            Self::Assistant => crate::style::history_response_style(),
+            Self::Subagent => crate::style::subagent_message_style(),
+            Self::Environment => crate::style::context_message_style(),
+        }
+    }
+}
+
+pub(crate) fn captured_lines(
+    text: &str,
+    author: ContextAuthor,
+    mode: OutputMode,
+) -> Vec<HyperlinkLine> {
+    let formatted = (mode == OutputMode::Fmt)
+        .then(|| format_json(text).ok().flatten())
+        .flatten();
+    let shown = formatted.as_deref().unwrap_or(text);
+    let escaped = shown.chars().any(unsafe_control).then(|| {
+        shown.chars().fold(String::new(), |mut output, ch| {
+            if unsafe_control(ch) {
+                output.extend(ch.escape_default());
+            } else {
+                output.push(ch);
+            }
+            output
+        })
+    });
+    let shown = escaped.as_deref().unwrap_or(shown);
+    let mut lines = crate::terminal_hyperlinks::plain_hyperlink_lines(
+        shown
+            .split('\n')
+            .map(|line| ratatui::text::Line::from(line.to_owned()))
+            .collect(),
+    );
+    let provenance = if mode == OutputMode::Fmt || escaped.is_some() {
+        OutputProvenance::Formatted
+    } else {
+        OutputProvenance::Captured
+    };
+    mark_lines(&mut lines, provenance);
+    for line in &mut lines {
+        let style = author.style();
+        line.line.style = line.line.style.patch(style);
+        if let Some(source) = &mut line.source {
+            source.line_style = source.line_style.patch(style);
+        }
+    }
+    if escaped.is_some() {
+        lines.push(client_notice("Control characters escaped for display"));
+    }
+    lines
+}
+
+pub(crate) fn captured_blocks(
+    blocks: &[String],
+    author: ContextAuthor,
+    mode: OutputMode,
+) -> Vec<HyperlinkLine> {
+    let mut lines = Vec::new();
+    for (index, text) in blocks.iter().enumerate() {
+        if blocks.len() > 1 {
+            lines.push(client_notice(&format!("Text block {}", index + 1)));
+        }
+        lines.extend(captured_lines(text, author, mode));
+    }
+    lines
+}
+
+/// A readable representation is not an exact model-input capture.
+pub(crate) fn client_lines(text: &str, mode: OutputMode) -> Vec<HyperlinkLine> {
+    let mut lines = captured_lines(text, ContextAuthor::Environment, mode);
+    for line in &mut lines {
+        line.line.style = Style::default();
+        if let Some(source) = &mut line.source {
+            source.line_style = Style::default();
+        }
+    }
+    mark_lines(&mut lines, OutputProvenance::Client);
+    if mode == OutputMode::Fmt {
+        for line in &mut lines {
+            line.line.style = line
+                .line
+                .style
+                .patch(crate::style::formatted_output_style());
+            if let Some(source) = &mut line.source {
+                source.line_style = source
+                    .line_style
+                    .patch(crate::style::formatted_output_style());
+            }
+        }
+    }
+    lines
+}
+
+pub(crate) fn context_sources(
+    sources: &[codex_protocol::ContextSource],
+    mode: OutputMode,
+) -> Vec<HyperlinkLine> {
+    use codex_protocol::ContextSource;
+    let mut lines = Vec::new();
+    for source in sources {
+        let (heading, text, provenance) = match source {
+            ContextSource::Prompt { label, text } => {
+                (label.as_str(), text.as_str(), OutputProvenance::Captured)
+            }
+            ContextSource::ToolDeclarations { text } => (
+                "Tool Declarations — client representation of supplied schemas; provider prompt not observable",
+                text.as_str(),
+                OutputProvenance::Client,
+            ),
+        };
+        if !lines.is_empty() {
+            lines.push("".into());
+        }
+        let heading = super::sanitize_user_text(heading.into()).replace(['\n', '\t'], " ");
+        lines.push(client_notice(&heading));
+        let body = if provenance == OutputProvenance::Client {
+            client_lines(text, mode)
+        } else {
+            captured_lines(text, ContextAuthor::Environment, mode)
+        };
+        lines.extend(body);
+    }
+    lines
+}
+
+pub(crate) fn raw_cell_lines(cell: &dyn super::HistoryCell, width: u16) -> Vec<HyperlinkLine> {
+    let any = cell.as_any();
+    let members = any
+        .downcast_ref::<super::CodeModeCell>()
+        .map(|group| &group.members)
+        .or_else(|| {
+            any.downcast_ref::<super::ToolOutputGroup>()
+                .map(|group| &group.members)
+        });
+    if let Some(members) = members {
+        return members
+            .iter()
+            .flat_map(|member| raw_cell_lines(member.as_ref(), width))
+            .collect();
+    }
+    if let Some(preamble) = any.downcast_ref::<super::PreambleCell>() {
+        return preamble.source_lines(OutputMode::Raw);
+    }
+    if let Some(arrival) = any.downcast_ref::<super::ArrivalCell>() {
+        return arrival.context_lines(width, OutputMode::Raw);
+    }
+    if let Some(output) = any.downcast_ref::<super::ToolOutputCell>() {
+        return output.output_lines(width, OutputMode::Raw);
+    }
+    let author = if any.is::<super::UserHistoryCell>() {
+        Some(ContextAuthor::User)
+    } else if any.is::<super::AgentMessageCell>()
+        || any.is::<super::AgentMarkdownCell>()
+        || any.is::<super::StreamingAgentTailCell>()
+    {
+        Some(ContextAuthor::Assistant)
+    } else {
+        None
+    };
+    let mut lines = crate::terminal_hyperlinks::plain_hyperlink_lines(cell.live_raw_lines());
+    if let Some(author) = author {
+        for line in &mut lines {
+            line.line.style = line.line.style.patch(author.style());
+            if let Some(source) = &mut line.source {
+                source.line_style = source.line_style.patch(author.style());
+            }
+        }
+    } else {
+        mark_lines(&mut lines, OutputProvenance::Client);
+    }
+    lines
+}
+
 impl OutputProvenance {
     fn style(self) -> Style {
         match self {
-            Self::Unspecified | Self::Captured => Style::default(),
-            Self::Formatted => crate::style::formatted_output_style(),
+            Self::Unspecified => Style::default(),
+            Self::Captured => crate::style::context_message_style(),
+            Self::Formatted => {
+                crate::style::context_message_style().patch(crate::style::formatted_output_style())
+            }
             Self::Client => {
                 if crate::terminal_palette::default_bg().is_some() {
                     crate::style::aside_style()

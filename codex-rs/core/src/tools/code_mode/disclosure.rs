@@ -19,10 +19,6 @@ pub(crate) enum Disclosure {
     Declared,
     /// Rostered beside its purpose summary.
     Glossed,
-    /// Rostered by name.
-    Named,
-    /// Left to ranked search.
-    Deferred,
 }
 
 impl Disclosure {
@@ -30,24 +26,14 @@ impl Disclosure {
         tool: &RegisteredTool,
         tool_name: &ToolName,
         tool_mode: ToolMode,
-        ranked_search: bool,
+        _ranked_search: bool,
     ) -> Self {
-        let deferred = tool.exposure == ToolExposure::Deferred;
-        let code_mode_only = tool_mode == ToolMode::CodeModeOnly;
-        if deferred && ranked_search {
-            Self::Deferred
-        } else if tool.runtime.is_third_party_tool() {
-            // MCP catalogs are too large to gloss; a client's dynamic tools stay declared
-            // unless the client defers them.
-            if deferred || (code_mode_only && tool.runtime.mcp_server_name().is_some()) {
-                Self::Named
-            } else {
-                Self::Declared
-            }
-        } else if deferred
-            || (code_mode_only
-                && !(tool_name.is_default_namespace()
-                    && BOOTSTRAP.contains(&tool_name.name.as_str())))
+        if tool.exposure == ToolExposure::Deferred
+            || (tool_mode == ToolMode::CodeModeOnly
+                && (tool.runtime.mcp_server_name().is_some()
+                    || (!tool.runtime.is_third_party_tool()
+                        && !(tool_name.is_default_namespace()
+                            && BOOTSTRAP.contains(&tool_name.name.as_str())))))
         {
             Self::Glossed
         } else {

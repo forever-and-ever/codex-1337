@@ -14,9 +14,35 @@ use serde_json::json;
 fn aliases_preserve_dispatch_identity_across_collisions_and_catalogue_order() {
     // Flattening a namespace can collide with a direct name; choosing the first
     // declaration would make replay aliases depend on discovery order.
+    let nested = codex_code_mode::ToolDefinition {
+        name: "mcp__sample__read".into(),
+        tool_name: codex_tools::ToolName::namespaced("mcp__sample", "read"),
+        summary: String::new(),
+        description: "Read captured data.".into(),
+        kind: codex_code_mode::CodeModeToolKind::Function,
+        input_schema: None,
+        output_schema: None,
+    };
+    let handbook = codex_code_mode::build_exec_tool_description_for(
+        codex_code_mode::presentation::ToolDialect::Anthropic,
+        &[],
+        &[codex_code_mode::UndeclaredTool(nested)],
+        &Default::default(),
+        600_000,
+        true,
+        codex_code_mode::MediaHelpers {
+            image_detail: codex_code_mode::ImageDetailVisibility::Visible,
+            audio: false,
+            generated_image: false,
+        },
+        codex_code_mode::DeferredToolDiscovery::Catalog,
+        None,
+    );
+    assert!(handbook.contains("tools.mcp__sample__read: Read captured data."));
+    assert!(!handbook.contains("declare const tools"));
     let exec = FreeformTool {
         name: "exec".to_string(),
-        description: "Execute JavaScript; ALL_TOOLS remains available inside the cell.".to_string(),
+        description: handbook,
         defer_loading: None,
         format: FreeformToolFormat {
             r#type: "grammar".to_string(),

@@ -1,7 +1,7 @@
 //! Read-only accounting uses the captured prefix, never recaptures capabilities.
 use super::Session;
 use super::preamble::InjectedText;
-use super::preamble::{PreambleTools, census, raw_context};
+use super::preamble::{PreambleTools, census};
 use crate::context::BaseInstructionsFragment;
 use crate::context::is_contextual_user_fragment;
 use crate::context::world_state::{PreviousSectionState, SectionTransition, WorldStateSection};
@@ -91,10 +91,11 @@ impl Session {
                 }
             }
             let tools = PreambleTools::History(Cow::Owned(tools));
-            let raw = raw_context(&instructions, &tools, &context);
+            let sources = super::preamble::context_sources(&instructions, &tools, &context);
             ContextInventory {
                 parts: census(&instructions, &tools, context),
-                raw,
+                raw: String::new(),
+                sources,
             }
         })
         .await

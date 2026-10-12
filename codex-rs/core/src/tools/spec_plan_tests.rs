@@ -2752,10 +2752,7 @@ async fn excluded_deferred_namespaces_do_not_enable_nested_tool_guidance() {
     let ToolSpec::Freeform(exec) = plan.visible_spec(codex_code_mode::PUBLIC_TOOL_NAME) else {
         panic!("expected code mode exec tool");
     };
-    assert!(
-        exec.description
-            .contains("Some deferred nested tools may be omitted")
-    );
+    assert!(exec.description.contains("inventory names every"));
     assert!(!exec.description.contains("excluded__lookup("));
     plan.assert_registered_contains(&[
         &ToolName::namespaced("excluded", "lookup").to_string(),

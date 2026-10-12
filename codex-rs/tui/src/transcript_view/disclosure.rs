@@ -57,7 +57,7 @@ impl Disclosure {
         ids.iter()
             .filter_map(|id| self.output_modes.get(id))
             .max_by_key(|choice| choice.revision)
-            .map_or(OutputMode::Fmt, |choice| choice.mode)
+            .map_or(OutputMode::Raw, |choice| choice.mode)
     }
     pub(super) fn is_expanded(&self, ids: &[String]) -> bool {
         ids.iter().any(|id| self.expanded.contains(id))

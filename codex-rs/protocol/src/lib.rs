@@ -7,6 +7,8 @@ mod agent_path;
 pub mod auth;
 mod preamble;
 
+pub use preamble::ContextSource;
+
 pub use preamble::ContextInventory;
 mod response_item_id;
 mod response_usage;

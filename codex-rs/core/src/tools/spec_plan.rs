@@ -690,10 +690,7 @@ fn spec_for_model_request(
             ))
             .is_some_and(|winner| winner == tool_name)
     {
-        codex_tools::augment_tool_spec_for_code_mode(
-            spec,
-            turn_context.config.code_mode.tool_input_schema_max_bytes,
-        )
+        codex_tools::augment_tool_spec_for_code_mode(spec)
     } else {
         spec
     }
@@ -901,9 +898,6 @@ fn register_code_mode_executors(
     let mut code_mode_nested_tool_specs = Vec::new();
     let mut exec_prompt_tool_specs = Vec::new();
     let mut glossed_exec_prompt_tool_specs = Vec::new();
-    let mut named_exec_prompt_tool_specs = Vec::new();
-    let mut deferred_exec_prompt_tool_specs = Vec::new();
-    let mut included_deferred_mcp_output_schema = false;
     let tool_search_enabled = model_info.supports_search_tool;
     for tool in registry.entries() {
         let exposure = tool.exposure;
@@ -967,16 +961,7 @@ fn register_code_mode_executors(
 
         // Rostered tools' contracts come from `describe_tool` on demand.
         match disclosure {
-            Disclosure::Deferred => {
-                if cached_runtime.is_none() || !included_deferred_mcp_output_schema {
-                    if cached_runtime.is_some() {
-                        included_deferred_mcp_output_schema = true;
-                    }
-                    deferred_exec_prompt_tool_specs.push(Arc::clone(&spec));
-                }
-            }
             Disclosure::Glossed => glossed_exec_prompt_tool_specs.push(Arc::clone(&spec)),
-            Disclosure::Named => named_exec_prompt_tool_specs.push(Arc::clone(&spec)),
             Disclosure::Declared => exec_prompt_tool_specs.push(spec.as_ref().clone()),
         }
         code_mode_nested_tool_specs.push((spec, cached_runtime));
@@ -991,28 +976,13 @@ fn register_code_mode_executors(
         codex_code_mode::DeferredToolDiscovery::Catalog
     };
     let mut namespace_descriptions = code_mode_namespace_descriptions(&exec_prompt_tool_specs);
-    let code_mode_input_schema_max_bytes =
-        turn_context.config.code_mode.tool_input_schema_max_bytes;
-    let mut enabled_tools = collect_code_mode_exec_prompt_tool_definitions(
-        exec_prompt_tool_specs.iter(),
-        code_mode_input_schema_max_bytes,
-    );
+    let mut enabled_tools =
+        collect_code_mode_exec_prompt_tool_definitions(exec_prompt_tool_specs.iter());
     let undeclared = |specs: &[Arc<ToolSpec>]| {
-        collect_code_mode_exec_prompt_tool_definitions(
-            specs.iter().map(Arc::as_ref),
-            code_mode_input_schema_max_bytes,
-        )
-        .into_iter()
+        collect_code_mode_exec_prompt_tool_definitions(specs.iter().map(Arc::as_ref)).into_iter()
     };
     let undeclared_tools = undeclared(&glossed_exec_prompt_tool_specs)
-        .map(codex_code_mode::UndeclaredTool::Glossed)
-        .chain(
-            undeclared(&named_exec_prompt_tool_specs).map(codex_code_mode::UndeclaredTool::Named),
-        )
-        .chain(
-            undeclared(&deferred_exec_prompt_tool_specs)
-                .map(codex_code_mode::UndeclaredTool::Deferred),
-        )
+        .map(codex_code_mode::UndeclaredTool)
         .collect::<Vec<_>>();
     let model_messages = ResolvedModelMessages::from_model(model_info);
     if tool_mode == ToolMode::CodeModeOnly {
@@ -1020,7 +990,16 @@ fn register_code_mode_executors(
     }
     enabled_tools
         .sort_by(|left, right| compare_code_mode_tools(left, right, &namespace_descriptions));
-    let exec_description = codex_code_mode::build_exec_tool_description(
+    let dialect = match turn_context.provider.info().adapter {
+        codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription => {
+            codex_code_mode::presentation::ToolDialect::Anthropic
+        }
+        codex_model_provider_info::ModelProviderAdapter::OpenaiCompatible => {
+            codex_code_mode::presentation::ToolDialect::Responses
+        }
+    };
+    let exec_description = codex_code_mode::build_exec_tool_description_for(
+        dialect,
         &enabled_tools,
         &undeclared_tools,
         &namespace_descriptions,

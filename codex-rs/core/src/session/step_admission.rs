@@ -16,7 +16,6 @@ use codex_protocol::items::TurnItem;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::ResponseItem;
-use codex_protocol::models::plaintext_agent_message_content;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::ItemCompletedEvent;
 use codex_protocol::protocol::TokenUsage;
@@ -155,9 +154,8 @@ impl ResponseMembers {
 #[derive(Debug)]
 struct Incoming {
     kind: ArrivalKind,
+    source: codex_protocol::step_admission::ArrivalSource,
     label: String,
-    /// Counted when present; an encrypted or opaque arrival takes a share of the remainder.
-    text: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -304,8 +302,9 @@ impl Session {
                 response_id: response_id.clone(),
                 announced_at_ms,
                 kind: incoming.kind,
+                source: incoming.source,
                 label: incoming.label,
-                text: incoming.text,
+                text: None,
             };
             self.emit_step_item(
                 &step_context.turn,
@@ -344,16 +343,16 @@ fn admit(items: &[ResponseItem]) -> Admitted {
         match item {
             ResponseItem::Message { role, .. } if role == "assistant" => {}
             ResponseItem::Message { role, content, .. } => {
-                let text = content
+                let blocks: Vec<String> = content
                     .iter()
                     .filter_map(|content| match content {
                         ContentItem::InputText { text } | ContentItem::OutputText { text } => {
-                            Some(text.as_str())
+                            Some(text.clone())
                         }
                         ContentItem::InputImage { .. } | ContentItem::InputAudio { .. } => None,
                     })
-                    .collect::<Vec<_>>()
-                    .join("\n");
+                    .collect();
+                let label = context_label(&blocks.join("\n"));
                 let kind = if role == "user" && !content.iter().all(is_contextual_user_fragment) {
                     ArrivalKind::User
                 } else {
@@ -361,26 +360,46 @@ fn admit(items: &[ResponseItem]) -> Admitted {
                 };
                 admitted.arrivals.push(Incoming {
                     kind,
-                    label: context_label(&text),
-                    text: Some(text),
+                    source: codex_protocol::step_admission::ArrivalSource::Captured { blocks },
+                    label,
                 });
             }
             ResponseItem::AgentMessage {
                 author, content, ..
             } => admitted.arrivals.push(Incoming {
                 kind: ArrivalKind::InterAgent,
+                source: content
+                    .iter()
+                    .map(|part| match part {
+                        codex_protocol::models::AgentMessageInputContent::InputText { text } => {
+                            Some(text.clone())
+                        }
+                        codex_protocol::models::AgentMessageInputContent::EncryptedContent {
+                            ..
+                        } => None,
+                    })
+                    .collect::<Option<Vec<_>>>()
+                    .map(
+                        |blocks| codex_protocol::step_admission::ArrivalSource::Captured { blocks },
+                    )
+                    .unwrap_or(codex_protocol::step_admission::ArrivalSource::Unavailable),
                 label: author.clone(),
-                text: plaintext_agent_message_content(content),
             }),
-            ResponseItem::AdditionalTools { tools, .. } => admitted.arrivals.push(Incoming {
-                kind: ArrivalKind::Injection,
-                label: "Additional tools".to_string(),
-                text: serde_json::to_string(tools).ok(),
-            }),
+            ResponseItem::AdditionalTools { tools, .. } => {
+                admitted.arrivals.push(Incoming {
+                    kind: ArrivalKind::Injection,
+                    label: "Additional tools".to_string(),
+                    source: serde_json::to_string(tools)
+                        .map(|text| {
+                            codex_protocol::step_admission::ArrivalSource::ToolDeclarations { text }
+                        })
+                        .unwrap_or(codex_protocol::step_admission::ArrivalSource::Unavailable),
+                })
+            }
             ResponseItem::ConfigurationUpdate { .. } => admitted.arrivals.push(Incoming {
                 kind: ArrivalKind::Injection,
                 label: "Configuration update".to_string(),
-                text: None,
+                source: codex_protocol::step_admission::ArrivalSource::Unavailable,
             }),
             ResponseItem::Compaction { .. }
             | ResponseItem::NativeCompaction { .. }
@@ -388,7 +407,7 @@ fn admit(items: &[ResponseItem]) -> Admitted {
             | ResponseItem::CompactionTrigger {} => admitted.arrivals.push(Incoming {
                 kind: ArrivalKind::Injection,
                 label: "Compaction".to_string(),
-                text: None,
+                source: codex_protocol::step_admission::ArrivalSource::Unavailable,
             }),
             ResponseItem::FunctionCallOutput { output, .. }
             | ResponseItem::CustomToolCallOutput { output, .. } => {
@@ -422,7 +441,16 @@ fn seal(mut mark: StepMark, received: i128, admitted: Admitted) -> (String, Step
         admitted
             .arrivals
             .iter()
-            .map(|arrival| arrival.text.as_deref().map(count_o200k_text)),
+            .map(|arrival| match &arrival.source {
+                codex_protocol::step_admission::ArrivalSource::Captured { blocks } => {
+                    Some(count_o200k_text(&blocks.join("\n")))
+                }
+                codex_protocol::step_admission::ArrivalSource::ToolDeclarations { text } => {
+                    Some(count_o200k_text(text))
+                }
+                codex_protocol::step_admission::ArrivalSource::Legacy
+                | codex_protocol::step_admission::ArrivalSource::Unavailable => None,
+            }),
     )
     .collect::<Vec<_>>();
     let Apportionment {

@@ -77,7 +77,6 @@ async fn assert_partial_results(provider: &dyn CodeModeSessionProvider) {
                     summary: String::new(),
                     kind: CodeModeToolKind::Function,
                     input_schema: None,
-                    input_schema_max_bytes: None,
                     output_schema: None,
                 }],
                 source: format!(

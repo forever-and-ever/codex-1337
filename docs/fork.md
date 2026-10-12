@@ -8,8 +8,16 @@ These terms have several meanings in the code or name fork concepts. Use the
 qualified forms.
 
 - Preamble: the initial instructions, tools and managed context of one context
-  window. Injections are subsequent arrivals, not refreshed preambles. Both
-  disclose their raw contents on expansion. `/context` opens a read-only Context
+  window. Injections are subsequent arrivals, not refreshed preambles. Preamble
+  starts collapsed and opens its client-only census before a separate source
+  fold. Raw shows captured text; Fmt opts into whitespace expansion and repainting,
+  never summarization; unsafe terminal controls are visibly escaped with a client
+  notice. Tool Declarations is a client serialization of the supplied
+  declarations, not the provider's unobservable internal prompt. Older mixed captures
+  retain a legacy label rather than guessed section boundaries. User messages are
+  blue, assistant prose green, inter-agent prose yellow-green, and other incoming
+  context purple; client-only representations remain visually separate. Author
+  color does not determine context inclusion. `/context` opens a read-only Context
   snapshot of retained special material, including superseded copies and amendments;
   it neither injects text nor wakes an unloaded thread. Older windows without a
   saved inspection prefix become inspectable after their next model request.

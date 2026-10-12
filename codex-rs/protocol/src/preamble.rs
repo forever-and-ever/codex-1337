@@ -15,7 +15,10 @@ pub struct PreambleItem {
     pub window_id: Option<String>,
     pub completed_at_ms: i64,
     pub parts: Vec<PreamblePart>,
-    /// Exact request-side special material. Missing only in older rollout records.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[ts(optional, as = "Option<_>")]
+    pub sources: Vec<ContextSource>,
+    /// Legacy mixed capture. New records preserve exact text in typed sources.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw: Option<String>,
     /// Legacy rolling-census delta. New per-window preambles always leave this absent.
@@ -32,7 +35,28 @@ pub struct PreambleItem {
 #[ts(rename_all = "camelCase")]
 pub struct ContextInventory {
     pub parts: Vec<PreamblePart>,
+    /// Legacy mixed capture; new records use typed sources.
+    #[serde(default)]
     pub raw: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[ts(optional, as = "Option<_>")]
+    pub sources: Vec<ContextSource>,
+}
+
+/// Captured text and a client serialization of declarations are different evidence.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, TS, JsonSchema)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+#[ts(tag = "kind", rename_all = "camelCase")]
+pub enum ContextSource {
+    Prompt {
+        label: String,
+        text: String,
+    },
+    /// The declarations supplied to the provider, serialized by this client for inspection.
+    /// This is not the provider's internal prompt serialization.
+    ToolDeclarations {
+        text: String,
+    },
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, TS, JsonSchema)]

@@ -1,6 +1,5 @@
 //! Discovery metadata retains output schemas for explicit lookup, not repeated prompts.
 
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use codex_protocol::ToolName;
@@ -9,13 +8,9 @@ use serde_json::Value as JsonValue;
 
 use crate::CodeModeToolKind;
 use crate::ToolDefinition;
-use crate::json_schema_types::DEFAULT_INPUT_SCHEMA_MAX_BYTES;
-use crate::json_schema_types::RenderedJsonSchema;
-use crate::json_schema_types::render_json_schema_to_typescript_with_budget;
 use crate::normalize_code_mode_identifier;
 
 const MAX_SUMMARY_CHARACTERS: usize = 160;
-pub(crate) const COMPACT_OUTPUT_SCHEMA_MAX_BYTES: usize = 1_024;
 
 pub fn enabled_tool_metadata(definition: &ToolDefinition) -> EnabledToolMetadata {
     EnabledToolMetadata {
@@ -24,6 +19,7 @@ pub fn enabled_tool_metadata(definition: &ToolDefinition) -> EnabledToolMetadata
         description: definition.description.clone(),
         summary: compact_tool_summary(&definition.summary),
         kind: definition.kind,
+        input_schema: definition.input_schema.clone().map(Arc::new),
         output_schema: definition.output_schema.clone().map(Arc::new),
     }
 }
@@ -36,44 +32,46 @@ pub struct EnabledToolMetadata {
     pub summary: String,
     pub kind: CodeModeToolKind,
     #[serde(skip)]
+    input_schema: Option<Arc<JsonValue>>,
+    #[serde(skip)]
     output_schema: Option<Arc<JsonValue>>,
 }
 
 impl EnabledToolMetadata {
     pub fn describe_output(&self) -> String {
-        let Some(schema) = self.output_schema.as_deref() else {
+        let Some(output) = self.output_schema.as_deref() else {
             return format!("{}: no declared output schema", self.global_name);
         };
-        let output =
-            render_output_type(schema, DEFAULT_INPUT_SCHEMA_MAX_BYTES, &mut BTreeSet::new());
-        format!(
-            "{} output:\n```ts\n{}type ToolOutput = {};\n```",
-            self.global_name, output.declarations, output.root_type
-        )
+        if let Some(structured) = mcp_structured_content_schema(Some(output)) {
+            format!(
+                "{} returns an MCP result: content blocks; optional structuredContent, isError, _meta.\n{}",
+                self.global_name,
+                crate::contract::schema("structuredContent", structured)
+            )
+        } else {
+            crate::contract::schema(&format!("{} returns", self.global_name), output)
+        }
+    }
+
+    pub fn describe_schema(&self) -> String {
+        serde_json::json!({"input": self.input_schema, "output": self.output_schema}).to_string()
     }
 }
 
-/// Collapses whitespace and keeps the leading whole sentences that fit; a first sentence longer
+/// Collapses whitespace and keeps the first purpose sentence; a sentence longer
 /// than the budget is cut at a word boundary and marked with an ellipsis. A period followed by a
 /// lowercase word, as in "e.g. this", does not end a sentence.
 pub(crate) fn compact_tool_summary(purpose: &str) -> String {
     let mut summary = String::new();
     let mut characters = 0;
-    // Byte lengths of `summary` after its last confirmed sentence and after a pending one.
-    let mut sentence_end = None;
-    let mut pending_end = None;
+    let mut pending_end = false;
     for word in purpose.split_whitespace() {
-        if let Some(end) = pending_end.take()
-            && !word.starts_with(char::is_lowercase)
-        {
-            sentence_end = Some(end);
+        if pending_end && !word.starts_with(char::is_lowercase) {
+            return summary;
         }
+        pending_end = false;
         let width = usize::from(characters > 0) + word.chars().count();
         if characters + width > MAX_SUMMARY_CHARACTERS {
-            if let Some(end) = sentence_end {
-                summary.truncate(end);
-                return summary;
-            }
             // Keep whole words, leaving room for the ellipsis.
             if characters == MAX_SUMMARY_CHARACTERS {
                 match summary.rfind(' ') {
@@ -95,32 +93,10 @@ pub(crate) fn compact_tool_summary(purpose: &str) -> String {
         summary.push_str(word);
         characters += width;
         if word.ends_with(['.', '!', '?']) {
-            pending_end = Some(summary.len());
+            pending_end = true;
         }
     }
     summary
-}
-
-pub(crate) fn render_output_type(
-    schema: &JsonValue,
-    max_bytes: usize,
-    names: &mut BTreeSet<String>,
-) -> RenderedJsonSchema {
-    if let Some(structured_content_schema) = mcp_structured_content_schema(Some(schema)) {
-        let mut output = render_json_schema_to_typescript_with_budget(
-            structured_content_schema,
-            max_bytes,
-            names,
-        );
-        output.root_type = if output.root_type == "unknown" {
-            "CallToolResult".to_string()
-        } else {
-            format!("CallToolResult<{}>", output.root_type)
-        };
-        output
-    } else {
-        render_json_schema_to_typescript_with_budget(schema, max_bytes, names)
-    }
 }
 
 pub(crate) fn mcp_structured_content_schema(

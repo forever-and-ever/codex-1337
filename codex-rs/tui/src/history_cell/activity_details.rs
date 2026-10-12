@@ -9,7 +9,6 @@ use super::HistoryRenderMode;
 use super::ToolOutputCell;
 use super::output_provenance::OutputMode;
 use crate::terminal_hyperlinks::HyperlinkLine;
-use crate::terminal_hyperlinks::plain_hyperlink_lines;
 use std::sync::Arc;
 
 #[derive(Debug, Default, Clone)]
@@ -101,7 +100,9 @@ impl ActivityDetails {
             .flat_map(|(_, cell)| {
                 let mut lines = match mode {
                     HistoryRenderMode::Rich => cell.transcript_hyperlink_lines(width),
-                    HistoryRenderMode::Raw => plain_hyperlink_lines(cell.raw_lines()),
+                    HistoryRenderMode::Raw => {
+                        super::output_provenance::raw_cell_lines(cell.as_ref(), width)
+                    }
                 };
                 if mode == HistoryRenderMode::Rich && !lines.is_empty() {
                     lines.insert(/*index*/ 0, HyperlinkLine::from(""));

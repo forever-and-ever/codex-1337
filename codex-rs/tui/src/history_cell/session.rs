@@ -147,10 +147,10 @@ pub(crate) fn fullscreen_session_lines(
             }
         }
         lines
-    } else if detailed || mode == HistoryRenderMode::Rich {
+    } else if mode == HistoryRenderMode::Rich {
         cell.retained_hyperlink_lines(width, detailed)
     } else {
-        cell.display_hyperlink_lines_for_mode(width, mode)
+        super::output_provenance::raw_cell_lines(cell, width)
     }
 }
 

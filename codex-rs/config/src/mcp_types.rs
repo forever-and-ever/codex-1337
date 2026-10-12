@@ -250,7 +250,6 @@ pub struct McpServerConfig {
     pub supports_parallel_tool_calls: bool,
 
     /// UTF-8 byte threshold for compacting each ordinary MCP tool input schema. Defaults to 5,000 bytes.
-    /// Code Mode also uses an explicitly configured limit when rendering each tool's input type.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_input_schema_max_bytes: Option<NonZeroUsize>,
 
@@ -408,7 +407,6 @@ pub struct RawMcpServerConfig {
     #[serde(default)]
     pub supports_parallel_tool_calls: Option<bool>,
     /// UTF-8 byte threshold for compacting each ordinary MCP tool input schema. Defaults to 5,000 bytes.
-    /// Code Mode also uses an explicitly configured limit when rendering each tool's input type.
     /// Larger limits preserve more parameter descriptions.
     #[serde(default)]
     #[schemars(range(min = 1))]

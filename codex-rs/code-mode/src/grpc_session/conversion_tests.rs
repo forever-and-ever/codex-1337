@@ -29,7 +29,6 @@ fn execute_request_preserves_tool_schemas_namespaces_and_limits() {
             description: "search the workspace".to_string(),
             kind: CodeModeToolKind::Freeform,
             input_schema: Some(json!({"type": "object"})),
-            input_schema_max_bytes: None,
             output_schema: Some(json!({"type": "string"})),
         }],
         source: "text('hello')".to_string(),

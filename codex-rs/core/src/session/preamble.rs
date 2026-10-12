@@ -50,7 +50,7 @@ impl PreambleTools<'_> {
 pub(crate) struct PreambleMark {
     window_id: uuid::Uuid,
     parts: Vec<PreamblePart>,
-    raw: String,
+    sources: Vec<codex_protocol::ContextSource>,
 }
 
 impl PreambleMark {
@@ -147,7 +147,9 @@ impl Session {
             .flat_map(|(role, content)| {
                 content.iter().filter_map(move |content| match content {
                     ContentItem::InputText { text }
-                        if role == "developer" || is_contextual_user_fragment(content) =>
+                        if role == "developer"
+                            || role == "system"
+                            || is_contextual_user_fragment(content) =>
                     {
                         Some(InjectedText {
                             role: role.clone(),
@@ -160,12 +162,12 @@ impl Session {
             .collect();
         Some(AbortOnDropHandle::new(tokio::task::spawn_blocking(
             move || {
-                let raw = raw_context(&instructions, &tools, &context);
+                let sources = context_sources(&instructions, &tools, &context);
                 let parts = census(&instructions, &tools, context);
                 PreambleMark {
                     window_id,
                     parts,
-                    raw,
+                    sources,
                 }
             },
         )))
@@ -183,7 +185,7 @@ impl Session {
         let PreambleMark {
             window_id,
             parts,
-            raw,
+            sources,
         } = mark;
         self.state.lock().await.preamble_window = Some(window_id);
         let turn_id = &turn_context.sub_id;
@@ -194,7 +196,8 @@ impl Session {
             window_id: Some(window_id.to_string()),
             completed_at_ms,
             parts,
-            raw: Some(raw),
+            raw: None,
+            sources,
             change: None,
             reported_input_tokens: usage.and_then(|usage| u64::try_from(usage.input_tokens).ok()),
         };
@@ -214,24 +217,31 @@ impl Session {
 
 #[expect(
     clippy::expect_used,
-    reason = "tool schemas contain only JSON-serializable values"
+    reason = "tool declarations contain only serializable JSON values"
 )]
-pub(super) fn raw_context(
+pub(super) fn context_sources(
     instructions: &str,
     tools: &PreambleTools<'_>,
     context: &[InjectedText],
-) -> String {
-    let tools = match tools {
-        PreambleTools::Direct(tools) => serde_json::to_string_pretty(tools),
-        PreambleTools::History(tools) => serde_json::to_string_pretty(tools),
+) -> Vec<codex_protocol::ContextSource> {
+    use codex_protocol::ContextSource;
+    let declarations = match tools {
+        PreambleTools::Direct(tools) => serde_json::to_string(tools),
+        PreambleTools::History(tools) => serde_json::to_string(tools),
     }
     .expect("tool declarations are serializable");
-    let mut raw =
-        format!("--- Base instructions ---\n{instructions}\n\n--- Tool declarations ---\n{tools}");
-    for fragment in context {
-        raw.push_str(&format!("\n\n--- {} ---\n{}", fragment.role, fragment.text));
-    }
-    raw
+    std::iter::once(ContextSource::Prompt {
+        label: "Base instructions".into(),
+        text: instructions.to_owned(),
+    })
+    .chain(std::iter::once(ContextSource::ToolDeclarations {
+        text: declarations,
+    }))
+    .chain(context.iter().map(|fragment| ContextSource::Prompt {
+        label: fragment.role.clone(),
+        text: fragment.text.clone(),
+    }))
+    .collect()
 }
 
 pub(super) fn census(

@@ -10,55 +10,33 @@ use std::collections::BTreeMap;
 
 use crate::PUBLIC_TOOL_NAME;
 use crate::UndeclaredTool;
-use crate::discovery::COMPACT_OUTPUT_SCHEMA_MAX_BYTES;
 use crate::discovery::compact_tool_summary;
-use crate::discovery::mcp_structured_content_schema;
-use crate::discovery::render_output_type;
-use crate::json_schema_types::DEFAULT_INPUT_SCHEMA_MAX_BYTES;
-use crate::json_schema_types::RenderedJsonSchema;
-use crate::json_schema_types::render_json_schema_to_typescript_with_budget;
-use std::collections::BTreeSet;
 
 const MAX_JS_SAFE_INTEGER: u64 = (1_u64 << 53) - 1;
 const MAX_YIELD_TIME_PLACEHOLDER: &str = "{{ max_yield_time_ms }}";
-const DEFERRED_NESTED_TOOLS_GUIDANCE: &str = "Some deferred nested tools may be omitted from this description. They are still available on the global `tools` object and listed in `ALL_TOOLS`. Tool availability can change between calls.";
-const TOOL_DISCOVERY_GUIDANCE: &str = r#"Tool discovery helpers (synchronous):
-- `ALL_TOOLS`: `{ name, description }` catalogue; exact callable names and purpose summaries, not signatures or full instructions.
-- `search_tools(query: string, options?: { namespace?: string, limit?: number, offset?: number })`: returns `{ matches: Array<{ name, description }>, truncated: boolean, next_offset: number | null }`. All case-insensitive literal query words must match a name or summary; an empty query browses. `namespace` restricts the normalized namespace or callable-name prefix (`functions` for plain tools). Limit defaults to 8, capped at 20. Continue with the same query/options and `offset: next_offset`.
-- `describe_tool(name: string, options?: { detail?: "contract" | "output" })`: defaults to full instructions, namespace guidance, input declaration, and a compact return type. Retrieve this contract when missing from context. `{detail: "output"}` returns only the detailed output type; request it when inspecting result fields. MCP contracts use the shared `CallToolResult` envelope. Other return types over 1 KiB are abbreviated; explicit output declarations retain the 16,000-byte schema limit.
+const DEFERRED_NESTED_TOOLS_GUIDANCE: &str = "The inventory names every currently available nested tool. Contracts are on demand: call describe_tool before first use. Availability can change; ALL_TOOLS reflects the current catalogue.";
+const TOOL_DISCOVERY_GUIDANCE: &str = r#"Discovery (synchronous):
+- ALL_TOOLS: current name-and-purpose inventory.
+- search_tools(query, options?): case-insensitive literal words must all match a name or purpose; empty query browses. Optional namespace restricts callable prefix (functions for plain tools), limit defaults to 8 and is capped at 20, offset defaults to 0. Returns matches, truncated, next_offset; continue with the same query and next_offset.
+- describe_tool(name, options?): exact callable name required. Returns the complete instructions and schema-derived parameter contract. Optional detail is contract (default), output (complete return shape), or schema (raw machine schemas). Read a missing contract before calling; inspect output before using unfamiliar result fields.
 Print bounded search results, not the whole catalogue."#;
-const EXECUTION_OUTPUT_GUIDANCE: &str = r#"Execution output rules:
-- `text(value, options?: {metadata?: boolean})` and `notify(value, options?: {metadata?: boolean})` print compatible directly returned native `exec_command`/`write_stdin` objects as literal output plus necessary execution state. Nonempty dense arrays containing only such objects get ordinal headers; only default mode coalesces consecutive empty successful entries. `{metadata: true}` includes each result's metadata. JavaScript result fields are unchanged.
-- `text(result)` is compact. Strings, including `result.output` and explicit `JSON.stringify(result)`, remain literal. All other values retain generic serialization."#;
+const EXECUTION_OUTPUT_GUIDANCE: &str = r#"Output: text/notify render directly returned exec_command/write_stdin results as literal output plus required execution state; dense nonempty arrays of only these results get ordinal headers. Default mode coalesces consecutive empty successes; metadata=true retains each result's metadata. JavaScript fields never change. Strings remain literal (including result.output and JSON.stringify); other values use generic serialization."#;
 pub const TOOL_SEARCH_GUIDANCE: &str = r#"Use `await tools.tool_search({query: "...", limit: 8})` for ranked discovery of deferred tools. It returns `{tools: [{name, description}]}` with callable names and compact purpose summaries. Use `describe_tool(name)` for a missing contract before calling a tool."#;
-const LEGACY_IMAGE_HELPER_DESCRIPTION: &str = r#"`image(imageUrlOrItem: string | { image_url: string; detail?: "auto" | "low" | "high" | "original" | null } | ImageContent, detail?: "auto" | "low" | "high" | "original" | null)`: Appends an image item. `image_url` should be a base64-encoded `data:` URL. To forward an MCP tool image, pass an individual `ImageContent` block from `result.content`, for example `image(result.content[0])`. MCP image blocks may request detail with `_meta: { "codex/imageDetail": "original" }`. When provided, the second `detail` argument overrides any detail embedded in the first argument."#;
-const UNIFIED_IMAGE_HELPER_DESCRIPTION: &str = r#"`image(imageUrlOrItem: string | { image_url: string } | ImageContent)`: Appends an image item. `image_url` should be a base64-encoded `data:` URL. To forward an MCP tool image, pass an individual `ImageContent` block from `result.content`, for example `image(result.content[0])`."#;
-const AUDIO_HELPER_DESCRIPTION: &str = r#"`audio(audioUrlOrItem: string | { audio_url: string } | AudioContent)`: Appends an audio item. `audio_url` should be a base64-encoded `data:` URL. To forward an MCP tool audio block, pass an individual `AudioContent` block from `result.content`, for example `audio(result.content[0])`."#;
-const GENERATED_IMAGE_HELPER_DESCRIPTION: &str = r#"`generatedImage(result: { image_url: string; output_hint?: string })`: Appends an image-generation result and its optional output hint. HTTP(S) URLs are not supported."#;
-const EXEC_DESCRIPTION_TEMPLATE: &str = r#"Run JavaScript code to orchestrate/compose tool calls
-- Evaluates the provided JavaScript code in a fresh V8 isolate as an async module.
-- All nested tools are available on the global `tools` object, for example `await tools.exec_command(...)`. Tool names are exposed as normalized JavaScript identifiers, for example `await tools.mcp__ologs__get_profile(...)`.
-- Nested tool methods take either a string or an object as their input argument.
-- Nested tools return either an object or a string, based on the description.
-- Runs raw JavaScript -- no Node, no direct network access, no console. When available, `fs` accesses the selected executor's sandboxed filesystem, not the JavaScript host.
-- Accepts raw JavaScript source text, not JSON, quoted strings, or markdown code fences.
-- You may optionally start the tool input with a first-line pragma like `// @exec: {"max_output_tokens": 1000}`.
-- `max_output_tokens` sets the token budget for direct `exec` results. Defaults to 10000 tokens.
-- `exec` blocks until the script finishes. To keep working while a script runs, call `yield_control()` in it.
-- `exec` returns `Script running with cell ID ...` early when new user or agent input arrives, or after {{ max_yield_time_ms }} ms; the script keeps running.
-- When the JS code is fully evaluated, the isolate's lifetime ends and unawaited promises are silently discarded.
-
-- Global helpers:
-- `exit()`: Immediately ends the current script successfully (like an early return from the top level).
-- `text(value, options?: {metadata?: boolean})`: Appends a text item; see Execution output rules below for native execution results and generic serialization.
+const LEGACY_IMAGE_HELPER_DESCRIPTION: &str = r#"`image(value, detail?)`: append an image. Value is a base64 data URL, an object with image_url and optional detail, or an individual MCP image block (image(result.content[0])). Detail is auto, low, high, original, or null; the second argument overrides embedded detail, including MCP _meta[\"codex/imageDetail\"]."#;
+const UNIFIED_IMAGE_HELPER_DESCRIPTION: &str = r#"`image(value)`: append an image. Value is a base64 data URL, an object with image_url, or an individual MCP image block (image(result.content[0]))."#;
+const AUDIO_HELPER_DESCRIPTION: &str = r#"`audio(value)`: append audio. Value is a base64 data URL, an object with audio_url, or an individual MCP audio block (audio(result.content[0]))."#;
+const GENERATED_IMAGE_HELPER_DESCRIPTION: &str = r#"`generatedImage(result)`: append a generated image. Result requires image_url and may include an output_hint string. HTTP(S) URLs are unsupported."#;
+const EXEC_DESCRIPTION_TEMPLATE: &str = r#"Execute raw JavaScript in a fresh V8 async module. No JSON envelope, Markdown fences, Node, direct network, or console. Call nested tools with await tools.NAME(args); freeform tools take a string. Tool permissions and approvals still apply.
+Await every operation: finishing the module destroys its isolate and discards outstanding promises. exec blocks until completion, yield_control(), new input, or {{ max_yield_time_ms }} ms; a returned cell ID means work continues. Resume with wait only after receiving that ID.
+Optional first line: // @exec: {"max_output_tokens": 1000}. Default output budget: 10000 tokens.
+Output enters context only when explicitly emitted:
+- text(value, options?): append output; notify(value, options?): emit immediately. Optional metadata=true includes native execution metadata.
+- yield_control(): emit accumulated output and hand control back while this cell keeps running.
+- exit(): end successfully now.
 {{ sh_helper }}
 {{ media_helpers }}
-- `store(key: string, value: any)`: stores a serializable value under a string key for later `exec` calls in the same session.
-- `load(key: string)`: returns the stored value for a string key, or `undefined` if it is missing.
-- `notify(value, options?: {metadata?: boolean})`: immediately injects an extra `custom_tool_call_output` for the current `exec` call. Values are rendered like `text(...)`.
-- `setTimeout(callback: () => void, delayMs?: number)`: schedules a callback to run later and returns a timeout id. Pending timeouts do not keep `exec` alive by themselves; await an explicit promise if you need to wait for one.
-- `clearTimeout(timeoutId?: number)`: cancels a timeout created by `setTimeout`.
-- `yield_control()`: yields the accumulated output to the model immediately while the script keeps running."#;
+- store(key, value), load(key): retain serializable values by string key across cells; missing keys return undefined.
+- setTimeout(callback, delayMs?), clearTimeout(id?): schedule/cancel timers. Timers alone do not keep the isolate alive; await a promise when waiting."#;
 const EXECUTION_ORDER_GUIDANCE: &str = "- `exec` and `wait` may be batched with other top-level calls. They do not impose ordering: put `fence({})` between dependent stages. A fence fails on background/yielded work or any failed prerequisite, including nested calls; caught errors do not erase failures.";
 const WAIT_DESCRIPTION_TEMPLATE: &str = r#"- Use `wait` only after `exec` returns `Script running with cell ID ...`.
 - `cell_id` identifies the running `exec` cell to resume.
@@ -69,23 +47,6 @@ const WAIT_DESCRIPTION_TEMPLATE: &str = r#"- Use `wait` only after `exec` return
 - `wait` returns only the new output since the last yield, or the final completion or termination result for that cell.
 - If the cell is still running, `wait` may yield again with the same `cell_id`.
 - If the cell has already finished, `wait` returns the completed result and closes the cell."#;
-// Abridged from https://modelcontextprotocol.io/specification/draft/schema#calltoolresult to the
-// fields a script reads; annotations, icons and resource metadata are omitted.
-const MCP_TYPESCRIPT_PREAMBLE: &str = r#"type MetaObject = Record<string, unknown>;
-type TextContent = { type: "text"; text: string; _meta?: MetaObject };
-type ImageContent = { type: "image"; data: string; mimeType: string; _meta?: MetaObject };
-type AudioContent = { type: "audio"; data: string; mimeType: string; _meta?: MetaObject };
-type ResourceLink = { type: "resource_link"; uri: string; name: string; mimeType?: string; description?: string };
-type EmbeddedResource = { type: "resource"; resource: { uri: string; mimeType?: string; text?: string; blob?: string } };
-type ContentBlock = TextContent | ImageContent | AudioContent | ResourceLink | EmbeddedResource;
-type CallToolResult<TStructured = { [key: string]: unknown }> = {
-  content: ContentBlock[];
-  structuredContent?: TStructured;
-  isError?: boolean;
-  _meta?: MetaObject;
-  [key: string]: unknown;
-};"#;
-
 pub const CODE_MODE_PRAGMA_PREFIX: &str = "// @exec:";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -104,9 +65,6 @@ pub struct ToolDefinition {
     pub summary: String,
     pub kind: CodeModeToolKind,
     pub input_schema: Option<JsonValue>,
-    /// Internal budget used while rendering the input declaration, before sending it to the host.
-    #[serde(skip)]
-    pub input_schema_max_bytes: Option<usize>,
     pub output_schema: Option<JsonValue>,
 }
 
@@ -259,6 +217,30 @@ pub fn build_exec_tool_description(
     deferred_tool_discovery: DeferredToolDiscovery,
     messages: Option<&CodeModeToolMessages>,
 ) -> String {
+    build_exec_tool_description_for(
+        crate::presentation::ToolDialect::default(),
+        enabled_tools,
+        undeclared_tools,
+        namespace_descriptions,
+        max_yield_time_ms,
+        code_mode_only,
+        media_helpers,
+        deferred_tool_discovery,
+        messages,
+    )
+}
+
+pub fn build_exec_tool_description_for(
+    dialect: crate::presentation::ToolDialect,
+    enabled_tools: &[ToolDefinition],
+    undeclared_tools: &[UndeclaredTool],
+    namespace_descriptions: &BTreeMap<String, ToolNamespaceDescription>,
+    max_yield_time_ms: u64,
+    code_mode_only: bool,
+    media_helpers: MediaHelpers,
+    deferred_tool_discovery: DeferredToolDiscovery,
+    messages: Option<&CodeModeToolMessages>,
+) -> String {
     let mut sections = Vec::new();
     let description = messages
         .and_then(|messages| messages.exec.as_ref())
@@ -303,16 +285,18 @@ pub fn build_exec_tool_description(
     if !guidance.is_empty() {
         sections.push(guidance.to_string());
     }
-    sections.extend(crate::roster::render_roster(undeclared_tools));
+    sections.extend(dialect.notes().map(str::to_owned));
+    sections.extend(crate::roster::render_roster_for(undeclared_tools, dialect));
     if !code_mode_only {
         return sections.join("\n\n");
     }
 
-    let preamble = messages
-        .and_then(|messages| messages.mcp_typescript_preamble.as_deref())
-        .unwrap_or(MCP_TYPESCRIPT_PREAMBLE);
-    if !preamble.is_empty() {
-        sections.push(format!("Shared MCP Types:\n```ts\n{preamble}\n```"));
+    // Preserve explicit caller guidance without injecting the old shared TypeScript manual.
+    if let Some(preamble) =
+        messages.and_then(|messages| messages.mcp_typescript_preamble.as_deref())
+        && !preamble.is_empty()
+    {
+        sections.push(preamble.to_owned());
     }
 
     if !enabled_tools.is_empty() {
@@ -320,7 +304,6 @@ pub fn build_exec_tool_description(
         let mut nested_tool_sections = Vec::with_capacity(enabled_tools.len());
 
         for tool in enabled_tools {
-            let name = tool.name.as_str();
             let nested_description = render_code_mode_sample_for_definition(tool);
             let namespace_description = tool
                 .tool_name
@@ -342,15 +325,12 @@ pub fn build_exec_tool_description(
                 current_namespace = next_namespace;
             }
 
-            let global_name = normalize_code_mode_identifier(name);
+            let heading = dialect.contract_heading(tool);
             let nested_description = nested_description.trim();
             if nested_description.is_empty() {
-                nested_tool_sections.push(render_tool_heading(&global_name, name));
+                nested_tool_sections.push(heading);
             } else {
-                nested_tool_sections.push(format!(
-                    "{}\n{nested_description}",
-                    render_tool_heading(&global_name, name)
-                ));
+                nested_tool_sections.push(format!("{}\n{nested_description}", heading));
             }
         }
 
@@ -396,80 +376,8 @@ pub fn augment_tool_definition(mut definition: ToolDefinition) -> ToolDefinition
     definition
 }
 
-pub fn render_code_mode_sample(
-    description: &str,
-    tool_name: &str,
-    input_name: &str,
-    input_type: String,
-    output_type: String,
-) -> String {
-    let declaration = format!(
-        "declare const tools: {{ {} }};",
-        render_code_mode_tool_declaration(tool_name, input_name, &input_type, &output_type)
-    );
-    format!("{description}\n\nexec tool declaration:\n```ts\n{declaration}\n```")
-}
-
 fn render_code_mode_sample_for_definition(definition: &ToolDefinition) -> String {
-    let mut names = BTreeSet::new();
-    let input_name = match definition.kind {
-        CodeModeToolKind::Function => "args",
-        CodeModeToolKind::Freeform => "input",
-    };
-    let input_type = match definition.kind {
-        CodeModeToolKind::Function => definition
-            .input_schema
-            .as_ref()
-            .map(|schema| {
-                render_json_schema_to_typescript_with_budget(
-                    schema,
-                    definition
-                        .input_schema_max_bytes
-                        .unwrap_or(DEFAULT_INPUT_SCHEMA_MAX_BYTES),
-                    &mut names,
-                )
-            })
-            .unwrap_or_else(|| RenderedJsonSchema::inline("unknown")),
-        CodeModeToolKind::Freeform => RenderedJsonSchema::inline("string"),
-    };
-    let output_type = if mcp_structured_content_schema(definition.output_schema.as_ref()).is_some()
-    {
-        RenderedJsonSchema::inline("CallToolResult")
-    } else {
-        definition
-            .output_schema
-            .as_ref()
-            .map(|schema| render_output_type(schema, COMPACT_OUTPUT_SCHEMA_MAX_BYTES, &mut names))
-            .unwrap_or_else(|| RenderedJsonSchema::inline("unknown"))
-    };
-    let declaration = render_code_mode_tool_declaration(
-        &definition.name,
-        input_name,
-        &input_type.root_type,
-        &output_type.root_type,
-    );
-    format!(
-        "{}\n\nexec tool declaration:\n```ts\n{}{}declare const tools: {{ {declaration} }};\n```",
-        definition.description, input_type.declarations, output_type.declarations
-    )
-}
-
-fn render_code_mode_tool_declaration(
-    tool_name: &str,
-    input_name: &str,
-    input_type: &str,
-    output_type: &str,
-) -> String {
-    let tool_name = normalize_code_mode_identifier(tool_name);
-    format!("{tool_name}({input_name}: {input_type}): Promise<{output_type}>;")
-}
-
-fn render_tool_heading(global_name: &str, raw_name: &str) -> String {
-    if global_name == raw_name {
-        format!("### `{global_name}`")
-    } else {
-        format!("### `{global_name}` (`{raw_name}`)")
-    }
+    crate::contract::render(definition)
 }
 
 #[cfg(test)]
@@ -561,7 +469,7 @@ mod tests {
     }
 
     #[test]
-    fn augment_tool_definition_appends_typed_declaration() {
+    fn augment_tool_definition_renders_complete_contract() {
         let definition = ToolDefinition {
             summary: String::new(),
             name: "hidden_dynamic_tool".to_string(),
@@ -574,7 +482,6 @@ mod tests {
                 "required": ["city"],
                 "additionalProperties": false
             })),
-            input_schema_max_bytes: None,
             output_schema: Some(json!({
                 "type": "object",
                 "properties": { "ok": { "type": "boolean" } },
@@ -583,30 +490,28 @@ mod tests {
         };
 
         let description = augment_tool_definition(definition.clone()).description;
-        assert!(description.contains("declare const tools"));
-        assert!(
-            description.contains(
-                "hidden_dynamic_tool(args: { city: string; }): Promise<{ ok: boolean; }>;"
-            )
-        );
+        assert!(!description.contains("declare const tools"));
+        assert!(description.contains("city (required): string"));
         // A large return type must not consume the input contract's independent budget.
         let mut large_output = definition;
         large_output.output_schema.as_mut().unwrap()["properties"]["ok"]["description"] =
             json!("Output detail. ".repeat(100));
         let large_output = augment_tool_definition(large_output);
-        assert_eq!(
-            large_output.description,
-            "Test tool\n\nexec tool declaration:\n```ts\ndeclare const tools: { hidden_dynamic_tool(args: { city: string; }): Promise<unknown>; };\n```"
+        assert!(large_output.description.contains("city (required): string"));
+        assert!(
+            large_output
+                .description
+                .contains(&"Output detail. ".repeat(100))
         );
         assert!(
             enabled_tool_metadata(&large_output)
                 .describe_output()
-                .contains("ok: boolean;")
+                .contains("ok (required): boolean")
         );
     }
 
     #[test]
-    fn augment_tool_definition_includes_property_descriptions_as_comments() {
+    fn augment_tool_definition_retains_parameter_descriptions() {
         let definition = ToolDefinition {
             summary: String::new(),
             name: "weather_tool".to_string(),
@@ -630,7 +535,6 @@ mod tests {
                 },
                 "required": ["weather"]
             })),
-            input_schema_max_bytes: None,
             output_schema: Some(json!({
                 "type": "object",
                 "properties": {
@@ -644,19 +548,15 @@ mod tests {
         };
 
         let description = augment_tool_definition(definition).description;
-        assert!(description.contains(
-            r#"weather_tool(args: {
-  // look up weather for a given list of locations
-  weather: Array<{ location: string; }>;
-}): Promise<{
-  // human readable weather forecast
-  forecast: string;
-}>;"#
-        ));
+        assert!(
+            description.contains(
+                "weather (required): array. look up weather for a given list of locations"
+            )
+        );
     }
 
     #[test]
-    fn code_mode_types_structured_content_result_refs() {
+    fn contract_resolves_structured_output_references() {
         let definition = ToolDefinition {
             summary: String::new(),
             name: "mcp__sample__search".to_string(),
@@ -668,7 +568,6 @@ mod tests {
                 "properties": {},
                 "additionalProperties": false
             })),
-            input_schema_max_bytes: None,
             output_schema: Some(mcp_call_tool_result_schema(json!({
                 "type": "object",
                 "properties": {
@@ -696,18 +595,20 @@ mod tests {
         let schema = definition.output_schema.clone();
         let definition = augment_tool_definition(definition);
         assert_eq!(definition.output_schema, schema);
-        assert_eq!(
-            definition.description,
-            "Search\n\nexec tool declaration:\n```ts\ndeclare const tools: { mcp__sample__search(args: {}): Promise<CallToolResult>; };\n```"
+        assert!(
+            definition
+                .description
+                .contains("await tools.mcp__sample__search(args)")
         );
-        assert_eq!(
-            enabled_tool_metadata(&definition).describe_output(),
-            "mcp__sample__search output:\n```ts\ntype T_Result_item_v1 = { id: string; score: number; };\ntype ToolOutput = CallToolResult<{ results: Array<T_Result_item_v1>; }>;\n```"
-        );
+        assert!(definition.description.contains("Returns: MCP result"));
+        let output = enabled_tool_metadata(&definition).describe_output();
+        assert!(output.contains("id (required): string"));
+        assert!(output.contains("score (required): number"));
+        assert!(!output.contains("External schema"));
     }
 
     #[test]
-    fn code_mode_types_shared_alias_scope_and_required_branches() {
+    fn contract_retains_shared_references_and_required_branches() {
         // Aliases share a scope across inputs and outputs, but schema refs do not.
         let definition = ToolDefinition {
             name: "send_message".to_string(),
@@ -730,7 +631,6 @@ mod tests {
                     "Target_Node": { "type": ["string", "null"] }
                 }
             })),
-            input_schema_max_bytes: None,
             output_schema: Some(json!({
                 "$ref": "#/$defs/Target_Node",
                 "$defs": { "Target_Node": {
@@ -740,10 +640,13 @@ mod tests {
                 } }
             })),
         };
-        assert_eq!(
-            augment_tool_definition(definition).description,
-            "Send\n\nexec tool declaration:\n```ts\ntype T_Target_Node = string;\ntype T_Target_Node_2 = string | null;\ntype T_Target_Node_3 = { next: T_Target_Node_3; };\ndeclare const tools: { send_message(args: { prompt: string; threadId?: T_Target_Node; threadName?: T_Target_Node_2; } & ({ threadId: unknown; [key: string]: unknown; } | { threadName: unknown; [key: string]: unknown; })): Promise<T_Target_Node_3>; };\n```"
-        );
+        let rendered = augment_tool_definition(definition).description;
+        assert!(rendered.contains("Required fields: threadId"));
+        assert!(rendered.contains("Required fields: threadName"));
+        assert!(rendered.contains("exactly one, variant 2"));
+        assert!(rendered.contains("value: string or null"));
+        assert!(rendered.contains("next (required): value; see #/$defs/Target_Node"));
+        assert!(!rendered.contains("External schema"));
     }
 
     #[test]
@@ -756,7 +659,6 @@ mod tests {
                 description: "bar".to_string(),
                 kind: CodeModeToolKind::Function,
                 input_schema: None,
-                input_schema_max_bytes: None,
                 output_schema: None,
             }],
             &[],
@@ -789,7 +691,7 @@ bar"
             )
         };
         let mentions = |description: String| {
-            ["`image(", "`audio(", "`generatedImage(", "`setTimeout("]
+            ["`image(", "`audio(", "`generatedImage(", "setTimeout("]
                 .map(|helper| description.contains(helper))
         };
         assert_eq!(mentions(describe(ALL_MEDIA)), [true; 4]);
@@ -825,7 +727,6 @@ bar"
                         "properties": {},
                         "additionalProperties": false
                     })),
-                    input_schema_max_bytes: None,
                     output_schema: Some(mcp_call_tool_result_schema(json!({
                         "type": "object",
                         "properties": {},
@@ -843,7 +744,6 @@ bar"
                         "properties": {},
                         "additionalProperties": false
                     })),
-                    input_schema_max_bytes: None,
                     output_schema: Some(mcp_call_tool_result_schema(json!({
                         "type": "object",
                         "properties": {},
@@ -859,14 +759,16 @@ bar"
             DeferredToolDiscovery::Catalog,
             /*messages*/ None,
         );
-        assert_eq!(description.matches("## mcp__sample").count(), 1);
+        assert_eq!(
+            description
+                .lines()
+                .filter(|line| *line == "## mcp__sample")
+                .count(),
+            1
+        );
         assert!(description.contains("## mcp__sample\nShared namespace guidance."));
-        assert!(description.contains(
-            "declare const tools: { mcp__sample__alpha(args: {}): Promise<CallToolResult>; };"
-        ));
-        assert!(description.contains(
-            "declare const tools: { mcp__sample__beta(args: {}): Promise<CallToolResult>; };"
-        ));
+        assert!(description.contains("Call: await tools.mcp__sample__alpha(args)."));
+        assert!(description.contains("Call: await tools.mcp__sample__beta(args)."));
     }
 
     #[test]
@@ -890,7 +792,6 @@ bar"
                     "properties": {},
                     "additionalProperties": false
                 })),
-                input_schema_max_bytes: None,
                 output_schema: Some(mcp_call_tool_result_schema(json!({
                     "type": "object",
                     "properties": {},
@@ -906,12 +807,12 @@ bar"
             /*messages*/ None,
         );
 
-        assert!(!description.contains("## mcp__sample"));
-        assert!(description.contains("### `mcp__sample__alpha`"));
+        assert!(!description.lines().any(|line| line == "## mcp__sample"));
+        assert!(description.contains("### `mcp__sample__alpha` (`mcp__sample__.alpha`)"));
     }
 
     #[test]
-    fn code_mode_only_description_renders_shared_mcp_types_once() {
+    fn code_mode_description_defers_mcp_output_detail() {
         let first_tool = augment_tool_definition(ToolDefinition {
             summary: String::new(),
             name: "mcp__sample__alpha".to_string(),
@@ -923,7 +824,6 @@ bar"
                 "properties": {},
                 "additionalProperties": false
             })),
-            input_schema_max_bytes: None,
             output_schema: Some(json!({
                 "type": "object",
                 "properties": {
@@ -959,7 +859,6 @@ bar"
                 "properties": {},
                 "additionalProperties": false
             })),
-            input_schema_max_bytes: None,
             output_schema: Some(json!({
                 "type": "object",
                 "properties": {
@@ -994,7 +893,6 @@ bar"
                     description: "First tool".to_string(),
                     kind: first_tool.kind,
                     input_schema: first_tool.input_schema,
-                    input_schema_max_bytes: None,
                     output_schema: first_tool.output_schema,
                 },
                 ToolDefinition {
@@ -1004,7 +902,6 @@ bar"
                     description: "Second tool".to_string(),
                     kind: second_tool.kind,
                     input_schema: second_tool.input_schema,
-                    input_schema_max_bytes: None,
                     output_schema: second_tool.output_schema,
                 },
             ],
@@ -1021,13 +918,13 @@ bar"
             description
                 .matches("type CallToolResult<TStructured = { [key: string]: unknown }>")
                 .count(),
-            1
+            0
         );
-        assert_eq!(description.matches("Shared MCP Types:").count(), 1);
+        assert_eq!(description.matches("Shared MCP Types:").count(), 0);
     }
 
     #[test]
-    fn code_mode_only_description_renders_shared_mcp_types_for_deferred_tools() {
+    fn deferred_tools_are_rostered_without_shared_type_manual() {
         let deferred_tool = ToolDefinition {
             summary: String::new(),
             name: "mcp__sample__alpha".to_string(),
@@ -1039,7 +936,6 @@ bar"
                 "properties": {},
                 "additionalProperties": false
             })),
-            input_schema_max_bytes: None,
             output_schema: Some(mcp_call_tool_result_schema(json!({
                 "type": "object",
                 "properties": {},
@@ -1049,7 +945,7 @@ bar"
 
         let description = build_exec_tool_description(
             &[],
-            &[UndeclaredTool::Deferred(deferred_tool)],
+            &[UndeclaredTool(deferred_tool)],
             &BTreeMap::new(),
             /*max_yield_time_ms*/ 600_000,
             /*code_mode_only*/ true,
@@ -1058,8 +954,8 @@ bar"
             /*messages*/ None,
         );
 
-        assert!(description.contains("Some deferred nested tools may be omitted"));
-        assert!(description.contains("Shared MCP Types:"));
+        assert!(description.contains("inventory names every"));
+        assert!(!description.contains("Shared MCP Types:"));
         assert!(!description.contains("### `mcp__sample__alpha`"));
     }
 
@@ -1072,7 +968,6 @@ bar"
             description: "Deferred tool".to_string(),
             kind: CodeModeToolKind::Function,
             input_schema: None,
-            input_schema_max_bytes: None,
             output_schema: None,
         }];
         let search_tool = ToolDefinition {
@@ -1082,7 +977,6 @@ bar"
             description: super::TOOL_SEARCH_GUIDANCE.to_string(),
             kind: CodeModeToolKind::Function,
             input_schema: None,
-            input_schema_max_bytes: None,
             output_schema: None,
         };
         for code_mode_only in [false, true] {
@@ -1099,7 +993,7 @@ bar"
                     &deferred_tools
                         .iter()
                         .cloned()
-                        .map(UndeclaredTool::Deferred)
+                        .map(UndeclaredTool)
                         .collect::<Vec<_>>(),
                     &BTreeMap::new(),
                     crate::DEFAULT_EXEC_YIELD_TIME_MS,
@@ -1108,10 +1002,10 @@ bar"
                     discovery,
                     /*messages*/ None,
                 );
-                assert!(description.contains("Some deferred nested tools may be omitted"));
-                assert!(description.contains("search_tools(query: string"));
+                assert!(description.contains("inventory names every"));
+                assert!(description.contains("search_tools(query, options?)"));
                 assert_eq!(
-                    description.matches("await tools.tool_search(").count(),
+                    description.matches(super::TOOL_SEARCH_GUIDANCE).count(),
                     usize::from(discovery == DeferredToolDiscovery::RankedSearch),
                 );
 
@@ -1125,7 +1019,8 @@ bar"
                     discovery,
                     /*messages*/ None,
                 );
-                assert_eq!(description, empty_catalog_description);
+                assert!(description.contains("tools.deferred_tool: Deferred tool"));
+                assert!(!empty_catalog_description.contains("tools.deferred_tool: Deferred tool"));
             }
         }
     }

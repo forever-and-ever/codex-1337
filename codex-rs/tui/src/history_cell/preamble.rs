@@ -28,6 +28,8 @@ pub(crate) struct PreambleCell {
     timestamp: Option<HistoryTimestamp>,
     parts: Vec<PreamblePart>,
     raw: Option<String>,
+    sources: Vec<codex_protocol::ContextSource>,
+    title: &'static str,
     change: Option<PreambleChange>,
     reported_input_tokens: Option<u64>,
 }
@@ -39,6 +41,7 @@ impl PreambleCell {
             completed_at_ms,
             parts,
             raw,
+            sources,
             change,
             reported_input_tokens,
             ..
@@ -47,12 +50,44 @@ impl PreambleCell {
             unreachable!("PreambleCell requires a Preamble item")
         };
         Self {
+            title: "Preamble",
             id,
             timestamp: HistoryTimestamp::from_millis(completed_at_ms),
             parts,
             raw,
+            sources,
             change,
             reported_input_tokens,
+        }
+    }
+
+    pub(crate) fn inventory(inventory: codex_protocol::ContextInventory) -> Self {
+        Self {
+            id: "context-inventory".into(),
+            timestamp: None,
+            title: "Context snapshot",
+            parts: inventory.parts,
+            sources: inventory.sources,
+            raw: (!inventory.raw.is_empty()).then_some(inventory.raw),
+            change: None,
+            reported_input_tokens: None,
+        }
+    }
+
+    pub(crate) fn source_lines(
+        &self,
+        mode: super::output_provenance::OutputMode,
+    ) -> Vec<HyperlinkLine> {
+        if self.sources.is_empty() {
+            let mut lines = vec![super::output_provenance::client_notice(
+                "Legacy mixed capture — prompt and declaration boundaries were not retained",
+            )];
+            if let Some(raw) = &self.raw {
+                lines.extend(super::output_provenance::client_lines(raw, mode));
+            }
+            lines
+        } else {
+            super::output_provenance::context_sources(&self.sources, mode)
         }
     }
 
@@ -63,8 +98,8 @@ impl PreambleCell {
     fn heading(&self) -> Line<'static> {
         let mut heading = Line::default();
         heading.push_span(
-            if self.raw.is_some() {
-                "Preamble"
+            if self.raw.is_some() || !self.sources.is_empty() {
+                self.title
             } else {
                 "Context census (legacy)"
             }
@@ -163,16 +198,6 @@ impl PreambleCell {
         lines
     }
 
-    fn detail_lines(&self) -> Vec<Line<'static>> {
-        let mut lines = self.summary_lines();
-        if self.raw.is_some() {
-            lines.push(Line::default());
-            lines.push(Line::from("Raw Context".bold()));
-            lines.extend(self.raw_lines());
-        }
-        lines
-    }
-
     fn raw_fold(&self) -> String {
         format!("preamble-raw:{}", self.id)
     }
@@ -231,30 +256,43 @@ impl FeedEntry for PreambleCell {
         self.heading()
     }
 
-    fn feed_body(&self, _width: u16, expanded: &HashSet<String>) -> ActivityParts {
-        let mut lines = self.summary_lines();
+    fn feed_body(
+        &self,
+        _width: u16,
+        expanded: &HashSet<String>,
+        mode: super::output_provenance::OutputMode,
+    ) -> ActivityParts {
+        use super::output_provenance::{OutputProvenance, mark_lines};
+        let mut lines: Vec<HyperlinkLine> =
+            self.summary_lines().into_iter().map(Into::into).collect();
+        mark_lines(&mut lines, OutputProvenance::Client);
         let mut controls = Vec::new();
-        if self.raw.is_some() {
+        if self.raw.is_some() || !self.sources.is_empty() {
             let id = self.raw_fold();
             let expanded = expanded.contains(&id);
-            lines.push(Line::default());
+            lines.push("".into());
             controls.push(PartControl {
                 id,
                 line: lines.len(),
                 expanded,
             });
-            lines.push(Line::from("Raw Context".bold()));
+            let mut heading = vec![HyperlinkLine::from(Line::from("Raw Context".bold()))];
+            mark_lines(&mut heading, OutputProvenance::Client);
+            lines.extend(heading);
             if expanded {
-                lines.extend(self.raw_lines());
+                lines.extend(self.source_lines(mode));
             }
         }
         ActivityParts {
             lines: crate::terminal_hyperlinks::prefix_hyperlink_lines(
-                lines.into_iter().map(Into::into).collect(),
+                lines,
                 "  ".into(),
                 "  ".into(),
             ),
-            header: None,
+            header: Some(ActivityHeader {
+                source_offset: "Raw Context".len(),
+                expand_on_truncation: false,
+            }),
             output: None,
             controls,
         }
@@ -264,6 +302,10 @@ impl FeedEntry for PreambleCell {
 impl HistoryCell for PreambleCell {
     fn transcript_timestamp(&self) -> Option<HistoryTimestamp> {
         self.timestamp
+    }
+
+    fn has_formatted_output(&self) -> bool {
+        self.raw.is_some() || !self.sources.is_empty()
     }
 
     fn activity_ids(&self) -> Vec<String> {
@@ -297,15 +339,24 @@ impl HistoryCell for PreambleCell {
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
-        self.raw.as_ref().map_or_else(
-            || self.detail_lines(),
-            |raw| {
-                super::sanitize_user_text(raw.as_str().into())
-                    .lines()
-                    .map(|line| Line::from(line.to_string()))
+        if self.sources.is_empty() {
+            return self.raw.as_deref().map_or_else(Vec::new, |raw| {
+                super::sanitize_user_text(raw.into())
+                    .split('\n')
+                    .map(|line| Line::from(line.to_owned()))
                     .collect()
-            },
-        )
+            });
+        }
+        self.sources
+            .iter()
+            .flat_map(|source| {
+                let text = match source {
+                    codex_protocol::ContextSource::Prompt { text, .. }
+                    | codex_protocol::ContextSource::ToolDeclarations { text } => text,
+                };
+                text.split('\n').map(|line| Line::from(line.to_owned()))
+            })
+            .collect()
     }
 
     fn transcript_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
@@ -313,12 +364,13 @@ impl HistoryCell for PreambleCell {
     }
 
     fn expanded_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        let mut expanded = HashSet::new();
+        expanded.insert(self.raw_fold());
         let mut lines = self.display_hyperlink_lines(width);
-        lines.extend(crate::terminal_hyperlinks::prefix_hyperlink_lines(
-            self.detail_lines().into_iter().map(Into::into).collect(),
-            "  ".into(),
-            "  ".into(),
-        ));
+        lines.extend(
+            self.feed_body(width, &expanded, super::output_provenance::OutputMode::Raw)
+                .lines,
+        );
         lines
     }
 

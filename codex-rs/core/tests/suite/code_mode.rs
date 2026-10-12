@@ -1056,7 +1056,6 @@ pub(super) async fn mcp_schema_max_bytes_scenario() -> Result<Vec<ResponsesReque
                 .features
                 .enable(Feature::CodeModeOnly)
                 .expect("enable Code Mode");
-            config.code_mode.tool_input_schema_max_bytes = Some(30_000);
             let mut servers = config.mcp_servers.get().clone();
             for (name, budget) in [("default_schema", None), ("expanded_schema", Some(60_000))] {
                 let mut server_config = serde_json::json!({"url": url});
@@ -1075,10 +1074,10 @@ pub(super) async fn mcp_schema_max_bytes_scenario() -> Result<Vec<ResponsesReque
     let lookup = r#"
 const results = ["default_schema", "expanded_schema"].map(server => {
   const description = describe_tool(`mcp__${server}__search`);
-  return [description.includes("budget_description_marker"), description.includes("query: string;")];
+  return [description.includes("budget_description_marker"), description.includes("query (required): string")];
 });
 const shared = describe_tool("mcp__default_schema__shared");
-results.push([shared.includes("code_mode_description_marker"), shared.includes("term: string;")]);
+results.push([shared.includes("code_mode_description_marker"), shared.includes("term (required): string")]);
 text(JSON.stringify(results));"#;
     let responses = responses::mount_sse_sequence(
         &server,
@@ -1239,7 +1238,7 @@ async fn code_mode_excludes_mcp_servers_using_their_configured_identity() -> Res
                 assert_eq!(
                     echo_tool["description"]
                         .as_str()
-                        .is_some_and(|description| description.contains("exec tool declaration:")),
+                        .is_some_and(|description| description.contains("Call: await tools.")),
                     !omit_code_mode,
                     "the MCP tool description must agree with Code Mode availability; \
                  omit_tools_from={omit_tools_from:?}, code_mode_only={code_mode_only}, \
@@ -1300,7 +1299,7 @@ async fn code_mode_excludes_mcp_servers_using_their_configured_identity() -> Res
                         .as_str()
                         .is_some_and(|description| {
                             description.contains(&unrelated_nested_tool_name)
-                                && description.contains("exec tool declaration:")
+                                && description.contains("Call: await tools.")
                         }),
                     "an unrelated same-namespace tool must remain available inside Code Mode; \
                  omit_tools_from={omit_tools_from:?}, \
@@ -3558,13 +3557,9 @@ async fn code_mode_complete_call_survives_unrelated_truncation() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[test_case(false, None; "control")]
-#[test_case(true, None; "ranked_search")]
-#[test_case(true, Some(30_000); "ranked_search_expanded_schema")]
-async fn code_mode_only_searches_and_calls_deferred_app_tools(
-    ranked_search: bool,
-    schema_max_bytes: Option<usize>,
-) -> Result<()> {
+#[test_case(false; "control")]
+#[test_case(true; "ranked_search")]
+async fn code_mode_only_searches_and_calls_deferred_app_tools(ranked_search: bool) -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
@@ -3620,7 +3615,7 @@ if (!tool) {
     found: true,
     rankedSearchAvailable: typeof tools.tool_search === "function",
     name: tool.name,
-    hasDeclaration: contract.includes("mcp__codex_apps__calendar_timezone_option_99(args:"),
+    hasDeclaration: contract.includes("await tools.mcp__codex_apps__calendar_timezone_option_99(args)"),
     hasSchemaDescription: contract.includes("schema_budget_marker"),
     hasNamespacePrefix: contract.startsWith("Calendar search context.\n\n"),
     isError: Boolean(result.isError),
@@ -3681,7 +3676,6 @@ if (!tool) {
                 .features
                 .enable(Feature::CodeModeOnly)
                 .expect("test config should allow feature update");
-            config.code_mode.tool_input_schema_max_bytes = schema_max_bytes;
             if ranked_search {
                 config
                     .features
@@ -3742,8 +3736,14 @@ if (!tool) {
     assert!(exec_description.contains("search_tools"));
     let has_ranked_search = exec_description.contains("await tools.tool_search(");
     assert_eq!(has_ranked_search, ranked_search);
-    assert!(exec_description.contains("Shared MCP Types:"));
-    assert!(!exec_description.contains("calendar_timezone_option_99"));
+    assert!(!exec_description.contains("declare const tools"));
+    for index in 0..100 {
+        assert!(exec_description.contains(&format!(
+            "tools.mcp__codex_apps__calendar_timezone_option_{index}"
+        )));
+        assert!(exec_description.contains(&format!("Read timezone option {index}.")));
+    }
+    assert!(!exec_description.contains("schema_budget_marker"));
 
     let request = follow_up_mock.single_request();
     let (output, success) = custom_tool_output_body_and_success(&request, "call-1");
@@ -8040,13 +8040,9 @@ text(JSON.stringify({
     let requests = response_mock.requests();
     assert_eq!(requests.len(), 3);
 
-    let declaration =
-        "declare const tools: { editor__apply_patch(input: string): Promise<unknown>; };";
-    let description = |generation| {
-        format!(
-            "Apply a raw editor patch (step {generation}).\n\nexec tool declaration:\n```ts\n{declaration}\n```"
-        )
-    };
+    let declaration = "Call: await tools.editor__apply_patch(input). Input is a raw string, not a JSON envelope.\nReturns: no declared shape.";
+    let description =
+        |generation| format!("Apply a raw editor patch (step {generation}).\n\n{declaration}");
     let first_body = requests[0].body_json();
     let namespaced_custom_tool = namespace_child_tool(&first_body, "editor", "apply_patch")
         .expect("namespaced custom tool should be included in the model request");
@@ -8444,10 +8440,10 @@ text(JSON.stringify({
                     "foo-bar",
                     concat!(
                         "First normalized dynamic tool.\n\n",
-                        "exec tool declaration:\n",
-                        "```ts\n",
-                        "declare const tools: { foo_bar(args: {}): Promise<unknown>; };\n",
-                        "```",
+                        "Call: await tools.foo_bar(args).\n",
+                        "Parameters: object\n",
+                        "  Other fields forbidden.\n",
+                        "Returns: no declared shape.",
                     ),
                 ),
                 ("foo_bar", "Shadowed normalized dynamic tool."),
