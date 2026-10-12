@@ -18,7 +18,7 @@ use crate::session::session::Session;
 pub(crate) struct Interjection {
     /// Raised when user input is queued.
     steer: CancellationToken,
-    /// Raised by a steer or by mail that triggers a turn: a child of `steer`.
+    /// Raised by a steer or released mail: a child of `steer`.
     news: CancellationToken,
 }
 
@@ -63,21 +63,22 @@ impl Interjection {
         let news = self.news.clone();
         Some(AbortOnDropHandle::new(tokio::spawn(async move {
             loop {
-                let (steered, summoned) = {
+                let (steered, mailed) = {
                     let turn_state = turn_state.lock().await;
                     let pending = &turn_state.pending_input;
                     (
                         pending.has_user_input(),
-                        pending.items.iter().any(|input| {
-                            matches!(input, TurnInput::InterAgentCommunication(mail) if mail.trigger_turn)
-                        }),
+                        pending
+                            .items
+                            .iter()
+                            .any(|input| matches!(input, TurnInput::InterAgentCommunication(_))),
                     )
                 };
                 if steered {
                     steer.cancel();
                     return;
                 }
-                if summoned || sess.input_queue.has_trigger_turn_mailbox_items().await {
+                if mailed || sess.input_queue.has_pending_mailbox_items().await {
                     news.cancel();
                 }
                 if activity.changed().await.is_err() {

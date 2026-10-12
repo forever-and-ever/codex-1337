@@ -46,6 +46,25 @@ impl LocalAgentControl {
         }
         Ok(())
     }
+
+    pub(super) async fn ensure_message_recipient_loaded(
+        &self,
+        recipient: ThreadId,
+        author: &AgentPath,
+    ) -> CodexResult<()> {
+        let manager = self.runtime.upgrade()?;
+        if manager.get_thread(recipient).await.is_ok() {
+            return Ok(());
+        }
+        let sender = self
+            .runtime
+            .registry
+            .agent_id_for_path(author)
+            .ok_or(CodexErr::ThreadNotFound(recipient))?;
+        let config = manager.get_thread(sender).await?.session.get_config().await;
+        self.ensure_v2_agent_loaded((*config).clone(), recipient, None)
+            .await
+    }
 }
 
 impl AgentMessage {
@@ -66,7 +85,7 @@ impl AgentMessage {
             ),
             Self::Plaintext(message) => {
                 let message_type = match mode {
-                    MessageDeliveryMode::QueueOnly => InterAgentMessageType::Message,
+                    MessageDeliveryMode::Ordinary => InterAgentMessageType::Message,
                     MessageDeliveryMode::TriggerTurn => InterAgentMessageType::NewTask,
                 };
                 let content = InterAgentMessage::new(

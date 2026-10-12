@@ -396,28 +396,23 @@ async fn wait_for_recorded_user_message(thread: &CodexThread, needle: &str) {
     .expect("timed out waiting for user message recording");
 }
 
-fn history_contains_assistant_inter_agent_communication<'a>(
+fn history_contains_inter_agent_communication<'a>(
     history_items: impl IntoIterator<Item = &'a ResponseItem>,
     expected: &InterAgentCommunication,
 ) -> bool {
+    let ResponseItem::AgentMessage {
+        author,
+        recipient,
+        content,
+        ..
+    } = expected.to_model_input_item()
+    else {
+        unreachable!("communication is typed mail")
+    };
     history_items.into_iter().any(|item| {
-        let ResponseItem::Message { role, content, .. } = item else {
-            return false;
-        };
-        if role != "assistant" {
-            return false;
-        }
-        content.iter().any(|content_item| match content_item {
-            ContentItem::OutputText { text } => {
-                serde_json::from_str::<InterAgentCommunication>(text)
-                    .ok()
-                    .as_ref()
-                    == Some(expected)
-            }
-            ContentItem::InputText { .. }
-            | ContentItem::InputImage { .. }
-            | ContentItem::InputAudio { .. } => false,
-        })
+        matches!(item, ResponseItem::AgentMessage {
+            author: actual_author, recipient: actual_recipient, content: actual_content, ..
+        } if actual_author == &author && actual_recipient == &recipient && actual_content == &content)
     })
 }
 
@@ -938,7 +933,7 @@ async fn send_input_submits_user_message() {
 }
 
 #[tokio::test]
-async fn send_inter_agent_communication_without_turn_queues_message_without_triggering_turn() {
+async fn send_inter_agent_communication_without_turn_preserves_message_attribution() {
     let harness = AgentControlHarness::new().await;
     let (thread_id, thread) = harness.start_thread().await;
     let communication = InterAgentCommunication::new(
@@ -977,22 +972,20 @@ async fn send_inter_agent_communication_without_turn_queues_message_without_trig
 
     timeout(Duration::from_secs(5), async {
         loop {
-            if thread
-                .session
-                .input_queue
-                .has_pending_input(&thread.session.active_turn)
-                .await
-            {
+            if history_contains_inter_agent_communication(
+                thread.session.clone_history().await.raw_items(),
+                &communication,
+            ) {
                 break;
             }
             sleep(Duration::from_millis(10)).await;
         }
     })
     .await
-    .expect("inter-agent communication should stay pending");
+    .expect("ordinary inter-agent communication should be admitted without user input");
 
     let history = thread.session.clone_history().await;
-    assert!(!history_contains_assistant_inter_agent_communication(
+    assert!(history_contains_inter_agent_communication(
         history.raw_items(),
         &communication
     ));
@@ -1263,6 +1256,17 @@ async fn check_v2_agent_reload(route: V2ReloadRoute) {
         "residency reload must preserve the worker provider instead of inheriting its sender's provider",
     );
 
+    if matches!(route, V2ReloadRoute::Sender) {
+        reloaded_child
+            .shutdown_and_wait()
+            .await
+            .expect("reloaded child shuts down");
+        harness
+            .manager
+            .remove_thread(&spawned_agent.thread_id)
+            .await
+            .expect("remove child before ordinary delivery");
+    }
     let communication = InterAgentCommunication::new(
         AgentPath::root(),
         agent_path,
@@ -1292,6 +1296,15 @@ async fn check_v2_agent_reload(route: V2ReloadRoute) {
         .into_iter()
         .find(|entry| captured_op_matches(entry, &expected));
     assert!(captured.is_some());
+    let delivered_child = harness
+        .manager
+        .get_thread(spawned_agent.thread_id)
+        .await
+        .expect("ordinary delivery reloads an unloaded recipient");
+    assert_eq!(
+        delivered_child.config_snapshot().await.model,
+        "gpt-5.6-luna"
+    );
 }
 
 #[tokio::test]
@@ -1611,7 +1624,7 @@ async fn cold_resume_with_thread_instructions_preserves_lazy_v2_child_inheritanc
                     .expect("capture resume config"),
                 input: crate::AgentInput::Message {
                     message: AgentMessage::Plaintext("hello after resume".to_string()),
-                    mode: MessageDeliveryMode::QueueOnly,
+                    mode: MessageDeliveryMode::Ordinary,
                 },
                 start_options: TurnStartOptions {
                     root_turn_id: turn.turn_metadata_state.root_turn_id(),
@@ -1760,7 +1773,7 @@ async fn v2_reload_preserves_shared_instructions_after_root_unloads(
                 .expect("capture resume config"),
             input: crate::AgentInput::Message {
                 message: AgentMessage::Plaintext("wake the unloaded target".to_string()),
-                mode: MessageDeliveryMode::QueueOnly,
+                mode: MessageDeliveryMode::Ordinary,
             },
             start_options: TurnStartOptions {
                 root_turn_id: sender_turn.turn_metadata_state.root_turn_id(),
@@ -4139,7 +4152,7 @@ async fn multi_agent_v2_completion_ignores_dead_direct_parent() {
     );
 
     let root_history = root_thread.session.clone_history().await;
-    assert!(!history_contains_assistant_inter_agent_communication(
+    assert!(!history_contains_inter_agent_communication(
         root_history.raw_items(),
         &InterAgentCommunication::new(
             tester_path,
@@ -4239,7 +4252,7 @@ async fn multi_agent_v2_completion_queues_message_for_direct_parent() {
     .expect("completion watcher should queue a direct-parent message");
 
     let root_history = root_thread.session.clone_history().await;
-    assert!(!history_contains_assistant_inter_agent_communication(
+    assert!(!history_contains_inter_agent_communication(
         root_history.raw_items(),
         &InterAgentCommunication::new(
             tester_path,

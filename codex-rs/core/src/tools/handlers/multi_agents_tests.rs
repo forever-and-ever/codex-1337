@@ -1403,7 +1403,7 @@ async fn multi_agent_v2_spawn_returns_path_and_send_message_accepts_relative_pat
         .expect("plaintext native task must be deliverable");
     let ops_before = manager.captured_ops().len();
     for mode in [
-        MessageDeliveryMode::QueueOnly,
+        MessageDeliveryMode::Ordinary,
         MessageDeliveryMode::TriggerTurn,
     ] {
         let error = session
@@ -3898,7 +3898,7 @@ async fn multi_agent_v2_wait_agent_returns_summary_for_mailbox_activity() {
 
     let wait_output = tokio::time::timeout(Duration::from_millis(100), wait_task)
         .await
-        .expect("one child must not incur a batching window")
+        .expect("released mail must not incur another batching window")
         .expect("wait task should join")
         .expect("wait_agent should succeed");
     let (content, success) = expect_text_output(wait_output);
@@ -4013,8 +4013,6 @@ async fn multi_agent_v2_wait_agent_wakes_on_any_mailbox_notification() {
         .features
         .enable(Feature::MultiAgentV2)
         .expect("test config should allow feature update");
-    // Two running workers would otherwise hold this wake for the batching window.
-    config.multi_agent_v2.wait_agent_batch_window_ms = None;
     set_turn_config(&mut turn, config);
     let session = Arc::new(session);
     let turn = Arc::new(turn);

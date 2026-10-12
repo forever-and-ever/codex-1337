@@ -232,7 +232,7 @@ pub fn create_send_message_tool() -> ToolSpec {
 
     ToolSpec::Function(ResponsesApiTool {
         name: "send_message".to_string(),
-        description: "Send a message to an existing agent. The message will be delivered promptly. Does not trigger a new turn."
+        description: "Send a message to an existing agent. Delivery wakes an idle recipient without replacing its task. Subagent messages batch for up to 60 seconds while two or more subagents in the family are active."
             .to_string(),
         strict: false,
         defer_loading: None,

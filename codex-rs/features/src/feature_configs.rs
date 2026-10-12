@@ -340,7 +340,7 @@ pub struct MultiAgentV2ConfigToml {
     pub message_board_remote: Option<RemoteMessageBoardConfigToml>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub non_code_mode_only: Option<bool>,
-    /// Maximum mailbox batching window; zero disables batching.
+    /// Fixed family-mail delivery window while at least two subagents are active; zero disables batching.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wait_agent_batch_window_ms: Option<u64>,
 }

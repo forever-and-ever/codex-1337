@@ -1,4 +1,4 @@
-//! Retains queue-only mail while local sessions are unloaded.
+//! Retains transferred ordinary mail while local sessions are unloaded.
 //! Eviction transfers mail before releasing the recipient's residency guard.
 
 use crate::agent_communication::PENDING_MAILBOX_MESSAGES;

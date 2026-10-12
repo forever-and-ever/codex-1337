@@ -85,15 +85,8 @@ pub async fn inter_agent_communication(
     communication: InterAgentCommunication,
     start_options: codex_protocol::turn_input::TurnStartOptions,
 ) {
-    let trigger_turn = communication.trigger_turn;
-    sess.input_queue
-        .enqueue_mailbox_communication(communication, start_options)
+    sess.receive_agent_mail(communication, start_options, sub_id)
         .await;
-    crate::agent_communication::emit_agent_communication_receive(&sub_id);
-    if trigger_turn || sess.has_outstanding_durable_sleep() {
-        sess.maybe_start_turn_for_pending_work_with_sub_id(sub_id)
-            .await;
-    }
 }
 
 pub async fn run_user_shell_command(
@@ -459,6 +452,7 @@ pub(super) async fn submission_loop(
     // Session shutdown and tree shutdown both use the existing teardown handler.
     let mut shutdown_received = false;
     let mut mailbox = sess.input_queue.mailbox_updates();
+    let mut active_subagents = sess.services.local_agent_runtime.active_subagents();
     if let Some(updates) = &mut mailbox {
         updates.mark_changed();
     }
@@ -468,6 +462,10 @@ pub(super) async fn submission_loop(
             _ = sess.services.local_agent_runtime.shutdown.cancelled() => {
                 shutdown_received = shutdown(&sess, super::new_submission_id()).await;
                 break;
+            }
+            _ = sess.input_queue.wait_for_mailbox_release(&mut active_subagents) => {
+                sess.maybe_start_turn_for_pending_work().await;
+                continue;
             }
             sub = rx_sub.recv() => match sub {
                 Ok(sub) => sub,
@@ -482,9 +480,7 @@ pub(super) async fn submission_loop(
                 match update {
                     Ok(true) => {
                         sess.input_queue.notify_mailbox();
-                        if sess.has_outstanding_durable_sleep() {
-                            sess.maybe_start_turn_for_pending_work().await;
-                        }
+                        sess.maybe_start_turn_for_pending_work().await;
                     }
                     Ok(false) => {}
                     Err(_) => mailbox = None,

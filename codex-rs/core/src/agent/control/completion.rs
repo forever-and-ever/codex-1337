@@ -1,6 +1,6 @@
 //! Delivers terminal child results and completion activity to the agent tree.
 //!
-//! Sessions capture terminal state; the controller owns routing and queue-only delivery.
+//! Sessions capture terminal state; the controller owns routing and ordinary-mail delivery.
 //! Delivery remains best effort; metrics distinguish queue acceptance from delivery failure.
 
 use super::LocalAgentControl;
