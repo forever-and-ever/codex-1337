@@ -58,7 +58,7 @@ pub(crate) fn schema(label: &str, root: &Value) -> String {
         {
             Some(target) => renderer.node("value", target, 1),
             None => renderer.lines.push(
-                "  External schema reference; resolve before constructing this value.".to_owned(),
+                "  Unresolved schema reference; inspect describe_tool(name, {detail: \"schema\"}) before constructing this value.".to_owned(),
             ),
         }
     }
