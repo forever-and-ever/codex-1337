@@ -7,6 +7,21 @@
         "string",
         "null"
       ]
+    },
+    "ToolName": {
+      "description": "Identifies a callable tool, preserving the namespace split when the model provides one.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
     }
   },
   "properties": {
@@ -41,7 +56,7 @@
     },
     "tool_input": true,
     "tool_name": {
-      "type": "string"
+      "$ref": "#/definitions/ToolName"
     },
     "transcript_path": {
       "$ref": "#/definitions/NullableString"
@@ -58,7 +73,6 @@
     "permission_mode",
     "session_id",
     "tool_input",
-    "tool_name",
     "transcript_path",
     "turn_id"
   ],

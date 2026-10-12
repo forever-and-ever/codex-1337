@@ -2236,6 +2236,53 @@
         }
       ]
     },
+    "HookSelector": {
+      "description": "Selects a hook's tool address or its lifecycle event value, never a flattened name.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Omitted components match any value. An explicit tool selector requires an attributed tool.",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "namespace": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "tool"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Matches the event's source, reason, trigger, or agent type, not its event name.",
+          "properties": {
+            "pattern": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "event_value"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "pattern",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "HookStateToml": {
       "properties": {
         "enabled": {
@@ -2410,6 +2457,7 @@
       "type": "string"
     },
     "MatcherGroup": {
+      "additionalProperties": false,
       "properties": {
         "hooks": {
           "default": [],
@@ -2418,9 +2466,13 @@
           },
           "type": "array"
         },
-        "matcher": {
-          "default": null,
-          "type": "string"
+        "selector": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/HookSelector"
+            }
+          ],
+          "default": null
         }
       },
       "type": "object"

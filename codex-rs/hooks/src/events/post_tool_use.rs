@@ -336,13 +336,16 @@ mod tests {
     #[test]
     fn command_input_uses_request_tool_name() {
         let mut request = request_for_tool_use("call-apply-patch");
-        request.tool_name = "apply_patch".to_string();
+        request.tool_name = codex_protocol::ToolName::namespaced("functions", "apply_patch");
 
         let input_json = command_input_json(&request).expect("serialize command input");
         let input: serde_json::Value =
             serde_json::from_str(&input_json).expect("parse command input");
 
-        assert_eq!(input["tool_name"], "apply_patch");
+        assert_eq!(
+            input["tool_name"],
+            serde_json::json!({"namespace": "functions", "name": "apply_patch"})
+        );
     }
 
     #[test]

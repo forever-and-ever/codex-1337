@@ -2348,8 +2348,7 @@ fn executor_stop_hook_fixture() -> (
         engine.handlers,
         vec![ConfiguredHandler {
             builtin: true,
-            event_name: HookEventName::Stop,
-            selector: None,
+            selection: super::HookSelection::Stop,
             timeout_sec: 5,
             status_message: None,
             additional_context_limit: Default::default(),

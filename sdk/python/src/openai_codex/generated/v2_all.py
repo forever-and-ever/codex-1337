@@ -1227,14 +1227,6 @@ class ConfiguredHookHandler(
     )
 
 
-class ConfiguredHookMatcherGroup(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    hooks: list[ConfiguredHookHandler]
-    matcher: str | None = None
-
-
 class ConnectorMetadata(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -2203,6 +2195,37 @@ class HookScope(Enum):
     turn = "turn"
 
 
+class ToolHookSelector(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    name: str | None = None
+    namespace: str | None = None
+    type: Annotated[Literal["tool"], Field(title="ToolHookSelectorType")]
+
+
+class EventValueHookSelector(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    pattern: str
+    type: Annotated[Literal["event_value"], Field(title="EventValueHookSelectorType")]
+
+
+class HookSelector(RootModel[ToolHookSelector | EventValueHookSelector]):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: Annotated[
+        ToolHookSelector | EventValueHookSelector,
+        Field(
+            description="Selects a hook's tool address or its lifecycle event value, never a flattened name."
+        ),
+    ]
+
+
 class HookSource(Enum):
     system = "system"
     user = "user"
@@ -2570,28 +2593,6 @@ class LogoutAccountResponse(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-
-
-class ManagedHooksRequirements(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    interrupt: Annotated[list[ConfiguredHookMatcherGroup] | None, Field(alias="Interrupt")] = []
-    permission_request: Annotated[
-        list[ConfiguredHookMatcherGroup], Field(alias="PermissionRequest")
-    ]
-    post_compact: Annotated[list[ConfiguredHookMatcherGroup], Field(alias="PostCompact")]
-    post_tool_use: Annotated[list[ConfiguredHookMatcherGroup], Field(alias="PostToolUse")]
-    pre_compact: Annotated[list[ConfiguredHookMatcherGroup], Field(alias="PreCompact")]
-    pre_tool_use: Annotated[list[ConfiguredHookMatcherGroup], Field(alias="PreToolUse")]
-    session_end: Annotated[list[ConfiguredHookMatcherGroup] | None, Field(alias="SessionEnd")] = []
-    session_start: Annotated[list[ConfiguredHookMatcherGroup], Field(alias="SessionStart")]
-    stop: Annotated[list[ConfiguredHookMatcherGroup], Field(alias="Stop")]
-    subagent_start: Annotated[list[ConfiguredHookMatcherGroup], Field(alias="SubagentStart")]
-    subagent_stop: Annotated[list[ConfiguredHookMatcherGroup], Field(alias="SubagentStop")]
-    user_prompt_submit: Annotated[list[ConfiguredHookMatcherGroup], Field(alias="UserPromptSubmit")]
-    managed_dir: Annotated[str | None, Field(alias="managedDir")] = None
-    windows_managed_dir: Annotated[str | None, Field(alias="windowsManagedDir")] = None
 
 
 class MarketplaceAddParams(BaseModel):
@@ -8945,6 +8946,14 @@ class ConfigurationReasoning(BaseModel):
     effort: ReasoningEffort
 
 
+class ConfiguredHookMatcherGroup(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    hooks: list[ConfiguredHookHandler]
+    selector: HookSelector | None = None
+
+
 class InputImageContentItem(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -9413,8 +9422,8 @@ class HookMetadata1(BaseModel):
     event_name: Annotated[HookEventName, Field(alias="eventName")]
     is_managed: Annotated[bool, Field(alias="isManaged")]
     key: str
-    matcher: str | None = None
     plugin_id: Annotated[str | None, Field(alias="pluginId")] = None
+    selector: HookSelector | None = None
     source: HookSource
     source_path: Annotated[AbsolutePathBuf, Field(alias="sourcePath")]
     status_message: Annotated[str | None, Field(alias="statusMessage")] = None
@@ -9443,8 +9452,8 @@ class HookMetadata2(BaseModel):
     event_name: Annotated[HookEventName, Field(alias="eventName")]
     is_managed: Annotated[bool, Field(alias="isManaged")]
     key: str
-    matcher: str | None = None
     plugin_id: Annotated[str | None, Field(alias="pluginId")] = None
+    selector: HookSelector | None = None
     source: HookSource
     source_path: Annotated[AbsolutePathBuf, Field(alias="sourcePath")]
     status_message: Annotated[str | None, Field(alias="statusMessage")] = None
@@ -9473,8 +9482,8 @@ class PromptHookMetadata(BaseModel):
     event_name: Annotated[HookEventName, Field(alias="eventName")]
     is_managed: Annotated[bool, Field(alias="isManaged")]
     key: str
-    matcher: str | None = None
     plugin_id: Annotated[str | None, Field(alias="pluginId")] = None
+    selector: HookSelector | None = None
     source: HookSource
     source_path: Annotated[AbsolutePathBuf, Field(alias="sourcePath")]
     status_message: Annotated[str | None, Field(alias="statusMessage")] = None
@@ -9501,8 +9510,8 @@ class AgentHookMetadata(BaseModel):
     event_name: Annotated[HookEventName, Field(alias="eventName")]
     is_managed: Annotated[bool, Field(alias="isManaged")]
     key: str
-    matcher: str | None = None
     plugin_id: Annotated[str | None, Field(alias="pluginId")] = None
+    selector: HookSelector | None = None
     source: HookSource
     source_path: Annotated[AbsolutePathBuf, Field(alias="sourcePath")]
     status_message: Annotated[str | None, Field(alias="statusMessage")] = None
@@ -9670,6 +9679,28 @@ class LoginAccountParams(
         | ChatgptAuthTokensLoginAccountParams,
         Field(title="LoginAccountParams"),
     ]
+
+
+class ManagedHooksRequirements(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    interrupt: Annotated[list[ConfiguredHookMatcherGroup] | None, Field(alias="Interrupt")] = []
+    permission_request: Annotated[
+        list[ConfiguredHookMatcherGroup], Field(alias="PermissionRequest")
+    ]
+    post_compact: Annotated[list[ConfiguredHookMatcherGroup], Field(alias="PostCompact")]
+    post_tool_use: Annotated[list[ConfiguredHookMatcherGroup], Field(alias="PostToolUse")]
+    pre_compact: Annotated[list[ConfiguredHookMatcherGroup], Field(alias="PreCompact")]
+    pre_tool_use: Annotated[list[ConfiguredHookMatcherGroup], Field(alias="PreToolUse")]
+    session_end: Annotated[list[ConfiguredHookMatcherGroup] | None, Field(alias="SessionEnd")] = []
+    session_start: Annotated[list[ConfiguredHookMatcherGroup], Field(alias="SessionStart")]
+    stop: Annotated[list[ConfiguredHookMatcherGroup], Field(alias="Stop")]
+    subagent_start: Annotated[list[ConfiguredHookMatcherGroup], Field(alias="SubagentStart")]
+    subagent_stop: Annotated[list[ConfiguredHookMatcherGroup], Field(alias="SubagentStop")]
+    user_prompt_submit: Annotated[list[ConfiguredHookMatcherGroup], Field(alias="UserPromptSubmit")]
+    managed_dir: Annotated[str | None, Field(alias="managedDir")] = None
+    windows_managed_dir: Annotated[str | None, Field(alias="windowsManagedDir")] = None
 
 
 class McpResourceReadParams(BaseModel):

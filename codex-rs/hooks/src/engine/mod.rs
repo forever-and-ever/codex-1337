@@ -8,7 +8,7 @@ pub(crate) mod mcp_runner;
 pub(crate) mod output_parser;
 pub(crate) mod schema_loader;
 
-pub(crate) use selector::HookMatcher;
+pub(crate) use matcher::HookMatcher;
 
 use crate::events::compact::PostCompactRequest;
 use crate::events::compact::PreCompactOutcome;

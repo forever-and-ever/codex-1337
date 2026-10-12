@@ -767,10 +767,14 @@
           },
           "type": "array"
         },
-        "matcher": {
-          "type": [
-            "string",
-            "null"
+        "selector": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HookSelector"
+            },
+            {
+              "type": "null"
+            }
           ]
         }
       },
@@ -796,6 +800,63 @@
         "api"
       ],
       "type": "string"
+    },
+    "HookSelector": {
+      "description": "Selects a hook's tool address or its lifecycle event value, never a flattened name.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Omitted components match any value. An explicit tool selector requires an attributed tool.",
+          "properties": {
+            "name": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "namespace": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "enum": [
+                "tool"
+              ],
+              "title": "ToolHookSelectorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "ToolHookSelector",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Matches the event's source, reason, trigger, or agent type, not its event name.",
+          "properties": {
+            "pattern": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "event_value"
+              ],
+              "title": "EventValueHookSelectorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "pattern",
+            "type"
+          ],
+          "title": "EventValueHookSelector",
+          "type": "object"
+        }
+      ]
     },
     "InAppBrowserRequirements": {
       "properties": {
