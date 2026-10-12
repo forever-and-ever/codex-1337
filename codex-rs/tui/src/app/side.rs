@@ -371,7 +371,7 @@ impl App {
             {
                 return false;
             }
-            self.active_side_parent_thread_id().is_none()
+            true
         } else {
             false
         }
@@ -410,14 +410,13 @@ impl App {
             return Ok(());
         };
 
-        self.select_agent_thread(tui, app_server, target_thread_id)
-            .await?;
-        if self.active_thread_id == Some(target_thread_id)
-            && self.active_side_parent_thread_id().is_none()
-        {
-            self.surface_pending_inactive_thread_interactive_requests()
-                .await?;
-        }
+        self.select_agent_thread_after(
+            tui,
+            app_server,
+            target_thread_id,
+            super::turn_submissions::SelectionAfter::SurfaceInactive,
+        )
+        .await?;
         Ok(())
     }
 
@@ -448,60 +447,9 @@ impl App {
         app_server: &mut AppServerSession,
         thread_id: ThreadId,
     ) {
-        self.abandoned_side_threads.insert(thread_id);
         self.pending_app_server_requests
             .cancel_thread_verification(&thread_id.to_string());
-        let turn_id = self
-            .active_turn_id_for_thread(thread_id)
-            .await
-            .unwrap_or_default();
-        let request_handle = app_server.request_handle();
-        let interrupt_request_id = app_server.next_request_id();
-        let retry_interrupt_request_id = app_server.next_request_id();
-        let unsubscribe_request_id = app_server.next_request_id();
-
-        self.discard_thread_local_state(thread_id).await;
-
-        tokio::spawn(async move {
-            let interrupt_result = request_handle
-                .request_typed::<TurnInterruptResponse>(ClientRequest::TurnInterrupt {
-                    request_id: interrupt_request_id,
-                    params: TurnInterruptParams {
-                        thread_id: thread_id.to_string(),
-                        turn_id: turn_id.clone(),
-                    },
-                })
-                .await;
-            let interrupt_result = if let Err(error) = &interrupt_result
-                && let Some(actual_turn_id) = active_turn_interrupt_race(error)
-            {
-                request_handle
-                    .request_typed::<TurnInterruptResponse>(ClientRequest::TurnInterrupt {
-                        request_id: retry_interrupt_request_id,
-                        params: TurnInterruptParams {
-                            thread_id: thread_id.to_string(),
-                            turn_id: actual_turn_id,
-                        },
-                    })
-                    .await
-            } else {
-                interrupt_result
-            };
-            if let Err(error) = interrupt_result {
-                tracing::warn!(%error, "failed to interrupt side conversation");
-            }
-            if let Err(error) = request_handle
-                .request_typed::<ThreadUnsubscribeResponse>(ClientRequest::ThreadUnsubscribe {
-                    request_id: unsubscribe_request_id,
-                    params: ThreadUnsubscribeParams {
-                        thread_id: thread_id.to_string(),
-                    },
-                })
-                .await
-            {
-                tracing::warn!(%error, "failed to unsubscribe side conversation");
-            }
-        });
+        self.enqueue_side_cleanup(app_server, thread_id).await;
     }
 
     pub(super) async fn discard_closed_side_thread(&mut self, thread_id: ThreadId) {
@@ -671,17 +619,12 @@ impl App {
         app_server: &mut AppServerSession,
         thread_id: ThreadId,
     ) -> Result<()> {
-        let side_thread_to_discard = self.side_thread_to_discard_after_switch(thread_id);
-        self.select_agent_thread(tui, app_server, thread_id).await?;
-        if self.active_thread_id == Some(thread_id)
-            && let Some(side_thread_id) = side_thread_to_discard
-        {
-            self.discard_side_thread_in_background(app_server, side_thread_id)
-                .await;
-            self.surface_pending_inactive_thread_interactive_requests()
-                .await?;
-        }
-        Ok(())
+        let after = self
+            .side_thread_to_discard_after_switch(thread_id)
+            .map(super::turn_submissions::SelectionAfter::DiscardSide)
+            .unwrap_or(super::turn_submissions::SelectionAfter::SelectOnly);
+        self.select_agent_thread_after(tui, app_server, thread_id, after)
+            .await
     }
 
     pub(super) async fn handle_start_side(

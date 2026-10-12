@@ -516,7 +516,7 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
                 !changed_child_permissions,
                 std::sync::atomic::Ordering::SeqCst,
             );
-            app.select_agent_thread(&mut tui, &mut session, child)
+            app.select_agent_thread_and_settle(&mut tui, &mut session, child)
                 .await?;
             assert_eq!(app.recap.progress(), child_recap);
             assert_eq!(app.primary_thread_id, Some(id));
@@ -534,7 +534,8 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
                 app.runtime_permission_profile_override = Some(
                     RuntimePermissionProfileOverride::from_config(app.chat_widget.config_ref()),
                 );
-                app.select_agent_thread(&mut tui, &mut session, id).await?;
+                app.select_agent_thread_and_settle(&mut tui, &mut session, id)
+                    .await?;
                 assert!(app.thread_unavailable(id));
                 assert_eq!(app.current_displayed_thread_id(), Some(id));
                 assert_eq!(

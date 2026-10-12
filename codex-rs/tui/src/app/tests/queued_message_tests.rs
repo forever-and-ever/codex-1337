@@ -289,7 +289,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         .lock()
         .await
         .set_session(other.session, other.turns);
-    app.select_agent_thread(&mut tui, &mut server, other_id)
+    app.select_agent_thread_and_settle(&mut tui, &mut server, other_id)
         .await?;
     assert_eq!(app.chat_widget.thread_id(), Some(other_id));
     app.chat_widget
@@ -386,6 +386,9 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         .recv()
         .await
         .expect("unknown interrupt receipt");
+    let super::super::turn_submissions::ServerCompletion::Request(control) = control else {
+        panic!("expected request completion");
+    };
     app.finish_submission(
         &mut server,
         control.scope,
@@ -596,6 +599,9 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     )
     .await?
     .expect("owned response-delivery receipt");
+    let super::super::turn_submissions::ServerCompletion::Request(delivery) = delivery else {
+        panic!("expected request completion");
+    };
     app.finish_submission(
         &mut server,
         delivery.scope,
@@ -662,6 +668,51 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         1
     );
     assert!(app.server_operations.is_empty());
+    // Navigation owns its withheld read without replacing the visible target/draft.
+    // Canceling this read-only stage cannot turn a late reply into a selection.
+    let reads_before = recorded_params(&requests, "thread/read").len();
+    let visible_before = app.current_displayed_thread_id();
+    app.chat_widget
+        .apply_external_edit("navigation draft".into());
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        app.select_agent_thread(&mut tui, &mut server, thread_id),
+    )
+    .await??;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while recorded_params(&requests, "thread/read").len() == reads_before {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await?;
+    assert_eq!(app.current_displayed_thread_id(), visible_before);
+    app.handle_key_event(
+        &mut tui,
+        &mut server,
+        KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
+    )
+    .await;
+    assert!(app.chat_widget.composer_text_with_pending().contains('x'));
+    let navigation = match app.server_operations.preview(visible_before).navigation {
+        Some(crate::app::turn_submissions::NavigationPreview::Preparing { id }) => id,
+        _ => panic!("pending navigation remains visible and cancellable"),
+    };
+    app.handle_submission_event(
+        &server,
+        crate::app::turn_submissions::SubmissionEvent::CancelNavigation { id: navigation },
+    )
+    .await;
+    assert!(app.server_operations.is_empty());
+    assert_eq!(app.current_displayed_thread_id(), visible_before);
+    assert!(
+        app.chat_widget
+            .composer_text_with_pending()
+            .contains("navigation draft")
+    );
+    assert_eq!(
+        recorded_params(&requests, "thread/read").len(),
+        reads_before + 1
+    );
     server.shutdown().await?;
     proxy.await??;
     Ok(())

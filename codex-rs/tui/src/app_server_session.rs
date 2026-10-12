@@ -1066,31 +1066,6 @@ impl AppServerSession {
         session_config
     }
 
-    async fn fork_parent_title_from_app_server(
-        &mut self,
-        forked_from_id: Option<&str>,
-    ) -> Option<String> {
-        let forked_from_id = forked_from_id?;
-        let forked_from_id = match ThreadId::from_string(forked_from_id) {
-            Ok(thread_id) => thread_id,
-            Err(err) => {
-                tracing::warn!("Failed to parse fork parent thread id from app server: {err}");
-                return None;
-            }
-        };
-
-        match self
-            .thread_read(forked_from_id, /*include_turns*/ false)
-            .await
-        {
-            Ok(thread) => thread.name,
-            Err(err) => {
-                tracing::warn!("Failed to read fork parent metadata from app server: {err}");
-                None
-            }
-        }
-    }
-
     /// Lists thread ids that the app server currently holds in memory.
     ///
     /// Used by `App::backfill_loaded_subagent_threads` to discover subagent threads that were
@@ -1112,7 +1087,13 @@ impl AppServerSession {
         thread_id: ThreadId,
         include_turns: bool,
     ) -> Result<Thread> {
-        history::preparation::read_thread(&self.request_handle(), thread_id, include_turns).await
+        history::preparation::read_thread(
+            session_preparation::RequestPolicy::Unbounded,
+            &self.request_handle(),
+            thread_id,
+            include_turns,
+        )
+        .await
     }
 
     pub(crate) async fn thread_archive(&mut self, thread_id: ThreadId) -> Result<()> {

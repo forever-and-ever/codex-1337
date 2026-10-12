@@ -632,6 +632,10 @@ impl ThreadEventChannel {
         }
     }
 
+    pub(super) fn mark_live(&mut self) {
+        self.attachment = ThreadEventAttachment::Live;
+    }
+
     pub(super) fn mark_replay_only(&mut self) {
         self.attachment = ThreadEventAttachment::ReplayOnly;
     }

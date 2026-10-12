@@ -51,6 +51,24 @@ pub(in crate::app) struct DetachedTarget {
     pub(super) result: Result<(), String>,
 }
 
+pub(super) async fn unsubscribe(
+    handle: &AppServerRequestHandle,
+    id: Uuid,
+    thread_id: ThreadId,
+) -> Result<(), TypedRequestError> {
+    handle
+        .request_typed::<api::ThreadUnsubscribeResponse>(api::ClientRequest::ThreadUnsubscribe {
+            request_id: api::RequestId::String(format!(
+                "tui-operation-{id}-{thread_id}-unsubscribe"
+            )),
+            params: api::ThreadUnsubscribeParams {
+                thread_id: thread_id.to_string(),
+            },
+        })
+        .await
+        .map(|_| ())
+}
+
 pub(super) async fn send(
     handle: &AppServerRequestHandle,
     id: Uuid,
@@ -78,20 +96,28 @@ pub(super) async fn send(
         let thread_id = target.thread_id;
         let result = async {
             if let DetachKind::Side { turn_id, replay_only } = &target.kind {
-                let interrupt = handle.request_typed::<api::TurnInterruptResponse>(api::ClientRequest::TurnInterrupt {
-                    request_id: api::RequestId::String(format!("tui-operation-{id}-{thread_id}-side-interrupt")),
-                    params: api::TurnInterruptParams { thread_id: thread_id.to_string(), turn_id: turn_id.clone() },
-                }).await;
-                if let Err(error) = interrupt {
-                    let gone = *replay_only && matches!(&error, TypedRequestError::Server { method, source }
-                        if method == "turn/interrupt" && source.code == -32600 && source.message == format!("thread not found: {thread_id}"));
-                    if !gone { return Err(error.to_string()); }
+                let mut turn_id = turn_id.clone();
+                for attempt in 0..2 {
+                    let interrupt = handle.request_typed::<api::TurnInterruptResponse>(api::ClientRequest::TurnInterrupt {
+                        request_id: api::RequestId::String(format!("tui-operation-{id}-{thread_id}-side-interrupt-{attempt}")),
+                        params: api::TurnInterruptParams { thread_id: thread_id.to_string(), turn_id: turn_id.clone() },
+                    }).await;
+                    match interrupt {
+                        Ok(_) => break,
+                        Err(error) => {
+                            let gone = *replay_only && matches!(&error, TypedRequestError::Server { method, source }
+                                if method == "turn/interrupt" && source.code == -32600 && source.message == format!("thread not found: {thread_id}"));
+                            if gone { break; }
+                            if attempt == 0 && let Some(actual) = active_turn_interrupt_race(&error) && actual != turn_id {
+                                turn_id = actual;
+                                continue;
+                            }
+                            return Err(error.to_string());
+                        }
+                    }
                 }
             }
-            handle.request_typed::<api::ThreadUnsubscribeResponse>(api::ClientRequest::ThreadUnsubscribe {
-                request_id: api::RequestId::String(format!("tui-operation-{id}-{thread_id}-unsubscribe")),
-                params: api::ThreadUnsubscribeParams { thread_id: thread_id.to_string() },
-            }).await.map(|_| ()).map_err(|error| error.to_string())
+            unsubscribe(handle, id, thread_id).await.map_err(|error| error.to_string())
         }.await;
         results.push(DetachedTarget { thread_id, result });
     }
@@ -190,7 +216,7 @@ impl App {
                 }
                 (DetachKind::Side { .. }, Err(error)) => {
                     self.add_agents_overview_error(format!(
-                        "Failed to close side conversation {}; it is still open: {error}",
+                        "Closing side conversation {} was not confirmed: {error}",
                         target.thread_id
                     ));
                 }

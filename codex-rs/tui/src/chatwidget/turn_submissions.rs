@@ -115,11 +115,10 @@ impl ChatWidget {
         if let Some(navigation) = &self.submission_preview.navigation {
             previews.push(match navigation {
                 crate::app::turn_submissions::NavigationPreview::Preparing { .. } => {
-                    "Preparing session picker…".into()
+                    "Preparing navigation…".into()
                 }
-                crate::app::turn_submissions::NavigationPreview::Cleaning => {
-                    "Closing canceled session picker…".into()
-                }
+                crate::app::turn_submissions::NavigationPreview::Cleaning => "Cleaning canceled navigation…".into(),
+                crate::app::turn_submissions::NavigationPreview::Uncertain => "Navigation outcome unknown. Close and reopen to resynchronize; the earlier request may still complete.".into(),
             });
         }
         previews

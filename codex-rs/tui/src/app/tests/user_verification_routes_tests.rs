@@ -116,7 +116,7 @@ async fn side_toggle_surfaces_pending_verification_from_an_inactive_thread() -> 
             ),
         );
         let mut tui = crate::tui::test_support::make_test_tui()?;
-        app.select_agent_thread(&mut tui, &mut app_server, side_thread_id)
+        app.select_agent_thread_and_settle(&mut tui, &mut app_server, side_thread_id)
             .await?;
         assert_eq!(app.active_thread_id, Some(side_thread_id));
 
@@ -136,6 +136,7 @@ async fn side_toggle_surfaces_pending_verification_from_an_inactive_thread() -> 
 
         app.toggle_side_conversation(&mut tui, &mut app_server)
             .await?;
+        app.settle_navigation(&mut app_server).await?;
         assert_eq!(app.active_thread_id, Some(primary_thread_id));
         assert!(app.chat_widget.has_active_view());
         assert!(

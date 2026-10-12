@@ -893,7 +893,7 @@ async fn enqueue_primary_thread_session_replays_buffered_approval_after_attach()
         /*initial_user_message*/ None,
     )
     .await?;
-    Box::pin(app.select_agent_thread(&mut tui, &mut app_server, thread_id)).await?;
+    Box::pin(app.select_agent_thread_and_settle(&mut tui, &mut app_server, thread_id)).await?;
 
     assert!(
         !app.pending_app_server_requests
@@ -1346,7 +1346,7 @@ async fn selected_side_thread_close_is_handled_by_foreground_event_owner() -> Re
         .insert(side_thread_id, SideThreadState::new(primary_thread_id));
 
     let mut tui = crate::tui::test_support::make_test_tui()?;
-    app.select_agent_thread(&mut tui, &mut app_server, side_thread_id)
+    app.select_agent_thread_and_settle(&mut tui, &mut app_server, side_thread_id)
         .await?;
     assert_eq!(app.active_thread_id, Some(side_thread_id));
     let event = app
@@ -1357,6 +1357,7 @@ async fn selected_side_thread_close_is_handled_by_foreground_event_owner() -> Re
         .expect("thread closure should remain queued for the foreground loop");
     app.handle_active_thread_event(&mut tui, &mut app_server, event)
         .await?;
+    app.settle_navigation(&mut app_server).await?;
 
     assert_eq!(app.active_thread_id, Some(primary_thread_id));
     assert!(!app.side_threads.contains_key(&side_thread_id));
@@ -2927,10 +2928,9 @@ fn selected_and_resumed_threads_use_server_capability_for_v1_and_v2_children() -
             .copied()
             .zip([MultiAgentVersion::V1, MultiAgentVersion::V2])
         {
-            assert!(
-                app.attach_live_thread_for_selection(&mut app_server, child_thread_id)
-                    .await?
-            );
+            let mut tui = crate::tui::test_support::make_test_tui()?;
+            app.select_agent_thread_and_settle(&mut tui, &mut app_server, child_thread_id).await?;
+            assert_eq!(app.thread_event_channels[&child_thread_id].attachment(), ThreadEventAttachment::Live);
             assert_eq!(
                 app.agent_navigation.is_parent_owned(child_thread_id),
                 multi_agent_version == MultiAgentVersion::V2
@@ -2964,7 +2964,7 @@ fn selected_and_resumed_threads_use_server_capability_for_v1_and_v2_children() -
         assert!(app.agent_navigation.is_parent_owned(child_thread_ids[1]));
 
         let mut tui = crate::tui::test_support::make_test_tui()?;
-        app.select_agent_thread(&mut tui, &mut app_server, child_thread_ids[0])
+        app.select_agent_thread_and_settle(&mut tui, &mut app_server, child_thread_ids[0])
             .await?;
         while app_event_rx.try_recv().is_ok() {}
         app.chat_widget
@@ -2976,7 +2976,7 @@ fn selected_and_resumed_threads_use_server_capability_for_v1_and_v2_children() -
                 .any(|event| matches!(event, AppEvent::CodexOp(Op::UserTurn { .. })))
         );
 
-        app.select_agent_thread(&mut tui, &mut app_server, child_thread_ids[1])
+        app.select_agent_thread_and_settle(&mut tui, &mut app_server, child_thread_ids[1])
             .await?;
         while app_event_rx.try_recv().is_ok() {}
         app.chat_widget
@@ -2994,9 +2994,11 @@ fn selected_and_resumed_threads_use_server_capability_for_v1_and_v2_children() -
         root_store.lock().await.set_active_turn_id("root-turn".to_string());
         Box::pin(app.handle_key_event(&mut tui, &mut app_server,
             KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL))).await;
+    app.settle_navigation(&mut app_server).await?;
         assert_eq!(root_store.lock().await.pending_interrupt_turn_id, None);
         Box::pin(app.handle_key_event(&mut tui, &mut app_server,
             KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))).await;
+    app.settle_navigation(&mut app_server).await?;
         assert_eq!(app.current_displayed_thread_id(), Some(root_thread_id));
 
         let resumed = Box::pin(app_server.resume_thread(
@@ -3053,6 +3055,7 @@ fn selected_and_resumed_threads_use_server_capability_for_v1_and_v2_children() -
         assert_eq!(source.can_accept_direct_input, Some(false));
         Box::pin(app.handle_key_event(&mut tui, &mut app_server,
             KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))).await;
+    app.settle_navigation(&mut app_server).await?;
         assert_eq!(app.current_displayed_thread_id(), Some(fork_id));
         Ok(())
     }))
@@ -3085,15 +3088,10 @@ fn attach_live_thread_for_selection_rejects_empty_non_ephemeral_fallback_threads
             /*is_closed*/ false,
         );
 
-        let err = app
-            .attach_live_thread_for_selection(&mut app_server, thread_id)
-            .await
-            .expect_err("empty fallback should not attach as a blank replay-only thread");
-
-        assert_eq!(
-            err.to_string(),
-            format!("Agent thread {thread_id} is not yet available for replay or live attach.")
-        );
+        let mut tui = crate::tui::test_support::make_test_tui()?;
+        app.select_agent_thread_and_settle(&mut tui, &mut app_server, thread_id)
+            .await?;
+        assert_ne!(app.active_thread_id, Some(thread_id));
         assert!(!app.thread_event_channels.contains_key(&thread_id));
         Ok(())
     })
@@ -3125,15 +3123,10 @@ fn attach_live_thread_for_selection_rejects_unmaterialized_fallback_threads() ->
             /*is_closed*/ false,
         );
 
-        let err = app
-            .attach_live_thread_for_selection(&mut app_server, thread_id)
-            .await
-            .expect_err("ephemeral fallback should not attach as a blank live thread");
-
-        assert_eq!(
-            err.to_string(),
-            format!("Agent thread {thread_id} is not yet available for replay or live attach.")
-        );
+        let mut tui = crate::tui::test_support::make_test_tui()?;
+        app.select_agent_thread_and_settle(&mut tui, &mut app_server, thread_id)
+            .await?;
+        assert_ne!(app.active_thread_id, Some(thread_id));
         assert!(!app.thread_event_channels.contains_key(&thread_id));
         Ok(())
     })
@@ -3286,7 +3279,7 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
             app.chat_widget.config_ref()
         ))
     );
-    app.select_agent_thread(&mut tui, &mut app_server, parent_thread_id)
+    app.select_agent_thread_and_settle(&mut tui, &mut app_server, parent_thread_id)
         .await?;
     app.select_permission_profile(
         &mut app_server,
@@ -3298,7 +3291,7 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
         },
     )
     .await;
-    app.select_agent_thread(&mut tui, &mut app_server, side_thread_id)
+    app.select_agent_thread_and_settle(&mut tui, &mut app_server, side_thread_id)
         .await?;
     let settings = next_thread_settings_updated(&mut app_server, parent_thread_id).await;
     app.enqueue_thread_notification(
@@ -3306,7 +3299,7 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
         ServerNotification::ThreadSettingsUpdated(settings),
     )
     .await?;
-    app.select_agent_thread(&mut tui, &mut app_server, parent_thread_id)
+    app.select_agent_thread_and_settle(&mut tui, &mut app_server, parent_thread_id)
         .await?;
     assert_eq!(
         app.config
@@ -3343,7 +3336,7 @@ async fn select_uncached_agent_thread_still_refreshes_liveness() -> Result<()> {
     );
     let mut tui = crate::tui::test_support::make_test_tui()?;
 
-    Box::pin(app.select_agent_thread(&mut tui, &mut app_server, thread_id)).await?;
+    Box::pin(app.select_agent_thread_and_settle(&mut tui, &mut app_server, thread_id)).await?;
 
     assert_eq!(app.active_thread_id, None);
     assert_eq!(app.agent_navigation.get(&thread_id), None);

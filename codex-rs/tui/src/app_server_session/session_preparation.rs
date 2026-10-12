@@ -3,8 +3,96 @@
 use super::history::preparation::HistoryPaginationUpdate;
 use super::*;
 
+pub(crate) async fn read_thread(
+    policy: RequestPolicy,
+    handle: &AppServerRequestHandle,
+    thread_id: ThreadId,
+) -> Result<Thread> {
+    history::preparation::read_thread(policy, handle, thread_id, false).await
+}
+
+pub(crate) struct HydratedThread {
+    pub(crate) thread: Thread,
+    pub(crate) history: Result<()>,
+}
+
+pub(crate) struct PreparedHistory {
+    result: Result<HydratedThread>,
+    update: HistoryPaginationUpdate,
+}
+
+impl PreparedHistory {
+    pub(crate) fn apply(self, server: &mut AppServerSession) -> Result<HydratedThread> {
+        server.apply_history_preparation(self.update);
+        self.result
+    }
+}
+
+pub(crate) async fn prepare_thread_history(
+    policy: RequestPolicy,
+    handle: AppServerRequestHandle,
+    thread_id: ThreadId,
+    config: Config,
+    local_settings: LocalSettings,
+) -> PreparedHistory {
+    let mut update = HistoryPaginationUpdate::Untracked;
+    let result = async {
+        let mut thread = read_thread(policy, &handle, thread_id).await?;
+        let (result, observation) = history::preparation::prepare_initial_thread_history(
+            policy,
+            &handle,
+            &mut thread,
+            None,
+            None,
+            Some(&config),
+            Some(&local_settings),
+            HistoryHydrationScope::Initial,
+        )
+        .await;
+        update = observation;
+        Ok(HydratedThread {
+            thread,
+            history: result,
+        })
+    }
+    .await;
+    PreparedHistory { result, update }
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum RequestPolicy {
+    Unbounded,
+    Interactive,
+}
+
+pub(in crate::app_server_session) async fn request<T: serde::de::DeserializeOwned>(
+    policy: RequestPolicy,
+    handle: &codex_app_server_client::AppServerRequestHandle,
+    request: ClientRequest,
+) -> std::result::Result<T, TypedRequestError> {
+    if matches!(policy, RequestPolicy::Unbounded) {
+        return handle.request_typed(request).await;
+    }
+    let method = request.method().to_string();
+    tokio::time::timeout(
+        crate::app::turn_submissions::ACK_TIMEOUT,
+        handle.request_typed(request),
+    )
+    .await
+    .unwrap_or_else(|_| {
+        Err(TypedRequestError::Transport {
+            method,
+            source: std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "TUI preparation response deadline elapsed; the remote request may still complete",
+            ),
+        })
+    })
+}
+
 pub(crate) struct ResumePreparation {
     handle: AppServerRequestHandle,
+    policy: RequestPolicy,
     thread_id: ThreadId,
     params: ThreadResumeParams,
     config: Config,
@@ -36,6 +124,7 @@ pub(crate) struct PreparedSession {
 impl AppServerSession {
     pub(crate) fn prepare_resume_thread(
         &self,
+        policy: RequestPolicy,
         local_settings: &crate::local_settings::LocalSettings,
         config: Config,
         thread_id: ThreadId,
@@ -63,6 +152,7 @@ impl AppServerSession {
         }
         ResumePreparation {
             handle: self.request_handle(),
+            policy,
             thread_id,
             params,
             config,
@@ -89,6 +179,7 @@ impl ResumePreparation {
     pub(crate) async fn run(self) -> PreparedSession {
         let Self {
             handle,
+            policy,
             thread_id,
             mut params,
             config,
@@ -119,7 +210,7 @@ impl ResumePreparation {
                             .ok()
                             .flatten();
                         rollout_maintenance_guard.is_some()
-                    } && history::preparation::read_thread(&handle, thread_id, false)
+                    } && history::preparation::read_thread(policy, &handle, thread_id, false)
                         .await
                         .is_ok_and(|thread| thread.history_mode == ThreadHistoryMode::Legacy)));
             !known_legacy_history
@@ -161,7 +252,7 @@ impl ResumePreparation {
             }
         };
         custody = SubscriptionCustody::Subscribed(thread_id);
-        let (history, update) = history::preparation::prepare_initial_thread_history(&handle,
+        let (history, update) = history::preparation::prepare_initial_thread_history(policy, &handle,
                 &mut response.thread,
                 response.turns_backwards_cursor.clone(),
                 response.items_backwards_cursor.clone(),
@@ -179,7 +270,7 @@ impl ResumePreparation {
             Err(error) => return Err(error),
         };
         let fork_parent_title = match response.thread.forked_from_id.as_deref().and_then(|id| ThreadId::from_string(id).ok()) {
-            Some(parent) => match history::preparation::read_thread(&handle, parent, false).await {
+            Some(parent) => match history::preparation::read_thread(policy, &handle, parent, false).await {
                 Ok(thread) => thread.name,
                 Err(error) => { tracing::warn!(%error, "Failed to read fork parent metadata from app server"); None }
             },

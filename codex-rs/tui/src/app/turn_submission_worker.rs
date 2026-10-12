@@ -13,7 +13,7 @@ use codex_app_server_protocol::TurnSteerResponse;
 
 // These RPCs acknowledge acceptance, not turn completion. A missing acknowledgement
 // after the same bound used for farm receipts is uncertain, never permission to retry.
-pub(super) const ACK_TIMEOUT: Duration = Duration::from_secs(/*secs*/ 30);
+pub(crate) const ACK_TIMEOUT: Duration = Duration::from_secs(/*secs*/ 30);
 
 fn request_id() -> AppServerRequestId {
     AppServerRequestId::String(format!("submit-{}", uuid::Uuid::new_v4()))
@@ -193,7 +193,7 @@ async fn send_inner(
     .await;
     finished(continuation, observations, result)
 }
-fn classify_failure(error: TypedRequestError) -> SubmissionFailure {
+pub(super) fn classify_failure(error: TypedRequestError) -> SubmissionFailure {
     match error {
         TypedRequestError::Server { .. } => SubmissionFailure::Rejected(error),
         TypedRequestError::Transport { .. } | TypedRequestError::Deserialize { .. } => {

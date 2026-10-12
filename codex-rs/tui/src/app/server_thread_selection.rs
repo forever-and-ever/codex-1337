@@ -1,0 +1,875 @@
+//! Selection prepares metadata and subscriptions without transferring the visible receiver.
+
+use super::*;
+use crate::app_server_session::session_preparation::{
+    PreparedHistory, PreparedSession, ResumePreparation, SubscriptionCustody,
+};
+use codex_app_server_client::AppServerRequestHandle;
+use codex_app_server_protocol as api;
+
+use crate::app_server_session::session_preparation::RequestPolicy;
+
+pub(super) enum SelectStage {
+    Liveness {
+        thread_id: ThreadId,
+        after: SelectionAfter,
+    },
+    DiscardSide(super::super::detach::DetachPlan),
+    Resume {
+        context: Box<SelectionContext>,
+        kind: SelectionKind,
+    },
+    Fallback(Box<SelectionContext>),
+    Cleanup {
+        thread_id: ThreadId,
+        next: CleanupContinuation,
+    },
+    Uncertain(ThreadId),
+}
+
+impl SelectStage {
+    pub(super) fn thread_id(&self) -> ThreadId {
+        match self {
+            Self::Liveness { thread_id, .. } | Self::Uncertain(thread_id) => *thread_id,
+            Self::DiscardSide(plan) => plan.origin().expect("side cleanup has a target"),
+            Self::Resume { context, .. } | Self::Fallback(context) => context.thread_id,
+            Self::Cleanup { thread_id, .. } => *thread_id,
+        }
+    }
+}
+
+pub(in crate::app) enum SelectionAfter {
+    SelectOnly,
+    DiscardSide(ThreadId),
+    SurfaceInactive,
+}
+
+pub(super) struct SelectionContext {
+    thread_id: ThreadId,
+    pending_profile_on_unavailable_thread: bool,
+    cached_session: Option<ThreadSessionState>,
+    target: SelectionTarget,
+    after: SelectionAfter,
+}
+
+enum SelectionTarget {
+    Uncached,
+    Cached(Arc<Mutex<ThreadEventStore>>),
+}
+#[derive(Clone, Copy)]
+pub(super) enum SelectionKind {
+    Attach,
+    Refresh,
+}
+pub(super) enum CleanupContinuation {
+    Done,
+    Fallback(Box<SelectionContext>),
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ReplayMode {
+    Live,
+    Closed,
+    AttachFailed,
+}
+enum SelectedThread {
+    Cached {
+        replay: ReplayMode,
+        verification: Result<Option<String>>,
+    },
+    Attached(AppServerStartedThread),
+    Refreshed(AppServerStartedThread),
+    ReadOnly(api::Thread),
+}
+
+pub(super) enum SelectionReceipt {
+    Liveness(Result<api::Thread>),
+    Resumed {
+        prepared: PreparedSession,
+        handle: AppServerRequestHandle,
+    },
+    Fallback(PreparedHistory),
+    Detached(Result<(), SubmissionFailure>),
+    SideDetached(super::super::detach::DetachReceipt),
+    Terminated,
+}
+
+enum SelectionEffect {
+    DiscardSide {
+        handle: AppServerRequestHandle,
+        plan: super::super::detach::DetachPlan,
+    },
+    Liveness {
+        thread_id: ThreadId,
+        handle: AppServerRequestHandle,
+    },
+    Resume {
+        plan: ResumePreparation,
+        handle: AppServerRequestHandle,
+    },
+    Fallback {
+        thread_id: ThreadId,
+        handle: AppServerRequestHandle,
+        config: Config,
+        local_settings: LocalSettings,
+    },
+    Detach {
+        thread_id: ThreadId,
+        handle: AppServerRequestHandle,
+    },
+}
+
+impl App {
+    pub(in crate::app) fn enqueue_thread_selection(
+        &mut self,
+        server: &AppServerSession,
+        thread_id: ThreadId,
+        after: SelectionAfter,
+    ) {
+        self.enqueue_navigation(
+            server,
+            NavigationIntent::Select(SelectStage::Liveness { thread_id, after }),
+        );
+    }
+
+    pub(super) fn dispatch_selection_liveness(
+        &self,
+        server: &AppServerSession,
+        operation: &mut PendingNavigation,
+        thread_id: ThreadId,
+    ) {
+        self.spawn_selection_effect(
+            operation,
+            SelectionEffect::Liveness {
+                thread_id,
+                handle: server.request_handle(),
+            },
+        );
+    }
+
+    fn spawn_selection_effect(&self, operation: &mut PendingNavigation, effect: SelectionEffect) {
+        let completions = self.server_operations.control_tx.clone();
+        let (id, order, epoch, generation) = (
+            operation.id,
+            operation.order,
+            operation.epoch,
+            operation.generation,
+        );
+        operation.state = LaneState::Running(AbortOnDropHandle::new(tokio::spawn(async move {
+            let receipt = std::panic::AssertUnwindSafe(async {
+                match effect {
+                    SelectionEffect::DiscardSide { handle, plan } => {
+                        let receipt = match tokio::time::timeout(
+                            super::super::worker::ACK_TIMEOUT,
+                            super::super::detach::send(&handle, id, &plan),
+                        )
+                        .await
+                        {
+                            Ok(results) => super::super::detach::DetachReceipt::Complete(results),
+                            Err(_) => super::super::detach::DetachReceipt::BudgetExpired,
+                        };
+                        SelectionReceipt::SideDetached(receipt)
+                    }
+                    SelectionEffect::Liveness { thread_id, handle } => SelectionReceipt::Liveness(
+                        crate::app_server_session::session_preparation::read_thread(
+                            RequestPolicy::Interactive,
+                            &handle,
+                            thread_id,
+                        )
+                        .await,
+                    ),
+                    SelectionEffect::Resume { plan, handle } => SelectionReceipt::Resumed {
+                        prepared: plan.run().await,
+                        handle,
+                    },
+                    SelectionEffect::Fallback {
+                        thread_id,
+                        handle,
+                        config,
+                        local_settings,
+                    } => SelectionReceipt::Fallback(
+                        crate::app_server_session::session_preparation::prepare_thread_history(
+                            RequestPolicy::Interactive,
+                            handle,
+                            thread_id,
+                            config,
+                            local_settings,
+                        )
+                        .await,
+                    ),
+                    SelectionEffect::Detach { thread_id, handle } => {
+                        let result = tokio::time::timeout(
+                            super::super::worker::ACK_TIMEOUT,
+                            super::super::detach::unsubscribe(&handle, id, thread_id),
+                        )
+                        .await;
+                        SelectionReceipt::Detached(match result {
+                            Ok(result) => result.map_err(super::super::worker::classify_failure),
+                            Err(_) => Err(SubmissionFailure::TimedOut),
+                        })
+                    }
+                }
+            })
+            .catch_unwind()
+            .await
+            .unwrap_or(SelectionReceipt::Terminated);
+            let _ = completions.send(ServerCompletion::Navigation(NavigationCompletion {
+                id,
+                order,
+                epoch,
+                generation,
+                receipt: NavigationReceipt::Selected(receipt),
+            }));
+        })));
+    }
+
+    pub(super) async fn finish_selection_operation(
+        &mut self,
+        tui: &mut tui::Tui,
+        server: &mut AppServerSession,
+        mut operation: PendingNavigation,
+        matching: bool,
+        receipt: SelectionReceipt,
+    ) -> Result<()> {
+        let same_epoch = operation.epoch == self.server_operations.epoch;
+        let stage = match std::mem::replace(&mut operation.intent, NavigationIntent::Transitioning)
+        {
+            NavigationIntent::Select(stage) => stage,
+            _ => unreachable!("selection receipt without selection intent"),
+        };
+        match (stage, receipt) {
+            (SelectStage::Liveness { thread_id, after }, SelectionReceipt::Liveness(result))
+                if matching =>
+            {
+                if !self.apply_thread_liveness(result, thread_id) {
+                    self.add_agents_overview_error(format!(
+                        "Agent thread {thread_id} is no longer available."
+                    ));
+                    return Ok(());
+                }
+                let context = Box::new(self.capture_selection_context(thread_id, after).await);
+                self.advance_selection(tui, server, operation, context)
+                    .await?;
+            }
+            (SelectStage::Liveness { .. }, _) if !matching => {}
+            (SelectStage::DiscardSide(plan), SelectionReceipt::SideDetached(receipt)) => {
+                if same_epoch {
+                    let unknown = match &receipt {
+                        super::super::detach::DetachReceipt::BudgetExpired => true,
+                        super::super::detach::DetachReceipt::Complete(results) => {
+                            results.iter().any(|result| result.result.is_err())
+                        }
+                    };
+                    let thread_id = plan.origin().expect("side cleanup has a target");
+                    self.finish_detach_plan(&plan, receipt).await;
+                    if unknown {
+                        self.add_agents_overview_error(format!("Closing side conversation {thread_id} was not confirmed. Close and reopen to resynchronize; the earlier request may still complete."));
+                        self.retain_uncertain_selection(operation, thread_id, false);
+                    }
+                }
+            }
+            (
+                SelectStage::Resume { context, kind },
+                SelectionReceipt::Resumed { prepared, handle },
+            ) => {
+                let PreparedSession {
+                    result,
+                    custody,
+                    observations,
+                } = prepared;
+                if same_epoch {
+                    server.apply_session_observations(observations);
+                }
+                let matching = matching && self.selection_target_is_current(&context);
+                if !matching {
+                    if matches!(kind, SelectionKind::Attach)
+                        && let SubscriptionCustody::Subscribed(thread_id) = custody
+                    {
+                        self.start_selection_cleanup(
+                            operation,
+                            thread_id,
+                            handle,
+                            CleanupContinuation::Done,
+                            false,
+                        );
+                    } else if same_epoch && let SubscriptionCustody::Uncertain(thread_id) = custody
+                    {
+                        self.retain_uncertain_selection(operation, thread_id, false);
+                    }
+                    return Ok(());
+                }
+                match result {
+                    Ok(started) => {
+                        if started.can_accept_text_input {
+                            self.agent_navigation
+                                .text_input_threads
+                                .insert(context.thread_id);
+                        } else {
+                            self.agent_navigation
+                                .text_input_threads
+                                .remove(&context.thread_id);
+                        }
+                        if started.blocks_direct_input {
+                            self.agent_navigation.mark_parent_owned(context.thread_id);
+                        }
+                        let selected = match kind {
+                            SelectionKind::Attach => SelectedThread::Attached(started),
+                            SelectionKind::Refresh => SelectedThread::Refreshed(started),
+                        };
+                        self.commit_agent_selection(tui, server, *context, selected)
+                            .await?;
+                    }
+                    Err(error) => match custody {
+                        SubscriptionCustody::Uncertain(thread_id) => {
+                            self.add_agents_overview_error(format!("Conversation attachment outcome is unknown: {error}. No resume was retried; close and reopen to resynchronize. The earlier request may still complete."));
+                            self.retain_uncertain_selection(operation, thread_id, true);
+                        }
+                        SubscriptionCustody::Subscribed(thread_id)
+                            if matches!(kind, SelectionKind::Attach) =>
+                        {
+                            self.start_selection_cleanup(
+                                operation,
+                                thread_id,
+                                handle,
+                                CleanupContinuation::Fallback(context),
+                                true,
+                            );
+                        }
+                        _ if matches!(kind, SelectionKind::Refresh) => {
+                            tracing::warn!(%error, "failed to refresh inferred thread session before replay");
+                            self.commit_agent_selection(
+                                tui,
+                                server,
+                                *context,
+                                SelectedThread::Cached {
+                                    replay: ReplayMode::Live,
+                                    verification: Err(error),
+                                },
+                            )
+                            .await?;
+                        }
+                        _ => self.start_selection_fallback(server, operation, context),
+                    },
+                }
+            }
+            (SelectStage::Fallback(context), SelectionReceipt::Fallback(prepared)) => {
+                if same_epoch {
+                    let result =
+                        prepared
+                            .apply(server)
+                            .and_then(|hydrated| match hydrated.history {
+                                Ok(()) => Ok(hydrated.thread),
+                                Err(error)
+                                    if Self::can_fallback_from_include_turns_error(&error) =>
+                                {
+                                    Ok(hydrated.thread)
+                                }
+                                Err(error) => Err(error),
+                            });
+                    if matching && self.selection_target_is_current(&context) {
+                        match result {
+                            Ok(thread) if !thread.ephemeral && !thread.turns.is_empty() => {
+                                self.commit_agent_selection(
+                                    tui,
+                                    server,
+                                    *context,
+                                    SelectedThread::ReadOnly(thread),
+                                )
+                                .await?
+                            }
+                            result => {
+                                if self.thread_event_channels.contains_key(&context.thread_id) {
+                                    self.commit_agent_selection(
+                                        tui,
+                                        server,
+                                        *context,
+                                        SelectedThread::Cached {
+                                            replay: ReplayMode::AttachFailed,
+                                            verification: Ok(None),
+                                        },
+                                    )
+                                    .await?;
+                                } else {
+                                    let error = match result {
+                                        Err(error) => error.to_string(),
+                                        _ => format!(
+                                            "Agent thread {} is not yet available for replay or live attach.",
+                                            context.thread_id
+                                        ),
+                                    };
+                                    self.add_agents_overview_error(error);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            (SelectStage::Cleanup { thread_id, next }, SelectionReceipt::Detached(result)) => {
+                match result {
+                    Ok(()) => {
+                        if matching && let CleanupContinuation::Fallback(context) = next {
+                            self.start_selection_fallback(server, operation, context);
+                        }
+                    }
+                    Err(error) if same_epoch => {
+                        self.add_agents_overview_error(format!("Detaching superseded conversation {thread_id} was not confirmed: {error:?}. Close and reopen to resynchronize; no detach was retried."));
+                        self.retain_uncertain_selection(operation, thread_id, matching);
+                    }
+                    Err(_) => {}
+                }
+            }
+            (stage, SelectionReceipt::Terminated) => {
+                let thread_id = stage.thread_id();
+                self.add_agents_overview_error("Conversation preparation terminated unexpectedly. No request was retried; close and reopen to resynchronize.".into());
+                if same_epoch
+                    && matches!(
+                        stage,
+                        SelectStage::Resume { .. }
+                            | SelectStage::Cleanup { .. }
+                            | SelectStage::DiscardSide(_)
+                    )
+                {
+                    self.retain_uncertain_selection(operation, thread_id, matching);
+                }
+            }
+            _ => unreachable!("selection stage received a different family's receipt"),
+        }
+        Ok(())
+    }
+
+    async fn capture_selection_context(
+        &self,
+        thread_id: ThreadId,
+        after: SelectionAfter,
+    ) -> SelectionContext {
+        let unavailable = self.thread_unavailable(thread_id);
+        let target = match self.thread_event_channels.get(&thread_id) {
+            Some(channel) => SelectionTarget::Cached(Arc::clone(&channel.store)),
+            None => SelectionTarget::Uncached,
+        };
+        let cached_session = if unavailable {
+            match &target {
+                SelectionTarget::Cached(store) => store.lock().await.session.clone(),
+                SelectionTarget::Uncached => None,
+            }
+        } else {
+            None
+        };
+        SelectionContext {
+            thread_id,
+            pending_profile_on_unavailable_thread: unavailable
+                && self.pending_server_profiles.contains_key(&thread_id),
+            cached_session,
+            target,
+            after,
+        }
+    }
+
+    fn selection_target_is_current(&self, context: &SelectionContext) -> bool {
+        match &context.target {
+            SelectionTarget::Uncached => true,
+            SelectionTarget::Cached(store) => self
+                .thread_event_channels
+                .get(&context.thread_id)
+                .is_some_and(|channel| Arc::ptr_eq(&channel.store, store)),
+        }
+    }
+
+    async fn advance_selection(
+        &mut self,
+        tui: &mut tui::Tui,
+        server: &mut AppServerSession,
+        mut operation: PendingNavigation,
+        context: Box<SelectionContext>,
+    ) -> Result<()> {
+        let thread_id = context.thread_id;
+        let closed = self
+            .agent_navigation
+            .get(&thread_id)
+            .is_some_and(|entry| entry.is_closed);
+        let kind = if self.should_attach_live_thread_for_selection(thread_id) {
+            Some(SelectionKind::Attach)
+        } else if let Some(channel) = self.thread_event_channels.get(&thread_id) {
+            let store = channel.store.lock().await;
+            self.should_refresh_thread_session(thread_id, closed, store.session.as_ref())
+                .then_some(SelectionKind::Refresh)
+        } else {
+            None
+        };
+        if let Some(kind) = kind {
+            let plan = server.prepare_resume_thread(
+                RequestPolicy::Interactive,
+                &self.local_settings,
+                self.config.clone(),
+                thread_id,
+                crate::app_server_session::ResumeModelSettings::PreserveExistingThread,
+                crate::resume_permissions::ResumePermissions::default(),
+            );
+            operation.intent = NavigationIntent::Select(SelectStage::Resume { context, kind });
+            self.spawn_selection_effect(
+                &mut operation,
+                SelectionEffect::Resume {
+                    plan,
+                    handle: server.request_handle(),
+                },
+            );
+            self.server_operations.navigation.current = Some(operation);
+        } else if !self.thread_event_channels.contains_key(&thread_id) {
+            self.add_agents_overview_error(format!(
+                "Agent thread {thread_id} is no longer available."
+            ));
+        } else {
+            self.commit_agent_selection(
+                tui,
+                server,
+                *context,
+                SelectedThread::Cached {
+                    replay: if closed {
+                        ReplayMode::Closed
+                    } else {
+                        ReplayMode::Live
+                    },
+                    verification: Ok(None),
+                },
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
+    fn start_selection_fallback(
+        &mut self,
+        server: &AppServerSession,
+        mut operation: PendingNavigation,
+        context: Box<SelectionContext>,
+    ) {
+        let thread_id = context.thread_id;
+        operation.intent = NavigationIntent::Select(SelectStage::Fallback(context));
+        self.spawn_selection_effect(
+            &mut operation,
+            SelectionEffect::Fallback {
+                thread_id,
+                handle: server.request_handle(),
+                config: self.config.clone(),
+                local_settings: self.local_settings.clone(),
+            },
+        );
+        self.server_operations.navigation.current = Some(operation);
+    }
+
+    fn start_selection_cleanup(
+        &mut self,
+        mut operation: PendingNavigation,
+        thread_id: ThreadId,
+        handle: AppServerRequestHandle,
+        next: CleanupContinuation,
+        matching: bool,
+    ) {
+        operation.intent = NavigationIntent::Select(SelectStage::Cleanup { thread_id, next });
+        self.spawn_selection_effect(
+            &mut operation,
+            SelectionEffect::Detach { thread_id, handle },
+        );
+        if matching {
+            self.server_operations.navigation.current = Some(operation);
+        } else {
+            self.server_operations.navigation.retired.push(operation);
+        }
+    }
+
+    fn retain_uncertain_selection(
+        &mut self,
+        mut operation: PendingNavigation,
+        thread_id: ThreadId,
+        matching: bool,
+    ) {
+        operation.intent = NavigationIntent::Select(SelectStage::Uncertain(thread_id));
+        operation.state = LaneState::Uncertain;
+        if matching {
+            self.server_operations.navigation.current = Some(operation);
+        } else {
+            self.server_operations.navigation.retired.push(operation);
+        }
+    }
+
+    async fn install_selected_snapshot(
+        &mut self,
+        thread_id: ThreadId,
+        session: ThreadSessionState,
+        turns: Vec<Turn>,
+        live_attached: bool,
+    ) {
+        let was_external_writer = self
+            .thread_event_channels
+            .get(&thread_id)
+            .is_some_and(|channel| channel.attachment() == ThreadEventAttachment::ExternalWriter);
+        if self.active_thread_id == Some(thread_id) {
+            self.store_active_thread_receiver().await;
+        }
+        self.agents_overview.activity.remove(&thread_id);
+        let channel = self.ensure_thread_channel(thread_id);
+        if live_attached {
+            channel.mark_live();
+        } else if was_external_writer {
+            channel.mark_external_writer();
+        } else {
+            channel.mark_replay_only();
+        }
+        let mut store = channel.store.lock().await;
+        store.set_session(session, turns);
+        store.rebase_buffer_after_session_refresh();
+    }
+
+    pub(in crate::app) async fn select_tracked_side_locally(
+        &mut self,
+        tui: &mut tui::Tui,
+        server: &mut AppServerSession,
+        thread_id: ThreadId,
+        after: SelectionAfter,
+    ) -> Result<()> {
+        self.supersede_pending_navigation();
+        let context = self.capture_selection_context(thread_id, after).await;
+        self.commit_agent_selection(
+            tui,
+            server,
+            context,
+            SelectedThread::Cached {
+                replay: ReplayMode::Live,
+                verification: Ok(None),
+            },
+        )
+        .await
+    }
+
+    pub(in crate::app) async fn finish_selection_after(
+        &mut self,
+        server: &mut AppServerSession,
+        after: SelectionAfter,
+    ) -> Result<()> {
+        match after {
+            SelectionAfter::SelectOnly => {}
+            SelectionAfter::DiscardSide(thread_id) => {
+                self.discard_side_thread_in_background(server, thread_id)
+                    .await;
+                self.surface_pending_inactive_thread_interactive_requests()
+                    .await?;
+            }
+            SelectionAfter::SurfaceInactive => {
+                if self.active_side_parent_thread_id().is_none() {
+                    self.surface_pending_inactive_thread_interactive_requests()
+                        .await?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub(in crate::app) async fn enqueue_side_cleanup(
+        &mut self,
+        server: &AppServerSession,
+        thread_id: ThreadId,
+    ) {
+        self.abandoned_side_threads.insert(thread_id);
+        let channel = self.ensure_thread_channel(thread_id);
+        let store = Arc::clone(&channel.store);
+        let replay_only = channel.attachment() == ThreadEventAttachment::ReplayOnly;
+        let turn_id = self
+            .active_turn_id_for_thread(thread_id)
+            .await
+            .unwrap_or_default();
+        let plan = super::super::detach::DetachPlan {
+            targets: vec![super::super::detach::DetachTarget {
+                thread_id,
+                store,
+                kind: super::super::detach::DetachKind::Side {
+                    turn_id,
+                    replay_only,
+                },
+            }],
+            voice: None,
+        };
+        let order = self.server_operations.next_order;
+        self.server_operations.next_order =
+            order.checked_add(1).expect("operation sequence exhausted");
+        let mut operation = PendingNavigation {
+            id: Uuid::new_v4(),
+            order,
+            epoch: self.server_operations.epoch,
+            generation: self.server_operations.navigation.generation,
+            intent: NavigationIntent::Select(SelectStage::DiscardSide(plan.clone())),
+            state: LaneState::Queued,
+        };
+        self.spawn_selection_effect(
+            &mut operation,
+            SelectionEffect::DiscardSide {
+                handle: server.request_handle(),
+                plan,
+            },
+        );
+        self.server_operations.navigation.retired.push(operation);
+        self.refresh_submission_preview();
+    }
+
+    async fn commit_agent_selection(
+        &mut self,
+        tui: &mut tui::Tui,
+        app_server: &mut AppServerSession,
+        context: SelectionContext,
+        selected: SelectedThread,
+    ) -> Result<()> {
+        let SelectionContext {
+            thread_id,
+            pending_profile_on_unavailable_thread,
+            cached_session,
+            after,
+            ..
+        } = context;
+        let (mut is_replay_only, mut attached_replay_only, verification, refreshed) = match selected
+        {
+            SelectedThread::Cached {
+                replay,
+                verification,
+            } => (
+                replay != ReplayMode::Live,
+                replay == ReplayMode::AttachFailed,
+                verification,
+                None,
+            ),
+            SelectedThread::Attached(started) => {
+                let notice = started.history_notice.clone();
+                self.install_selected_snapshot(thread_id, started.session, started.turns, true)
+                    .await;
+                (false, false, Ok(notice), None)
+            }
+            SelectedThread::Refreshed(started) => (false, false, Ok(None), Some(started)),
+            SelectedThread::ReadOnly(thread) => {
+                let turns = thread.turns.clone();
+                let mut session = self.session_state_for_thread_read(thread_id, &thread).await;
+                if let Some(channel) = self.thread_event_channels.get(&thread_id)
+                    && let Some(cached) = channel.store.lock().await.session.as_ref()
+                {
+                    session.approval_policy = cached.approval_policy;
+                    session.permission_profile = cached.permission_profile.clone();
+                    session.active_permission_profile = cached.active_permission_profile.clone();
+                    session.approvals_reviewer = cached.approvals_reviewer;
+                }
+                session.model.clear();
+                self.install_selected_snapshot(thread_id, session, turns, false)
+                    .await;
+                (true, true, Ok(None), None)
+            }
+        };
+        self.agent_navigation.explicit_attachments.insert(thread_id);
+        let previous_thread_id = self.active_thread_id;
+        // Notifications already routed to the active channel must reach the old
+        // widget before its transcript state is transferred. Events routed after
+        // deactivation are retained separately for that thread.
+        if let Some(mut receiver) = self.active_thread_rx.take() {
+            while let Ok(event) = receiver.try_recv() {
+                self.handle_thread_event_now_recovering_file_changes(event)
+                    .await;
+            }
+            self.active_thread_rx = Some(receiver);
+        }
+        self.store_active_thread_receiver().await;
+        self.active_thread_id = None;
+        let Some((receiver, mut snapshot)) = self.activate_thread_for_replay(thread_id).await
+        else {
+            self.add_agents_overview_error(format!("Agent thread {thread_id} is already active."));
+            if let Some(previous_thread_id) = previous_thread_id {
+                self.activate_thread_channel(previous_thread_id).await;
+            }
+            return Ok(());
+        };
+
+        let session_verification = match refreshed {
+            Some(mut started) => {
+                let notice = started.history_notice.take();
+                self.apply_refreshed_snapshot_thread(thread_id, started, &mut snapshot)
+                    .await;
+                Ok(notice)
+            }
+            None => verification,
+        };
+        let session_verified = session_verification.is_ok();
+        if !is_replay_only
+            && !self.side_threads.contains_key(&thread_id)
+            && snapshot.session.as_ref().is_some_and(|session| {
+                session
+                    .active_permission_profile
+                    .as_ref()
+                    .is_some_and(|profile| !profile.id.starts_with(':'))
+            })
+            && !session_verified
+        {
+            is_replay_only = true;
+            attached_replay_only = true;
+        }
+        if pending_profile_on_unavailable_thread && !is_replay_only && session_verified {
+            self.pending_server_profiles.remove(&thread_id);
+        }
+        // Refreshing can merge restored turns into the store, so recap progress must be read only
+        // after the refresh while the activated thread channel is still retained.
+        let Some(channel) = self.thread_event_channels.get(&thread_id) else {
+            self.add_agents_overview_error(format!(
+                "Agent thread {thread_id} is no longer available."
+            ));
+            return Ok(());
+        };
+        let recap_progress = {
+            let mut store = channel.store.lock().await;
+            if let (Some(cached), Some(session)) =
+                (cached_session.as_ref(), snapshot.session.as_mut())
+            {
+                if !pending_profile_on_unavailable_thread {
+                    self.restore_runtime_permissions(session, cached);
+                }
+                store.session = Some(session.clone());
+                if !is_replay_only && self.primary_thread_id == Some(thread_id) {
+                    self.primary_session_configured = Some(session.clone());
+                }
+            }
+            store.recap_progress()
+        };
+        snapshot.input_state = snapshot
+            .input_state
+            .or(self.agents_overview.input_states.remove(&thread_id));
+
+        self.active_thread_id = Some(thread_id);
+        self.active_thread_rx = Some(receiver);
+
+        self.recap.note_focus_gained();
+        self.recap = recap::RecapState::default();
+
+        if !tui.is_terminal_focused() {
+            self.recap.note_focus_lost(Instant::now());
+        }
+        let now = Instant::now();
+        self.recap.seed_from_progress(recap_progress, now);
+        self.schedule_recap_check(thread_id, now);
+
+        self.render_thread_snapshot(tui, app_server, thread_id, snapshot, !is_replay_only)?;
+        if let Ok(Some(notice)) = session_verification {
+            self.chat_widget.add_info_message(notice, /*hint*/ None);
+        }
+        if is_replay_only
+            && self
+                .thread_event_channels
+                .get(&thread_id)
+                .is_none_or(|channel| channel.attachment() != ThreadEventAttachment::ExternalWriter)
+        {
+            self.chat_widget.pause_unavailable_thread();
+            let message = if attached_replay_only {
+                format!(
+                    "Agent thread {thread_id} could not be resumed live. Replaying saved transcript."
+                )
+            } else {
+                format!("Agent thread {thread_id} is closed. Replaying saved transcript.")
+            };
+            self.chat_widget.add_info_message(message, /*hint*/ None);
+        }
+        self.refresh_pending_thread_approvals().await;
+        self.finish_selection_after(app_server, after).await?;
+
+        Ok(())
+    }
+}

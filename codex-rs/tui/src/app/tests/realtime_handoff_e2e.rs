@@ -218,7 +218,7 @@ async fn delegated_core_events_keep_private_output_hidden_and_deliver_final_spee
     );
     assert_eq!(app.chat_widget.thread_id(), Some(other_id));
     assert_eq!(app.voice_owner_thread_id(), Some(thread_id));
-    app.select_agent_thread(&mut tui, &mut app_server, thread_id)
+    app.select_agent_thread_and_settle(&mut tui, &mut app_server, thread_id)
         .await?;
     assert!(app.chat_widget.realtime_conversation_is_running());
     let rendered = rendered.join("\n");

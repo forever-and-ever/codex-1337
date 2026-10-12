@@ -439,6 +439,12 @@ pub(super) async fn start_recording_app_server_with_realtime_speech(
                         continue;
                     }
                     if history_capabilities == HistoryCapabilities::TurnSubmissionStalls
+                        && request.method == "thread/read"
+                        && request_sink.lock().expect("request recorder lock").iter().any(|seen| seen.method == "thread/realtime/listVoices")
+                    {
+                        continue;
+                    }
+                    if history_capabilities == HistoryCapabilities::TurnSubmissionStalls
                         && matches!(request.method.as_str(), "turn/start" | "turn/steer" | "skills/list" | "turn/interrupt" | "thread/realtime/listVoices")
                     {
                         continue;

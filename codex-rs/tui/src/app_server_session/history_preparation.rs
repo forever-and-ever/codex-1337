@@ -28,7 +28,10 @@ impl AppServerSession {
     }
 }
 
+use super::super::session_preparation::RequestPolicy;
+
 pub(super) async fn thread_items_page(
+    policy: RequestPolicy,
     handle: &codex_app_server_client::AppServerRequestHandle,
     thread_id: ThreadId,
     turn_id: Option<&str>,
@@ -39,16 +42,20 @@ pub(super) async fn thread_items_page(
         "tui-history-{}",
         uuid::Uuid::new_v4()
     ));
-    handle
-        .request_typed(ClientRequest::ThreadItemsList {
+    super::super::session_preparation::request(
+        policy,
+        handle,
+        ClientRequest::ThreadItemsList {
             request_id,
             params: thread_items_page_params(thread_id, turn_id, cursor, limit),
-        })
-        .await
-        .wrap_err("failed to load a bounded thread item page")
+        },
+    )
+    .await
+    .wrap_err("failed to load a bounded thread item page")
 }
 
 pub(super) async fn thread_turns_page(
+    policy: RequestPolicy,
     handle: &codex_app_server_client::AppServerRequestHandle,
     thread_id: ThreadId,
     cursor: Option<String>,
@@ -58,8 +65,10 @@ pub(super) async fn thread_turns_page(
         "tui-history-{}",
         uuid::Uuid::new_v4()
     ));
-    handle
-        .request_typed(ClientRequest::ThreadTurnsList {
+    super::super::session_preparation::request(
+        policy,
+        handle,
+        ClientRequest::ThreadTurnsList {
             request_id,
             params: ThreadTurnsListParams {
                 thread_id: thread_id.to_string(),
@@ -68,12 +77,14 @@ pub(super) async fn thread_turns_page(
                 sort_direction: Some(SortDirection::Desc),
                 items_view: Some(TurnItemsView::NotLoaded),
             },
-        })
-        .await
-        .wrap_err("failed to load a bounded thread history page")
+        },
+    )
+    .await
+    .wrap_err("failed to load a bounded thread history page")
 }
 
 pub(super) async fn merge_thread_item_page(
+    policy: RequestPolicy,
     handle: &codex_app_server_client::AppServerRequestHandle,
     thread_id: ThreadId,
     page: ThreadItemsListResponse,
@@ -99,7 +110,8 @@ pub(super) async fn merge_thread_item_page(
             // Fetch only the remaining item-backed turns so metadata does not run ahead
             // of this page. Empty turns between them may require another bounded request.
             let limit = missing_turn_ids.len().min(HISTORY_ITEM_PAGE_LIMIT as usize) as u32;
-            let page = thread_turns_page(handle, thread_id, Some(cursor.clone()), limit).await?;
+            let page =
+                thread_turns_page(policy, handle, thread_id, Some(cursor.clone()), limit).await?;
             for turn in merge_turn_page(&cursor, page, state, turns) {
                 missing_turn_ids.remove(&turn.id);
             }
@@ -124,6 +136,7 @@ pub(super) async fn merge_thread_item_page(
 }
 
 pub(in crate::app_server_session) async fn read_thread(
+    policy: RequestPolicy,
     handle: &codex_app_server_client::AppServerRequestHandle,
     thread_id: ThreadId,
     include_turns: bool,
@@ -132,15 +145,18 @@ pub(in crate::app_server_session) async fn read_thread(
         "tui-history-{}",
         uuid::Uuid::new_v4()
     ));
-    let response = handle
-        .request_typed::<ThreadReadResponse>(ClientRequest::ThreadRead {
+    let response = super::super::session_preparation::request::<ThreadReadResponse>(
+        policy,
+        handle,
+        ClientRequest::ThreadRead {
             request_id,
             params: ThreadReadParams {
                 thread_id: thread_id.to_string(),
                 include_turns,
             },
-        })
-        .await;
+        },
+    )
+    .await;
     let mut response: ThreadReadResponse = match response {
         Ok(response) => return Ok(response.thread),
         Err(TypedRequestError::Server { source, .. })
@@ -152,20 +168,24 @@ pub(in crate::app_server_session) async fn read_thread(
                 "tui-history-{}",
                 uuid::Uuid::new_v4()
             ));
-            handle
-                .request_typed(ClientRequest::ThreadRead {
+            super::super::session_preparation::request(
+                policy,
+                handle,
+                ClientRequest::ThreadRead {
                     request_id,
                     params: ThreadReadParams {
                         thread_id: thread_id.to_string(),
                         include_turns: false,
                     },
-                })
-                .await
-                .wrap_err("thread/read failed during TUI session lookup")?
+                },
+            )
+            .await
+            .wrap_err("thread/read failed during TUI session lookup")?
         }
         Err(err) => return Err(err).wrap_err("thread/read failed during TUI session lookup"),
     };
     let (result, _) = prepare_initial_thread_history(
+        policy,
         handle,
         &mut response.thread,
         /*turn_cursor*/ None,
@@ -180,6 +200,7 @@ pub(in crate::app_server_session) async fn read_thread(
 }
 
 pub(in crate::app_server_session) async fn prepare_initial_thread_history(
+    policy: RequestPolicy,
     handle: &codex_app_server_client::AppServerRequestHandle,
     thread: &mut Thread,
     turn_cursor: Option<String>,
@@ -196,11 +217,14 @@ pub(in crate::app_server_session) async fn prepare_initial_thread_history(
     };
     if thread.history_mode == ThreadHistoryMode::Legacy {
         if thread.turns.is_empty() {
-            thread.turns =
-                match Box::pin(read_thread(handle, thread_id, /*include_turns*/ true)).await {
-                    Ok(thread) => thread.turns,
-                    Err(error) => return (Err(error), HistoryPaginationUpdate::Untracked),
-                };
+            thread.turns = match Box::pin(read_thread(
+                policy, handle, thread_id, /*include_turns*/ true,
+            ))
+            .await
+            {
+                Ok(thread) => thread.turns,
+                Err(error) => return (Err(error), HistoryPaginationUpdate::Untracked),
+            };
         }
         return (Ok(()), HistoryPaginationUpdate::Legacy(thread_id));
     }
@@ -213,6 +237,7 @@ pub(in crate::app_server_session) async fn prepare_initial_thread_history(
     };
     let result = async {
         let page = thread_turns_page(
+            policy,
             handle,
             thread_id,
             state.next_turn_cursor.clone(),
@@ -228,6 +253,7 @@ pub(in crate::app_server_session) async fn prepare_initial_thread_history(
         let mut rendered_rows = 0;
         while let Some(limit) = budget.next_page_size(rendered_rows, scanned_items) {
             let page = thread_items_page(
+                policy,
                 handle,
                 thread_id,
                 /*turn_id*/ None,
@@ -237,9 +263,15 @@ pub(in crate::app_server_session) async fn prepare_initial_thread_history(
             .await?;
             let empty_page = page.data.is_empty();
             scanned_items = scanned_items.saturating_add(page.data.len());
-            let items =
-                merge_thread_item_page(handle, thread_id, page, &mut state, &mut thread.turns)
-                    .await?;
+            let items = merge_thread_item_page(
+                policy,
+                handle,
+                thread_id,
+                page,
+                &mut state,
+                &mut thread.turns,
+            )
+            .await?;
             // Finish the anchor turn so prompt editing can detect earlier steers,
             // but do not scan history older than the displayed transcript.
             if let HistoryHydrationScope::ThroughTurn(anchor) = scope
@@ -270,6 +302,7 @@ pub(in crate::app_server_session) async fn prepare_initial_thread_history(
         if scope == HistoryHydrationScope::Complete {
             while let Some(cursor) = state.next_turn_cursor.clone() {
                 let page = thread_turns_page(
+                    policy,
                     handle,
                     thread_id,
                     Some(cursor.clone()),

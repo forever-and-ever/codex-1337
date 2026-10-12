@@ -266,13 +266,14 @@ async fn agents_navigation_escape_returns_to_main_but_preserves_drafts_and_popup
         ThreadEventChannel::new_with_session(/*capacity*/ 1, child.session, child.turns),
     );
     let mut tui = crate::tui::test_support::make_test_tui()?;
-    app.select_agent_thread(&mut tui, &mut app_server, child_id)
+    app.select_agent_thread_and_settle(&mut tui, &mut app_server, child_id)
         .await?;
     assert_eq!(app.current_displayed_thread_id(), Some(child_id));
     app.chat_widget.apply_external_edit("x".into());
     assert_eq!(app.chat_widget.composer_text_with_pending(), "x");
     app.handle_key_event(&mut tui, &mut app_server, KeyCode::Esc.into())
         .await;
+    app.settle_navigation(&mut app_server).await?;
     assert_eq!(app.current_displayed_thread_id(), Some(child_id));
     app.chat_widget.apply_external_edit(String::new());
     assert!(app.chat_widget.composer_is_empty());
@@ -286,10 +287,12 @@ async fn agents_navigation_escape_returns_to_main_but_preserves_drafts_and_popup
     });
     app.handle_key_event(&mut tui, &mut app_server, KeyCode::Esc.into())
         .await;
+    app.settle_navigation(&mut app_server).await?;
     assert_eq!(app.current_displayed_thread_id(), Some(child_id));
     assert!(app.chat_widget.no_modal_or_popup_active());
     app.handle_key_event(&mut tui, &mut app_server, KeyCode::Esc.into())
         .await;
+    app.settle_navigation(&mut app_server).await?;
     assert_eq!(app.current_displayed_thread_id(), Some(root_id));
     app.upsert_agent_picker_thread(
         child_id,
@@ -308,6 +311,7 @@ async fn agents_navigation_escape_returns_to_main_but_preserves_drafts_and_popup
         app.chat_widget.apply_external_edit(String::new());
         app.handle_key_event(&mut tui, &mut app_server, KeyCode::Down.into())
             .await;
+        app.settle_navigation(&mut app_server).await?;
         assert_eq!(
             app.agent_navigation.roster.lock().unwrap().focused,
             Some(child_id)
@@ -318,6 +322,7 @@ async fn agents_navigation_escape_returns_to_main_but_preserves_drafts_and_popup
             KeyEvent::new(KeyCode::Char(character), modifiers),
         )
         .await;
+        app.settle_navigation(&mut app_server).await?;
         std::thread::sleep(crate::bottom_pane::ChatComposer::recommended_paste_flush_delay());
         app.chat_widget
             .handle_paste_burst_tick(tui.frame_requester());
@@ -333,24 +338,28 @@ async fn agents_navigation_escape_returns_to_main_but_preserves_drafts_and_popup
         .apply_external_edit("Preserve this root draft".into());
     app.handle_key_event(&mut tui, &mut app_server, KeyCode::Down.into())
         .await;
+    app.settle_navigation(&mut app_server).await?;
     assert_eq!(
         app.agent_navigation.roster.lock().unwrap().focused,
         Some(child_id)
     );
     app.handle_key_event(&mut tui, &mut app_server, KeyCode::Enter.into())
         .await;
+    app.settle_navigation(&mut app_server).await?;
     assert_eq!(app.current_displayed_thread_id(), Some(child_id));
     app.chat_widget
         .apply_external_edit("Hidden child draft".into());
     app.chat_widget.set_parent_owned_thread();
     app.handle_key_event(&mut tui, &mut app_server, KeyCode::Up.into())
         .await;
+    app.settle_navigation(&mut app_server).await?;
     assert_eq!(
         app.chat_widget.composer_text_with_pending(),
         "Hidden child draft"
     );
     app.handle_key_event(&mut tui, &mut app_server, KeyCode::Esc.into())
         .await;
+    app.settle_navigation(&mut app_server).await?;
     assert_eq!(app.current_displayed_thread_id(), Some(child_id));
     app.chat_widget.set_child_text_input_enabled();
     tui.set_owned_screen(/*owned*/ true)?;
@@ -370,6 +379,7 @@ async fn agents_navigation_escape_returns_to_main_but_preserves_drafts_and_popup
     app.transcript_view.begin_search();
     app.handle_tui_event(&mut tui, &mut app_server, TuiEvent::Key(ctrl_c))
         .await?;
+    app.settle_navigation(&mut app_server).await?;
     assert!(!app.transcript_view.is_search_editing());
     assert_eq!(
         app.chat_widget.composer_text_with_pending(),
@@ -377,6 +387,7 @@ async fn agents_navigation_escape_returns_to_main_but_preserves_drafts_and_popup
     );
     app.handle_tui_event(&mut tui, &mut app_server, TuiEvent::Key(ctrl_c))
         .await?;
+    app.settle_navigation(&mut app_server).await?;
     let child_pending_interrupt = child_store.lock().await.pending_interrupt_turn_id.clone();
     let root_pending_interrupt = root_store.lock().await.pending_interrupt_turn_id.clone();
     assert_eq!(
@@ -394,12 +405,14 @@ async fn agents_navigation_escape_returns_to_main_but_preserves_drafts_and_popup
     );
     app.handle_key_event(&mut tui, &mut app_server, KeyCode::Up.into())
         .await;
+    app.settle_navigation(&mut app_server).await?;
     assert_eq!(
         app.chat_widget.composer_text_with_pending(),
         "Hidden child draft"
     );
     app.handle_tui_event(&mut tui, &mut app_server, TuiEvent::Key(ctrl_c))
         .await?;
+    app.settle_navigation(&mut app_server).await?;
     assert!(app.chat_widget.composer_is_empty());
     assert!(
         !std::iter::from_fn(|| events.try_recv().ok())
@@ -407,6 +420,7 @@ async fn agents_navigation_escape_returns_to_main_but_preserves_drafts_and_popup
     );
     app.handle_tui_event(&mut tui, &mut app_server, TuiEvent::Key(ctrl_c))
         .await?;
+    app.settle_navigation(&mut app_server).await?;
     let interrupt = std::iter::from_fn(|| events.try_recv().ok())
         .find(|event| matches!(event, AppEvent::CodexOp(_) | AppEvent::Exit(_)))
         .expect("empty child composer should interrupt");
@@ -431,12 +445,14 @@ async fn agents_navigation_escape_returns_to_main_but_preserves_drafts_and_popup
     while events.try_recv().is_ok() {}
     app.handle_tui_event(&mut tui, &mut app_server, TuiEvent::Key(ctrl_c))
         .await?;
+    app.settle_navigation(&mut app_server).await?;
     assert!(
         std::iter::from_fn(|| events.try_recv().ok())
             .any(|event| matches!(event, AppEvent::Exit(ExitMode::ShutdownFirst)))
     );
     app.handle_key_event(&mut tui, &mut app_server, KeyCode::Esc.into())
         .await;
+    app.settle_navigation(&mut app_server).await?;
     assert_eq!(app.current_displayed_thread_id(), Some(root_id));
     assert_eq!(
         app.chat_widget.composer_text_with_pending(),
@@ -445,7 +461,7 @@ async fn agents_navigation_escape_returns_to_main_but_preserves_drafts_and_popup
     // The owned transcript routes input before handle_key_event. An idle child
     // previously consumed Escape as prompt backtracking instead of navigation.
     for phase in ["running", "finished", "stopped", "finishing"] {
-        app.select_agent_thread(&mut tui, &mut app_server, child_id)
+        app.select_agent_thread_and_settle(&mut tui, &mut app_server, child_id)
             .await?;
         app.chat_widget.apply_external_edit(String::new());
         app.enqueue_thread_notification(child_id, turn_started_notification(child_id, phase))
@@ -475,6 +491,7 @@ async fn agents_navigation_escape_returns_to_main_but_preserves_drafts_and_popup
             TuiEvent::Key(KeyCode::Esc.into()),
         )
         .await?;
+        app.settle_navigation(&mut app_server).await?;
         assert_eq!(app.current_displayed_thread_id(), Some(child_id));
         assert!(!app.transcript_view.is_search_editing());
         app.handle_tui_event(
@@ -483,6 +500,7 @@ async fn agents_navigation_escape_returns_to_main_but_preserves_drafts_and_popup
             TuiEvent::Key(KeyCode::Esc.into()),
         )
         .await?;
+        app.settle_navigation(&mut app_server).await?;
         assert_eq!(
             (
                 app.current_displayed_thread_id(),
@@ -581,7 +599,7 @@ async fn pending_windows_sandbox_setup_blocks_thread_replacement() -> Result<()>
     );
     app.chat_widget.initial_user_message = prompt.clone();
 
-    app.select_agent_thread(&mut tui, &mut app_server, other)
+    app.select_agent_thread_and_settle(&mut tui, &mut app_server, other)
         .await?;
     assert_eq!(app.active_thread_id, Some(current));
     assert_eq!(app.chat_widget.initial_user_message, prompt);

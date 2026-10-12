@@ -4,6 +4,12 @@ use super::*;
 
 use futures::FutureExt;
 
+#[path = "server_thread_selection.rs"]
+mod selection;
+
+use selection::SelectStage;
+pub(super) use selection::SelectionAfter;
+
 #[derive(Default)]
 pub(super) struct NavigationOwner {
     current: Option<PendingNavigation>,
@@ -22,6 +28,8 @@ struct PendingNavigation {
 
 enum NavigationIntent {
     Picker,
+    Select(SelectStage),
+    Transitioning,
     PickerDefaults(Box<PickerPreparation>),
     PickerStarting,
     ClosePicker,
@@ -48,6 +56,7 @@ enum NavigationReceipt {
     PickerDefaults(Result<Option<crate::config_update::EffectiveConfig>, String>),
     Picker(Result<AppServerSession, String>),
     PickerClosed,
+    Selected(selection::SelectionReceipt),
 }
 
 impl std::fmt::Debug for NavigationCompletion {
@@ -73,9 +82,28 @@ impl NavigationOwner {
             .any(|operation| operation.epoch == epoch && operation.order < order)
     }
 
+    pub(super) fn precedes_thread(&self, thread_id: ThreadId, order: u64, epoch: u64) -> bool {
+        self.current.iter().chain(&self.retired).any(|operation| operation.epoch == epoch && operation.order < order && matches!(&operation.intent, NavigationIntent::Select(stage) if stage.thread_id() == thread_id))
+    }
+    pub(super) fn retire_epoch(&mut self, epoch: u64) {
+        self.retired.retain(|operation| {
+            operation.epoch == epoch || !matches!(operation.state, LaneState::Uncertain)
+        });
+    }
+
     pub(super) fn preview(&self) -> Option<NavigationPreview> {
         if let Some(operation) = &self.current {
-            Some(NavigationPreview::Preparing { id: operation.id })
+            Some(if matches!(operation.state, LaneState::Uncertain) {
+                NavigationPreview::Uncertain
+            } else {
+                NavigationPreview::Preparing { id: operation.id }
+            })
+        } else if self
+            .retired
+            .iter()
+            .any(|operation| matches!(operation.state, LaneState::Uncertain))
+        {
+            Some(NavigationPreview::Uncertain)
         } else if !self.retired.is_empty() {
             Some(NavigationPreview::Cleaning)
         } else {
@@ -90,6 +118,13 @@ impl NavigationOwner {
             .expect("navigation generation exhausted");
         if let Some(operation) = self.current.take()
             && !matches!(operation.state, LaneState::Queued)
+            && !matches!(
+                operation.intent,
+                NavigationIntent::PickerDefaults(_)
+                    | NavigationIntent::Select(
+                        SelectStage::Liveness { .. } | SelectStage::Fallback(_)
+                    )
+            )
         {
             // Do not abort a resource-producing request: its late session still needs an owner.
             self.retired.push(operation);
@@ -116,11 +151,14 @@ impl App {
     }
 
     pub(in crate::app) fn enqueue_picker_preparation(&mut self, server: &AppServerSession) {
+        self.enqueue_navigation(server, NavigationIntent::Picker);
+    }
+
+    fn enqueue_navigation(&mut self, server: &AppServerSession, intent: NavigationIntent) {
         self.server_operations.navigation.retire_current();
         let order = self.server_operations.next_order;
         self.server_operations.next_order =
             order.checked_add(1).expect("operation sequence exhausted");
-        let intent = NavigationIntent::Picker;
         self.server_operations.navigation.current = Some(PendingNavigation {
             id: Uuid::new_v4(),
             order,
@@ -139,14 +177,35 @@ impl App {
             .lanes
             .get(&OperationLane::Connection)
             .map(|lane| lane.active.order);
-        let Some(operation) = self.server_operations.navigation.current.as_mut() else {
+        let Some(mut operation) = self.server_operations.navigation.current.take() else {
             return;
         };
+        let thread_target = match &operation.intent {
+            NavigationIntent::Select(stage) => Some(stage.thread_id()),
+            _ => None,
+        };
+        let thread_blocked = thread_target.is_some_and(|thread_id| {
+            self.server_operations.navigation.retired.iter().any(|retired| retired.epoch == operation.epoch && matches!(retired.intent, NavigationIntent::Select(_)))
+            || self.server_operations.lanes.iter().any(|(lane, earlier)| earlier.active.order < operation.order && matches!(lane, OperationLane::Thread(id) | OperationLane::Realtime(id) if *id == thread_id))
+        });
         if !matches!(operation.state, LaneState::Queued)
             || barrier.is_some_and(|order| order < operation.order)
+            || thread_blocked
         {
+            self.server_operations.navigation.current = Some(operation);
             return;
         }
+        if let NavigationIntent::Select(SelectStage::Liveness { thread_id, .. }) = &operation.intent
+        {
+            let thread_id = *thread_id;
+            self.dispatch_selection_liveness(server, &mut operation, thread_id);
+            self.server_operations.navigation.current = Some(operation);
+            return;
+        }
+        assert!(
+            matches!(operation.intent, NavigationIntent::Picker),
+            "only admitted navigation intents are queued"
+        );
         // Config is captured only after earlier connection mutations have settled.
         let preparation = Box::new(PickerPreparation {
             config: self.config.clone(),
@@ -172,7 +231,7 @@ impl App {
             operation.epoch,
             operation.generation,
         );
-        let events = self.app_event_tx.clone();
+        let completions = self.server_operations.control_tx.clone();
         let handle = server.request_handle();
         operation.state = LaneState::Running(AbortOnDropHandle::new(tokio::spawn(async move {
             let result = std::panic::AssertUnwindSafe(
@@ -182,16 +241,15 @@ impl App {
             .await
             .map_err(|_| "Picker defaults task terminated unexpectedly".to_string())
             .and_then(|result| result.map_err(|error| error.to_string()));
-            events.send(AppEvent::ServerNavigationPrepared(Box::new(
-                NavigationCompletion {
-                    id,
-                    order,
-                    epoch,
-                    generation,
-                    receipt: NavigationReceipt::PickerDefaults(result),
-                },
-            )));
+            let _ = completions.send(ServerCompletion::Navigation(NavigationCompletion {
+                id,
+                order,
+                epoch,
+                generation,
+                receipt: NavigationReceipt::PickerDefaults(result),
+            }));
         })));
+        self.server_operations.navigation.current = Some(operation);
     }
 
     pub(in crate::app) async fn finish_navigation_operation(
@@ -222,7 +280,18 @@ impl App {
                 .map(|index| self.server_operations.navigation.retired.remove(index))
         };
         let Some(mut operation) = operation else {
-            // Even a queued envelope outlives retirement: successful session ownership must not vanish.
+            // Only canceled read-only work can finish without a retained owner.
+            assert!(
+                !matches!(
+                    &completion.receipt,
+                    NavigationReceipt::Selected(
+                        selection::SelectionReceipt::Resumed { .. }
+                            | selection::SelectionReceipt::Detached(_)
+                            | selection::SelectionReceipt::SideDetached(_)
+                    )
+                ),
+                "resource-producing navigation receipt lost its owner"
+            );
             if let NavigationReceipt::Picker(Ok(session)) = completion.receipt {
                 self.close_stale_picker_session(
                     completion.id,
@@ -235,6 +304,10 @@ impl App {
             return Ok(AppRunControl::Continue);
         };
         match completion.receipt {
+            NavigationReceipt::Selected(receipt) => {
+                self.finish_selection_operation(tui, server, operation, matching, receipt)
+                    .await?;
+            }
             NavigationReceipt::PickerDefaults(Ok(defaults)) if matching => {
                 let NavigationIntent::PickerDefaults(mut preparation) =
                     std::mem::replace(&mut operation.intent, NavigationIntent::PickerStarting)
@@ -341,7 +414,7 @@ impl App {
         operation: &mut PendingNavigation,
         preparation: PickerPreparation,
     ) {
-        let events = self.app_event_tx.clone();
+        let completions = self.server_operations.control_tx.clone();
         let (id, order, epoch, generation) = (
             operation.id,
             operation.order,
@@ -362,20 +435,18 @@ impl App {
             .await
             .map_err(|_| "Picker preparation task terminated unexpectedly".to_string())
             .and_then(|result| result.map_err(|error| error.to_string()));
-            events.send(AppEvent::ServerNavigationPrepared(Box::new(
-                NavigationCompletion {
-                    id,
-                    order,
-                    epoch,
-                    generation,
-                    receipt: NavigationReceipt::Picker(result),
-                },
-            )));
+            let _ = completions.send(ServerCompletion::Navigation(NavigationCompletion {
+                id,
+                order,
+                epoch,
+                generation,
+                receipt: NavigationReceipt::Picker(result),
+            }));
         })));
     }
 
     fn spawn_picker_cleanup(&self, operation: &mut PendingNavigation, session: AppServerSession) {
-        let events = self.app_event_tx.clone();
+        let completions = self.server_operations.control_tx.clone();
         let (id, order, epoch, generation) = (
             operation.id,
             operation.order,
@@ -393,15 +464,13 @@ impl App {
                 }
                 Err(_) => tracing::warn!("superseded picker cleanup task terminated unexpectedly"),
             }
-            events.send(AppEvent::ServerNavigationPrepared(Box::new(
-                NavigationCompletion {
-                    id,
-                    order,
-                    epoch,
-                    generation,
-                    receipt: NavigationReceipt::PickerClosed,
-                },
-            )));
+            let _ = completions.send(ServerCompletion::Navigation(NavigationCompletion {
+                id,
+                order,
+                epoch,
+                generation,
+                receipt: NavigationReceipt::PickerClosed,
+            }));
         })));
     }
 }

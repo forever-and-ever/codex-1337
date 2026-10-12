@@ -123,7 +123,7 @@ async fn automatic_thread_title_respects_origin_metadata_after_switching() -> co
                 .lock()
                 .await
                 .set_session(second.session, second.turns);
-            app.select_agent_thread(&mut tui, &mut app_server, second_id)
+            app.select_agent_thread_and_settle(&mut tui, &mut app_server, second_id)
                 .await?;
         }
         if let Some(name) = manual_name {
@@ -812,14 +812,14 @@ async fn thread_title_progress_clears_failed_requests_and_follows_thread_switche
         .lock()
         .await
         .set_session(second.session, second.turns);
-    app.select_agent_thread(&mut tui, &mut app_server, second_id)
+    app.select_agent_thread_and_settle(&mut tui, &mut app_server, second_id)
         .await?;
     app.render_chat_widget_frame(
         &mut tui,
         ratatui::layout::Size::new(/*width*/ 120, /*height*/ 30),
     )?;
     assert!(!render_bottom_popup(&app.chat_widget, /*width*/ 120).contains('⠋'));
-    app.select_agent_thread(&mut tui, &mut app_server, thread_id)
+    app.select_agent_thread_and_settle(&mut tui, &mut app_server, thread_id)
         .await?;
     app.render_chat_widget_frame(
         &mut tui,

@@ -334,7 +334,7 @@ impl App {
         );
     }
 
-    pub(in crate::app) async fn finish_server_operation(
+    pub(super) async fn finish_server_operation(
         &mut self,
         origin: &OperationOrigin,
         operation: &ServerOperation,
@@ -450,7 +450,7 @@ impl App {
         Ok(())
     }
 
-    pub(in crate::app) fn reject_server_operation(
+    pub(super) fn reject_server_operation(
         &mut self,
         origin: &OperationOrigin,
         operation: &ServerOperation,

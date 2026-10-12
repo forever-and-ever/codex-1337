@@ -1365,12 +1365,11 @@ See the Codex keymap documentation for supported actions and examples."
                         }
                     }
                     Some(completion) = app.server_operations.control_rx.recv() => {
-                        match app.finish_submission(&mut app_server, completion.scope, completion.id, completion.epoch, completion.outcome).await {
-                            Ok(()) => {},
-                            Err(err) if app.recover_transport_error(&err) => {},
+                        match app.handle_server_completion(tui, &mut app_server, completion).await {
+                            Ok(control) => control,
+                            Err(err) if app.recover_transport_error(&err) => AppRunControl::Continue,
                             Err(err) => break Err(err),
                         }
-                        AppRunControl::Continue
                     }
                     completion = app.thread_delivery.completion_rx.recv(), if !app.thread_delivery.is_blocked()
                         && app.thread_delivery.primary_replay_thread.is_none() => {

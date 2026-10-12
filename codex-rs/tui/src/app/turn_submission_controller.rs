@@ -332,9 +332,11 @@ impl App {
                                 if matches!(&**operation, ServerOperation::Control(control::ControlOperation::RealtimeStop { .. })))
                                 || !self.server_operations.realtime_start_precedes(*thread_id, lane.active.order)
                         }
-                        OperationLane::Thread(_) => barrier.is_none_or(|order| lane.active.order < order),
+                        OperationLane::Thread(thread_id) => barrier.is_none_or(|order| lane.active.order < order)
+                            && !self.server_operations.navigation.precedes_thread(*thread_id, lane.active.order, self.server_operations.epoch),
                         OperationLane::Realtime(thread_id) => {
                             barrier.is_none_or(|order| lane.active.order < order)
+                                && !self.server_operations.navigation.precedes_thread(*thread_id, lane.active.order, self.server_operations.epoch)
                                 && !self.server_operations.realtime_stop_precedes(*thread_id, lane.active.order)
                         }
                         OperationLane::Connection => {
@@ -415,12 +417,12 @@ impl App {
                 worker::send(handle, request, origin).await
             };
             if urgent {
-                let _ = control_completions.send(ControlCompletion {
+                let _ = control_completions.send(ServerCompletion::Request(ControlCompletion {
                     scope,
                     id,
                     epoch,
                     outcome,
-                });
+                }));
                 return;
             }
             let OperationScope::Thread(thread_id) = scope else {
@@ -494,6 +496,9 @@ impl App {
                     .epoch
                     .checked_add(1)
                     .expect("operation epoch exhausted");
+                self.server_operations
+                    .navigation
+                    .retire_epoch(self.server_operations.epoch);
                 let lanes = std::mem::take(&mut self.server_operations.lanes);
                 let protected_starts = lanes
                     .values()
@@ -565,6 +570,31 @@ impl App {
         }
         self.drive_server_operations(server);
         self.refresh_submission_preview();
+    }
+
+    pub(in crate::app) async fn handle_server_completion(
+        &mut self,
+        tui: &mut tui::Tui,
+        server: &mut AppServerSession,
+        completion: ServerCompletion,
+    ) -> Result<AppRunControl> {
+        match completion {
+            ServerCompletion::Request(completion) => {
+                self.finish_submission(
+                    server,
+                    completion.scope,
+                    completion.id,
+                    completion.epoch,
+                    completion.outcome,
+                )
+                .await?;
+                Ok(AppRunControl::Continue)
+            }
+            ServerCompletion::Navigation(completion) => {
+                self.finish_navigation_operation(tui, server, completion)
+                    .await
+            }
+        }
     }
 
     pub(in crate::app) async fn finish_submission(
@@ -979,6 +1009,7 @@ impl App {
         &mut self,
         server: &mut AppServerSession,
     ) -> Result<()> {
+        let mut tui = crate::tui::test_support::make_test_tui()?;
         tokio::time::timeout(Duration::from_secs(5), async {
             while !self.server_operations.is_empty() {
                 tokio::select! {
@@ -988,7 +1019,7 @@ impl App {
                     }
                     completion = self.server_operations.control_rx.recv() => {
                         let completion = completion.ok_or_else(|| color_eyre::eyre::eyre!("control receipt channel closed"))?;
-                        self.finish_submission(server, completion.scope, completion.id, completion.epoch, completion.outcome).await?;
+                        self.handle_server_completion(&mut tui, server, completion).await?;
                     }
                 }
             }
@@ -996,5 +1027,40 @@ impl App {
         })
         .await??;
         Ok(())
+    }
+
+    #[cfg(test)]
+    pub(in crate::app) async fn settle_navigation(
+        &mut self,
+        server: &mut AppServerSession,
+    ) -> Result<()> {
+        let mut tui = crate::tui::test_support::make_test_tui()?;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !self.server_operations.navigation.is_empty() {
+                tokio::select! {
+                    completion = self.thread_delivery.completion_rx.recv() => {
+                        let completion = completion.expect("local receipt channel open");
+                        self.handle_local_thread_completion(server, completion).await?;
+                    }
+                    completion = self.server_operations.control_rx.recv() => {
+                        let completion = completion.expect("server receipt channel open");
+                        self.handle_server_completion(&mut tui, server, completion).await?;
+                    }
+                }
+            }
+            Ok::<_, color_eyre::Report>(())
+        })
+        .await??;
+        Ok(())
+    }
+    #[cfg(test)]
+    pub(in crate::app) async fn select_agent_thread_and_settle(
+        &mut self,
+        tui: &mut tui::Tui,
+        server: &mut AppServerSession,
+        thread_id: ThreadId,
+    ) -> Result<()> {
+        self.select_agent_thread(tui, server, thread_id).await?;
+        self.settle_navigation(server).await
     }
 }

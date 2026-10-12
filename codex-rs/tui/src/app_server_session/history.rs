@@ -321,8 +321,15 @@ impl AppServerSession {
         cursor: Option<String>,
         limit: u32,
     ) -> Result<ThreadItemsListResponse> {
-        preparation::thread_items_page(&self.request_handle(), thread_id, turn_id, cursor, limit)
-            .await
+        preparation::thread_items_page(
+            super::session_preparation::RequestPolicy::Unbounded,
+            &self.request_handle(),
+            thread_id,
+            turn_id,
+            cursor,
+            limit,
+        )
+        .await
     }
 
     pub(crate) async fn thread_turns_page(
@@ -331,7 +338,14 @@ impl AppServerSession {
         cursor: Option<String>,
         limit: u32,
     ) -> Result<ThreadTurnsListResponse> {
-        preparation::thread_turns_page(&self.request_handle(), thread_id, cursor, limit).await
+        preparation::thread_turns_page(
+            super::session_preparation::RequestPolicy::Unbounded,
+            &self.request_handle(),
+            thread_id,
+            cursor,
+            limit,
+        )
+        .await
     }
 
     async fn merge_thread_item_page(
@@ -341,8 +355,15 @@ impl AppServerSession {
         state: &mut ThreadHistoryPagination,
         turns: &mut Vec<Turn>,
     ) -> Result<Vec<ThreadItem>> {
-        preparation::merge_thread_item_page(&self.request_handle(), thread_id, page, state, turns)
-            .await
+        preparation::merge_thread_item_page(
+            super::session_preparation::RequestPolicy::Unbounded,
+            &self.request_handle(),
+            thread_id,
+            page,
+            state,
+            turns,
+        )
+        .await
     }
 
     /// Hydrates paginated threads through bounded turn and item pages.
@@ -359,6 +380,7 @@ impl AppServerSession {
         scope: HistoryHydrationScope<'_>,
     ) -> Result<()> {
         let (result, update) = preparation::prepare_initial_thread_history(
+            super::session_preparation::RequestPolicy::Unbounded,
             &self.request_handle(),
             thread,
             turn_cursor,

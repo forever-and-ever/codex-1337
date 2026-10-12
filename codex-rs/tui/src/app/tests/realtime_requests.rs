@@ -358,7 +358,7 @@ async fn switching_agent_threads_preserves_backend_voice_and_routes_pending_spee
     );
     let mut tui = crate::tui::test_support::make_test_tui()?;
 
-    Box::pin(app.select_agent_thread(&mut tui, &mut app_server, target)).await?;
+    Box::pin(app.select_agent_thread_and_settle(&mut tui, &mut app_server, target)).await?;
 
     assert_eq!(app.chat_widget.thread_id(), Some(target));
     assert_eq!(app.voice_owner_thread_id(), Some(source));
@@ -412,7 +412,7 @@ async fn switching_agent_threads_preserves_backend_voice_and_routes_pending_spee
         recorded_params(&requests, "thread/unsubscribe")
             .contains(&serde_json::json!({"threadId": source.to_string()}))
     );
-    Box::pin(app.select_agent_thread(&mut tui, &mut app_server, source)).await?;
+    Box::pin(app.select_agent_thread_and_settle(&mut tui, &mut app_server, source)).await?;
     assert!(std::iter::from_fn(|| events.try_recv().ok()).any(|event| {
         matches!(event, AppEvent::InsertHistoryCell(cell) if cell.display_lines(/*width*/ 80)
             .iter().any(|line| line.to_string().contains("Start voice mode before muting")))
@@ -1864,7 +1864,7 @@ async fn embedded_voice_settings_follow_project_after_thread_switch() -> Result<
                 Vec::new(),
             ),
         );
-        Box::pin(app.select_agent_thread(&mut tui, &mut server, thread_id)).await?;
+        Box::pin(app.select_agent_thread_and_settle(&mut tui, &mut server, thread_id)).await?;
         app.open_realtime_voices(&server);
         app.settle_turn_submissions(&mut server).await?;
         let popup = crate::chatwidget::tests::helpers::render_bottom_popup(

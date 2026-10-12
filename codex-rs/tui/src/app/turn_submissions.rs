@@ -20,6 +20,8 @@ pub(in crate::app) mod voice_preferences;
 #[path = "turn_submission_worker.rs"]
 mod worker;
 
+pub(crate) use worker::ACK_TIMEOUT;
+
 #[path = "server_operation_requests.rs"]
 mod requests;
 
@@ -38,6 +40,12 @@ pub(in crate::app) use requests::ServerOperation;
 mod control;
 pub(in crate::app) use control::ControlOperation;
 pub(in crate::app) use control::GoalStop;
+
+#[derive(Debug)]
+pub(in crate::app) enum ServerCompletion {
+    Request(ControlCompletion),
+    Navigation(navigation::NavigationCompletion),
+}
 
 #[derive(Debug)]
 pub(in crate::app) struct ControlCompletion {
@@ -68,7 +76,8 @@ pub(in crate::app) use requests::ThreadMutation;
 
 #[path = "server_navigation_operations.rs"]
 mod navigation;
-pub(crate) use navigation::NavigationCompletion;
+
+pub(super) use navigation::SelectionAfter;
 
 // TELOS(durable-approvals-and-queues): One operation owner carries captured origin, epoch and uncertain effects.
 
@@ -77,8 +86,8 @@ pub(super) struct ServerOperations {
     navigation: navigation::NavigationOwner,
     next_order: u64,
     epoch: u64,
-    control_tx: mpsc::UnboundedSender<ControlCompletion>,
-    pub(in crate::app) control_rx: mpsc::UnboundedReceiver<ControlCompletion>,
+    control_tx: mpsc::UnboundedSender<ServerCompletion>,
+    pub(in crate::app) control_rx: mpsc::UnboundedReceiver<ServerCompletion>,
 }
 
 impl Default for ServerOperations {
@@ -307,6 +316,7 @@ impl SubmissionPreviewEntry {
 pub(crate) enum NavigationPreview {
     Preparing { id: Uuid },
     Cleaning,
+    Uncertain,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

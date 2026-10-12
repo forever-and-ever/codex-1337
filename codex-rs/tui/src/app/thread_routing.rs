@@ -1545,52 +1545,15 @@ impl App {
         Ok(())
     }
 
-    pub(super) async fn refresh_snapshot_session_if_needed(
-        &mut self,
-        app_server: &mut AppServerSession,
-        thread_id: ThreadId,
-        is_replay_only: bool,
-        snapshot: &mut ThreadEventSnapshot,
-    ) -> color_eyre::Result<Option<String>> {
-        if !self.should_refresh_snapshot_session(thread_id, is_replay_only, snapshot) {
-            return Ok(None);
-        }
-
-        match app_server
-            .resume_thread(
-                &self.local_settings,
-                self.config.clone(),
-                thread_id,
-                crate::app_server_session::ResumeModelSettings::PreserveExistingThread,
-            )
-            .await
-        {
-            Ok(mut started) => {
-                let notice = started.history_notice.take();
-                self.apply_refreshed_snapshot_thread(thread_id, started, snapshot)
-                    .await;
-                Ok(notice)
-            }
-            Err(err) => {
-                tracing::warn!(
-                    thread_id = %thread_id,
-                    error = %err,
-                    "failed to refresh inferred thread session before replay"
-                );
-                Err(err)
-            }
-        }
-    }
-
-    pub(super) fn should_refresh_snapshot_session(
+    pub(super) fn should_refresh_thread_session(
         &self,
         thread_id: ThreadId,
         is_replay_only: bool,
-        snapshot: &ThreadEventSnapshot,
+        session: Option<&ThreadSessionState>,
     ) -> bool {
         !is_replay_only
             && !self.side_threads.contains_key(&thread_id)
-            && snapshot.session.as_ref().is_none_or(|session| {
+            && session.is_none_or(|session| {
                 session.model.trim().is_empty()
                     || session.rollout_path.is_none()
                     || (self.primary_thread_id != Some(thread_id)

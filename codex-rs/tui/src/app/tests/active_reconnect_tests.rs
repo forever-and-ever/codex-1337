@@ -525,7 +525,7 @@ async fn reconnect_reconciles_offscreen_pending_profile_before_restoring_permiss
     .await?;
     assert!(app.pending_server_profiles.contains_key(&primary));
 
-    app.select_agent_thread(&mut tui, &mut session, primary)
+    app.select_agent_thread_and_settle(&mut tui, &mut session, primary)
         .await?;
     assert!(!app.thread_unavailable(primary));
     assert!(!app.pending_server_profiles.contains_key(&primary));

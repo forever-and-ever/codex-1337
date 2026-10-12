@@ -145,6 +145,7 @@ impl AppServerSession {
     ) -> Result<AppServerStartedThread> {
         let prepared = self
             .prepare_resume_thread(
+                super::session_preparation::RequestPolicy::Unbounded,
                 local_settings,
                 config,
                 thread_id,
