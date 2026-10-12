@@ -5,10 +5,66 @@ use super::ThreadRequestProcessor;
 use super::ThreadResumeTarget;
 use crate::turn_admission::TurnAdmission;
 use codex_app_server_protocol::ThreadResumeParams;
+use codex_protocol::ThreadId;
 use codex_protocol::mcp::ClientMcpExtensions;
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::collections::hash_map::Entry;
 use std::time::Duration;
 use tokio::task::JoinHandle;
+use tokio::time::Instant;
 use tokio_util::task::AbortOnDropHandle;
+
+struct RecoveryBackoff {
+    delay: Duration,
+    not_before: Instant,
+    diagnostic: String,
+}
+
+impl RecoveryBackoff {
+    fn new(error: impl std::fmt::Display) -> Self {
+        let delay = Duration::from_secs(1);
+        Self {
+            delay,
+            not_before: Instant::now() + delay,
+            diagnostic: error.to_string(),
+        }
+    }
+
+    fn waiting(&self) -> bool {
+        Instant::now() < self.not_before
+    }
+
+    fn defer(&mut self, error: impl std::fmt::Display) -> bool {
+        let diagnostic = error.to_string();
+        let changed = diagnostic != self.diagnostic;
+        self.diagnostic = diagnostic;
+        self.delay = (self.delay * 2).min(Duration::from_secs(60));
+        self.not_before = Instant::now() + self.delay;
+        changed
+    }
+}
+
+fn defer_recipient(
+    retries: &mut HashMap<(ThreadId, ThreadId), RecoveryBackoff>,
+    root: ThreadId,
+    recipient: ThreadId,
+    error: impl std::fmt::Display,
+) {
+    match retries.entry((root, recipient)) {
+        Entry::Vacant(entry) => {
+            entry.insert(RecoveryBackoff::new(&error));
+            tracing::error!(%root, %recipient, %error, "accepted-mail recovery is blocked; inbox retained; unload/reload or resume recipient after repairing storage; retrying with capped backoff");
+        }
+        Entry::Occupied(mut entry) => {
+            if entry.get_mut().defer(&error) {
+                tracing::error!(%root, %recipient, %error, "accepted-mail recovery blockage changed; inbox retained");
+            } else {
+                tracing::debug!(%root, %recipient, %error, "accepted-mail recovery remains blocked; inbox retained");
+            }
+        }
+    }
+}
 
 impl ThreadRequestProcessor {
     pub(crate) fn start_accepted_mail_recovery(
@@ -19,23 +75,55 @@ impl ThreadRequestProcessor {
         let task: JoinHandle<()> = tokio::spawn(async move {
             let mut tick = tokio::time::interval(Duration::from_secs(1));
             tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            let mut recipients = HashMap::new();
+            let mut inbox_retry: Option<RecoveryBackoff> = None;
             loop {
                 tick.tick().await;
-                if let Err(error) = processor.recover_accepted_mail(&admission).await {
-                    tracing::error!(%error, "accepted agent-mail recovery is blocked; authoritative inbox retained");
+                if inbox_retry.as_ref().is_some_and(RecoveryBackoff::waiting) {
+                    continue;
+                }
+                match processor
+                    .recover_accepted_mail(&admission, &mut recipients)
+                    .await
+                {
+                    Ok(()) => inbox_retry = None,
+                    Err(error) => {
+                        if let Some(retry) = &mut inbox_retry {
+                            if retry.defer(&error) {
+                                tracing::error!(%error, "accepted agent-mail inbox recovery blockage changed; inbox retained");
+                            } else {
+                                tracing::debug!(%error, "accepted agent-mail inbox recovery remains blocked; inbox retained");
+                            }
+                        } else {
+                            inbox_retry = Some(RecoveryBackoff::new(&error));
+                            tracing::error!(%error, "accepted agent-mail inbox recovery is blocked; inbox retained; retrying with capped backoff");
+                        }
+                    }
                 }
             }
         });
         AbortOnDropHandle::new(task)
     }
 
-    async fn recover_accepted_mail(&self, admission: &TurnAdmission) -> anyhow::Result<()> {
+    async fn recover_accepted_mail(
+        &self,
+        admission: &TurnAdmission,
+        retries: &mut HashMap<(ThreadId, ThreadId), RecoveryBackoff>,
+    ) -> anyhow::Result<()> {
         let db = self
             .state_db
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("authoritative agent-mail inbox is unavailable"))?;
         let recipients = db.thread_queue().pending_agent_mail_recipients().await?;
+        let pending: HashSet<_> = recipients.iter().copied().collect();
+        retries.retain(|identity, _| pending.contains(identity));
         for (root, recipient) in recipients {
+            if retries
+                .get(&(root, recipient))
+                .is_some_and(RecoveryBackoff::waiting)
+            {
+                continue;
+            }
             let _permit = match admission.admit() {
                 Ok(permit) => permit,
                 Err(_) => return Ok(()),
@@ -55,7 +143,7 @@ impl ThreadRequestProcessor {
                     )
                     .await
                 {
-                    tracing::error!(%root, message = %error.message, "cannot restore accepted-mail family; inbox retained");
+                    defer_recipient(retries, root, recipient, &error.message);
                     continue;
                 }
             }
@@ -66,7 +154,9 @@ impl ThreadRequestProcessor {
                 .recover_accepted_agent_mail(root, recipient)
                 .await
             {
-                tracing::error!(%root, %recipient, %error, "accepted mail awaits family recovery");
+                defer_recipient(retries, root, recipient, error);
+            } else {
+                retries.remove(&(root, recipient));
             }
         }
         Ok(())
