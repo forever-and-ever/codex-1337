@@ -108,4 +108,4 @@ commands that would enter the bubblewrap path.
   remain in force. The default `isolate` mode retains PID isolation.
 
 **Notes**
-- The CLI surface is `codex sandbox`; the host OS selects the sandbox backend.
+- The CLI surface is `codex sandbox run [OPTIONS] -- <COMMAND>...`; the host OS selects the sandbox backend. `uninstall` remains a separate explicit verb; unknown verbs are errors, never executables.

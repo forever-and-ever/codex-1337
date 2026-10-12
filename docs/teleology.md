@@ -342,8 +342,8 @@ During a merge, look up each conflicted path in the index at the end and resolve
 
 - Telos: a mistyped command never becomes an instruction to execute or a value to store.
 - Holds: a command with no subcommands may accept bare prose; if subcommands exist, all are explicit. Enumerated verbs reject unknowns before executing, queuing work, or changing goal, conversation, or draft state. Prose at a verb-bearing boundary requires its explicit verb or delimiter. Bare menu/status affordances remain valid. `/goal set <objective>` alone enters the objective path; `/goal` opens the existing menu, and replacing an unfinished goal still requires confirmation. Use the existing typed enum/parsing machinery, not a second generic command framework.
-- Owners: `codex-rs/tui/src/chatwidget/goal_command.rs` (`GoalVerb`, `ChatWidget::dispatch_goal_command`), `codex-rs/tui/src/chatwidget/context_role.rs` (`ContextRoleCommand`), `codex-rs/tui/src/chatwidget/pets_command.rs` (`PetVerb`), `codex-rs/tui/src/chatwidget/slash_dispatch.rs`, `codex-rs/tui/src/goal_display.rs`, `codex-rs/tui/src/slash_command.rs`; top-level CLI prose is already explicit through `codex --prompt` in `codex-rs/tui/src/cli.rs`.
-- Tripwire: `goal_control_slash_commands_emit_goal_events`, `goal_slash_command_emits_attached_images`, `queued_goal_slash_command_emits_set_goal_event_after_thread_starts`, `restored_queued_goal_slash_command_emits_set_goal_event` (`codex-rs/tui/src/chatwidget/tests/slash_commands.rs`), `goal_slash_command_emits_only_inserted_paste_text_element` (`codex-rs/tui/src/chatwidget/tests/goal_validation.rs`), `set_thread_goal_draft_materializes_long_objective_and_confirms_before_paste` (`codex-rs/tui/src/app/tests.rs`), `unrecognized_words_are_rejected_rather_than_seeded_as_prompts` (`codex-rs/cli/src/main.rs`). Remaining mixed grammars are recorded in the command-grammar audit, not silently exempted.
+- Owners: `codex-rs/tui/src/chatwidget/goal_command.rs` (`GoalVerb`, `ChatWidget::dispatch_goal_command`), `codex-rs/tui/src/chatwidget/context_role.rs` (`ContextRoleCommand`), `codex-rs/tui/src/chatwidget/pets_command.rs` (`PetVerb`), `codex-rs/tui/src/chatwidget/slash_dispatch.rs`, `codex-rs/tui/src/goal_display.rs`, `codex-rs/tui/src/slash_command.rs`, `codex-rs/exec/src/command_grammar.rs` (`Command`), `codex-rs/cli/src/sandbox_command.rs` (`SandboxSubcommand`); top-level CLI prose is already explicit through `codex --prompt` in `codex-rs/tui/src/cli.rs`.
+- Tripwire: `goal_control_slash_commands_emit_goal_events`, `goal_slash_command_emits_attached_images`, `queued_goal_slash_command_emits_set_goal_event_after_thread_starts`, `restored_queued_goal_slash_command_emits_set_goal_event`, `slash_pets_with_arg_selects_named_pet` (`codex-rs/tui/src/chatwidget/tests/slash_commands.rs`), `context_role_command_output` (`codex-rs/tui/src/chatwidget/tests/context_role_tests.rs`), `goal_slash_command_emits_only_inserted_paste_text_element` (`codex-rs/tui/src/chatwidget/tests/goal_validation.rs`), `set_thread_goal_draft_materializes_long_objective_and_confirms_before_paste` (`codex-rs/tui/src/app/tests.rs`), `parses_config_isolation_flags` (`codex-rs/exec/src/cli_tests.rs`), stdin interactions (`codex-rs/exec/tests/suite/prompt_stdin.rs`), `unrecognized_words_are_rejected_rather_than_seeded_as_prompts` and `sandbox_uninstall_respects_command_separator` (`codex-rs/cli/src/main.rs`).
 - Pressure: upstream `/goal` treats every unrecognized control word as a new objective; upstream's CLI also allows bare positional prompts. Preserve explicit verbs and the confirmation path when merging dispatch, help, or completion changes.
 - Evidence: command-grammar owner decision, 2026-10-12.
 
@@ -417,7 +417,9 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/app-server/src/request_processors/thread_queue_processor.rs`: server-hosted-agents
 - `codex-rs/app-server/src/turn_admission.rs`: shared-daemon
 - `codex-rs/cli/Cargo.toml`: removed-stacks
-- `codex-rs/cli/src/main.rs`: pipelined-crate-graph, removed-stacks
+- `codex-rs/cli/src/main.rs`: pipelined-crate-graph, removed-stacks, explicit-command-verbs
+- `codex-rs/exec/src/cli.rs`: explicit-command-verbs
+- `codex-rs/exec/src/lib.rs`: explicit-command-verbs
 - `codex-rs/tui/src/cli.rs`: explicit-command-verbs
 - `codex-rs/code-mode-protocol/src/description.rs`: mcp-roster, standing-context-trims, local-coprocessor, response-order-fences
 - `codex-rs/codex-mcp/src/binding.rs`: standing-context-trims
@@ -507,6 +509,8 @@ Fork-owned files, absent upstream:
 - `codex-rs/app-server/src/thread_tools/mod.rs`: server-hosted-agents
 - `codex-rs/cli/src/bin/codex.rs`: pipelined-crate-graph
 - `codex-rs/cli/src/reload_probe.rs`: reload-host
+- `codex-rs/cli/src/sandbox_command.rs`: explicit-command-verbs
+- `codex-rs/exec/src/command_grammar.rs`: explicit-command-verbs
 - `codex-rs/code-mode-protocol/src/contract.rs`: compact-contracts
 - `codex-rs/code-mode-protocol/src/presentation.rs`: compact-contracts, mcp-roster
 - `codex-rs/code-mode-protocol/src/discovery.rs`: compact-contracts

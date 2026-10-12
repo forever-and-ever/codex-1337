@@ -30,7 +30,7 @@ async fn cyber_access_program_is_selected_per_turn() -> anyhow::Result<()> {
     .await;
 
     let seed = test
-        .cmd_with_server(&server)
+        .cmd_with_server(&server).arg("run")
         .args([
             "--skip-git-repo-check",
             "--json",

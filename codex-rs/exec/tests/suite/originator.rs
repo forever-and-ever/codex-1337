@@ -20,7 +20,7 @@ async fn send_codex_exec_originator() -> anyhow::Result<()> {
     ]);
     responses::mount_sse_once_match(&server, header("Originator", "codex_exec"), body).await;
 
-    test.cmd_with_server(&server)
+    test.cmd_with_server(&server).arg("run")
         .env_remove(CODEX_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR)
         .arg("--skip-git-repo-check")
         .arg("tell me something")
@@ -43,7 +43,7 @@ async fn supports_originator_override() -> anyhow::Result<()> {
     responses::mount_sse_once_match(&server, header("Originator", "codex_exec_override"), body)
         .await;
 
-    test.cmd_with_server(&server)
+    test.cmd_with_server(&server).arg("run")
         .env("CODEX_INTERNAL_ORIGINATOR_OVERRIDE", "codex_exec_override")
         .arg("--skip-git-repo-check")
         .arg("tell me something")

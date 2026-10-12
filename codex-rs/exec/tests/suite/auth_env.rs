@@ -24,7 +24,7 @@ async fn exec_uses_codex_api_key_env_var() -> anyhow::Result<()> {
     )
     .await;
 
-    test.cmd_with_server(&server)
+    test.cmd_with_server(&server).arg("run")
         .arg("--skip-git-repo-check")
         .arg("-C")
         .arg(&repo_root)
@@ -81,7 +81,7 @@ async fn exec_api_key_cannot_discard_stored_workspace_network_policy() -> anyhow
     )
     .await;
 
-    test.cmd_with_server(&inference_server)
+    test.cmd_with_server(&inference_server).arg("run")
         .arg("--skip-git-repo-check")
         .arg("echo testing workspace network policy")
         .assert()
@@ -177,7 +177,7 @@ async fn exec_bootstrap_rejects_redirected_oauth_and_cloud_policy() -> anyhow::R
         .await;
 
         let output = test
-            .cmd_with_server(&inference)
+            .cmd_with_server(&inference).arg("run")
             .env(
                 codex_login::REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR,
                 format!("{}/oauth/token", origin.uri()),

@@ -28,7 +28,7 @@ fn resume_parses_prompt_after_global_flags() {
         cli.cyber_access_program,
         Some(CyberAccessProgramCliArg::DaybreakBlue)
     );
-    let Some(Command::Resume(args)) = cli.command else {
+    let Command::Resume(args) = cli.command else {
         panic!("expected resume command");
     };
     let effective_prompt = args.prompt.clone().or_else(|| {
@@ -60,7 +60,7 @@ fn resume_accepts_output_flags_after_subcommand() {
         Some(PathBuf::from("/tmp/resume-output.md"))
     );
     assert_eq!(cli.output_schema, Some(PathBuf::from("/tmp/schema.json")));
-    let Some(Command::Resume(args)) = cli.command else {
+    let Command::Resume(args) = cli.command else {
         panic!("expected resume command");
     };
     assert_eq!(args.session_id.as_deref(), Some("session-123"));
@@ -90,7 +90,7 @@ fn fork_parses_prompt_after_global_flags() {
         cli.thread_source,
         Some(ThreadSource::Feature("automated_review".to_string()))
     );
-    let Some(Command::Fork(args)) = cli.command else {
+    let Command::Fork(args) = cli.command else {
         panic!("expected fork command");
     };
     assert_eq!(args.session_id, "session-123");
@@ -103,9 +103,16 @@ fn parses_config_isolation_flags() {
         "codex-exec",
         "--ignore-user-config",
         "--ignore-rules",
+        "run",
         "summarize",
     ]);
 
+    for verb in ["rsume", "summarize"] {
+        let error = Cli::try_parse_from(["codex-exec", verb])
+            .expect_err("unknown modes must not become prompts");
+        assert_eq!(error.kind(), clap::error::ErrorKind::InvalidSubcommand);
+    }
+    assert!(matches!(cli.command, Command::Run(_)));
     assert!(cli.ignore_user_config);
     assert!(cli.ignore_rules);
 }
@@ -127,7 +134,7 @@ fn approve_for_me_flag_conflicts_with_other_sandbox_modes() {
     ] {
         let mut args = vec!["codex-exec", "--approve-for-me"];
         args.extend(conflicting_args);
-        args.push("summarize");
+        args.extend(["run", "summarize"]);
 
         let error = Cli::try_parse_from(args).expect_err("flags should conflict");
         assert_eq!(error.kind(), clap::error::ErrorKind::ArgumentConflict);

@@ -16,7 +16,7 @@ async fn run_exec_with_config(config_toml: &str, extra_args: &[&str]) -> anyhow:
     ]);
     responses::mount_sse_once(&server, body).await;
 
-    let mut cmd = test.cmd_with_server(&server);
+    let mut cmd = test.cmd_with_server(&server).arg("run");
     let output = cmd
         .arg("--skip-git-repo-check")
         .args(extra_args)

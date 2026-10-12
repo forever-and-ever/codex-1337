@@ -22,7 +22,7 @@ async fn accepts_add_dir_flag() -> anyhow::Result<()> {
     let temp_dir1 = tempfile::tempdir()?;
     let temp_dir2 = tempfile::tempdir()?;
 
-    test.cmd_with_server(&server)
+    test.cmd_with_server(&server).arg("run")
         .arg("--skip-git-repo-check")
         .arg("--sandbox")
         .arg("workspace-write")
@@ -54,7 +54,7 @@ async fn accepts_multiple_add_dir_flags() -> anyhow::Result<()> {
     let temp_dir2 = tempfile::tempdir()?;
     let temp_dir3 = tempfile::tempdir()?;
 
-    test.cmd_with_server(&server)
+    test.cmd_with_server(&server).arg("run")
         .arg("--skip-git-repo-check")
         .arg("--sandbox")
         .arg("workspace-write")

@@ -18,7 +18,7 @@ alias c := codex
 codex *args:
     cargo run --bin codex -- {args}
 
-# `codex exec`
+# `codex exec <run|resume|fork|review> ...`
 exec *args:
     cargo run --bin codex -- exec {args}
 

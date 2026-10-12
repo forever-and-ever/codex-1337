@@ -181,6 +181,7 @@ describe("CodexExec", () => {
         "exec",
         "--experimental-json",
         ...expectedOverrides.flatMap((override) => ["--config", override]),
+        "run",
       ]);
     },
   );
@@ -207,6 +208,7 @@ describe("CodexExec", () => {
       "--experimental-json",
       "--thread-source",
       "automated_review",
+      "run",
     ]);
   });
 

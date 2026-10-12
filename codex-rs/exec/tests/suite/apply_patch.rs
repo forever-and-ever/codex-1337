@@ -78,7 +78,7 @@ async fn test_apply_patch_tool() -> anyhow::Result<()> {
     let server = start_mock_server().await;
     mount_sse_sequence(&server, response_streams).await;
 
-    test.cmd_with_server(&server)
+    test.cmd_with_server(&server).arg("run")
         .arg("--skip-git-repo-check")
         .arg("-s")
         .arg("danger-full-access")
@@ -128,7 +128,7 @@ async fn test_apply_patch_freeform_tool() -> anyhow::Result<()> {
     let server = start_mock_server().await;
     mount_sse_sequence(&server, response_streams).await;
 
-    test.cmd_with_server(&server)
+    test.cmd_with_server(&server).arg("run")
         .arg("--skip-git-repo-check")
         .arg("-s")
         .arg("danger-full-access")
@@ -241,7 +241,7 @@ async fn shutdown_flushes_completed_turn_and_file_diff() -> anyhow::Result<()> {
     )
     .await;
 
-    test.cmd_with_server(&server)
+    test.cmd_with_server(&server).arg("run")
         .env_remove("CODEX_API_KEY")
         .env_remove("CODEX_ANALYTICS_EVENTS_CAPTURE_FILE")
         .arg("--skip-git-repo-check")

@@ -60,6 +60,6 @@ codex -c log_dir=./.codex-log
 tail -F ./.codex-log/codex-tui.log
 ```
 
-The non-interactive mode (`codex exec`) defaults to `RUST_LOG=error`, but messages are printed inline, so there is no need to monitor a separate file.
+Non-interactive commands use an explicit verb: `codex exec run [PROMPT]` starts a new task (`run` without a prompt, or with `-`, reads stdin); `resume`, `fork`, and `review` select the other modes. Unknown verbs are errors, never prompts. These commands default to `RUST_LOG=error`, but messages are printed inline, so there is no need to monitor a separate file.
 
 See the Rust documentation on [`RUST_LOG`](https://docs.rs/env_logger/latest/env_logger/#enabling-logging) for more information on the configuration options.

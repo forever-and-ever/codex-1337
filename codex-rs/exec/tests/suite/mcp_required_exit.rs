@@ -24,7 +24,7 @@ async fn exits_non_zero_when_required_mcp_server_fails_to_initialize() -> anyhow
     ]);
     responses::mount_sse_once(&server, body).await;
 
-    test.cmd_with_server(&server)
+    test.cmd_with_server(&server).arg("run")
         .arg("--skip-git-repo-check")
         .arg("--experimental-json")
         .arg("tell me something")

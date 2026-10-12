@@ -22,7 +22,7 @@ async fn exits_non_zero_when_server_reports_error() -> anyhow::Result<()> {
     })]);
     responses::mount_sse_once(&server, body).await;
 
-    test.cmd_with_server(&server)
+    test.cmd_with_server(&server).arg("run")
         .arg("--skip-git-repo-check")
         .arg("tell me something")
         .arg("--experimental-json")

@@ -172,6 +172,8 @@ export class CodexExec {
 
     if (args.threadId) {
       commandArgs.push("resume", args.threadId);
+    } else {
+      commandArgs.push("run");
     }
 
     if (args.images?.length) {

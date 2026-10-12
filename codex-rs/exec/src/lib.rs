@@ -6,6 +6,7 @@
 #![deny(clippy::print_stdout)]
 
 mod cli;
+mod command_grammar;
 mod daybreak;
 mod event_processor;
 mod event_processor_with_human_output;
@@ -212,7 +213,7 @@ impl RequestIdSequencer {
 struct ExecRunArgs {
     in_process_start_args: InProcessClientStartArgs,
     state_db: Option<StateDbHandle>,
-    command: Option<ExecCommand>,
+    command: ExecCommand,
     config: Config,
     resume_approvals_reviewer_override: Option<codex_app_server_protocol::ApprovalsReviewer>,
     daybreak_override: Option<bool>,
@@ -224,7 +225,6 @@ struct ExecRunArgs {
     model_provider: Option<String>,
     oss: bool,
     output_schema_path: Option<PathBuf>,
-    prompt: Option<String>,
     skip_git_repo_check: bool,
     stderr_with_ansi: bool,
     thread_source: ThreadSource,
@@ -266,19 +266,18 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         color,
         last_message_file,
         json: json_mode,
-        prompt,
         output_schema: output_schema_path,
         mut config_overrides,
     } = cli;
     if cyber_access_program.is_some() {
-        match command.as_ref() {
-            Some(ExecCommand::Review(_)) => {
+        match &command {
+            ExecCommand::Review(_) => {
                 anyhow::bail!("--cyber-access-program is not supported with `codex exec review`");
             }
-            Some(ExecCommand::Fork(args)) if args.prompt.is_none() && prompt.is_none() => {
+            ExecCommand::Fork(args) if args.prompt.is_none() => {
                 anyhow::bail!("Forking with --cyber-access-program requires a prompt");
             }
-            Some(ExecCommand::Resume(_) | ExecCommand::Fork(_)) | None => {}
+            ExecCommand::Run(_) | ExecCommand::Resume(_) | ExecCommand::Fork(_) => {}
         }
     }
     let mut shared = shared.into_inner();
@@ -609,7 +608,6 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         model_provider,
         oss,
         output_schema_path,
-        prompt,
         skip_git_repo_check,
         stderr_with_ansi,
         thread_source: thread_source.map(Into::into).unwrap_or(ThreadSource::User),
@@ -710,7 +708,6 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
         model_provider,
         oss,
         output_schema_path,
-        prompt,
         skip_git_repo_check,
         stderr_with_ansi,
         thread_source,
@@ -719,12 +716,12 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
 
     if config.features.enabled(Feature::CliDaybreak)
         && config.daybreak_enabled
-        && !matches!(&command, Some(ExecCommand::Review(_)))
+        && !matches!(&command, ExecCommand::Review(_))
     {
         anyhow::ensure!(
             !oss || matches!(
                 &command,
-                Some(ExecCommand::Resume(_) | ExecCommand::Fork(_))
+                ExecCommand::Resume(_) | ExecCommand::Fork(_)
             ),
             "Daybreak requires the OpenAI model provider"
         );
@@ -759,13 +756,13 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
     let default_approval_policy = config.permissions.approval_policy.value();
     let default_effort = config.model_reasoning_effort.clone();
 
-    let (initial_operation, prompt_summary) = match (command.as_ref(), prompt, images) {
-        (Some(ExecCommand::Review(review_cli)), _, _) => {
+    let (initial_operation, prompt_summary) = match (&command, images) {
+        (ExecCommand::Review(review_cli), _) => {
             let review_request = build_review_request(review_cli)?;
             let summary = codex_core::review_prompts::user_facing_hint(&review_request.target);
             (InitialOperation::Review { review_request }, summary)
         }
-        (Some(ExecCommand::Resume(args)), root_prompt, imgs) => {
+        (ExecCommand::Resume(args), imgs) => {
             let prompt_arg = args
                 .prompt
                 .clone()
@@ -775,8 +772,7 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                     } else {
                         None
                     }
-                })
-                .or(root_prompt);
+                });
             let prompt_text = resolve_prompt(prompt_arg);
             let mut items: Vec<UserInput> = imgs
                 .into_iter()
@@ -797,8 +793,8 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                 prompt_text,
             )
         }
-        (Some(ExecCommand::Fork(args)), root_prompt, imgs) => {
-            let prompt_arg = args.prompt.clone().or(root_prompt);
+        (ExecCommand::Fork(args), imgs) => {
+            let prompt_arg = args.prompt.clone();
             if let Some(prompt_arg) = prompt_arg {
                 let prompt_text = resolve_prompt(Some(prompt_arg));
                 let mut items: Vec<UserInput> = imgs
@@ -828,10 +824,11 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                 (InitialOperation::ForkOnly, String::new())
             }
         }
-        (None, root_prompt, imgs) => {
-            let prompt_text = resolve_root_prompt(root_prompt);
+        (ExecCommand::Run(args), imgs) => {
+            let prompt_text = resolve_root_prompt(args.prompt.clone());
             let mut items: Vec<UserInput> = imgs
                 .into_iter()
+                .chain(args.images.iter().cloned())
                 .map(|path| UserInput::LocalImage { path, detail: None })
                 .collect();
             items.push(UserInput::Text {
@@ -869,8 +866,7 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
 
     let mut daybreak_enabled = config.daybreak_enabled;
     // Resolve resume and fork through existing app-server thread lifecycle APIs.
-    let (primary_thread_id, fallback_session_configured) = if let Some(ExecCommand::Resume(args)) =
-        command.as_ref()
+    let (primary_thread_id, fallback_session_configured) = if let ExecCommand::Resume(args) = &command
     {
         if let Some(thread_id) =
             resolve_resume_thread_id(&client, &config, state_db.as_ref(), args).await?
@@ -905,7 +901,7 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                     .map_err(anyhow::Error::msg)?;
             (session_configured.thread_id, session_configured)
         }
-    } else if let Some(ExecCommand::Fork(args)) = command.as_ref() {
+    } else if let ExecCommand::Fork(args) = &command {
         let source_args = crate::cli::ResumeArgs {
             session_id: Some(args.session_id.clone()),
             last: false,

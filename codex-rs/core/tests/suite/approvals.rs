@@ -3072,6 +3072,7 @@ def main():
         [
             "codex",
             "sandbox",
+            "run",
             "-P",
             profile_name,
             "--include-managed-config",
@@ -3184,14 +3185,15 @@ exec {remote_bash_exec} "$@"
     let sandbox_argv = shlex::split(&ssh_argv[2]).context("parse remote sandbox command")?;
     assert_eq!(
         sandbox_argv.len(),
-        9,
+        10,
         "expected codex sandbox ... bash -lc CMD"
     );
     assert_eq!(
-        sandbox_argv[..8],
+        sandbox_argv[..9],
         [
             "codex",
             "sandbox",
+            "run",
             "-P",
             BUILT_IN_PERMISSION_PROFILE_WORKSPACE,
             "--include-managed-config",
@@ -3201,7 +3203,7 @@ exec {remote_bash_exec} "$@"
         ],
         "remote_bash.py should use the allowlisted inherited profile and managed configuration to reconstruct the Codex sandbox"
     );
-    let command_argv = shlex::split(&sandbox_argv[8]).context("parse remote bash command")?;
+    let command_argv = shlex::split(&sandbox_argv[9]).context("parse remote bash command")?;
     assert_eq!(
         command_argv,
         ["printf", "%s", "hello world"],
