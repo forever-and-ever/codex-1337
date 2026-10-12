@@ -513,7 +513,10 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
         .join("\n");
     examples.push(format!("Terminal interactions\n{interactions}"));
     for (heading, cell) in [
-        ("Exact captures", Arc::new(terminal) as Arc<dyn HistoryCell>),
+        (
+            "Exact captures",
+            Arc::new(terminal.clone()) as Arc<dyn HistoryCell>,
+        ),
         ("Historical suffix", partial_fork.block),
         ("Hydrated fork", hydrated_fork),
         ("Isolated sibling", partial_sibling.block),

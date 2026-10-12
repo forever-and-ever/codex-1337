@@ -1632,7 +1632,7 @@ async fn replay_thread_snapshot_in_progress_turn_restores_running_state_without_
 
 #[tokio::test]
 async fn replay_thread_snapshot_does_not_submit_queue_before_replay_catches_up() {
-    let (mut app, _app_event_rx, _op_rx) = make_test_app_with_channels().await;
+    let (mut app, _app_event_rx, mut op_rx) = make_test_app_with_channels().await;
     let thread_id = ThreadId::new();
     let session = test_thread_session(thread_id, test_path_buf("/tmp/project"));
     app.chat_widget.handle_thread_session(session.clone());
@@ -1656,12 +1656,13 @@ async fn replay_thread_snapshot_does_not_submit_queue_before_replay_catches_up()
         .chat_widget
         .capture_thread_input_state()
         .expect("expected queued follow-up state");
-    let client_id = input_state
-        .input_queue
-        .pending_steer
-        .client_id()
-        .unwrap()
-        .to_owned();
+    let Op::UserTurn {
+        client_id: Some(client_id),
+        ..
+    } = next_user_turn_op(&mut op_rx)
+    else {
+        panic!("expected accepted steer submission with a client ID");
+    };
     input_state.reconnect_pending = true;
 
     let (chat_widget, _app_event_tx, _rx, mut new_op_rx) =
