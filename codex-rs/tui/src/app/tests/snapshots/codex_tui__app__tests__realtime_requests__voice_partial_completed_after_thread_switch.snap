@@ -1,5 +1,6 @@
 ---
 source: tui/src/app/tests/realtime_requests.rs
+assertion_line: 480
 expression: "normalize_voice_snapshot_directory(&format!(\"Other task:\\n{other_ui}\\nRestored owner:\\n{}\\n{rendered}\",\nrender_bottom_popup(&app.chat_widget, 80)), &app.config.cwd,)"
 ---
 Other task:
@@ -30,5 +31,4 @@ Restored owner:
   /permissions - choose what Codex is allowed to do
   /model - choose what model and reasoning effort to use
   /review - review any changes and find issues
-
 › spoken partial completed

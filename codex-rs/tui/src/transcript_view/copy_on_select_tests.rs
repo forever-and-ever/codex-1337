@@ -163,7 +163,7 @@ fn copy_on_select_preserves_link_activation_and_ignores_empty_drags() {
         render(
             &mut view,
             &cells,
-            /*width*/ GUTTER_COLUMNS + 26,
+            /*width*/ GUTTER_COLUMNS + 80,
             /*height*/ 1,
         );
         let down = mouse(MouseEventKind::Down(MouseButton::Left), /*column*/ 2);

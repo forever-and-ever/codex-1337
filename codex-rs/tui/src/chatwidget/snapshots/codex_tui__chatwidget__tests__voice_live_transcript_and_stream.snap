@@ -1,13 +1,12 @@
 ---
 source: tui/src/chatwidget/tests/status_and_layout.rs
+assertion_line: 39
 expression: normalized_backend_snapshot(terminal.backend())
 ---
 "                                                            "
 "• Agent answer arriving                                     "
 "                                                            "
-"                                                            "
 "› pick a number                                             "
-"                                                            "
 "                                                            "
 "                                                            "
 " voice ● listening                  ⌃x mute     /voice stop "

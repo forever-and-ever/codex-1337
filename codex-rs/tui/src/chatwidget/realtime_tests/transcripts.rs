@@ -463,9 +463,7 @@ async fn stopping_voice_preserves_the_live_transcript_once() {
         }
         insta::allow_duplicates! {
             insta::assert_snapshot!(rendered.join("\n"), @r"
-
             › Earlier question
-
             • Earlier answer
             • Answer in progress
             ");
@@ -910,15 +908,11 @@ async fn animated_interleaved_captions_keep_settled_words_visible() {
     }
     insta::assert_snapshot!(settled.join("\n"), @"
     user first:
-
     › Keep these words visible please
-
 
     • Other speaker.
     assistant first:
-
     › Other speaker.
-
 
     • Keep these words visible please
     ");

@@ -8,6 +8,8 @@ use codex_app_server_protocol::RateLimitReachedType;
 use codex_app_server_protocol::RateLimitResetCreditsSummary;
 use codex_app_server_protocol::RateLimitSnapshot;
 use codex_app_server_protocol::RateLimitWindow;
+use codex_app_server_protocol::ResetCreditConfirmation;
+use codex_app_server_protocol::ResetCreditScope;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use pretty_assertions::assert_eq;
@@ -41,7 +43,10 @@ fn rate_limit_snapshot(
 
 fn account_rate_limits_response(snapshot: RateLimitSnapshot) -> GetAccountRateLimitsResponse {
     GetAccountRateLimitsResponse {
-        reset_credit_confirmation: None,
+        reset_credit_confirmation: Some(ResetCreditConfirmation {
+            token: "test-payer-binding".into(),
+            scope: ResetCreditScope::Global,
+        }),
         ordinary_usage_allowed: None,
         account_id: None,
         rate_limit_upsell: None,

@@ -298,17 +298,13 @@ async fn text_selection_temporarily_replaces_the_rendered_backtrack_highlight() 
     .await?;
     let (_, highlighted) = render(&mut app);
     assert_eq!(highlighted, "");
-    // The selection starts on the leading blank source row before the user message.
-    for _ in 0..2 {
-        app.handle_tui_event(
-            &mut tui,
-            &mut app_server,
-            TuiEvent::Key(KeyCode::Right.into()),
-        )
-        .await?;
-    }
+    app.handle_tui_event(
+        &mut tui,
+        &mut app_server,
+        TuiEvent::Key(KeyCode::Right.into()),
+    )
+    .await?;
     let (_, highlighted) = render(&mut app);
-    // The selected leading newline does not paint an empty cell.
     assert_eq!(highlighted, "S");
 
     app.handle_tui_event(

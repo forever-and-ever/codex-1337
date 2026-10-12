@@ -8874,17 +8874,19 @@ async fn prompt_edit_reverts_earlier_and_first_visible_prompts_in_place() -> Res
         vec!["turn-0"]
     );
     tui.set_owned_screen(/*owned*/ true)?;
-    app.handle_tui_event(&mut tui, &mut app_server, TuiEvent::Draw)
-        .await?;
-    assert_eq!(
-        app.transcript_view.history,
-        crate::pager_overlay::TranscriptHistoryState::LoadingOlder
-    );
-    loop {
-        let event = app_event_rx.recv().await.expect("older history page");
-        if let AppEvent::OlderThreadHistoryLoaded { .. } = event {
-            Box::pin(app.handle_event(&mut tui, &mut app_server, event)).await?;
-            break;
+    while app_server.has_older_history(source_thread_id) {
+        app.handle_tui_event(&mut tui, &mut app_server, TuiEvent::Draw)
+            .await?;
+        assert_eq!(
+            app.transcript_view.history,
+            crate::pager_overlay::TranscriptHistoryState::LoadingOlder
+        );
+        loop {
+            let event = app_event_rx.recv().await.expect("older history page");
+            if let AppEvent::OlderThreadHistoryLoaded { .. } = event {
+                Box::pin(app.handle_event(&mut tui, &mut app_server, event)).await?;
+                break;
+            }
         }
     }
     tui.set_owned_screen(/*owned*/ false)?;

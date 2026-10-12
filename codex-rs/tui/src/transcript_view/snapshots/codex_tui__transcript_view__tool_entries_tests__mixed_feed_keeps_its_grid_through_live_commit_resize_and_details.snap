@@ -1,12 +1,11 @@
 ---
 source: tui/src/transcript_view/tool_entries_tests.rs
+assertion_line: 779
 expression: "snapshots.join(\"\\n\\n\").replace(&clock, \"14:17\")"
 ---
 width=64
         [-] User
-
               › Review the layout
-
 
   14:17       • Activity Reviewing layout
 
@@ -26,9 +25,7 @@ width=64
 
 expanded width=64
         [-] User
-
               › Review the layout
-
 
   14:17       • Activity Reviewing layout
 
@@ -52,9 +49,7 @@ expanded width=64
                   source_indent();
 
 detailed width=64
-
               › Review the layout
-
 
   14:17       • Activity Reviewing layout
 
@@ -81,10 +76,8 @@ detailed width=64
 
 width=32
         [-] User
-
               › Review the
                 layout
-
 
   14:17       • Activity
                 Reviewing layout
@@ -107,10 +100,8 @@ width=32
                 source_indent();
 
 detailed width=32
-
               › Review the
                 layout
-
 
   14:17       • Activity
                 Reviewing layout

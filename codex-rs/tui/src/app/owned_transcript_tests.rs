@@ -1595,10 +1595,11 @@ async fn fullscreen_composer_mouse_copy_and_input_ownership() -> Result<()> {
 
     // A transcript drag that crosses into the composer remains a transcript selection.
     let transcript_y = row_containing(&tui, "transcript text");
+    let transcript_x = crate::transcript_geometry::GUTTER_COLUMNS + 2;
     for event in [
-        mouse(Down(Left), /*column*/ 1, transcript_y),
-        mouse(Drag(Left), x + 3, y),
-        mouse(Up(Left), x + 3, y),
+        mouse(Down(Left), transcript_x, transcript_y),
+        mouse(Drag(Left), transcript_x + 3, y),
+        mouse(Up(Left), transcript_x + 3, y),
     ] {
         app.handle_owned_transcript_event(&mut tui, &mut server, &event)?;
     }

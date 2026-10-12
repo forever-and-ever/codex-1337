@@ -1,16 +1,17 @@
 ---
 source: tui/src/app/tests.rs
+assertion_line: 8782
 expression: transcript
 ---
 
 ────────────────────────────────────────────────────────────────────────────────
+        [-] User
+              › retained prompt
 
         [-] User
-
                 [Image #1]
                 [Image #2]
 
               › selected prompt [Image #1]
-
 
               • Conversation reverted to this point. File changes are unchanged.

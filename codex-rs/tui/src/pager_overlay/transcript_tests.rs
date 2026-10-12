@@ -398,41 +398,6 @@ async fn jump_top_holds_the_visible_page_until_all_history_arrives() -> Result<(
 }
 
 #[test]
-fn highlighting_reveals_prompt_body_when_only_padding_is_visible() {
-    let mut overlay = transcript_overlay(vec![
-        Arc::new(history_cell::new_user_prompt(
-            "first prompt".into(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-        )),
-        Arc::new(history_cell::PlainHistoryCell::new(vec![
-            "tail one".into(),
-            "tail two".into(),
-            "tail three".into(),
-        ])),
-    ]);
-    let area = Rect::new(
-        /*x*/ 0, /*y*/ 0, /*width*/ 120, /*height*/ 10,
-    );
-    let mut buf = Buffer::empty(area);
-    overlay.render(area, &mut buf);
-    assert!(!buffer_to_text(&buf, area).contains("first prompt"));
-    overlay.set_highlight_cell(Some(0));
-    let mut buf = Buffer::empty(area);
-    overlay.render(area, &mut buf);
-    let text = buffer_to_text(&buf, area);
-    assert!(text.contains("first prompt"), "{text}");
-    let highlighted = buf
-        .content()
-        .iter()
-        .filter(|cell| cell.modifier.contains(ratatui::style::Modifier::REVERSED))
-        .map(ratatui::buffer::Cell::symbol)
-        .collect::<String>();
-    assert_eq!(highlighted, "first prompt");
-}
-
-#[test]
 fn transcript_overlay_snapshots_paginated_history_states() {
     let mut overlay = transcript_overlay(vec![Arc::new(TestCell {
         lines: vec![Line::from("recent transcript")],

@@ -239,7 +239,7 @@ fn copy_highlight_fills_a_block_across_blank_and_wrapped_rows() {
 }
 
 #[test]
-fn whole_user_turn_highlight_includes_bottom_padding() {
+fn whole_user_turn_highlight_covers_only_content() {
     let selected = ratatui::buffer::Cell::default()
         .set_style(crate::style::selection_style())
         .style();
@@ -639,7 +639,7 @@ fn copy_navigation_leaves_context_and_preserves_the_center_band() {
 }
 
 #[test]
-fn copy_resize_keeps_whole_user_padding_inside_context() {
+fn copy_resize_keeps_whole_user_turn_inside_context() {
     let user = |message: &str| -> Arc<dyn HistoryCell> {
         Arc::new(crate::history_cell::new_user_prompt(
             message.into(),

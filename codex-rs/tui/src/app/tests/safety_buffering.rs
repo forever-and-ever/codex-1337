@@ -1079,11 +1079,13 @@ goals = true
         "the fork should render the retried prompt once: {forked_history}"
     );
     if committed_steer.is_some() {
-        let rendered_retry = forked_history
-            .lines()
-            .skip_while(|line| !line.contains(RETRY_PROMPT))
-            .collect::<Vec<_>>()
-            .join("\n");
+        let rendered_retry = format!(
+            "› {RETRY_PROMPT}{}",
+            forked_history
+                .split_once(RETRY_PROMPT)
+                .expect("retried prompt")
+                .1,
+        );
         let rendered_retry = regex_lite::Regex::new(r"• \d{2}:\d{2}:\d{2} ")
             .expect("entry clock pattern")
             .replace_all(&rendered_retry, "• HH:MM:SS ");

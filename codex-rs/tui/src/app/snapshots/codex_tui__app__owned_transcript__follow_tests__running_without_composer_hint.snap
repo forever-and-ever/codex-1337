@@ -5,7 +5,7 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(super::
 ---
                   • Command cargo test
 ────────────────────────────────────────────────────────────────────────────────
-• Running (for ζσξζ)
+• Running (ζσξζ)
 
 • Working (0s • ⌃c to interrupt)
 
