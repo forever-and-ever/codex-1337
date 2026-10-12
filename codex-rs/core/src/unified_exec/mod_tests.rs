@@ -769,41 +769,87 @@ async fn terminating_during_stdin_poll_returns_exited_response() -> anyhow::Resu
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn completed_pipe_commands_preserve_exit_code() -> anyhow::Result<()> {
     let (_, turn) = make_session_and_context().await;
-    #[allow(deprecated)]
-    let cwd = turn.cwd.clone();
-    let request = test_exec_request(
-        &turn,
-        vec!["bash".to_string(), "-lc".to_string(), "exit 17".to_string()],
-        cwd,
-        shell_env(),
-    );
-
-    let environment = codex_exec_server::Environment::default_for_tests();
-    let process = UnifiedExecProcessManager::default()
-        .open_session_with_prepared_exec_env(
-            /*process_id*/ 1234,
-            &request,
-            /*tool_ctx*/ None,
-            codex_sandboxing::WindowsSandboxProxySettingsMode::Reconcile,
-            /*network_policy_decider*/ None,
-            /*tty*/ false,
-            Box::new(NoopSpawnLifecycle),
-            &environment,
-        )
-        .await?;
-
-    if !process.has_exited() {
-        let exit_signal = process.cancellation_token();
-        assert!(
-            tokio::time::timeout(Duration::from_secs(2), exit_signal.cancelled())
-                .await
-                .is_ok(),
-            "process did not report exit within timeout"
+    // Classification must distinguish repository prose from a denial after a
+    // prepared child exits; neither case may lose its nonzero exit or output.
+    for (sandbox, text, denied) in [
+        (SandboxType::None, "", false),
+        (
+            SandboxType::LinuxSeccomp,
+            "sandbox seccomp landlock: failed to write file: No space left on device",
+            false,
+        ),
+        (
+            SandboxType::LinuxSeccomp,
+            "cannot create file: Permission denied",
+            true,
+        ),
+    ] {
+        #[allow(deprecated)]
+        let cwd = turn.cwd.clone();
+        let mut env = shell_env();
+        env.insert("COMPLETED_OUTPUT".to_string(), text.to_string());
+        let mut request = test_exec_request(
+            &turn,
+            vec![
+                "bash".to_string(),
+                "-lc".to_string(),
+                "printf '%s' \"$COMPLETED_OUTPUT\"; exit 17".to_string(),
+            ],
+            cwd,
+            env,
         );
-    }
+        // The prepared-launch boundary owns classification, not policy setup.
+        request.sandbox = sandbox;
+        let environment = codex_exec_server::Environment::default_for_tests();
+        let result = UnifiedExecProcessManager::default()
+            .open_session_with_prepared_exec_env(
+                /*process_id*/ 1234,
+                &request,
+                /*tool_ctx*/ None,
+                codex_sandboxing::WindowsSandboxProxySettingsMode::Reconcile,
+                /*network_policy_decider*/ None,
+                /*tty*/ false,
+                Box::new(NoopSpawnLifecycle),
+                &environment,
+            )
+            .await;
 
-    assert!(process.has_exited());
-    assert_eq!(process.exit_code(), Some(17));
+        let denial = match result {
+            Err(err) => Some(err),
+            Ok(process) => {
+                if !process.has_exited() {
+                    let exit_signal = process.cancellation_token();
+                    assert!(
+                        tokio::time::timeout(Duration::from_secs(2), exit_signal.cancelled())
+                            .await
+                            .is_ok(),
+                        "process did not report exit within timeout"
+                    );
+                }
+                assert!(process.has_exited());
+                assert_eq!(process.exit_code(), Some(17));
+                let denial = process.check_for_sandbox_denial().await.err();
+                let output = process
+                    .output_handles()
+                    .output_buffer
+                    .lock()
+                    .await
+                    .pending
+                    .to_bytes();
+                assert_eq!(String::from_utf8_lossy(&output), text);
+                denial
+            }
+        };
+        match denial {
+            Some(UnifiedExecError::SandboxDenied { output, .. }) => {
+                assert!(denied, "repository prose is not denial evidence");
+                assert_eq!(output.exit_code, 17);
+                assert_eq!(output.aggregated_output.text, text);
+            }
+            Some(err) => return Err(err.into()),
+            None => assert!(!denied, "expected sandbox denial"),
+        }
+    }
     Ok(())
 }
 

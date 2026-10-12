@@ -6,7 +6,7 @@ use crate::SandboxType;
 /// because of the sandbox - a command in the user's zshrc file might hit an
 /// error, but the command itself might fail or succeed for other reasons.
 /// For now, we conservatively check for well known command failure exit codes and
-/// also look for common sandbox denial keywords in the command output.
+/// also look for permission-denial diagnostics in the command output.
 ///
 /// This predicate is intentionally side-effect free. Callers that handle a
 /// denial should record it where the relevant audit context is available.
@@ -47,14 +47,12 @@ pub fn is_likely_executor_managed_sandbox_denied(exec_output: &ExecToolCallOutpu
         return false;
     }
 
-    const SANDBOX_DENIED_KEYWORDS: [&str; 7] = [
+    // Backend names and generic write failures also occur in ordinary command
+    // output. Only permission diagnostics are evidence of a sandbox denial.
+    const DENIAL_DIAGNOSTICS: [&str; 3] = [
         "operation not permitted",
         "permission denied",
         "read-only file system",
-        "seccomp",
-        "sandbox",
-        "landlock",
-        "failed to write file",
     ];
 
     [
@@ -65,7 +63,7 @@ pub fn is_likely_executor_managed_sandbox_denied(exec_output: &ExecToolCallOutpu
     .into_iter()
     .any(|section| {
         let lower = section.to_lowercase();
-        SANDBOX_DENIED_KEYWORDS
+        DENIAL_DIAGNOSTICS
             .iter()
             .any(|needle| lower.contains(needle))
     })
