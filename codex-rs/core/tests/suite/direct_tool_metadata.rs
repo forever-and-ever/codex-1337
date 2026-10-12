@@ -125,6 +125,8 @@ async fn message_budget_sheds_inventory_without_changing_tool_results_or_history
     } else {
         Some(start_mock_server().await)
     };
+    let servers = http_server.iter().collect::<Vec<_>>();
+    mock_server::run(&servers, async {
     let http_mock = if let Some(server) = &http_server {
         Some(mount_sse_sequence(server, events.iter().cloned().map(sse).collect()).await)
     } else {
@@ -336,6 +338,8 @@ async fn message_budget_sheds_inventory_without_changing_tool_results_or_history
         server.shutdown().await;
     }
     Ok(())
+    })
+    .await
 }
 
 #[test_case(RemoteCompactionSupport::Unsupported, true; "local")]

@@ -699,46 +699,50 @@ async fn tool_start_is_not_called_when_pre_tool_hook_prevents_execution() -> Res
         ),
     ] {
         let server = responses::start_mock_server().await;
-        let call_id = format!("prevented-{tool_name}-call");
-        responses::mount_sse_sequence(
-            &server,
-            vec![
-                responses::sse(vec![
-                    responses::ev_function_call(&call_id, tool_name, &arguments.to_string()),
-                    responses::ev_completed("first-response"),
-                ]),
-                responses::sse(vec![
-                    responses::ev_assistant_message("assistant-1", "done"),
-                    responses::ev_completed("second-response"),
-                ]),
-            ],
-        )
-        .await;
+        mock_server::run(&[&server], async {
+            let call_id = format!("prevented-{tool_name}-call");
+            responses::mount_sse_sequence(
+                &server,
+                vec![
+                    responses::sse(vec![
+                        responses::ev_function_call(&call_id, tool_name, &arguments.to_string()),
+                        responses::ev_completed("first-response"),
+                    ]),
+                    responses::sse(vec![
+                        responses::ev_assistant_message("assistant-1", "done"),
+                        responses::ev_completed("second-response"),
+                    ]),
+                ],
+            )
+            .await;
 
-        let recorder = Arc::new(ConversationHistoryRecorder::default());
-        let mut extensions = ExtensionRegistryBuilder::<Config>::new();
-        extensions.tool_lifecycle_contributor(recorder.clone());
-        let test = test_codex()
-            .with_extensions(Arc::new(extensions.build()))
-            .with_pre_build_hook(move |home| {
-                write_pre_tool_hook(home, matcher, &hook_output)
-                    .expect("write pre-tool hook fixture");
-            })
-            .with_config(trust_discovered_hooks)
-            .with_config(|config| config.update_plan_enabled = true)
-            .build_with_auto_env(&server)
-            .await?;
+            let recorder = Arc::new(ConversationHistoryRecorder::default());
+            let mut extensions = ExtensionRegistryBuilder::<Config>::new();
+            extensions.tool_lifecycle_contributor(recorder.clone());
+            let test = test_codex()
+                .with_extensions(Arc::new(extensions.build()))
+                .with_pre_build_hook(move |home| {
+                    write_pre_tool_hook(home, matcher, &hook_output)
+                        .expect("write pre-tool hook fixture");
+                })
+                .with_config(trust_discovered_hooks)
+                .with_config(|config| config.update_plan_enabled = true)
+                .build_with_auto_env(&server)
+                .await?;
 
-        test.submit_text_turn("Run the tool.").await?;
+            test.submit_text_turn("Run the tool.").await?;
 
-        assert!(
-            recorder
-                .histories
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .is_empty(),
-            "tool start should not run for {tool_name}"
-        );
+            assert!(
+                recorder
+                    .histories
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .is_empty(),
+                "tool start should not run for {tool_name}"
+            );
+            Ok::<(), anyhow::Error>(())
+        })
+        .await?;
     }
 
     Ok(())

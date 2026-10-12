@@ -29,6 +29,7 @@ use codex_protocol::protocol::ReviewDecision;
 use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::user_input::UserInput;
 use codex_utils_path_uri::PathUri;
+use core_test_support::mock_server;
 use core_test_support::responses::ResponseMock;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
@@ -343,6 +344,7 @@ async fn unified_exec_zsh_fork_guardian_reviews_intercepted_execve() -> Result<(
     else {
         return Ok(());
     };
+    mock_server::run(&[&server], async {
 
     let call_id = "uexec-zsh-fork-guardian-execve";
     let parent_tool_call = exec_command_event(
@@ -460,6 +462,8 @@ async fn unified_exec_zsh_fork_guardian_reviews_intercepted_execve() -> Result<(
     );
 
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -501,174 +505,182 @@ enabled = false
     else {
         return Ok(());
     };
+    mock_server::run(&[&server], async {
+        let open_call_id = "uexec-zsh-fork-cross-turn-open";
+        let open_command = "while IFS= read -r command; do eval \"$command\"; done";
+        let open_args = json!({
+            "cmd": open_command,
+            "yield_time_ms": 250,
+            "tty": true,
+            "sandbox_permissions": SandboxPermissions::RequireEscalated,
+            "justification": "start an interactive terminal for the next turn",
+        });
+        let write_call_id = "uexec-zsh-fork-cross-turn-write";
+        let write_args = json!({
+            "chars": format!("touch {outside_path:?}\nexit\n"),
+            "session_id": 1000,
+            "yield_time_ms": 5_000,
+        });
+        let responses = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("resp-cross-turn-open"),
+                    ev_function_call(
+                        open_call_id,
+                        "exec_command",
+                        &serde_json::to_string(&open_args)?,
+                    ),
+                    ev_completed("resp-cross-turn-open"),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-cross-turn-first-done"),
+                    ev_assistant_message("msg-cross-turn-first-done", "terminal is running"),
+                    ev_completed("resp-cross-turn-first-done"),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-cross-turn-write"),
+                    ev_function_call(
+                        write_call_id,
+                        "write_stdin",
+                        &serde_json::to_string(&write_args)?,
+                    ),
+                    ev_completed("resp-cross-turn-write"),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-cross-turn-write-guardian"),
+                    ev_assistant_message("msg-cross-turn-write-guardian", r#"{"outcome":"allow"}"#),
+                    ev_completed("resp-cross-turn-write-guardian"),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-cross-turn-execve-guardian"),
+                    ev_assistant_message(
+                        "msg-cross-turn-execve-guardian",
+                        r#"{"outcome":"allow"}"#,
+                    ),
+                    ev_completed("resp-cross-turn-execve-guardian"),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-cross-turn-second-done"),
+                    ev_assistant_message("msg-cross-turn-second-done", "done"),
+                    ev_completed("resp-cross-turn-second-done"),
+                ]),
+            ],
+        )
+        .await;
 
-    let open_call_id = "uexec-zsh-fork-cross-turn-open";
-    let open_command = "while IFS= read -r command; do eval \"$command\"; done";
-    let open_args = json!({
-        "cmd": open_command,
-        "yield_time_ms": 250,
-        "tty": true,
-        "sandbox_permissions": SandboxPermissions::RequireEscalated,
-        "justification": "start an interactive terminal for the next turn",
-    });
-    let write_call_id = "uexec-zsh-fork-cross-turn-write";
-    let write_args = json!({
-        "chars": format!("touch {outside_path:?}\nexit\n"),
-        "session_id": 1000,
-        "yield_time_ms": 5_000,
-    });
-    let responses = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-cross-turn-open"),
-                ev_function_call(
-                    open_call_id,
-                    "exec_command",
-                    &serde_json::to_string(&open_args)?,
-                ),
-                ev_completed("resp-cross-turn-open"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-cross-turn-first-done"),
-                ev_assistant_message("msg-cross-turn-first-done", "terminal is running"),
-                ev_completed("resp-cross-turn-first-done"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-cross-turn-write"),
-                ev_function_call(
-                    write_call_id,
-                    "write_stdin",
-                    &serde_json::to_string(&write_args)?,
-                ),
-                ev_completed("resp-cross-turn-write"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-cross-turn-write-guardian"),
-                ev_assistant_message("msg-cross-turn-write-guardian", r#"{"outcome":"allow"}"#),
-                ev_completed("resp-cross-turn-write-guardian"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-cross-turn-execve-guardian"),
-                ev_assistant_message("msg-cross-turn-execve-guardian", r#"{"outcome":"allow"}"#),
-                ev_completed("resp-cross-turn-execve-guardian"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-cross-turn-second-done"),
-                ev_assistant_message("msg-cross-turn-second-done", "done"),
-                ev_completed("resp-cross-turn-second-done"),
-            ]),
-        ],
-    )
-    .await;
-
-    submit_turn_with_session_permissions(
-        &test,
-        "start a persistent terminal with user approvals",
-        approval_policy,
-        ApprovalsReviewer::User,
-    )
-    .await?;
-    approve_expected_exec(&test, open_command).await?;
-    let first_completion = wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
-    let EventMsg::TurnComplete(first_completion) = first_completion else {
-        unreachable!("completion wait only returns turn-complete events");
-    };
-
-    let next_cwd = test.config.cwd.join("next-turn");
-    fs::create_dir(&next_cwd)?;
-    let (sandbox_policy, permission_profile) = turn_permission_fields(
-        test.session_configured.permission_profile.clone(),
-        next_cwd.as_path(),
-    );
-    test.codex
-        .start_or_steer_turn(
-            TurnInputRequest::user_input(vec![UserInput::Text {
-                text: "run a command in the persistent terminal with Guardian approvals".into(),
-                text_elements: Vec::new(),
-            }])
-            .with_thread_settings(ThreadSettingsOverrides {
-                environments: Some(local_requests(next_cwd)),
-                approvals_reviewer: Some(ApprovalsReviewer::AutoReview),
-                sandbox_policy: Some(sandbox_policy),
-                permission_profile,
-                ..Default::default()
-            }),
+        submit_turn_with_session_permissions(
+            &test,
+            "start a persistent terminal with user approvals",
+            approval_policy,
+            ApprovalsReviewer::User,
         )
         .await?;
-
-    let mut current_turn_id = None;
-    let mut stdin_assessment = None;
-    let mut intercepted_assessment = None;
-    loop {
-        let event = tokio::time::timeout(Duration::from_secs(30), test.codex.next_event())
-            .await
-            .context("timed out waiting for current-turn intercepted execve Guardian review")??;
-        match event.msg {
-            EventMsg::TurnStarted(started) => current_turn_id = Some(started.turn_id),
-            EventMsg::GuardianAssessment(assessment)
-                if assessment.status == GuardianAssessmentStatus::Approved
-                    && matches!(
-                        &assessment.action,
-                        GuardianAssessmentAction::WriteStdin { approval_id, .. }
-                            if approval_id == write_call_id
-                    ) =>
-            {
-                stdin_assessment = Some(assessment);
-            }
-            EventMsg::GuardianAssessment(assessment)
-                if assessment.status == GuardianAssessmentStatus::Approved
-                    && matches!(assessment.action, GuardianAssessmentAction::Execve { .. }) =>
-            {
-                intercepted_assessment = Some(assessment);
-            }
-            EventMsg::ExecApprovalRequest(_) => {
-                panic!("persistent-terminal approval used the previous turn's user reviewer")
-            }
-            EventMsg::TurnComplete(_) => break,
-            _ => {}
-        }
-    }
-
-    let current_turn_id = current_turn_id.context("expected the second turn to start")?;
-    assert_ne!(current_turn_id, first_completion.turn_id);
-    let stdin_assessment =
-        stdin_assessment.context("expected an approved Guardian assessment for stdin")?;
-    assert_eq!(
-        (
-            stdin_assessment.turn_id.as_str(),
-            stdin_assessment.target_item_id.as_deref(),
-        ),
-        (current_turn_id.as_str(), Some(open_call_id)),
-    );
-    let assessment = intercepted_assessment
-        .context("expected an approved Guardian assessment for the persistent terminal")?;
-    assert_eq!(assessment.turn_id, current_turn_id);
-    assert_eq!(assessment.target_item_id.as_deref(), Some(open_call_id));
-    assert!(
-        outside_path.exists(),
-        "Guardian-approved command from the second turn should create the file"
-    );
-
-    let guardian_requests = responses
-        .requests()
-        .into_iter()
-        .filter(|request| {
-            request.body_json()["client_metadata"]["x-openai-subagent"].as_str() == Some("guardian")
+        approve_expected_exec(&test, open_command).await?;
+        let first_completion = wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
         })
-        .collect::<Vec<_>>();
-    assert_eq!(guardian_requests.len(), 2);
-    assert!(guardian_requests[0].body_contains_text(&outside_path.to_string_lossy()));
-    let environment_id = &test.executor_environment().selection().environment_id;
-    let environment = format!(r#""environment_id": "{environment_id}""#);
-    assert!(guardian_requests[0].body_contains_text(&environment));
-    assert!(guardian_requests[0].body_contains_text("The `cwd` field is its launch directory"));
-    assert!(guardian_requests[1].body_contains_text(&outside_path.to_string_lossy()));
+        .await;
+        let EventMsg::TurnComplete(first_completion) = first_completion else {
+            unreachable!("completion wait only returns turn-complete events");
+        };
 
-    Ok(())
+        let next_cwd = test.config.cwd.join("next-turn");
+        fs::create_dir(&next_cwd)?;
+        let (sandbox_policy, permission_profile) = turn_permission_fields(
+            test.session_configured.permission_profile.clone(),
+            next_cwd.as_path(),
+        );
+        test.codex
+            .start_or_steer_turn(
+                TurnInputRequest::user_input(vec![UserInput::Text {
+                    text: "run a command in the persistent terminal with Guardian approvals".into(),
+                    text_elements: Vec::new(),
+                }])
+                .with_thread_settings(ThreadSettingsOverrides {
+                    environments: Some(local_requests(next_cwd)),
+                    approvals_reviewer: Some(ApprovalsReviewer::AutoReview),
+                    sandbox_policy: Some(sandbox_policy),
+                    permission_profile,
+                    ..Default::default()
+                }),
+            )
+            .await?;
+
+        let mut current_turn_id = None;
+        let mut stdin_assessment = None;
+        let mut intercepted_assessment = None;
+        loop {
+            let event = tokio::time::timeout(Duration::from_secs(30), test.codex.next_event())
+                .await
+                .context(
+                    "timed out waiting for current-turn intercepted execve Guardian review",
+                )??;
+            match event.msg {
+                EventMsg::TurnStarted(started) => current_turn_id = Some(started.turn_id),
+                EventMsg::GuardianAssessment(assessment)
+                    if assessment.status == GuardianAssessmentStatus::Approved
+                        && matches!(
+                            &assessment.action,
+                            GuardianAssessmentAction::WriteStdin { approval_id, .. }
+                                if approval_id == write_call_id
+                        ) =>
+                {
+                    stdin_assessment = Some(assessment);
+                }
+                EventMsg::GuardianAssessment(assessment)
+                    if assessment.status == GuardianAssessmentStatus::Approved
+                        && matches!(assessment.action, GuardianAssessmentAction::Execve { .. }) =>
+                {
+                    intercepted_assessment = Some(assessment);
+                }
+                EventMsg::ExecApprovalRequest(_) => {
+                    panic!("persistent-terminal approval used the previous turn's user reviewer")
+                }
+                EventMsg::TurnComplete(_) => break,
+                _ => {}
+            }
+        }
+
+        let current_turn_id = current_turn_id.context("expected the second turn to start")?;
+        assert_ne!(current_turn_id, first_completion.turn_id);
+        let stdin_assessment =
+            stdin_assessment.context("expected an approved Guardian assessment for stdin")?;
+        assert_eq!(
+            (
+                stdin_assessment.turn_id.as_str(),
+                stdin_assessment.target_item_id.as_deref(),
+            ),
+            (current_turn_id.as_str(), Some(open_call_id)),
+        );
+        let assessment = intercepted_assessment
+            .context("expected an approved Guardian assessment for the persistent terminal")?;
+        assert_eq!(assessment.turn_id, current_turn_id);
+        assert_eq!(assessment.target_item_id.as_deref(), Some(open_call_id));
+        assert!(
+            outside_path.exists(),
+            "Guardian-approved command from the second turn should create the file"
+        );
+
+        let guardian_requests = responses
+            .requests()
+            .into_iter()
+            .filter(|request| {
+                request.body_json()["client_metadata"]["x-openai-subagent"].as_str()
+                    == Some("guardian")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(guardian_requests.len(), 2);
+        assert!(guardian_requests[0].body_contains_text(&outside_path.to_string_lossy()));
+        let environment_id = &test.executor_environment().selection().environment_id;
+        let environment = format!(r#""environment_id": "{environment_id}""#);
+        assert!(guardian_requests[0].body_contains_text(&environment));
+        assert!(guardian_requests[0].body_contains_text("The `cwd` field is its launch directory"));
+        assert!(guardian_requests[1].body_contains_text(&outside_path.to_string_lossy()));
+
+        Ok(())
+    })
+    .await
 }
 
 struct CommandResult {

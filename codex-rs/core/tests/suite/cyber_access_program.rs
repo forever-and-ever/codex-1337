@@ -278,108 +278,111 @@ async fn cyber_access_program_is_inherited_by_child_turns() -> Result<()> {
             json!({"message": "inspect the repository"})
         };
         let server = responses::start_mock_server().await;
-        // V1 completion notifications can require another parent response.
-        Mock::given(method("POST"))
-            .and(path("/v1/responses"))
-            .and(|request: &wiremock::Request| !request.headers.contains_key("x-openai-subagent"))
-            .respond_with(responses::sse_response(final_response("resp-parent-done")))
-            .with_priority(/*p*/ 10)
-            .mount(&server)
+        mock_server::run(&[&server], async {
+            // V1 completion notifications can require another parent response.
+            Mock::given(method("POST"))
+                .and(path("/v1/responses"))
+                .and(|request: &wiremock::Request| {
+                    !request.headers.contains_key("x-openai-subagent")
+                })
+                .respond_with(responses::sse_response(final_response("resp-parent-done")))
+                .with_priority(/*p*/ 10)
+                .mount(&server)
+                .await;
+            responses::mount_sse_once(
+                &server,
+                responses::sse(vec![
+                    responses::ev_function_call_with_namespace(
+                        "spawn-worker",
+                        namespace,
+                        "spawn_agent",
+                        &spawn_arguments.to_string(),
+                    ),
+                    responses::ev_completed("resp-spawn"),
+                ]),
+            )
             .await;
-        responses::mount_sse_once(
-            &server,
-            responses::sse(vec![
-                responses::ev_function_call_with_namespace(
-                    "spawn-worker",
-                    namespace,
-                    "spawn_agent",
-                    &spawn_arguments.to_string(),
-                ),
-                responses::ev_completed("resp-spawn"),
-            ]),
-        )
-        .await;
-        let initial_child_request = responses::mount_sse_once_match(
-            &server,
-            header("x-openai-subagent", "collab_spawn"),
-            final_response("resp-child-initial"),
-        )
-        .await;
-        let test = test_codex()
-            .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
-            .with_model(if is_v2 { "gpt-5.6-sol" } else { "gpt-5.1" })
-            .with_config(move |config| {
-                config
-                    .features
-                    .enable(Feature::Collab)
-                    .expect("enable multi-agent tools");
-                if is_v2 {
+            let initial_child_request = responses::mount_sse_once_match(
+                &server,
+                header("x-openai-subagent", "collab_spawn"),
+                final_response("resp-child-initial"),
+            )
+            .await;
+            let test = test_codex()
+                .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+                .with_model(if is_v2 { "gpt-5.6-sol" } else { "gpt-5.1" })
+                .with_config(move |config| {
                     config
                         .features
-                        .enable(Feature::MultiAgentV2)
-                        .expect("enable v2 tools");
-                }
-            })
-            .build_with_auto_env(&server)
-            .await?;
-        let mut created_threads = test.thread_manager.subscribe_thread_created();
-        submit(&test, Some(CyberAccessProgram::DaybreakRed)).await?;
-        let child_id = created_threads.recv().await?;
-        let child = test.thread_manager.get_thread(child_id).await?;
-        wait_for_event(&child, |event| matches!(event, EventMsg::TurnComplete(_))).await;
-
-        let child_programs = |requests: &responses::ResponseMock| {
-            requests
-                .requests()
-                .iter()
-                .filter(|request| {
-                    request.body_json()["client_metadata"]["thread_id"] == json!(child_id)
+                        .enable(Feature::Collab)
+                        .expect("enable multi-agent tools");
+                    if is_v2 {
+                        config
+                            .features
+                            .enable(Feature::MultiAgentV2)
+                            .expect("enable v2 tools");
+                    }
                 })
-                .map(|request| request.body_json()["access_programs"].clone())
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(
-            child_programs(&initial_child_request),
-            vec![json!({"cyber": "daybreak_red"})],
-            "namespace={namespace}, fork_turns={fork_turns}"
-        );
+                .build_with_auto_env(&server)
+                .await?;
+            let mut created_threads = test.thread_manager.subscribe_thread_created();
+            submit(&test, Some(CyberAccessProgram::DaybreakRed)).await?;
+            let child_id = created_threads.recv().await?;
+            let child = test.thread_manager.get_thread(child_id).await?;
+            wait_for_event(&child, |event| matches!(event, EventMsg::TurnComplete(_))).await;
 
-        for (program, expected, reload) in [
-            (
-                Some(CyberAccessProgram::Standard),
-                json!({"cyber": "standard"}),
-                false,
-            ),
-            (
-                Some(CyberAccessProgram::DaybreakBlue),
-                json!({"cyber": "daybreak_blue"}),
-                true,
-            ),
-            (None, json!(null), false),
-            (
-                Some(CyberAccessProgram::Standard),
-                json!({"cyber": "standard"}),
-                true,
-            ),
-        ] {
-            if reload {
-                let child = test.thread_manager.get_thread(child_id).await?;
-                child.shutdown_and_wait().await?;
-                test.thread_manager.remove_thread(&child_id).await;
-            }
-            let mut reply_sequence = Vec::new();
-            if reload && !is_v2 {
+            let child_programs = |requests: &responses::ResponseMock| {
+                requests
+                    .requests()
+                    .iter()
+                    .filter(|request| {
+                        request.body_json()["client_metadata"]["thread_id"] == json!(child_id)
+                    })
+                    .map(|request| request.body_json()["access_programs"].clone())
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(
+                child_programs(&initial_child_request),
+                vec![json!({"cyber": "daybreak_red"})],
+                "namespace={namespace}, fork_turns={fork_turns}"
+            );
+
+            for (program, expected, reload) in [
+                (
+                    Some(CyberAccessProgram::Standard),
+                    json!({"cyber": "standard"}),
+                    false,
+                ),
+                (
+                    Some(CyberAccessProgram::DaybreakBlue),
+                    json!({"cyber": "daybreak_blue"}),
+                    true,
+                ),
+                (None, json!(null), false),
+                (
+                    Some(CyberAccessProgram::Standard),
+                    json!({"cyber": "standard"}),
+                    true,
+                ),
+            ] {
+                if reload {
+                    let child = test.thread_manager.get_thread(child_id).await?;
+                    child.shutdown_and_wait().await?;
+                    test.thread_manager.remove_thread(&child_id).await;
+                }
+                let mut reply_sequence = Vec::new();
+                if reload && !is_v2 {
+                    reply_sequence.push(responses::sse(vec![
+                        responses::ev_function_call_with_namespace(
+                            "resume-worker",
+                            namespace,
+                            "resume_agent",
+                            &json!({"id": child_id}).to_string(),
+                        ),
+                        responses::ev_completed("resp-resume"),
+                    ]));
+                }
                 reply_sequence.push(responses::sse(vec![
-                    responses::ev_function_call_with_namespace(
-                        "resume-worker",
-                        namespace,
-                        "resume_agent",
-                        &json!({"id": child_id}).to_string(),
-                    ),
-                    responses::ev_completed("resp-resume"),
-                ]));
-            }
-            reply_sequence.push(responses::sse(vec![
                 responses::ev_function_call_with_namespace(
                     "followup-worker",
                     namespace,
@@ -392,22 +395,25 @@ async fn cyber_access_program_is_inherited_by_child_turns() -> Result<()> {
                 ),
                 responses::ev_completed("resp-followup"),
             ]));
-            responses::mount_sse_sequence(&server, reply_sequence).await;
-            let followup_child_request = responses::mount_sse_once_match(
-                &server,
-                header("x-openai-subagent", "collab_spawn"),
-                final_response("resp-child-next"),
-            )
-            .await;
-            submit(&test, program).await?;
-            let child = test.thread_manager.get_thread(child_id).await?;
-            wait_for_event(&child, |event| matches!(event, EventMsg::TurnComplete(_))).await;
-            assert_eq!(
-                child_programs(&followup_child_request),
-                vec![expected],
-                "namespace={namespace}, fork_turns={fork_turns}, reload={reload}"
-            );
-        }
+                responses::mount_sse_sequence(&server, reply_sequence).await;
+                let followup_child_request = responses::mount_sse_once_match(
+                    &server,
+                    header("x-openai-subagent", "collab_spawn"),
+                    final_response("resp-child-next"),
+                )
+                .await;
+                submit(&test, program).await?;
+                let child = test.thread_manager.get_thread(child_id).await?;
+                wait_for_event(&child, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+                assert_eq!(
+                    child_programs(&followup_child_request),
+                    vec![expected],
+                    "namespace={namespace}, fork_turns={fork_turns}, reload={reload}"
+                );
+            }
+            Ok::<(), anyhow::Error>(())
+        })
+        .await?;
     }
     Ok(())
 }
