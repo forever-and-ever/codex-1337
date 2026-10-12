@@ -44,7 +44,8 @@ expression: "states.join(\"\\n---\\n\")"
 ›    Using a reset...
 ---
   Usage limit resets
-  Couldn't reset usage. Please try again.
+  Couldn't confirm the reset outcome. Retry keeps the same attempt. request
+  timed out
 
 
 › 1. Try again

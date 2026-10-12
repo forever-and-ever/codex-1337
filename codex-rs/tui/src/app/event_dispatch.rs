@@ -1654,7 +1654,8 @@ impl App {
                     }
                 };
                 match result {
-                Ok(response) => {
+                Ok(mut response) => {
+                    let reset_credit_confirmation = response.reset_credit_confirmation.take();
                     let rate_limit_reset_credits = response.rate_limit_reset_credits.clone();
                     let snapshots = if accepted
                     {
@@ -1719,7 +1720,7 @@ impl App {
                                     "account/rateLimits/read response did not include rateLimitResetCredits"
                                         .to_string()
                                 }),
-                                response.reset_credit_confirmation,
+                                reset_credit_confirmation,
                             );
                         }
                     }
