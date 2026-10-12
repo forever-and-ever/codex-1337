@@ -84,7 +84,7 @@ async fn estimate_reaches_attaching_clients_and_warming_refuses_unreplayable_pro
 
     let request = app
         .send_thread_resume_request(ThreadResumeParams {
-            thread_id,
+            thread_id: thread_id.clone(),
             ..Default::default()
         })
         .await?;
@@ -95,5 +95,27 @@ async fn estimate_reaches_attaching_clients_and_warming_refuses_unreplayable_pro
     )
     .await??;
     assert_eq!(attached, warm);
+
+    timeout(READ_TIMEOUT, app.shutdown_gracefully()).await??;
+    let mut app = TestAppServer::builder()
+        .with_codex_home(home.path())
+        .build_initialized_with_timeout(READ_TIMEOUT)
+        .await?;
+    let request = app
+        .send_thread_resume_request(ThreadResumeParams {
+            thread_id,
+            ..Default::default()
+        })
+        .await?;
+    let _: ThreadResumeResponse = timeout(READ_TIMEOUT, app.read_response(request)).await??;
+    let restored: ThreadPromptCacheUpdatedNotification = timeout(
+        READ_TIMEOUT,
+        app.read_notification("thread/promptCache/updated"),
+    )
+    .await??;
+    // Resume checkpoints settings, advancing updated_at without making a model request.
+    // A restarted server has no observed request lease to recover from that metadata.
+    assert_eq!(restored.estimate, PromptCacheEstimate::Unknown);
+    assert_eq!(restored.warming, PromptCacheWarming::Off);
     Ok(())
 }

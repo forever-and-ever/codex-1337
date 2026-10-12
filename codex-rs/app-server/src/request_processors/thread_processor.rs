@@ -4337,9 +4337,7 @@ impl ThreadRequestProcessor {
                 self.thread_goal_processor
                     .emit_resume_goal_snapshot(thread_id)
                     .await;
-                self.prompt_cache
-                    .publish_to(connection_id, thread_id, codex_thread.as_ref())
-                    .await;
+                self.prompt_cache.publish_to(connection_id, thread_id);
                 crate::alarms::publish_to(connection_id, thread_id, codex_thread.as_ref()).await;
                 codex_thread
                     .emit_thread_idle_lifecycle_if_idle(ThreadIdleCause::Completed)
