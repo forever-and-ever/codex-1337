@@ -376,6 +376,7 @@ impl CodeModeCell {
             .collect()
     }
 
+    #[cfg(test)]
     pub(crate) fn terminal(&self) -> bool {
         self.status().is_some()
     }
