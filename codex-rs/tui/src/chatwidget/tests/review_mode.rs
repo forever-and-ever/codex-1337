@@ -480,7 +480,13 @@ async fn identical_steer_receipts_only_acknowledge_the_matching_submission() {
             ThreadItemRenderSource::Live,
             /*timestamp*/ None,
         );
-        assert_eq!(chat.input_queue.pending_steer, expected);
+        assert_eq!(
+            chat.input_queue
+                .pending_steer
+                .as_ref()
+                .map(|steer| steer.into_owned()),
+            expected
+        );
     }
 }
 

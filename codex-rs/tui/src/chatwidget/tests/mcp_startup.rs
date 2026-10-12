@@ -279,7 +279,11 @@ async fn review_during_mcp_startup_preserves_draft_when_foreground_work_is_pendi
             match activity {
                 "turn" => handle_turn_started(&mut chat, "turn-1"),
                 "review" => chat.review.is_review_mode = true,
-                "pending" => chat.input_queue.turn.is_pending() = true,
+                "pending" => {
+                    chat.input_queue.turn = super::super::input_queue::UserTurnInput::AwaitingStart(
+                        super::super::input_queue::PendingTurnStart::Operation,
+                    );
+                }
                 "images" => chat.prepare_image_submission(
                     "image prompt".into(),
                     UserMessageHistoryRecord::UserMessageText,

@@ -204,7 +204,8 @@ pub(crate) struct PendingSteer {
     pub(super) compare_key: PendingSteerCompareKey,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct PendingSteerReplacement {
     pub(super) previous: PendingSteer,
     pub(super) appended: PendingSteer,

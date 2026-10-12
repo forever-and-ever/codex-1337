@@ -3413,7 +3413,11 @@ async fn slash_cd_rejects_pending_input_and_unsupported_session_ownership() {
         let (queued, steer) = (UserMessage::from("q").into(), pending_steer("s"));
         match state {
             "active" => chat.bottom_pane.set_task_running(/*running*/ true),
-            "pending" => chat.input_queue.turn.is_pending() = true,
+            "pending" => {
+                chat.input_queue.turn = super::super::input_queue::UserTurnInput::AwaitingStart(
+                    super::super::input_queue::PendingTurnStart::Operation,
+                );
+            }
             "queued" => chat.input_queue.queued_user_messages.push_back(queued),
             "steer" => chat.input_queue.pending_steer.set(Some(steer)),
             "side" => chat.set_side_conversation_active(/*active*/ true),

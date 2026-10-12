@@ -6,7 +6,7 @@
 //! Its entry notice is shared across chats until the backend confirms ordinary usage has recovered.
 
 use super::ChatWidget;
-use super::QueuedUserMessage;
+
 use super::luna_reserve_return::ReserveReturnModel;
 use crate::app_command::AppCommand;
 use crate::backend_banners::BackendBanner;
