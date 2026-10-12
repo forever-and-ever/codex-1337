@@ -19,6 +19,7 @@ use codex_app_server_protocol::ThreadSource;
 use codex_app_server_protocol::ThreadStatus;
 use codex_app_server_transport::app_server_control_socket_path;
 use codex_uds::UnixStream;
+use codex_uds::xdg_state_directory;
 use futures::SinkExt;
 use futures::StreamExt;
 use serde::Deserialize;
@@ -380,15 +381,7 @@ fn roster() -> Result<Frame> {
 }
 
 fn roster_path() -> Result<PathBuf> {
-    env::var_os("XDG_STATE_HOME")
-        .map(PathBuf::from)
-        .filter(|path| path.is_absolute())
-        .or_else(|| {
-            env::var_os("HOME")
-                .map(PathBuf::from)
-                .filter(|path| path.is_absolute())
-                .map(|home| home.join(".local/state"))
-        })
+    xdg_state_directory()
         .map(|root| root.join("codex-wrangler/known-sessions.json"))
         .context("neither absolute XDG_STATE_HOME nor HOME is available")
 }

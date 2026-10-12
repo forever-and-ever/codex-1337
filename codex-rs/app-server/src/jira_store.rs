@@ -9,6 +9,8 @@ use codex_app_server_protocol::JiraKey;
 use codex_app_server_protocol::JiraResult;
 use codex_app_server_protocol::JiraRevision;
 use codex_app_server_protocol::ThreadJiraResponse;
+#[cfg(target_os = "linux")]
+use codex_uds::xdg_state_directory;
 use codex_utils_path_uri::LegacyAppPathString;
 use sha2::Digest;
 use sha2::Sha256;
@@ -62,15 +64,7 @@ pub(crate) fn execute(
 fn durable_state_dir() -> Option<PathBuf> {
     #[cfg(target_os = "linux")]
     {
-        std::env::var_os("XDG_STATE_HOME")
-            .map(PathBuf::from)
-            .filter(|path| path.is_absolute())
-            .or_else(|| {
-                std::env::var_os("HOME")
-                    .map(PathBuf::from)
-                    .filter(|path| path.is_absolute())
-                    .map(|home| home.join(".local/state"))
-            })
+        xdg_state_directory()
     }
     #[cfg(not(target_os = "linux"))]
     {

@@ -1,5 +1,8 @@
 //! Cross-platform async Unix domain socket helpers.
 
+mod state_directory;
+pub use state_directory::xdg_state_directory;
+
 #[cfg(unix)]
 mod daemon_directory;
 #[cfg(unix)]
