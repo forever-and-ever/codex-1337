@@ -233,8 +233,8 @@ pub(crate) fn reunite_code_mode(cells: &[Arc<dyn HistoryCell>]) -> Option<Projec
     let mut changed = false;
     for (index, cell) in cells.iter().enumerate() {
         if let Some(fact) = cell.as_any().downcast_ref::<CodeModeFactCell>()
-            && let CodeModeEvent::WaitStarted { call_id } | CodeModeEvent::WaitCompleted { call_id } =
-                &fact.0.event
+            && let CodeModeEvent::WaitStarted { call_id, .. }
+            | CodeModeEvent::WaitCompleted { call_id, .. } = &fact.0.event
         {
             let key = (fact.0.exec_call_id.clone(), call_id.clone());
             if let Some((_, retained)) = references.get_mut(&key) {
@@ -293,8 +293,8 @@ pub(crate) fn reunite_code_mode(cells: &[Arc<dyn HistoryCell>]) -> Option<Projec
     let mut replacements = Vec::new();
     for (index, cell) in cells.iter().enumerate() {
         if let Some(fact) = cell.as_any().downcast_ref::<CodeModeFactCell>()
-            && let CodeModeEvent::WaitStarted { call_id } | CodeModeEvent::WaitCompleted { call_id } =
-                &fact.0.event
+            && let CodeModeEvent::WaitStarted { call_id, .. }
+            | CodeModeEvent::WaitCompleted { call_id, .. } = &fact.0.event
         {
             let (anchor, reference) = &references[&(fact.0.exec_call_id.clone(), call_id.clone())];
             if *anchor == index {

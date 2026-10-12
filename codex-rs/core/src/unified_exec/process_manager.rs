@@ -861,7 +861,11 @@ impl UnifiedExecProcessManager {
         context: &UnifiedExecContext,
         request: WriteStdinRequest<'_>,
     ) -> Result<ExecCommandToolOutput, UnifiedExecError> {
+        let wait = super::process_wait::observe(self, context, &request).await;
         let result = self.write_stdin_inner(context, request).await;
+        if let Some(wait) = wait {
+            wait.finish().await;
+        }
         let outcome = match &result {
             Ok(output) if output.process_id.is_some() => "yielded",
             Ok(_) => "exited",

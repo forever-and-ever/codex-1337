@@ -53,6 +53,7 @@ mod oneshot;
 mod process;
 mod process_manager;
 mod process_state;
+mod process_wait;
 mod shell_snapshot;
 mod stdin_approval;
 pub(crate) mod terminal_watch;

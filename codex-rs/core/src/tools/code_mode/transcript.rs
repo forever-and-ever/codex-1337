@@ -21,8 +21,8 @@ pub(super) async fn record(
         CodeModeEvent::Started { call_id, .. } => format!("start:{call_id}"),
         CodeModeEvent::Allocated => "allocation".into(),
         CodeModeEvent::ToolCall { call_id } => format!("tool:{call_id}"),
-        CodeModeEvent::WaitStarted { call_id } => format!("wait-start:{call_id}"),
-        CodeModeEvent::WaitCompleted { call_id } => format!("wait-end:{call_id}"),
+        CodeModeEvent::WaitStarted { call_id, .. } => format!("wait-start:{call_id}"),
+        CodeModeEvent::WaitCompleted { call_id, .. } => format!("wait-end:{call_id}"),
         CodeModeEvent::Finished { .. } => "end".into(),
     };
     session

@@ -134,6 +134,7 @@ impl CodeModeWaitHandler {
                             &exec.turn,
                             codex_protocol::code_mode::CodeModeEvent::WaitStarted {
                                 call_id: call_id.clone(),
+                                target: None,
                             },
                         )
                         .await;
@@ -163,6 +164,7 @@ impl CodeModeWaitHandler {
                             &exec.turn,
                             codex_protocol::code_mode::CodeModeEvent::WaitCompleted {
                                 call_id: call_id.clone(),
+                                target: None,
                             },
                         )
                         .await;

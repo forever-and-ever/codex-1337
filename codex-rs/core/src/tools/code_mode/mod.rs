@@ -1,8 +1,10 @@
 mod delegate;
 mod disclosure;
 mod lifecycle;
+
 pub(crate) use lifecycle::CaptureOrigin;
 pub(crate) use lifecycle::NotificationLease;
+pub(crate) use lifecycle::ProcessWait;
 mod execute_handler;
 pub(crate) mod execute_spec;
 mod output;

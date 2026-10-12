@@ -905,9 +905,8 @@ fn wait_calls(cell: &dyn HistoryCell) -> Option<(&str, &str)> {
         (fact, fact.exec_call_id.as_str())
     };
     match &fact.event {
-        CodeModeEvent::WaitStarted { call_id } | CodeModeEvent::WaitCompleted { call_id } => {
-            Some((call_id.as_str(), exec))
-        }
+        CodeModeEvent::WaitStarted { call_id, .. }
+        | CodeModeEvent::WaitCompleted { call_id, .. } => Some((call_id.as_str(), exec)),
         _ => None,
     }
 }

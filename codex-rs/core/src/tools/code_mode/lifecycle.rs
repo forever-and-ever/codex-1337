@@ -21,6 +21,9 @@ use crate::session::session::Session;
 use crate::session::turn_context::TurnContext;
 use crate::turn_timing::now_unix_timestamp_ms;
 
+mod process_wait;
+pub(crate) use process_wait::ProcessWait;
+
 #[derive(Default)]
 pub(super) struct TranscriptRegistry {
     state: Mutex<RegistryState>,

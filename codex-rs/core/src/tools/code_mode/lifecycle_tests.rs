@@ -73,6 +73,67 @@ async fn early_terminal_and_late_capture_have_one_execution_lifetime() {
     // measurements retain descriptors, not a running terminal task or alias map.
     scope.capture_alias("wait-1".into(), &turn);
     let captured_owner = service.transcript.owner("wait-1").unwrap();
+    // Cancellation releases only its own wait; the tracker owns ordered completion.
+    scope.capture_alias("wait-2".into(), &turn);
+    let target = CodeModeOwner {
+        exec_call_id: "other-exec".into(),
+        ..owner.clone()
+    };
+    let returning = service
+        .begin_process_wait("wait-1", target.clone(), Arc::clone(&turn))
+        .await
+        .unwrap();
+    let cancelled = service
+        .begin_process_wait("wait-2", target.clone(), Arc::clone(&turn))
+        .await
+        .unwrap();
+    returning.finish().await;
+    drop(cancelled);
+    let wait_facts = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        let mut facts = Vec::new();
+        for _ in 0..4 {
+            let event = events.recv().await.unwrap();
+            let EventMsg::CodeModeOwned(owned) = event.msg else {
+                panic!("wait fact requires its actor owner");
+            };
+            assert_eq!(owned.owner, owner);
+            let (_, event) = owned.into_parts();
+            let EventMsg::ItemCompleted(event) = *event else {
+                panic!("expected wait fact");
+            };
+            let TurnItem::CodeMode(fact) = event.item else {
+                panic!("expected Code Mode wait");
+            };
+            facts.push(fact.event);
+        }
+        facts
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        wait_facts,
+        vec![
+            CodeModeEvent::WaitStarted {
+                call_id: "wait-1".into(),
+                target: Some(target.clone())
+            },
+            CodeModeEvent::WaitStarted {
+                call_id: "wait-2".into(),
+                target: Some(target.clone())
+            },
+            CodeModeEvent::WaitCompleted {
+                call_id: "wait-1".into(),
+                target: Some(target.clone())
+            },
+            CodeModeEvent::WaitCompleted {
+                call_id: "wait-2".into(),
+                target: Some(target)
+            },
+        ]
+    );
+    service
+        .transcript
+        .release_capture("wait-2", CaptureOrigin::Returned);
     service
         .transcript
         .release_capture("wait-1", CaptureOrigin::Returned);
@@ -201,6 +262,10 @@ async fn service_teardown_cancels_blocked_transcript_admission() {
         )
         .await;
     let scope = starting.scope();
+    let wait = service
+        .begin_process_wait("abandoned-exec", scope.owner(), Arc::clone(&scope.turn))
+        .await
+        .unwrap();
     let _blocked_admission = scope.admission.lock().await;
     // Admission/persistence/delivery all run inside the same cancellable drain.
     // Teardown must not join while waiting for an unavailable admission gate.
@@ -221,5 +286,6 @@ async fn service_teardown_cancels_blocked_transcript_admission() {
         .await
         .unwrap()
         .unwrap();
+    wait.finish().await;
     assert!(service.transcript.tasks.is_empty());
 }
