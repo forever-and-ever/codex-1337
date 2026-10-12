@@ -488,10 +488,15 @@ impl ThreadComposerState {
     }
 
     pub(super) fn merge(states: impl IntoIterator<Item = Self>) -> Self {
+        let mut states = states.into_iter();
+        let first = states.next().unwrap_or_default();
+        let Some(second) = states.next() else {
+            return first;
+        };
         let mut used = HashSet::new();
         let mut messages = Vec::new();
         let mut pastes = Vec::new();
-        for state in states {
+        for state in [first, second].into_iter().chain(states) {
             let message = UserMessage {
                 text: state.text,
                 text_elements: state.text_elements,
