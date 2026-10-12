@@ -18,6 +18,8 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::AbortOnDropHandle;
 
+// TELOS(client-only-shell): Visible local intent owns one draft lease and never becomes agent input.
+
 pub(crate) struct LocalShell {
     cwd: Result<PathBuf, String>,
     state: State,

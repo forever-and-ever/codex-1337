@@ -15,6 +15,8 @@ use codex_thread_store::AgentMailPersistence;
 use futures::FutureExt;
 use std::sync::Arc;
 
+// TELOS(accepted-agent-mail): Acceptance, canonical admission and uncertain writes remain distinct obligations.
+
 #[derive(Default)]
 pub(crate) struct AgentMailRuntime {
     pub(crate) acceptance: tokio::sync::Mutex<()>,

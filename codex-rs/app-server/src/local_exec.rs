@@ -1,6 +1,8 @@
 use clap::Args;
 use codex_sandboxing::LinuxSandboxPidNamespace;
 
+// TELOS(managed-process-visibility): Only trusted daemon startup selects host PID visibility for local tools.
+
 /// Trusted startup settings for this app server's local executor, not remote executors.
 #[derive(Args, Debug, Clone, Default, PartialEq, Eq)]
 pub struct AppServerLocalExecArgs {

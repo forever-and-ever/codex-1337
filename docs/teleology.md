@@ -227,7 +227,45 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Pressure: 0.162 #51137 recovers Guardian reviews from parent checkpoints and #51223 edits `guardian/review_session.rs`.
 - Evidence: ad002e7548, ff65685666.
 
+## Tool authority
+
+### managed-process-visibility
+
+- Telos: the managed local server permits the owner's chosen host-process and user-service access without changing every execution request.
+- Holds: production and staging units explicitly select inherited Linux PID/proc visibility; ordinary app-server startup still defaults to isolation. The trusted startup choice reaches only the local executor, never remote executor policy or a repository/model permission override. Other directly executed sandbox restrictions remain unchanged. Same-UID signaling and host-user-manager escape from tool containment are intentional operator authority; see `docs/fork.md` Local TUI releases.
+- Owners: `codex-rs/app-server/src/local_exec.rs`, `codex-rs/sandboxing/src/linux_pid_namespace.rs`, `scripts/systemd/codex-app-server.service`, `scripts/systemd/codex-app-server-staging.service`.
+- Tripwire: existing app-server startup/config and installer-unit checks cover argument propagation; host D-Bus behavior has a recorded read-only A/B witness, not a portable unit-test claim.
+- Pressure: upstream sandbox defaults or daemon argument rebuilding must not erase the explicit managed-unit policy or silently apply it to standalone/remote executors.
+- Evidence: 649efc61dc.
+
+### startup-tool-ceiling
+
+- Telos: an ephemeral utility model receives data without acquiring tool authority through configuration or provider changes.
+- Holds: the captured startup tool policy is immutable and can only narrow inherited authority. `noTools` permits no direct or nested dispatch and starts no MCP contributors, including required servers. The frontend sends utility transcript/inference only after a receipt derived from the captured policy confirms the restriction; absent receipts fail closed. This nonpersisted startup restriction requires an ephemeral thread.
+- Owners: `codex-rs/protocol/src/tool_policy.rs`, `codex-rs/core/src/tool_policy.rs`, `codex-rs/core/src/tools/registry.rs`, `codex-rs/tui/src/temporary_structured_request.rs`.
+- Tripwire: `startup_allowlist_controls_advertising_and_execution` (`codex-rs/core/tests/suite/managed_threads_tests.rs`), `dispatch_uses_canonical_tool_names_for_lifecycle_contributors` (`codex-rs/core/src/tools/registry_tests.rs`), and the existing recap/older-server interactions.
+- Pressure: startup, extension refresh and discovery changes must preserve the ceiling at advertising and execution, not merely hide schemas or maintain a feature denylist.
+- Evidence: 7b8ddaa991.
+
+### canonical-tool-identity
+
+- Telos: formatting a tool name cannot broaden a hook, change attribution, or collide with another tool.
+- Holds: namespace and local name remain one structured `ToolName` through dispatch, hooks and delayed execution receipts. `HookSelector` distinguishes tool identity from lifecycle-event values; unknown fields and selectors invalid for an event fail closed. Provider aliases and display strings are boundary projections, never policy identities; obsolete flattened matchers have no compatibility fallback.
+- Owners: `codex-rs/protocol/src/tool_name.rs`, `codex-rs/protocol/src/hook_selector.rs`, `codex-rs/hooks/src/engine/selection.rs`, `codex-rs/core/src/tool_policy.rs`.
+- Tripwire: existing hook selection/configuration interactions in `codex-rs/hooks/src/engine/mod_tests.rs` and `codex-rs/hooks/src/config_rules.rs`; original-tool attribution through execution is covered by the core hook integration cases.
+- Pressure: upstream changes to tool naming, delayed process receipts or hook configuration must not reintroduce concatenated identities or turn an invalid selector into an unfiltered hook.
+- Evidence: 46833d37fa, 731f798e13, 09cb78a61c.
+
 ## Server-owned coordination
+
+### accepted-agent-mail
+
+- Telos: ordinary mail acknowledged as accepted survives a server crash before model admission without becoming duplicate or revived work.
+- Holds: the authoritative inbox commits a stable identity, attribution and replay digest before acceptance. Finite owned admission drains on shutdown and commits canonical history before acknowledging the row; an uncertain canonical write fences new inference until canonical recovery. Lookup checks retained raw lineage, past compaction but within explicit cutoffs, and never treats an old admission witness as current context membership. Revert acknowledges already-canonical pending rows before discarding their witnesses; genuinely unadmitted rows remain pending. Recovery requires no frontend, retains blocked mail and uses bounded in-memory backoff. The envelope is process crash with intact storage, not a preacceptance completion outbox.
+- Owners: `codex-rs/core/src/agent/control/accepted_mail.rs`, `codex-rs/core/src/session/agent_mail.rs`, `codex-rs/state/src/runtime/agent_mail.rs`, `codex-rs/thread-store/src/live_thread/agent_mail.rs`, `codex-rs/thread-store/src/local/agent_mail.rs`, `codex-rs/app-server/src/request_processors/agent_mail.rs`.
+- Tripwire: `record_inter_agent_communication_preserves_item_id_in_rollout_and_resume` (`codex-rs/core/src/session/tests.rs`), `revert_keeps_thread_id_and_hides_suffix_across_repeated_reverts` (`codex-rs/thread-store/src/local/revert_thread_tests.rs`), and the existing idle-mail/successor-process recovery interactions.
+- Pressure: queued-input, task registration, compaction, rollback, lineage and shutdown changes must preserve acceptance versus admission and canonical uncertainty; neither latest-model-context reads nor best-effort channel sends replace the durable contract.
+- Evidence: 53d5d972e3, c63e481a76, 2a47c1fcc3, 519609ba40, c882db1102.
 
 ### shared-daemon
 
@@ -250,22 +288,31 @@ During a merge, look up each conflicted path in the index at the end and resolve
 ### server-hosted-agents
 
 - Telos: agent coordination lives in the app server, so it survives frontends and restarts.
-- Holds: task tools run in the app server, not the TUI; deliveries to a busy thread queue durably with attribution and never become user input; subagent families survive restarts, and only an idle subtree can be retired; farm requests persist; an active root thread's canonical name is unique; each thread's comms gate and context role are server state.
-- Owners: `codex-rs/app-server/src/thread_tools/mod.rs`, `codex-rs/app-server-protocol/src/delegation.rs`, `codex-rs/app-server/src/request_processors/thread_queue_processor.rs`, `codex-rs/ext/queue/src/service.rs`, `codex-rs/core/src/agent/control.rs`, `codex-rs/core/src/agent/control/retirement.rs`, `codex-rs/core/src/tools/handlers/multi_agents_v2/retire_agent.rs`, `codex-rs/state/src/runtime/farm_requests.rs`, `codex-rs/state/src/runtime/thread_names.rs`, `codex-rs/app-server/src/request_processors/comms_gate.rs`, `codex-rs/protocol/src/comms_gate.rs`, `codex-rs/app-server/src/request_processors/context_role.rs`, `codex-rs/protocol/src/context_role.rs`.
+- Holds: task tools run in the app server, not the TUI; deliveries to a busy thread queue durably with attribution and never become user input; subagent families survive restarts, and only an idle subtree can be retired; farm requests persist; an active root thread's canonical name is unique; each thread's comms gate and context role are server state. A farm reservation is keyed by request identity before path allocation; only proven rejection releases the reserved path. Allocated or uncertain outcomes retain custody and are not silently retried. Cross-provider automatic farming defaults to Fresh independently of per-provider executor configuration.
+- Owners: `codex-rs/app-server/src/thread_tools/mod.rs`, `codex-rs/app-server-protocol/src/delegation.rs`, `codex-rs/app-server/src/request_processors/thread_queue_processor.rs`, `codex-rs/ext/queue/src/service.rs`, `codex-rs/core/src/agent/control.rs`, `codex-rs/core/src/agent/control/retirement.rs`, `codex-rs/core/src/tools/handlers/multi_agents_v2/retire_agent.rs`, `codex-rs/state/src/runtime/farm_requests.rs`, `codex-rs/state/src/runtime/thread_names.rs`, `codex-rs/app-server/src/request_processors/comms_gate.rs`, `codex-rs/protocol/src/comms_gate.rs`, `codex-rs/app-server/src/request_processors/context_role.rs`, `codex-rs/protocol/src/context_role.rs`. Reservation authority: `codex-rs/core/src/agent/control/farm_reservation.rs`.
 - Tripwire: `codex-rs/app-server/src/thread_coordination_lifecycle_tests.rs`, `codex-rs/app-server/tests/suite/v2/server_coordination_*tests.rs`, `queued_tool_output_waits_for_completion_without_becoming_user_input` (`codex-rs/app-server/tests/suite/v2/thread_queue.rs`), `v2_family_survives_unload_until_idle_subtree_retirement` (`codex-rs/core/src/agent/control_tests.rs`), `farm_spawns_and_replays_without_steering_parent` (`codex-rs/app-server/tests/suite/v2/thread_farm.rs`), `root_name_claim_race_and_archive_lifecycle` (`codex-rs/state/src/runtime/thread_names_tests.rs`), `closed_idle_destination_bounces_messages_until_reopened` and `context_role_is_discoverable_until_cleared`.
-- Pressure: 0.162 edits `core/src/agent/control.rs` with #51415 (turn lineage), #51329 (no partial-history subagent forks), #50087 (queued agent mail across eviction), #49814 and #51515 (coordinated agent-tree shutdown); #51415 also edits `thread_queue_processor.rs`.
-- Evidence: fa1cf4ce29, 8e8bb48075, c8dec1e3eb, 217bcce455, db62274156, eb8132ec04, f4588c72c6.
+- Pressure: 0.162 edits `core/src/agent/control.rs` with #51415 (turn lineage), #51329 (no partial-history subagent forks), #50087 (queued agent mail across eviction), #49814 and #51515 (coordinated agent-tree shutdown); #51415 also edits `thread_queue_processor.rs`. Path allocation and replay must not mistake an uncertain accepted request for a fresh reservation.
+- Evidence: fa1cf4ce29, 8e8bb48075, c8dec1e3eb, 217bcce455, db62274156, eb8132ec04, f4588c72c6, e373b1520b, e331fec3c1, 2d9abac7cf.
 
 ### durable-approvals-and-queues
 
 - Telos: a reconnect loses no pending decision or queued edit.
-- Holds: an unresolved approval request is kept outside the bounded transcript replay ring until resolved and replays after the buffered events; a reconnect retires in-flight queue operations and restores pending edits into their drafts without submitting them.
-- Owners: `codex-rs/tui/src/app/pending_interactive_replay.rs`, `codex-rs/tui/src/app/thread_event_buffer.rs`, `codex-rs/tui/src/app/queued_messages.rs` (`QueuedMessages`), `codex-rs/tui/src/app/reconnect.rs`.
-- Tripwire: `pending_approval_survives_transcript_eviction` (`codex-rs/tui/src/app/tests/thread_delivery_tests.rs`). Queued edits across a reconnect: none.
+- Holds: an unresolved approval request is kept outside the bounded transcript replay ring until resolved and replays after the buffered events; a reconnect retires in-flight queue operations and restores pending edits into their drafts without submitting them. The UI's operation ledger owns dispatch, typed thread-or-connection origin, captured store/epoch, ordered configuration barriers and completion. Unsent/definitively rejected drafts are recoverable; unknown effects are never automatically replayed or reported as success. Urgent interrupts, response delivery and bounded exit control do not wait behind an ordinary submission.
+- Owners: `codex-rs/tui/src/app/pending_interactive_replay.rs`, `codex-rs/tui/src/app/thread_event_buffer.rs`, `codex-rs/tui/src/app/queued_messages.rs` (`QueuedMessages`), `codex-rs/tui/src/app/reconnect.rs`. `codex-rs/tui/src/app/turn_submissions.rs` (`ServerOperations`), `codex-rs/tui/src/app/turn_submission_controller.rs`, `codex-rs/tui/src/app/server_operation_requests.rs`, `codex-rs/tui/src/app/server_realtime_operations.rs`.
+- Tripwire: `pending_approval_survives_transcript_eviction` (`codex-rs/tui/src/app/tests/thread_delivery_tests.rs`). Queued edits across a reconnect: none. `stalled_submission_does_not_block_queued_edit_or_typing` (`codex-rs/tui/src/app/tests/queued_message_tests.rs`) composes response, control, draft and configuration custody.
 - Pressure: 0.162 #51415 edits `pending_interactive_replay.rs`; `reconnect.rs` takes 7 upstream commits (#49472, #49715, #49809, #49857, #50148, #50199, #51500).
-- Evidence: b56191783c, 2926fc7aa0.
+- Evidence: b56191783c, 2926fc7aa0, 0aaf58f10c, c201932da2, 9a8bc53195, 8773e03b0d.
 
 ## Resilience policy
+
+### compaction-is-not-input
+
+- Telos: compaction preserves enough handling evidence to continue without repeating already-handled or superseded work.
+- Holds: a bounded factual record comes from the frozen compaction input, retaining recent requests, explicit goal changes, assistant reports and paired tool receipts. Acknowledgment is not completion and missing evidence proves nothing. Only host annotations authenticate a retained record; quoted user/tool wrappers do not. Replacement retains concurrent history, and malformed authenticated evidence returns an error without replacing history. Persisted record framing does not depend on reminder wording. Refreshed standing instructions remain separate from this evidence.
+- Owners: `codex-rs/core/src/context/compaction_continuation.rs`, `codex-rs/core/src/compact.rs`, `codex-rs/core/src/compact_remote_v2.rs`, `codex-rs/core/src/compact_native.rs`.
+- Tripwire: `native_checkpoint_swap_retains_concurrent_tail_and_rejects_stale_prefix_atomically` (`codex-rs/core/src/session/native_compaction_tests.rs`), `remote_compact_v2_retains_metadata_from_resumed_history` and the existing goal/guardian compaction interactions.
+- Pressure: upstream summary-only replacement, retained-history filtering or provider-specific checkpoint installation must not turn compaction into new user intent or discard the host-authenticated continuation.
+- Evidence: 2387ddf521, fabf777aac.
 
 ### backpressure-waits
 
@@ -337,6 +384,15 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Evidence: 94d7235008, 3f4d858769, 5f45f5bbc5, 0700355c3e, 7f2715c164, 60f6ba0573, e176b09c07, 6d7c491d67, bbf73666b7, 177ca0e1e2, d206c23b79, 262a393d8a.
 
 ## TUI doctrine
+
+### client-only-shell
+
+- Telos: a deliberate local terminal command need not enter the agent's conversation or wait for its server.
+- Holds: only visible composer `!!` intent admits host-local execution; hidden pasted prefixes and attachments cannot acquire it. One admission lease owns the command before the draft is cleared, then transfers to the process job or retained rejection. Host cwd, local process-group custody, bounded output and cancellation stay separate from agent shell policy and conversation cwd. Startup recovery never turns local intent into agent input; newer drafts are not overwritten by failure recovery.
+- Owners: `codex-rs/tui/src/local_shell.rs`, `codex-rs/tui/src/app/local_shell.rs`, `codex-rs/tui/src/bottom_pane/chat_composer/local_shell.rs`, `codex-rs/tui/src/chatwidget/local_shell.rs`.
+- Tripwire: `pasted_input_preserves_app_boundary_and_local_shell_authority` (`codex-rs/tui/src/app/tests.rs`).
+- Pressure: composer paste handling, submission/reconnect recovery and shell routing must preserve the explicit host-local authority boundary and single draft lease.
+- Evidence: 865ddc1d21, 1103c818cc, 4995ef537e.
 
 ### explicit-command-verbs
 
@@ -411,13 +467,13 @@ Upstream files, where merge conflicts arise:
 
 - `codex-rs/features/src/lib.rs`: append-only-tool-declarations
 - `codex-rs/core/src/session/step_context.rs`: append-only-tool-declarations
-- `codex-rs/core/src/session/world_state.rs`: append-only-tool-declarations
+- `codex-rs/core/src/session/world_state.rs`: append-only-tool-declarations, standing-context-trims
 - `codex-rs/Cargo.toml`: one-dependency-graph, pipelined-crate-graph, removed-stacks
 - `codex-rs/app-server-client/Cargo.toml`: pipelined-crate-graph
 - `codex-rs/app-server/src/request_processors/thread_queue_processor.rs`: server-hosted-agents
 - `codex-rs/app-server/src/turn_admission.rs`: shared-daemon
 - `codex-rs/cli/Cargo.toml`: removed-stacks
-- `codex-rs/cli/src/main.rs`: pipelined-crate-graph, removed-stacks, explicit-command-verbs
+- `codex-rs/cli/src/main.rs`: pipelined-crate-graph, removed-stacks, explicit-command-verbs, managed-process-visibility
 - `codex-rs/exec/src/cli.rs`: explicit-command-verbs
 - `codex-rs/exec/src/lib.rs`: explicit-command-verbs
 - `codex-rs/tui/src/cli.rs`: explicit-command-verbs
@@ -433,14 +489,13 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/config/src/tui_keymap.rs`: key-doctrine
 - `codex-rs/core/src/agent/control.rs`: server-hosted-agents
 - `codex-rs/core/src/compact_model_fallback.rs`: compaction-stops-on-uncertainty
-- `codex-rs/core/src/compact_remote_v2.rs`: compaction-stops-on-uncertainty
+- `codex-rs/core/src/compact_remote_v2.rs`: compaction-stops-on-uncertainty, compaction-is-not-input
 - `codex-rs/core/src/config/mod.rs`: adapter-not-transport
 - `codex-rs/core/src/context/world_state/mod.rs`: retained-goal-rules
 - `codex-rs/core/src/mcp_tool_call.rs`: human-only-facts, catalog-at-model-boundaries
 - `codex-rs/core/src/responses_retry.rs`: backpressure-waits
 - `codex-rs/core/src/session/context_window.rs`: adapter-not-transport
 - `codex-rs/core/src/session/turn.rs`: native-robustness, response-order-fences
-- `codex-rs/core/src/session/world_state.rs`: standing-context-trims
 - `codex-rs/core/src/stream_events_utils.rs`: native-robustness, response-order-fences
 - `codex-rs/core/src/tools/code_mode/delegate.rs`: response-order-fences
 - `codex-rs/core/src/tools/code_mode/execute_handler.rs`: compact-contracts, turn-economy
@@ -487,9 +542,17 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/tui/src/tui/frame_requester.rs`: attention-gated-painting
 - `codex-rs/windows-sandbox-rs/Cargo.toml`: removed-stacks
 - `justfile`: hermetic-test-runs
+- `codex-rs/protocol/src/tool_name.rs`: canonical-tool-identity
+- `codex-rs/core/src/tools/registry.rs`: startup-tool-ceiling
+- `codex-rs/tui/src/temporary_structured_request.rs`: startup-tool-ceiling
+- `codex-rs/sandboxing/src/linux_pid_namespace.rs`: managed-process-visibility
+- `codex-rs/core/src/compact.rs`: compaction-is-not-input
+- `codex-rs/thread-store/src/local/revert_thread.rs`: accepted-agent-mail
+- `codex-rs/core/src/session/handlers.rs`: accepted-agent-mail
+- `codex-rs/tui/src/bottom_pane/chat_composer.rs`: client-only-shell
+- `codex-rs/app-server/src/lib.rs`: managed-process-visibility, startup-tool-ceiling
 
 Fork-owned files, absent upstream:
-
 
 - `AGENTS.md`: fullscreen-only, minimal-upstream-delta
 - `codex-rs/app-server-embedding/src/lib.rs`: pipelined-crate-graph
@@ -533,7 +596,7 @@ Fork-owned files, absent upstream:
 - `codex-rs/core/src/backpressure.rs`: backpressure-waits
 - `codex-rs/core/src/client_anthropic.rs`: subscription-boundary
 - `codex-rs/core/src/client_anthropic_tools.rs`: claude-native-voice, stable-native-identities
-- `codex-rs/core/src/compact_native.rs`: messages-from-canonical-history
+- `codex-rs/core/src/compact_native.rs`: messages-from-canonical-history, compaction-is-not-input
 - `codex-rs/core/src/compact_native_request.rs`: messages-from-canonical-history, native-robustness
 - `codex-rs/core/src/config/models_cache.rs`: adapter-not-transport
 - `codex-rs/core/src/context/environment_context/workspace_root_folding.rs`: standing-context-trims
@@ -598,4 +661,38 @@ Fork-owned files, absent upstream:
 - `scripts/run_tests.py`: pipelined-crate-graph, hermetic-test-runs
 - `scripts/systemd/codex-app-server-refresh.path`: shared-daemon
 - `scripts/systemd/codex-app-server-refresh.service`: shared-daemon
-- `scripts/systemd/codex-app-server.service`: shared-daemon
+- `scripts/systemd/codex-app-server.service`: shared-daemon, managed-process-visibility
+
+
+- `codex-rs/protocol/src/hook_selector.rs`: canonical-tool-identity
+- `codex-rs/hooks/src/engine/selection.rs`: canonical-tool-identity
+- `codex-rs/core/src/tool_policy.rs`: canonical-tool-identity, startup-tool-ceiling
+- `codex-rs/protocol/src/tool_policy.rs`: startup-tool-ceiling
+
+
+
+- `codex-rs/app-server/src/local_exec.rs`: managed-process-visibility
+
+
+- `scripts/systemd/codex-app-server-staging.service`: managed-process-visibility
+- `codex-rs/core/src/agent/control/accepted_mail.rs`: accepted-agent-mail
+- `codex-rs/core/src/session/agent_mail.rs`: accepted-agent-mail
+- `codex-rs/state/src/runtime/agent_mail.rs`: accepted-agent-mail
+- `codex-rs/thread-store/src/live_thread/agent_mail.rs`: accepted-agent-mail
+- `codex-rs/thread-store/src/local/agent_mail.rs`: accepted-agent-mail
+- `codex-rs/app-server/src/request_processors/agent_mail.rs`: accepted-agent-mail
+- `codex-rs/core/src/context/compaction_continuation.rs`: compaction-is-not-input
+
+
+- `codex-rs/tui/src/local_shell.rs`: client-only-shell
+- `codex-rs/tui/src/app/local_shell.rs`: client-only-shell
+- `codex-rs/tui/src/bottom_pane/chat_composer/local_shell.rs`: client-only-shell
+- `codex-rs/tui/src/chatwidget/local_shell.rs`: client-only-shell
+
+
+
+- `codex-rs/tui/src/app/turn_submissions.rs`: durable-approvals-and-queues
+- `codex-rs/tui/src/app/turn_submission_controller.rs`: durable-approvals-and-queues
+- `codex-rs/tui/src/app/server_operation_requests.rs`: durable-approvals-and-queues
+- `codex-rs/tui/src/app/server_realtime_operations.rs`: durable-approvals-and-queues
+- `codex-rs/core/src/agent/control/farm_reservation.rs`: server-hosted-agents

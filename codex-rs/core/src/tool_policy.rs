@@ -20,6 +20,8 @@ fn excludes_all(policy: &ToolPolicy) -> bool {
     policy.allowed_tools.as_ref().is_some_and(Vec::is_empty)
 }
 
+// TELOS(startup-tool-ceiling): Capture a ceiling once; later configuration or discovery cannot broaden it.
+
 pub(crate) fn capture(init: &mut ExtensionDataInit, source: &SessionSource) -> Arc<ToolPolicy> {
     let inherited = init.get::<ToolPolicy>().unwrap_or_else(|| {
         // Older reviewer rollouts predate the explicit startup policy.

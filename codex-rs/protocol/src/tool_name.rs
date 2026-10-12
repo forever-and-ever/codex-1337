@@ -7,6 +7,8 @@ use std::fmt;
 /// Namespace used for top-level function and custom tools.
 pub const DEFAULT_FUNCTION_NAMESPACE: &str = "functions";
 
+// TELOS(canonical-tool-identity): Display aliases never replace structured identity in dispatch or hook policy.
+
 /// Identifies a callable tool, preserving the namespace split when the model
 /// provides one.
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize, JsonSchema)]

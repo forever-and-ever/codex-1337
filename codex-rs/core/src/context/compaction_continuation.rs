@@ -45,6 +45,8 @@ enum Observation {
     },
 }
 
+// TELOS(compaction-is-not-input): Handling evidence survives compaction without becoming new user intent.
+
 #[derive(Default)]
 pub(crate) struct CompactionContinuation(Vec<Observation>);
 

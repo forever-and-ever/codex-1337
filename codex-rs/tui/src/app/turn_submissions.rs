@@ -70,6 +70,8 @@ pub(in crate::app) use requests::ThreadMutation;
 mod navigation;
 pub(crate) use navigation::NavigationCompletion;
 
+// TELOS(durable-approvals-and-queues): One operation owner carries captured origin, epoch and uncertain effects.
+
 pub(super) struct ServerOperations {
     lanes: HashMap<OperationLane, SubmissionLane>,
     navigation: navigation::NavigationOwner,

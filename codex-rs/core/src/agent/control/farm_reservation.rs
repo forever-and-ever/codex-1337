@@ -24,6 +24,8 @@ use codex_state::FarmRequestClaim;
 use codex_state::FarmRequestState;
 use std::sync::Arc;
 
+// TELOS(server-hosted-agents): A farm path remains reserved until rejection is proved, not merely timed out.
+
 pub(super) enum SpawnAdmission {
     Ordinary,
     Farm {
