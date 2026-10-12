@@ -64,6 +64,7 @@ use codex_http_client::OutboundProxyPolicy;
 use codex_http_client::RouteAwareClientPool;
 use codex_login::CodexAuth;
 use codex_login::auth::AgentIdentityAuthPolicy;
+use codex_model_provider::SharedModelProvider;
 use codex_model_provider::create_model_provider;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::built_in_model_providers;
@@ -8359,6 +8360,27 @@ pub(crate) async fn make_session_and_context_with_rx() -> (
     async_channel::Receiver<Event>,
 ) {
     make_session_and_context_with_dynamic_tools_and_rx(Vec::new()).await
+}
+
+pub(crate) fn bind_model_client_for_tests(
+    session: &mut Arc<Session>,
+    turn: &mut Arc<TurnContext>,
+    client: ModelClient,
+    provider: SharedModelProvider,
+    model: ModelInfo,
+) {
+    // Bind before the fixture is shared with a task; the ordinary lifecycle owns
+    // startup, streaming, history and task teardown afterward.
+    let session = Arc::get_mut(session).expect("unshared session fixture");
+    let turn = Arc::get_mut(turn).expect("unshared turn fixture");
+    session.services.model_client = client;
+    session.state.get_mut().session_configuration.provider = provider.clone();
+    turn.provider = provider;
+    let mut settings = (*turn.initial_settings).clone();
+    settings.model_info = Arc::new(model);
+    let settings = Arc::new(settings);
+    turn.initial_settings = Arc::clone(&settings);
+    turn.next_step_settings.store(settings);
 }
 
 #[tokio::test]

@@ -62,10 +62,10 @@ fn map_api_error_details(err: ApiError) -> CodexErr {
         ApiError::Stream(msg) => CodexErr::Stream(msg),
         ApiError::NativeStream(message) => CodexErr::Fatal(message),
         ApiError::AnthropicStream { progress, source } => {
-            // Partial output is not yet reconciled across attempts. Even an empty item
-            // start has exposed its lifecycle to consumers, so only pre-output retries
-            // use the existing finite stream budget.
-            if progress == AnthropicStreamProgress::BeforeOutput && source.retryable() {
+            // Core discards unfinished client-visible items before replay. Completed
+            // native items remain irreversible: retrying them can duplicate tools or
+            // send an invalid signed-thinking prefill.
+            if progress != AnthropicStreamProgress::CompletedItem && source.retryable() {
                 CodexErr::Stream(source.to_string())
             } else {
                 CodexErr::Fatal(format!("Anthropic stream error ({progress:?}): {source}"))

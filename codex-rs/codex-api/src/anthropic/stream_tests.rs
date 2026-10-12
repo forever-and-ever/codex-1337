@@ -175,7 +175,7 @@ async fn stalled_stream_and_dropped_consumer_release_transport() {
                 assert!(std::error::Error::source(&error).is_some());
                 assert_eq!(
                     crate::map_api_error(error).retry_delay(1).is_some(),
-                    expected_progress == AnthropicStreamProgress::BeforeOutput
+                    expected_progress != AnthropicStreamProgress::CompletedItem
                 );
                 assert!(stream.next().await.is_none());
             } else {
@@ -236,8 +236,8 @@ async fn uncertain_post_attempts_once_despite_provider_retry_policy() {
 
 #[tokio::test]
 async fn errors_before_any_completed_item_stay_typed_for_retry() {
-    // Provider error frames retain their existing precommit policy. Transport
-    // interruption is stricter until partial presentation is reconciled on retry.
+    // Provider frames and recoverable body interruptions use core's precommit
+    // retry/discard boundary; completed native items must never be replayed.
     let start = "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg\",\"usage\":{\"input_tokens\":13,\"output_tokens\":1,\"cache_read_input_tokens\":100,\"cache_creation_input_tokens\":7}}}\n\n";
     let partial = "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"partial\"}}\n\n";
     let mut kinds = Vec::new();
@@ -273,7 +273,7 @@ async fn errors_before_any_completed_item_stay_typed_for_retry() {
         ]
     );
     // A timeout, clean EOF and malformed SSE can all arrive after HTTP succeeds;
-    // only transport interruption before any output may spend the finite retry budget.
+    // only precompletion transport interruption may spend the finite retry budget.
     let stop = "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n";
     for block in [
         json!({"type":"text","text":"partial"}),
@@ -372,7 +372,7 @@ async fn errors_before_any_completed_item_stay_typed_for_retry() {
                 }
                 let mapped = crate::map_api_error(error);
                 let retryable =
-                    recoverable && expected_progress == AnthropicStreamProgress::BeforeOutput;
+                    recoverable && expected_progress != AnthropicStreamProgress::CompletedItem;
                 assert_eq!(mapped.retry_delay(1).is_some(), retryable);
                 assert_eq!(
                     CodexErrKind::from(mapped.details()),
