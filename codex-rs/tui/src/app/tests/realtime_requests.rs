@@ -1865,7 +1865,8 @@ async fn embedded_voice_settings_follow_project_after_thread_switch() -> Result<
             ),
         );
         Box::pin(app.select_agent_thread(&mut tui, &mut server, thread_id)).await?;
-        app.open_realtime_voices(&server).await;
+        app.open_realtime_voices(&server);
+        app.settle_turn_submissions(&mut server).await?;
         let popup = crate::chatwidget::tests::helpers::render_bottom_popup(
             &app.chat_widget,
             /*width*/ 80,
@@ -1909,8 +1910,9 @@ async fn remote_voice_picker_reads_server_preference() -> Result<()> {
     )?;
     app.chat_widget
         .set_realtime_voice(Some(codex_protocol::protocol::RealtimeVoice::Maple));
-    let (server, requests, proxy) = start_recording_remote_app_server(&app.config).await?;
-    app.open_realtime_voices(&server).await;
+    let (mut server, requests, proxy) = start_recording_remote_app_server(&app.config).await?;
+    app.open_realtime_voices(&server);
+    app.settle_turn_submissions(&mut server).await?;
     assert_eq!(
         recorded_params(&requests, "thread/realtime/listVoices").len(),
         1
@@ -1944,7 +1946,8 @@ async fn remote_voice_catalog_success_and_failure() -> Result<()> {
             )
             .await?;
         while events.try_recv().is_ok() {}
-        app.open_realtime_voices(&server).await;
+        app.open_realtime_voices(&server);
+        app.settle_turn_submissions(&mut server).await?;
         let popup = crate::chatwidget::tests::helpers::render_bottom_popup(
             &app.chat_widget,
             /*width*/ 80,
@@ -1970,8 +1973,8 @@ async fn remote_voice_catalog_success_and_failure() -> Result<()> {
                         app.persist_realtime_voice(
                             &server,
                             codex_protocol::protocol::RealtimeVoice::Juniper,
-                        )
-                        .await;
+                        );
+                        app.settle_turn_submissions(&mut server).await?;
                         assert_eq!(
                             (
                                 app.config.realtime.voice,
@@ -2082,13 +2085,13 @@ async fn overridden_voice_save_keeps_effective_voice() -> Result<()> {
             Default::default(),
         )
         .await?;
-        let server = AppServerSession::new(
+        let mut server = AppServerSession::new(
             codex_app_server_client::AppServerClient::InProcess(client),
             crate::app_server_session::ThreadParamsMode::Embedded,
         );
         while events.try_recv().is_ok() {}
-        app.persist_realtime_voice(&server, codex_protocol::protocol::RealtimeVoice::Juniper)
-            .await;
+        app.persist_realtime_voice(&server, codex_protocol::protocol::RealtimeVoice::Juniper);
+        app.settle_turn_submissions(&mut server).await?;
         assert_eq!(
             (
                 app.config.realtime.voice,

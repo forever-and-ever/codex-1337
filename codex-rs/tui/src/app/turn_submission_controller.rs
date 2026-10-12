@@ -508,6 +508,10 @@ impl App {
                 }
                 for (_, lane) in lanes {
                     let thread_id = lane.active.origin.thread_id();
+                    if matches!(&lane.active.request, SubmissionRequest::Operation(operation) if matches!(&**operation, ThreadOperation::Connection(ConnectionMutation::Voice(voice_preferences::VoicePreferenceOperation::Confirm { .. }))))
+                    {
+                        self.chat_widget.add_error_message("Voice preference was saved, but confirmation was interrupted by a connection change. No write was retried.".into());
+                    }
                     if let SubmissionRequest::Operation(operation) = &lane.active.request
                         && let ThreadOperation::Control(control::ControlOperation::DetachAndExit {
                             reason,
@@ -655,6 +659,23 @@ impl App {
             self.refresh_submission_preview();
             return Ok(());
         }
+        if let SubmissionOutcome::Operation(Ok(OperationReceipt::VoicePreference(
+            voice_preferences::VoicePreferenceReceipt::Saved(write),
+        ))) = &outcome
+            && self.continue_voice_preference(&mut active, write)
+        {
+            self.server_operations.lanes.insert(
+                key,
+                SubmissionLane {
+                    active,
+                    state: LaneState::Queued,
+                    waiting,
+                },
+            );
+            self.drive_server_operations(server);
+            self.refresh_submission_preview();
+            return Ok(());
+        }
         if let SubmissionOutcome::Operation(result) = outcome {
             let SubmissionRequest::Operation(operation) = &active.request else {
                 unreachable!("RPC receipt for a turn operation");
@@ -705,6 +726,7 @@ impl App {
                     }
                     if !matches!(failure, SubmissionFailure::Rejected(_))
                         && !matches!(&**operation, ThreadOperation::Realtime(operation) if operation.is_preparation())
+                        && !matches!(&**operation, ThreadOperation::Connection(ConnectionMutation::Voice(preference)) if preference.is_read_only())
                         && !matches!(
                             &**operation,
                             ThreadOperation::Catalog(_) | ThreadOperation::Control(_)

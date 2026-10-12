@@ -2379,7 +2379,7 @@ impl App {
             }
             AppEvent::OpenRealtimeSettings => self.chat_widget.open_realtime_settings(),
             AppEvent::OpenRealtimeSoundDevices => self.chat_widget.open_realtime_sound_devices(),
-            AppEvent::OpenRealtimeVoices => self.open_realtime_voices(app_server).await,
+            AppEvent::OpenRealtimeVoices => self.open_realtime_voices(app_server),
             AppEvent::OpenRealtimeDevicePicker { kind } => self.list_realtime_devices(kind),
             AppEvent::OpenRealtimeInputChannels { device } => self.chat_widget.open_realtime_input_channels(device),
             AppEvent::RealtimeDevicesListed { origin, kind, result } => {
@@ -2397,7 +2397,7 @@ impl App {
                 self.persist_realtime_input_channel(channel).await;
             }
             AppEvent::PersistRealtimeVoiceSelection { voice } => {
-                self.persist_realtime_voice(app_server, voice).await;
+                self.persist_realtime_voice(app_server, voice);
             }
             AppEvent::PersistServiceTierSelection { service_tier } => {
                 self.refresh_status_line();

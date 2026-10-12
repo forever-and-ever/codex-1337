@@ -37,6 +37,7 @@ pub(in crate::app) enum CatalogRequest {
 #[derive(Clone)]
 pub(in crate::app) enum ConnectionMutation {
     ReloadUserConfig,
+    Voice(super::voice_preferences::VoicePreferenceOperation),
 }
 
 #[derive(Clone)]
@@ -86,6 +87,7 @@ pub(in crate::app) enum OperationReceipt {
     GuardianApproved,
     Skills(api::SkillsListResponse),
     ConfigReloaded,
+    VoicePreference(super::voice_preferences::VoicePreferenceReceipt),
     RealtimePrepared(Result<Option<codex_protocol::protocol::RealtimeVoice>, String>),
     RealtimeStarted,
     RealtimeSpeechAccepted,
@@ -119,11 +121,29 @@ impl ThreadOperation {
             },
             Self::Catalog(CatalogRequest::Skills { .. }) => "Loading skills",
             Self::Connection(ConnectionMutation::ReloadUserConfig) => "Reloading settings",
+            Self::Connection(ConnectionMutation::Voice(operation)) => match operation {
+                super::voice_preferences::VoicePreferenceOperation::Open { .. } => {
+                    "Loading voice preferences"
+                }
+                super::voice_preferences::VoicePreferenceOperation::Save { .. } => {
+                    "Saving voice preference"
+                }
+                super::voice_preferences::VoicePreferenceOperation::Confirm { .. } => {
+                    "Confirming saved voice preference"
+                }
+            },
         }
     }
 
     pub(super) fn cancellable_before_send(&self) -> bool {
-        !matches!(self, Self::Control(_) | Self::Response(_))
+        !matches!(
+            self,
+            Self::Control(_)
+                | Self::Response(_)
+                | Self::Connection(ConnectionMutation::Voice(
+                    super::voice_preferences::VoicePreferenceOperation::Confirm { .. }
+                ))
+        )
     }
 
     pub(super) fn lane(&self, scope: OperationScope) -> OperationLane {
@@ -173,6 +193,9 @@ pub(super) async fn send(
                 })
                 .await?;
             return Ok(OperationReceipt::ConfigReloaded);
+        }
+        ThreadOperation::Connection(ConnectionMutation::Voice(operation)) => {
+            return super::voice_preferences::send(handle, id, operation).await;
         }
         _ => {}
     }
@@ -318,6 +341,11 @@ impl App {
         receipt: OperationReceipt,
     ) -> Result<()> {
         if matches!(origin, OperationOrigin::Connection) {
+            if let ThreadOperation::Connection(ConnectionMutation::Voice(operation)) = operation
+                && let OperationReceipt::VoicePreference(receipt) = receipt
+            {
+                self.finish_voice_preference(operation, receipt);
+            }
             return Ok(());
         }
         let thread_id = origin.thread().0;
@@ -409,6 +437,9 @@ impl App {
                 }
             }
             OperationReceipt::SettingsUnsupported => {}
+            OperationReceipt::VoicePreference(_) => {
+                unreachable!("voice preferences have connection origin")
+            }
             OperationReceipt::Compacted
             | OperationReceipt::TerminalsCleaned
             | OperationReceipt::AlarmDisarmed
@@ -425,6 +456,13 @@ impl App {
         operation: &ThreadOperation,
         failure: &SubmissionFailure,
     ) {
+        if let ThreadOperation::Connection(ConnectionMutation::Voice(
+            super::voice_preferences::VoicePreferenceOperation::Confirm { .. },
+        )) = operation
+        {
+            self.chat_widget.add_error_message("Voice preference was saved, but its effective value could not be confirmed. No write was retried.".into());
+            return;
+        }
         let thread_id = origin.thread_id();
         if let Some(thread_id) = thread_id
             && let ThreadOperation::Realtime(operation) = operation

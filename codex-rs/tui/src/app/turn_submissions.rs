@@ -15,6 +15,8 @@ use uuid::Uuid;
 
 #[path = "turn_submission_controller.rs"]
 mod controller;
+#[path = "server_voice_preferences.rs"]
+pub(in crate::app) mod voice_preferences;
 #[path = "turn_submission_worker.rs"]
 mod worker;
 
