@@ -50,7 +50,6 @@ use crate::markdown::render_markdown_agent_with_list_spacing;
 use crate::markdown_render::ListSpacing;
 use crate::style::proposed_plan_style;
 use crate::terminal_hyperlinks::HyperlinkLine;
-use crate::terminal_hyperlinks::prefix_hyperlink_lines;
 use ratatui::prelude::Stylize;
 use ratatui::text::Line;
 use std::path::Path;
@@ -898,7 +897,7 @@ impl PlanStreamController {
         }
 
         let plan_style = proposed_plan_style();
-        let plan_lines = prefix_hyperlink_lines(plan_lines, "  ".into(), "  ".into())
+        let plan_lines = history_cell::prefix_proposed_plan_lines(plan_lines)
             .into_iter()
             .map(|line| line.style(plan_style))
             .collect::<Vec<_>>();

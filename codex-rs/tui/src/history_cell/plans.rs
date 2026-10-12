@@ -90,6 +90,15 @@ pub(crate) fn new_proposed_plan_stream(
     }
 }
 
+pub(crate) fn prefix_proposed_plan_lines(lines: Vec<HyperlinkLine>) -> Vec<HyperlinkLine> {
+    let mut lines = prefix_hyperlink_lines(lines, "  ".into(), "  ".into());
+    // Reconstructed logical lines must retain the same right margin as the markdown renderer.
+    for source in lines.iter_mut().filter_map(|line| line.source.as_mut()) {
+        source.right_reserve = 2;
+    }
+    lines
+}
+
 /// Finalized proposed-plan history that can render itself again for a new width.
 ///
 /// This is the source-backed counterpart to `ProposedPlanStreamCell`. It owns raw markdown and the
@@ -138,7 +147,7 @@ impl ProposedPlanCell {
             if body.is_empty() {
                 body.push(HyperlinkLine::new(Line::from("(empty)".dim().italic())));
             }
-            plan_lines.extend(prefix_hyperlink_lines(body, "  ".into(), "  ".into()));
+            plan_lines.extend(prefix_proposed_plan_lines(body));
             plan_lines.push(HyperlinkLine::new(Line::from(" ")));
 
             lines.extend(plan_lines.into_iter().map(|line| line.style(plan_style)));
