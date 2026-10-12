@@ -269,7 +269,16 @@ impl TranscriptView {
         if index > cells.len() {
             return None;
         }
-        let seat = self.feed_seat(cells, index);
+        // Search reads the full retained preamble independently of both manual folds.
+        let seat = if full_content
+            && cells
+                .get(index)
+                .is_some_and(|cell| cell.as_any().is::<crate::history_cell::PreambleCell>())
+        {
+            super::feed::Seat::LOOSE
+        } else {
+            self.feed_seat(cells, index)
+        };
         if self.elides_cell(cells, index) || !seat.is_visible() {
             return Some(Arc::new(TextLayout::new(
                 Vec::new(),
@@ -406,13 +415,16 @@ impl TranscriptView {
             };
             let mut layout = match seat.content {
                 Content::Hidden => TextLayout::new(Vec::new(), width),
-                Content::Body => TextLayout::new(
-                    crate::transcript_geometry::rich_lines(feed::entry_body(
-                        cell.as_ref(),
-                        content_width,
-                    )),
-                    width,
-                ),
+                Content::Body => {
+                    let parts = feed::entry_body(cell.as_ref(), content_width, expanded_parts)
+                        .expect("feed body requires a feed entry");
+                    let mut layout =
+                        TextLayout::new(crate::transcript_geometry::rich_lines(parts.lines), width);
+                    for control in parts.controls {
+                        layout = layout.with_part_control(control);
+                    }
+                    layout
+                }
                 // Detailed content and markerless cards share the gutter without acquiring
                 // synthetic markers, disclosure identities, or expansion controls.
                 _ if !disclosure => {

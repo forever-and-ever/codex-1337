@@ -1,6 +1,7 @@
 //! The feed's one interaction worth pinning: steps fold under their headers with their figures,
 //! a Code Mode header shows its block's script, and an activity whose only row became its
-//! header keeps its details behind its own control.
+//! header keeps its details behind its own control. Preamble summaries and retained raw context
+//! have independent folds across navigation, reflow, replay, and full-source search.
 
 use super::*;
 use crate::exec_cell::CommandOutput;
@@ -250,4 +251,118 @@ fn steps_fold_under_one_header_with_their_figures() {
     click(&mut view, &script, "cargo test", fold);
     screen(&mut view, "folded");
     insta::assert_snapshot!(snapshots.join("\n\n"));
+
+    // A parent's fold must not stand in for consent to reveal retained instructions. The two
+    // identities also survive reflow and a new immutable revision of the same semantic item.
+    let raw = "<instructions>\n  Be exact.\n</instructions>\n<tools>exec</tools>\n<context>needle Ω</context>";
+    let preamble = |id: &str, raw: &str| -> Arc<dyn HistoryCell> {
+        Arc::new(PreambleCell::from_item(ThreadItem::Preamble {
+            id: id.into(),
+            response_id: id.into(),
+            completed_at_ms: CLOCK_MS,
+            parts: vec![
+                codex_protocol::PreamblePart {
+                    section: codex_protocol::PreambleSection::Instructions,
+                    group: None,
+                    label: "Base instructions".into(),
+                    tokens: 700,
+                },
+                codex_protocol::PreamblePart {
+                    section: codex_protocol::PreambleSection::Context,
+                    group: None,
+                    label: "AGENTS.md /repo".into(),
+                    tokens: 300,
+                },
+            ],
+            raw: Some(raw.into()),
+            change: None,
+            reported_input_tokens: None,
+            window_id: None,
+        }))
+    };
+    let mut cells = vec![
+        preamble("window-1", raw),
+        preamble("window-2", "other window"),
+    ];
+    assert_eq!(
+        cells[0]
+            .raw_lines()
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n"),
+        raw,
+    );
+    let mut view = TranscriptView::default();
+    let mut snapshots = Vec::new();
+    let mut screen =
+        |view: &mut TranscriptView, cells: &[Arc<dyn HistoryCell>], label: &str, width| {
+            let buffer =
+                crate::transcript_view::tests::render(view, cells, width, /*height*/ 24);
+            let text = crate::transcript_view::tests::text(&buffer).replace(&clock, "HH:MM");
+            snapshots.push(format!("{label}\n{}", text.trim_end()));
+            text
+        };
+    let collapsed = screen(&mut view, &cells, "fresh", 80);
+    assert_eq!(
+        collapsed
+            .lines()
+            .filter(|line| line.contains("Preamble"))
+            .count(),
+        2
+    );
+    assert!(!collapsed.contains("Base instructions"));
+    let parent = view.current_layout(&cells, 0).unwrap().fold_targets()[0].clone();
+    assert!(view.focus_fold(&cells, 0, parent.clone()));
+    view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+    let summary = screen(&mut view, &cells, "summary", 80);
+    assert!(summary.contains("Base instructions"));
+    assert!(summary.contains("Raw Context"));
+    assert!(!summary.contains("<instructions>"));
+    for _ in 0..2 {
+        view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+    }
+    assert!(!screen(&mut view, &cells, "summary reopened", 80).contains("<instructions>"));
+    view.handle_key(crossterm::event::KeyCode::Down.into(), &cells);
+    view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+    assert!(screen(&mut view, &cells, "raw explicitly opened", 80).contains("<instructions>"));
+    let second_parent = view.current_layout(&cells, 1).unwrap().fold_targets()[0].clone();
+    assert!(view.focus_fold(&cells, 1, second_parent));
+    view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+    assert!(
+        !view
+            .current_layout(&cells, 1)
+            .unwrap()
+            .text()
+            .contains("other window")
+    );
+    screen(&mut view, &cells, "narrow raw", 40);
+    assert!(screen(&mut view, &cells, "wide raw", 80).contains("<instructions>"));
+    assert!(view.focus_fold(&cells, 0, parent.clone()));
+    for _ in 0..2 {
+        view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+    }
+    assert!(
+        screen(&mut view, &cells, "raw retained across parent fold", 80).contains("<instructions>")
+    );
+    cells[0] = preamble("window-1", raw);
+    view.jump_to_latest();
+    assert!(screen(&mut view, &cells, "same item replayed", 80).contains("<instructions>"));
+    assert!(view.focus_fold(&cells, 0, parent));
+    view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+    let manual = view.disclosure.expanded.clone();
+    view.begin_search();
+    view.paste_search("needle Ω");
+    assert!((0..512).any(|_| !view.advance_search(&cells)));
+    assert!(
+        view.layout(&cells, 0)
+            .unwrap()
+            .text()
+            .contains("<context>needle Ω</context>")
+    );
+    assert!(screen(&mut view, &cells, "search raw match", 80).contains("needle Ω"));
+    view.cancel_search();
+    assert_eq!(view.disclosure.expanded, manual);
+    assert!(!screen(&mut view, &cells, "search cancelled", 80).contains("<instructions>"));
+    insta::assert_snapshot!("preamble_disclosure", snapshots.join("\n\n"));
 }
