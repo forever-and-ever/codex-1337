@@ -240,7 +240,7 @@ impl App {
         let Some(widget) = self.voice_widget_for_thread(thread_id) else {
             return;
         };
-        let message = match failure {
+        let mut message = match failure {
             SubmissionFailure::Rejected(error) => format!("{} failed: {error}", operation.label()),
             SubmissionFailure::Uncertain(error) => format!(
                 "{} outcome is unknown: {error}. No retry was sent.",
@@ -251,6 +251,9 @@ impl App {
                 operation.label()
             ),
         };
+        if !operation.is_preparation() && !matches!(failure, SubmissionFailure::Rejected(_)) {
+            message.push_str(" Close and reopen this TUI to resynchronize voice status; the earlier request may still complete. A stop acknowledgement cannot settle the earlier unknown signal.");
+        }
         match operation {
             RealtimeOperation::Speech { delivery_id, .. } => {
                 if matches!(failure, SubmissionFailure::Rejected(_)) {
@@ -283,7 +286,6 @@ impl App {
             }
             // Do not reset a possibly-started session as though it were definitively unsent.
             RealtimeOperation::Start { .. } => widget.add_error_message(message),
-            _ => {}
         }
     }
 }

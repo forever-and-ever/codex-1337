@@ -21,6 +21,8 @@ mod worker;
 #[path = "server_operation_requests.rs"]
 mod requests;
 
+pub(in crate::app) use requests::ServerRequestDelivery;
+
 #[path = "server_realtime_operations.rs"]
 mod realtime;
 
@@ -55,6 +57,7 @@ enum OperationLane {
     Exit,
     Connection,
     Realtime(ThreadId),
+    Response(ThreadId),
 }
 
 pub(in crate::app) use requests::CatalogRequest;
@@ -278,6 +281,10 @@ pub(crate) enum ThreadSubmissionPreview {
         active: SubmissionPreviewEntry,
         waiting: Vec<SubmissionPreviewEntry>,
     },
+    Uncertain {
+        active: SubmissionPreviewEntry,
+        waiting: Vec<SubmissionPreviewEntry>,
+    },
 }
 
 #[derive(Debug)]
@@ -343,6 +350,11 @@ impl PendingSubmission {
                 text: history_cell::sanitize_user_text(turn.draft.message.text.clone().into())
                     .into_owned(),
             },
+            SubmissionRequest::Operation(operation) if !operation.cancellable_before_send() => {
+                SubmissionPreviewEntry::Cancellation {
+                    text: operation.label(),
+                }
+            }
             SubmissionRequest::Operation(operation) => SubmissionPreviewEntry::Operation {
                 id: self.id,
                 text: operation.label(),
@@ -414,7 +426,8 @@ impl ServerOperations {
         let editable = |entry: &PendingSubmission| {
             entry.id == id
                 && (matches!(entry.request, SubmissionRequest::Turn(_))
-                    || action == PendingSteerCancelAction::Remove)
+                    || action == PendingSteerCancelAction::Remove
+                        && matches!(&entry.request, SubmissionRequest::Operation(operation) if operation.cancellable_before_send()))
         };
         let key = self.lanes.iter().find_map(|(key, lane)| {
             if *key != OperationLane::Connection && lane.active.thread_id != thread_id {
@@ -496,6 +509,7 @@ impl ServerOperations {
         let mut entries = Vec::new();
         for key in [
             OperationLane::Thread(thread_id),
+            OperationLane::Response(thread_id),
             OperationLane::Realtime(thread_id),
             OperationLane::Control(thread_id),
             OperationLane::Connection,
@@ -520,7 +534,7 @@ impl ServerOperations {
             }
         } else if *uncertain {
             SubmissionPreviewEntry::Cancellation {
-                text: "Operation outcome unknown; no retry sent",
+                text: "Outcome unknown; no retry sent. Close and reopen this TUI to resynchronize status; the earlier request may still complete.",
             }
         } else {
             first.preview()
@@ -530,7 +544,11 @@ impl ServerOperations {
             .skip(usize::from(!*queued))
             .map(|(entry, _, _)| entry.preview())
             .collect();
-        ThreadSubmissionPreview::Sending { active, waiting }
+        if *uncertain {
+            ThreadSubmissionPreview::Uncertain { active, waiting }
+        } else {
+            ThreadSubmissionPreview::Sending { active, waiting }
+        }
     }
 }
 

@@ -51,7 +51,7 @@ impl ChatWidget {
         }
     }
     pub(super) fn has_waiting_submission(&self) -> bool {
-        matches!(&self.submission_preview.thread, ThreadSubmissionPreview::Sending { waiting, .. } if waiting.iter().any(|entry| matches!(entry, SubmissionPreviewEntry::Message { .. })))
+        matches!(&self.submission_preview.thread, ThreadSubmissionPreview::Sending { waiting, .. } | ThreadSubmissionPreview::Uncertain { waiting, .. } if waiting.iter().any(|entry| matches!(entry, SubmissionPreviewEntry::Message { .. })))
     }
 
     pub(super) fn edit_submission_after_questions(
@@ -93,6 +93,15 @@ impl ChatWidget {
     pub(super) fn submission_previews(&self) -> Vec<String> {
         let mut previews = match &self.submission_preview.thread {
             ThreadSubmissionPreview::Idle => Vec::new(),
+            ThreadSubmissionPreview::Uncertain { active, waiting } => {
+                std::iter::once(active.text().to_string())
+                    .chain(
+                        waiting
+                            .iter()
+                            .map(|entry| format!("Pending: {}", entry.text())),
+                    )
+                    .collect()
+            }
             ThreadSubmissionPreview::Sending { active, waiting } => {
                 std::iter::once(format!("Sending… {}", active.text()))
                     .chain(
@@ -117,7 +126,8 @@ impl ChatWidget {
     }
 
     pub(super) fn edit_waiting_submission(&mut self, action: PendingSteerCancelAction) -> bool {
-        if let ThreadSubmissionPreview::Sending { waiting, .. } = &self.submission_preview.thread
+        if let ThreadSubmissionPreview::Sending { waiting, .. }
+        | ThreadSubmissionPreview::Uncertain { waiting, .. } = &self.submission_preview.thread
             && let Some(id) = waiting.iter().rev().find_map(|entry| match entry {
                 SubmissionPreviewEntry::Message { id, .. } => Some(*id),
                 SubmissionPreviewEntry::Operation { id, .. }
@@ -158,6 +168,13 @@ impl ChatWidget {
         ) && self.submission_preview.navigation.is_none()
         {
             return false;
+        }
+        if matches!(
+            self.submission_preview.thread,
+            ThreadSubmissionPreview::Uncertain { .. }
+        ) {
+            self.add_info_message("Operation outcome is unknown. Close and reopen this TUI to resynchronize status; the earlier request may still complete. No retry will be sent automatically.".into(), None);
+            return true;
         }
         let message = if matches!(
             self.submission_preview.thread,

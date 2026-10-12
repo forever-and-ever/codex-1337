@@ -11,6 +11,7 @@ pub(in crate::app) enum ThreadOperation {
     Catalog(CatalogRequest),
     Connection(ConnectionMutation),
     Realtime(realtime::RealtimeOperation),
+    Response(Box<ServerRequestDelivery>),
 }
 
 #[derive(Clone)]
@@ -38,6 +39,12 @@ pub(in crate::app) enum ConnectionMutation {
     ReloadUserConfig,
 }
 
+#[derive(Clone)]
+pub(in crate::app) struct ServerRequestDelivery {
+    pub(in crate::app) resolution: super::super::app_server_requests::AppServerRequestResolution,
+    pub(in crate::app) command: AppCommand,
+}
+
 #[derive(Debug)]
 pub(in crate::app) enum OperationReceipt {
     Compacted,
@@ -62,11 +69,13 @@ pub(in crate::app) enum OperationReceipt {
     RealtimeSpeechAccepted,
     RealtimeDiscarded,
     RealtimeStopped,
+    ServerRequestDelivered,
 }
 
 impl ThreadOperation {
     pub(in crate::app) fn label(&self) -> &'static str {
         match self {
+            Self::Response(_) => "Delivering app-server response",
             Self::Realtime(operation) => operation.label(),
             Self::Control(control::ControlOperation::RealtimeStop { .. }) => "Stopping voice mode",
             Self::Control(control::ControlOperation::DetachAndExit { .. }) => {
@@ -91,8 +100,13 @@ impl ThreadOperation {
         }
     }
 
+    pub(super) fn cancellable_before_send(&self) -> bool {
+        !matches!(self, Self::Control(_) | Self::Response(_))
+    }
+
     pub(super) fn lane(&self, thread_id: ThreadId) -> OperationLane {
         match self {
+            Self::Response(_) => OperationLane::Response(thread_id),
             Self::Realtime(_) => OperationLane::Realtime(thread_id),
             Self::Connection(_) => OperationLane::Connection,
             Self::Control(control::ControlOperation::DetachAndExit { .. }) => OperationLane::Exit,
@@ -112,6 +126,16 @@ pub(super) async fn send(
     let request_id = api::RequestId::String(format!("tui-operation-{id}"));
     let thread = thread_id.to_string();
     match operation {
+        ThreadOperation::Response(delivery) => {
+            handle
+                .resolve_server_request(delivery.resolution.request_id, delivery.resolution.result)
+                .await
+                .map_err(|source| TypedRequestError::Transport {
+                    method: "server-request response delivery".into(),
+                    source,
+                })?;
+            Ok(OperationReceipt::ServerRequestDelivered)
+        }
         ThreadOperation::Realtime(operation) => {
             realtime::send(handle, thread_id, id, operation).await
         }
@@ -261,6 +285,16 @@ impl App {
         receipt: OperationReceipt,
     ) -> Result<()> {
         match receipt {
+            OperationReceipt::ServerRequestDelivered => {
+                if let ThreadOperation::Response(delivery) = operation
+                    && ThreadEventStore::op_can_change_pending_replay_state(&delivery.command)
+                {
+                    self.note_thread_outbound_op(thread_id, &delivery.command)
+                        .await;
+                    self.refresh_pending_thread_approvals().await;
+                    self.refresh_side_parent_status_from_store(thread_id).await;
+                }
+            }
             OperationReceipt::RealtimeSpeechAccepted => {
                 if let ThreadOperation::Realtime(
                     operation @ realtime::RealtimeOperation::Speech { delivery_id, .. },
@@ -452,7 +486,8 @@ impl App {
                     }
                 }
                 // These payloads own no widget-local pending lease before dispatch.
-                ThreadOperation::Mutation(_)
+                ThreadOperation::Response(_)
+                | ThreadOperation::Mutation(_)
                 | ThreadOperation::Catalog(_)
                 | ThreadOperation::Connection(_)
                 | ThreadOperation::Control(_) => {}

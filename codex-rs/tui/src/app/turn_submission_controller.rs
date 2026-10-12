@@ -299,7 +299,7 @@ impl App {
                         return None;
                     }
                     let ready = match key {
-                        OperationLane::Exit => true,
+                        OperationLane::Exit | OperationLane::Response(_) => true,
                         OperationLane::Control(thread_id) => {
                             !matches!(&lane.active.request, SubmissionRequest::Operation(operation)
                                 if matches!(&**operation, ThreadOperation::Control(control::ControlOperation::RealtimeStop { .. })))
@@ -373,7 +373,7 @@ impl App {
         let store = Arc::clone(&active.store);
         let completions = self.thread_delivery.completion_tx.clone();
         let control_completions = self.server_operations.control_tx.clone();
-        let urgent = matches!(&active.request, SubmissionRequest::Operation(operation) if matches!(&**operation, ThreadOperation::Control(_) | ThreadOperation::Realtime(_)));
+        let urgent = matches!(&active.request, SubmissionRequest::Operation(operation) if matches!(&**operation, ThreadOperation::Control(_) | ThreadOperation::Realtime(_) | ThreadOperation::Response(_)));
         let settings_supported = server.operation_settings_supported();
         let task = AbortOnDropHandle::new(tokio::spawn(async move {
             let outcome = if !permitted {
@@ -668,15 +668,17 @@ impl App {
                             .then_some(thread_id)
                             .into_iter()
                             .collect::<HashSet<_>>();
-                        self.cleanup_unsent_operations(waiting.iter(), &protected)
+                        if !matches!(&**operation, ThreadOperation::Response(_)) {
+                            self.cleanup_unsent_operations(waiting.iter(), &protected)
+                                .await;
+                            let drafts = recoverable_drafts(waiting.drain(..));
+                            self.restore_submission_drafts(
+                                thread_id,
+                                drafts,
+                                DraftDisposition::Recover { uncertain_id: None },
+                            )
                             .await;
-                        let drafts = recoverable_drafts(waiting.drain(..));
-                        self.restore_submission_drafts(
-                            thread_id,
-                            drafts,
-                            DraftDisposition::Recover { uncertain_id: None },
-                        )
-                        .await;
+                        }
                         self.server_operations.lanes.insert(
                             key,
                             SubmissionLane {

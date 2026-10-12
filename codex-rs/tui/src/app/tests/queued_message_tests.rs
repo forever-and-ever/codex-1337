@@ -548,6 +548,78 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     assert!(recorded_params(&requests, "thread/alarm/disarm").is_empty());
     assert!(recorded_params(&requests, "thread/compact/start").is_empty());
     assert!(app.server_operations.is_empty());
+    // Approval delivery transfers its request identity exactly once and bypasses a stalled
+    // model lane/config barrier. A second UI resolution cannot manufacture a second send.
+    app.submit_thread_op(
+        &mut server,
+        other_id,
+        AppCommand::ListSkills {
+            cwds: vec![app.config.cwd.to_path_buf()],
+            force_reload: false,
+        },
+    )
+    .await?;
+    app.submit_thread_op(&mut server, other_id, AppCommand::ReloadUserConfig)
+        .await?;
+    let approval = ServerRequest::FileChangeRequestApproval {
+        request_id: codex_app_server_protocol::RequestId::Integer(991),
+        params: codex_app_server_protocol::FileChangeRequestApprovalParams {
+            thread_id: other_id.to_string(),
+            turn_id: "response-turn".into(),
+            item_id: "response-patch".into(),
+            started_at_ms: 0,
+            reason: None,
+            grant_root: None,
+        },
+    };
+    assert!(
+        app.pending_app_server_requests
+            .note_server_request(&approval)
+            .is_none()
+    );
+    let decision = AppCommand::PatchApproval {
+        id: "response-patch".into(),
+        decision: codex_app_server_protocol::FileChangeApprovalDecision::Cancel,
+    };
+    let responses_before = recorded_params(&requests, "server/request/response").len();
+    assert!(
+        app.try_resolve_app_server_request(&server, other_id, &decision)
+            .await?
+    );
+    assert!(
+        !app.try_resolve_app_server_request(&server, other_id, &decision)
+            .await?
+    );
+    let delivery = tokio::time::timeout(
+        Duration::from_secs(5),
+        app.server_operations.control_rx.recv(),
+    )
+    .await?
+    .expect("owned response-delivery receipt");
+    app.finish_submission(
+        &mut server,
+        delivery.thread_id,
+        delivery.id,
+        delivery.epoch,
+        delivery.outcome,
+    )
+    .await?;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while recorded_params(&requests, "server/request/response").len() == responses_before {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await?;
+    assert_eq!(
+        recorded_params(&requests, "server/request/response").len(),
+        responses_before + 1
+    );
+    app.handle_submission_event(
+        &server,
+        crate::app::turn_submissions::SubmissionEvent::Retire,
+    )
+    .await;
+    assert!(app.server_operations.is_empty());
     // Realtime preparation owns no signaling effect yet. Retiring its read-only stage
     // releases the matching local helper lease and cannot later start a stale attempt.
     crate::chatwidget::prepare_voice_for_thread(&mut app.chat_widget, other_id);

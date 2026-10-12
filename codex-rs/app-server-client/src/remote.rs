@@ -167,6 +167,9 @@ pub struct RemoteAppServerClient {
     worker_handle: tokio::task::JoinHandle<()>,
 }
 
+#[path = "remote_response_delivery.rs"]
+mod response_delivery;
+
 #[derive(Clone)]
 pub struct RemoteAppServerRequestHandle {
     command_tx: mpsc::Sender<RemoteClientCommand>,
@@ -580,26 +583,9 @@ impl RemoteAppServerClient {
         request_id: RequestId,
         result: JsonRpcResult,
     ) -> IoResult<()> {
-        let (response_tx, response_rx) = oneshot::channel();
-        self.command_tx
-            .send(RemoteClientCommand::ResolveServerRequest {
-                request_id,
-                result,
-                response_tx,
-            })
+        self.request_handle()
+            .resolve_server_request(request_id, result)
             .await
-            .map_err(|_| {
-                IoError::new(
-                    ErrorKind::BrokenPipe,
-                    "remote app-server worker channel is closed",
-                )
-            })?;
-        response_rx.await.map_err(|_| {
-            IoError::new(
-                ErrorKind::BrokenPipe,
-                "remote app-server resolve channel is closed",
-            )
-        })?
     }
 
     pub async fn reject_server_request(

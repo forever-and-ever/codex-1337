@@ -1004,30 +1004,21 @@ impl App {
         let Some(resolution) = self
             .pending_app_server_requests
             .take_resolution(&thread_id.to_string(), op)
-            .map_err(|err| color_eyre::eyre::eyre!(err))?
+            .map_err(|error| color_eyre::eyre::eyre!(error))?
         else {
             return Ok(false);
         };
-
-        match app_server
-            .resolve_server_request(resolution.request_id, resolution.result)
-            .await
-        {
-            Ok(()) => {
-                if ThreadEventStore::op_can_change_pending_replay_state(op) {
-                    self.note_thread_outbound_op(thread_id, op).await;
-                    self.refresh_pending_thread_approvals().await;
-                    self.refresh_side_parent_status_from_store(thread_id).await;
-                }
-                Ok(true)
-            }
-            Err(err) => {
-                self.chat_widget.add_error_message(format!(
-                    "Failed to resolve app-server request for thread {thread_id}: {err}"
-                ));
-                Ok(false)
-            }
-        }
+        // Taking the pending resolution transfers its sole delivery authority into this envelope.
+        // A lost acknowledgement must not fall through to another operation or recreate the response.
+        self.enqueue_server_operation(
+            app_server,
+            thread_id,
+            ThreadOperation::Response(Box::new(super::turn_submissions::ServerRequestDelivery {
+                resolution,
+                command: op.clone(),
+            })),
+        );
+        Ok(true)
     }
 
     pub(super) async fn refresh_pending_thread_approvals(&mut self) {

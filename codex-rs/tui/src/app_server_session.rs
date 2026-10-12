@@ -1512,14 +1512,6 @@ impl AppServerSession {
         self.client.reject_server_request(request_id, error).await
     }
 
-    pub(crate) async fn resolve_server_request(
-        &self,
-        request_id: RequestId,
-        result: serde_json::Value,
-    ) -> std::io::Result<()> {
-        self.client.resolve_server_request(request_id, result).await
-    }
-
     pub(crate) async fn shutdown(self) -> std::io::Result<()> {
         self.client.shutdown().await
     }
