@@ -1501,6 +1501,7 @@ fn test_remote_model_with_policy(
 async fn empty_model_catalog_requires_explicit_model(configured_model: Option<&str>) -> Result<()> {
     skip_if_no_network!(Ok(()));
     let server = MockServer::start().await;
+    mock_server::run(&[&server], async {
     Mock::given(method("GET"))
         .and(path("/codex/models"))
         .respond_with(ResponseTemplate::new(/*s*/ 200).set_body_json(ModelsResponse::default()))
@@ -1538,65 +1539,71 @@ async fn empty_model_catalog_requires_explicit_model(configured_model: Option<&s
         );
     }
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn model_catalog_url_supplies_conversation_model_and_instructions() -> Result<()> {
     skip_if_no_network!(Ok(()));
     let server = MockServer::start().await;
-    let instructions = "Use the gateway's reviewed conversation instructions.";
-    let mut model = codex_models_manager::model_info::model_info_from_slug("gateway-conversation");
-    model.visibility = ModelVisibility::List;
-    model.supported_in_api = true;
-    model.support_verbosity = false;
-    model.used_fallback_model_metadata = false;
-    model
-        .model_messages
-        .as_mut()
-        .expect("fallback instructions")
-        .instructions_template = Some(instructions.to_string());
-    let catalog = ModelsResponse {
-        models: vec![model],
-    };
-    Mock::given(method("GET"))
-        .and(path("/codex/models"))
-        .respond_with(ResponseTemplate::new(/*s*/ 200).set_body_json(&catalog))
-        .expect(1)
-        .mount(&server)
-        .await;
-    let response = mount_sse_once(
-        &server,
-        sse(vec![ev_response_created("resp-1"), ev_completed("resp-1")]),
-    )
-    .await;
-    let catalog_url = format!("{}/codex/models", server.uri());
-    let test = test_codex()
-        .with_auth(CodexAuth::from_api_key("gateway-api-key"))
-        .with_model("gateway-conversation")
-        .with_config(move |config| {
-            config.model_provider.name = "Gateway".to_string();
-            config.model_provider.model_catalog_url = Some(catalog_url.into());
-            config
-                .features
-                .enable(Feature::ApiKeyModelDiscovery)
-                .expect("enable API-key discovery");
-            config.model_verbosity = Some(codex_protocol::config_types::Verbosity::High);
-        })
-        .build_with_auto_env(&server)
-        .await?;
-    let received = test
-        .thread_manager
-        .get_models_manager()
-        .raw_model_catalog(
-            RefreshStrategy::OnlineIfUncached,
-            codex_core::test_support::default_http_client_factory(),
+    mock_server::run(&[&server], async {
+        let instructions = "Use the gateway's reviewed conversation instructions.";
+        let mut model =
+            codex_models_manager::model_info::model_info_from_slug("gateway-conversation");
+        model.visibility = ModelVisibility::List;
+        model.supported_in_api = true;
+        model.support_verbosity = false;
+        model.used_fallback_model_metadata = false;
+        model
+            .model_messages
+            .as_mut()
+            .expect("fallback instructions")
+            .instructions_template = Some(instructions.to_string());
+        let catalog = ModelsResponse {
+            models: vec![model],
+        };
+        Mock::given(method("GET"))
+            .and(path("/codex/models"))
+            .respond_with(ResponseTemplate::new(/*s*/ 200).set_body_json(&catalog))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let response = mount_sse_once(
+            &server,
+            sse(vec![ev_response_created("resp-1"), ev_completed("resp-1")]),
         )
         .await;
-    assert_eq!(received.models, catalog.models);
-    test.submit_turn("hello").await?;
-    let request = response.single_request().body_json();
-    assert_eq!(request["model"], "gateway-conversation");
-    assert_eq!(response.single_request().instructions_text(), instructions);
-    assert_eq!(request["text"].get("verbosity"), None);
-    Ok(())
+        let catalog_url = format!("{}/codex/models", server.uri());
+        let test = test_codex()
+            .with_auth(CodexAuth::from_api_key("gateway-api-key"))
+            .with_model("gateway-conversation")
+            .with_config(move |config| {
+                config.model_provider.name = "Gateway".to_string();
+                config.model_provider.model_catalog_url = Some(catalog_url.into());
+                config
+                    .features
+                    .enable(Feature::ApiKeyModelDiscovery)
+                    .expect("enable API-key discovery");
+                config.model_verbosity = Some(codex_protocol::config_types::Verbosity::High);
+            })
+            .build_with_auto_env(&server)
+            .await?;
+        let received = test
+            .thread_manager
+            .get_models_manager()
+            .raw_model_catalog(
+                RefreshStrategy::OnlineIfUncached,
+                codex_core::test_support::default_http_client_factory(),
+            )
+            .await;
+        assert_eq!(received.models, catalog.models);
+        test.submit_turn("hello").await?;
+        let request = response.single_request().body_json();
+        assert_eq!(request["model"], "gateway-conversation");
+        assert_eq!(response.single_request().instructions_text(), instructions);
+        assert_eq!(request["text"].get("verbosity"), None);
+        Ok(())
+    })
+    .await
 }

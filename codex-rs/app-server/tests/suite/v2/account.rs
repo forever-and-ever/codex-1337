@@ -269,96 +269,100 @@ async fn mock_oauth_token(server: &MockServer, id_token: &str) {
 #[tokio::test]
 async fn logout_account_removes_auth_and_notifies(enterprise_cleanup_failure: bool) -> Result<()> {
     let oauth_server = MockServer::start().await;
-    Mock::given(method("POST"))
-        .and(path("/oauth/revoke"))
-        .respond_with(ResponseTemplate::new(200))
-        .expect(u64::from(enterprise_cleanup_failure))
-        .mount(&oauth_server)
-        .await;
-    let codex_home = TempDir::new()?;
-    create_config_toml(codex_home.path(), CreateConfigTomlParams::default())?;
+    mock_server::run(&[&oauth_server], async {
+        Mock::given(method("POST"))
+            .and(path("/oauth/revoke"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(u64::from(enterprise_cleanup_failure))
+            .mount(&oauth_server)
+            .await;
+        let codex_home = TempDir::new()?;
+        create_config_toml(codex_home.path(), CreateConfigTomlParams::default())?;
 
-    if enterprise_cleanup_failure {
-        write_chatgpt_auth(
-            codex_home.path(),
-            ChatGptAuthFixture::new("access-token")
-                .account_id(WORKSPACE_ID_INITIAL)
-                .chatgpt_user_id("enterprise-user"),
-            AuthCredentialsStoreMode::File,
-        )?;
-        let mut config: toml::Value = toml::from_str(&std::fs::read_to_string(
-            codex_home.path().join("config.toml"),
-        )?)?;
-        config.as_table_mut().expect("config table").insert(
-            "mcp_enterprise_managed_auth".into(),
-            toml::toml! {
-                [idp]
-                issuer = "https://idp.example"
-                client_id = "enterprise-client"
-            }
-            .into(),
+        if enterprise_cleanup_failure {
+            write_chatgpt_auth(
+                codex_home.path(),
+                ChatGptAuthFixture::new("access-token")
+                    .account_id(WORKSPACE_ID_INITIAL)
+                    .chatgpt_user_id("enterprise-user"),
+                AuthCredentialsStoreMode::File,
+            )?;
+            let mut config: toml::Value = toml::from_str(&std::fs::read_to_string(
+                codex_home.path().join("config.toml"),
+            )?)?;
+            config.as_table_mut().expect("config table").insert(
+                "mcp_enterprise_managed_auth".into(),
+                toml::toml! {
+                    [idp]
+                    issuer = "https://idp.example"
+                    client_id = "enterprise-client"
+                }
+                .into(),
+            );
+            std::fs::write(
+                codex_home.path().join("config.toml"),
+                toml::to_string(&config)?,
+            )?;
+            // Fail credential cleanup before touching the platform keyring.
+            std::fs::write(codex_home.path().join("mcp-oauth-locks"), "not a directory")?;
+        } else {
+            login_with_api_key(
+                codex_home.path(),
+                "sk-test-key",
+                AuthCredentialsStoreMode::File,
+                AuthKeyringBackendKind::default(),
+            )?;
+        }
+        assert!(codex_home.path().join("auth.json").exists());
+
+        let refresh_url = format!("{}/oauth/token", oauth_server.uri());
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .without_auto_env()
+            .with_env_overrides(&[
+                ("OPENAI_API_KEY", None),
+                (REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR, Some(&refresh_url)),
+            ])
+            .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
+            .await?;
+
+        let id = mcp.send_logout_account_request().await?;
+        let _ok: LogoutAccountResponse =
+            timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(id)).await??;
+
+        let note = timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_notification_message("account/updated"),
+        )
+        .await??;
+        let parsed: ServerNotification = note.try_into()?;
+        let ServerNotification::AccountUpdated(payload) = parsed else {
+            bail!("unexpected notification: {parsed:?}");
+        };
+        assert!(
+            payload.auth_mode.is_none(),
+            "auth_method should be None after logout"
         );
-        std::fs::write(
-            codex_home.path().join("config.toml"),
-            toml::to_string(&config)?,
-        )?;
-        // Fail credential cleanup before touching the platform keyring.
-        std::fs::write(codex_home.path().join("mcp-oauth-locks"), "not a directory")?;
-    } else {
-        login_with_api_key(
-            codex_home.path(),
-            "sk-test-key",
-            AuthCredentialsStoreMode::File,
-            AuthKeyringBackendKind::default(),
-        )?;
-    }
-    assert!(codex_home.path().join("auth.json").exists());
+        assert_eq!(payload.plan_type, None);
 
-    let refresh_url = format!("{}/oauth/token", oauth_server.uri());
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .without_auto_env()
-        .with_env_overrides(&[
-            ("OPENAI_API_KEY", None),
-            (REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR, Some(&refresh_url)),
-        ])
-        .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
-        .await?;
+        assert!(
+            !codex_home.path().join("auth.json").exists(),
+            "auth.json should be deleted"
+        );
 
-    let id = mcp.send_logout_account_request().await?;
-    let _ok: LogoutAccountResponse = timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(id)).await??;
-
-    let note = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("account/updated"),
-    )
-    .await??;
-    let parsed: ServerNotification = note.try_into()?;
-    let ServerNotification::AccountUpdated(payload) = parsed else {
-        bail!("unexpected notification: {parsed:?}");
-    };
-    assert!(
-        payload.auth_mode.is_none(),
-        "auth_method should be None after logout"
-    );
-    assert_eq!(payload.plan_type, None);
-
-    assert!(
-        !codex_home.path().join("auth.json").exists(),
-        "auth.json should be deleted"
-    );
-
-    let get_id = mcp
-        .send_get_account_request(GetAccountParams {
-            new_thread: None,
-            thread_id: None,
-            refresh_token: false,
-        })
-        .await?;
-    let account: GetAccountResponse =
-        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(get_id)).await??;
-    assert_eq!(account.account, None);
-    Ok(())
+        let get_id = mcp
+            .send_get_account_request(GetAccountParams {
+                new_thread: None,
+                thread_id: None,
+                refresh_token: false,
+            })
+            .await?;
+        let account: GetAccountResponse =
+            timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(get_id)).await??;
+        assert_eq!(account.account, None);
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test]
@@ -1458,182 +1462,185 @@ async fn login_survives_same_owner_token_refresh(
 ) -> Result<()> {
     let codex_home = TempDir::new()?;
     let backend = MockServer::start().await;
-    create_config_toml(
-        codex_home.path(),
-        CreateConfigTomlParams {
-            requires_openai_auth: Some(true),
-            chatgpt_base_url: Some(format!("{}/backend-api", backend.uri())),
-            ..Default::default()
-        },
-    )?;
-    write_models_cache(codex_home.path()).await?;
-    mock_device_code_usercode(&backend, /*interval_seconds*/ 0).await;
-    mock_device_code_token_success(&backend).await;
-    let id_token = encode_id_token(
-        &ChatGptIdTokenClaims::new()
-            .email("device@example.com")
-            .plan_type("enterprise")
-            .chatgpt_user_id("device-user")
-            .chatgpt_account_id(WORKSPACE_ID_DEVICE),
-    )?;
-    mock_oauth_token(&backend, &id_token).await;
-    Mock::given(method("POST"))
-        .and(path("/oauth/refresh"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "id_token": id_token,
-            "access_token": "refreshed-access-token",
-            "refresh_token": "refreshed-refresh-token",
-        })))
-        .expect(1)
-        .mount(&backend)
-        .await;
-    let started = Arc::new(Notify::new());
-    for (request_path, response) in [
-        ("/backend-api/wham/config/bundle", json!({})),
-        (
-            "/backend-api/wham/accounts/check",
-            json!({"accounts": [{
-                "id": WORKSPACE_ID_DEVICE, "workspace_backend_origin": "https://chatgpt.com",
-                "account_routing_override": "NO_CONSTRAINT",
-            }]}),
-        ),
-    ] {
-        let mock = Mock::given(method("GET")).and(path(request_path));
-        let mock = if request_path == "/backend-api/wham/accounts/check" {
-            mock.and(header("authorization", "Bearer refreshed-access-token"))
-        } else {
-            mock
-        };
-        mock.respond_with(ResponseTemplate::new(200).set_body_json(response.clone()))
+    mock_server::run(&[&backend], async {
+        create_config_toml(
+            codex_home.path(),
+            CreateConfigTomlParams {
+                requires_openai_auth: Some(true),
+                chatgpt_base_url: Some(format!("{}/backend-api", backend.uri())),
+                ..Default::default()
+            },
+        )?;
+        write_models_cache(codex_home.path()).await?;
+        mock_device_code_usercode(&backend, /*interval_seconds*/ 0).await;
+        mock_device_code_token_success(&backend).await;
+        let id_token = encode_id_token(
+            &ChatGptIdTokenClaims::new()
+                .email("device@example.com")
+                .plan_type("enterprise")
+                .chatgpt_user_id("device-user")
+                .chatgpt_account_id(WORKSPACE_ID_DEVICE),
+        )?;
+        mock_oauth_token(&backend, &id_token).await;
+        Mock::given(method("POST"))
+            .and(path("/oauth/refresh"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id_token": id_token,
+                "access_token": "refreshed-access-token",
+                "refresh_token": "refreshed-refresh-token",
+            })))
+            .expect(1)
             .mount(&backend)
             .await;
-        if request_path == delayed_path {
-            let request_started = Arc::clone(&started);
-            Mock::given(method("GET"))
-                .and(path(request_path))
-                .and(header("authorization", "Bearer access-token-123"))
-                .respond_with(move |_: &wiremock::Request| {
-                    request_started.notify_one();
-                    ResponseTemplate::new(match refresh_trigger {
-                        LoginRefreshTrigger::AuthStatus => 200,
-                        LoginRefreshTrigger::UnauthorizedConfig => 401,
-                    })
-                    .set_delay(Duration::from_secs(/*secs*/ 2))
-                    .set_body_json(response.clone())
-                })
-                .with_priority(1)
-                .expect(1..=2)
+        let started = Arc::new(Notify::new());
+        for (request_path, response) in [
+            ("/backend-api/wham/config/bundle", json!({})),
+            (
+                "/backend-api/wham/accounts/check",
+                json!({"accounts": [{
+                    "id": WORKSPACE_ID_DEVICE, "workspace_backend_origin": "https://chatgpt.com",
+                    "account_routing_override": "NO_CONSTRAINT",
+                }]}),
+            ),
+        ] {
+            let mock = Mock::given(method("GET")).and(path(request_path));
+            let mock = if request_path == "/backend-api/wham/accounts/check" {
+                mock.and(header("authorization", "Bearer refreshed-access-token"))
+            } else {
+                mock
+            };
+            mock.respond_with(ResponseTemplate::new(200).set_body_json(response.clone()))
                 .mount(&backend)
                 .await;
+            if request_path == delayed_path {
+                let request_started = Arc::clone(&started);
+                Mock::given(method("GET"))
+                    .and(path(request_path))
+                    .and(header("authorization", "Bearer access-token-123"))
+                    .respond_with(move |_: &wiremock::Request| {
+                        request_started.notify_one();
+                        ResponseTemplate::new(match refresh_trigger {
+                            LoginRefreshTrigger::AuthStatus => 200,
+                            LoginRefreshTrigger::UnauthorizedConfig => 401,
+                        })
+                        .set_delay(Duration::from_secs(/*secs*/ 2))
+                        .set_body_json(response.clone())
+                    })
+                    .with_priority(1)
+                    .expect(1..=2)
+                    .mount(&backend)
+                    .await;
+            }
         }
-    }
-    let issuer = backend.uri();
-    let refresh_url = format!("{issuer}/oauth/refresh");
-    let mut server = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .with_env_overrides(&[
-            ("OPENAI_API_KEY", None),
-            (LOGIN_ISSUER_ENV_VAR, Some(issuer.as_str())),
-            (
-                REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR,
-                Some(refresh_url.as_str()),
-            ),
-        ])
-        .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
-        .await?;
-    let request = server
-        .send_login_account_chatgpt_device_code_request()
-        .await?;
-    let login: LoginAccountResponse =
-        timeout(DEFAULT_READ_TIMEOUT, server.read_response(request)).await??;
-    let LoginAccountResponse::ChatgptDeviceCode { login_id, .. } = login else {
-        bail!("unexpected login response: {login:?}");
-    };
-    timeout(DEFAULT_READ_TIMEOUT, started.notified()).await?;
-    let expected_account = GetAccountResponse {
-        display_name: None,
-        account_id: None,
-        account: Some(Account::Chatgpt {
-            email: Some("device@example.com".into()),
-            plan_type: AccountPlanType::Enterprise,
-        }),
-        requires_openai_auth: true,
-        workspace_routing: expected_workspace_routing(WORKSPACE_ID_DEVICE),
-    };
-    match refresh_trigger {
-        LoginRefreshTrigger::AuthStatus => {
-            let request = server
-                .send_get_auth_status_request(GetAuthStatusParams {
-                    include_token: Some(true),
-                    refresh_token: Some(true),
-                })
-                .await?;
-            let refreshed: GetAuthStatusResponse =
-                timeout(DEFAULT_READ_TIMEOUT, server.read_response(request)).await??;
-            assert_eq!(
-                refreshed.auth_token.as_deref(),
-                Some("refreshed-access-token")
-            );
+        let issuer = backend.uri();
+        let refresh_url = format!("{issuer}/oauth/refresh");
+        let mut server = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .with_env_overrides(&[
+                ("OPENAI_API_KEY", None),
+                (LOGIN_ISSUER_ENV_VAR, Some(issuer.as_str())),
+                (
+                    REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR,
+                    Some(refresh_url.as_str()),
+                ),
+            ])
+            .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
+            .await?;
+        let request = server
+            .send_login_account_chatgpt_device_code_request()
+            .await?;
+        let login: LoginAccountResponse =
+            timeout(DEFAULT_READ_TIMEOUT, server.read_response(request)).await??;
+        let LoginAccountResponse::ChatgptDeviceCode { login_id, .. } = login else {
+            bail!("unexpected login response: {login:?}");
+        };
+        timeout(DEFAULT_READ_TIMEOUT, started.notified()).await?;
+        let expected_account = GetAccountResponse {
+            display_name: None,
+            account_id: None,
+            account: Some(Account::Chatgpt {
+                email: Some("device@example.com".into()),
+                plan_type: AccountPlanType::Enterprise,
+            }),
+            requires_openai_auth: true,
+            workspace_routing: expected_workspace_routing(WORKSPACE_ID_DEVICE),
+        };
+        match refresh_trigger {
+            LoginRefreshTrigger::AuthStatus => {
+                let request = server
+                    .send_get_auth_status_request(GetAuthStatusParams {
+                        include_token: Some(true),
+                        refresh_token: Some(true),
+                    })
+                    .await?;
+                let refreshed: GetAuthStatusResponse =
+                    timeout(DEFAULT_READ_TIMEOUT, server.read_response(request)).await??;
+                assert_eq!(
+                    refreshed.auth_token.as_deref(),
+                    Some("refreshed-access-token")
+                );
+            }
+            LoginRefreshTrigger::UnauthorizedConfig => {
+                assert_eq!(read_account(&mut server).await?, expected_account);
+            }
         }
-        LoginRefreshTrigger::UnauthorizedConfig => {
-            assert_eq!(read_account(&mut server).await?, expected_account);
-        }
-    }
-    let completed: AccountLoginCompletedNotification = timeout(
-        DEFAULT_READ_TIMEOUT,
-        server.read_notification("account/login/completed"),
-    )
-    .await??;
-    assert_eq!(
-        completed,
-        AccountLoginCompletedNotification {
-            login_id: Some(login_id),
-            success: true,
-            error: None,
-            onboarding_entrypoint: None,
-        }
-    );
-    let updated: AccountUpdatedNotification = timeout(
-        DEFAULT_READ_TIMEOUT,
-        server.read_notification("account/updated"),
-    )
-    .await??;
-    assert_eq!(
-        updated,
-        AccountUpdatedNotification {
-            auth_mode: Some(AuthMode::Chatgpt),
-            plan_type: Some(AccountPlanType::Enterprise),
-        }
-    );
-    assert_eq!(read_account(&mut server).await?, expected_account);
-    let requests = backend
-        .received_requests()
-        .await
-        .expect("recorded requests");
-    let routing_tokens = requests
-        .iter()
-        .filter(|request| request.url.path() == "/backend-api/wham/accounts/check")
-        .map(|request| {
-            request.headers["authorization"]
-                .to_str()
-                .expect("routing authorization header")
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        routing_tokens,
-        if delayed_path == "/backend-api/wham/accounts/check" {
-            vec!["Bearer access-token-123", "Bearer refreshed-access-token"]
-        } else if matches!(refresh_trigger, LoginRefreshTrigger::UnauthorizedConfig) {
-            vec![
-                "Bearer refreshed-access-token",
-                "Bearer refreshed-access-token",
-            ]
-        } else {
-            vec!["Bearer refreshed-access-token"]
-        }
-    );
-    backend.verify().await;
-    Ok(())
+        let completed: AccountLoginCompletedNotification = timeout(
+            DEFAULT_READ_TIMEOUT,
+            server.read_notification("account/login/completed"),
+        )
+        .await??;
+        assert_eq!(
+            completed,
+            AccountLoginCompletedNotification {
+                login_id: Some(login_id),
+                success: true,
+                error: None,
+                onboarding_entrypoint: None,
+            }
+        );
+        let updated: AccountUpdatedNotification = timeout(
+            DEFAULT_READ_TIMEOUT,
+            server.read_notification("account/updated"),
+        )
+        .await??;
+        assert_eq!(
+            updated,
+            AccountUpdatedNotification {
+                auth_mode: Some(AuthMode::Chatgpt),
+                plan_type: Some(AccountPlanType::Enterprise),
+            }
+        );
+        assert_eq!(read_account(&mut server).await?, expected_account);
+        let requests = backend
+            .received_requests()
+            .await
+            .expect("recorded requests");
+        let routing_tokens = requests
+            .iter()
+            .filter(|request| request.url.path() == "/backend-api/wham/accounts/check")
+            .map(|request| {
+                request.headers["authorization"]
+                    .to_str()
+                    .expect("routing authorization header")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            routing_tokens,
+            if delayed_path == "/backend-api/wham/accounts/check" {
+                vec!["Bearer access-token-123", "Bearer refreshed-access-token"]
+            } else if matches!(refresh_trigger, LoginRefreshTrigger::UnauthorizedConfig) {
+                vec![
+                    "Bearer refreshed-access-token",
+                    "Bearer refreshed-access-token",
+                ]
+            } else {
+                vec!["Bearer refreshed-access-token"]
+            }
+        );
+        backend.verify().await;
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test]
@@ -2604,66 +2611,69 @@ async fn get_account_omits_chatgpt_after_permanent_refresh_failure() -> Result<(
     )?;
 
     let server = MockServer::start().await;
-    Mock::given(method("POST"))
-        .and(path("/oauth/token"))
-        .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({
-            "error": {
-                "code": "refresh_token_reused"
+    mock_server::run(&[&server], async {
+        Mock::given(method("POST"))
+            .and(path("/oauth/token"))
+            .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({
+                "error": {
+                    "code": "refresh_token_reused"
+                }
+            })))
+            .expect(1..=2)
+            .mount(&server)
+            .await;
+
+        let refresh_url = format!("{}/oauth/token", server.uri());
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .without_auto_env()
+            .with_env_overrides(&[
+                ("OPENAI_API_KEY", None),
+                (
+                    REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR,
+                    Some(refresh_url.as_str()),
+                ),
+            ])
+            .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
+            .await?;
+
+        let auth_status_request_id = mcp
+            .send_get_auth_status_request(GetAuthStatusParams {
+                include_token: Some(true),
+                refresh_token: Some(true),
+            })
+            .await?;
+        let _: GetAuthStatusResponse = timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_response(auth_status_request_id),
+        )
+        .await??;
+
+        let request_id = mcp
+            .send_get_account_request(GetAccountParams {
+                new_thread: None,
+                thread_id: None,
+                refresh_token: false,
+            })
+            .await?;
+
+        let received: GetAccountResponse =
+            timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(request_id)).await??;
+
+        assert_eq!(
+            received,
+            GetAccountResponse {
+                display_name: None,
+                account_id: None,
+                account: None,
+                requires_openai_auth: true,
+                workspace_routing: None,
             }
-        })))
-        .expect(1..=2)
-        .mount(&server)
-        .await;
-
-    let refresh_url = format!("{}/oauth/token", server.uri());
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .without_auto_env()
-        .with_env_overrides(&[
-            ("OPENAI_API_KEY", None),
-            (
-                REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR,
-                Some(refresh_url.as_str()),
-            ),
-        ])
-        .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
-        .await?;
-
-    let auth_status_request_id = mcp
-        .send_get_auth_status_request(GetAuthStatusParams {
-            include_token: Some(true),
-            refresh_token: Some(true),
-        })
-        .await?;
-    let _: GetAuthStatusResponse = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_response(auth_status_request_id),
-    )
-    .await??;
-
-    let request_id = mcp
-        .send_get_account_request(GetAccountParams {
-            new_thread: None,
-            thread_id: None,
-            refresh_token: false,
-        })
-        .await?;
-
-    let received: GetAccountResponse =
-        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(request_id)).await??;
-
-    assert_eq!(
-        received,
-        GetAccountResponse {
-            display_name: None,
-            account_id: None,
-            account: None,
-            requires_openai_auth: true,
-            workspace_routing: None,
-        }
-    );
-    server.verify().await;
-    Ok(())
+        );
+        server.verify().await;
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test]

@@ -159,6 +159,7 @@ async fn workspace_roots_allow_file_and_command_writes() -> Result<()> {
     );
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let test = workspace_roots_test(&server).await?;
     let cwd = PathUri::from_abs_path(&test.config.cwd);
     let patch_path = cwd.join("workspace-root-patch.txt")?;
@@ -198,6 +199,8 @@ async fn workspace_roots_allow_file_and_command_writes() -> Result<()> {
     );
 
     remove_files(&test, &[&patch_path, &command_path]).await
+    })
+    .await
 }
 
 #[test_case(false; "thread-owned secondary root")]
@@ -215,6 +218,7 @@ async fn workspace_roots_allow_file_and_command_writes_in_secondary_root(
     );
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let mut builder = test_codex()
         .with_config(move |config| {
             #[cfg(windows)]
@@ -339,6 +343,8 @@ async fn workspace_roots_allow_file_and_command_writes_in_secondary_root(
         )
         .await?;
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -448,6 +454,7 @@ async fn workspace_roots_deny_file_and_command_writes_outside_roots() -> Result<
     );
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let test = workspace_roots_test(&server).await?;
     let patch_path = outside_workspace_path(&test, "outside-patch.txt")?;
     let command_path = outside_workspace_path(&test, "outside-command.txt")?;
@@ -504,4 +511,6 @@ async fn workspace_roots_deny_file_and_command_writes_outside_roots() -> Result<
     );
 
     Ok(())
+    })
+    .await
 }

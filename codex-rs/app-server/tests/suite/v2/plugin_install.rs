@@ -1,3 +1,4 @@
+use core_test_support::mock_server;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -1869,6 +1870,7 @@ async fn plugin_oauth_login_preserves_registered_callbacks_or_uses_legacy_fallba
     callback_already_server_specific: bool,
 ) -> Result<()> {
     let oauth = MockServer::start().await;
+    mock_server::run(&[&oauth], async {
     let authorization_server = oauth.uri();
     let server_url = format!("{authorization_server}/mcp");
     let resource_metadata_url = format!("{authorization_server}/oauth-resource");
@@ -2058,6 +2060,8 @@ async fn plugin_oauth_login_preserves_registered_callbacks_or_uses_legacy_fallba
     );
     oauth.verify().await;
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test]

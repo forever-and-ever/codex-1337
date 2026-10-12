@@ -3459,97 +3459,100 @@ async fn token_count_includes_rate_limits_snapshot() {
 async fn usage_limit_error_emits_rate_limit_event() -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
     let server = MockServer::start().await;
+    mock_server::run(&[&server], async {
+        let response = ResponseTemplate::new(429)
+            .insert_header("x-codex-primary-used-percent", "100.0")
+            .insert_header("x-codex-secondary-used-percent", "87.5")
+            .insert_header("x-codex-primary-over-secondary-limit-percent", "95.0")
+            .insert_header("x-codex-primary-window-minutes", "15")
+            .insert_header("x-codex-secondary-window-minutes", "60")
+            .insert_header("x-codex-credits-has-credits", "true")
+            .insert_header("x-codex-credits-unlimited", "false")
+            .insert_header("x-codex-credits-balance", "")
+            .insert_header(
+                "x-codex-rate-limit-reached-type",
+                "workspace_member_usage_limit_reached",
+            )
+            .set_body_json(json!({
+                "error": {
+                    "type": "usage_limit_reached",
+                    "message": "limit reached",
+                    "resets_at": 1704067242,
+                    "plan_type": "pro"
+                }
+            }));
 
-    let response = ResponseTemplate::new(429)
-        .insert_header("x-codex-primary-used-percent", "100.0")
-        .insert_header("x-codex-secondary-used-percent", "87.5")
-        .insert_header("x-codex-primary-over-secondary-limit-percent", "95.0")
-        .insert_header("x-codex-primary-window-minutes", "15")
-        .insert_header("x-codex-secondary-window-minutes", "60")
-        .insert_header("x-codex-credits-has-credits", "true")
-        .insert_header("x-codex-credits-unlimited", "false")
-        .insert_header("x-codex-credits-balance", "")
-        .insert_header(
-            "x-codex-rate-limit-reached-type",
-            "workspace_member_usage_limit_reached",
-        )
-        .set_body_json(json!({
-            "error": {
-                "type": "usage_limit_reached",
-                "message": "limit reached",
-                "resets_at": 1704067242,
-                "plan_type": "pro"
-            }
-        }));
+        Mock::given(method("POST"))
+            .and(path("/v1/responses"))
+            .respond_with(response)
+            .expect(1)
+            .mount(&server)
+            .await;
 
-    Mock::given(method("POST"))
-        .and(path("/v1/responses"))
-        .respond_with(response)
-        .expect(1)
-        .mount(&server)
-        .await;
+        let mut builder = test_codex();
+        let codex_fixture = builder.build(&server).await?;
+        let codex = codex_fixture.codex.clone();
 
-    let mut builder = test_codex();
-    let codex_fixture = builder.build(&server).await?;
-    let codex = codex_fixture.codex.clone();
+        let expected_limits = json!({
+            "limit_id": "codex",
+            "limit_name": null,
+            "primary": {
+                "used_percent": 100.0,
+                "window_minutes": 15,
+                "resets_at": null
+            },
+            "secondary": {
+                "used_percent": 87.5,
+                "window_minutes": 60,
+                "resets_at": null
+            },
+            "credits": {
+                "has_credits": true,
+                "unlimited": false,
+                "balance": null
+            },
+            "individual_limit": null,
+            "spend_control_reached": null,
+            "plan_type": null,
+            "rate_limit_reached_type": "workspace_member_usage_limit_reached"
+        });
 
-    let expected_limits = json!({
-        "limit_id": "codex",
-        "limit_name": null,
-        "primary": {
-            "used_percent": 100.0,
-            "window_minutes": 15,
-            "resets_at": null
-        },
-        "secondary": {
-            "used_percent": 87.5,
-            "window_minutes": 60,
-            "resets_at": null
-        },
-        "credits": {
-            "has_credits": true,
-            "unlimited": false,
-            "balance": null
-        },
-        "individual_limit": null,
-        "spend_control_reached": null,
-        "plan_type": null,
-        "rate_limit_reached_type": "workspace_member_usage_limit_reached"
-    });
+        let submission = codex
+            .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "hello".into(),
+                text_elements: Vec::new(),
+            }]))
+            .await
+            .expect("submission should succeed while emitting usage limit error events");
 
-    let submission = codex
-        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-            text: "hello".into(),
-            text_elements: Vec::new(),
-        }]))
-        .await
-        .expect("submission should succeed while emitting usage limit error events");
+        let token_event =
+            wait_for_event(&codex, |msg| matches!(msg, EventMsg::TokenCount(_))).await;
+        let EventMsg::TokenCount(event) = token_event else {
+            unreachable!();
+        };
 
-    let token_event = wait_for_event(&codex, |msg| matches!(msg, EventMsg::TokenCount(_))).await;
-    let EventMsg::TokenCount(event) = token_event else {
-        unreachable!();
-    };
+        let event_json = serde_json::to_value(&event).expect("serialize token count event");
+        pretty_assertions::assert_eq!(
+            event_json,
+            json!({
+                "info": null,
+                "rate_limits": expected_limits
+            })
+        );
 
-    let event_json = serde_json::to_value(&event).expect("serialize token count event");
-    pretty_assertions::assert_eq!(
-        event_json,
-        json!({
-            "info": null,
-            "rate_limits": expected_limits
-        })
-    );
+        let error_event = wait_for_event(&codex, |msg| matches!(msg, EventMsg::Error(_))).await;
+        let EventMsg::Error(error_event) = error_event else {
+            unreachable!();
+        };
+        assert!(
+            error_event.message.contains("spend cap set by the owner"),
+            "unexpected error message for submission {submission:?}: {}",
+            error_event.message
+        );
 
-    let error_event = wait_for_event(&codex, |msg| matches!(msg, EventMsg::Error(_))).await;
-    let EventMsg::Error(error_event) = error_event else {
-        unreachable!();
-    };
-    assert!(
-        error_event.message.contains("spend cap set by the owner"),
-        "unexpected error message for submission {submission:?}: {}",
-        error_event.message
-    );
-
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

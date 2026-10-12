@@ -4,6 +4,7 @@ use codex_login::CODEX_ACCESS_TOKEN_ENV_VAR;
 use codex_login::CODEX_API_KEY_ENV_VAR;
 use codex_protocol::protocol::GitInfo;
 use core_test_support::fs_wait;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::skip_if_no_network;
 use pretty_assertions::assert_eq;
@@ -461,172 +462,177 @@ async fn integration_creates_and_checks_session_file() -> anyhow::Result<()> {
 
     // 3. Serve two hermetic SSE responses, one for the initial run and one for resume.
     let server = MockServer::start().await;
-    let resp_mock =
-        responses::mount_sse_sequence(&server, vec![cli_sse_response(), cli_sse_response()]).await;
-    let repo_root = repo_root();
+    mock_server::run(&[&server], async {
+        let resp_mock =
+            responses::mount_sse_sequence(&server, vec![cli_sse_response(), cli_sse_response()])
+                .await;
+        let repo_root = repo_root();
 
-    // 4. Run the codex CLI and invoke `exec`, which is what records a session.
-    let bin = codex_utils_cargo_bin::cargo_bin("codex-exec").unwrap();
-    let mut cmd = Command::new(bin);
-    cmd.arg("--skip-git-repo-check")
-        .arg("-c")
-        .arg(format!("openai_base_url=\"{}/v1\"", server.uri()))
-        .arg("-C")
-        .arg(&repo_root)
-        .arg(&prompt);
-    cmd.env("CODEX_HOME", home.path())
-        .env(CODEX_API_KEY_ENV_VAR, "dummy");
+        // 4. Run the codex CLI and invoke `exec`, which is what records a session.
+        let bin = codex_utils_cargo_bin::cargo_bin("codex-exec").unwrap();
+        let mut cmd = Command::new(bin);
+        cmd.arg("--skip-git-repo-check")
+            .arg("-c")
+            .arg(format!("openai_base_url=\"{}/v1\"", server.uri()))
+            .arg("-C")
+            .arg(&repo_root)
+            .arg(&prompt);
+        cmd.env("CODEX_HOME", home.path())
+            .env(CODEX_API_KEY_ENV_VAR, "dummy");
 
-    let output = run_cli_command(&mut cmd).unwrap();
-    assert!(
-        output.status.success(),
-        "codex-cli exec failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+        let output = run_cli_command(&mut cmd).unwrap();
+        assert!(
+            output.status.success(),
+            "codex-cli exec failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
 
-    // Wait for sessions dir to appear.
-    let sessions_dir = home.path().join("sessions");
-    fs_wait::wait_for_path_exists(&sessions_dir, Duration::from_secs(5)).await?;
+        // Wait for sessions dir to appear.
+        let sessions_dir = home.path().join("sessions");
+        fs_wait::wait_for_path_exists(&sessions_dir, Duration::from_secs(5)).await?;
 
-    // Find the session file that contains `marker`.
-    let marker_clone = marker.clone();
-    let path = fs_wait::wait_for_matching_file(&sessions_dir, Duration::from_secs(10), move |p| {
-        if p.extension().and_then(|ext| ext.to_str()) != Some("jsonl") {
-            return false;
+        // Find the session file that contains `marker`.
+        let marker_clone = marker.clone();
+        let path =
+            fs_wait::wait_for_matching_file(&sessions_dir, Duration::from_secs(10), move |p| {
+                if p.extension().and_then(|ext| ext.to_str()) != Some("jsonl") {
+                    return false;
+                }
+                let Ok(content) = std::fs::read_to_string(p) else {
+                    return false;
+                };
+                content.contains(&marker_clone)
+            })
+            .await?;
+
+        // Basic sanity checks on location and metadata.
+        let rel = path
+            .strip_prefix(&sessions_dir)
+            .expect("session file should live under sessions/");
+        let comps: Vec<String> = rel
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            comps.len(),
+            4,
+            "Expected sessions/YYYY/MM/DD/<file>, got {rel:?}"
+        );
+        let year = &comps[0];
+        let month = &comps[1];
+        let day = &comps[2];
+        assert!(
+            year.len() == 4 && year.chars().all(|c| c.is_ascii_digit()),
+            "Year dir not 4-digit numeric: {year}"
+        );
+        assert!(
+            month.len() == 2 && month.chars().all(|c| c.is_ascii_digit()),
+            "Month dir not zero-padded 2-digit numeric: {month}"
+        );
+        assert!(
+            day.len() == 2 && day.chars().all(|c| c.is_ascii_digit()),
+            "Day dir not zero-padded 2-digit numeric: {day}"
+        );
+        if let Ok(m) = month.parse::<u8>() {
+            assert!((1..=12).contains(&m), "Month out of range: {m}");
         }
-        let Ok(content) = std::fs::read_to_string(p) else {
-            return false;
-        };
-        content.contains(&marker_clone)
-    })
-    .await?;
-
-    // Basic sanity checks on location and metadata.
-    let rel = path
-        .strip_prefix(&sessions_dir)
-        .expect("session file should live under sessions/");
-    let comps: Vec<String> = rel
-        .components()
-        .map(|c| c.as_os_str().to_string_lossy().into_owned())
-        .collect();
-    assert_eq!(
-        comps.len(),
-        4,
-        "Expected sessions/YYYY/MM/DD/<file>, got {rel:?}"
-    );
-    let year = &comps[0];
-    let month = &comps[1];
-    let day = &comps[2];
-    assert!(
-        year.len() == 4 && year.chars().all(|c| c.is_ascii_digit()),
-        "Year dir not 4-digit numeric: {year}"
-    );
-    assert!(
-        month.len() == 2 && month.chars().all(|c| c.is_ascii_digit()),
-        "Month dir not zero-padded 2-digit numeric: {month}"
-    );
-    assert!(
-        day.len() == 2 && day.chars().all(|c| c.is_ascii_digit()),
-        "Day dir not zero-padded 2-digit numeric: {day}"
-    );
-    if let Ok(m) = month.parse::<u8>() {
-        assert!((1..=12).contains(&m), "Month out of range: {m}");
-    }
-    if let Ok(d) = day.parse::<u8>() {
-        assert!((1..=31).contains(&d), "Day out of range: {d}");
-    }
-
-    let content = std::fs::read_to_string(&path).expect("failed to read session file");
-    let mut lines = content.lines();
-    let meta_line = lines
-        .next()
-        .ok_or("missing session meta line")
-        .expect("missing session meta line");
-    let meta: serde_json::Value =
-        serde_json::from_str(meta_line).expect("failed to parse session meta line as JSON");
-    assert_eq!(
-        meta.get("type").and_then(|v| v.as_str()),
-        Some("session_meta")
-    );
-    let payload = meta.get("payload").expect("Missing payload in meta line");
-    assert!(payload.get("id").is_some(), "SessionMeta missing id");
-    assert!(
-        payload.get("timestamp").is_some(),
-        "SessionMeta missing timestamp"
-    );
-
-    let mut found_message = false;
-    for line in lines {
-        if line.trim().is_empty() {
-            continue;
+        if let Ok(d) = day.parse::<u8>() {
+            assert!((1..=31).contains(&d), "Day out of range: {d}");
         }
-        let Ok(item) = serde_json::from_str::<serde_json::Value>(line) else {
-            continue;
-        };
-        if item.get("type").and_then(|t| t.as_str()) == Some("response_item")
-            && let Some(payload) = item.get("payload")
-            && payload.get("type").and_then(|t| t.as_str()) == Some("message")
-            && let Some(c) = payload.get("content")
-            && c.to_string().contains(&marker)
-        {
-            found_message = true;
-            break;
-        }
-    }
-    assert!(
-        found_message,
-        "No message found in session file containing the marker"
-    );
 
-    // Second run: resume should update the existing file.
-    let marker2 = format!("integration-resume-{}", Uuid::new_v4());
-    let prompt2 = format!("echo {marker2}");
-    let bin2 = codex_utils_cargo_bin::cargo_bin("codex-exec").unwrap();
-    let mut cmd2 = Command::new(bin2);
-    cmd2.arg("--skip-git-repo-check")
-        .arg("-c")
-        .arg(format!("openai_base_url=\"{}/v1\"", server.uri()))
-        .arg("-C")
-        .arg(&repo_root)
-        .arg(&prompt2)
-        .arg("resume")
-        .arg("--last");
-    cmd2.env("CODEX_HOME", home.path())
-        .env("OPENAI_API_KEY", "dummy");
+        let content = std::fs::read_to_string(&path).expect("failed to read session file");
+        let mut lines = content.lines();
+        let meta_line = lines
+            .next()
+            .ok_or("missing session meta line")
+            .expect("missing session meta line");
+        let meta: serde_json::Value =
+            serde_json::from_str(meta_line).expect("failed to parse session meta line as JSON");
+        assert_eq!(
+            meta.get("type").and_then(|v| v.as_str()),
+            Some("session_meta")
+        );
+        let payload = meta.get("payload").expect("Missing payload in meta line");
+        assert!(payload.get("id").is_some(), "SessionMeta missing id");
+        assert!(
+            payload.get("timestamp").is_some(),
+            "SessionMeta missing timestamp"
+        );
 
-    let output2 = run_cli_command(&mut cmd2).unwrap();
-    assert!(output2.status.success(), "resume codex-cli run failed");
-    assert_eq!(resp_mock.requests().len(), 2);
-
-    // Find the new session file containing the resumed marker.
-    let marker2_clone = marker2.clone();
-    let resumed_path =
-        fs_wait::wait_for_matching_file(&sessions_dir, Duration::from_secs(10), move |p| {
-            if p.extension().and_then(|ext| ext.to_str()) != Some("jsonl") {
-                return false;
+        let mut found_message = false;
+        for line in lines {
+            if line.trim().is_empty() {
+                continue;
             }
-            std::fs::read_to_string(p)
-                .map(|content| content.contains(&marker2_clone))
-                .unwrap_or(false)
-        })
-        .await?;
+            let Ok(item) = serde_json::from_str::<serde_json::Value>(line) else {
+                continue;
+            };
+            if item.get("type").and_then(|t| t.as_str()) == Some("response_item")
+                && let Some(payload) = item.get("payload")
+                && payload.get("type").and_then(|t| t.as_str()) == Some("message")
+                && let Some(c) = payload.get("content")
+                && c.to_string().contains(&marker)
+            {
+                found_message = true;
+                break;
+            }
+        }
+        assert!(
+            found_message,
+            "No message found in session file containing the marker"
+        );
 
-    // Resume should write to the existing log file.
-    assert_eq!(
-        resumed_path, path,
-        "resume should create a new session file"
-    );
+        // Second run: resume should update the existing file.
+        let marker2 = format!("integration-resume-{}", Uuid::new_v4());
+        let prompt2 = format!("echo {marker2}");
+        let bin2 = codex_utils_cargo_bin::cargo_bin("codex-exec").unwrap();
+        let mut cmd2 = Command::new(bin2);
+        cmd2.arg("--skip-git-repo-check")
+            .arg("-c")
+            .arg(format!("openai_base_url=\"{}/v1\"", server.uri()))
+            .arg("-C")
+            .arg(&repo_root)
+            .arg(&prompt2)
+            .arg("resume")
+            .arg("--last");
+        cmd2.env("CODEX_HOME", home.path())
+            .env("OPENAI_API_KEY", "dummy");
 
-    let resumed_content = std::fs::read_to_string(&resumed_path)?;
-    assert!(
-        resumed_content.contains(&marker),
-        "resumed file missing original marker"
-    );
-    assert!(
-        resumed_content.contains(&marker2),
-        "resumed file missing resumed marker"
-    );
-    Ok(())
+        let output2 = run_cli_command(&mut cmd2).unwrap();
+        assert!(output2.status.success(), "resume codex-cli run failed");
+        assert_eq!(resp_mock.requests().len(), 2);
+
+        // Find the new session file containing the resumed marker.
+        let marker2_clone = marker2.clone();
+        let resumed_path =
+            fs_wait::wait_for_matching_file(&sessions_dir, Duration::from_secs(10), move |p| {
+                if p.extension().and_then(|ext| ext.to_str()) != Some("jsonl") {
+                    return false;
+                }
+                std::fs::read_to_string(p)
+                    .map(|content| content.contains(&marker2_clone))
+                    .unwrap_or(false)
+            })
+            .await?;
+
+        // Resume should write to the existing log file.
+        assert_eq!(
+            resumed_path, path,
+            "resume should create a new session file"
+        );
+
+        let resumed_content = std::fs::read_to_string(&resumed_path)?;
+        assert!(
+            resumed_content.contains(&marker),
+            "resumed file missing original marker"
+        );
+        assert!(
+            resumed_content.contains(&marker2),
+            "resumed file missing resumed marker"
+        );
+        Ok(())
+    })
+    .await
 }
 
 /// Integration test to verify git info is collected and recorded in session files.

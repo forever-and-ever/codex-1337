@@ -536,132 +536,135 @@ async fn assert_code_mode_standalone_web_search(
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
-    let denied = responses::start_mock_server().await;
-    let managed = !matches!(policy, SearchPolicy::Unmanaged);
-    let deny_search = matches!(policy, SearchPolicy::DenySearch);
-    let search_response = match policy {
-        SearchPolicy::DenyRedirect => {
-            ResponseTemplate::new(/*s*/ 307).insert_header("location", denied.uri())
+    mock_server::run(&[&server], async {
+        let denied = responses::start_mock_server().await;
+        let managed = !matches!(policy, SearchPolicy::Unmanaged);
+        let deny_search = matches!(policy, SearchPolicy::DenySearch);
+        let search_response = match policy {
+            SearchPolicy::DenyRedirect => {
+                ResponseTemplate::new(/*s*/ 307).insert_header("location", denied.uri())
+            }
+            SearchPolicy::Unmanaged | SearchPolicy::DenySearch => ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"output": "Search result"})),
+        };
+        let controller = NetworkPolicyController::default();
+        let mut allowed_endpoints =
+            BTreeSet::from([format!("{}/v1/responses", server.uri()).parse()?]);
+        if !deny_search {
+            allowed_endpoints.insert(format!("{}/v1/alpha/search", server.uri()).parse()?);
         }
-        SearchPolicy::Unmanaged | SearchPolicy::DenySearch => {
-            ResponseTemplate::new(200).set_body_json(serde_json::json!({"output": "Search result"}))
-        }
-    };
-    let controller = NetworkPolicyController::default();
-    let mut allowed_endpoints = BTreeSet::from([format!("{}/v1/responses", server.uri()).parse()?]);
-    if !deny_search {
-        allowed_endpoints.insert(format!("{}/v1/alpha/search", server.uri()).parse()?);
-    }
-    let policy = controller.policy().restrict_to_endpoints(allowed_endpoints);
-    assert!(controller.publish(policy.revision(), DestinationPolicy::Unrestricted));
-    Mock::given(method("POST"))
-        .and(path("/v1/alpha/search"))
-        .respond_with(search_response)
-        .expect(if deny_search { 0 } else { 1 })
-        .mount(&server)
-        .await;
+        let policy = controller.policy().restrict_to_endpoints(allowed_endpoints);
+        assert!(controller.publish(policy.revision(), DestinationPolicy::Unrestricted));
+        Mock::given(method("POST"))
+            .and(path("/v1/alpha/search"))
+            .respond_with(search_response)
+            .expect(if deny_search { 0 } else { 1 })
+            .mount(&server)
+            .await;
 
-    responses::mount_sse_once(
-        &server,
-        sse(vec![
-            ev_response_created("resp-1"),
-            ev_custom_tool_call(
-                "call-1",
-                "exec",
-                r#"
+        responses::mount_sse_once(
+            &server,
+            sse(vec![
+                ev_response_created("resp-1"),
+                ev_custom_tool_call(
+                    "call-1",
+                    "exec",
+                    r#"
 const result = await tools.web__run({
   search_query: [{ q: "standalone web search" }],
 });
 text(result);
 "#,
-            ),
-            ev_completed("resp-1"),
-        ]),
-    )
-    .await;
-    let follow_up_mock = responses::mount_sse_once(
-        &server,
-        sse(vec![
-            ev_assistant_message("msg-1", "done"),
-            ev_completed("resp-2"),
-        ]),
-    )
-    .await;
+                ),
+                ev_completed("resp-1"),
+            ]),
+        )
+        .await;
+        let follow_up_mock = responses::mount_sse_once(
+            &server,
+            sse(vec![
+                ev_assistant_message("msg-1", "done"),
+                ev_completed("resp-2"),
+            ]),
+        )
+        .await;
 
-    let auth = CodexAuth::from_api_key("dummy");
-    let auth_manager = codex_core::test_support::auth_manager_from_auth(auth.clone());
-    let mut extension_builder = ExtensionRegistryBuilder::<Config>::new();
-    install_web_search_extension(&mut extension_builder, auth_manager);
-    let mut builder = test_codex()
-        .with_auth(auth)
-        .with_extensions(Arc::new(extension_builder.build()))
-        .with_model("test-gpt-5.1-codex")
-        .with_config(move |config| {
-            if managed {
-                config.application_network_policy = policy;
-                config.respect_system_proxy = false;
-            }
-            config
-                .features
-                .enable(Feature::CodeMode)
-                .expect("code mode should be enabled");
-            config
-                .features
-                .enable(Feature::StandaloneWebSearch)
-                .expect("standalone web search should be enabled");
-            config
-                .web_search_mode
-                .set(web_search_mode)
-                .expect("web search mode should be accepted");
-        });
-    let test = builder.build_with_auto_env(&server).await?;
+        let auth = CodexAuth::from_api_key("dummy");
+        let auth_manager = codex_core::test_support::auth_manager_from_auth(auth.clone());
+        let mut extension_builder = ExtensionRegistryBuilder::<Config>::new();
+        install_web_search_extension(&mut extension_builder, auth_manager);
+        let mut builder = test_codex()
+            .with_auth(auth)
+            .with_extensions(Arc::new(extension_builder.build()))
+            .with_model("test-gpt-5.1-codex")
+            .with_config(move |config| {
+                if managed {
+                    config.application_network_policy = policy;
+                    config.respect_system_proxy = false;
+                }
+                config
+                    .features
+                    .enable(Feature::CodeMode)
+                    .expect("code mode should be enabled");
+                config
+                    .features
+                    .enable(Feature::StandaloneWebSearch)
+                    .expect("standalone web search should be enabled");
+                config
+                    .web_search_mode
+                    .set(web_search_mode)
+                    .expect("web search mode should be accepted");
+            });
+        let test = builder.build_with_auto_env(&server).await?;
 
-    test.submit_turn("Search the web from code mode").await?;
+        test.submit_turn("Search the web from code mode").await?;
 
-    if managed {
-        let output =
-            custom_tool_output_body_and_success(&follow_up_mock.single_request(), "call-1").0;
-        assert!(
-            output.contains("destination denied by application network policy"),
-            "{output}"
+        if managed {
+            let output =
+                custom_tool_output_body_and_success(&follow_up_mock.single_request(), "call-1").0;
+            assert!(
+                output.contains("destination denied by application network policy"),
+                "{output}"
+            );
+            assert!(denied.received_requests().await.unwrap().is_empty());
+            return Ok(());
+        }
+
+        let search_request = server
+            .received_requests()
+            .await
+            .expect("received requests should be available")
+            .into_iter()
+            .find(|request| request.url.path() == "/v1/alpha/search")
+            .expect("standalone search request should be sent");
+        let search_body = search_request
+            .body_json::<Value>()
+            .expect("search request body should be JSON");
+        assert_eq!(
+            search_body["model"],
+            serde_json::json!("test-gpt-5.1-codex")
         );
-        assert!(denied.received_requests().await.unwrap().is_empty());
-        return Ok(());
-    }
+        assert_eq!(
+            search_body["commands"],
+            serde_json::json!({
+                "search_query": [{"q": "standalone web search"}],
+            })
+        );
+        assert_eq!(
+            search_body["settings"],
+            serde_json::json!({
+                "allowed_callers": ["direct"],
+                "external_web_access": expected_external_web_access,
+            })
+        );
+        assert_eq!(
+            custom_tool_output_last_non_empty_text(&follow_up_mock.single_request(), "call-1"),
+            Some("Search result".to_string())
+        );
 
-    let search_request = server
-        .received_requests()
-        .await
-        .expect("received requests should be available")
-        .into_iter()
-        .find(|request| request.url.path() == "/v1/alpha/search")
-        .expect("standalone search request should be sent");
-    let search_body = search_request
-        .body_json::<Value>()
-        .expect("search request body should be JSON");
-    assert_eq!(
-        search_body["model"],
-        serde_json::json!("test-gpt-5.1-codex")
-    );
-    assert_eq!(
-        search_body["commands"],
-        serde_json::json!({
-            "search_query": [{"q": "standalone web search"}],
-        })
-    );
-    assert_eq!(
-        search_body["settings"],
-        serde_json::json!({
-            "allowed_callers": ["direct"],
-            "external_web_access": expected_external_web_access,
-        })
-    );
-    assert_eq!(
-        custom_tool_output_last_non_empty_text(&follow_up_mock.single_request(), "call-1"),
-        Some("Search result".to_string())
-    );
-
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 async fn run_code_mode_turn_with_rmcp(
@@ -4712,131 +4715,134 @@ async fn code_mode_wait_timeout_reconnects_on_next_exec() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
-    let mut builder = test_codex()
-        .with_model("test-gpt-5.1-codex")
-        .with_config(|config| {
-            config
-                .features
-                .enable(Feature::CodeMode)
-                .expect("code mode should be enabled");
-            cap_yield(config, 60_000);
-        });
-    let test = builder.build_with_auto_env(&server).await?;
+    mock_server::run(&[&server], async {
+        let mut builder = test_codex()
+            .with_model("test-gpt-5.1-codex")
+            .with_config(|config| {
+                config
+                    .features
+                    .enable(Feature::CodeMode)
+                    .expect("code mode should be enabled");
+                cap_yield(config, 60_000);
+            });
+        let test = builder.build_with_auto_env(&server).await?;
 
-    let first_turn = responses::mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-1"),
-                ev_custom_tool_call(
-                    "call-1",
-                    "exec",
-                    "yield_control(); await new Promise(() => {});",
-                ),
-                ev_completed("resp-1"),
-            ]),
-            sse(vec![
-                ev_assistant_message("msg-1", "waiting"),
-                ev_completed("resp-2"),
-            ]),
-        ],
-    )
-    .await;
+        let first_turn = responses::mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("resp-1"),
+                    ev_custom_tool_call(
+                        "call-1",
+                        "exec",
+                        "yield_control(); await new Promise(() => {});",
+                    ),
+                    ev_completed("resp-1"),
+                ]),
+                sse(vec![
+                    ev_assistant_message("msg-1", "waiting"),
+                    ev_completed("resp-2"),
+                ]),
+            ],
+        )
+        .await;
 
-    test.submit_turn("start a stalled code-mode cell").await?;
-    let first_request = first_turn
-        .last_request()
-        .expect("initial exec should be returned to the model");
-    let first_items = custom_tool_output_items(&first_request, "call-1");
-    let cell_id = extract_running_cell_id(text_item(&first_items, /*index*/ 0));
+        test.submit_turn("start a stalled code-mode cell").await?;
+        let first_request = first_turn
+            .last_request()
+            .expect("initial exec should be returned to the model");
+        let first_items = custom_tool_output_items(&first_request, "call-1");
+        let cell_id = extract_running_cell_id(text_item(&first_items, /*index*/ 0));
 
-    let timeout_completion = responses::mount_function_call_agent_response(
-        &server,
-        "call-2",
-        &serde_json::to_string(&serde_json::json!({ "cell_id": cell_id }))?,
-        "wait",
-    )
-    .await
-    .completion;
+        let timeout_completion = responses::mount_function_call_agent_response(
+            &server,
+            "call-2",
+            &serde_json::to_string(&serde_json::json!({ "cell_id": cell_id }))?,
+            "wait",
+        )
+        .await
+        .completion;
 
-    test.codex
-        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-            text: "wait for the stalled cell".to_string(),
-            text_elements: Vec::new(),
-        }]))
-        .await?;
-    wait_for_event_match(&test.codex, |event| match event {
-        EventMsg::RawResponseItem(raw) => match &raw.item {
-            ResponseItem::FunctionCall { call_id, .. } if call_id == "call-2" => Some(()),
+        test.codex
+            .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "wait for the stalled cell".to_string(),
+                text_elements: Vec::new(),
+            }]))
+            .await?;
+        wait_for_event_match(&test.codex, |event| match event {
+            EventMsg::RawResponseItem(raw) => match &raw.item {
+                ResponseItem::FunctionCall { call_id, .. } if call_id == "call-2" => Some(()),
+                _ => None,
+            },
             _ => None,
-        },
-        _ => None,
-    })
-    .await;
+        })
+        .await;
 
-    tokio::time::pause();
-    // The wait-start event precedes deadline registration across several awaits.
-    // Give blocking work and host I/O real runtime ticks between simulated steps;
-    // yield_now alone can exhaust the bound before those operations finish.
-    for _ in 0..300 {
-        tokio::time::advance(Duration::from_secs(1)).await;
-        tokio::task::yield_now().await;
-        if timeout_completion
-            .function_call_output_text("call-2")
-            .is_some()
-        {
-            break;
+        tokio::time::pause();
+        // The wait-start event precedes deadline registration across several awaits.
+        // Give blocking work and host I/O real runtime ticks between simulated steps;
+        // yield_now alone can exhaust the bound before those operations finish.
+        for _ in 0..300 {
+            tokio::time::advance(Duration::from_secs(1)).await;
+            tokio::task::yield_now().await;
+            if timeout_completion
+                .function_call_output_text("call-2")
+                .is_some()
+            {
+                break;
+            }
+            tokio::time::resume();
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            tokio::time::pause();
         }
         tokio::time::resume();
-        tokio::time::sleep(Duration::from_millis(10)).await;
-        tokio::time::pause();
-    }
-    tokio::time::resume();
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+
+        let timeout_output = timeout_completion
+            .function_call_output_text("call-2")
+            .expect("timed-out wait should be returned to the model");
+        assert!(
+            timeout_output.contains("code-mode host timed out waiting for wait response"),
+            "unexpected wait output: {timeout_output}"
+        );
+
+        let reconnect_turn = responses::mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("resp-5"),
+                    ev_custom_tool_call(
+                        "call-3",
+                        "exec",
+                        r#"text("reconnected"); yield_control(); await new Promise(() => {});"#,
+                    ),
+                    ev_completed("resp-5"),
+                ]),
+                sse(vec![
+                    ev_assistant_message("msg-3", "reconnected"),
+                    ev_completed("resp-6"),
+                ]),
+            ],
+        )
+        .await;
+
+        test.submit_turn("run a cell after the timeout").await?;
+        let reconnect_request = reconnect_turn
+            .last_request()
+            .expect("replacement exec should be returned to the model");
+        let reconnect_items = custom_tool_output_items(&reconnect_request, "call-3");
+        assert_eq!(
+            extract_running_cell_id(text_item(&reconnect_items, /*index*/ 0)),
+            "g2:1"
+        );
+        assert_eq!(text_item(&reconnect_items, /*index*/ 1), "reconnected");
+
+        Ok(())
     })
-    .await;
-
-    let timeout_output = timeout_completion
-        .function_call_output_text("call-2")
-        .expect("timed-out wait should be returned to the model");
-    assert!(
-        timeout_output.contains("code-mode host timed out waiting for wait response"),
-        "unexpected wait output: {timeout_output}"
-    );
-
-    let reconnect_turn = responses::mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-5"),
-                ev_custom_tool_call(
-                    "call-3",
-                    "exec",
-                    r#"text("reconnected"); yield_control(); await new Promise(() => {});"#,
-                ),
-                ev_completed("resp-5"),
-            ]),
-            sse(vec![
-                ev_assistant_message("msg-3", "reconnected"),
-                ev_completed("resp-6"),
-            ]),
-        ],
-    )
-    .await;
-
-    test.submit_turn("run a cell after the timeout").await?;
-    let reconnect_request = reconnect_turn
-        .last_request()
-        .expect("replacement exec should be returned to the model");
-    let reconnect_items = custom_tool_output_items(&reconnect_request, "call-3");
-    assert_eq!(
-        extract_running_cell_id(text_item(&reconnect_items, /*index*/ 0)),
-        "g2:1"
-    );
-    assert_eq!(text_item(&reconnect_items, /*index*/ 1), "reconnected");
-
-    Ok(())
+    .await
 }
 
 #[derive(Default)]
@@ -6113,6 +6119,7 @@ async fn code_mode_interrupt_terminates_active_cells_and_nested_tools() -> Resul
     }));
 
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let mut builder = test_codex()
         .with_model("test-gpt-5.1-codex")
         .with_extensions(Arc::new(extensions.build()))
@@ -6245,6 +6252,8 @@ async fn code_mode_interrupt_terminates_active_cells_and_nested_tools() -> Resul
     assert_eq!(text_item(&recovery_items, /*index*/ 1), "preserved");
 
     Ok(())
+    })
+    .await
 }
 
 #[cfg_attr(windows, ignore = "no exec_command on Windows")]

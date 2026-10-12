@@ -10,6 +10,7 @@ use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::TurnCompletedNotification;
 use codex_app_server_protocol::TurnStatus;
 use codex_config::types::AuthCredentialsStoreMode;
+use core_test_support::mock_server;
 use core_test_support::streaming_sse::StreamingSseChunk;
 use core_test_support::streaming_sse::start_streaming_sse_server;
 use pretty_assertions::assert_eq;
@@ -26,46 +27,49 @@ use wiremock::matchers::path;
 async fn standalone_startup_applies_local_policy_before_fetching_stored_account_requirements()
 -> Result<()> {
     let backend = MockServer::start().await;
-    let bundle_path = "/backend-api/wham/config/bundle";
-    Mock::given(method("GET"))
-        .and(path(bundle_path))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
-        .expect(0)
-        .mount(&backend)
-        .await;
-    let home = TempDir::new()?;
-    std::fs::write(
-        home.path().join("config.toml"),
-        format!(
-            "chatgpt_base_url = '{}/backend-api/'\ncli_auth_credentials_store = 'file'\n",
-            backend.uri()
-        ),
-    )?;
-    std::fs::write(
-        home.path().join("requirements.toml"),
-        "[application.network]",
-    )?;
-    write_chatgpt_auth(
-        home.path(),
-        ChatGptAuthFixture::new("stored-token")
-            .account_id("selected")
-            .plan_type("enterprise"),
-        AuthCredentialsStoreMode::File,
-    )?;
-    let _app = TestAppServer::builder()
-        .with_codex_home(home.path())
-        .with_env_overrides(&[("OPENAI_API_KEY", None)])
-        .build_initialized()
-        .await?;
-    assert!(
-        backend
-            .received_requests()
-            .await
-            .unwrap()
-            .iter()
-            .all(|request| request.url.path() != bundle_path)
-    );
-    Ok(())
+    mock_server::run(&[&backend], async {
+        let bundle_path = "/backend-api/wham/config/bundle";
+        Mock::given(method("GET"))
+            .and(path(bundle_path))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
+            .expect(0)
+            .mount(&backend)
+            .await;
+        let home = TempDir::new()?;
+        std::fs::write(
+            home.path().join("config.toml"),
+            format!(
+                "chatgpt_base_url = '{}/backend-api/'\ncli_auth_credentials_store = 'file'\n",
+                backend.uri()
+            ),
+        )?;
+        std::fs::write(
+            home.path().join("requirements.toml"),
+            "[application.network]",
+        )?;
+        write_chatgpt_auth(
+            home.path(),
+            ChatGptAuthFixture::new("stored-token")
+                .account_id("selected")
+                .plan_type("enterprise"),
+            AuthCredentialsStoreMode::File,
+        )?;
+        let _app = TestAppServer::builder()
+            .with_codex_home(home.path())
+            .with_env_overrides(&[("OPENAI_API_KEY", None)])
+            .build_initialized()
+            .await?;
+        assert!(
+            backend
+                .received_requests()
+                .await
+                .unwrap()
+                .iter()
+                .all(|request| request.url.path() != bundle_path)
+        );
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

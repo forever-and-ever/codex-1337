@@ -23,6 +23,7 @@ use codex_app_server_protocol::TurnStartResponse;
 use codex_app_server_protocol::TurnStartedNotification;
 use codex_app_server_protocol::TurnStatus;
 use codex_app_server_protocol::UserInput as V2UserInput;
+use core_test_support::mock_server;
 use core_test_support::skip_if_remote;
 use pretty_assertions::assert_eq;
 use tempfile::TempDir;
@@ -252,77 +253,80 @@ async fn turn_interrupt_resolves_pending_command_approval_request() -> Result<()
             "call_sleep_approval",
         )?])
         .await;
-    MockResponsesConfig::new(&server.uri())
-        .with_approval_policy("on-request")
-        .with_root_config(r#"approvals_reviewer = "user""#)
-        .write(&codex_home)?;
+    mock_server::run(&[&server], async {
+        MockResponsesConfig::new(&server.uri())
+            .with_approval_policy("on-request")
+            .with_root_config(r#"approvals_reviewer = "user""#)
+            .write(&codex_home)?;
 
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(&codex_home)
-        .build_initialized()
-        .await?;
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(&codex_home)
+            .build_initialized()
+            .await?;
 
-    let ThreadStartResponse { thread, .. } = mcp
-        .start_thread(ThreadStartParams {
-            model: Some("mock-model".to_string()),
-            ..Default::default()
-        })
-        .await?;
-
-    let TurnStartResponse { turn } = mcp
-        .request(|request_id| ClientRequest::TurnStart {
-            request_id,
-            params: TurnStartParams {
-                thread_id: thread.id.clone(),
-                client_user_message_id: None,
-                input: vec![V2UserInput::Text {
-                    text: "run python".to_string(),
-                    text_elements: Vec::new(),
-                }],
-                cwd: Some(working_directory),
-                approval_policy: Some(codex_app_server_protocol::AskForApproval::UnlessTrusted),
+        let ThreadStartResponse { thread, .. } = mcp
+            .start_thread(ThreadStartParams {
+                model: Some("mock-model".to_string()),
                 ..Default::default()
-            },
-        })
-        .await?;
+            })
+            .await?;
 
-    let request = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_request_message(),
-    )
-    .await??;
-    let ServerRequest::CommandExecutionRequestApproval { request_id, params } = request else {
-        panic!("expected CommandExecutionRequestApproval request");
-    };
-    assert_eq!(params.item_id, "call_sleep_approval");
-    assert_eq!(params.thread_id, thread.id);
-    assert_eq!(params.turn_id, turn.id);
+        let TurnStartResponse { turn } = mcp
+            .request(|request_id| ClientRequest::TurnStart {
+                request_id,
+                params: TurnStartParams {
+                    thread_id: thread.id.clone(),
+                    client_user_message_id: None,
+                    input: vec![V2UserInput::Text {
+                        text: "run python".to_string(),
+                        text_elements: Vec::new(),
+                    }],
+                    cwd: Some(working_directory),
+                    approval_policy: Some(codex_app_server_protocol::AskForApproval::UnlessTrusted),
+                    ..Default::default()
+                },
+            })
+            .await?;
 
-    let _: TurnInterruptResponse = mcp
-        .request(|request_id| ClientRequest::TurnInterrupt {
-            request_id,
-            params: TurnInterruptParams {
-                thread_id: thread.id.clone(),
-                turn_id: turn.id.clone(),
-            },
-        })
-        .await?;
+        let request = timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_request_message(),
+        )
+        .await??;
+        let ServerRequest::CommandExecutionRequestApproval { request_id, params } = request else {
+            panic!("expected CommandExecutionRequestApproval request");
+        };
+        assert_eq!(params.item_id, "call_sleep_approval");
+        assert_eq!(params.thread_id, thread.id);
+        assert_eq!(params.turn_id, turn.id);
 
-    let resolved: ServerRequestResolvedNotification = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_notification("serverRequest/resolved"),
-    )
-    .await??;
-    assert_eq!(resolved.thread_id, thread.id);
-    assert_eq!(resolved.request_id, request_id);
+        let _: TurnInterruptResponse = mcp
+            .request(|request_id| ClientRequest::TurnInterrupt {
+                request_id,
+                params: TurnInterruptParams {
+                    thread_id: thread.id.clone(),
+                    turn_id: turn.id.clone(),
+                },
+            })
+            .await?;
 
-    let completed: TurnCompletedNotification = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_notification("turn/completed"),
-    )
-    .await??;
-    assert_eq!(completed.thread_id, thread.id);
-    assert_eq!(completed.turn.status, TurnStatus::Interrupted);
+        let resolved: ServerRequestResolvedNotification = timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_notification("serverRequest/resolved"),
+        )
+        .await??;
+        assert_eq!(resolved.thread_id, thread.id);
+        assert_eq!(resolved.request_id, request_id);
 
-    Ok(())
+        let completed: TurnCompletedNotification = timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_notification("turn/completed"),
+        )
+        .await??;
+        assert_eq!(completed.thread_id, thread.id);
+        assert_eq!(completed.turn.status, TurnStatus::Interrupted);
+
+        Ok(())
+    })
+    .await
 }

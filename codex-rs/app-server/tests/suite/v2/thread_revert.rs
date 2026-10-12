@@ -45,6 +45,7 @@ use codex_rollout::RolloutItem;
 use codex_rollout::read_session_meta_line;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use core_test_support::load_default_config_for_test;
+use core_test_support::mock_server;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
 use tempfile::TempDir;
@@ -602,112 +603,115 @@ async fn thread_revert_interrupts_active_turn_and_keeps_thread_loaded() -> Resul
         create_final_assistant_message_sse_response("third")?,
     ])
     .await;
-    MockResponsesConfig::new(&server.uri()).write(home.path())?;
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(home.path())
-        .build()
-        .await?;
-    initialize_experimental(&mut mcp).await?;
+    mock_server::run(&[&server], async {
+        MockResponsesConfig::new(&server.uri()).write(home.path())?;
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(home.path())
+            .build()
+            .await?;
+        initialize_experimental(&mut mcp).await?;
 
-    let ThreadStartResponse { thread, .. } = mcp
-        .start_thread(ThreadStartParams {
-            history_mode: Some(ThreadHistoryMode::Paginated),
-            ..Default::default()
-        })
-        .await?;
-    let first_turn = mcp
-        .start_turn_and_wait_for_completion(TurnStartParams {
-            thread_id: thread.id.clone(),
+        let ThreadStartResponse { thread, .. } = mcp
+            .start_thread(ThreadStartParams {
+                history_mode: Some(ThreadHistoryMode::Paginated),
+                ..Default::default()
+            })
+            .await?;
+        let first_turn = mcp
+            .start_turn_and_wait_for_completion(TurnStartParams {
+                thread_id: thread.id.clone(),
+                input: vec![UserInput::Text {
+                    text: "first".to_string(),
+                    text_elements: Vec::new(),
+                }],
+                ..Default::default()
+            })
+            .await?;
+
+        let TurnStartResponse { turn: active_turn } = mcp
+            .request(|request_id| ClientRequest::TurnStart {
+                request_id,
+                params: TurnStartParams {
+                    thread_id: thread.id.clone(),
+                    input: vec![UserInput::Text {
+                        text: "sleep".to_string(),
+                        text_elements: Vec::new(),
+                    }],
+                    collaboration_mode: Some(CollaborationMode {
+                        mode: ModeKind::Plan,
+                        settings: Settings {
+                            model: "mock-model".to_string(),
+                            reasoning_effort: Some(ReasoningEffort::Medium),
+                            developer_instructions: None,
+                        },
+                    }),
+                    approval_policy: Some(AskForApproval::Never),
+                    ..Default::default()
+                },
+            })
+            .await?;
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_request_message(),
+        )
+        .await??;
+
+        let ThreadRevertResponse {
+            thread: reverted_thread,
+            turns_backwards_cursor,
+            items_backwards_cursor,
+        } = mcp
+            .request(|request_id| ClientRequest::ThreadRevert {
+                request_id,
+                params: ThreadRevertParams {
+                    thread_id: thread.id.clone(),
+                    before_turn_id: active_turn.id.clone(),
+                },
+            })
+            .await?;
+        let completed: TurnCompletedNotification = timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_notification("turn/completed"),
+        )
+        .await??;
+        assert_eq!(completed.thread_id, thread.id);
+        assert_eq!(completed.turn.status, TurnStatus::Interrupted);
+        assert!(reverted_thread.turns.is_empty());
+        assert!(items_backwards_cursor.is_some());
+        assert_eq!(
+            turn_ids_from_cursor(
+                &mut mcp,
+                &thread.id,
+                turns_backwards_cursor,
+                /*sort_direction*/ None,
+            )
+            .await?,
+            vec![first_turn.turn.id]
+        );
+
+        let resumed: ThreadResumeResponse = mcp
+            .request(|request_id| ClientRequest::ThreadResume {
+                request_id,
+                params: ThreadResumeParams {
+                    thread_id: thread.id.clone(),
+                    ..Default::default()
+                },
+            })
+            .await?;
+        assert_eq!(resumed.approval_policy, AskForApproval::Never);
+
+        mcp.start_turn_and_wait_for_completion(TurnStartParams {
+            thread_id: thread.id,
             input: vec![UserInput::Text {
-                text: "first".to_string(),
+                text: "third".to_string(),
                 text_elements: Vec::new(),
             }],
             ..Default::default()
         })
         .await?;
-
-    let TurnStartResponse { turn: active_turn } = mcp
-        .request(|request_id| ClientRequest::TurnStart {
-            request_id,
-            params: TurnStartParams {
-                thread_id: thread.id.clone(),
-                input: vec![UserInput::Text {
-                    text: "sleep".to_string(),
-                    text_elements: Vec::new(),
-                }],
-                collaboration_mode: Some(CollaborationMode {
-                    mode: ModeKind::Plan,
-                    settings: Settings {
-                        model: "mock-model".to_string(),
-                        reasoning_effort: Some(ReasoningEffort::Medium),
-                        developer_instructions: None,
-                    },
-                }),
-                approval_policy: Some(AskForApproval::Never),
-                ..Default::default()
-            },
-        })
-        .await?;
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_request_message(),
-    )
-    .await??;
-
-    let ThreadRevertResponse {
-        thread: reverted_thread,
-        turns_backwards_cursor,
-        items_backwards_cursor,
-    } = mcp
-        .request(|request_id| ClientRequest::ThreadRevert {
-            request_id,
-            params: ThreadRevertParams {
-                thread_id: thread.id.clone(),
-                before_turn_id: active_turn.id.clone(),
-            },
-        })
-        .await?;
-    let completed: TurnCompletedNotification = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_notification("turn/completed"),
-    )
-    .await??;
-    assert_eq!(completed.thread_id, thread.id);
-    assert_eq!(completed.turn.status, TurnStatus::Interrupted);
-    assert!(reverted_thread.turns.is_empty());
-    assert!(items_backwards_cursor.is_some());
-    assert_eq!(
-        turn_ids_from_cursor(
-            &mut mcp,
-            &thread.id,
-            turns_backwards_cursor,
-            /*sort_direction*/ None,
-        )
-        .await?,
-        vec![first_turn.turn.id]
-    );
-
-    let resumed: ThreadResumeResponse = mcp
-        .request(|request_id| ClientRequest::ThreadResume {
-            request_id,
-            params: ThreadResumeParams {
-                thread_id: thread.id.clone(),
-                ..Default::default()
-            },
-        })
-        .await?;
-    assert_eq!(resumed.approval_policy, AskForApproval::Never);
-
-    mcp.start_turn_and_wait_for_completion(TurnStartParams {
-        thread_id: thread.id,
-        input: vec![UserInput::Text {
-            text: "third".to_string(),
-            text_elements: Vec::new(),
-        }],
-        ..Default::default()
+        Ok(())
     })
-    .await?;
-    Ok(())
+    .await
 }
 
 async fn turn_ids_from_cursor(

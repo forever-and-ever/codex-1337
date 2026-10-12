@@ -12,6 +12,7 @@ use codex_app_server_protocol::LoginAccountResponse;
 use codex_app_server_protocol::LogoutAccountResponse;
 use codex_app_server_protocol::RequestId;
 use codex_config::types::AuthCredentialsStoreMode;
+use core_test_support::mock_server;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
 use serde_json::json;
@@ -98,6 +99,7 @@ async fn saved_workspace_is_discovered_once_and_not_the_default_account(
     plan_type: &str,
 ) -> Result<()> {
     let backend = MockServer::start().await;
+    mock_server::run(&[&backend], async {
     Mock::given(method("GET")).and(path("/backend-api/wham/accounts/check"))
         .and(header("chatgpt-account-id", "selected"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
@@ -160,11 +162,14 @@ async fn saved_workspace_is_discovered_once_and_not_the_default_account(
     assert_eq!(read(&mut server).await?, expected);
     backend.verify().await;
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test]
 async fn saved_chatgpt_login_without_selected_workspace_preserves_account() -> Result<()> {
     let backend = MockServer::start().await;
+    mock_server::run(&[&backend], async {
     Mock::given(path("/backend-api/wham/accounts/check"))
         .respond_with(ResponseTemplate::new(500))
         .expect(0)
@@ -185,6 +190,8 @@ async fn saved_chatgpt_login_without_selected_workspace_preserves_account() -> R
     );
     backend.verify().await;
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test]
@@ -252,6 +259,7 @@ async fn stable_clients_do_not_treat_failed_workspace_discovery_as_unrestricted(
 async fn login_and_workspace_switch_notify_after_routing_is_ready_then_logout_clears_it()
 -> Result<()> {
     let backend = MockServer::start().await;
+    mock_server::run(&[&backend], async {
     Mock::given(method("GET")).and(path("/backend-api/wham/accounts/check"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"accounts": [
             {"id": "first", "workspace_backend_origin": "https://chatgpt.com", "account_routing_override": "us_cr"},
@@ -295,6 +303,8 @@ async fn login_and_workspace_switch_notify_after_routing_is_ready_then_logout_cl
     );
     backend.verify().await;
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test]
@@ -383,6 +393,7 @@ async fn late_startup_discovery_is_discarded_on_workspace_switch_and_logout() ->
 #[tokio::test]
 async fn api_only_login_does_not_discover_chatgpt_routing() -> Result<()> {
     let backend = MockServer::start().await;
+    mock_server::run(&[&backend], async {
     Mock::given(path("/backend-api/wham/accounts/check"))
         .respond_with(ResponseTemplate::new(500))
         .expect(0)
@@ -403,16 +414,19 @@ async fn api_only_login_does_not_discover_chatgpt_routing() -> Result<()> {
     );
     backend.verify().await;
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test]
 async fn failed_workspace_requirements_do_not_fall_back_to_startup_config() -> Result<()> {
     let backend = MockServer::start().await;
-    let home = TempDir::new()?;
-    config(&home, &backend).await?;
-    let mut server = start(&home).await?;
-    backend.reset().await;
-    Mock::given(path("/backend-api/wham/config/bundle"))
+    mock_server::run(&[&backend], async {
+        let home = TempDir::new()?;
+        config(&home, &backend).await?;
+        let mut server = start(&home).await?;
+        backend.reset().await;
+        Mock::given(path("/backend-api/wham/config/bundle"))
         .respond_with(ResponseTemplate::new(200).set_body_json(
             json!({"requirements_toml": {"enterprise_managed": [{
                 "id": "invalid", "name": "Invalid requirements", "contents": "application = true",
@@ -420,39 +434,42 @@ async fn failed_workspace_requirements_do_not_fall_back_to_startup_config() -> R
         ))
         .mount(&backend)
         .await;
-    Mock::given(path("/backend-api/wham/accounts/check"))
-        .respond_with(ResponseTemplate::new(200))
-        .expect(0)
-        .mount(&backend)
-        .await;
-    login(&mut server, "selected").await?;
-    let notification = timeout(
-        READ_TIMEOUT,
-        server.read_stream_until_notification_message("account/login/completed"),
-    )
-    .await??;
-    assert_eq!(notification.params.unwrap()["success"], false);
-    let request = server
-        .send_get_account_request(GetAccountParams {
-            new_thread: None,
-            thread_id: None,
-            refresh_token: false,
-        })
-        .await?;
-    let error = timeout(
-        READ_TIMEOUT,
-        server.read_stream_until_error_message(RequestId::Integer(request)),
-    )
-    .await??;
-    assert_eq!(error.error.message, "failed to load workspace requirements");
-    backend.verify().await;
-    Ok(())
+        Mock::given(path("/backend-api/wham/accounts/check"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(0)
+            .mount(&backend)
+            .await;
+        login(&mut server, "selected").await?;
+        let notification = timeout(
+            READ_TIMEOUT,
+            server.read_stream_until_notification_message("account/login/completed"),
+        )
+        .await??;
+        assert_eq!(notification.params.unwrap()["success"], false);
+        let request = server
+            .send_get_account_request(GetAccountParams {
+                new_thread: None,
+                thread_id: None,
+                refresh_token: false,
+            })
+            .await?;
+        let error = timeout(
+            READ_TIMEOUT,
+            server.read_stream_until_error_message(RequestId::Integer(request)),
+        )
+        .await??;
+        assert_eq!(error.error.message, "failed to load workspace requirements");
+        backend.verify().await;
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test]
 async fn backend_config_changed_during_discovery_is_retried_with_fresh_config() -> Result<()> {
     let old_backend = MockServer::start().await;
     let new_backend = MockServer::start().await;
+    mock_server::run(&[&new_backend], async {
     let started = Arc::new(Notify::new());
     let request_started = Arc::clone(&started);
     Mock::given(path("/backend-api/wham/accounts/check"))
@@ -502,4 +519,6 @@ async fn backend_config_changed_during_discovery_is_retried_with_fresh_config() 
     );
     new_backend.verify().await;
     Ok(())
+    })
+    .await
 }

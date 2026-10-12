@@ -30,6 +30,7 @@ use codex_feedback::CodexFeedback;
 use codex_http_client::HttpClientBuilder;
 use codex_http_client::cache_system_proxy_route_for_test;
 use codex_protocol::protocol::SessionSource;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::skip_if_no_network;
 use pretty_assertions::assert_eq;
@@ -90,6 +91,7 @@ async fn browser_login_bootstraps_through_system_proxy() -> Result<()> {
 
     let cloud_enables_proxy = mode == "cloud-enables-proxy";
     let proxy = MockServer::start().await;
+    mock_server::run(&[&proxy], async {
     let provider = MockServer::start().await;
     let codex_home = TempDir::new()?;
     let model_catalog = codex_models_manager::bundled_models_response()?;
@@ -295,4 +297,6 @@ async fn browser_login_bootstraps_through_system_proxy() -> Result<()> {
     client.shutdown().await?;
     proxy.verify().await;
     Ok(())
+    })
+    .await
 }

@@ -5,6 +5,7 @@ use app_test_support::ChatGptIdTokenClaims;
 use app_test_support::encode_id_token;
 use codex_app_server_protocol::ChatgptAuthTokensRefreshResponse;
 use codex_app_server_protocol::ServerRequest;
+use core_test_support::mock_server;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
 use serde_json::json;
@@ -391,103 +392,106 @@ async fn logout_login_enable_recovers_first_unauthorized_enrollment() -> Result<
     let home = TempDir::new()?;
     let listener = configured_remote_control_listener(home.path()).await?;
     let oauth = wiremock::MockServer::start().await;
-    wiremock::Mock::given(wiremock::matchers::path("/oauth/revoke"))
-        .respond_with(wiremock::ResponseTemplate::new(/*s*/ 200))
-        .expect(1)
-        .mount(&oauth)
-        .await;
-    let revoke_url = format!("{}/oauth/revoke", oauth.uri());
-    let mut app = TestAppServer::builder()
-        .with_codex_home(home.path())
-        .with_env_overrides(&[("CODEX_REVOKE_TOKEN_URL_OVERRIDE", Some(revoke_url.as_str()))])
-        .without_auto_env()
-        .build_initialized()
-        .await?;
-    let enabled = app.send_remote_control_ephemeral_enable_request().await?;
-    wait_for_response(&mut app, enabled).await?;
-    let (_, reader) = timeout(DEFAULT_TIMEOUT, read_enroll_request(&listener)).await??;
-    respond_with_json(
-        reader.into_inner(),
-        serde_json::json!({
-            "server_id": "server-a", "environment_id": "environment-a",
-            "remote_control_token": "token-a", "expires_at": "3026-05-22T12:34:56Z",
-        }),
-    )
-    .await?;
-    let (stream, _) = timeout(DEFAULT_TIMEOUT, listener.accept()).await??;
-    let mut websocket = timeout(DEFAULT_TIMEOUT, accept_async(stream)).await??;
-    let logout = app.send_logout_account_request().await?;
-    wait_for_response(&mut app, logout).await?;
-    timeout(DEFAULT_TIMEOUT, async {
-        loop {
-            let notification = app
-                .read_stream_until_notification_message("remoteControl/status/changed")
-                .await?;
-            let status: RemoteControlStatusChangedNotification =
-                serde_json::from_value(notification.params.context("status params")?)?;
-            if status.status == RemoteControlConnectionStatus::Disabled {
-                return Ok::<(), anyhow::Error>(());
-            }
-        }
-    })
-    .await??;
-    assert!(matches!(
-        timeout(DEFAULT_TIMEOUT, websocket.next()).await?,
-        None | Some(Err(_)) | Some(Ok(Message::Close(_)))
-    ));
-
-    let token = encode_id_token(
-        &ChatGptIdTokenClaims::new()
-            .chatgpt_account_id("account_b")
-            .chatgpt_user_id("user_b")
-            .plan_type("pro"),
-    )?;
-    let login = app
-        .send_chatgpt_auth_tokens_login_request(
-            token.clone(),
-            "account_b".to_string(),
-            Some("pro".to_string()),
+    mock_server::run(&[&oauth], async {
+        wiremock::Mock::given(wiremock::matchers::path("/oauth/revoke"))
+            .respond_with(wiremock::ResponseTemplate::new(/*s*/ 200))
+            .expect(1)
+            .mount(&oauth)
+            .await;
+        let revoke_url = format!("{}/oauth/revoke", oauth.uri());
+        let mut app = TestAppServer::builder()
+            .with_codex_home(home.path())
+            .with_env_overrides(&[("CODEX_REVOKE_TOKEN_URL_OVERRIDE", Some(revoke_url.as_str()))])
+            .without_auto_env()
+            .build_initialized()
+            .await?;
+        let enabled = app.send_remote_control_ephemeral_enable_request().await?;
+        wait_for_response(&mut app, enabled).await?;
+        let (_, reader) = timeout(DEFAULT_TIMEOUT, read_enroll_request(&listener)).await??;
+        respond_with_json(
+            reader.into_inner(),
+            serde_json::json!({
+                "server_id": "server-a", "environment_id": "environment-a",
+                "remote_control_token": "token-a", "expires_at": "3026-05-22T12:34:56Z",
+            }),
         )
         .await?;
-    wait_for_response(&mut app, login).await?;
-    let enabled = app.send_remote_control_ephemeral_enable_request().await?;
-    wait_for_response(&mut app, enabled).await?;
-    let (line, reader) = timeout(DEFAULT_TIMEOUT, read_enroll_request(&listener)).await??;
-    assert_eq!(
-        line,
-        "POST /backend-api/wham/remote/control/server/enroll HTTP/1.1"
-    );
-    respond_with_status(reader.into_inner(), "401 Unauthorized", "expired token").await?;
-    let request = timeout(DEFAULT_TIMEOUT, app.read_stream_until_request_message()).await??;
-    let ServerRequest::ChatgptAuthTokensRefresh { request_id, .. } = request else {
-        anyhow::bail!("expected token refresh after the new owner's 401");
-    };
-    let refreshed_token = encode_id_token(
-        &ChatGptIdTokenClaims::new()
-            .chatgpt_account_id("account_b")
-            .chatgpt_user_id("user_b")
-            .plan_type("pro")
-            .email("refreshed@example.com"),
-    )?;
-    app.send_response(
-        request_id,
-        serde_json::to_value(ChatgptAuthTokensRefreshResponse {
-            access_token: refreshed_token,
-            chatgpt_account_id: "account_b".to_string(),
-            chatgpt_plan_type: Some("pro".to_string()),
-        })?,
-    )
-    .await?;
-    let (_, reader) = timeout(DEFAULT_TIMEOUT, read_enroll_request(&listener)).await??;
-    respond_with_json(
-        reader.into_inner(),
-        serde_json::json!({
-            "server_id": "server-b", "environment_id": "environment-b",
-            "remote_control_token": "token-b", "expires_at": "3026-05-22T12:34:56Z",
-        }),
-    )
-    .await?;
-    let (stream, _) = timeout(DEFAULT_TIMEOUT, listener.accept()).await??;
-    let _websocket = timeout(DEFAULT_TIMEOUT, accept_async(stream)).await??;
-    Ok(())
+        let (stream, _) = timeout(DEFAULT_TIMEOUT, listener.accept()).await??;
+        let mut websocket = timeout(DEFAULT_TIMEOUT, accept_async(stream)).await??;
+        let logout = app.send_logout_account_request().await?;
+        wait_for_response(&mut app, logout).await?;
+        timeout(DEFAULT_TIMEOUT, async {
+            loop {
+                let notification = app
+                    .read_stream_until_notification_message("remoteControl/status/changed")
+                    .await?;
+                let status: RemoteControlStatusChangedNotification =
+                    serde_json::from_value(notification.params.context("status params")?)?;
+                if status.status == RemoteControlConnectionStatus::Disabled {
+                    return Ok::<(), anyhow::Error>(());
+                }
+            }
+        })
+        .await??;
+        assert!(matches!(
+            timeout(DEFAULT_TIMEOUT, websocket.next()).await?,
+            None | Some(Err(_)) | Some(Ok(Message::Close(_)))
+        ));
+
+        let token = encode_id_token(
+            &ChatGptIdTokenClaims::new()
+                .chatgpt_account_id("account_b")
+                .chatgpt_user_id("user_b")
+                .plan_type("pro"),
+        )?;
+        let login = app
+            .send_chatgpt_auth_tokens_login_request(
+                token.clone(),
+                "account_b".to_string(),
+                Some("pro".to_string()),
+            )
+            .await?;
+        wait_for_response(&mut app, login).await?;
+        let enabled = app.send_remote_control_ephemeral_enable_request().await?;
+        wait_for_response(&mut app, enabled).await?;
+        let (line, reader) = timeout(DEFAULT_TIMEOUT, read_enroll_request(&listener)).await??;
+        assert_eq!(
+            line,
+            "POST /backend-api/wham/remote/control/server/enroll HTTP/1.1"
+        );
+        respond_with_status(reader.into_inner(), "401 Unauthorized", "expired token").await?;
+        let request = timeout(DEFAULT_TIMEOUT, app.read_stream_until_request_message()).await??;
+        let ServerRequest::ChatgptAuthTokensRefresh { request_id, .. } = request else {
+            anyhow::bail!("expected token refresh after the new owner's 401");
+        };
+        let refreshed_token = encode_id_token(
+            &ChatGptIdTokenClaims::new()
+                .chatgpt_account_id("account_b")
+                .chatgpt_user_id("user_b")
+                .plan_type("pro")
+                .email("refreshed@example.com"),
+        )?;
+        app.send_response(
+            request_id,
+            serde_json::to_value(ChatgptAuthTokensRefreshResponse {
+                access_token: refreshed_token,
+                chatgpt_account_id: "account_b".to_string(),
+                chatgpt_plan_type: Some("pro".to_string()),
+            })?,
+        )
+        .await?;
+        let (_, reader) = timeout(DEFAULT_TIMEOUT, read_enroll_request(&listener)).await??;
+        respond_with_json(
+            reader.into_inner(),
+            serde_json::json!({
+                "server_id": "server-b", "environment_id": "environment-b",
+                "remote_control_token": "token-b", "expires_at": "3026-05-22T12:34:56Z",
+            }),
+        )
+        .await?;
+        let (stream, _) = timeout(DEFAULT_TIMEOUT, listener.accept()).await??;
+        let _websocket = timeout(DEFAULT_TIMEOUT, accept_async(stream)).await??;
+        Ok(())
+    })
+    .await
 }

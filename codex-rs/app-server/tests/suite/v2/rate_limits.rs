@@ -21,6 +21,7 @@ use codex_app_server_protocol::SendAddCreditsNudgeEmailResponse;
 use codex_app_server_protocol::SpendControlLimitSnapshot;
 use codex_config::types::AuthCredentialsStoreMode;
 use codex_protocol::account::PlanType as AccountPlanType;
+use core_test_support::mock_server;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 use std::path::Path;
@@ -117,250 +118,256 @@ async fn get_account_rate_limits_returns_snapshot(
     )?;
 
     let server = MockServer::start().await;
-    let server_url = server.uri();
-    write_chatgpt_base_url(codex_home.path(), &server_url)?;
+    mock_server::run(&[&server], async {
+        let server_url = server.uri();
+        write_chatgpt_base_url(codex_home.path(), &server_url)?;
 
-    let primary_reset_timestamp = chrono::DateTime::parse_from_rfc3339("2025-01-01T00:02:00Z")
-        .expect("parse primary reset timestamp")
-        .timestamp();
-    let secondary_reset_timestamp = chrono::DateTime::parse_from_rfc3339("2025-01-01T01:00:00Z")
-        .expect("parse secondary reset timestamp")
-        .timestamp();
-    let reset_credit_granted_at = chrono::DateTime::parse_from_rfc3339("2026-06-17T00:00:00Z")
-        .expect("parse reset credit grant timestamp")
-        .timestamp();
-    let reset_credit_expires_at = chrono::DateTime::parse_from_rfc3339("2026-07-17T00:00:00Z")
-        .expect("parse reset credit expiry timestamp")
-        .timestamp();
-    let second_reset_credit_granted_at =
-        chrono::DateTime::parse_from_rfc3339("2026-06-18T00:00:00Z")
-            .expect("parse second reset credit grant timestamp")
+        let primary_reset_timestamp = chrono::DateTime::parse_from_rfc3339("2025-01-01T00:02:00Z")
+            .expect("parse primary reset timestamp")
             .timestamp();
-    let banner = json!({
-        "banner_type": "selected_model_limit_reached",
-        "title": "Usage limit reached",
-        "description": "View your usage.",
-        "ctas": [{"action": "view_usage", "label": "View usage"}]
-    });
-    let response_body = json!({
-        "account_id": "account-123",
-        "user_id": "user-123",
-        "rate_limit_upsell": banner,
+        let secondary_reset_timestamp =
+            chrono::DateTime::parse_from_rfc3339("2025-01-01T01:00:00Z")
+                .expect("parse secondary reset timestamp")
+                .timestamp();
+        let reset_credit_granted_at = chrono::DateTime::parse_from_rfc3339("2026-06-17T00:00:00Z")
+            .expect("parse reset credit grant timestamp")
+            .timestamp();
+        let reset_credit_expires_at = chrono::DateTime::parse_from_rfc3339("2026-07-17T00:00:00Z")
+            .expect("parse reset credit expiry timestamp")
+            .timestamp();
+        let second_reset_credit_granted_at =
+            chrono::DateTime::parse_from_rfc3339("2026-06-18T00:00:00Z")
+                .expect("parse second reset credit grant timestamp")
+                .timestamp();
+        let banner = json!({
+            "banner_type": "selected_model_limit_reached",
+            "title": "Usage limit reached",
+            "description": "View your usage.",
+            "ctas": [{"action": "view_usage", "label": "View usage"}]
+        });
+        let response_body = json!({
+            "account_id": "account-123",
+            "user_id": "user-123",
+            "rate_limit_upsell": banner,
 
-        "plan_type": plan_type,
-        "rate_limit": {
-            "allowed": true,
-            "limit_reached": false,
-            "primary_window": {
-                "used_percent": 42,
-                "limit_window_seconds": 3600,
-                "reset_after_seconds": 120,
-                "reset_at": primary_reset_timestamp,
+            "plan_type": plan_type,
+            "rate_limit": {
+                "allowed": true,
+                "limit_reached": false,
+                "primary_window": {
+                    "used_percent": 42,
+                    "limit_window_seconds": 3600,
+                    "reset_after_seconds": 120,
+                    "reset_at": primary_reset_timestamp,
+                },
+                "secondary_window": {
+                    "used_percent": 5,
+                    "limit_window_seconds": 86400,
+                    "reset_after_seconds": 43200,
+                    "reset_at": secondary_reset_timestamp,
+                }
             },
-            "secondary_window": {
-                "used_percent": 5,
-                "limit_window_seconds": 86400,
-                "reset_after_seconds": 43200,
-                "reset_at": secondary_reset_timestamp,
-            }
-        },
-        "rate_limit_reached_type": {
-            "type": "workspace_member_usage_limit_reached",
-        },
-        "spend_control": {
-            "reached": false,
-            "individual_limit": {
-                "source": "workspace_spend_controls",
-                "limit": "25000",
-                "used": "8000",
-                "remaining": "17000",
-                "used_percent": 32,
-                "remaining_percent": 68,
-                "reset_after_seconds": 43200,
-                "reset_at": secondary_reset_timestamp,
-            }
-        },
-        "additional_rate_limits": [
-            {
-                "limit_name": "codex_other",
-                "metered_feature": "codex_other",
-                "rate_limit": {
-                    "allowed": true,
-                    "limit_reached": false,
-                    "primary_window": {
-                        "used_percent": 88,
-                        "limit_window_seconds": 1800,
-                        "reset_after_seconds": 600,
-                        "reset_at": 1735693200
+            "rate_limit_reached_type": {
+                "type": "workspace_member_usage_limit_reached",
+            },
+            "spend_control": {
+                "reached": false,
+                "individual_limit": {
+                    "source": "workspace_spend_controls",
+                    "limit": "25000",
+                    "used": "8000",
+                    "remaining": "17000",
+                    "used_percent": 32,
+                    "remaining_percent": 68,
+                    "reset_after_seconds": 43200,
+                    "reset_at": secondary_reset_timestamp,
+                }
+            },
+            "additional_rate_limits": [
+                {
+                    "limit_name": "codex_other",
+                    "metered_feature": "codex_other",
+                    "rate_limit": {
+                        "allowed": true,
+                        "limit_reached": false,
+                        "primary_window": {
+                            "used_percent": 88,
+                            "limit_window_seconds": 1800,
+                            "reset_after_seconds": 600,
+                            "reset_at": 1735693200
+                        }
                     }
                 }
-            }
-        ],
-        "rate_limit_reset_credits": { "available_count": 3 }
-    });
-
-    Mock::given(method("GET"))
-        .and(path("/api/codex/usage"))
-        .and(header("authorization", "Bearer chatgpt-token"))
-        .and(header("chatgpt-account-id", "account-123"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(response_body))
-        .expect(1)
-        .mount(&server)
-        .await;
-    Mock::given(method("GET"))
-        .and(path("/api/codex/rate-limit-reset-credits"))
-        .and(header("authorization", "Bearer chatgpt-token"))
-        .and(header("chatgpt-account-id", "account-123"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "credits": [
-                {
-                    "id": "credit-1",
-                    "reset_type": "codex_rate_limits",
-                    "status": "available",
-                    "granted_at": "2026-06-17T00:00:00Z",
-                    "expires_at": "2026-07-17T00:00:00Z",
-                    "title": "Full reset (Weekly + 5 hr)",
-                    "description": "Ready to redeem"
-                },
-                {
-                    "id": "credit-2",
-                    "reset_type": "future_reset_type",
-                    "status": "future_status",
-                    "granted_at": "2026-06-18T00:00:00Z",
-                    "expires_at": null
-                }
             ],
-            "available_count": 2,
-            "total_earned_count": 4
-        })))
-        .expect(1)
-        .mount(&server)
-        .await;
+            "rate_limit_reset_credits": { "available_count": 3 }
+        });
 
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .without_auto_env()
-        .with_env_overrides(&[("OPENAI_API_KEY", None)])
-        .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
-        .await?;
-
-    let request_id = mcp.send_get_account_rate_limits_request().await?;
-
-    let received: GetAccountRateLimitsResponse =
-        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(request_id)).await??;
-
-    let expected = GetAccountRateLimitsResponse {
-        reset_credit_confirmation: received.reset_credit_confirmation.clone(),
-        ordinary_usage_allowed: Some(true),
-        account_id: Some("account-123".to_string()),
-        rate_limit_upsell: Some(banner),
-        rate_limits: RateLimitSnapshot {
-            limit_id: Some("codex".to_string()),
-            limit_name: None,
-            normal_model_slug: None,
-            primary: Some(RateLimitWindow {
-                used_percent: 42,
-                window_duration_mins: Some(60),
-                resets_at: Some(primary_reset_timestamp),
-            }),
-            secondary: Some(RateLimitWindow {
-                used_percent: 5,
-                window_duration_mins: Some(1440),
-                resets_at: Some(secondary_reset_timestamp),
-            }),
-            credits: None,
-            individual_limit: Some(SpendControlLimitSnapshot {
-                limit: "25000".to_string(),
-                used: "8000".to_string(),
-                remaining_percent: 68,
-                resets_at: secondary_reset_timestamp,
-            }),
-            spend_control_reached: Some(false),
-            plan_type: Some(expected_plan),
-            rate_limit_reached_type: Some(RateLimitReachedType::WorkspaceMemberUsageLimitReached),
-        },
-        rate_limits_by_limit_id: Some(
-            [
-                (
-                    "codex".to_string(),
-                    RateLimitSnapshot {
-                        limit_id: Some("codex".to_string()),
-                        limit_name: None,
-                        normal_model_slug: None,
-                        primary: Some(RateLimitWindow {
-                            used_percent: 42,
-                            window_duration_mins: Some(60),
-                            resets_at: Some(primary_reset_timestamp),
-                        }),
-                        secondary: Some(RateLimitWindow {
-                            used_percent: 5,
-                            window_duration_mins: Some(1440),
-                            resets_at: Some(secondary_reset_timestamp),
-                        }),
-                        credits: None,
-                        individual_limit: Some(SpendControlLimitSnapshot {
-                            limit: "25000".to_string(),
-                            used: "8000".to_string(),
-                            remaining_percent: 68,
-                            resets_at: secondary_reset_timestamp,
-                        }),
-                        spend_control_reached: Some(false),
-                        plan_type: Some(expected_plan),
-                        rate_limit_reached_type: Some(
-                            RateLimitReachedType::WorkspaceMemberUsageLimitReached,
-                        ),
+        Mock::given(method("GET"))
+            .and(path("/api/codex/usage"))
+            .and(header("authorization", "Bearer chatgpt-token"))
+            .and(header("chatgpt-account-id", "account-123"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(response_body))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/codex/rate-limit-reset-credits"))
+            .and(header("authorization", "Bearer chatgpt-token"))
+            .and(header("chatgpt-account-id", "account-123"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "credits": [
+                    {
+                        "id": "credit-1",
+                        "reset_type": "codex_rate_limits",
+                        "status": "available",
+                        "granted_at": "2026-06-17T00:00:00Z",
+                        "expires_at": "2026-07-17T00:00:00Z",
+                        "title": "Full reset (Weekly + 5 hr)",
+                        "description": "Ready to redeem"
                     },
-                ),
-                (
-                    "codex_other".to_string(),
-                    RateLimitSnapshot {
-                        limit_id: Some("codex_other".to_string()),
-                        limit_name: Some("codex_other".to_string()),
-                        normal_model_slug: None,
-                        primary: Some(RateLimitWindow {
-                            used_percent: 88,
-                            window_duration_mins: Some(30),
-                            resets_at: Some(1735693200),
-                        }),
-                        secondary: None,
-                        credits: None,
-                        individual_limit: None,
-                        spend_control_reached: None,
-                        plan_type: Some(expected_plan),
-                        rate_limit_reached_type: None,
-                    },
-                ),
-            ]
-            .into_iter()
-            .collect(),
-        ),
-        rate_limit_reset_credits: Some(RateLimitResetCreditsSummary {
-            available_count: 2,
-            credits: Some(vec![
-                RateLimitResetCredit {
-                    id: "credit-1".to_string(),
-                    reset_type: RateLimitResetType::CodexRateLimits,
-                    status: RateLimitResetCreditStatus::Available,
-                    granted_at: reset_credit_granted_at,
-                    expires_at: Some(reset_credit_expires_at),
-                    title: Some("Full reset (Weekly + 5 hr)".to_string()),
-                    description: Some("Ready to redeem".to_string()),
-                },
-                RateLimitResetCredit {
-                    id: "credit-2".to_string(),
-                    reset_type: RateLimitResetType::Unknown,
-                    status: RateLimitResetCreditStatus::Unknown,
-                    granted_at: second_reset_credit_granted_at,
-                    expires_at: None,
-                    title: None,
-                    description: None,
-                },
-            ]),
-        }),
-    };
-    assert_eq!(received, expected);
+                    {
+                        "id": "credit-2",
+                        "reset_type": "future_reset_type",
+                        "status": "future_status",
+                        "granted_at": "2026-06-18T00:00:00Z",
+                        "expires_at": null
+                    }
+                ],
+                "available_count": 2,
+                "total_earned_count": 4
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
 
-    Ok(())
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .without_auto_env()
+            .with_env_overrides(&[("OPENAI_API_KEY", None)])
+            .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
+            .await?;
+
+        let request_id = mcp.send_get_account_rate_limits_request().await?;
+
+        let received: GetAccountRateLimitsResponse =
+            timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(request_id)).await??;
+
+        let expected = GetAccountRateLimitsResponse {
+            reset_credit_confirmation: received.reset_credit_confirmation.clone(),
+            ordinary_usage_allowed: Some(true),
+            account_id: Some("account-123".to_string()),
+            rate_limit_upsell: Some(banner),
+            rate_limits: RateLimitSnapshot {
+                limit_id: Some("codex".to_string()),
+                limit_name: None,
+                normal_model_slug: None,
+                primary: Some(RateLimitWindow {
+                    used_percent: 42,
+                    window_duration_mins: Some(60),
+                    resets_at: Some(primary_reset_timestamp),
+                }),
+                secondary: Some(RateLimitWindow {
+                    used_percent: 5,
+                    window_duration_mins: Some(1440),
+                    resets_at: Some(secondary_reset_timestamp),
+                }),
+                credits: None,
+                individual_limit: Some(SpendControlLimitSnapshot {
+                    limit: "25000".to_string(),
+                    used: "8000".to_string(),
+                    remaining_percent: 68,
+                    resets_at: secondary_reset_timestamp,
+                }),
+                spend_control_reached: Some(false),
+                plan_type: Some(expected_plan),
+                rate_limit_reached_type: Some(
+                    RateLimitReachedType::WorkspaceMemberUsageLimitReached,
+                ),
+            },
+            rate_limits_by_limit_id: Some(
+                [
+                    (
+                        "codex".to_string(),
+                        RateLimitSnapshot {
+                            limit_id: Some("codex".to_string()),
+                            limit_name: None,
+                            normal_model_slug: None,
+                            primary: Some(RateLimitWindow {
+                                used_percent: 42,
+                                window_duration_mins: Some(60),
+                                resets_at: Some(primary_reset_timestamp),
+                            }),
+                            secondary: Some(RateLimitWindow {
+                                used_percent: 5,
+                                window_duration_mins: Some(1440),
+                                resets_at: Some(secondary_reset_timestamp),
+                            }),
+                            credits: None,
+                            individual_limit: Some(SpendControlLimitSnapshot {
+                                limit: "25000".to_string(),
+                                used: "8000".to_string(),
+                                remaining_percent: 68,
+                                resets_at: secondary_reset_timestamp,
+                            }),
+                            spend_control_reached: Some(false),
+                            plan_type: Some(expected_plan),
+                            rate_limit_reached_type: Some(
+                                RateLimitReachedType::WorkspaceMemberUsageLimitReached,
+                            ),
+                        },
+                    ),
+                    (
+                        "codex_other".to_string(),
+                        RateLimitSnapshot {
+                            limit_id: Some("codex_other".to_string()),
+                            limit_name: Some("codex_other".to_string()),
+                            normal_model_slug: None,
+                            primary: Some(RateLimitWindow {
+                                used_percent: 88,
+                                window_duration_mins: Some(30),
+                                resets_at: Some(1735693200),
+                            }),
+                            secondary: None,
+                            credits: None,
+                            individual_limit: None,
+                            spend_control_reached: None,
+                            plan_type: Some(expected_plan),
+                            rate_limit_reached_type: None,
+                        },
+                    ),
+                ]
+                .into_iter()
+                .collect(),
+            ),
+            rate_limit_reset_credits: Some(RateLimitResetCreditsSummary {
+                available_count: 2,
+                credits: Some(vec![
+                    RateLimitResetCredit {
+                        id: "credit-1".to_string(),
+                        reset_type: RateLimitResetType::CodexRateLimits,
+                        status: RateLimitResetCreditStatus::Available,
+                        granted_at: reset_credit_granted_at,
+                        expires_at: Some(reset_credit_expires_at),
+                        title: Some("Full reset (Weekly + 5 hr)".to_string()),
+                        description: Some("Ready to redeem".to_string()),
+                    },
+                    RateLimitResetCredit {
+                        id: "credit-2".to_string(),
+                        reset_type: RateLimitResetType::Unknown,
+                        status: RateLimitResetCreditStatus::Unknown,
+                        granted_at: second_reset_credit_granted_at,
+                        expires_at: None,
+                        title: None,
+                        description: None,
+                    },
+                ]),
+            }),
+        };
+        assert_eq!(received, expected);
+
+        Ok(())
+    })
+    .await
 }
 
 #[test_case(Some("workspace-a"), Some("user-a"), /*restricted*/ false, /*permitted*/ true; "matching_identity")]
@@ -390,58 +397,61 @@ async fn get_account_rate_limits_filters_banner_by_identity(
     )?;
 
     let server = MockServer::start().await;
-    write_chatgpt_base_url(codex_home.path(), &server.uri())?;
-    let banner = json!({
-        "banner_type": "selected_model_limit", "model_slug": "test-model-a",
-        "presentation": "inline", "title": "Usage limit reached",
-        "description": "Contact your owner.",
-        "ctas": [{"action": "notify_owner", "label": "Notify owner"}]
-    });
-    Mock::given(method("GET"))
-        .and(path("/api/codex/usage"))
-        .and(header("authorization", "Bearer chatgpt-token"))
-        .and(header("chatgpt-account-id", "workspace-a"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "account_id": account, "user_id": user, "plan_type": "team",
-            "rate_limit": {"allowed": true, "limit_reached": false,
-                "primary_window": {"used_percent": 42, "limit_window_seconds": 3600,
-                    "reset_after_seconds": 120, "reset_at": 2000000000}},
-            "rate_limit_upsell": banner, "rate_limit_reset_credits": {"available_count": 0}
-        })))
-        .expect(1)
-        .mount(&server)
-        .await;
-    Mock::given(method("GET"))
-        .and(path("/api/codex/rate-limit-reset-credits"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "available_count": 0, "credits": []
-        })))
-        .expect(1)
-        .mount(&server)
-        .await;
+    mock_server::run(&[&server], async {
+        write_chatgpt_base_url(codex_home.path(), &server.uri())?;
+        let banner = json!({
+            "banner_type": "selected_model_limit", "model_slug": "test-model-a",
+            "presentation": "inline", "title": "Usage limit reached",
+            "description": "Contact your owner.",
+            "ctas": [{"action": "notify_owner", "label": "Notify owner"}]
+        });
+        Mock::given(method("GET"))
+            .and(path("/api/codex/usage"))
+            .and(header("authorization", "Bearer chatgpt-token"))
+            .and(header("chatgpt-account-id", "workspace-a"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "account_id": account, "user_id": user, "plan_type": "team",
+                "rate_limit": {"allowed": true, "limit_reached": false,
+                    "primary_window": {"used_percent": 42, "limit_window_seconds": 3600,
+                        "reset_after_seconds": 120, "reset_at": 2000000000}},
+                "rate_limit_upsell": banner, "rate_limit_reset_credits": {"available_count": 0}
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/codex/rate-limit-reset-credits"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "available_count": 0, "credits": []
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
 
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .with_env_overrides(&[("OPENAI_API_KEY", None)])
-        .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
-        .await?;
-    let request_id = mcp.send_get_account_rate_limits_request().await?;
-    let received: GetAccountRateLimitsResponse =
-        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(request_id)).await??;
-    let snapshot = json!({
-        "limitId": "codex", "planType": "team",
-        "primary": {"usedPercent": 42, "windowDurationMins": 60, "resetsAt": 2000000000}
-    });
-    let expected: GetAccountRateLimitsResponse = serde_json::from_value(json!({
-        "ordinaryUsageAllowed": if permitted { Some(true) } else { None },
-        "accountId": account, "rateLimitUpsell": if permitted { Some(banner) } else { None },
-        "rateLimits": snapshot, "rateLimitsByLimitId": {"codex": snapshot},
-        "rateLimitResetCredits": {"availableCount": 0, "credits": []},
-        "resetCreditConfirmation": received.reset_credit_confirmation
-    }))?;
-    assert_eq!(received, expected);
-    server.verify().await;
-    Ok(())
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .with_env_overrides(&[("OPENAI_API_KEY", None)])
+            .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
+            .await?;
+        let request_id = mcp.send_get_account_rate_limits_request().await?;
+        let received: GetAccountRateLimitsResponse =
+            timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(request_id)).await??;
+        let snapshot = json!({
+            "limitId": "codex", "planType": "team",
+            "primary": {"usedPercent": 42, "windowDurationMins": 60, "resetsAt": 2000000000}
+        });
+        let expected: GetAccountRateLimitsResponse = serde_json::from_value(json!({
+            "ordinaryUsageAllowed": if permitted { Some(true) } else { None },
+            "accountId": account, "rateLimitUpsell": if permitted { Some(banner) } else { None },
+            "rateLimits": snapshot, "rateLimitsByLimitId": {"codex": snapshot},
+            "rateLimitResetCredits": {"availableCount": 0, "credits": []},
+            "resetCreditConfirmation": received.reset_credit_confirmation
+        }))?;
+        assert_eq!(received, expected);
+        server.verify().await;
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test]
@@ -456,54 +466,57 @@ async fn get_account_rate_limits_preserves_count_when_reset_credit_details_fail(
     )?;
 
     let server = MockServer::start().await;
-    write_chatgpt_base_url(codex_home.path(), &server.uri())?;
+    mock_server::run(&[&server], async {
+        write_chatgpt_base_url(codex_home.path(), &server.uri())?;
 
-    Mock::given(method("GET"))
-        .and(path("/api/codex/usage"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "plan_type": "pro",
-            "rate_limit": {
-                "allowed": true,
-                "limit_reached": false,
-                "primary_window": {
-                    "used_percent": 42,
-                    "limit_window_seconds": 3600,
-                    "reset_after_seconds": 120,
-                    "reset_at": 1735689720
-                }
-            },
-            "rate_limit_reset_credits": { "available_count": 3 }
-        })))
-        .expect(1)
-        .mount(&server)
-        .await;
-    Mock::given(method("GET"))
-        .and(path("/api/codex/rate-limit-reset-credits"))
-        .respond_with(ResponseTemplate::new(500).set_body_string("boom"))
-        .expect(1)
-        .mount(&server)
-        .await;
+        Mock::given(method("GET"))
+            .and(path("/api/codex/usage"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "plan_type": "pro",
+                "rate_limit": {
+                    "allowed": true,
+                    "limit_reached": false,
+                    "primary_window": {
+                        "used_percent": 42,
+                        "limit_window_seconds": 3600,
+                        "reset_after_seconds": 120,
+                        "reset_at": 1735689720
+                    }
+                },
+                "rate_limit_reset_credits": { "available_count": 3 }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/codex/rate-limit-reset-credits"))
+            .respond_with(ResponseTemplate::new(500).set_body_string("boom"))
+            .expect(1)
+            .mount(&server)
+            .await;
 
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .without_auto_env()
-        .with_env_overrides(&[("OPENAI_API_KEY", None)])
-        .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
-        .await?;
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .without_auto_env()
+            .with_env_overrides(&[("OPENAI_API_KEY", None)])
+            .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
+            .await?;
 
-    let request_id = mcp.send_get_account_rate_limits_request().await?;
-    let received: GetAccountRateLimitsResponse =
-        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(request_id)).await??;
+        let request_id = mcp.send_get_account_rate_limits_request().await?;
+        let received: GetAccountRateLimitsResponse =
+            timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(request_id)).await??;
 
-    assert_eq!(
-        received.rate_limit_reset_credits,
-        Some(RateLimitResetCreditsSummary {
-            available_count: 3,
-            credits: None,
-        })
-    );
+        assert_eq!(
+            received.rate_limit_reset_credits,
+            Some(RateLimitResetCreditsSummary {
+                available_count: 3,
+                credits: None,
+            })
+        );
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test]

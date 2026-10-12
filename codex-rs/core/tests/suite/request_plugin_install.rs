@@ -468,144 +468,147 @@ async fn startup_recommendations_use_developer_message(
 
     let expect_recommendations = disabled_feature.is_none();
     let server = start_mock_server().await;
-    let apps_server = AppsTestServer::mount(&server).await?;
-    let recommendation_started = Arc::new(Notify::new());
-    let started = Arc::clone(&recommendation_started);
-    let response = ResponseTemplate::new(200).set_body_json(json!({
-        "enabled": true,
-        "plugins": [{
-            "id": "plugin_github",
-            "name": "github",
-            "display_name": "GitHub"
-        }]
-    }));
-    Mock::given(method("GET"))
-        .and(path("/ps/plugins/suggested/codex"))
-        .respond_with(move |_: &wiremock::Request| {
-            started.notify_one();
-            response.clone()
-        })
-        .expect(u64::from(expect_recommendations))
-        .mount(&server)
-        .await;
-    let model_response = mount_sse_once(
-        &server,
-        sse(vec![
-            ev_response_created("startup-recommendations"),
-            ev_assistant_message("startup-recommendations-message", "done"),
-            ev_completed("startup-recommendations"),
-        ]),
-    )
-    .await;
-    let barrier = Arc::new(StartupMcpBarrier {
-        block_next: AtomicBool::new(true),
-        entered: Notify::new(),
-        release: Notify::new(),
-    });
-    let mut extensions = ExtensionRegistryBuilder::<Config>::new();
-    extensions.mcp_server_contributor(barrier.clone());
-    let mut builder = test_codex()
-        .with_extensions(Arc::new(extensions.build()))
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
-        .with_config(move |config| {
-            configure_apps_without_search_tool(config, &apps_server.chatgpt_base_url);
-            config.model_provider.supports_websockets = false;
-            for suggestion_feature in [Feature::ToolSuggest, Feature::RecommendedPlugins] {
-                config
-                    .features
-                    .disable(suggestion_feature)
-                    .expect("test config should allow feature update");
-            }
-            config
-                .features
-                .enable(feature)
-                .expect("test config should allow feature update");
-            if let Some(disabled_feature) = disabled_feature {
-                config
-                    .features
-                    .disable(disabled_feature)
-                    .expect("test config should allow feature update");
-            }
-        });
-    let startup = builder.build_with_auto_env(&server);
-    tokio::pin!(startup);
-
-    tokio::select! {
-        result = &mut startup => {
-            result?;
-            anyhow::bail!("session startup should remain blocked in MCP configuration");
-        }
-        _ = barrier.entered.notified() => {}
-    }
-    if expect_recommendations {
-        tokio::time::timeout(Duration::from_secs(5), recommendation_started.notified())
-            .await
-            .context("recommendations must start before MCP configuration is released")?;
-    }
-    assert!(futures::poll!(&mut startup).is_pending());
-    assert!(model_response.requests().is_empty());
-    barrier.release.notify_one();
-    let test = startup.await?;
-
-    test.submit_turn("suggest a plugin").await?;
-
-    if feature == Feature::RecommendedPlugins && disabled_feature.is_none() {
-        insta::assert_snapshot!(
-            "startup_recommendations_developer_context",
-            context_snapshot::format_request_history_snapshot(
-                "Startup recommendations share the developer message with other context.",
-                &model_response.requests(),
-                &ContextSnapshotOptions::default().rewrite_known_segments(),
-            )
-        );
-    }
-
-    let request = model_response.single_request();
-    let developer_context = request.message_input_texts("developer").join("\n");
-    assert_eq!(
-        developer_context.contains("<recommended_plugins>"),
-        expect_recommendations,
-    );
-    assert_eq!(
-        developer_context.contains("- GitHub (github@openai-curated-remote)"),
-        expect_recommendations,
-    );
-    if expect_recommendations {
-        let developer_messages = request.message_input_text_groups("developer");
-        let recommendation_message = developer_messages
-            .iter()
-            .find(|message| {
-                message
-                    .iter()
-                    .any(|text| text.starts_with("<recommended_plugins>"))
+    mock_server::run(&[&server], async {
+        let apps_server = AppsTestServer::mount(&server).await?;
+        let recommendation_started = Arc::new(Notify::new());
+        let started = Arc::clone(&recommendation_started);
+        let response = ResponseTemplate::new(200).set_body_json(json!({
+            "enabled": true,
+            "plugins": [{
+                "id": "plugin_github",
+                "name": "github",
+                "display_name": "GitHub"
+            }]
+        }));
+        Mock::given(method("GET"))
+            .and(path("/ps/plugins/suggested/codex"))
+            .respond_with(move |_: &wiremock::Request| {
+                started.notify_one();
+                response.clone()
             })
-            .expect("developer message with recommendations");
-        assert!(
-            recommendation_message
-                .iter()
-                .any(|text| text.starts_with("<permissions instructions>")),
-            "recommendations should share the developer message with other context"
+            .expect(u64::from(expect_recommendations))
+            .mount(&server)
+            .await;
+        let model_response = mount_sse_once(
+            &server,
+            sse(vec![
+                ev_response_created("startup-recommendations"),
+                ev_assistant_message("startup-recommendations-message", "done"),
+                ev_completed("startup-recommendations"),
+            ]),
+        )
+        .await;
+        let barrier = Arc::new(StartupMcpBarrier {
+            block_next: AtomicBool::new(true),
+            entered: Notify::new(),
+            release: Notify::new(),
+        });
+        let mut extensions = ExtensionRegistryBuilder::<Config>::new();
+        extensions.mcp_server_contributor(barrier.clone());
+        let mut builder = test_codex()
+            .with_extensions(Arc::new(extensions.build()))
+            .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+            .with_config(move |config| {
+                configure_apps_without_search_tool(config, &apps_server.chatgpt_base_url);
+                config.model_provider.supports_websockets = false;
+                for suggestion_feature in [Feature::ToolSuggest, Feature::RecommendedPlugins] {
+                    config
+                        .features
+                        .disable(suggestion_feature)
+                        .expect("test config should allow feature update");
+                }
+                config
+                    .features
+                    .enable(feature)
+                    .expect("test config should allow feature update");
+                if let Some(disabled_feature) = disabled_feature {
+                    config
+                        .features
+                        .disable(disabled_feature)
+                        .expect("test config should allow feature update");
+                }
+            });
+        let startup = builder.build_with_auto_env(&server);
+        tokio::pin!(startup);
+
+        tokio::select! {
+            result = &mut startup => {
+                result?;
+                anyhow::bail!("session startup should remain blocked in MCP configuration");
+            }
+            _ = barrier.entered.notified() => {}
+        }
+        if expect_recommendations {
+            tokio::time::timeout(Duration::from_secs(5), recommendation_started.notified())
+                .await
+                .context("recommendations must start before MCP configuration is released")?;
+        }
+        assert!(futures::poll!(&mut startup).is_pending());
+        assert!(model_response.requests().is_empty());
+        barrier.release.notify_one();
+        let test = startup.await?;
+
+        test.submit_turn("suggest a plugin").await?;
+
+        if feature == Feature::RecommendedPlugins && disabled_feature.is_none() {
+            insta::assert_snapshot!(
+                "startup_recommendations_developer_context",
+                context_snapshot::format_request_history_snapshot(
+                    "Startup recommendations share the developer message with other context.",
+                    &model_response.requests(),
+                    &ContextSnapshotOptions::default().rewrite_known_segments(),
+                )
+            );
+        }
+
+        let request = model_response.single_request();
+        let developer_context = request.message_input_texts("developer").join("\n");
+        assert_eq!(
+            developer_context.contains("<recommended_plugins>"),
+            expect_recommendations,
         );
         assert_eq!(
-            recommendation_message.last().map(String::as_str),
-            Some(concat!(
-                "<recommended_plugins>\n",
-                "Here is a list of plugins that are available but not installed.\n\n",
-                "- GitHub (github@openai-curated-remote)\n",
-                "</recommended_plugins>",
-            ))
+            developer_context.contains("- GitHub (github@openai-curated-remote)"),
+            expect_recommendations,
         );
-    }
-    let tools = tool_names(&request.body_json());
-    assert_eq!(
-        tools
-            .iter()
-            .any(|name| name == REQUEST_PLUGIN_INSTALL_TOOL_NAME),
-        expect_recommendations && feature == Feature::ToolSuggest,
-    );
-    test.codex.shutdown_and_wait().await?;
-    server.verify().await;
-    Ok(())
+        if expect_recommendations {
+            let developer_messages = request.message_input_text_groups("developer");
+            let recommendation_message = developer_messages
+                .iter()
+                .find(|message| {
+                    message
+                        .iter()
+                        .any(|text| text.starts_with("<recommended_plugins>"))
+                })
+                .expect("developer message with recommendations");
+            assert!(
+                recommendation_message
+                    .iter()
+                    .any(|text| text.starts_with("<permissions instructions>")),
+                "recommendations should share the developer message with other context"
+            );
+            assert_eq!(
+                recommendation_message.last().map(String::as_str),
+                Some(concat!(
+                    "<recommended_plugins>\n",
+                    "Here is a list of plugins that are available but not installed.\n\n",
+                    "- GitHub (github@openai-curated-remote)\n",
+                    "</recommended_plugins>",
+                ))
+            );
+        }
+        let tools = tool_names(&request.body_json());
+        assert_eq!(
+            tools
+                .iter()
+                .any(|name| name == REQUEST_PLUGIN_INSTALL_TOOL_NAME),
+            expect_recommendations && feature == Feature::ToolSuggest,
+        );
+        test.codex.shutdown_and_wait().await?;
+        server.verify().await;
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

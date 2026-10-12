@@ -2537,147 +2537,150 @@ async fn cyber_model_guardian_denial_interrupts_turn_immediately(
     );
 
     let server = start_mock_server().await;
-    let approval_policy = AskForApproval::OnRequest;
-    let sandbox_policy = SandboxPolicy::WorkspaceWrite {
-        writable_roots: vec![],
-        network_access: false,
-        exclude_tmpdir_env_var: true,
-        exclude_slash_tmp: true,
-    };
-    let sandbox_policy_for_config = sandbox_policy.clone();
+    mock_server::run(&[&server], async {
+        let approval_policy = AskForApproval::OnRequest;
+        let sandbox_policy = SandboxPolicy::WorkspaceWrite {
+            writable_roots: vec![],
+            network_access: false,
+            exclude_tmpdir_env_var: true,
+            exclude_slash_tmp: true,
+        };
+        let sandbox_policy_for_config = sandbox_policy.clone();
 
-    let mut builder = test_codex()
-        .with_model_info_override("gpt-5.4", |model| {
-            model.model_specialty = Some(MODEL_SPECIALTY_CYBER.to_string());
-        })
-        .with_config(move |config| {
-            config.permissions.approval_policy = Constrained::allow_any(approval_policy);
-            config
-                .set_legacy_sandbox_policy(sandbox_policy_for_config)
-                .expect("set sandbox policy");
+        let mut builder = test_codex()
+            .with_model_info_override("gpt-5.4", |model| {
+                model.model_specialty = Some(MODEL_SPECIALTY_CYBER.to_string());
+            })
+            .with_config(move |config| {
+                config.permissions.approval_policy = Constrained::allow_any(approval_policy);
+                config
+                    .set_legacy_sandbox_policy(sandbox_policy_for_config)
+                    .expect("set sandbox policy");
+            });
+        let cached_calls = Arc::new(std::sync::atomic::AtomicUsize::new(/*v*/ 0));
+        if matches!(approval_path, ApprovalPath::CachedContributor) {
+            let mut extensions = ExtensionRegistryBuilder::default();
+            extensions.approval_review_contributor(Arc::new(AttemptCachedApproval(Arc::clone(
+                &cached_calls,
+            ))));
+            builder = builder.with_extensions(Arc::new(extensions.build()));
+        }
+        let test = builder.build_with_auto_env(&server).await?;
+
+        let output_file = test.cwd.path().join("cyber-guardian-denied.txt");
+        let command = format!("printf should-not-run > {}", output_file.display());
+        let tool_args = json!({
+            "cmd": command,
+            "yield_time_ms": 1_000_u64,
+            "sandbox_permissions": SandboxPermissions::RequireEscalated,
+            "justification": "Exercise immediate Guardian interruption for cyber models.",
         });
-    let cached_calls = Arc::new(std::sync::atomic::AtomicUsize::new(/*v*/ 0));
-    if matches!(approval_path, ApprovalPath::CachedContributor) {
-        let mut extensions = ExtensionRegistryBuilder::default();
-        extensions.approval_review_contributor(Arc::new(AttemptCachedApproval(Arc::clone(
-            &cached_calls,
-        ))));
-        builder = builder.with_extensions(Arc::new(extensions.build()));
-    }
-    let test = builder.build_with_auto_env(&server).await?;
-
-    let output_file = test.cwd.path().join("cyber-guardian-denied.txt");
-    let command = format!("printf should-not-run > {}", output_file.display());
-    let tool_args = json!({
-        "cmd": command,
-        "yield_time_ms": 1_000_u64,
-        "sandbox_permissions": SandboxPermissions::RequireEscalated,
-        "justification": "Exercise immediate Guardian interruption for cyber models.",
-    });
-    let responses = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-cyber-parent-tool-denied"),
-                ev_function_call(
-                    "exec-cyber-call-denied",
-                    "exec_command",
-                    &serde_json::to_string(&tool_args)?,
-                ),
-                ev_completed("resp-cyber-parent-tool-denied"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-cyber-guardian-denied"),
-                ev_assistant_message(
-                    "msg-cyber-guardian-denied",
-                    &json!({
-                        "risk_level": "high",
-                        "user_authorization": "low",
-                        "outcome": "deny",
-                        "rationale": "The requested command has unacceptable test risk.",
-                    })
-                    .to_string(),
-                ),
-                ev_completed("resp-cyber-guardian-denied"),
-            ]),
-        ],
-    )
-    .await;
-
-    test.codex
-        .start_or_steer_turn(
-            TurnInputRequest::user_input(vec![UserInput::Text {
-                text: "run a command that Guardian should deny for a cyber model".into(),
-                text_elements: Vec::new(),
-            }])
-            .with_thread_settings(ThreadSettingsOverrides {
-                approval_policy: Some(approval_policy),
-                approvals_reviewer: Some(ApprovalsReviewer::AutoReview),
-                sandbox_policy: Some(sandbox_policy),
-                ..Default::default()
-            }),
+        let responses = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("resp-cyber-parent-tool-denied"),
+                    ev_function_call(
+                        "exec-cyber-call-denied",
+                        "exec_command",
+                        &serde_json::to_string(&tool_args)?,
+                    ),
+                    ev_completed("resp-cyber-parent-tool-denied"),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-cyber-guardian-denied"),
+                    ev_assistant_message(
+                        "msg-cyber-guardian-denied",
+                        &json!({
+                            "risk_level": "high",
+                            "user_authorization": "low",
+                            "outcome": "deny",
+                            "rationale": "The requested command has unacceptable test risk.",
+                        })
+                        .to_string(),
+                    ),
+                    ev_completed("resp-cyber-guardian-denied"),
+                ]),
+            ],
         )
-        .await?;
+        .await;
 
-    let mut assessments = Vec::new();
-    let warning = wait_for_event(&test.codex, |event| {
-        match event {
-            EventMsg::GuardianAssessment(event) => assessments.push(event.clone()),
-            EventMsg::GuardianWarning(warning)
-                if warning.message.contains("too many approval requests") =>
-            {
-                return true;
+        test.codex
+            .start_or_steer_turn(
+                TurnInputRequest::user_input(vec![UserInput::Text {
+                    text: "run a command that Guardian should deny for a cyber model".into(),
+                    text_elements: Vec::new(),
+                }])
+                .with_thread_settings(ThreadSettingsOverrides {
+                    approval_policy: Some(approval_policy),
+                    approvals_reviewer: Some(ApprovalsReviewer::AutoReview),
+                    sandbox_policy: Some(sandbox_policy),
+                    ..Default::default()
+                }),
+            )
+            .await?;
+
+        let mut assessments = Vec::new();
+        let warning = wait_for_event(&test.codex, |event| {
+            match event {
+                EventMsg::GuardianAssessment(event) => assessments.push(event.clone()),
+                EventMsg::GuardianWarning(warning)
+                    if warning.message.contains("too many approval requests") =>
+                {
+                    return true;
+                }
+                EventMsg::TurnComplete(_) | EventMsg::TurnAborted(_) => {
+                    panic!("turn ended without Guardian's denial warning")
+                }
+                _ => {}
             }
-            EventMsg::TurnComplete(_) | EventMsg::TurnAborted(_) => {
-                panic!("turn ended without Guardian's denial warning")
+            false
+        })
+        .await;
+        assert_eq!(
+            assessments
+                .iter()
+                .map(|event| event.status)
+                .collect::<Vec<_>>(),
+            vec![
+                codex_protocol::protocol::GuardianAssessmentStatus::InProgress,
+                codex_protocol::protocol::GuardianAssessmentStatus::Denied
+            ]
+        );
+        assert_eq!(assessments[0].id, assessments[1].id);
+        assert_eq!(
+            cached_calls.load(std::sync::atomic::Ordering::SeqCst),
+            match approval_path {
+                ApprovalPath::SynchronousFallback => 0,
+                ApprovalPath::CachedContributor => 1,
             }
-            _ => {}
-        }
-        false
-    })
-    .await;
-    assert_eq!(
-        assessments
-            .iter()
-            .map(|event| event.status)
-            .collect::<Vec<_>>(),
-        vec![
-            codex_protocol::protocol::GuardianAssessmentStatus::InProgress,
-            codex_protocol::protocol::GuardianAssessmentStatus::Denied
-        ]
-    );
-    assert_eq!(assessments[0].id, assessments[1].id);
-    assert_eq!(
-        cached_calls.load(std::sync::atomic::Ordering::SeqCst),
-        match approval_path {
-            ApprovalPath::SynchronousFallback => 0,
-            ApprovalPath::CachedContributor => 1,
-        }
-    );
-    let EventMsg::GuardianWarning(warning) = warning else {
-        unreachable!("wait_for_event returned a non-warning event")
-    };
-    assert!(
-        warning
-            .message
-            .contains("1 consecutive, 1 in the last 50 reviews")
-    );
+        );
+        let EventMsg::GuardianWarning(warning) = warning else {
+            unreachable!("wait_for_event returned a non-warning event")
+        };
+        assert!(
+            warning
+                .message
+                .contains("1 consecutive, 1 in the last 50 reviews")
+        );
 
-    let aborted = wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnAborted(_))
-    })
-    .await;
-    let EventMsg::TurnAborted(aborted) = aborted else {
-        unreachable!("wait_for_event returned a non-abort event")
-    };
-    assert_eq!(aborted.reason, TurnAbortReason::Interrupted);
-    assert_eq!(responses.requests().len(), 2);
-    assert!(
-        !output_file.exists(),
-        "Guardian-denied cyber-model command unexpectedly executed"
-    );
+        let aborted = wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnAborted(_))
+        })
+        .await;
+        let EventMsg::TurnAborted(aborted) = aborted else {
+            unreachable!("wait_for_event returned a non-abort event")
+        };
+        assert_eq!(aborted.reason, TurnAbortReason::Interrupted);
+        assert_eq!(responses.requests().len(), 2);
+        assert!(
+            !output_file.exists(),
+            "Guardian-denied cyber-model command unexpectedly executed"
+        );
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

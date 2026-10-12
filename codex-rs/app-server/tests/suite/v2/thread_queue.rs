@@ -710,130 +710,133 @@ async fn interrupt_preserves_queue_and_queue_start_can_resume_a_non_head_item() 
         create_final_assistant_message_sse_response("message added after cold resume done")?,
     ];
     let (mut app, codex_home, _server) = queue_app(responses).await?;
-    let thread_id = app
-        .start_thread(ThreadStartParams::default())
-        .await?
-        .thread
-        .id;
-    let (active_turn_id, _approval_id) = start_blocked_turn(&mut app, &thread_id).await?;
+    mock_server::run(&[&_server], async {
+        let thread_id = app
+            .start_thread(ThreadStartParams::default())
+            .await?
+            .thread
+            .id;
+        let (active_turn_id, _approval_id) = start_blocked_turn(&mut app, &thread_id).await?;
 
-    let first = queue_item(&mut app, submission(&thread_id, "first queued message")).await?;
-    let second = queue_item(
-        &mut app,
-        ThreadQueueAddParams {
-            client_user_message_id: "second-queued-client-id".to_string(),
-            ..submission(&thread_id, "second queued message")
-        },
-    )
-    .await?;
-
-    let _: TurnInterruptResponse = app
-        .request(|request_id| ClientRequest::TurnInterrupt {
-            request_id,
-            params: TurnInterruptParams {
-                thread_id: thread_id.clone(),
-                turn_id: active_turn_id,
+        let first = queue_item(&mut app, submission(&thread_id, "first queued message")).await?;
+        let second = queue_item(
+            &mut app,
+            ThreadQueueAddParams {
+                client_user_message_id: "second-queued-client-id".to_string(),
+                ..submission(&thread_id, "second queued message")
             },
-        })
+        )
         .await?;
-    let interrupted: TurnCompletedNotification =
-        timeout(READ_TIMEOUT, app.read_notification("turn/completed")).await??;
-    assert_eq!(interrupted.turn.status, TurnStatus::Interrupted);
-    assert_eq!(
-        vec![first.clone(), second.clone()],
-        list_queue(&mut app, &thread_id).await?.data
-    );
 
-    let added_after_interrupt = queue_item(
-        &mut app,
-        submission(&thread_id, "message added after interruption"),
-    )
-    .await?;
-    assert_eq!(
-        vec![first.clone(), second.clone(), added_after_interrupt.clone(),],
-        list_queue(&mut app, &thread_id).await?.data
-    );
-
-    let metadata_resume_request_id = app
-        .send_thread_resume_request(ThreadResumeParams {
-            thread_id: thread_id.clone(),
-            exclude_turns: true,
-            ..Default::default()
-        })
-        .await?;
-    let metadata_resumed: ThreadResumeResponse =
-        timeout(READ_TIMEOUT, app.read_response(metadata_resume_request_id)).await??;
-    assert_eq!(metadata_resumed.thread.id, thread_id);
-    assert_eq!(
-        vec![first.clone(), second.clone(), added_after_interrupt.clone(),],
-        list_queue(&mut app, &thread_id).await?.data
-    );
-
-    let resume_request_id = app
-        .send_thread_resume_request(ThreadResumeParams {
-            thread_id: thread_id.clone(),
-            ..Default::default()
-        })
-        .await?;
-    let resumed: ThreadResumeResponse =
-        timeout(READ_TIMEOUT, app.read_response(resume_request_id)).await??;
-    assert_eq!(resumed.thread.id, thread_id);
-    assert_eq!(
-        vec![first.clone(), second.clone(), added_after_interrupt.clone(),],
-        list_queue(&mut app, &thread_id).await?.data
-    );
-
-    drop(app);
-    let mut app = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .without_managed_config()
-        .build_initialized()
-        .await?;
-    let cold_resume_request_id = app
-        .send_thread_resume_request(ThreadResumeParams {
-            thread_id: thread_id.clone(),
-            ..Default::default()
-        })
-        .await?;
-    let cold_resumed: ThreadResumeResponse =
-        timeout(READ_TIMEOUT, app.read_response(cold_resume_request_id)).await??;
-    assert_eq!(cold_resumed.thread.id, thread_id);
-
-    let added_after_cold_resume = queue_item(
-        &mut app,
-        submission(&thread_id, "message added after cold resume"),
-    )
-    .await?;
-    assert_eq!(
-        vec![
-            first,
-            second.clone(),
-            added_after_interrupt,
-            added_after_cold_resume
-        ],
-        list_queue(&mut app, &thread_id).await?.data
-    );
-
-    let started: ThreadQueueStartResponse = app
-        .request(|request_id| ClientRequest::ThreadQueueStart {
-            request_id,
-            params: ThreadQueueStartParams {
-                thread_id: thread_id.clone(),
-                queued_submission_id: Some(second.id),
-            },
-        })
-        .await?;
-    for index in 0..4 {
-        let completed: TurnCompletedNotification =
+        let _: TurnInterruptResponse = app
+            .request(|request_id| ClientRequest::TurnInterrupt {
+                request_id,
+                params: TurnInterruptParams {
+                    thread_id: thread_id.clone(),
+                    turn_id: active_turn_id,
+                },
+            })
+            .await?;
+        let interrupted: TurnCompletedNotification =
             timeout(READ_TIMEOUT, app.read_notification("turn/completed")).await??;
-        if index == 0 {
-            assert_eq!(completed.turn.id, started.turn.id);
-        }
-        assert_eq!(completed.turn.status, TurnStatus::Completed);
-    }
-    assert!(list_queue(&mut app, &thread_id).await?.data.is_empty());
+        assert_eq!(interrupted.turn.status, TurnStatus::Interrupted);
+        assert_eq!(
+            vec![first.clone(), second.clone()],
+            list_queue(&mut app, &thread_id).await?.data
+        );
 
-    Ok(())
+        let added_after_interrupt = queue_item(
+            &mut app,
+            submission(&thread_id, "message added after interruption"),
+        )
+        .await?;
+        assert_eq!(
+            vec![first.clone(), second.clone(), added_after_interrupt.clone(),],
+            list_queue(&mut app, &thread_id).await?.data
+        );
+
+        let metadata_resume_request_id = app
+            .send_thread_resume_request(ThreadResumeParams {
+                thread_id: thread_id.clone(),
+                exclude_turns: true,
+                ..Default::default()
+            })
+            .await?;
+        let metadata_resumed: ThreadResumeResponse =
+            timeout(READ_TIMEOUT, app.read_response(metadata_resume_request_id)).await??;
+        assert_eq!(metadata_resumed.thread.id, thread_id);
+        assert_eq!(
+            vec![first.clone(), second.clone(), added_after_interrupt.clone(),],
+            list_queue(&mut app, &thread_id).await?.data
+        );
+
+        let resume_request_id = app
+            .send_thread_resume_request(ThreadResumeParams {
+                thread_id: thread_id.clone(),
+                ..Default::default()
+            })
+            .await?;
+        let resumed: ThreadResumeResponse =
+            timeout(READ_TIMEOUT, app.read_response(resume_request_id)).await??;
+        assert_eq!(resumed.thread.id, thread_id);
+        assert_eq!(
+            vec![first.clone(), second.clone(), added_after_interrupt.clone(),],
+            list_queue(&mut app, &thread_id).await?.data
+        );
+
+        drop(app);
+        let mut app = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .without_managed_config()
+            .build_initialized()
+            .await?;
+        let cold_resume_request_id = app
+            .send_thread_resume_request(ThreadResumeParams {
+                thread_id: thread_id.clone(),
+                ..Default::default()
+            })
+            .await?;
+        let cold_resumed: ThreadResumeResponse =
+            timeout(READ_TIMEOUT, app.read_response(cold_resume_request_id)).await??;
+        assert_eq!(cold_resumed.thread.id, thread_id);
+
+        let added_after_cold_resume = queue_item(
+            &mut app,
+            submission(&thread_id, "message added after cold resume"),
+        )
+        .await?;
+        assert_eq!(
+            vec![
+                first,
+                second.clone(),
+                added_after_interrupt,
+                added_after_cold_resume
+            ],
+            list_queue(&mut app, &thread_id).await?.data
+        );
+
+        let started: ThreadQueueStartResponse = app
+            .request(|request_id| ClientRequest::ThreadQueueStart {
+                request_id,
+                params: ThreadQueueStartParams {
+                    thread_id: thread_id.clone(),
+                    queued_submission_id: Some(second.id),
+                },
+            })
+            .await?;
+        for index in 0..4 {
+            let completed: TurnCompletedNotification =
+                timeout(READ_TIMEOUT, app.read_notification("turn/completed")).await??;
+            if index == 0 {
+                assert_eq!(completed.turn.id, started.turn.id);
+            }
+            assert_eq!(completed.turn.status, TurnStatus::Completed);
+        }
+        assert!(list_queue(&mut app, &thread_id).await?.data.is_empty());
+
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test]

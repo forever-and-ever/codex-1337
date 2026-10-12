@@ -1,5 +1,6 @@
 //! Exercises asynchronous score publication through real tool calls and approval results.
 
+use core_test_support::mock_server;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -44,6 +45,7 @@ async fn delayed_score_only_covers_the_tool_call_it_classified() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let permission_args = json!({
         "reason": "request network access",
         "permissions": { "network": { "enabled": true } },
@@ -286,4 +288,6 @@ async fn delayed_score_only_covers_the_tool_call_it_classified() -> Result<()> {
     parent_server.shutdown().await;
     classifier_server.shutdown().await;
     Ok(())
+    })
+    .await
 }

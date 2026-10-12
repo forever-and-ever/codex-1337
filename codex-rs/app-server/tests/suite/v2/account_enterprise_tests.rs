@@ -1,6 +1,7 @@
 //! Account API regressions for enterprise policy, persisted authority, and login attempts.
 
 use super::*;
+use core_test_support::mock_server;
 use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -55,121 +56,122 @@ async fn logout_reloads_persisted_workspace_and_its_enterprise_policy(
     policy_load_failure: bool,
 ) -> Result<()> {
     let server = MockServer::start().await;
-    for (workspace, issuer) in [
-        (WORKSPACE_ID_INITIAL, "https://initial-idp.example"),
-        (WORKSPACE_ID_REFRESHED, "https://next-idp.example"),
-    ] {
-        let contents = if policy_load_failure && workspace == WORKSPACE_ID_REFRESHED {
-            "invalid = [".to_string()
-        } else {
-            format!(
-                r#"[mcp_enterprise_managed_auth.idp]
+    mock_server::run(&[&server], async {
+        for (workspace, issuer) in [
+            (WORKSPACE_ID_INITIAL, "https://initial-idp.example"),
+            (WORKSPACE_ID_REFRESHED, "https://next-idp.example"),
+        ] {
+            let contents = if policy_load_failure && workspace == WORKSPACE_ID_REFRESHED {
+                "invalid = [".to_string()
+            } else {
+                format!(
+                    r#"[mcp_enterprise_managed_auth.idp]
 issuer = "{issuer}"
 client_id = "enterprise-client""#
-            )
-        };
-        Mock::given(method("GET"))
-            .and(path("/backend-api/wham/config/bundle"))
-            .and(header("chatgpt-account-id", workspace))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(
+                )
+            };
+            Mock::given(method("GET"))
+                .and(path("/backend-api/wham/config/bundle"))
+                .and(header("chatgpt-account-id", workspace))
+                .respond_with(ResponseTemplate::new(200).set_body_json(
                     CloudConfigBundleFixture::enterprise_config(contents).into_bundle(),
-                ),
-            )
+                ))
+                .expect(1)
+                .mount(&server)
+                .await;
+        }
+        Mock::given(method("POST"))
+            .and(path("/oauth/revoke"))
+            .and(body_partial_json(json!({
+                "token": "next-refresh-token",
+                "token_type_hint": "refresh_token",
+            })))
+            .respond_with(ResponseTemplate::new(200))
             .expect(1)
             .mount(&server)
             .await;
-    }
-    Mock::given(method("POST"))
-        .and(path("/oauth/revoke"))
-        .and(body_partial_json(json!({
-            "token": "next-refresh-token",
-            "token_type_hint": "refresh_token",
-        })))
-        .respond_with(ResponseTemplate::new(200))
-        .expect(1)
-        .mount(&server)
-        .await;
-    let codex_home = TempDir::new()?;
-    create_config_toml(
-        codex_home.path(),
-        CreateConfigTomlParams {
-            chatgpt_base_url: Some(format!("{}/backend-api", server.uri())),
-            ..Default::default()
-        },
-    )?;
-    write_chatgpt_auth(
-        codex_home.path(),
-        ChatGptAuthFixture::new("initial-token")
-            .refresh_token("initial-refresh-token")
-            .account_id(WORKSPACE_ID_INITIAL)
-            .chatgpt_user_id("enterprise-user")
-            .plan_type("business"),
-        AuthCredentialsStoreMode::File,
-    )?;
-    // Keep the real platform keyring out of this API test. Enterprise cleanup
-    // failure must still permit revocation and removal of the selected account.
-    if !policy_load_failure {
-        std::fs::write(codex_home.path().join("mcp-oauth-locks"), "not a directory")?;
-    }
-    let refresh_url = format!("{}/oauth/token", server.uri());
-    let mut app = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .without_auto_env()
-        .with_env_overrides(&[
-            ("OPENAI_API_KEY", None),
-            (REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR, Some(&refresh_url)),
-        ])
-        .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
-        .await?;
-
-    // Simulate a second process switching workspaces while this server caches A.
-    write_chatgpt_auth(
-        codex_home.path(),
-        ChatGptAuthFixture::new("next-token")
-            .refresh_token("next-refresh-token")
-            .account_id(WORKSPACE_ID_REFRESHED)
-            .chatgpt_user_id("enterprise-user")
-            .plan_type("business"),
-        AuthCredentialsStoreMode::File,
-    )?;
-    let id = app.send_logout_account_request().await?;
-    let response: LogoutAccountResponse =
-        timeout(DEFAULT_READ_TIMEOUT, app.read_response(id)).await??;
-    assert_eq!(response, LogoutAccountResponse {});
-    let notification = timeout(
-        DEFAULT_READ_TIMEOUT,
-        app.read_stream_until_notification_message("account/updated"),
-    )
-    .await??;
-    let notification: ServerNotification = notification.try_into()?;
-    let ServerNotification::AccountUpdated(account) = notification else {
-        bail!("unexpected notification: {notification:?}");
-    };
-    assert_eq!(
-        account,
-        AccountUpdatedNotification {
-            auth_mode: Some(AuthMode::Chatgpt),
-            plan_type: Some(AccountPlanType::Business),
+        let codex_home = TempDir::new()?;
+        create_config_toml(
+            codex_home.path(),
+            CreateConfigTomlParams {
+                chatgpt_base_url: Some(format!("{}/backend-api", server.uri())),
+                ..Default::default()
+            },
+        )?;
+        write_chatgpt_auth(
+            codex_home.path(),
+            ChatGptAuthFixture::new("initial-token")
+                .refresh_token("initial-refresh-token")
+                .account_id(WORKSPACE_ID_INITIAL)
+                .chatgpt_user_id("enterprise-user")
+                .plan_type("business"),
+            AuthCredentialsStoreMode::File,
+        )?;
+        // Keep the real platform keyring out of this API test. Enterprise cleanup
+        // failure must still permit revocation and removal of the selected account.
+        if !policy_load_failure {
+            std::fs::write(codex_home.path().join("mcp-oauth-locks"), "not a directory")?;
         }
-    );
-    // Logging out of B revokes B, but must preserve the saved account A.
-    let remaining = load_file_auth(codex_home.path())?.expect("saved account A");
-    assert_eq!(
-        remaining
-            .tokens
-            .expect("saved ChatGPT tokens")
-            .account_id
-            .as_deref(),
-        Some(WORKSPACE_ID_INITIAL)
-    );
-    if policy_load_failure {
-        assert!(
-            !codex_home.path().join("mcp-oauth-locks").exists(),
-            "invalid current policy must not select any enterprise credential for deletion"
+        let refresh_url = format!("{}/oauth/token", server.uri());
+        let mut app = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .without_auto_env()
+            .with_env_overrides(&[
+                ("OPENAI_API_KEY", None),
+                (REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR, Some(&refresh_url)),
+            ])
+            .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
+            .await?;
+
+        // Simulate a second process switching workspaces while this server caches A.
+        write_chatgpt_auth(
+            codex_home.path(),
+            ChatGptAuthFixture::new("next-token")
+                .refresh_token("next-refresh-token")
+                .account_id(WORKSPACE_ID_REFRESHED)
+                .chatgpt_user_id("enterprise-user")
+                .plan_type("business"),
+            AuthCredentialsStoreMode::File,
+        )?;
+        let id = app.send_logout_account_request().await?;
+        let response: LogoutAccountResponse =
+            timeout(DEFAULT_READ_TIMEOUT, app.read_response(id)).await??;
+        assert_eq!(response, LogoutAccountResponse {});
+        let notification = timeout(
+            DEFAULT_READ_TIMEOUT,
+            app.read_stream_until_notification_message("account/updated"),
+        )
+        .await??;
+        let notification: ServerNotification = notification.try_into()?;
+        let ServerNotification::AccountUpdated(account) = notification else {
+            bail!("unexpected notification: {notification:?}");
+        };
+        assert_eq!(
+            account,
+            AccountUpdatedNotification {
+                auth_mode: Some(AuthMode::Chatgpt),
+                plan_type: Some(AccountPlanType::Business),
+            }
         );
-    }
-    Ok(())
+        // Logging out of B revokes B, but must preserve the saved account A.
+        let remaining = load_file_auth(codex_home.path())?.expect("saved account A");
+        assert_eq!(
+            remaining
+                .tokens
+                .expect("saved ChatGPT tokens")
+                .account_id
+                .as_deref(),
+            Some(WORKSPACE_ID_INITIAL)
+        );
+        if policy_load_failure {
+            assert!(
+                !codex_home.path().join("mcp-oauth-locks").exists(),
+                "invalid current policy must not select any enterprise credential for deletion"
+            );
+        }
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

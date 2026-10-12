@@ -5,6 +5,7 @@ use codex_login::ExternalAuthFuture;
 use codex_login::ExternalAuthRefreshContext;
 use codex_model_provider_info::WireApi;
 use codex_model_provider_info::create_oss_provider_with_base_url;
+use core_test_support::mock_server;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_response_created;
 use core_test_support::responses::mount_sse_once;
@@ -180,67 +181,70 @@ async fn external_auth_401_retry_uses_refreshed_chatgpt_headers() -> anyhow::Res
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    Mock::given(method("POST"))
-        .and(path("/v1/responses"))
-        .and(header(
-            "authorization",
-            format!("Bearer {INITIAL_ACCESS_TOKEN}"),
-        ))
-        .and(header("chatgpt-account-id", CHATGPT_ACCOUNT_ID))
-        .respond_with(ResponseTemplate::new(401).set_body_string("unauthorized"))
-        .expect(1)
-        .mount(&server)
-        .await;
-    Mock::given(method("POST"))
-        .and(path("/v1/responses"))
-        .and(header(
-            "authorization",
-            format!("Bearer {REFRESHED_ACCESS_TOKEN}"),
-        ))
-        .and(header("chatgpt-account-id", CHATGPT_ACCOUNT_ID))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .insert_header("content-type", "text/event-stream")
-                .set_body_string(sse(vec![
-                    ev_response_created("resp-1"),
-                    ev_completed("resp-1"),
-                ])),
-        )
-        .expect(1)
-        .mount(&server)
-        .await;
+    mock_server::run(&[&server], async {
+        Mock::given(method("POST"))
+            .and(path("/v1/responses"))
+            .and(header(
+                "authorization",
+                format!("Bearer {INITIAL_ACCESS_TOKEN}"),
+            ))
+            .and(header("chatgpt-account-id", CHATGPT_ACCOUNT_ID))
+            .respond_with(ResponseTemplate::new(401).set_body_string("unauthorized"))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v1/responses"))
+            .and(header(
+                "authorization",
+                format!("Bearer {REFRESHED_ACCESS_TOKEN}"),
+            ))
+            .and(header("chatgpt-account-id", CHATGPT_ACCOUNT_ID))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(sse(vec![
+                        ev_response_created("resp-1"),
+                        ev_completed("resp-1"),
+                    ])),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
 
-    let mut builder = test_codex().with_auth(CodexAuth::from_api_key("seed"));
-    let test = builder.build_with_auto_env(&server).await?;
-    let external_auth = Arc::new(ScriptedExternalAuth {
-        current: Mutex::new(external_chatgpt_auth(INITIAL_ACCESS_TOKEN)?),
-        refreshed: external_chatgpt_auth(REFRESHED_ACCESS_TOKEN)?,
-    });
-    test.thread_manager
-        .auth_manager()
-        .set_external_auth(external_auth.clone())
-        .await?;
+        let mut builder = test_codex().with_auth(CodexAuth::from_api_key("seed"));
+        let test = builder.build_with_auto_env(&server).await?;
+        let external_auth = Arc::new(ScriptedExternalAuth {
+            current: Mutex::new(external_chatgpt_auth(INITIAL_ACCESS_TOKEN)?),
+            refreshed: external_chatgpt_auth(REFRESHED_ACCESS_TOKEN)?,
+        });
+        test.thread_manager
+            .auth_manager()
+            .set_external_auth(external_auth.clone())
+            .await?;
 
-    test.submit_turn("hello").await?;
+        test.submit_turn("hello").await?;
 
-    server.verify().await;
-    let requests = server
-        .received_requests()
-        .await
-        .expect("mock server should capture requests");
-    let authorization_headers = requests
-        .iter()
-        .filter(|request| request.url.path() == "/v1/responses")
-        .filter_map(|request| request.headers.get("authorization"))
-        .filter_map(|value| value.to_str().ok())
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-    assert_eq!(
-        authorization_headers,
-        vec![
-            format!("Bearer {INITIAL_ACCESS_TOKEN}"),
-            format!("Bearer {REFRESHED_ACCESS_TOKEN}"),
-        ]
-    );
-    Ok(())
+        server.verify().await;
+        let requests = server
+            .received_requests()
+            .await
+            .expect("mock server should capture requests");
+        let authorization_headers = requests
+            .iter()
+            .filter(|request| request.url.path() == "/v1/responses")
+            .filter_map(|request| request.headers.get("authorization"))
+            .filter_map(|value| value.to_str().ok())
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            authorization_headers,
+            vec![
+                format!("Bearer {INITIAL_ACCESS_TOKEN}"),
+                format!("Bearer {REFRESHED_ACCESS_TOKEN}"),
+            ]
+        );
+        Ok(())
+    })
+    .await
 }

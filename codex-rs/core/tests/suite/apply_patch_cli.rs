@@ -1543,6 +1543,7 @@ async fn apply_patch_cli_can_use_exec_command_output_as_patch_input() -> Result<
     let harness =
         apply_patch_harness_with(|builder| builder.with_model("gpt-5.5").with_windows_cmd_shell())
             .await?;
+    mock_server::run(&[harness.server()], async {
 
     let source_contents = "line1\nnaïve café\nline3\n";
     harness.write_file("source.txt", source_contents).await?;
@@ -1668,6 +1669,8 @@ async fn apply_patch_cli_can_use_exec_command_output_as_patch_input() -> Result<
     assert_eq!(target_contents, source_contents);
 
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1683,95 +1686,98 @@ async fn apply_patch_custom_tool_streaming_emits_updated_changes() -> Result<()>
         })
     })
     .await?;
-    let test = harness.test();
-    let codex = test.codex.clone();
-    let call_id = "apply-patch-streaming";
-    let patch = "*** Begin Patch\n*** Add File: streamed.txt\n+hello\n+world\n*** End Patch";
-    mount_sse_sequence(
-        harness.server(),
-        vec![
-            sse(vec![
-                ev_response_created("resp-1"),
-                json!({
-                    "type": "response.output_item.added",
-                    "item": {
-                        "type": "custom_tool_call",
+    mock_server::run(&[harness.server()], async {
+        let test = harness.test();
+        let codex = test.codex.clone();
+        let call_id = "apply-patch-streaming";
+        let patch = "*** Begin Patch\n*** Add File: streamed.txt\n+hello\n+world\n*** End Patch";
+        mount_sse_sequence(
+            harness.server(),
+            vec![
+                sse(vec![
+                    ev_response_created("resp-1"),
+                    json!({
+                        "type": "response.output_item.added",
+                        "item": {
+                            "type": "custom_tool_call",
+                            "call_id": call_id,
+                            "name": "apply_patch",
+                            "input": "",
+                        }
+                    }),
+                    json!({
+                        "type": "response.custom_tool_call_input.delta",
                         "call_id": call_id,
-                        "name": "apply_patch",
-                        "input": "",
-                    }
-                }),
-                json!({
-                    "type": "response.custom_tool_call_input.delta",
-                    "call_id": call_id,
-                    "delta": "*** Begin Patch\n",
-                }),
-                json!({
-                    "type": "response.custom_tool_call_input.delta",
-                    "call_id": call_id,
-                    "delta": "*** Add File: streamed.txt\n+hello",
-                }),
-                json!({
-                    "type": "response.custom_tool_call_input.delta",
-                    "call_id": call_id,
-                    "delta": "\n+world\n*** End Patch",
-                }),
-                ev_apply_patch_custom_tool_call(call_id, patch),
-                ev_completed("resp-1"),
-            ]),
-            sse(vec![
-                ev_assistant_message("msg-1", "done"),
-                ev_completed("resp-2"),
-            ]),
-        ],
-    )
-    .await;
+                        "delta": "*** Begin Patch\n",
+                    }),
+                    json!({
+                        "type": "response.custom_tool_call_input.delta",
+                        "call_id": call_id,
+                        "delta": "*** Add File: streamed.txt\n+hello",
+                    }),
+                    json!({
+                        "type": "response.custom_tool_call_input.delta",
+                        "call_id": call_id,
+                        "delta": "\n+world\n*** End Patch",
+                    }),
+                    ev_apply_patch_custom_tool_call(call_id, patch),
+                    ev_completed("resp-1"),
+                ]),
+                sse(vec![
+                    ev_assistant_message("msg-1", "done"),
+                    ev_completed("resp-2"),
+                ]),
+            ],
+        )
+        .await;
 
-    submit_without_wait(&harness, "create streamed file").await?;
+        submit_without_wait(&harness, "create streamed file").await?;
 
-    let mut updates = Vec::new();
-    wait_for_event(&codex, |event| match event {
-        EventMsg::PatchApplyUpdated(update) => {
-            updates.push(update.clone());
-            false
-        }
-        EventMsg::TurnComplete(_) => true,
-        _ => false,
+        let mut updates = Vec::new();
+        wait_for_event(&codex, |event| match event {
+            EventMsg::PatchApplyUpdated(update) => {
+                updates.push(update.clone());
+                false
+            }
+            EventMsg::TurnComplete(_) => true,
+            _ => false,
+        })
+        .await;
+
+        assert_eq!(
+            updates
+                .iter()
+                .map(|update| update.call_id.as_str())
+                .collect::<Vec<_>>(),
+            vec![call_id, call_id]
+        );
+        assert_eq!(
+            updates
+                .first()
+                .expect("first update")
+                .changes
+                .get(&std::path::PathBuf::from("streamed.txt")),
+            Some(&codex_protocol::protocol::FileChange::Add {
+                content: String::new(),
+            })
+        );
+        assert_eq!(
+            updates
+                .last()
+                .expect("last update")
+                .changes
+                .get(&std::path::PathBuf::from("streamed.txt")),
+            Some(&codex_protocol::protocol::FileChange::Add {
+                content: "hello\nworld\n".to_string(),
+            })
+        );
+        assert_eq!(
+            harness.read_file_text("streamed.txt").await?,
+            "hello\nworld\n"
+        );
+        Ok(())
     })
-    .await;
-
-    assert_eq!(
-        updates
-            .iter()
-            .map(|update| update.call_id.as_str())
-            .collect::<Vec<_>>(),
-        vec![call_id, call_id]
-    );
-    assert_eq!(
-        updates
-            .first()
-            .expect("first update")
-            .changes
-            .get(&std::path::PathBuf::from("streamed.txt")),
-        Some(&codex_protocol::protocol::FileChange::Add {
-            content: String::new(),
-        })
-    );
-    assert_eq!(
-        updates
-            .last()
-            .expect("last update")
-            .changes
-            .get(&std::path::PathBuf::from("streamed.txt")),
-        Some(&codex_protocol::protocol::FileChange::Add {
-            content: "hello\nworld\n".to_string(),
-        })
-    );
-    assert_eq!(
-        harness.read_file_text("streamed.txt").await?,
-        "hello\nworld\n"
-    );
-    Ok(())
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

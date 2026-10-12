@@ -1,5 +1,6 @@
 //! Exercises blocking plugin reconciliation through the public JSON-RPC API.
 
+use core_test_support::mock_server;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -44,166 +45,170 @@ async fn plugin_reconcile_syncs_bundles_and_reports_changes(
     marketplace: &str,
 ) -> Result<()> {
     let server = MockServer::start().await;
-    // Both scopes must retain background-sync behavior with remote_plugin disabled.
-    let (mut app_server, codex_home) = start_app_server(&server).await?;
-    let thread = app_server.start_thread(Default::default()).await?.thread;
-    let bundle_url = format!("{}/bundle", server.uri());
-    let plugin_id = format!("linear@{marketplace}");
-    let first = PluginReconcileChangedPlugin {
-        id: plugin_id.clone(),
-        has_mcps: true,
-        has_apps: false,
-        has_hooks: true,
-        has_skills: true,
-    };
-    let second = PluginReconcileChangedPlugin {
-        id: plugin_id.clone(),
-        has_mcps: false,
-        has_apps: true,
-        has_hooks: false,
-        has_skills: false,
-    };
-    let updated = PluginReconcileChangedPlugin {
-        id: plugin_id,
-        has_mcps: true,
-        has_apps: true,
-        has_hooks: true,
-        has_skills: true,
-    };
-    let failed_id = "plugins~Plugin_11111111111111111111111111111111";
-    let mut missing_bundle = installed_plugin("1.0.0", &bundle_url, "WORKSPACE");
-    missing_bundle["id"] = json!(failed_id);
-    missing_bundle["name"] = json!("missing-bundle");
-    missing_bundle["release"]["bundle_download_url"] = Value::Null;
-    let mut first_pass_failure = Some(missing_bundle);
+    mock_server::run(&[&server], async {
+        // Both scopes must retain background-sync behavior with remote_plugin disabled.
+        let (mut app_server, codex_home) = start_app_server(&server).await?;
+        let thread = app_server.start_thread(Default::default()).await?.thread;
+        let bundle_url = format!("{}/bundle", server.uri());
+        let plugin_id = format!("linear@{marketplace}");
+        let first = PluginReconcileChangedPlugin {
+            id: plugin_id.clone(),
+            has_mcps: true,
+            has_apps: false,
+            has_hooks: true,
+            has_skills: true,
+        };
+        let second = PluginReconcileChangedPlugin {
+            id: plugin_id.clone(),
+            has_mcps: false,
+            has_apps: true,
+            has_hooks: false,
+            has_skills: false,
+        };
+        let updated = PluginReconcileChangedPlugin {
+            id: plugin_id,
+            has_mcps: true,
+            has_apps: true,
+            has_hooks: true,
+            has_skills: true,
+        };
+        let failed_id = "plugins~Plugin_11111111111111111111111111111111";
+        let mut missing_bundle = installed_plugin("1.0.0", &bundle_url, "WORKSPACE");
+        missing_bundle["id"] = json!(failed_id);
+        missing_bundle["name"] = json!("missing-bundle");
+        missing_bundle["release"]["bundle_download_url"] = Value::Null;
+        let mut first_pass_failure = Some(missing_bundle);
 
-    // v1.1 drops hooks; v2 restores them and drops Apps. Both updates must report
-    // both sides, while uninstall below reports only v2's remaining capabilities.
-    // Enablement changes report cached capabilities without downloading the bundle again.
-    for (version, enabled, capabilities, expected_plugins, expected_downloads) in [
-        ("1.0.0", true, &first, vec![first.clone()], 1),
-        ("1.0.0", true, &first, Vec::new(), 0),
-        ("1.0.0", false, &first, vec![first.clone()], 0),
-        ("1.0.0", true, &first, vec![first.clone()], 0),
-        ("1.1.0", true, &second, vec![updated.clone()], 1),
-        ("2.0.0", true, &first, vec![updated], 1),
-    ] {
-        let mut files = vec![(
-            ".codex-plugin/plugin.json",
-            json!({"name": "linear"}).to_string(),
-        )];
-        if capabilities.has_mcps {
-            files.push((
-                ".mcp.json",
-                json!({"mcpServers": {"example": {"command": "unused", "enabled": false}}})
+        // v1.1 drops hooks; v2 restores them and drops Apps. Both updates must report
+        // both sides, while uninstall below reports only v2's remaining capabilities.
+        // Enablement changes report cached capabilities without downloading the bundle again.
+        for (version, enabled, capabilities, expected_plugins, expected_downloads) in [
+            ("1.0.0", true, &first, vec![first.clone()], 1),
+            ("1.0.0", true, &first, Vec::new(), 0),
+            ("1.0.0", false, &first, vec![first.clone()], 0),
+            ("1.0.0", true, &first, vec![first.clone()], 0),
+            ("1.1.0", true, &second, vec![updated.clone()], 1),
+            ("2.0.0", true, &first, vec![updated], 1),
+        ] {
+            let mut files = vec![(
+                ".codex-plugin/plugin.json",
+                json!({"name": "linear"}).to_string(),
+            )];
+            if capabilities.has_mcps {
+                files.push((
+                    ".mcp.json",
+                    json!({"mcpServers": {"example": {"command": "unused", "enabled": false}}})
+                        .to_string(),
+                ));
+            }
+            if capabilities.has_apps {
+                files.push((
+                    ".app.json",
+                    json!({"apps": {"example": {"id": "connector_example"}}}).to_string(),
+                ));
+            }
+            if capabilities.has_hooks {
+                files.push((
+                    "hooks/hooks.json",
+                    json!({"hooks": {"UserPromptSubmit": [{"hooks": [{
+                        "type": "command", "command": format!("echo hook {version}")
+                    }]}]}})
                     .to_string(),
-            ));
+                ));
+            }
+            if capabilities.has_skills {
+                files.push((
+                    "skills/example/SKILL.md",
+                    "---\nname: example\ndescription: Example skill\n---\nExample skill"
+                        .to_string(),
+                ));
+            }
+            let mut archive = tar::Builder::new(GzEncoder::new(Vec::new(), Compression::default()));
+            for (path, contents) in files {
+                let mut header = tar::Header::new_gnu();
+                header.set_size(contents.len() as u64);
+                header.set_mode(/*mode*/ 0o644);
+                header.set_cksum();
+                archive.append_data(&mut header, path, contents.as_bytes())?;
+            }
+            let bundle = archive.into_inner()?.finish()?;
+            let mut plugin = installed_plugin(version, &bundle_url, scope);
+            plugin["enabled"] = json!(enabled);
+            let mut plugins = vec![plugin];
+            let mut failures = Vec::new();
+            if let Some(failure) = first_pass_failure.take() {
+                plugins.push(failure);
+                failures.push(failed_id.to_string());
+            }
+            let expected = PluginReconcileResponse {
+                changed_plugins: expected_plugins,
+                failed_remote_plugin_ids: failures.clone(),
+                failed_materialization_remote_plugin_ids: failures,
+            };
+            let active_plugin_ids = if enabled {
+                vec![REMOTE_PLUGIN_ID.to_string()]
+            } else {
+                Vec::new()
+            };
+            mount_installed_snapshot(&server, plugins).await;
+            Mock::given(method("GET"))
+                .and(path("/bundle"))
+                .respond_with(ResponseTemplate::new(200).set_body_bytes(bundle))
+                .expect(expected_downloads)
+                .mount(&server)
+                .await;
+            assert_eq!(reconcile(&mut app_server).await?, expected);
+            // A turn exercises the loaded registry, not fresh hooks/list discovery. Hooks run
+            // on the app-server host even when the thread uses a remote executor.
+            assert_eq!(
+                turn_hook_runs(
+                    &mut app_server,
+                    &server,
+                    thread.id.clone(),
+                    active_plugin_ids
+                )
+                .await?,
+                usize::from(scope == "WORKSPACE" && enabled && capabilities.has_hooks),
+            );
+            server.verify().await;
+            server.reset().await;
         }
-        if capabilities.has_apps {
-            files.push((
-                ".app.json",
-                json!({"apps": {"example": {"id": "connector_example"}}}).to_string(),
-            ));
-        }
-        if capabilities.has_hooks {
-            files.push((
-                "hooks/hooks.json",
-                json!({"hooks": {"UserPromptSubmit": [{"hooks": [{
-                    "type": "command", "command": format!("echo hook {version}")
-                }]}]}})
-                .to_string(),
-            ));
-        }
-        if capabilities.has_skills {
-            files.push((
-                "skills/example/SKILL.md",
-                "---\nname: example\ndescription: Example skill\n---\nExample skill".to_string(),
-            ));
-        }
-        let mut archive = tar::Builder::new(GzEncoder::new(Vec::new(), Compression::default()));
-        for (path, contents) in files {
-            let mut header = tar::Header::new_gnu();
-            header.set_size(contents.len() as u64);
-            header.set_mode(/*mode*/ 0o644);
-            header.set_cksum();
-            archive.append_data(&mut header, path, contents.as_bytes())?;
-        }
-        let bundle = archive.into_inner()?.finish()?;
-        let mut plugin = installed_plugin(version, &bundle_url, scope);
-        plugin["enabled"] = json!(enabled);
-        let mut plugins = vec![plugin];
-        let mut failures = Vec::new();
-        if let Some(failure) = first_pass_failure.take() {
-            plugins.push(failure);
-            failures.push(failed_id.to_string());
-        }
-        let expected = PluginReconcileResponse {
-            changed_plugins: expected_plugins,
-            failed_remote_plugin_ids: failures.clone(),
-            failed_materialization_remote_plugin_ids: failures,
-        };
-        let active_plugin_ids = if enabled {
-            vec![REMOTE_PLUGIN_ID.to_string()]
-        } else {
-            Vec::new()
-        };
-        mount_installed_snapshot(&server, plugins).await;
-        Mock::given(method("GET"))
-            .and(path("/bundle"))
-            .respond_with(ResponseTemplate::new(200).set_body_bytes(bundle))
-            .expect(expected_downloads)
-            .mount(&server)
-            .await;
-        assert_eq!(reconcile(&mut app_server).await?, expected);
-        // A turn exercises the loaded registry, not fresh hooks/list discovery. Hooks run
-        // on the app-server host even when the thread uses a remote executor.
+
+        // Uninstall must report removed capabilities and stop already-loaded hooks.
+        mount_installed_snapshot(&server, Vec::new()).await;
         assert_eq!(
-            turn_hook_runs(
-                &mut app_server,
-                &server,
-                thread.id.clone(),
-                active_plugin_ids
-            )
-            .await?,
-            usize::from(scope == "WORKSPACE" && enabled && capabilities.has_hooks),
+            reconcile(&mut app_server).await?,
+            PluginReconcileResponse {
+                changed_plugins: vec![first],
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            turn_hook_runs(&mut app_server, &server, thread.id.clone(), Vec::new()).await?,
+            0
         );
         server.verify().await;
         server.reset().await;
-    }
 
-    // Uninstall must report removed capabilities and stop already-loaded hooks.
-    mount_installed_snapshot(&server, Vec::new()).await;
-    assert_eq!(
-        reconcile(&mut app_server).await?,
-        PluginReconcileResponse {
-            changed_plugins: vec![first],
-            ..Default::default()
-        }
-    );
-    assert_eq!(
-        turn_hook_runs(&mut app_server, &server, thread.id.clone(), Vec::new()).await?,
-        0
-    );
-    server.verify().await;
-    server.reset().await;
-
-    // The next RPC must honor the latest config without contacting the plugin service.
-    let config_path = codex_home.path().join("config.toml");
-    let config = std::fs::read_to_string(&config_path)?;
-    std::fs::write(
-        config_path,
-        config.replace("plugins = true", "plugins = false"),
-    )?;
-    assert_eq!(
-        reconcile(&mut app_server).await?,
-        PluginReconcileResponse::default()
-    );
-    let requests = server.received_requests().await.expect("recorded requests");
-    assert!(requests.iter().all(|request| {
-        !request.url.path().starts_with("/backend-api/ps/plugins/")
-            && request.url.path() != "/bundle"
-    }));
-    Ok(())
+        // The next RPC must honor the latest config without contacting the plugin service.
+        let config_path = codex_home.path().join("config.toml");
+        let config = std::fs::read_to_string(&config_path)?;
+        std::fs::write(
+            config_path,
+            config.replace("plugins = true", "plugins = false"),
+        )?;
+        assert_eq!(
+            reconcile(&mut app_server).await?,
+            PluginReconcileResponse::default()
+        );
+        let requests = server.received_requests().await.expect("recorded requests");
+        assert!(requests.iter().all(|request| {
+            !request.url.path().starts_with("/backend-api/ps/plugins/")
+                && request.url.path() != "/bundle"
+        }));
+        Ok(())
+    })
+    .await
 }
 
 async fn turn_hook_runs(

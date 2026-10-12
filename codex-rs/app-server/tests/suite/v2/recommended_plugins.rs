@@ -15,6 +15,7 @@ use codex_app_server_protocol::ThreadStartResponse;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::UserInput;
 use core_test_support::apps_test_server::AppsTestServer;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
@@ -57,6 +58,7 @@ async fn recommended_plugins_after_external_login(
         "recommended_plugins = true\n"
     };
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let apps_server = AppsTestServer::mount(&server).await?;
     Mock::given(method("GET"))
         .and(path("/ps/plugins/suggested/codex"))
@@ -222,4 +224,6 @@ async fn recommended_plugins_after_external_login(
     );
     assert!(!tool_names.contains(&"list_available_plugins_to_install"));
     Ok(())
+    })
+    .await
 }

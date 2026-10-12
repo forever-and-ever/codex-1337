@@ -185,47 +185,50 @@ async fn executor_interrupt_hook_runs_after_attachment() -> Result<()> {
         completed_turn_response("turn").set_delay(Duration::from_secs(60)),
     ])
     .await?;
-    fixture.attach().await?;
-    fixture
-        .test
-        .codex
-        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-            text: "interrupt this turn".to_string(),
-            text_elements: Vec::new(),
-        }]))
-        .await?;
+    mock_server::run(&[&server], async {
+        fixture.attach().await?;
+        fixture
+            .test
+            .codex
+            .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "interrupt this turn".to_string(),
+                text_elements: Vec::new(),
+            }]))
+            .await?;
 
-    // The model request confirms discovery was saved, without requiring a target shell.
-    tokio::time::timeout(Duration::from_secs(10), async {
-        while fixture.responses.requests().is_empty() {
-            tokio::task::yield_now().await;
-        }
+        // The model request confirms discovery was saved, without requiring a target shell.
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while fixture.responses.requests().is_empty() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .context("interrupted turn should reach the model request")?;
+        fixture.test.codex.submit(Op::Interrupt).await?;
+        wait_for_event(&fixture.test.codex, |event| {
+            matches!(event, EventMsg::TurnAborted(_))
+        })
+        .await;
+        fixture.wait_for_hook_call().await?;
+
+        let calls = recorded_hook_calls(&server).await?;
+        assert_eq!(calls.len(), 1);
+        let call = &calls[0]["params"];
+        let response = fixture.responses.single_request().body_json();
+        let turn_id = &response["client_metadata"]["turn_id"];
+        assert_eq!(call["name"], "turn_ended");
+        assert_eq!(
+            call["arguments"],
+            json!({
+                "hook_event_name": "Interrupt",
+                "session_id": fixture.test.session_configured.thread_id.to_string(),
+                "turn_id": turn_id,
+            })
+        );
+        assert_eq!(call["_meta"]["x-codex-turn-metadata"]["turn_id"], *turn_id);
+        Ok(())
     })
     .await
-    .context("interrupted turn should reach the model request")?;
-    fixture.test.codex.submit(Op::Interrupt).await?;
-    wait_for_event(&fixture.test.codex, |event| {
-        matches!(event, EventMsg::TurnAborted(_))
-    })
-    .await;
-    fixture.wait_for_hook_call().await?;
-
-    let calls = recorded_hook_calls(&server).await?;
-    assert_eq!(calls.len(), 1);
-    let call = &calls[0]["params"];
-    let response = fixture.responses.single_request().body_json();
-    let turn_id = &response["client_metadata"]["turn_id"];
-    assert_eq!(call["name"], "turn_ended");
-    assert_eq!(
-        call["arguments"],
-        json!({
-            "hook_event_name": "Interrupt",
-            "session_id": fixture.test.session_configured.thread_id.to_string(),
-            "turn_id": turn_id,
-        })
-    );
-    assert_eq!(call["_meta"]["x-codex-turn-metadata"]["turn_id"], *turn_id);
-    Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -238,31 +241,34 @@ async fn executor_interrupt_hook_skips_turn_without_step_context() -> Result<()>
 
     let (_server, fixture) =
         executor_hook_fixture(vec![completed_turn_response("first-turn")]).await?;
-    fixture.attach().await?;
-    fixture
-        .test
-        .submit_text_turn("populate executor discovery")
-        .await?;
-    fixture.wait_for_hook_call().await?;
+    mock_server::run(&[&_server], async {
+        fixture.attach().await?;
+        fixture
+            .test
+            .submit_text_turn("populate executor discovery")
+            .await?;
+        fixture.wait_for_hook_call().await?;
 
-    // Standalone shell turns have no model step, despite the previous turn's discovery.
-    fixture
-        .test
-        .codex
-        .submit(Op::RunUserShellCommand {
-            command: "sleep 60".to_string(),
-            timeout_ms: None,
-        })
-        .await?;
-    fixture.interrupt_running_command().await?;
+        // Standalone shell turns have no model step, despite the previous turn's discovery.
+        fixture
+            .test
+            .codex
+            .submit(Op::RunUserShellCommand {
+                command: "sleep 60".to_string(),
+                timeout_ms: None,
+            })
+            .await?;
+        fixture.interrupt_running_command().await?;
 
-    assert!(
-        tokio::time::timeout(Duration::from_secs(1), fixture.hook_called.notified())
-            .await
-            .is_err(),
-        "executor hooks must not reuse a previous turn's step context",
-    );
-    Ok(())
+        assert!(
+            tokio::time::timeout(Duration::from_secs(1), fixture.hook_called.notified())
+                .await
+                .is_err(),
+            "executor hooks must not reuse a previous turn's step context",
+        );
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

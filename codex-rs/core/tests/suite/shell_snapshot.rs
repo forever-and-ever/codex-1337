@@ -403,38 +403,40 @@ async fn shell_snapshot_v2_warms_after_hooks_without_blocking_the_model() -> Res
         })
         .with_config(trust_discovered_hooks);
     let harness = TestCodexHarness::with_auto_env_builder(builder).await?;
+    mock_server::run(&[harness.server()], async {
+        // The model can finish a text-only turn while the profile is still blocked.
+        run_no_shell_turn(&harness).await?;
+        wait_for_file_contents(&profile_home.path().join("captures"), "x").await?;
+        fs::write(profile_home.path().join("ready"), "").await?;
 
-    // The model can finish a text-only turn while the profile is still blocked.
-    run_no_shell_turn(&harness).await?;
-    wait_for_file_contents(&profile_home.path().join("captures"), "x").await?;
-    fs::write(profile_home.path().join("ready"), "").await?;
+        let end = run_tool_turn_on_harness(
+            &harness,
+            "use the prewarmed in-memory shell snapshot",
+            "shell-snapshot-v2-prewarm",
+            "exec_command",
+            json!({
+                "cmd": "profile_helper; printf '|%s' \"${PROFILE_SECRET-missing}\"",
+                "yield_time_ms": 1_000,
+            }),
+        )
+        .await?;
 
-    let end = run_tool_turn_on_harness(
-        &harness,
-        "use the prewarmed in-memory shell snapshot",
-        "shell-snapshot-v2-prewarm",
-        "exec_command",
-        json!({
-            "cmd": "profile_helper; printf '|%s' \"${PROFILE_SECRET-missing}\"",
-            "yield_time_ms": 1_000,
-        }),
-    )
-    .await?;
-
-    assert_eq!(end.exit_code, 0);
-    assert!(
-        harness
-            .function_call_stdout("shell-snapshot-v2-prewarm")
-            .await
-            .trim()
-            .ends_with("helper|missing")
-    );
-    assert_eq!(
-        fs::read_to_string(profile_home.path().join("captures")).await?,
-        "x"
-    );
-    assert!(!harness.test().home.path().join("shell_snapshots").exists());
-    Ok(())
+        assert_eq!(end.exit_code, 0);
+        assert!(
+            harness
+                .function_call_stdout("shell-snapshot-v2-prewarm")
+                .await
+                .trim()
+                .ends_with("helper|missing")
+        );
+        assert_eq!(
+            fs::read_to_string(profile_home.path().join("captures")).await?,
+            "x"
+        );
+        assert!(!harness.test().home.path().join("shell_snapshots").exists());
+        Ok(())
+    })
+    .await
 }
 
 #[cfg(unix)]
@@ -453,6 +455,7 @@ async fn shell_snapshot_v2_recovers_after_failed_prewarm() -> Result<()> {
             policy.r#set.insert("BASH_ENV".to_string(), bash_env);
         });
     let harness = TestCodexHarness::with_auto_env_builder(builder).await?;
+    mock_server::run(&[harness.server()], async {
     run_no_shell_turn(&harness).await?;
     wait_for_file_contents(&profile_home.path().join("failed"), "x").await?;
 
@@ -482,6 +485,8 @@ async fn shell_snapshot_v2_recovers_after_failed_prewarm() -> Result<()> {
     );
     harness.test().codex.shutdown_and_wait().await?;
     Ok(())
+    })
+    .await
 }
 
 #[cfg(unix)]
@@ -883,6 +888,7 @@ async fn shell_snapshot_v2_filters_profile_secrets_without_creating_files() -> R
             ]);
         });
     let harness = TestCodexHarness::with_auto_env_builder(builder).await?;
+    mock_server::run(&[harness.server()], async {
 
     for attempt in 0..2 {
         let end = run_tool_turn_on_harness(
@@ -911,6 +917,8 @@ async fn shell_snapshot_v2_filters_profile_secrets_without_creating_files() -> R
     );
     assert!(!harness.test().home.path().join("shell_snapshots").exists());
     Ok(())
+    })
+    .await
 }
 
 #[cfg(unix)]
@@ -984,42 +992,45 @@ async fn unified_exec_snapshot_preserves_shell_environment_policy_set() -> Resul
         config.permissions.shell_environment_policy.r#set = policy_set_path_for_test();
     });
     let harness = TestCodexHarness::with_builder(builder).await?;
-    let codex_home = harness.test().home.path().to_path_buf();
-    run_tool_turn_on_harness(
-        &harness,
-        "warm up unified exec shell snapshot",
-        "shell-snapshot-policy-warmup-exec",
-        "exec_command",
-        json!({
-            "cmd": "printf warmup",
-            "yield_time_ms": 1_000,
-        }),
-    )
-    .await?;
-    let snapshot_path = wait_for_snapshot(&codex_home).await?;
-    fs::write(&snapshot_path, snapshot_override_content_for_policy_test()).await?;
+    mock_server::run(&[harness.server()], async {
+        let codex_home = harness.test().home.path().to_path_buf();
+        run_tool_turn_on_harness(
+            &harness,
+            "warm up unified exec shell snapshot",
+            "shell-snapshot-policy-warmup-exec",
+            "exec_command",
+            json!({
+                "cmd": "printf warmup",
+                "yield_time_ms": 1_000,
+            }),
+        )
+        .await?;
+        let snapshot_path = wait_for_snapshot(&codex_home).await?;
+        fs::write(&snapshot_path, snapshot_override_content_for_policy_test()).await?;
 
-    let command = command_asserting_policy_after_snapshot();
-    let end = run_tool_turn_on_harness(
-        &harness,
-        "verify unified exec policy after snapshot",
-        "shell-snapshot-policy-assert-exec",
-        "exec_command",
-        json!({
-            "cmd": command,
-            "yield_time_ms": 1_000,
-        }),
-    )
-    .await?;
+        let command = command_asserting_policy_after_snapshot();
+        let end = run_tool_turn_on_harness(
+            &harness,
+            "verify unified exec policy after snapshot",
+            "shell-snapshot-policy-assert-exec",
+            "exec_command",
+            json!({
+                "cmd": command,
+                "yield_time_ms": 1_000,
+            }),
+        )
+        .await?;
 
-    assert_eq!(
-        normalize_newlines(&end.aggregated_output).trim(),
-        POLICY_SUCCESS_OUTPUT
-    );
-    assert_eq!(end.exit_code, 0);
-    assert!(snapshot_path.starts_with(codex_home));
+        assert_eq!(
+            normalize_newlines(&end.aggregated_output).trim(),
+            POLICY_SUCCESS_OUTPUT
+        );
+        assert_eq!(end.exit_code, 0);
+        assert!(snapshot_path.starts_with(codex_home));
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[cfg_attr(target_os = "windows", ignore)]

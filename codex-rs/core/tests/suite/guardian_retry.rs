@@ -7,6 +7,7 @@ use codex_protocol::config_types::ApprovalsReviewer;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::SandboxPolicy;
+use core_test_support::mock_server;
 use core_test_support::responses::*;
 use core_test_support::skip_if_no_network;
 use core_test_support::skip_if_wine_exec;
@@ -22,6 +23,7 @@ async fn guardian_retry_executes_only_after_a_completed_approval() -> Result<()>
         "Guardian approval actions require host-native paths"
     );
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let mut builder = test_codex().with_config(|config| {
         config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
         config.approvals_reviewer = ApprovalsReviewer::AutoReview;
@@ -105,4 +107,6 @@ async fn guardian_retry_executes_only_after_a_completed_approval() -> Result<()>
         .await?;
     assert_eq!(contents.lines().collect::<Vec<_>>(), vec!["executed"]);
     Ok(())
+    })
+    .await
 }

@@ -14,6 +14,7 @@ use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::Op;
 use codex_protocol::turn_input::TurnInputRequest;
 use codex_protocol::user_input::UserInput;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_codex::TestCodex;
@@ -279,63 +280,66 @@ async fn responses_http_uses_retry_after() -> Result<()> {
 
     let mut telemetry = RetryTelemetryCapture::install();
     let server = responses::start_mock_server().await;
-    let response_mock = responses::mount_response_sequence(
-        &server,
-        vec![
-            ResponseTemplate::new(503)
-                .insert_header("Retry-After", "1")
-                .set_body_json(json!({ "error": { "code": "server_is_overloaded" } })),
-            ResponseTemplate::new(503)
-                .insert_header("Retry-After", "1")
-                .set_body_json(json!({ "error": { "code": "server_is_overloaded" } })),
-            responses::sse_response(responses::sse(vec![
-                responses::ev_response_created("recovered"),
-                responses::ev_completed("recovered"),
-            ])),
-        ],
-    )
-    .await;
-    let test = test_codex()
-        .with_config(|config| {
-            config.model_provider.request_max_retries = Some(1);
-            config.model_provider.stream_max_retries = Some(1);
-        })
-        .build_with_auto_env(&server)
-        .await?;
+    mock_server::run(&[&server], async {
+        let response_mock = responses::mount_response_sequence(
+            &server,
+            vec![
+                ResponseTemplate::new(503)
+                    .insert_header("Retry-After", "1")
+                    .set_body_json(json!({ "error": { "code": "server_is_overloaded" } })),
+                ResponseTemplate::new(503)
+                    .insert_header("Retry-After", "1")
+                    .set_body_json(json!({ "error": { "code": "server_is_overloaded" } })),
+                responses::sse_response(responses::sse(vec![
+                    responses::ev_response_created("recovered"),
+                    responses::ev_completed("recovered"),
+                ])),
+            ],
+        )
+        .await;
+        let test = test_codex()
+            .with_config(|config| {
+                config.model_provider.request_max_retries = Some(1);
+                config.model_provider.stream_max_retries = Some(1);
+            })
+            .build_with_auto_env(&server)
+            .await?;
 
-    submit_user_input(&test, "retry the upstream overload").await?;
-    let retry = telemetry.next_retry().await;
-    assert!(retry.delay <= Duration::from_secs(1));
-    assert_eq!(
-        retry,
-        RetryTelemetryEvent {
-            attempt: 1,
-            delay: retry.delay,
-            layer: "http".into(),
-            operation: "request".into(),
-        }
-    );
-    assert!(wait_for_retry(&mut telemetry, &retry).await >= Duration::from_secs(1));
-    let retry = telemetry.next_retry().await;
-    assert!(retry.delay <= Duration::from_secs(1));
-    assert_eq!(
-        retry,
-        RetryTelemetryEvent {
-            attempt: 1,
-            delay: retry.delay,
-            layer: "stream".into(),
-            operation: "sampling".into(),
-        }
-    );
-    assert!(wait_for_retry(&mut telemetry, &retry).await >= Duration::from_secs(1));
-    wait_for_turn_completion(&test).await;
+        submit_user_input(&test, "retry the upstream overload").await?;
+        let retry = telemetry.next_retry().await;
+        assert!(retry.delay <= Duration::from_secs(1));
+        assert_eq!(
+            retry,
+            RetryTelemetryEvent {
+                attempt: 1,
+                delay: retry.delay,
+                layer: "http".into(),
+                operation: "request".into(),
+            }
+        );
+        assert!(wait_for_retry(&mut telemetry, &retry).await >= Duration::from_secs(1));
+        let retry = telemetry.next_retry().await;
+        assert!(retry.delay <= Duration::from_secs(1));
+        assert_eq!(
+            retry,
+            RetryTelemetryEvent {
+                attempt: 1,
+                delay: retry.delay,
+                layer: "stream".into(),
+                operation: "sampling".into(),
+            }
+        );
+        assert!(wait_for_retry(&mut telemetry, &retry).await >= Duration::from_secs(1));
+        wait_for_turn_completion(&test).await;
 
-    assert_eq!(response_mock.requests().len(), 3);
-    assert_eq!(
-        telemetry.events.try_recv(),
-        Err(mpsc::error::TryRecvError::Empty)
-    );
-    Ok(())
+        assert_eq!(response_mock.requests().len(), 3);
+        assert_eq!(
+            telemetry.events.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        );
+        Ok(())
+    })
+    .await
 }
 
 /// A 429 with server advice retries in the sampling loop and completes without a terminal error.
@@ -345,56 +349,59 @@ async fn responses_http_429_uses_retry_after() -> Result<()> {
 
     let mut telemetry = RetryTelemetryCapture::install();
     let server = responses::start_mock_server().await;
-    let response_mock = responses::mount_response_sequence(
-        &server,
-        vec![
-            ResponseTemplate::new(429)
-                .insert_header("Retry-After", "1")
-                .set_body_json(json!({ "error": { "code": "rate_limit_exceeded" } })),
-            responses::sse_response(responses::sse(vec![
-                responses::ev_response_created("recovered"),
-                responses::ev_completed("recovered"),
-            ])),
-        ],
-    )
-    .await;
-    let test = test_codex()
-        .with_config(|config| {
-            config.model_provider.request_max_retries = Some(0);
-            config.model_provider.stream_max_retries = Some(1);
-        })
-        .build_with_auto_env(&server)
-        .await?;
+    mock_server::run(&[&server], async {
+        let response_mock = responses::mount_response_sequence(
+            &server,
+            vec![
+                ResponseTemplate::new(429)
+                    .insert_header("Retry-After", "1")
+                    .set_body_json(json!({ "error": { "code": "rate_limit_exceeded" } })),
+                responses::sse_response(responses::sse(vec![
+                    responses::ev_response_created("recovered"),
+                    responses::ev_completed("recovered"),
+                ])),
+            ],
+        )
+        .await;
+        let test = test_codex()
+            .with_config(|config| {
+                config.model_provider.request_max_retries = Some(0);
+                config.model_provider.stream_max_retries = Some(1);
+            })
+            .build_with_auto_env(&server)
+            .await?;
 
-    submit_user_input(&test, "retry the rate-limited request").await?;
-    let retry = telemetry.next_retry().await;
-    assert!(retry.delay <= Duration::from_secs(1));
-    assert_eq!(
-        retry,
-        RetryTelemetryEvent {
-            attempt: 1,
-            delay: retry.delay,
-            layer: "stream".into(),
-            operation: "sampling".into(),
-        }
-    );
-    assert!(wait_for_retry(&mut telemetry, &retry).await >= Duration::from_secs(1));
-    loop {
-        match wait_for_event(&test.codex, |_| true).await {
-            EventMsg::Error(error) => panic!("unexpected terminal error: {error:?}"),
-            EventMsg::TurnComplete(completed) => {
-                assert_eq!(completed.error, None);
-                break;
+        submit_user_input(&test, "retry the rate-limited request").await?;
+        let retry = telemetry.next_retry().await;
+        assert!(retry.delay <= Duration::from_secs(1));
+        assert_eq!(
+            retry,
+            RetryTelemetryEvent {
+                attempt: 1,
+                delay: retry.delay,
+                layer: "stream".into(),
+                operation: "sampling".into(),
             }
-            _ => {}
+        );
+        assert!(wait_for_retry(&mut telemetry, &retry).await >= Duration::from_secs(1));
+        loop {
+            match wait_for_event(&test.codex, |_| true).await {
+                EventMsg::Error(error) => panic!("unexpected terminal error: {error:?}"),
+                EventMsg::TurnComplete(completed) => {
+                    assert_eq!(completed.error, None);
+                    break;
+                }
+                _ => {}
+            }
         }
-    }
-    assert_eq!(response_mock.requests().len(), 2);
-    assert_eq!(
-        telemetry.events.try_recv(),
-        Err(mpsc::error::TryRecvError::Empty)
-    );
-    Ok(())
+        assert_eq!(response_mock.requests().len(), 2);
+        assert_eq!(
+            telemetry.events.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        );
+        Ok(())
+    })
+    .await
 }
 
 /// Check backoff without a live server or tracing events coordinating the retry loop.
@@ -503,84 +510,87 @@ async fn responses_http_capacity_recovers_and_remains_interruptible() -> Result<
 
     let mut telemetry = RetryTelemetryCapture::install();
     let server = responses::start_mock_server().await;
-    let overload = ResponseTemplate::new(503)
-        .set_body_json(json!({ "error": { "code": "server_is_overloaded" } }));
-    let response_mock = responses::mount_response_sequence(
-        &server,
-        vec![
-            overload.clone(),
-            overload.clone(),
-            responses::sse_response(responses::sse(vec![
-                responses::ev_response_created("recovered"),
-                responses::ev_completed("recovered"),
-            ])),
-            overload,
-        ],
-    )
-    .await;
-    let test = test_codex()
-        .with_config(|config| {
-            config.model_provider.request_max_retries = Some(0);
-            config.model_provider.stream_max_retries = Some(0);
-        })
-        .build_with_auto_env(&server)
-        .await?;
+    mock_server::run(&[&server], async {
+        let overload = ResponseTemplate::new(503)
+            .set_body_json(json!({ "error": { "code": "server_is_overloaded" } }));
+        let response_mock = responses::mount_response_sequence(
+            &server,
+            vec![
+                overload.clone(),
+                overload.clone(),
+                responses::sse_response(responses::sse(vec![
+                    responses::ev_response_created("recovered"),
+                    responses::ev_completed("recovered"),
+                ])),
+                overload,
+            ],
+        )
+        .await;
+        let test = test_codex()
+            .with_config(|config| {
+                config.model_provider.request_max_retries = Some(0);
+                config.model_provider.stream_max_retries = Some(0);
+            })
+            .build_with_auto_env(&server)
+            .await?;
 
-    submit_user_input(&test, "keep the selected model").await?;
-    for (attempt, seconds) in [(1, 5), (2, 10)] {
+        submit_user_input(&test, "keep the selected model").await?;
+        for (attempt, seconds) in [(1, 5), (2, 10)] {
+            let retry = telemetry.next_retry().await;
+            assert_eq!(
+                retry,
+                RetryTelemetryEvent {
+                    attempt,
+                    delay: Duration::from_secs(seconds),
+                    layer: "stream".into(),
+                    operation: "sampling".into(),
+                }
+            );
+            let EventMsg::StreamError(event) = wait_for_event(&test.codex, |event| {
+                matches!(
+                    event,
+                    EventMsg::StreamError(_) | EventMsg::Error(_) | EventMsg::TurnComplete(_)
+                )
+            })
+            .await
+            else {
+                panic!("capacity must keep the turn running");
+            };
+            assert_eq!(
+                event.codex_error_info,
+                Some(CodexErrorInfo::ServerOverloaded)
+            );
+            wait_for_retry(&mut telemetry, &retry).await;
+        }
+        wait_for_turn_completion(&test).await;
+        let requests = response_mock.requests();
+        assert_eq!(requests.len(), 3);
+        for request in &requests[1..] {
+            assert_eq!(
+                request.body_json()["model"],
+                requests[0].body_json()["model"]
+            );
+            assert_eq!(request.input(), requests[0].input());
+        }
+
+        submit_user_input(&test, "interrupt while waiting for capacity").await?;
         let retry = telemetry.next_retry().await;
         assert_eq!(
-            retry,
-            RetryTelemetryEvent {
-                attempt,
-                delay: Duration::from_secs(seconds),
-                layer: "stream".into(),
-                operation: "sampling".into(),
-            }
+            retry.attempt, 1,
+            "capacity state is scoped to the request loop"
         );
-        let EventMsg::StreamError(event) = wait_for_event(&test.codex, |event| {
-            matches!(
-                event,
-                EventMsg::StreamError(_) | EventMsg::Error(_) | EventMsg::TurnComplete(_)
-            )
-        })
-        .await
-        else {
-            panic!("capacity must keep the turn running");
-        };
-        assert_eq!(
-            event.codex_error_info,
-            Some(CodexErrorInfo::ServerOverloaded)
-        );
-        wait_for_retry(&mut telemetry, &retry).await;
-    }
-    wait_for_turn_completion(&test).await;
-    let requests = response_mock.requests();
-    assert_eq!(requests.len(), 3);
-    for request in &requests[1..] {
-        assert_eq!(
-            request.body_json()["model"],
-            requests[0].body_json()["model"]
-        );
-        assert_eq!(request.input(), requests[0].input());
-    }
-
-    submit_user_input(&test, "interrupt while waiting for capacity").await?;
-    let retry = telemetry.next_retry().await;
-    assert_eq!(
-        retry.attempt, 1,
-        "capacity state is scoped to the request loop"
-    );
-    test.codex.submit(Op::Interrupt).await?;
-    tokio::time::timeout(
-        Duration::from_secs(2),
-        wait_for_event(&test.codex, |event| {
-            matches!(event, EventMsg::TurnAborted(_))
-        }),
-    )
-    .await?;
-    assert_eq!(response_mock.requests().len(), 4);
-    Ok(())
+        test.codex.submit(Op::Interrupt).await?;
+        tokio::time::timeout(
+            Duration::from_secs(2),
+            wait_for_event(&test.codex, |event| {
+                matches!(event, EventMsg::TurnAborted(_))
+            }),
+        )
+        .await?;
+        assert_eq!(response_mock.requests().len(), 4);
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -588,28 +598,31 @@ async fn responses_http_504_preserves_status_after_stream_retry() -> Result<()> 
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
-    let response_mock =
-        responses::mount_response_sequence(&server, vec![ResponseTemplate::new(504); 2]).await;
-    let test = test_codex()
-        .with_config(|config| {
-            config.service_tier = Some("flex".to_string());
-            config.model_provider.request_max_retries = Some(0);
-            config.model_provider.stream_max_retries = Some(1);
-        })
-        .build_with_auto_env(&server)
-        .await?;
+    mock_server::run(&[&server], async {
+        let response_mock =
+            responses::mount_response_sequence(&server, vec![ResponseTemplate::new(504); 2]).await;
+        let test = test_codex()
+            .with_config(|config| {
+                config.service_tier = Some("flex".to_string());
+                config.model_provider.request_max_retries = Some(0);
+                config.model_provider.stream_max_retries = Some(1);
+            })
+            .build_with_auto_env(&server)
+            .await?;
 
-    submit_user_input(&test, "surface the timeout after one retry").await?;
-    assert_terminal_failure(
-        &test,
-        CodexErrorInfo::HttpConnectionFailed {
-            http_status_code: Some(504),
-        },
-        /*expected_retries*/ 1,
-    )
-    .await?;
-    assert_eq!(response_mock.requests().len(), 2);
-    Ok(())
+        submit_user_input(&test, "surface the timeout after one retry").await?;
+        assert_terminal_failure(
+            &test,
+            CodexErrorInfo::HttpConnectionFailed {
+                http_status_code: Some(504),
+            },
+            /*expected_retries*/ 1,
+        )
+        .await?;
+        assert_eq!(response_mock.requests().len(), 2);
+        Ok(())
+    })
+    .await
 }
 
 /// Remote compaction v2 uses the upstream header before another HTTP request.
@@ -619,68 +632,71 @@ async fn compact_v2_uses_retry_after() -> Result<()> {
 
     let mut telemetry = RetryTelemetryCapture::install();
     let server = responses::start_mock_server().await;
-    let response_mock = responses::mount_response_sequence(
-        &server,
-        vec![
-            responses::sse_response(responses::sse(vec![
-                responses::ev_response_created("seed"),
-                responses::ev_completed("seed"),
-            ])),
-            ResponseTemplate::new(503)
-                .insert_header("Retry-After", "1")
-                .set_body_json(json!({ "error": { "code": "server_is_overloaded" } })),
-            responses::sse_response(responses::sse(vec![
-                json!({
-                    "type": "response.output_item.done",
-                    "item": {
-                        "type": "compaction",
-                        "encrypted_content": "RETRIED_COMPACTION_SUMMARY",
-                    }
-                }),
-                responses::ev_completed("compacted"),
-            ])),
-        ],
-    )
-    .await;
-    let test = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
-        .with_config(|config| {
-            config.model_provider.request_max_retries = Some(1);
-            config.model_provider.stream_max_retries = Some(0);
-        })
-        .build_with_auto_env(&server)
-        .await?;
-    test.submit_turn("seed history for compaction").await?;
+    mock_server::run(&[&server], async {
+        let response_mock = responses::mount_response_sequence(
+            &server,
+            vec![
+                responses::sse_response(responses::sse(vec![
+                    responses::ev_response_created("seed"),
+                    responses::ev_completed("seed"),
+                ])),
+                ResponseTemplate::new(503)
+                    .insert_header("Retry-After", "1")
+                    .set_body_json(json!({ "error": { "code": "server_is_overloaded" } })),
+                responses::sse_response(responses::sse(vec![
+                    json!({
+                        "type": "response.output_item.done",
+                        "item": {
+                            "type": "compaction",
+                            "encrypted_content": "RETRIED_COMPACTION_SUMMARY",
+                        }
+                    }),
+                    responses::ev_completed("compacted"),
+                ])),
+            ],
+        )
+        .await;
+        let test = test_codex()
+            .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+            .with_config(|config| {
+                config.model_provider.request_max_retries = Some(1);
+                config.model_provider.stream_max_retries = Some(0);
+            })
+            .build_with_auto_env(&server)
+            .await?;
+        test.submit_turn("seed history for compaction").await?;
 
-    test.codex.submit(Op::Compact).await?;
-    let retry = telemetry.next_retry().await;
-    assert!(retry.delay <= Duration::from_secs(1));
-    assert_eq!(
-        retry,
-        RetryTelemetryEvent {
-            attempt: 1,
-            delay: retry.delay,
-            layer: "http".into(),
-            operation: "request".into(),
-        }
-    );
-    assert!(wait_for_retry(&mut telemetry, &retry).await >= Duration::from_secs(1));
-    wait_for_turn_completion(&test).await;
-
-    let requests = response_mock.requests();
-    assert_eq!(requests.len(), 3);
-    for request in &requests[1..] {
-        assert_eq!(request.path(), "/v1/responses");
-        assert!(
-            !request.inputs_of_type("compaction_trigger").is_empty(),
-            "expected a remote compaction v2 request"
+        test.codex.submit(Op::Compact).await?;
+        let retry = telemetry.next_retry().await;
+        assert!(retry.delay <= Duration::from_secs(1));
+        assert_eq!(
+            retry,
+            RetryTelemetryEvent {
+                attempt: 1,
+                delay: retry.delay,
+                layer: "http".into(),
+                operation: "request".into(),
+            }
         );
-    }
-    assert_eq!(
-        telemetry.events.try_recv(),
-        Err(mpsc::error::TryRecvError::Empty)
-    );
-    Ok(())
+        assert!(wait_for_retry(&mut telemetry, &retry).await >= Duration::from_secs(1));
+        wait_for_turn_completion(&test).await;
+
+        let requests = response_mock.requests();
+        assert_eq!(requests.len(), 3);
+        for request in &requests[1..] {
+            assert_eq!(request.path(), "/v1/responses");
+            assert!(
+                !request.inputs_of_type("compaction_trigger").is_empty(),
+                "expected a remote compaction v2 request"
+            );
+        }
+        assert_eq!(
+            telemetry.events.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        );
+        Ok(())
+    })
+    .await
 }
 
 /// Remote compaction v2 stream failures retry without using the enclosing response header.
@@ -690,71 +706,74 @@ async fn compact_v2_stream_failure_uses_local_backoff_despite_retry_after() -> R
 
     let mut telemetry = RetryTelemetryCapture::install();
     let server = responses::start_mock_server().await;
-    let response_mock = responses::mount_response_sequence(
-        &server,
-        vec![
-            responses::sse_response(responses::sse(vec![
-                responses::ev_response_created("seed"),
-                responses::ev_completed("seed"),
-            ])),
-            responses::sse_response(responses::sse_failed(
-                "rate-limited",
-                "rate_limit_exceeded",
-                "Rate limit exceeded.",
-            ))
-            .insert_header("Retry-After", "1"),
-            responses::sse_response(responses::sse(vec![
-                json!({
-                    "type": "response.output_item.done",
-                    "item": {
-                        "type": "compaction",
-                        "encrypted_content": "RETRIED_COMPACTION_SUMMARY",
-                    }
-                }),
-                responses::ev_completed("compacted"),
-            ])),
-        ],
-    )
-    .await;
-    let test = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
-        .with_config(|config| {
-            config.model_provider.request_max_retries = Some(0);
-            config.model_provider.stream_max_retries = Some(1);
-        })
-        .build_with_auto_env(&server)
-        .await?;
-    test.submit_turn("seed history for compaction").await?;
+    mock_server::run(&[&server], async {
+        let response_mock = responses::mount_response_sequence(
+            &server,
+            vec![
+                responses::sse_response(responses::sse(vec![
+                    responses::ev_response_created("seed"),
+                    responses::ev_completed("seed"),
+                ])),
+                responses::sse_response(responses::sse_failed(
+                    "rate-limited",
+                    "rate_limit_exceeded",
+                    "Rate limit exceeded.",
+                ))
+                .insert_header("Retry-After", "1"),
+                responses::sse_response(responses::sse(vec![
+                    json!({
+                        "type": "response.output_item.done",
+                        "item": {
+                            "type": "compaction",
+                            "encrypted_content": "RETRIED_COMPACTION_SUMMARY",
+                        }
+                    }),
+                    responses::ev_completed("compacted"),
+                ])),
+            ],
+        )
+        .await;
+        let test = test_codex()
+            .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+            .with_config(|config| {
+                config.model_provider.request_max_retries = Some(0);
+                config.model_provider.stream_max_retries = Some(1);
+            })
+            .build_with_auto_env(&server)
+            .await?;
+        test.submit_turn("seed history for compaction").await?;
 
-    test.codex.submit(Op::Compact).await?;
-    let retry = telemetry.next_retry().await;
-    assert_eq!(
-        retry,
-        RetryTelemetryEvent {
-            attempt: 1,
-            delay: Duration::from_secs(5),
-            layer: "stream".into(),
-            operation: "remote_compaction_v2".into(),
-        }
-    );
-    wait_for_retry(&mut telemetry, &retry).await;
-    wait_for_turn_completion(&test).await;
-
-    let requests = response_mock.requests();
-    assert_eq!(requests.len(), 3);
-    for request in &requests[1..] {
-        assert_eq!(request.path(), "/v1/responses");
-        assert!(
-            !request.inputs_of_type("compaction_trigger").is_empty(),
-            "expected a remote compaction v2 request"
+        test.codex.submit(Op::Compact).await?;
+        let retry = telemetry.next_retry().await;
+        assert_eq!(
+            retry,
+            RetryTelemetryEvent {
+                attempt: 1,
+                delay: Duration::from_secs(5),
+                layer: "stream".into(),
+                operation: "remote_compaction_v2".into(),
+            }
         );
-    }
-    assert_eq!(
-        telemetry.events.try_recv(),
-        Err(mpsc::error::TryRecvError::Empty)
-    );
+        wait_for_retry(&mut telemetry, &retry).await;
+        wait_for_turn_completion(&test).await;
 
-    Ok(())
+        let requests = response_mock.requests();
+        assert_eq!(requests.len(), 3);
+        for request in &requests[1..] {
+            assert_eq!(request.path(), "/v1/responses");
+            assert!(
+                !request.inputs_of_type("compaction_trigger").is_empty(),
+                "expected a remote compaction v2 request"
+            );
+        }
+        assert_eq!(
+            telemetry.events.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        );
+
+        Ok(())
+    })
+    .await
 }
 
 /// Remote compaction honors message-only advice within its budget, with headers taking precedence.
@@ -769,75 +788,78 @@ async fn compact_v2_rate_limit_uses_server_advice(
 
     let mut telemetry = RetryTelemetryCapture::install();
     let server = responses::start_mock_server().await;
-    let failed = responses::sse_response(responses::sse(vec![json!({
-        "type": "response.failed",
-        "response": {"error": {
-            "code": "rate_limit_exceeded",
-            "message": message,
-            "headers": {"Retry-After": error_header}
-        }}
-    })]));
-    let response_mock = responses::mount_response_sequence(
-        &server,
-        vec![
-            responses::sse_response(responses::sse(vec![
-                responses::ev_response_created("seed"),
-                responses::ev_completed("seed"),
-            ])),
-            failed,
-            responses::sse_response(responses::sse(vec![
-                json!({
-                    "type": "response.output_item.done",
-                    "item": {
-                        "type": "compaction",
-                        "encrypted_content": "RETRIED_COMPACTION_SUMMARY",
-                    }
-                }),
-                responses::ev_completed("compacted"),
-            ])),
-        ],
-    )
-    .await;
-    let test = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
-        .with_config(|config| {
-            config.model_provider.request_max_retries = Some(0);
-            config.model_provider.stream_max_retries = Some(1);
-        })
-        .build_with_auto_env(&server)
-        .await?;
-    test.submit_turn("seed history for compaction").await?;
+    mock_server::run(&[&server], async {
+        let failed = responses::sse_response(responses::sse(vec![json!({
+            "type": "response.failed",
+            "response": {"error": {
+                "code": "rate_limit_exceeded",
+                "message": message,
+                "headers": {"Retry-After": error_header}
+            }}
+        })]));
+        let response_mock = responses::mount_response_sequence(
+            &server,
+            vec![
+                responses::sse_response(responses::sse(vec![
+                    responses::ev_response_created("seed"),
+                    responses::ev_completed("seed"),
+                ])),
+                failed,
+                responses::sse_response(responses::sse(vec![
+                    json!({
+                        "type": "response.output_item.done",
+                        "item": {
+                            "type": "compaction",
+                            "encrypted_content": "RETRIED_COMPACTION_SUMMARY",
+                        }
+                    }),
+                    responses::ev_completed("compacted"),
+                ])),
+            ],
+        )
+        .await;
+        let test = test_codex()
+            .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+            .with_config(|config| {
+                config.model_provider.request_max_retries = Some(0);
+                config.model_provider.stream_max_retries = Some(1);
+            })
+            .build_with_auto_env(&server)
+            .await?;
+        test.submit_turn("seed history for compaction").await?;
 
-    test.codex.submit(Op::Compact).await?;
-    let retry = telemetry.next_retry().await;
-    assert!(retry.delay <= Duration::from_secs(1));
-    assert_eq!(
-        retry,
-        RetryTelemetryEvent {
-            attempt: 1,
-            delay: retry.delay,
-            layer: "stream".into(),
-            operation: "remote_compaction_v2".into(),
-        }
-    );
-    assert!(wait_for_retry(&mut telemetry, &retry).await >= Duration::from_secs(1));
-    wait_for_turn_completion(&test).await;
-
-    let requests = response_mock.requests();
-    assert_eq!(requests.len(), 3);
-    for request in &requests[1..] {
-        assert_eq!(request.path(), "/v1/responses");
-        assert!(
-            !request.inputs_of_type("compaction_trigger").is_empty(),
-            "expected a remote compaction v2 request"
+        test.codex.submit(Op::Compact).await?;
+        let retry = telemetry.next_retry().await;
+        assert!(retry.delay <= Duration::from_secs(1));
+        assert_eq!(
+            retry,
+            RetryTelemetryEvent {
+                attempt: 1,
+                delay: retry.delay,
+                layer: "stream".into(),
+                operation: "remote_compaction_v2".into(),
+            }
         );
-    }
-    assert_eq!(
-        telemetry.events.try_recv(),
-        Err(mpsc::error::TryRecvError::Empty)
-    );
+        assert!(wait_for_retry(&mut telemetry, &retry).await >= Duration::from_secs(1));
+        wait_for_turn_completion(&test).await;
 
-    Ok(())
+        let requests = response_mock.requests();
+        assert_eq!(requests.len(), 3);
+        for request in &requests[1..] {
+            assert_eq!(request.path(), "/v1/responses");
+            assert!(
+                !request.inputs_of_type("compaction_trigger").is_empty(),
+                "expected a remote compaction v2 request"
+            );
+        }
+        assert_eq!(
+            telemetry.events.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        );
+
+        Ok(())
+    })
+    .await
 }
 
 /// Compaction capacity uses the same wait policy without spending its stream retry budget.
@@ -847,64 +869,67 @@ async fn compact_v2_capacity_recovers_after_request_retries() -> Result<()> {
 
     let mut telemetry = RetryTelemetryCapture::install();
     let server = responses::start_mock_server().await;
-    let overload = ResponseTemplate::new(503)
-        .set_body_json(json!({ "error": { "code": "server_is_overloaded" } }));
-    let response_mock = responses::mount_response_sequence(
-        &server,
-        vec![
-            responses::sse_response(responses::sse(vec![
-                responses::ev_response_created("seed"),
-                responses::ev_completed("seed"),
-            ])),
-            overload.clone(),
-            overload,
-            responses::sse_response(responses::sse(vec![
-                json!({
-                    "type": "response.output_item.done",
-                    "item": { "type": "compaction", "encrypted_content": "RETRIED_SUMMARY" }
-                }),
-                responses::ev_completed("compacted"),
-            ])),
-        ],
-    )
-    .await;
-    let test = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
-        .with_config(|config| {
-            config.model_provider.request_max_retries = Some(1);
-            config.model_provider.stream_max_retries = Some(0);
-        })
-        .build_with_auto_env(&server)
-        .await?;
-    test.submit_turn("seed history for compaction").await?;
+    mock_server::run(&[&server], async {
+        let overload = ResponseTemplate::new(503)
+            .set_body_json(json!({ "error": { "code": "server_is_overloaded" } }));
+        let response_mock = responses::mount_response_sequence(
+            &server,
+            vec![
+                responses::sse_response(responses::sse(vec![
+                    responses::ev_response_created("seed"),
+                    responses::ev_completed("seed"),
+                ])),
+                overload.clone(),
+                overload,
+                responses::sse_response(responses::sse(vec![
+                    json!({
+                        "type": "response.output_item.done",
+                        "item": { "type": "compaction", "encrypted_content": "RETRIED_SUMMARY" }
+                    }),
+                    responses::ev_completed("compacted"),
+                ])),
+            ],
+        )
+        .await;
+        let test = test_codex()
+            .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+            .with_config(|config| {
+                config.model_provider.request_max_retries = Some(1);
+                config.model_provider.stream_max_retries = Some(0);
+            })
+            .build_with_auto_env(&server)
+            .await?;
+        test.submit_turn("seed history for compaction").await?;
 
-    test.codex.submit(Op::Compact).await?;
-    let request_retry = telemetry.next_retry().await;
-    assert!((FIRST_RETRY_MIN_DELAY..FIRST_RETRY_MAX_DELAY).contains(&request_retry.delay));
-    wait_for_retry(&mut telemetry, &request_retry).await;
-    let capacity_retry = telemetry.next_retry().await;
-    assert_eq!(
-        capacity_retry,
-        RetryTelemetryEvent {
-            attempt: 1,
-            delay: Duration::from_secs(5),
-            layer: "stream".into(),
-            operation: "remote_compaction_v2".into(),
-        }
-    );
-    wait_for_retry(&mut telemetry, &capacity_retry).await;
-    wait_for_turn_completion(&test).await;
-    let requests = response_mock.requests();
-    assert_eq!(requests.len(), 4);
-    for request in &requests[1..] {
-        assert!(!request.inputs_of_type("compaction_trigger").is_empty());
-        assert_eq!(request.input(), requests[1].input());
+        test.codex.submit(Op::Compact).await?;
+        let request_retry = telemetry.next_retry().await;
+        assert!((FIRST_RETRY_MIN_DELAY..FIRST_RETRY_MAX_DELAY).contains(&request_retry.delay));
+        wait_for_retry(&mut telemetry, &request_retry).await;
+        let capacity_retry = telemetry.next_retry().await;
         assert_eq!(
-            request.body_json()["model"],
-            requests[1].body_json()["model"]
+            capacity_retry,
+            RetryTelemetryEvent {
+                attempt: 1,
+                delay: Duration::from_secs(5),
+                layer: "stream".into(),
+                operation: "remote_compaction_v2".into(),
+            }
         );
-    }
-    Ok(())
+        wait_for_retry(&mut telemetry, &capacity_retry).await;
+        wait_for_turn_completion(&test).await;
+        let requests = response_mock.requests();
+        assert_eq!(requests.len(), 4);
+        for request in &requests[1..] {
+            assert!(!request.inputs_of_type("compaction_trigger").is_empty());
+            assert_eq!(request.input(), requests[1].input());
+            assert_eq!(
+                request.body_json()["model"],
+                requests[1].body_json()["model"]
+            );
+        }
+        Ok(())
+    })
+    .await
 }
 
 /// SSE failures currently retry with local backoff instead of the enclosing response header.
@@ -914,66 +939,69 @@ async fn sse_failure_uses_local_backoff_despite_retry_after() -> Result<()> {
 
     let mut telemetry = RetryTelemetryCapture::install();
     let server = responses::start_mock_server().await;
-    let response_mock = responses::mount_response_sequence(
-        &server,
-        vec![
-            responses::sse_response(responses::sse(vec![
-                json!({
-                    "type": "error",
-                    "error": {
-                        "type": "tokens",
-                        "code": "rate_limit_exceeded",
-                        "message": "Rate limit exceeded."
-                    }
-                }),
-                json!({
-                    "type": "response.failed",
-                    "response": {
-                        "id": "rate-limited",
-                        "status": "failed",
+    mock_server::run(&[&server], async {
+        let response_mock = responses::mount_response_sequence(
+            &server,
+            vec![
+                responses::sse_response(responses::sse(vec![
+                    json!({
+                        "type": "error",
                         "error": {
+                            "type": "tokens",
                             "code": "rate_limit_exceeded",
                             "message": "Rate limit exceeded."
                         }
-                    }
-                }),
-            ]))
-            .insert_header("Retry-After", "1"),
-            responses::sse_response(responses::sse(vec![
-                responses::ev_response_created("recovered"),
-                responses::ev_completed("recovered"),
-            ])),
-        ],
-    )
-    .await;
-    let test = test_codex()
-        .with_config(|config| {
-            config.model_provider.request_max_retries = Some(0);
-            config.model_provider.stream_max_retries = Some(1);
-        })
-        .build_with_auto_env(&server)
-        .await?;
+                    }),
+                    json!({
+                        "type": "response.failed",
+                        "response": {
+                            "id": "rate-limited",
+                            "status": "failed",
+                            "error": {
+                                "code": "rate_limit_exceeded",
+                                "message": "Rate limit exceeded."
+                            }
+                        }
+                    }),
+                ]))
+                .insert_header("Retry-After", "1"),
+                responses::sse_response(responses::sse(vec![
+                    responses::ev_response_created("recovered"),
+                    responses::ev_completed("recovered"),
+                ])),
+            ],
+        )
+        .await;
+        let test = test_codex()
+            .with_config(|config| {
+                config.model_provider.request_max_retries = Some(0);
+                config.model_provider.stream_max_retries = Some(1);
+            })
+            .build_with_auto_env(&server)
+            .await?;
 
-    submit_user_input(&test, "retry the rate-limited stream").await?;
-    let retry = telemetry.next_retry().await;
-    assert_eq!(
-        retry,
-        RetryTelemetryEvent {
-            attempt: 1,
-            delay: Duration::from_secs(5),
-            layer: "stream".into(),
-            operation: "sampling".into(),
-        }
-    );
-    wait_for_retry(&mut telemetry, &retry).await;
-    wait_for_turn_completion(&test).await;
+        submit_user_input(&test, "retry the rate-limited stream").await?;
+        let retry = telemetry.next_retry().await;
+        assert_eq!(
+            retry,
+            RetryTelemetryEvent {
+                attempt: 1,
+                delay: Duration::from_secs(5),
+                layer: "stream".into(),
+                operation: "sampling".into(),
+            }
+        );
+        wait_for_retry(&mut telemetry, &retry).await;
+        wait_for_turn_completion(&test).await;
 
-    assert_eq!(response_mock.requests().len(), 2);
-    assert_eq!(
-        telemetry.events.try_recv(),
-        Err(mpsc::error::TryRecvError::Empty)
-    );
-    Ok(())
+        assert_eq!(response_mock.requests().len(), 2);
+        assert_eq!(
+            telemetry.events.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        );
+        Ok(())
+    })
+    .await
 }
 
 /// Headerless sampled stream rate limits outlast the stream retry budget until they clear.
@@ -985,62 +1013,65 @@ async fn sse_rate_limit_without_retry_after_outlasts_stream_retries(code: &str) 
 
     let mut telemetry = RetryTelemetryCapture::install();
     let server = responses::start_mock_server().await;
-    let response_mock = responses::mount_response_sequence(
-        &server,
-        vec![
-            responses::sse_response(responses::sse_failed(
-                "rate-limited",
-                code,
-                "Rate limit exceeded.",
-            )),
-            responses::sse_response(responses::sse(vec![
-                responses::ev_response_created("recovered"),
-                responses::ev_completed("recovered"),
-            ])),
-        ],
-    )
-    .await;
-    let test = test_codex()
-        .with_config(|config| {
-            config.model_provider.request_max_retries = Some(0);
-            config.model_provider.stream_max_retries = Some(0);
-        })
-        .build_with_auto_env(&server)
-        .await?;
-
-    submit_user_input(&test, "outlast the headerless rate-limited stream").await?;
-    let retry = telemetry.next_retry().await;
-    assert_eq!(
-        retry,
-        RetryTelemetryEvent {
-            attempt: 1,
-            delay: Duration::from_secs(5),
-            layer: "stream".into(),
-            operation: "sampling".into(),
-        }
-    );
-    let EventMsg::StreamError(event) = wait_for_event(&test.codex, |event| {
-        matches!(
-            event,
-            EventMsg::StreamError(_) | EventMsg::Error(_) | EventMsg::TurnComplete(_)
+    mock_server::run(&[&server], async {
+        let response_mock = responses::mount_response_sequence(
+            &server,
+            vec![
+                responses::sse_response(responses::sse_failed(
+                    "rate-limited",
+                    code,
+                    "Rate limit exceeded.",
+                )),
+                responses::sse_response(responses::sse(vec![
+                    responses::ev_response_created("recovered"),
+                    responses::ev_completed("recovered"),
+                ])),
+            ],
         )
+        .await;
+        let test = test_codex()
+            .with_config(|config| {
+                config.model_provider.request_max_retries = Some(0);
+                config.model_provider.stream_max_retries = Some(0);
+            })
+            .build_with_auto_env(&server)
+            .await?;
+
+        submit_user_input(&test, "outlast the headerless rate-limited stream").await?;
+        let retry = telemetry.next_retry().await;
+        assert_eq!(
+            retry,
+            RetryTelemetryEvent {
+                attempt: 1,
+                delay: Duration::from_secs(5),
+                layer: "stream".into(),
+                operation: "sampling".into(),
+            }
+        );
+        let EventMsg::StreamError(event) = wait_for_event(&test.codex, |event| {
+            matches!(
+                event,
+                EventMsg::StreamError(_) | EventMsg::Error(_) | EventMsg::TurnComplete(_)
+            )
+        })
+        .await
+        else {
+            panic!("a rate limit must keep the turn running");
+        };
+        assert_eq!(
+            event.codex_error_info,
+            Some(CodexErrorInfo::RateLimitExceeded)
+        );
+        wait_for_retry(&mut telemetry, &retry).await;
+        wait_for_turn_completion(&test).await;
+        assert_eq!(response_mock.requests().len(), 2);
+        assert_eq!(
+            telemetry.events.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        );
+        Ok(())
     })
     .await
-    else {
-        panic!("a rate limit must keep the turn running");
-    };
-    assert_eq!(
-        event.codex_error_info,
-        Some(CodexErrorInfo::RateLimitExceeded)
-    );
-    wait_for_retry(&mut telemetry, &retry).await;
-    wait_for_turn_completion(&test).await;
-    assert_eq!(response_mock.requests().len(), 2);
-    assert_eq!(
-        telemetry.events.try_recv(),
-        Err(mpsc::error::TryRecvError::Empty)
-    );
-    Ok(())
 }
 
 /// Both sources survive to the agent's retry loop, and valid headers always beat message advice.
@@ -1060,55 +1091,58 @@ async fn sse_failure_uses_server_advice(
 
     let mut telemetry = RetryTelemetryCapture::install();
     let server = responses::start_mock_server().await;
-    let failed = responses::sse_response(responses::sse(vec![json!({
-        "type": "response.failed",
-        "response": {"error": {
-            "code": code,
-            "message": message,
-            "headers": {"Retry-After": error_header}
-        }}
-    })]));
-    let response_mock = responses::mount_response_sequence(
-        &server,
-        vec![
-            failed,
-            responses::sse_response(responses::sse(vec![
-                responses::ev_response_created("recovered"),
-                responses::ev_completed("recovered"),
-            ])),
-        ],
-    )
-    .await;
-    let test = test_codex()
-        .with_config(|config| {
-            config.model_provider.request_max_retries = Some(0);
-            config.model_provider.stream_max_retries = Some(1);
-        })
-        .build_with_auto_env(&server)
-        .await?;
+    mock_server::run(&[&server], async {
+        let failed = responses::sse_response(responses::sse(vec![json!({
+            "type": "response.failed",
+            "response": {"error": {
+                "code": code,
+                "message": message,
+                "headers": {"Retry-After": error_header}
+            }}
+        })]));
+        let response_mock = responses::mount_response_sequence(
+            &server,
+            vec![
+                failed,
+                responses::sse_response(responses::sse(vec![
+                    responses::ev_response_created("recovered"),
+                    responses::ev_completed("recovered"),
+                ])),
+            ],
+        )
+        .await;
+        let test = test_codex()
+            .with_config(|config| {
+                config.model_provider.request_max_retries = Some(0);
+                config.model_provider.stream_max_retries = Some(1);
+            })
+            .build_with_auto_env(&server)
+            .await?;
 
-    submit_user_input(&test, "retry after the server's advice").await?;
-    let retry = telemetry.next_retry().await;
-    assert!(retry.delay <= Duration::from_secs(1));
-    assert_eq!(
-        retry,
-        RetryTelemetryEvent {
-            attempt: 1,
-            delay: retry.delay,
-            layer: "stream".into(),
-            operation: "sampling".into(),
-        }
-    );
-    assert!(wait_for_retry(&mut telemetry, &retry).await >= Duration::from_secs(1));
-    wait_for_turn_completion(&test).await;
+        submit_user_input(&test, "retry after the server's advice").await?;
+        let retry = telemetry.next_retry().await;
+        assert!(retry.delay <= Duration::from_secs(1));
+        assert_eq!(
+            retry,
+            RetryTelemetryEvent {
+                attempt: 1,
+                delay: retry.delay,
+                layer: "stream".into(),
+                operation: "sampling".into(),
+            }
+        );
+        assert!(wait_for_retry(&mut telemetry, &retry).await >= Duration::from_secs(1));
+        wait_for_turn_completion(&test).await;
 
-    assert_eq!(response_mock.requests().len(), 2);
-    assert_eq!(
-        telemetry.events.try_recv(),
-        Err(mpsc::error::TryRecvError::Empty)
-    );
+        assert_eq!(response_mock.requests().len(), 2);
+        assert_eq!(
+            telemetry.events.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        );
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 /// Streamed capacity waits without spending the transport retry budget.
@@ -1120,48 +1154,51 @@ async fn sse_capacity_recovers(retry_after: Option<&str>) -> Result<()> {
 
     let mut telemetry = RetryTelemetryCapture::install();
     let server = responses::start_mock_server().await;
-    let mut overload = responses::sse_response(responses::sse_failed(
-        "overloaded",
-        "server_is_overloaded",
-        "Selected model is at capacity.",
-    ));
-    if let Some(header) = retry_after {
-        overload = overload.insert_header("Retry-After", header);
-    }
-    let response_mock = responses::mount_response_sequence(
-        &server,
-        vec![
-            overload,
-            responses::sse_response(responses::sse(vec![
-                responses::ev_response_created("recovered"),
-                responses::ev_completed("recovered"),
-            ])),
-        ],
-    )
-    .await;
-    let test = test_codex()
-        .with_config(|config| {
-            config.model_provider.request_max_retries = Some(0);
-            config.model_provider.stream_max_retries = Some(0);
-        })
-        .build_with_auto_env(&server)
-        .await?;
-
-    submit_user_input(&test, "wait for streamed capacity").await?;
-    let retry = telemetry.next_retry().await;
-    assert_eq!(
-        retry,
-        RetryTelemetryEvent {
-            attempt: 1,
-            delay: Duration::from_secs(5),
-            layer: "stream".into(),
-            operation: "sampling".into(),
+    mock_server::run(&[&server], async {
+        let mut overload = responses::sse_response(responses::sse_failed(
+            "overloaded",
+            "server_is_overloaded",
+            "Selected model is at capacity.",
+        ));
+        if let Some(header) = retry_after {
+            overload = overload.insert_header("Retry-After", header);
         }
-    );
-    wait_for_retry(&mut telemetry, &retry).await;
-    wait_for_turn_completion(&test).await;
-    assert_eq!(response_mock.requests().len(), 2);
-    Ok(())
+        let response_mock = responses::mount_response_sequence(
+            &server,
+            vec![
+                overload,
+                responses::sse_response(responses::sse(vec![
+                    responses::ev_response_created("recovered"),
+                    responses::ev_completed("recovered"),
+                ])),
+            ],
+        )
+        .await;
+        let test = test_codex()
+            .with_config(|config| {
+                config.model_provider.request_max_retries = Some(0);
+                config.model_provider.stream_max_retries = Some(0);
+            })
+            .build_with_auto_env(&server)
+            .await?;
+
+        submit_user_input(&test, "wait for streamed capacity").await?;
+        let retry = telemetry.next_retry().await;
+        assert_eq!(
+            retry,
+            RetryTelemetryEvent {
+                attempt: 1,
+                delay: Duration::from_secs(5),
+                layer: "stream".into(),
+                operation: "sampling".into(),
+            }
+        );
+        wait_for_retry(&mut telemetry, &retry).await;
+        wait_for_turn_completion(&test).await;
+        assert_eq!(response_mock.requests().len(), 2);
+        Ok(())
+    })
+    .await
 }
 
 async fn assert_terminal_failure(

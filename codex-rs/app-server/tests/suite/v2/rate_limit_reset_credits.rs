@@ -1,3 +1,4 @@
+use core_test_support::mock_server;
 use std::path::Path;
 
 use anyhow::Result;
@@ -134,47 +135,50 @@ async fn consume_account_rate_limit_reset_credit_maps_backend_outcomes() -> Resu
 #[tokio::test]
 async fn consume_account_rate_limit_reset_credit_forwards_selected_credit_id() -> Result<()> {
     let (codex_home, server) = chatgpt_test_context().await?;
-    Mock::given(method("POST"))
-        .and(path("/api/codex/rate-limit-reset-credits/consume"))
-        .and(header("authorization", "Bearer chatgpt-token"))
-        .and(header("chatgpt-account-id", "account-123"))
-        .and(body_json(json!({
-            "redeem_request_id": "request-selected",
-            "credit_id": "credit-123",
-        })))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_json(json!({ "code": "reset", "windows_reset": 2 })),
-        )
-        .expect(1)
-        .mount(&server)
-        .await;
+    mock_server::run(&[&server], async {
+        Mock::given(method("POST"))
+            .and(path("/api/codex/rate-limit-reset-credits/consume"))
+            .and(header("authorization", "Bearer chatgpt-token"))
+            .and(header("chatgpt-account-id", "account-123"))
+            .and(body_json(json!({
+                "redeem_request_id": "request-selected",
+                "credit_id": "credit-123",
+            })))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({ "code": "reset", "windows_reset": 2 })),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
 
-    let mut mcp = initialized_app_server(codex_home.path()).await?;
-    let confirmation = reset_credit_confirmation(&mut mcp).await?;
-    let request_id = mcp
-        .send_consume_account_rate_limit_reset_credit_request(
-            ConsumeAccountRateLimitResetCreditParams {
-                confirmation: Some(confirmation),
-                new_thread: None,
-                thread_id: None,
-                idempotency_key: "request-selected".to_string(),
-                credit_id: Some("credit-123".to_string()),
-            },
-        )
-        .await?;
+        let mut mcp = initialized_app_server(codex_home.path()).await?;
+        let confirmation = reset_credit_confirmation(&mut mcp).await?;
+        let request_id = mcp
+            .send_consume_account_rate_limit_reset_credit_request(
+                ConsumeAccountRateLimitResetCreditParams {
+                    confirmation: Some(confirmation),
+                    new_thread: None,
+                    thread_id: None,
+                    idempotency_key: "request-selected".to_string(),
+                    credit_id: Some("credit-123".to_string()),
+                },
+            )
+            .await?;
 
-    assert_eq!(
-        timeout(
-            DEFAULT_READ_TIMEOUT,
-            mcp.read_response::<ConsumeAccountRateLimitResetCreditResponse>(request_id),
-        )
-        .await??,
-        ConsumeAccountRateLimitResetCreditResponse {
-            outcome: ConsumeAccountRateLimitResetCreditOutcome::Reset,
-        }
-    );
-    Ok(())
+        assert_eq!(
+            timeout(
+                DEFAULT_READ_TIMEOUT,
+                mcp.read_response::<ConsumeAccountRateLimitResetCreditResponse>(request_id),
+            )
+            .await??,
+            ConsumeAccountRateLimitResetCreditResponse {
+                outcome: ConsumeAccountRateLimitResetCreditOutcome::Reset,
+            }
+        );
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test]

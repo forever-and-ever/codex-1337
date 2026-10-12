@@ -132,6 +132,7 @@ async fn invalid_provider_rollout_budget_units_fail_without_retry() -> Result<()
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let mut completed = ev_completed_with_tokens("invalid-units", /*total_tokens*/ 11);
     completed["response"]["usage"]["codex_rollout_budget_units"] = json!(-1.0);
     let responses = mount_sse_sequence(
@@ -174,6 +175,8 @@ async fn invalid_provider_rollout_budget_units_fail_without_retry() -> Result<()
     );
 
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -350,62 +353,65 @@ async fn compaction_budget_exhaustion_fails_without_retry(
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut completed = ev_completed_with_tokens(
-        "compact",
-        /*total_tokens*/ if provider_units { 1 } else { 10 },
-    );
-    if provider_units {
-        completed["response"]["usage"]["codex_rollout_budget_units"] = json!(10.0);
-    }
-    let compact_response = if remote_v2 {
-        sse(vec![
-            json!({
-                "type": "response.output_item.done",
-                "item": {
-                    "type": "compaction",
-                    "encrypted_content": "encrypted-summary",
+    mock_server::run(&[&server], async {
+        let mut completed = ev_completed_with_tokens(
+            "compact",
+            /*total_tokens*/ if provider_units { 1 } else { 10 },
+        );
+        if provider_units {
+            completed["response"]["usage"]["codex_rollout_budget_units"] = json!(10.0);
+        }
+        let compact_response = if remote_v2 {
+            sse(vec![
+                json!({
+                    "type": "response.output_item.done",
+                    "item": {
+                        "type": "compaction",
+                        "encrypted_content": "encrypted-summary",
+                    }
+                }),
+                completed,
+            ])
+        } else {
+            sse(vec![
+                ev_response_created("compact"),
+                ev_assistant_message("compact-summary", "compact summary"),
+                completed,
+            ])
+        };
+        let responses = mount_sse_sequence(&server, vec![compact_response]).await;
+        let test = test_codex()
+            .with_config(move |config| {
+                config.rollout_budget = Some(RolloutBudgetConfig {
+                    limit_tokens: 10,
+                    reminder_at_remaining_tokens: vec![5],
+                    ..rollout_budget()
+                });
+                if !remote_v2 {
+                    config.model_provider.name = "OpenAI-compatible test provider".to_string();
                 }
-            }),
-            completed,
-        ])
-    } else {
-        sse(vec![
-            ev_response_created("compact"),
-            ev_assistant_message("compact-summary", "compact summary"),
-            completed,
-        ])
-    };
-    let responses = mount_sse_sequence(&server, vec![compact_response]).await;
-    let test = test_codex()
-        .with_config(move |config| {
-            config.rollout_budget = Some(RolloutBudgetConfig {
-                limit_tokens: 10,
-                reminder_at_remaining_tokens: vec![5],
-                ..rollout_budget()
-            });
-            if !remote_v2 {
-                config.model_provider.name = "OpenAI-compatible test provider".to_string();
-            }
+            })
+            .build(&server)
+            .await?;
+
+        test.codex.submit(Op::Compact).await?;
+        wait_for_event(&test.codex, |event| {
+            matches!(
+                event,
+                EventMsg::Error(error)
+                    if error.codex_error_info == Some(CodexErrorInfo::SessionBudgetExceeded)
+            )
         })
-        .build(&server)
-        .await?;
+        .await;
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+        assert_eq!(responses.requests().len(), 1, "compaction should not retry");
 
-    test.codex.submit(Op::Compact).await?;
-    wait_for_event(&test.codex, |event| {
-        matches!(
-            event,
-            EventMsg::Error(error)
-                if error.codex_error_info == Some(CodexErrorInfo::SessionBudgetExceeded)
-        )
+        Ok(())
     })
-    .await;
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
-    assert_eq!(responses.requests().len(), 1, "compaction should not retry");
-
-    Ok(())
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

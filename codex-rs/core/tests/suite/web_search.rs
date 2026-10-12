@@ -3,6 +3,7 @@
 use codex_features::Feature;
 use codex_protocol::config_types::WebSearchMode;
 use codex_protocol::models::PermissionProfile;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
@@ -362,6 +363,7 @@ async fn assert_claude_standalone_search(login: SearchLogin) -> anyhow::Result<(
 
     skip_if_no_network!(Ok(()));
     let server = wiremock::MockServer::start().await;
+    mock_server::run(&[&server], async {
     let home = Arc::new(tempfile::TempDir::new()?);
     let policy = NetworkPolicy::default().restrict_to_endpoints(
         [
@@ -548,4 +550,6 @@ async fn assert_claude_standalone_search(login: SearchLogin) -> anyhow::Result<(
     test.codex.shutdown_and_wait().await?;
     server.verify().await;
     Ok(())
+    })
+    .await
 }

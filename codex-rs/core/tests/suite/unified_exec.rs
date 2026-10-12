@@ -2377,142 +2377,144 @@ async fn assert_write_stdin_ctrl_c_interrupts_non_tty_session(
     skip_if_sandbox!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
+        let mut builder = test_codex().with_config(|config| {
+            config
+                .features
+                .enable(Feature::WriteStdinApproval)
+                .expect("enable stdin approvals");
+        });
+        let test = builder.build_with_auto_env(&server).await?;
 
-    let mut builder = test_codex().with_config(|config| {
-        config
-            .features
-            .enable(Feature::WriteStdinApproval)
-            .expect("enable stdin approvals");
-    });
-    let test = builder.build_with_auto_env(&server).await?;
+        let start_call_id = format!("uexec-non-tty-interrupt-{test_name}-start");
+        let interrupt_call_id = format!("uexec-non-tty-interrupt-{test_name}");
 
-    let start_call_id = format!("uexec-non-tty-interrupt-{test_name}-start");
-    let interrupt_call_id = format!("uexec-non-tty-interrupt-{test_name}");
+        let start_args = serde_json::json!({
+            "cmd": command,
+            "yield_time_ms": 250,
+            "tty": false,
+            "sandbox_permissions": "require_escalated",
+        });
+        let interrupt_args = serde_json::json!({
+            "chars": "\u{3}",
+            "session_id": 1000,
+            "yield_time_ms": 1000,
+        });
 
-    let start_args = serde_json::json!({
-        "cmd": command,
-        "yield_time_ms": 250,
-        "tty": false,
-        "sandbox_permissions": "require_escalated",
-    });
-    let interrupt_args = serde_json::json!({
-        "chars": "\u{3}",
-        "session_id": 1000,
-        "yield_time_ms": 1000,
-    });
+        let responses = vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                ev_function_call(
+                    &start_call_id,
+                    "exec_command",
+                    &serde_json::to_string(&start_args)?,
+                ),
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-2"),
+                ev_function_call(
+                    &interrupt_call_id,
+                    "write_stdin",
+                    &serde_json::to_string(&interrupt_args)?,
+                ),
+                ev_completed("resp-2"),
+            ]),
+            sse(vec![
+                ev_assistant_message("msg-1", "done"),
+                ev_completed("resp-3"),
+            ]),
+        ];
+        let request_log = mount_sse_sequence(&server, responses).await;
 
-    let responses = vec![
-        sse(vec![
-            ev_response_created("resp-1"),
-            ev_function_call(
-                &start_call_id,
-                "exec_command",
-                &serde_json::to_string(&start_args)?,
-            ),
-            ev_completed("resp-1"),
-        ]),
-        sse(vec![
-            ev_response_created("resp-2"),
-            ev_function_call(
-                &interrupt_call_id,
-                "write_stdin",
-                &serde_json::to_string(&interrupt_args)?,
-            ),
-            ev_completed("resp-2"),
-        ]),
-        sse(vec![
-            ev_assistant_message("msg-1", "done"),
-            ev_completed("resp-3"),
-        ]),
-    ];
-    let request_log = mount_sse_sequence(&server, responses).await;
-
-    test.codex
-        .start_or_steer_turn(
-            TurnInputRequest::user_input(vec![UserInput::Text {
-                text: "interrupt non-tty unified exec".to_string(),
-                text_elements: Vec::new(),
-            }])
-            .with_thread_settings(ThreadSettingsOverrides {
-                approval_policy: Some(AskForApproval::OnRequest),
-                sandbox_policy: Some(SandboxPolicy::ReadOnly {
-                    network_access: false,
+        test.codex
+            .start_or_steer_turn(
+                TurnInputRequest::user_input(vec![UserInput::Text {
+                    text: "interrupt non-tty unified exec".to_string(),
+                    text_elements: Vec::new(),
+                }])
+                .with_thread_settings(ThreadSettingsOverrides {
+                    approval_policy: Some(AskForApproval::OnRequest),
+                    sandbox_policy: Some(SandboxPolicy::ReadOnly {
+                        network_access: false,
+                    }),
+                    ..Default::default()
                 }),
-                ..Default::default()
-            }),
-        )
-        .await?;
+            )
+            .await?;
 
-    let mut approval_count = 0;
-    loop {
-        match wait_for_event(&test.codex, |_| true).await {
-            EventMsg::ExecApprovalRequest(approval) => {
-                approval_count += 1;
-                test.codex
-                    .submit(Op::ExecApproval {
-                        id: approval.effective_approval_id(),
-                        turn_id: Some(approval.turn_id),
-                        decision: ReviewDecision::Approved,
-                    })
-                    .await?;
+        let mut approval_count = 0;
+        loop {
+            match wait_for_event(&test.codex, |_| true).await {
+                EventMsg::ExecApprovalRequest(approval) => {
+                    approval_count += 1;
+                    test.codex
+                        .submit(Op::ExecApproval {
+                            id: approval.effective_approval_id(),
+                            turn_id: Some(approval.turn_id),
+                            decision: ReviewDecision::Approved,
+                        })
+                        .await?;
+                }
+                EventMsg::TurnComplete(_) => break,
+                _ => {}
             }
-            EventMsg::TurnComplete(_) => break,
-            _ => {}
         }
-    }
-    assert_eq!(
-        approval_count, 1,
-        "only process launch should need approval"
-    );
-
-    let requests = request_log.requests();
-    assert!(!requests.is_empty(), "expected at least one POST request");
-    let bodies = requests
-        .into_iter()
-        .map(|request| request.body_json())
-        .collect::<Vec<_>>();
-
-    let outputs = collect_tool_outputs(&bodies)?;
-
-    let start_output = outputs
-        .get(&start_call_id)
-        .with_context(|| format!("missing start output for exec_command {start_call_id}"))?;
-    assert_eq!(
-        start_output.process_id.as_deref(),
-        Some("1000"),
-        "exec_command should leave a running non-TTY session"
-    );
-    assert!(
-        start_output.exit_code.is_none(),
-        "initial exec_command should not include exit_code while session is running"
-    );
-    assert!(
-        start_output.output.contains("READY"),
-        "start output should include command readiness marker, got {:?}",
-        start_output.output
-    );
-
-    let interrupt_output = outputs
-        .get(&interrupt_call_id)
-        .with_context(|| format!("missing interrupt output for write_stdin {interrupt_call_id}"))?;
-    assert!(
-        interrupt_output.process_id.is_none(),
-        "interrupted process should be cleared from the session map"
-    );
-    assert_eq!(
-        interrupt_output.exit_code,
-        Some(expected_exit_code),
-        "interrupt should preserve the process-reported exit code"
-    );
-    if let Some(expected_interrupt_output) = expected_interrupt_output {
-        assert!(
-            interrupt_output.output.contains(expected_interrupt_output),
-            "interrupt should drain output from the signal handler, got {:?}",
-            interrupt_output.output
+        assert_eq!(
+            approval_count, 1,
+            "only process launch should need approval"
         );
-    }
 
-    Ok(())
+        let requests = request_log.requests();
+        assert!(!requests.is_empty(), "expected at least one POST request");
+        let bodies = requests
+            .into_iter()
+            .map(|request| request.body_json())
+            .collect::<Vec<_>>();
+
+        let outputs = collect_tool_outputs(&bodies)?;
+
+        let start_output = outputs
+            .get(&start_call_id)
+            .with_context(|| format!("missing start output for exec_command {start_call_id}"))?;
+        assert_eq!(
+            start_output.process_id.as_deref(),
+            Some("1000"),
+            "exec_command should leave a running non-TTY session"
+        );
+        assert!(
+            start_output.exit_code.is_none(),
+            "initial exec_command should not include exit_code while session is running"
+        );
+        assert!(
+            start_output.output.contains("READY"),
+            "start output should include command readiness marker, got {:?}",
+            start_output.output
+        );
+
+        let interrupt_output = outputs.get(&interrupt_call_id).with_context(|| {
+            format!("missing interrupt output for write_stdin {interrupt_call_id}")
+        })?;
+        assert!(
+            interrupt_output.process_id.is_none(),
+            "interrupted process should be cleared from the session map"
+        );
+        assert_eq!(
+            interrupt_output.exit_code,
+            Some(expected_exit_code),
+            "interrupt should preserve the process-reported exit code"
+        );
+        if let Some(expected_interrupt_output) = expected_interrupt_output {
+            assert!(
+                interrupt_output.output.contains(expected_interrupt_output),
+                "interrupt should drain output from the signal handler, got {:?}",
+                interrupt_output.output
+            );
+        }
+
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2809,86 +2811,88 @@ async fn unified_exec_interrupt_preserves_long_running_session() -> Result<()> {
     skip_if_host_windows!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
+        let mut builder = test_codex();
+        let TestCodex {
+            codex,
+            cwd,
+            session_configured,
+            ..
+        } = builder.build(&server).await?;
 
-    let mut builder = test_codex();
-    let TestCodex {
-        codex,
-        cwd,
-        session_configured,
-        ..
-    } = builder.build(&server).await?;
+        let temp_dir = tempfile::tempdir()?;
+        let pid_path = temp_dir.path().join("uexec_pid_interrupt");
+        let pid_path_str = pid_path.to_string_lossy();
 
-    let temp_dir = tempfile::tempdir()?;
-    let pid_path = temp_dir.path().join("uexec_pid_interrupt");
-    let pid_path_str = pid_path.to_string_lossy();
+        let call_id = "uexec-long-running-interrupt";
+        let command = format!("printf '%s' $$ > '{pid_path_str}' && exec sleep 3000");
+        let args = json!({
+            "cmd": command,
+            "yield_time_ms": 30000,
+        });
 
-    let call_id = "uexec-long-running-interrupt";
-    let command = format!("printf '%s' $$ > '{pid_path_str}' && exec sleep 3000");
-    let args = json!({
-        "cmd": command,
-        "yield_time_ms": 30000,
-    });
+        let responses = vec![sse(vec![
+            ev_response_created("resp-1"),
+            ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
+            ev_completed("resp-1"),
+        ])];
+        mount_sse_sequence(&server, responses).await;
 
-    let responses = vec![sse(vec![
-        ev_response_created("resp-1"),
-        ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
-        ev_completed("resp-1"),
-    ])];
-    mount_sse_sequence(&server, responses).await;
+        let session_model = session_configured.model.clone();
+        let turn_cwd = cwd.abs();
+        let (sandbox_policy, permission_profile) =
+            turn_permission_fields(PermissionProfile::Disabled, turn_cwd.as_path());
 
-    let session_model = session_configured.model.clone();
-    let turn_cwd = cwd.abs();
-    let (sandbox_policy, permission_profile) =
-        turn_permission_fields(PermissionProfile::Disabled, turn_cwd.as_path());
-
-    codex
-        .start_or_steer_turn(
-            TurnInputRequest::user_input(vec![UserInput::Text {
-                text: "interrupt long-running unified exec".into(),
-                text_elements: Vec::new(),
-            }])
-            .with_thread_settings(ThreadSettingsOverrides {
-                environments: Some(local_requests(turn_cwd)),
-                approval_policy: Some(AskForApproval::Never),
-                sandbox_policy: Some(sandbox_policy),
-                permission_profile,
-                collaboration_mode: Some(CollaborationMode {
-                    mode: ModeKind::Default,
-                    settings: Settings {
-                        model: session_model,
-                        reasoning_effort: None,
-                        developer_instructions: None,
-                    },
+        codex
+            .start_or_steer_turn(
+                TurnInputRequest::user_input(vec![UserInput::Text {
+                    text: "interrupt long-running unified exec".into(),
+                    text_elements: Vec::new(),
+                }])
+                .with_thread_settings(ThreadSettingsOverrides {
+                    environments: Some(local_requests(turn_cwd)),
+                    approval_policy: Some(AskForApproval::Never),
+                    sandbox_policy: Some(sandbox_policy),
+                    permission_profile,
+                    collaboration_mode: Some(CollaborationMode {
+                        mode: ModeKind::Default,
+                        settings: Settings {
+                            model: session_model,
+                            reasoning_effort: None,
+                            developer_instructions: None,
+                        },
+                    }),
+                    ..Default::default()
                 }),
-                ..Default::default()
-            }),
-        )
-        .await?;
+            )
+            .await?;
 
-    let _begin_event = wait_for_event_match(&codex, |msg| match msg {
-        EventMsg::ExecCommandBegin(ev) if ev.call_id == call_id => Some(ev.clone()),
-        _ => None,
+        let _begin_event = wait_for_event_match(&codex, |msg| match msg {
+            EventMsg::ExecCommandBegin(ev) if ev.call_id == call_id => Some(ev.clone()),
+            _ => None,
+        })
+        .await;
+
+        let pid = wait_for_pid_file(&pid_path).await?;
+        assert!(
+            pid.chars().all(|ch| ch.is_ascii_digit()),
+            "expected numeric pid, got {pid:?}"
+        );
+
+        codex.submit(Op::Interrupt).await?;
+        wait_for_event(&codex, |event| matches!(event, EventMsg::TurnAborted(_))).await;
+
+        assert!(
+            process_is_alive(&pid)?,
+            "expected unified exec process to remain alive after interrupt"
+        );
+
+        codex.submit(Op::CleanBackgroundTerminals).await?;
+        wait_for_process_exit(&pid).await?;
+
+        Ok(())
     })
-    .await;
-
-    let pid = wait_for_pid_file(&pid_path).await?;
-    assert!(
-        pid.chars().all(|ch| ch.is_ascii_digit()),
-        "expected numeric pid, got {pid:?}"
-    );
-
-    codex.submit(Op::Interrupt).await?;
-    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnAborted(_))).await;
-
-    assert!(
-        process_is_alive(&pid)?,
-        "expected unified exec process to remain alive after interrupt"
-    );
-
-    codex.submit(Op::CleanBackgroundTerminals).await?;
-    wait_for_process_exit(&pid).await?;
-
-    Ok(())
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2995,11 +2999,11 @@ async fn unified_exec_streams_after_lagged_output() -> Result<()> {
     skip_if_sandbox!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
+        let mut builder = test_codex();
+        let test = builder.build_with_auto_env(&server).await?;
 
-    let mut builder = test_codex();
-    let test = builder.build_with_auto_env(&server).await?;
-
-    let script = r#"python3 - <<'PY'
+        let script = r#"python3 - <<'PY'
 import sys
 import time
 
@@ -3018,84 +3022,87 @@ time.sleep(0.2)
 PY
 "#;
 
-    let first_call_id = "uexec-lag-start";
-    let first_args = serde_json::json!({
-        "cmd": script,
-        "yield_time_ms": 25,
-        "tty": true,
-    });
+        let first_call_id = "uexec-lag-start";
+        let first_args = serde_json::json!({
+            "cmd": script,
+            "yield_time_ms": 25,
+            "tty": true,
+        });
 
-    let second_call_id = "uexec-lag-poll";
-    let second_args = serde_json::json!({
-        "chars": "",
-        "session_id": 1000,
-        "yield_time_ms": 2_000,
-    });
+        let second_call_id = "uexec-lag-poll";
+        let second_args = serde_json::json!({
+            "chars": "",
+            "session_id": 1000,
+            "yield_time_ms": 2_000,
+        });
 
-    let responses = vec![
-        sse(vec![
-            ev_response_created("resp-1"),
-            ev_function_call(
-                first_call_id,
-                "exec_command",
-                &serde_json::to_string(&first_args)?,
-            ),
-            ev_completed("resp-1"),
-        ]),
-        sse(vec![
-            ev_response_created("resp-2"),
-            ev_function_call(
-                second_call_id,
-                "write_stdin",
-                &serde_json::to_string(&second_args)?,
-            ),
-            ev_completed("resp-2"),
-        ]),
-        sse(vec![
-            ev_assistant_message("msg-1", "lag handled"),
-            ev_completed("resp-3"),
-        ]),
-    ];
-    let request_log = mount_sse_sequence(&server, responses).await;
+        let responses = vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                ev_function_call(
+                    first_call_id,
+                    "exec_command",
+                    &serde_json::to_string(&first_args)?,
+                ),
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-2"),
+                ev_function_call(
+                    second_call_id,
+                    "write_stdin",
+                    &serde_json::to_string(&second_args)?,
+                ),
+                ev_completed("resp-2"),
+            ]),
+            sse(vec![
+                ev_assistant_message("msg-1", "lag handled"),
+                ev_completed("resp-3"),
+            ]),
+        ];
+        let request_log = mount_sse_sequence(&server, responses).await;
 
-    submit_unified_exec_turn(&test, "exercise lag handling", PermissionProfile::Disabled).await?;
-    // This is a worst case scenario for the truncate logic, and CI can spend a
-    // while draining the lagged tail before the follow-up tool call completes.
-    wait_for_event_with_timeout(
-        &test.codex,
-        |event| matches!(event, EventMsg::TurnComplete(_)),
-        UNIFIED_EXEC_LAGGED_OUTPUT_TIMEOUT,
-    )
-    .await;
+        submit_unified_exec_turn(&test, "exercise lag handling", PermissionProfile::Disabled)
+            .await?;
+        // This is a worst case scenario for the truncate logic, and CI can spend a
+        // while draining the lagged tail before the follow-up tool call completes.
+        wait_for_event_with_timeout(
+            &test.codex,
+            |event| matches!(event, EventMsg::TurnComplete(_)),
+            UNIFIED_EXEC_LAGGED_OUTPUT_TIMEOUT,
+        )
+        .await;
 
-    let requests = request_log.requests();
-    assert!(!requests.is_empty(), "expected at least one POST request");
-    let bodies = requests
-        .into_iter()
-        .map(|request| request.body_json())
-        .collect::<Vec<_>>();
+        let requests = request_log.requests();
+        assert!(!requests.is_empty(), "expected at least one POST request");
+        let bodies = requests
+            .into_iter()
+            .map(|request| request.body_json())
+            .collect::<Vec<_>>();
 
-    let outputs = collect_tool_outputs(&bodies)?;
+        let outputs = collect_tool_outputs(&bodies)?;
 
-    let start_output = outputs
-        .get(first_call_id)
-        .expect("missing initial unified_exec output");
-    let process_id = start_output.process_id.clone().unwrap_or_default();
-    assert!(
-        !process_id.is_empty(),
-        "expected session id from initial unified_exec response"
-    );
+        let start_output = outputs
+            .get(first_call_id)
+            .expect("missing initial unified_exec output");
+        let process_id = start_output.process_id.clone().unwrap_or_default();
+        assert!(
+            !process_id.is_empty(),
+            "expected session id from initial unified_exec response"
+        );
 
-    let poll_output = outputs
-        .get(second_call_id)
-        .expect("missing poll unified_exec output");
-    let poll_text = poll_output.output.as_str();
-    assert!(
-        poll_text.contains("TAIL-MARKER"),
-        "expected poll output to contain tail marker, got {poll_text:?}"
-    );
+        let poll_output = outputs
+            .get(second_call_id)
+            .expect("missing poll unified_exec output");
+        let poll_text = poll_output.output.as_str();
+        assert!(
+            poll_text.contains("TAIL-MARKER"),
+            "expected poll output to contain tail marker, got {poll_text:?}"
+        );
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -3305,58 +3312,61 @@ async fn managed_one_shot_command_is_terminated_when_the_turn_is_interrupted() -
     skip_if_target_windows!(Ok(()), "uses a POSIX command and process checks");
 
     let server = start_mock_server().await;
-    let mut builder = test_codex().with_cloud_config_bundle(
-        CloudConfigBundleFixture::loader_with_enterprise_requirement(
-            r#"
+    mock_server::run(&[&server], async {
+        let mut builder = test_codex().with_cloud_config_bundle(
+            CloudConfigBundleFixture::loader_with_enterprise_requirement(
+                r#"
 [features]
 unified_exec = false
 shell_tool = true
 "#,
-        ),
-    );
-    let test = builder.build_with_auto_env(&server).await?;
-    let temp_dir = tempfile::tempdir()?;
-    let pid_path = temp_dir.path().join("managed_one_shot_pid");
-    let command = format!(
-        "printf '%s' $$ > '{}' && exec sleep 3000",
-        pid_path.to_string_lossy()
-    );
-    let call_id = "managed-one-shot-interrupt";
-    let args = json!({
-        "cmd": command,
-        "timeout_ms": 30_000,
-    });
-    mount_sse_sequence(
-        &server,
-        vec![sse(vec![
-            ev_response_created("resp-1"),
-            ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
-            ev_completed("resp-1"),
-        ])],
-    )
-    .await;
+            ),
+        );
+        let test = builder.build_with_auto_env(&server).await?;
+        let temp_dir = tempfile::tempdir()?;
+        let pid_path = temp_dir.path().join("managed_one_shot_pid");
+        let command = format!(
+            "printf '%s' $$ > '{}' && exec sleep 3000",
+            pid_path.to_string_lossy()
+        );
+        let call_id = "managed-one-shot-interrupt";
+        let args = json!({
+            "cmd": command,
+            "timeout_ms": 30_000,
+        });
+        mount_sse_sequence(
+            &server,
+            vec![sse(vec![
+                ev_response_created("resp-1"),
+                ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
+                ev_completed("resp-1"),
+            ])],
+        )
+        .await;
 
-    submit_unified_exec_turn(
-        &test,
-        "interrupt one-shot command",
-        PermissionProfile::Disabled,
-    )
-    .await?;
-    wait_for_event_match(&test.codex, |event| match event {
-        EventMsg::ExecCommandBegin(event) if event.call_id == call_id => Some(()),
-        _ => None,
+        submit_unified_exec_turn(
+            &test,
+            "interrupt one-shot command",
+            PermissionProfile::Disabled,
+        )
+        .await?;
+        wait_for_event_match(&test.codex, |event| match event {
+            EventMsg::ExecCommandBegin(event) if event.call_id == call_id => Some(()),
+            _ => None,
+        })
+        .await;
+        let pid = wait_for_pid_file(&pid_path).await?;
+
+        test.codex.submit(Op::Interrupt).await?;
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnAborted(_))
+        })
+        .await;
+        wait_for_process_exit(&pid).await?;
+
+        Ok(())
     })
-    .await;
-    let pid = wait_for_pid_file(&pid_path).await?;
-
-    test.codex.submit(Op::Interrupt).await?;
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnAborted(_))
-    })
-    .await;
-    wait_for_process_exit(&pid).await?;
-
-    Ok(())
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

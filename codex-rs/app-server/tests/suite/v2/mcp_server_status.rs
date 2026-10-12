@@ -1,3 +1,4 @@
+use core_test_support::mock_server;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -255,60 +256,61 @@ async fn oauth_login_validates_callback_issuer_and_uses_http_headers_helper(
     expected_success: bool,
 ) -> Result<()> {
     let oauth = MockServer::start().await;
-    let issuer = format!("{}/mcp", oauth.uri());
-    Mock::given(method("GET"))
-        .and(path("/.well-known/oauth-authorization-server/mcp"))
-        .and(header("x-gateway", "gateway-token"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "issuer": issuer,
-            "authorization_endpoint": format!("{}/oauth/authorize", oauth.uri()),
-            "token_endpoint": format!("{}/oauth/token", oauth.uri()),
-            "authorization_response_iss_parameter_supported": issuer_supported,
-            "token_endpoint_auth_methods_supported": [if client_secret.is_some() {
-                "client_secret_post"
-            } else {
-                "none"
-            }],
-        })))
-        .mount(&oauth)
-        .await;
-    Mock::given(method("POST"))
-        .and(path("/oauth/token"))
-        .and(header("x-gateway", "gateway-token"))
-        .and(move |request: &wiremock::Request| {
-            let body: BTreeMap<_, _> = url::form_urlencoded::parse(&request.body)
-                .into_owned()
-                .collect();
-            body.get("client_secret").map(String::as_str) == client_secret
-                && body.get("client_id").map(String::as_str) == Some("test-client")
-        })
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "access_token": "oauth-token",
-            "token_type": "Bearer",
-        })))
-        .expect(u64::from(expected_success))
-        .mount(&oauth)
-        .await;
+    mock_server::run(&[&oauth], async {
+        let issuer = format!("{}/mcp", oauth.uri());
+        Mock::given(method("GET"))
+            .and(path("/.well-known/oauth-authorization-server/mcp"))
+            .and(header("x-gateway", "gateway-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "issuer": issuer,
+                "authorization_endpoint": format!("{}/oauth/authorize", oauth.uri()),
+                "token_endpoint": format!("{}/oauth/token", oauth.uri()),
+                "authorization_response_iss_parameter_supported": issuer_supported,
+                "token_endpoint_auth_methods_supported": [if client_secret.is_some() {
+                    "client_secret_post"
+                } else {
+                    "none"
+                }],
+            })))
+            .mount(&oauth)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/oauth/token"))
+            .and(header("x-gateway", "gateway-token"))
+            .and(move |request: &wiremock::Request| {
+                let body: BTreeMap<_, _> = url::form_urlencoded::parse(&request.body)
+                    .into_owned()
+                    .collect();
+                body.get("client_secret").map(String::as_str) == client_secret
+                    && body.get("client_id").map(String::as_str) == Some("test-client")
+            })
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "access_token": "oauth-token",
+                "token_type": "Bearer",
+            })))
+            .expect(u64::from(expected_success))
+            .mount(&oauth)
+            .await;
 
-    let codex_home = TempDir::new()?;
-    let helper_command = if cfg!(windows) {
-        r#"echo {"X-Gateway":"gateway-token"}"#
-    } else {
-        r#"printf '{"X-Gateway":"gateway-token"}'"#
-    };
-    let saved_callback = configured_callback
-        .map(|callback| format!("callback_url = \"{callback}\"\n"))
-        .unwrap_or_default();
-    let saved_client_secret = client_secret
-        .map(|secret| format!("client_secret = \"{secret}\"\n"))
-        .unwrap_or_default();
-    let global_callback_config = global_callback
-        .map(|callback| format!("mcp_oauth_callback_url = \"{callback}\"\n"))
-        .unwrap_or_default();
-    std::fs::write(
-        codex_home.path().join("config.toml"),
-        format!(
-            "mcp_oauth_credentials_store = \"file\"\n\
+        let codex_home = TempDir::new()?;
+        let helper_command = if cfg!(windows) {
+            r#"echo {"X-Gateway":"gateway-token"}"#
+        } else {
+            r#"printf '{"X-Gateway":"gateway-token"}'"#
+        };
+        let saved_callback = configured_callback
+            .map(|callback| format!("callback_url = \"{callback}\"\n"))
+            .unwrap_or_default();
+        let saved_client_secret = client_secret
+            .map(|secret| format!("client_secret = \"{secret}\"\n"))
+            .unwrap_or_default();
+        let global_callback_config = global_callback
+            .map(|callback| format!("mcp_oauth_callback_url = \"{callback}\"\n"))
+            .unwrap_or_default();
+        std::fs::write(
+            codex_home.path().join("config.toml"),
+            format!(
+                "mcp_oauth_credentials_store = \"file\"\n\
              {global_callback_config}\
              [mcp_servers.gateway]\n\
              url = \"{}/mcp\"\n\
@@ -317,89 +319,91 @@ async fn oauth_login_validates_callback_issuer_and_uses_http_headers_helper(
              client_id = \"test-client\"\n\
              {saved_client_secret}\
              {saved_callback}",
-            oauth.uri(),
-            toml::Value::String(helper_command.to_string()),
-        ),
-    )?;
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
-        .await?;
+                oauth.uri(),
+                toml::Value::String(helper_command.to_string()),
+            ),
+        )?;
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
+            .await?;
 
-    let request_id = mcp
-        .send_raw_request(
-            "mcpServer/oauth/login",
-            Some(json!({"name": "gateway", "timeoutSecs": 10})),
-        )
-        .await?;
-    let response: McpServerOauthLoginResponse =
-        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(request_id)).await??;
-    let authorization_url = Url::parse(&response.authorization_url)?;
-    let query: BTreeMap<_, _> = authorization_url.query_pairs().into_owned().collect();
-    assert!(!query.contains_key("client_secret"));
-    let mut callback_url = Url::parse(&query["redirect_uri"])?;
-    let expected_callback = if issuer_supported {
-        configured_callback
-            .expect("issuer-bound cases configure a stable callback")
-            .to_string()
-    } else {
-        resolve_mcp_oauth_callback_url(
-            &issuer,
-            global_callback,
-            McpOAuthCallbackMode::CallbackSpecific,
-        )?
-    };
-    assert_eq!(callback_url.path(), Url::parse(&expected_callback)?.path());
-    callback_url
-        .query_pairs_mut()
-        .append_pair("code", "test-code")
-        .append_pair("state", &query["state"]);
-    if let Some(callback_issuer) = callback_issuer {
-        let callback_issuer = if callback_issuer == "matching" {
-            issuer.as_str()
+        let request_id = mcp
+            .send_raw_request(
+                "mcpServer/oauth/login",
+                Some(json!({"name": "gateway", "timeoutSecs": 10})),
+            )
+            .await?;
+        let response: McpServerOauthLoginResponse =
+            timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(request_id)).await??;
+        let authorization_url = Url::parse(&response.authorization_url)?;
+        let query: BTreeMap<_, _> = authorization_url.query_pairs().into_owned().collect();
+        assert!(!query.contains_key("client_secret"));
+        let mut callback_url = Url::parse(&query["redirect_uri"])?;
+        let expected_callback = if issuer_supported {
+            configured_callback
+                .expect("issuer-bound cases configure a stable callback")
+                .to_string()
         } else {
-            callback_issuer
+            resolve_mcp_oauth_callback_url(
+                &issuer,
+                global_callback,
+                McpOAuthCallbackMode::CallbackSpecific,
+            )?
         };
+        assert_eq!(callback_url.path(), Url::parse(&expected_callback)?.path());
         callback_url
             .query_pairs_mut()
-            .append_pair("iss", callback_issuer);
-    }
-    HttpClientBuilder::new()
-        .build_direct()?
-        .get(callback_url)
-        .send()
-        .await?
-        .error_for_status()?;
-    let completed: McpServerOauthLoginCompletedNotification = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_notification("mcpServer/oauthLogin/completed"),
-    )
-    .await??;
-    assert_eq!(
-        completed.login_id.as_deref(),
-        Some(
-            response
-                .login_id
-                .as_deref()
-                .expect("login response should contain an ID")
+            .append_pair("code", "test-code")
+            .append_pair("state", &query["state"]);
+        if let Some(callback_issuer) = callback_issuer {
+            let callback_issuer = if callback_issuer == "matching" {
+                issuer.as_str()
+            } else {
+                callback_issuer
+            };
+            callback_url
+                .query_pairs_mut()
+                .append_pair("iss", callback_issuer);
+        }
+        HttpClientBuilder::new()
+            .build_direct()?
+            .get(callback_url)
+            .send()
+            .await?
+            .error_for_status()?;
+        let completed: McpServerOauthLoginCompletedNotification = timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_notification("mcpServer/oauthLogin/completed"),
         )
-    );
-    assert_eq!(
-        (
-            completed.name.as_str(),
-            completed.thread_id,
-            completed.success,
-            completed.error.is_some(),
-        ),
-        ("gateway", None, expected_success, !expected_success)
-    );
-    if let Some(client_secret) = client_secret {
-        assert!(!response.authorization_url.contains(client_secret));
-        let credentials = std::fs::read_to_string(codex_home.path().join(".credentials.json"))?;
-        assert!(!credentials.contains(client_secret));
-    }
-    oauth.verify().await;
-    Ok(())
+        .await??;
+        assert_eq!(
+            completed.login_id.as_deref(),
+            Some(
+                response
+                    .login_id
+                    .as_deref()
+                    .expect("login response should contain an ID")
+            )
+        );
+        assert_eq!(
+            (
+                completed.name.as_str(),
+                completed.thread_id,
+                completed.success,
+                completed.error.is_some(),
+            ),
+            ("gateway", None, expected_success, !expected_success)
+        );
+        if let Some(client_secret) = client_secret {
+            assert!(!response.authorization_url.contains(client_secret));
+            let credentials = std::fs::read_to_string(codex_home.path().join(".credentials.json"))?;
+            assert!(!credentials.contains(client_secret));
+        }
+        oauth.verify().await;
+        Ok(())
+    })
+    .await
 }
 
 #[test_case(false; "plain HTTP")]

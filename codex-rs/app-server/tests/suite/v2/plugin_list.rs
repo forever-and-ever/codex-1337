@@ -1,3 +1,4 @@
+use core_test_support::mock_server;
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 use std::sync::OnceLock;
@@ -4751,84 +4752,92 @@ remote_plugin = true
 async fn plugin_list_omits_featured_plugin_ids_without_chatgpt_auth() -> Result<()> {
     let codex_home = TempDir::new()?;
     let server = MockServer::start().await;
-    write_plugin_sync_config(codex_home.path(), &format!("{}/backend-api/", server.uri()))?;
-    write_openai_api_curated_marketplace(codex_home.path(), &["linear", "gmail"])?;
+    mock_server::run(&[&server], async {
+        write_plugin_sync_config(codex_home.path(), &format!("{}/backend-api/", server.uri()))?;
+        write_openai_api_curated_marketplace(codex_home.path(), &["linear", "gmail"])?;
 
-    Mock::given(method("GET"))
-        .and(path("/backend-api/plugins/featured"))
-        .and(query_param("platform", "codex"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_string(r#"["linear@openai-api-curated"]"#),
-        )
-        .expect(0)
-        .mount(&server)
-        .await;
+        Mock::given(method("GET"))
+            .and(path("/backend-api/plugins/featured"))
+            .and(query_param("platform", "codex"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_string(r#"["linear@openai-api-curated"]"#),
+            )
+            .expect(0)
+            .mount(&server)
+            .await;
 
-    let home = codex_home.path().to_string_lossy().into_owned();
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .with_env_overrides(&[
-            ("HOME", Some(home.as_str())),
-            ("USERPROFILE", Some(home.as_str())),
-        ])
-        .build_initialized_with_timeout(DEFAULT_TIMEOUT)
-        .await?;
+        let home = codex_home.path().to_string_lossy().into_owned();
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .with_env_overrides(&[
+                ("HOME", Some(home.as_str())),
+                ("USERPROFILE", Some(home.as_str())),
+            ])
+            .build_initialized_with_timeout(DEFAULT_TIMEOUT)
+            .await?;
 
-    let request_id = mcp
-        .send_plugin_list_request(PluginListParams {
-            cwds: None,
-            marketplace_kinds: None,
-            force_refetch: false,
-        })
-        .await?;
+        let request_id = mcp
+            .send_plugin_list_request(PluginListParams {
+                cwds: None,
+                marketplace_kinds: None,
+                force_refetch: false,
+            })
+            .await?;
 
-    let response: PluginListResponse =
-        timeout(DEFAULT_TIMEOUT, mcp.read_response(request_id)).await??;
+        let response: PluginListResponse =
+            timeout(DEFAULT_TIMEOUT, mcp.read_response(request_id)).await??;
 
-    assert_eq!(response.featured_plugin_ids, Vec::<String>::new());
-    assert_eq!(response.marketplaces[0].name, "openai-api-curated");
-    Ok(())
+        assert_eq!(response.featured_plugin_ids, Vec::<String>::new());
+        assert_eq!(response.marketplaces[0].name, "openai-api-curated");
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test]
 async fn plugin_list_uses_warmed_featured_plugin_ids_cache_on_first_request() -> Result<()> {
     let codex_home = TempDir::new()?;
     let server = MockServer::start().await;
-    write_plugin_sync_config(codex_home.path(), &format!("{}/backend-api/", server.uri()))?;
-    write_openai_curated_marketplace(codex_home.path(), &["linear", "gmail"])?;
-    write_remote_plugin_test_auth(codex_home.path())?;
+    mock_server::run(&[&server], async {
+        write_plugin_sync_config(codex_home.path(), &format!("{}/backend-api/", server.uri()))?;
+        write_openai_curated_marketplace(codex_home.path(), &["linear", "gmail"])?;
+        write_remote_plugin_test_auth(codex_home.path())?;
 
-    Mock::given(method("GET"))
-        .and(path("/backend-api/plugins/featured"))
-        .and(query_param("platform", "codex"))
-        .respond_with(ResponseTemplate::new(200).set_body_string(r#"["linear@openai-curated"]"#))
-        .expect(1)
-        .mount(&server)
-        .await;
+        Mock::given(method("GET"))
+            .and(path("/backend-api/plugins/featured"))
+            .and(query_param("platform", "codex"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_string(r#"["linear@openai-curated"]"#),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
 
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .with_plugin_startup_tasks()
-        .build_initialized_with_timeout(DEFAULT_TIMEOUT)
-        .await?;
-    wait_for_featured_plugin_request_count(&server, /*expected_count*/ 1).await?;
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .with_plugin_startup_tasks()
+            .build_initialized_with_timeout(DEFAULT_TIMEOUT)
+            .await?;
+        wait_for_featured_plugin_request_count(&server, /*expected_count*/ 1).await?;
 
-    let request_id = mcp
-        .send_plugin_list_request(PluginListParams {
-            cwds: None,
-            marketplace_kinds: None,
-            force_refetch: false,
-        })
-        .await?;
+        let request_id = mcp
+            .send_plugin_list_request(PluginListParams {
+                cwds: None,
+                marketplace_kinds: None,
+                force_refetch: false,
+            })
+            .await?;
 
-    let response: PluginListResponse =
-        timeout(DEFAULT_TIMEOUT, mcp.read_response(request_id)).await??;
+        let response: PluginListResponse =
+            timeout(DEFAULT_TIMEOUT, mcp.read_response(request_id)).await??;
 
-    assert_eq!(
-        response.featured_plugin_ids,
-        vec!["linear@openai-curated".to_string()]
-    );
-    Ok(())
+        assert_eq!(
+            response.featured_plugin_ids,
+            vec!["linear@openai-curated".to_string()]
+        );
+        Ok(())
+    })
+    .await
 }
 
 async fn wait_for_featured_plugin_request_count(

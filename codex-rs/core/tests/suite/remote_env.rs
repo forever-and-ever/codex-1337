@@ -3803,79 +3803,83 @@ async fn exec_command_routes_to_selected_remote_environment() -> Result<()> {
     skip_if_no_remote_env!(Ok(()));
 
     let server = start_mock_server().await;
-    let test = unified_exec_test(&server).await?;
-    let local_cwd = TempDir::new()?;
-    fs::write(local_cwd.path().join("marker.txt"), "local-routing")?;
-    let local_selection = local(local_cwd.path().abs());
-    let remote_cwd = PathBuf::from(format!(
-        "/tmp/codex-remote-routing-{}",
-        SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis()
-    ))
-    .abs();
-    let remote_marker_name = "marker.txt";
-    let remote_cwd_uri = PathUri::from_host_native_path(&remote_cwd)?;
-    let remote_marker_uri = PathUri::from_host_native_path(remote_cwd.join(remote_marker_name))?;
-    test.fs()
-        .create_directory(
-            &remote_cwd_uri,
-            CreateDirectoryOptions {
-                recursive: true,
-                follow_symlinks: true,
-            },
-            /*sandbox*/ None,
+    mock_server::run(&[&server], async {
+        let test = unified_exec_test(&server).await?;
+        let local_cwd = TempDir::new()?;
+        fs::write(local_cwd.path().join("marker.txt"), "local-routing")?;
+        let local_selection = local(local_cwd.path().abs());
+        let remote_cwd = PathBuf::from(format!(
+            "/tmp/codex-remote-routing-{}",
+            SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis()
+        ))
+        .abs();
+        let remote_marker_name = "marker.txt";
+        let remote_cwd_uri = PathUri::from_host_native_path(&remote_cwd)?;
+        let remote_marker_uri =
+            PathUri::from_host_native_path(remote_cwd.join(remote_marker_name))?;
+        test.fs()
+            .create_directory(
+                &remote_cwd_uri,
+                CreateDirectoryOptions {
+                    recursive: true,
+                    follow_symlinks: true,
+                },
+                /*sandbox*/ None,
+            )
+            .await?;
+        test.fs()
+            .write_file(
+                &remote_marker_uri,
+                b"remote-routing".to_vec(),
+                Default::default(),
+                /*sandbox*/ None,
+            )
+            .await?;
+        let remote_selection = TurnEnvironmentSelection {
+            selected_capability_roots: Default::default(),
+            environment_id: REMOTE_ENVIRONMENT_ID.to_string(),
+            cwd: PathUri::from_abs_path(&remote_cwd),
+            workspace_roots: vec![PathUri::from_abs_path(&remote_cwd)],
+            config: EnvironmentConfigState::FromThread,
+        };
+        let multi_env_output = exec_command_routing_output(
+            &test,
+            &server,
+            "call-multi-env",
+            json!({
+                "shell": "/bin/sh",
+                "cmd": format!("cat {remote_marker_name}"),
+                "login": false,
+                "yield_time_ms": 1_000,
+                "environment_id": REMOTE_ENVIRONMENT_ID,
+            }),
+            Some(vec![local_selection, remote_selection]),
         )
         .await?;
-    test.fs()
-        .write_file(
-            &remote_marker_uri,
-            b"remote-routing".to_vec(),
-            Default::default(),
-            /*sandbox*/ None,
-        )
-        .await?;
-    let remote_selection = TurnEnvironmentSelection {
-        selected_capability_roots: Default::default(),
-        environment_id: REMOTE_ENVIRONMENT_ID.to_string(),
-        cwd: PathUri::from_abs_path(&remote_cwd),
-        workspace_roots: vec![PathUri::from_abs_path(&remote_cwd)],
-        config: EnvironmentConfigState::FromThread,
-    };
-    let multi_env_output = exec_command_routing_output(
-        &test,
-        &server,
-        "call-multi-env",
-        json!({
-            "shell": "/bin/sh",
-            "cmd": format!("cat {remote_marker_name}"),
-            "login": false,
-            "yield_time_ms": 1_000,
-            "environment_id": REMOTE_ENVIRONMENT_ID,
-        }),
-        Some(vec![local_selection, remote_selection]),
-    )
-    .await?;
-    assert!(
-        multi_env_output.contains("remote-routing"),
-        "unexpected multi-env output: {multi_env_output}",
-    );
-    assert!(
-        !multi_env_output.contains("local-routing"),
-        "multi-env command should not route to local: {multi_env_output}",
-    );
+        assert!(
+            multi_env_output.contains("remote-routing"),
+            "unexpected multi-env output: {multi_env_output}",
+        );
+        assert!(
+            !multi_env_output.contains("local-routing"),
+            "multi-env command should not route to local: {multi_env_output}",
+        );
 
-    test.fs()
-        .remove(
-            &remote_cwd_uri,
-            RemoveOptions {
-                recursive: true,
-                force: true,
-                follow_symlinks: true,
-            },
-            /*sandbox*/ None,
-        )
-        .await?;
+        test.fs()
+            .remove(
+                &remote_cwd_uri,
+                RemoveOptions {
+                    recursive: true,
+                    force: true,
+                    follow_symlinks: true,
+                },
+                /*sandbox*/ None,
+            )
+            .await?;
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

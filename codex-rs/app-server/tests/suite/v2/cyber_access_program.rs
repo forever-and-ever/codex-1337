@@ -320,67 +320,70 @@ async fn api_key_cyber_access_program_requires_only_forwarding_feature() -> Resu
 async fn api_key_cyber_access_program_server_rejection_does_not_fall_back() -> Result<()> {
     core_test_support::skip_if_no_network!(Ok(()));
     let server = responses::start_mock_server().await;
-    Mock::given(method("POST"))
-        .and(path("/v1/responses"))
-        .respond_with(ResponseTemplate::new(/*s*/ 403).set_body_json(json!({
-            "error": {
-                "type": "invalid_request_error",
-                "code": "access_program_not_enabled",
-                "message": "Daybreak Blue is not enabled for this project."
-            }
-        })))
-        .expect(/*r*/ 1..)
-        .mount(&server)
-        .await;
-    let home = TempDir::new()?;
-    let mut app = start_api_key_app(home.path(), &server).await?;
-    set_api_key_cyber_access_programs(&mut app, /*enabled*/ true).await?;
-    let thread = app.start_thread(ThreadStartParams::default()).await?.thread;
-    let completed = app
-        .start_turn_and_wait_for_completion(TurnStartParams {
-            thread_id: thread.id,
-            cyber_access_program: Some(CyberAccessProgram::DaybreakBlue),
-            input: vec![UserInput::Text {
-                text: "hello".to_owned(),
-                text_elements: Vec::new(),
-            }],
-            ..Default::default()
-        })
-        .await?;
-    assert_eq!(completed.turn.status, TurnStatus::Failed);
-    let error = completed.turn.error.expect("server rejection");
-    assert_eq!(
-        error.codex_error_info,
-        Some(CodexErrorInfo::HttpConnectionFailed {
-            http_status_code: Some(403),
-        })
-    );
-    assert!(
-        error
-            .message
-            .contains("Daybreak Blue is not enabled for this project.")
-    );
-    let requests = responses::received_responses_requests(&server).await;
-    assert!(!requests.is_empty());
-    // Existing transport retries may repeat the request; none may drop the program.
-    assert_eq!(
-        requests
-            .iter()
-            .map(|request| (
-                request.header("authorization"),
-                request.body_json()["access_programs"].clone()
-            ))
-            .collect::<Vec<_>>(),
-        vec![
-            (
-                Some("Bearer test-key".to_owned()),
-                json!({"cyber": "daybreak_blue"})
-            );
-            requests.len()
-        ]
-    );
-    app.shutdown_gracefully().await?;
-    Ok(())
+    mock_server::run(&[&server], async {
+        Mock::given(method("POST"))
+            .and(path("/v1/responses"))
+            .respond_with(ResponseTemplate::new(/*s*/ 403).set_body_json(json!({
+                "error": {
+                    "type": "invalid_request_error",
+                    "code": "access_program_not_enabled",
+                    "message": "Daybreak Blue is not enabled for this project."
+                }
+            })))
+            .expect(/*r*/ 1..)
+            .mount(&server)
+            .await;
+        let home = TempDir::new()?;
+        let mut app = start_api_key_app(home.path(), &server).await?;
+        set_api_key_cyber_access_programs(&mut app, /*enabled*/ true).await?;
+        let thread = app.start_thread(ThreadStartParams::default()).await?.thread;
+        let completed = app
+            .start_turn_and_wait_for_completion(TurnStartParams {
+                thread_id: thread.id,
+                cyber_access_program: Some(CyberAccessProgram::DaybreakBlue),
+                input: vec![UserInput::Text {
+                    text: "hello".to_owned(),
+                    text_elements: Vec::new(),
+                }],
+                ..Default::default()
+            })
+            .await?;
+        assert_eq!(completed.turn.status, TurnStatus::Failed);
+        let error = completed.turn.error.expect("server rejection");
+        assert_eq!(
+            error.codex_error_info,
+            Some(CodexErrorInfo::HttpConnectionFailed {
+                http_status_code: Some(403),
+            })
+        );
+        assert!(
+            error
+                .message
+                .contains("Daybreak Blue is not enabled for this project.")
+        );
+        let requests = responses::received_responses_requests(&server).await;
+        assert!(!requests.is_empty());
+        // Existing transport retries may repeat the request; none may drop the program.
+        assert_eq!(
+            requests
+                .iter()
+                .map(|request| (
+                    request.header("authorization"),
+                    request.body_json()["access_programs"].clone()
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    Some("Bearer test-key".to_owned()),
+                    json!({"cyber": "daybreak_blue"})
+                );
+                requests.len()
+            ]
+        );
+        app.shutdown_gracefully().await?;
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test]

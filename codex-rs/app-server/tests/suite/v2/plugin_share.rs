@@ -1,3 +1,4 @@
+use core_test_support::mock_server;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -53,142 +54,145 @@ async fn plugin_share_save_uploads_local_plugin() -> Result<()> {
     let plugin_root = TempDir::new()?;
     let plugin_path = write_test_plugin(plugin_root.path(), "demo-plugin")?;
     let server = MockServer::start().await;
-    write_remote_plugin_config(codex_home.path(), &format!("{}/backend-api", server.uri()))?;
-    write_chatgpt_auth(
-        codex_home.path(),
-        ChatGptAuthFixture::new("chatgpt-token")
-            .account_id("account-123")
-            .chatgpt_user_id("user-123")
-            .chatgpt_account_id("account-123"),
-        AuthCredentialsStoreMode::File,
-    )?;
-    write_corrupt_plugin_share_local_path_mapping(codex_home.path())?;
+    mock_server::run(&[&server], async {
+        write_remote_plugin_config(codex_home.path(), &format!("{}/backend-api", server.uri()))?;
+        write_chatgpt_auth(
+            codex_home.path(),
+            ChatGptAuthFixture::new("chatgpt-token")
+                .account_id("account-123")
+                .chatgpt_user_id("user-123")
+                .chatgpt_account_id("account-123"),
+            AuthCredentialsStoreMode::File,
+        )?;
+        write_corrupt_plugin_share_local_path_mapping(codex_home.path())?;
 
-    Mock::given(method("POST"))
-        .and(path("/backend-api/public/plugins/workspace/upload-url"))
-        .and(header("authorization", "Bearer chatgpt-token"))
-        .and(header("chatgpt-account-id", "account-123"))
-        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
-            "file_id": "file_123",
-            "upload_url": format!("{}/upload/file_123", server.uri()),
-            "etag": "\"upload_etag_123\"",
-        })))
-        .expect(1)
-        .mount(&server)
-        .await;
-    Mock::given(method("PUT"))
-        .and(path("/upload/file_123"))
-        .and(header("x-ms-blob-type", "BlockBlob"))
-        .and(header("content-type", "application/gzip"))
-        .respond_with(ResponseTemplate::new(201).insert_header("etag", "\"blob_etag_123\""))
-        .expect(1)
-        .mount(&server)
-        .await;
-    Mock::given(method("POST"))
-        .and(path("/backend-api/public/plugins/workspace"))
-        .and(header("authorization", "Bearer chatgpt-token"))
-        .and(header("chatgpt-account-id", "account-123"))
-        .and(body_json(json!({
-            "file_id": "file_123",
-            "etag": "\"upload_etag_123\"",
-        })))
-        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
-            "plugin_id": "plugins_123",
-            "share_url": "https://chatgpt.example/plugins/share/share-key-1",
-            "can_publish_to_workspace": true,
-        })))
-        .expect(1)
-        .mount(&server)
-        .await;
+        Mock::given(method("POST"))
+            .and(path("/backend-api/public/plugins/workspace/upload-url"))
+            .and(header("authorization", "Bearer chatgpt-token"))
+            .and(header("chatgpt-account-id", "account-123"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+                "file_id": "file_123",
+                "upload_url": format!("{}/upload/file_123", server.uri()),
+                "etag": "\"upload_etag_123\"",
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .and(path("/upload/file_123"))
+            .and(header("x-ms-blob-type", "BlockBlob"))
+            .and(header("content-type", "application/gzip"))
+            .respond_with(ResponseTemplate::new(201).insert_header("etag", "\"blob_etag_123\""))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/backend-api/public/plugins/workspace"))
+            .and(header("authorization", "Bearer chatgpt-token"))
+            .and(header("chatgpt-account-id", "account-123"))
+            .and(body_json(json!({
+                "file_id": "file_123",
+                "etag": "\"upload_etag_123\"",
+            })))
+            .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+                "plugin_id": "plugins_123",
+                "share_url": "https://chatgpt.example/plugins/share/share-key-1",
+                "can_publish_to_workspace": true,
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
 
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .without_auto_env()
-        .build_initialized_with_timeout(DEFAULT_TIMEOUT)
-        .await?;
-    let expected_plugin_path = AbsolutePathBuf::try_from(plugin_path.clone())?;
-    let request_id = mcp
-        .send_raw_request(
-            "plugin/share/save",
-            Some(json!({
-                "pluginPath": expected_plugin_path.clone(),
-            })),
-        )
-        .await?;
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .without_auto_env()
+            .build_initialized_with_timeout(DEFAULT_TIMEOUT)
+            .await?;
+        let expected_plugin_path = AbsolutePathBuf::try_from(plugin_path.clone())?;
+        let request_id = mcp
+            .send_raw_request(
+                "plugin/share/save",
+                Some(json!({
+                    "pluginPath": expected_plugin_path.clone(),
+                })),
+            )
+            .await?;
 
-    let response: PluginShareSaveResponse =
-        timeout(DEFAULT_TIMEOUT, mcp.read_response(request_id)).await??;
+        let response: PluginShareSaveResponse =
+            timeout(DEFAULT_TIMEOUT, mcp.read_response(request_id)).await??;
 
-    assert_eq!(
-        response,
-        PluginShareSaveResponse {
-            remote_plugin_id: "plugins_123".to_string(),
-            share_url: "https://chatgpt.example/plugins/share/share-key-1".to_string(),
-            can_publish_to_workspace: Some(true),
-        }
-    );
+        assert_eq!(
+            response,
+            PluginShareSaveResponse {
+                remote_plugin_id: "plugins_123".to_string(),
+                share_url: "https://chatgpt.example/plugins/share/share-key-1".to_string(),
+                can_publish_to_workspace: Some(true),
+            }
+        );
 
-    Mock::given(method("GET"))
-        .and(path("/backend-api/ps/plugins/workspace/created"))
-        .and(query_param("limit", "200"))
-        .and(header("authorization", "Bearer chatgpt-token"))
-        .and(header("chatgpt-account-id", "account-123"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "plugins": [remote_plugin_json("plugins_123")],
-            "pagination": empty_pagination_json(),
-        })))
-        .expect(1)
-        .mount(&server)
-        .await;
-    Mock::given(method("GET"))
-        .and(path("/backend-api/ps/plugins/installed"))
-        .and(query_param("scope", "WORKSPACE"))
-        .and(header("authorization", "Bearer chatgpt-token"))
-        .and(header("chatgpt-account-id", "account-123"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "plugins": [installed_remote_plugin_json("plugins_123")],
-            "pagination": empty_pagination_json(),
-        })))
-        .expect(1)
-        .mount(&server)
-        .await;
+        Mock::given(method("GET"))
+            .and(path("/backend-api/ps/plugins/workspace/created"))
+            .and(query_param("limit", "200"))
+            .and(header("authorization", "Bearer chatgpt-token"))
+            .and(header("chatgpt-account-id", "account-123"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "plugins": [remote_plugin_json("plugins_123")],
+                "pagination": empty_pagination_json(),
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/backend-api/ps/plugins/installed"))
+            .and(query_param("scope", "WORKSPACE"))
+            .and(header("authorization", "Bearer chatgpt-token"))
+            .and(header("chatgpt-account-id", "account-123"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "plugins": [installed_remote_plugin_json("plugins_123")],
+                "pagination": empty_pagination_json(),
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
 
-    let request_id = mcp
-        .send_raw_request("plugin/share/list", Some(json!({})))
-        .await?;
-    let response: PluginShareListResponse =
-        timeout(DEFAULT_TIMEOUT, mcp.read_response(request_id)).await??;
+        let request_id = mcp
+            .send_raw_request("plugin/share/list", Some(json!({})))
+            .await?;
+        let response: PluginShareListResponse =
+            timeout(DEFAULT_TIMEOUT, mcp.read_response(request_id)).await??;
 
-    assert_eq!(
-        response,
-        PluginShareListResponse {
-            data: vec![PluginShareListItem {
-                plugin: PluginSummary {
-                    id: "demo-plugin@workspace-shared-with-me".to_string(),
-                    remote_plugin_id: Some("plugins_123".to_string()),
-                    version: Some("0.1.0".to_string()),
-                    local_version: Some("0.1.0".to_string()),
-                    name: "demo-plugin".to_string(),
-                    share_context: Some(expected_share_context("plugins_123")),
-                    source: PluginSource::Remote,
-                    installed: true,
-                    installed_at: None,
-                    enabled: true,
-                    install_policy: PluginInstallPolicy::Available,
-                    install_policy_source: None,
-                    must_show_installation_interstitial: Some(false),
-                    auth_policy: PluginAuthPolicy::OnUse,
-                    availability: codex_app_server_protocol::PluginAvailability::Available,
-                    disabled_reason: None,
-                    eligible_plan_types: None,
-                    interface: Some(expected_plugin_interface()),
-                    keywords: Vec::new(),
-                },
-                local_plugin_path: Some(expected_plugin_path),
-            }],
-        }
-    );
-    Ok(())
+        assert_eq!(
+            response,
+            PluginShareListResponse {
+                data: vec![PluginShareListItem {
+                    plugin: PluginSummary {
+                        id: "demo-plugin@workspace-shared-with-me".to_string(),
+                        remote_plugin_id: Some("plugins_123".to_string()),
+                        version: Some("0.1.0".to_string()),
+                        local_version: Some("0.1.0".to_string()),
+                        name: "demo-plugin".to_string(),
+                        share_context: Some(expected_share_context("plugins_123")),
+                        source: PluginSource::Remote,
+                        installed: true,
+                        installed_at: None,
+                        enabled: true,
+                        install_policy: PluginInstallPolicy::Available,
+                        install_policy_source: None,
+                        must_show_installation_interstitial: Some(false),
+                        auth_policy: PluginAuthPolicy::OnUse,
+                        availability: codex_app_server_protocol::PluginAvailability::Available,
+                        disabled_reason: None,
+                        eligible_plan_types: None,
+                        interface: Some(expected_plugin_interface()),
+                        keywords: Vec::new(),
+                    },
+                    local_plugin_path: Some(expected_plugin_path),
+                }],
+            }
+        );
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test]
@@ -197,96 +201,99 @@ async fn plugin_share_save_forwards_access_policy() -> Result<()> {
     let plugin_root = TempDir::new()?;
     let plugin_path = write_test_plugin(plugin_root.path(), "demo-plugin")?;
     let server = MockServer::start().await;
-    write_remote_plugin_config(codex_home.path(), &format!("{}/backend-api", server.uri()))?;
-    write_chatgpt_auth(
-        codex_home.path(),
-        ChatGptAuthFixture::new("chatgpt-token")
-            .account_id("account-123")
-            .chatgpt_user_id("user-123")
-            .chatgpt_account_id("account-123"),
-        AuthCredentialsStoreMode::File,
-    )?;
+    mock_server::run(&[&server], async {
+        write_remote_plugin_config(codex_home.path(), &format!("{}/backend-api", server.uri()))?;
+        write_chatgpt_auth(
+            codex_home.path(),
+            ChatGptAuthFixture::new("chatgpt-token")
+                .account_id("account-123")
+                .chatgpt_user_id("user-123")
+                .chatgpt_account_id("account-123"),
+            AuthCredentialsStoreMode::File,
+        )?;
 
-    Mock::given(method("POST"))
-        .and(path("/backend-api/public/plugins/workspace/upload-url"))
-        .and(header("authorization", "Bearer chatgpt-token"))
-        .and(header("chatgpt-account-id", "account-123"))
-        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
-            "file_id": "file_123",
-            "upload_url": format!("{}/upload/file_123", server.uri()),
-            "etag": "\"upload_etag_123\"",
-        })))
-        .expect(1)
-        .mount(&server)
-        .await;
-    Mock::given(method("PUT"))
-        .and(path("/upload/file_123"))
-        .respond_with(ResponseTemplate::new(201).insert_header("etag", "\"blob_etag_123\""))
-        .expect(1)
-        .mount(&server)
-        .await;
-    Mock::given(method("POST"))
-        .and(path("/backend-api/public/plugins/workspace"))
-        .and(body_json(json!({
-            "file_id": "file_123",
-            "etag": "\"upload_etag_123\"",
-            "discoverability": "UNLISTED",
-            "share_targets": [
-                {
-                    "principal_type": "user",
-                    "principal_id": "user-1",
-                    "role": "editor",
-                },
-                {
-                    "principal_type": "workspace",
-                    "principal_id": "account-123",
-                    "role": "reader",
-                },
-            ],
-        })))
-        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
-            "plugin_id": "plugins_123",
-            "share_url": "https://chatgpt.example/plugins/share/share-key-1",
-        })))
-        .expect(1)
-        .mount(&server)
-        .await;
-
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .without_auto_env()
-        .build_initialized_with_timeout(DEFAULT_TIMEOUT)
-        .await?;
-    let expected_plugin_path = AbsolutePathBuf::try_from(plugin_path)?;
-    let request_id = mcp
-        .send_raw_request(
-            "plugin/share/save",
-            Some(json!({
-                "pluginPath": expected_plugin_path,
+        Mock::given(method("POST"))
+            .and(path("/backend-api/public/plugins/workspace/upload-url"))
+            .and(header("authorization", "Bearer chatgpt-token"))
+            .and(header("chatgpt-account-id", "account-123"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+                "file_id": "file_123",
+                "upload_url": format!("{}/upload/file_123", server.uri()),
+                "etag": "\"upload_etag_123\"",
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .and(path("/upload/file_123"))
+            .respond_with(ResponseTemplate::new(201).insert_header("etag", "\"blob_etag_123\""))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/backend-api/public/plugins/workspace"))
+            .and(body_json(json!({
+                "file_id": "file_123",
+                "etag": "\"upload_etag_123\"",
                 "discoverability": "UNLISTED",
-                "shareTargets": [
+                "share_targets": [
                     {
-                        "principalType": "user",
-                        "principalId": "user-1",
+                        "principal_type": "user",
+                        "principal_id": "user-1",
                         "role": "editor",
                     },
+                    {
+                        "principal_type": "workspace",
+                        "principal_id": "account-123",
+                        "role": "reader",
+                    },
                 ],
-            })),
-        )
-        .await?;
+            })))
+            .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+                "plugin_id": "plugins_123",
+                "share_url": "https://chatgpt.example/plugins/share/share-key-1",
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
 
-    let response: PluginShareSaveResponse =
-        timeout(DEFAULT_TIMEOUT, mcp.read_response(request_id)).await??;
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .without_auto_env()
+            .build_initialized_with_timeout(DEFAULT_TIMEOUT)
+            .await?;
+        let expected_plugin_path = AbsolutePathBuf::try_from(plugin_path)?;
+        let request_id = mcp
+            .send_raw_request(
+                "plugin/share/save",
+                Some(json!({
+                    "pluginPath": expected_plugin_path,
+                    "discoverability": "UNLISTED",
+                    "shareTargets": [
+                        {
+                            "principalType": "user",
+                            "principalId": "user-1",
+                            "role": "editor",
+                        },
+                    ],
+                })),
+            )
+            .await?;
 
-    assert_eq!(
-        response,
-        PluginShareSaveResponse {
-            remote_plugin_id: "plugins_123".to_string(),
-            share_url: "https://chatgpt.example/plugins/share/share-key-1".to_string(),
-            can_publish_to_workspace: None,
-        }
-    );
-    Ok(())
+        let response: PluginShareSaveResponse =
+            timeout(DEFAULT_TIMEOUT, mcp.read_response(request_id)).await??;
+
+        assert_eq!(
+            response,
+            PluginShareSaveResponse {
+                remote_plugin_id: "plugins_123".to_string(),
+                share_url: "https://chatgpt.example/plugins/share/share-key-1".to_string(),
+                can_publish_to_workspace: None,
+            }
+        );
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test]
@@ -533,83 +540,86 @@ async fn plugin_share_save_rejects_access_policy_for_existing_plugin() -> Result
 async fn plugin_share_list_returns_created_workspace_plugins() -> Result<()> {
     let codex_home = TempDir::new()?;
     let server = MockServer::start().await;
-    write_remote_plugin_config(codex_home.path(), &format!("{}/backend-api", server.uri()))?;
-    write_chatgpt_auth(
-        codex_home.path(),
-        ChatGptAuthFixture::new("chatgpt-token")
-            .account_id("account-123")
-            .chatgpt_user_id("user-123")
-            .chatgpt_account_id("account-123"),
-        AuthCredentialsStoreMode::File,
-    )?;
+    mock_server::run(&[&server], async {
+        write_remote_plugin_config(codex_home.path(), &format!("{}/backend-api", server.uri()))?;
+        write_chatgpt_auth(
+            codex_home.path(),
+            ChatGptAuthFixture::new("chatgpt-token")
+                .account_id("account-123")
+                .chatgpt_user_id("user-123")
+                .chatgpt_account_id("account-123"),
+            AuthCredentialsStoreMode::File,
+        )?;
 
-    Mock::given(method("GET"))
-        .and(path("/backend-api/ps/plugins/workspace/created"))
-        .and(query_param("limit", "200"))
-        .and(header("authorization", "Bearer chatgpt-token"))
-        .and(header("chatgpt-account-id", "account-123"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "plugins": [remote_plugin_json("plugins_123")],
-            "pagination": empty_pagination_json(),
-        })))
-        .expect(1)
-        .mount(&server)
-        .await;
-    Mock::given(method("GET"))
-        .and(path("/backend-api/ps/plugins/installed"))
-        .and(query_param("scope", "WORKSPACE"))
-        .and(header("authorization", "Bearer chatgpt-token"))
-        .and(header("chatgpt-account-id", "account-123"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "plugins": [installed_remote_plugin_json("plugins_123")],
-            "pagination": empty_pagination_json(),
-        })))
-        .expect(1)
-        .mount(&server)
-        .await;
+        Mock::given(method("GET"))
+            .and(path("/backend-api/ps/plugins/workspace/created"))
+            .and(query_param("limit", "200"))
+            .and(header("authorization", "Bearer chatgpt-token"))
+            .and(header("chatgpt-account-id", "account-123"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "plugins": [remote_plugin_json("plugins_123")],
+                "pagination": empty_pagination_json(),
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/backend-api/ps/plugins/installed"))
+            .and(query_param("scope", "WORKSPACE"))
+            .and(header("authorization", "Bearer chatgpt-token"))
+            .and(header("chatgpt-account-id", "account-123"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "plugins": [installed_remote_plugin_json("plugins_123")],
+                "pagination": empty_pagination_json(),
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
 
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .without_auto_env()
-        .build_initialized_with_timeout(DEFAULT_TIMEOUT)
-        .await?;
-    let request_id = mcp
-        .send_raw_request("plugin/share/list", Some(json!({})))
-        .await?;
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .without_auto_env()
+            .build_initialized_with_timeout(DEFAULT_TIMEOUT)
+            .await?;
+        let request_id = mcp
+            .send_raw_request("plugin/share/list", Some(json!({})))
+            .await?;
 
-    let response: PluginShareListResponse =
-        timeout(DEFAULT_TIMEOUT, mcp.read_response(request_id)).await??;
+        let response: PluginShareListResponse =
+            timeout(DEFAULT_TIMEOUT, mcp.read_response(request_id)).await??;
 
-    assert_eq!(
-        response,
-        PluginShareListResponse {
-            data: vec![PluginShareListItem {
-                plugin: PluginSummary {
-                    id: "demo-plugin@workspace-shared-with-me".to_string(),
-                    remote_plugin_id: Some("plugins_123".to_string()),
-                    version: Some("0.1.0".to_string()),
-                    local_version: Some("0.1.0".to_string()),
-                    name: "demo-plugin".to_string(),
-                    share_context: Some(expected_share_context("plugins_123")),
-                    source: PluginSource::Remote,
-                    installed: true,
-                    installed_at: None,
-                    enabled: true,
-                    install_policy: PluginInstallPolicy::Available,
-                    install_policy_source: None,
-                    must_show_installation_interstitial: Some(false),
-                    auth_policy: PluginAuthPolicy::OnUse,
-                    availability: codex_app_server_protocol::PluginAvailability::Available,
-                    disabled_reason: None,
-                    eligible_plan_types: None,
-                    interface: Some(expected_plugin_interface()),
-                    keywords: Vec::new(),
-                },
-                local_plugin_path: None,
-            }],
-        }
-    );
-    Ok(())
+        assert_eq!(
+            response,
+            PluginShareListResponse {
+                data: vec![PluginShareListItem {
+                    plugin: PluginSummary {
+                        id: "demo-plugin@workspace-shared-with-me".to_string(),
+                        remote_plugin_id: Some("plugins_123".to_string()),
+                        version: Some("0.1.0".to_string()),
+                        local_version: Some("0.1.0".to_string()),
+                        name: "demo-plugin".to_string(),
+                        share_context: Some(expected_share_context("plugins_123")),
+                        source: PluginSource::Remote,
+                        installed: true,
+                        installed_at: None,
+                        enabled: true,
+                        install_policy: PluginInstallPolicy::Available,
+                        install_policy_source: None,
+                        must_show_installation_interstitial: Some(false),
+                        auth_policy: PluginAuthPolicy::OnUse,
+                        availability: codex_app_server_protocol::PluginAvailability::Available,
+                        disabled_reason: None,
+                        eligible_plan_types: None,
+                        interface: Some(expected_plugin_interface()),
+                        keywords: Vec::new(),
+                    },
+                    local_plugin_path: None,
+                }],
+            }
+        );
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test]
@@ -934,185 +944,191 @@ async fn plugin_share_checkout_cleans_up_path_when_marketplace_update_fails() ->
 async fn plugin_share_update_targets_updates_share_targets() -> Result<()> {
     let codex_home = TempDir::new()?;
     let server = MockServer::start().await;
-    write_remote_plugin_config(codex_home.path(), &format!("{}/backend-api", server.uri()))?;
-    write_chatgpt_auth(
-        codex_home.path(),
-        ChatGptAuthFixture::new("chatgpt-token")
-            .account_id("account-123")
-            .chatgpt_user_id("user-123")
-            .chatgpt_account_id("account-123"),
-        AuthCredentialsStoreMode::File,
-    )?;
+    mock_server::run(&[&server], async {
+        write_remote_plugin_config(codex_home.path(), &format!("{}/backend-api", server.uri()))?;
+        write_chatgpt_auth(
+            codex_home.path(),
+            ChatGptAuthFixture::new("chatgpt-token")
+                .account_id("account-123")
+                .chatgpt_user_id("user-123")
+                .chatgpt_account_id("account-123"),
+            AuthCredentialsStoreMode::File,
+        )?;
 
-    Mock::given(method("PUT"))
-        .and(path("/backend-api/ps/plugins/plugins_123/shares"))
-        .and(header("authorization", "Bearer chatgpt-token"))
-        .and(header("chatgpt-account-id", "account-123"))
-        .and(body_json(json!({
-            "discoverability": "UNLISTED",
-            "targets": [
-                {
-                    "principal_type": "user",
-                    "principal_id": "user-1",
-                    "role": "editor",
-                },
-                {
-                    "principal_type": "workspace",
-                    "principal_id": "account-123",
-                    "role": "reader",
-                },
-            ],
-        })))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "principals": [
-                {
-                    "principal_type": "user",
-                    "principal_id": "owner-1",
-                    "role": "owner",
-                    "name": "Owner",
-                },
-                {
-                    "principal_type": "user",
-                    "principal_id": "user-1",
-                    "role": "editor",
-                    "name": "Gavin",
-                },
-                {
-                    "principal_type": "workspace",
-                    "principal_id": "account-123",
-                    "role": "reader",
-                    "name": "Workspace",
-                },
-            ],
-            "discoverability": "UNLISTED",
-        })))
-        .expect(1)
-        .mount(&server)
-        .await;
-
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .without_auto_env()
-        .build_initialized_with_timeout(DEFAULT_TIMEOUT)
-        .await?;
-    let request_id = mcp
-        .send_raw_request(
-            "plugin/share/updateTargets",
-            Some(json!({
-                "remotePluginId": "plugins_123",
+        Mock::given(method("PUT"))
+            .and(path("/backend-api/ps/plugins/plugins_123/shares"))
+            .and(header("authorization", "Bearer chatgpt-token"))
+            .and(header("chatgpt-account-id", "account-123"))
+            .and(body_json(json!({
                 "discoverability": "UNLISTED",
-                "shareTargets": [
+                "targets": [
                     {
-                        "principalType": "user",
-                        "principalId": "user-1",
+                        "principal_type": "user",
+                        "principal_id": "user-1",
                         "role": "editor",
                     },
+                    {
+                        "principal_type": "workspace",
+                        "principal_id": "account-123",
+                        "role": "reader",
+                    },
                 ],
-            })),
-        )
-        .await?;
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "principals": [
+                    {
+                        "principal_type": "user",
+                        "principal_id": "owner-1",
+                        "role": "owner",
+                        "name": "Owner",
+                    },
+                    {
+                        "principal_type": "user",
+                        "principal_id": "user-1",
+                        "role": "editor",
+                        "name": "Gavin",
+                    },
+                    {
+                        "principal_type": "workspace",
+                        "principal_id": "account-123",
+                        "role": "reader",
+                        "name": "Workspace",
+                    },
+                ],
+                "discoverability": "UNLISTED",
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
 
-    let response: PluginShareUpdateTargetsResponse =
-        timeout(DEFAULT_TIMEOUT, mcp.read_response(request_id)).await??;
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .without_auto_env()
+            .build_initialized_with_timeout(DEFAULT_TIMEOUT)
+            .await?;
+        let request_id = mcp
+            .send_raw_request(
+                "plugin/share/updateTargets",
+                Some(json!({
+                    "remotePluginId": "plugins_123",
+                    "discoverability": "UNLISTED",
+                    "shareTargets": [
+                        {
+                            "principalType": "user",
+                            "principalId": "user-1",
+                            "role": "editor",
+                        },
+                    ],
+                })),
+            )
+            .await?;
 
-    assert_eq!(
-        response,
-        PluginShareUpdateTargetsResponse {
-            principals: vec![
-                PluginSharePrincipal {
-                    principal_type: PluginSharePrincipalType::User,
-                    principal_id: "owner-1".to_string(),
-                    role: PluginSharePrincipalRole::Owner,
-                    name: "Owner".to_string(),
-                },
-                PluginSharePrincipal {
-                    principal_type: PluginSharePrincipalType::User,
-                    principal_id: "user-1".to_string(),
-                    role: PluginSharePrincipalRole::Editor,
-                    name: "Gavin".to_string(),
-                },
-                PluginSharePrincipal {
-                    principal_type: PluginSharePrincipalType::Workspace,
-                    principal_id: "account-123".to_string(),
-                    role: PluginSharePrincipalRole::Reader,
-                    name: "Workspace".to_string(),
-                },
-            ],
-            discoverability: codex_app_server_protocol::PluginShareDiscoverability::Unlisted,
-        }
-    );
-    Ok(())
+        let response: PluginShareUpdateTargetsResponse =
+            timeout(DEFAULT_TIMEOUT, mcp.read_response(request_id)).await??;
+
+        assert_eq!(
+            response,
+            PluginShareUpdateTargetsResponse {
+                principals: vec![
+                    PluginSharePrincipal {
+                        principal_type: PluginSharePrincipalType::User,
+                        principal_id: "owner-1".to_string(),
+                        role: PluginSharePrincipalRole::Owner,
+                        name: "Owner".to_string(),
+                    },
+                    PluginSharePrincipal {
+                        principal_type: PluginSharePrincipalType::User,
+                        principal_id: "user-1".to_string(),
+                        role: PluginSharePrincipalRole::Editor,
+                        name: "Gavin".to_string(),
+                    },
+                    PluginSharePrincipal {
+                        principal_type: PluginSharePrincipalType::Workspace,
+                        principal_id: "account-123".to_string(),
+                        role: PluginSharePrincipalRole::Reader,
+                        name: "Workspace".to_string(),
+                    },
+                ],
+                discoverability: codex_app_server_protocol::PluginShareDiscoverability::Unlisted,
+            }
+        );
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test]
 async fn plugin_share_update_targets_publishes_workspace_plugin() -> Result<()> {
     let codex_home = TempDir::new()?;
     let server = MockServer::start().await;
-    write_remote_plugin_config(codex_home.path(), &format!("{}/backend-api", server.uri()))?;
-    write_chatgpt_auth(
-        codex_home.path(),
-        ChatGptAuthFixture::new("chatgpt-token")
-            .account_id("account-123")
-            .chatgpt_user_id("user-123")
-            .chatgpt_account_id("account-123"),
-        AuthCredentialsStoreMode::File,
-    )?;
+    mock_server::run(&[&server], async {
+        write_remote_plugin_config(codex_home.path(), &format!("{}/backend-api", server.uri()))?;
+        write_chatgpt_auth(
+            codex_home.path(),
+            ChatGptAuthFixture::new("chatgpt-token")
+                .account_id("account-123")
+                .chatgpt_user_id("user-123")
+                .chatgpt_account_id("account-123"),
+            AuthCredentialsStoreMode::File,
+        )?;
 
-    Mock::given(method("PUT"))
-        .and(path("/backend-api/ps/plugins/plugins_123/shares"))
-        .and(header("authorization", "Bearer chatgpt-token"))
-        .and(header("chatgpt-account-id", "account-123"))
-        .and(body_json(json!({
-            "discoverability": "LISTED",
-            "targets": [],
-        })))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "principals": [
-                {
-                    "principal_type": "user",
-                    "principal_id": "owner-1",
-                    "role": "owner",
-                    "name": "Owner",
-                },
-            ],
-            "discoverability": "LISTED",
-        })))
-        .expect(1)
-        .mount(&server)
-        .await;
-
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .without_auto_env()
-        .build_initialized_with_timeout(DEFAULT_TIMEOUT)
-        .await?;
-    let request_id = mcp
-        .send_raw_request(
-            "plugin/share/updateTargets",
-            Some(json!({
-                "remotePluginId": "plugins_123",
+        Mock::given(method("PUT"))
+            .and(path("/backend-api/ps/plugins/plugins_123/shares"))
+            .and(header("authorization", "Bearer chatgpt-token"))
+            .and(header("chatgpt-account-id", "account-123"))
+            .and(body_json(json!({
                 "discoverability": "LISTED",
-                "shareTargets": [],
-            })),
-        )
-        .await?;
+                "targets": [],
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "principals": [
+                    {
+                        "principal_type": "user",
+                        "principal_id": "owner-1",
+                        "role": "owner",
+                        "name": "Owner",
+                    },
+                ],
+                "discoverability": "LISTED",
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
 
-    let response: PluginShareUpdateTargetsResponse =
-        timeout(DEFAULT_TIMEOUT, mcp.read_response(request_id)).await??;
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .without_auto_env()
+            .build_initialized_with_timeout(DEFAULT_TIMEOUT)
+            .await?;
+        let request_id = mcp
+            .send_raw_request(
+                "plugin/share/updateTargets",
+                Some(json!({
+                    "remotePluginId": "plugins_123",
+                    "discoverability": "LISTED",
+                    "shareTargets": [],
+                })),
+            )
+            .await?;
 
-    assert_eq!(
-        response,
-        PluginShareUpdateTargetsResponse {
-            principals: vec![PluginSharePrincipal {
-                principal_type: PluginSharePrincipalType::User,
-                principal_id: "owner-1".to_string(),
-                role: PluginSharePrincipalRole::Owner,
-                name: "Owner".to_string(),
-            }],
-            discoverability: codex_app_server_protocol::PluginShareDiscoverability::Listed,
-        }
-    );
-    Ok(())
+        let response: PluginShareUpdateTargetsResponse =
+            timeout(DEFAULT_TIMEOUT, mcp.read_response(request_id)).await??;
+
+        assert_eq!(
+            response,
+            PluginShareUpdateTargetsResponse {
+                principals: vec![PluginSharePrincipal {
+                    principal_type: PluginSharePrincipalType::User,
+                    principal_id: "owner-1".to_string(),
+                    role: PluginSharePrincipalRole::Owner,
+                    name: "Owner".to_string(),
+                }],
+                discoverability: codex_app_server_protocol::PluginShareDiscoverability::Listed,
+            }
+        );
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test]
@@ -1172,107 +1188,114 @@ plugin_sharing = false
 async fn plugin_share_delete_removes_created_workspace_plugin() -> Result<()> {
     let codex_home = TempDir::new()?;
     let server = MockServer::start().await;
-    write_remote_plugin_config(codex_home.path(), &format!("{}/backend-api", server.uri()))?;
-    write_chatgpt_auth(
-        codex_home.path(),
-        ChatGptAuthFixture::new("chatgpt-token")
-            .account_id("account-123")
-            .chatgpt_user_id("user-123")
-            .chatgpt_account_id("account-123"),
-        AuthCredentialsStoreMode::File,
-    )?;
-    let local_plugin_path = AbsolutePathBuf::try_from(codex_home.path().join("local-plugin"))?;
-    write_plugin_share_local_path_mapping(codex_home.path(), "plugins_123", &local_plugin_path)?;
+    mock_server::run(&[&server], async {
+        write_remote_plugin_config(codex_home.path(), &format!("{}/backend-api", server.uri()))?;
+        write_chatgpt_auth(
+            codex_home.path(),
+            ChatGptAuthFixture::new("chatgpt-token")
+                .account_id("account-123")
+                .chatgpt_user_id("user-123")
+                .chatgpt_account_id("account-123"),
+            AuthCredentialsStoreMode::File,
+        )?;
+        let local_plugin_path = AbsolutePathBuf::try_from(codex_home.path().join("local-plugin"))?;
+        write_plugin_share_local_path_mapping(
+            codex_home.path(),
+            "plugins_123",
+            &local_plugin_path,
+        )?;
 
-    Mock::given(method("DELETE"))
-        .and(path("/backend-api/public/plugins/workspace/plugins_123"))
-        .and(header("authorization", "Bearer chatgpt-token"))
-        .and(header("chatgpt-account-id", "account-123"))
-        .respond_with(ResponseTemplate::new(204))
-        .expect(1)
-        .mount(&server)
-        .await;
+        Mock::given(method("DELETE"))
+            .and(path("/backend-api/public/plugins/workspace/plugins_123"))
+            .and(header("authorization", "Bearer chatgpt-token"))
+            .and(header("chatgpt-account-id", "account-123"))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
 
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .without_auto_env()
-        .build_initialized_with_timeout(DEFAULT_TIMEOUT)
-        .await?;
-    let request_id = mcp
-        .send_raw_request(
-            "plugin/share/delete",
-            Some(json!({
-                "remotePluginId": "plugins_123",
-            })),
-        )
-        .await?;
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .without_auto_env()
+            .build_initialized_with_timeout(DEFAULT_TIMEOUT)
+            .await?;
+        let request_id = mcp
+            .send_raw_request(
+                "plugin/share/delete",
+                Some(json!({
+                    "remotePluginId": "plugins_123",
+                })),
+            )
+            .await?;
 
-    let response: PluginShareDeleteResponse =
-        timeout(DEFAULT_TIMEOUT, mcp.read_response(request_id)).await??;
+        let response: PluginShareDeleteResponse =
+            timeout(DEFAULT_TIMEOUT, mcp.read_response(request_id)).await??;
 
-    assert_eq!(response, PluginShareDeleteResponse {});
+        assert_eq!(response, PluginShareDeleteResponse {});
 
-    Mock::given(method("GET"))
-        .and(path("/backend-api/ps/plugins/workspace/created"))
-        .and(query_param("limit", "200"))
-        .and(header("authorization", "Bearer chatgpt-token"))
-        .and(header("chatgpt-account-id", "account-123"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "plugins": [remote_plugin_json("plugins_123")],
-            "pagination": empty_pagination_json(),
-        })))
-        .expect(1)
-        .mount(&server)
-        .await;
-    Mock::given(method("GET"))
-        .and(path("/backend-api/ps/plugins/installed"))
-        .and(query_param("scope", "WORKSPACE"))
-        .and(header("authorization", "Bearer chatgpt-token"))
-        .and(header("chatgpt-account-id", "account-123"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "plugins": [installed_remote_plugin_json("plugins_123")],
-            "pagination": empty_pagination_json(),
-        })))
-        .expect(1)
-        .mount(&server)
-        .await;
+        Mock::given(method("GET"))
+            .and(path("/backend-api/ps/plugins/workspace/created"))
+            .and(query_param("limit", "200"))
+            .and(header("authorization", "Bearer chatgpt-token"))
+            .and(header("chatgpt-account-id", "account-123"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "plugins": [remote_plugin_json("plugins_123")],
+                "pagination": empty_pagination_json(),
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/backend-api/ps/plugins/installed"))
+            .and(query_param("scope", "WORKSPACE"))
+            .and(header("authorization", "Bearer chatgpt-token"))
+            .and(header("chatgpt-account-id", "account-123"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "plugins": [installed_remote_plugin_json("plugins_123")],
+                "pagination": empty_pagination_json(),
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
 
-    let request_id = mcp
-        .send_raw_request("plugin/share/list", Some(json!({})))
-        .await?;
-    let response: PluginShareListResponse =
-        timeout(DEFAULT_TIMEOUT, mcp.read_response(request_id)).await??;
+        let request_id = mcp
+            .send_raw_request("plugin/share/list", Some(json!({})))
+            .await?;
+        let response: PluginShareListResponse =
+            timeout(DEFAULT_TIMEOUT, mcp.read_response(request_id)).await??;
 
-    assert_eq!(
-        response,
-        PluginShareListResponse {
-            data: vec![PluginShareListItem {
-                plugin: PluginSummary {
-                    id: "demo-plugin@workspace-shared-with-me".to_string(),
-                    remote_plugin_id: Some("plugins_123".to_string()),
-                    version: Some("0.1.0".to_string()),
-                    local_version: Some("0.1.0".to_string()),
-                    name: "demo-plugin".to_string(),
-                    share_context: Some(expected_share_context("plugins_123")),
-                    source: PluginSource::Remote,
-                    installed: true,
-                    installed_at: None,
-                    enabled: true,
-                    install_policy: PluginInstallPolicy::Available,
-                    install_policy_source: None,
-                    must_show_installation_interstitial: Some(false),
-                    auth_policy: PluginAuthPolicy::OnUse,
-                    availability: codex_app_server_protocol::PluginAvailability::Available,
-                    disabled_reason: None,
-                    eligible_plan_types: None,
-                    interface: Some(expected_plugin_interface()),
-                    keywords: Vec::new(),
-                },
-                local_plugin_path: None,
-            }],
-        }
-    );
-    Ok(())
+        assert_eq!(
+            response,
+            PluginShareListResponse {
+                data: vec![PluginShareListItem {
+                    plugin: PluginSummary {
+                        id: "demo-plugin@workspace-shared-with-me".to_string(),
+                        remote_plugin_id: Some("plugins_123".to_string()),
+                        version: Some("0.1.0".to_string()),
+                        local_version: Some("0.1.0".to_string()),
+                        name: "demo-plugin".to_string(),
+                        share_context: Some(expected_share_context("plugins_123")),
+                        source: PluginSource::Remote,
+                        installed: true,
+                        installed_at: None,
+                        enabled: true,
+                        install_policy: PluginInstallPolicy::Available,
+                        install_policy_source: None,
+                        must_show_installation_interstitial: Some(false),
+                        auth_policy: PluginAuthPolicy::OnUse,
+                        availability: codex_app_server_protocol::PluginAvailability::Available,
+                        disabled_reason: None,
+                        eligible_plan_types: None,
+                        interface: Some(expected_plugin_interface()),
+                        keywords: Vec::new(),
+                    },
+                    local_plugin_path: None,
+                }],
+            }
+        );
+        Ok(())
+    })
+    .await
 }
 
 fn write_remote_plugin_config(codex_home: &Path, base_url: &str) -> std::io::Result<()> {

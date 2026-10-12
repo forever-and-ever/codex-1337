@@ -1,5 +1,6 @@
 //! A denied credential refresh ends 401 recovery without changing stored credentials.
 
+use core_test_support::mock_server;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -41,56 +42,60 @@ async fn denied_oauth_refresh_terminates_401_recovery_and_preserves_auth() -> Re
     }))?;
     std::fs::write(home.path().join("auth.json"), &auth_json)?;
     let server = start_mock_server().await;
-    // Account scoping shares this policy with inference. Permit the mocked model
-    // requests while denying the OAuth refresh endpoint reached after two 401s.
-    let policy = NetworkPolicy::default()
-        .restrict_to_endpoints([format!("{}/v1/responses", server.uri()).parse()?].into());
-    let auth = AuthManager::shared(
-        home.path().to_path_buf(),
-        /*enable_codex_api_key_env*/ false,
-        AuthCredentialsStoreMode::File,
-        /*forced_chatgpt_workspace_id*/ None,
-        /*chatgpt_base_url*/ None,
-        AuthKeyringBackendKind::default(),
-        AuthRouteConfig::from_http_client_factory(
-            HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault).with_network_policy(policy),
-        ),
-    )
-    .await;
-    let original = auth.auth_cached().expect("stored ChatGPT auth");
-    Mock::given(method("POST"))
-        .and(path("/v1/responses"))
-        .and(header("authorization", "Bearer current-access-token"))
-        .and(header("chatgpt-account-id", "workspace-one"))
-        .respond_with(ResponseTemplate::new(401))
-        .expect(/*r*/ 2) // Initial request and the existing disk-reload recovery step.
-        .mount(&server)
+    mock_server::run(&[&server], async {
+        // Account scoping shares this policy with inference. Permit the mocked model
+        // requests while denying the OAuth refresh endpoint reached after two 401s.
+        let policy = NetworkPolicy::default()
+            .restrict_to_endpoints([format!("{}/v1/responses", server.uri()).parse()?].into());
+        let auth = AuthManager::shared(
+            home.path().to_path_buf(),
+            /*enable_codex_api_key_env*/ false,
+            AuthCredentialsStoreMode::File,
+            /*forced_chatgpt_workspace_id*/ None,
+            /*chatgpt_base_url*/ None,
+            AuthKeyringBackendKind::default(),
+            AuthRouteConfig::from_http_client_factory(
+                HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault)
+                    .with_network_policy(policy),
+            ),
+        )
         .await;
-    let mut builder = test_codex().with_home(home).with_auth_manager(auth.clone());
-    let test = builder.build_with_auto_env(&server).await?;
-    test.codex
-        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-            text: "hello".into(),
-            text_elements: Vec::new(),
-        }]))
-        .await?;
-    let mut policy_error = None;
-    wait_for_event(&test.codex, |event| {
-        if let EventMsg::Error(error) = event {
-            policy_error.get_or_insert_with(|| error.message.clone());
-        }
-        matches!(event, EventMsg::TurnComplete(_))
+        let original = auth.auth_cached().expect("stored ChatGPT auth");
+        Mock::given(method("POST"))
+            .and(path("/v1/responses"))
+            .and(header("authorization", "Bearer current-access-token"))
+            .and(header("chatgpt-account-id", "workspace-one"))
+            .respond_with(ResponseTemplate::new(401))
+            .expect(/*r*/ 2) // Initial request and the existing disk-reload recovery step.
+            .mount(&server)
+            .await;
+        let mut builder = test_codex().with_home(home).with_auth_manager(auth.clone());
+        let test = builder.build_with_auto_env(&server).await?;
+        test.codex
+            .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "hello".into(),
+                text_elements: Vec::new(),
+            }]))
+            .await?;
+        let mut policy_error = None;
+        wait_for_event(&test.codex, |event| {
+            if let EventMsg::Error(error) = event {
+                policy_error.get_or_insert_with(|| error.message.clone());
+            }
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+        assert_eq!(
+            policy_error,
+            Some(format!("Fatal error: {}", NetworkPolicyDenied::Destination))
+        );
+        assert_eq!(auth.auth().await, Some(original));
+        assert_eq!(
+            std::fs::read(test.home.path().join("auth.json"))?,
+            auth_json
+        );
+        server.verify().await;
+        Ok(())
     })
-    .await;
-    assert_eq!(
-        policy_error,
-        Some(format!("Fatal error: {}", NetworkPolicyDenied::Destination))
-    );
-    assert_eq!(auth.auth().await, Some(original));
-    assert_eq!(
-        std::fs::read(test.home.path().join("auth.json"))?,
-        auth_json
-    );
-    server.verify().await;
-    Ok(())
+    .await
 }

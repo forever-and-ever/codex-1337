@@ -6,6 +6,7 @@ use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::WireApi;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::user_input::UserInput;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::skip_if_no_network;
 use core_test_support::streaming_sse::StreamingSseChunk;
@@ -163,27 +164,30 @@ async fn connection_failure_pauses_retry_budget_until_provider_is_reachable() ->
         .listener(TcpListener::bind(unavailable_address)?)
         .start()
         .await;
-    let response_mock = responses::mount_sse_sequence(
-        &recovered_server,
-        vec![sse_incomplete(), responses::sse_completed("resp_recovered")],
-    )
-    .await;
+    mock_server::run(&[&recovered_server], async {
+        let response_mock = responses::mount_sse_sequence(
+            &recovered_server,
+            vec![sse_incomplete(), responses::sse_completed("resp_recovered")],
+        )
+        .await;
 
-    let EventMsg::StreamError(stream_error) =
-        wait_for_event(&codex, |event| matches!(event, EventMsg::StreamError(_))).await
-    else {
-        unreachable!("predicate guarantees a stream error event");
-    };
-    assert_eq!(stream_error.message, "Reconnecting... 1/1");
+        let EventMsg::StreamError(stream_error) =
+            wait_for_event(&codex, |event| matches!(event, EventMsg::StreamError(_))).await
+        else {
+            unreachable!("predicate guarantees a stream error event");
+        };
+        assert_eq!(stream_error.message, "Reconnecting... 1/1");
 
-    let EventMsg::TurnComplete(completed) =
-        wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await
-    else {
-        unreachable!("predicate guarantees a turn complete event");
-    };
+        let EventMsg::TurnComplete(completed) =
+            wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await
+        else {
+            unreachable!("predicate guarantees a turn complete event");
+        };
 
-    assert_eq!(completed.error, None);
-    assert_eq!(response_mock.requests().len(), 2);
+        assert_eq!(completed.error, None);
+        assert_eq!(response_mock.requests().len(), 2);
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }

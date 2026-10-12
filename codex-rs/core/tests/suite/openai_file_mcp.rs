@@ -1,5 +1,6 @@
 #![cfg(not(target_os = "windows"))]
 
+use core_test_support::mock_server;
 use std::fs;
 use std::path::Path;
 
@@ -226,6 +227,7 @@ async fn run_extract_turn(
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn codex_apps_file_params_omit_fields_absent_from_tool_schema() -> Result<()> {
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let apps_server = AppsTestServer::mount(&server).await?;
     mount_file_upload_mocks(&server, STREAMED_FILE_SIZE as u64).await;
 
@@ -296,36 +298,41 @@ async fn codex_apps_file_params_omit_fields_absent_from_tool_schema() -> Result<
 
     server.verify().await;
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn codex_apps_file_params_pass_uploaded_file_to_post_tool_use_hook() -> Result<()> {
     let server = start_mock_server().await;
-    let apps_server = AppsTestServer::mount(&server).await?;
-    mount_file_upload_mocks(&server, /*file_size_bytes*/ 11).await;
+    mock_server::run(&[&server], async {
+        let apps_server = AppsTestServer::mount(&server).await?;
+        mount_file_upload_mocks(&server, /*file_size_bytes*/ 11).await;
 
-    let mut builder = apps_enabled_builder(apps_server.chatgpt_base_url.clone())
-        .with_pre_build_hook(move |home| {
-            if let Err(error) = write_post_tool_use_hook(home) {
-                panic!("failed to write apps file post tool use hook fixture: {error}");
-            }
-        })
-        .with_config(move |config| {
-            trust_discovered_hooks(config);
-        });
-    let test = builder.build(&server).await?;
-    tokio::fs::write(test.cwd.path().join("report.txt"), b"hello world").await?;
-    let _responses = run_extract_turn(&test, &server, PermissionProfile::Disabled).await?;
+        let mut builder = apps_enabled_builder(apps_server.chatgpt_base_url.clone())
+            .with_pre_build_hook(move |home| {
+                if let Err(error) = write_post_tool_use_hook(home) {
+                    panic!("failed to write apps file post tool use hook fixture: {error}");
+                }
+            })
+            .with_config(move |config| {
+                trust_discovered_hooks(config);
+            });
+        let test = builder.build(&server).await?;
+        tokio::fs::write(test.cwd.path().join("report.txt"), b"hello world").await?;
+        let _responses = run_extract_turn(&test, &server, PermissionProfile::Disabled).await?;
 
-    let hook_inputs = read_post_tool_use_hook_inputs(test.codex_home_path())?;
-    assert_eq!(hook_inputs.len(), 1);
-    assert_eq!(
-        hook_inputs[0]["tool_input"]["file"],
-        schema_filtered_uploaded_file(&server)
-    );
+        let hook_inputs = read_post_tool_use_hook_inputs(test.codex_home_path())?;
+        assert_eq!(hook_inputs.len(), 1);
+        assert_eq!(
+            hook_inputs[0]["tool_input"]["file"],
+            schema_filtered_uploaded_file(&server)
+        );
 
-    server.verify().await;
-    Ok(())
+        server.verify().await;
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -337,52 +344,55 @@ async fn codex_apps_file_params_retry_stream_under_restricted_read_policy() -> R
     skip_if_sandbox!(Ok(()));
 
     let server = start_mock_server().await;
-    let apps_server = AppsTestServer::mount(&server).await?;
-    mount_file_upload_mocks(&server, STREAMED_FILE_SIZE as u64).await;
-    Mock::given(method("PUT"))
-        .and(path("/upload/file_123"))
-        .respond_with(ResponseTemplate::new(503).insert_header("x-ms-retry-after-ms", "0"))
-        .with_priority(1)
-        .up_to_n_times(1)
-        .expect(1)
-        .mount(&server)
-        .await;
+    mock_server::run(&[&server], async {
+        let apps_server = AppsTestServer::mount(&server).await?;
+        mount_file_upload_mocks(&server, STREAMED_FILE_SIZE as u64).await;
+        Mock::given(method("PUT"))
+            .and(path("/upload/file_123"))
+            .respond_with(ResponseTemplate::new(503).insert_header("x-ms-retry-after-ms", "0"))
+            .with_priority(1)
+            .up_to_n_times(1)
+            .expect(1)
+            .mount(&server)
+            .await;
 
-    let mut builder = apps_enabled_builder(apps_server.chatgpt_base_url)
-        .with_config(|config| restrict_apps_upload_reads(config, "private.txt"))
-        .with_workspace_setup(|cwd, fs| async move {
-            let report_path = PathUri::from_abs_path(&cwd.join("report.txt"));
-            fs.write_file(
-                &report_path,
-                vec![b'x'; STREAMED_FILE_SIZE],
-                Default::default(),
-                /*sandbox*/ None,
-            )
-            .await?;
-            Ok(())
-        });
-    let test = builder.build_with_auto_env(&server).await?;
-    let permission_profile = test.config.permissions.permission_profile().clone();
+        let mut builder = apps_enabled_builder(apps_server.chatgpt_base_url)
+            .with_config(|config| restrict_apps_upload_reads(config, "private.txt"))
+            .with_workspace_setup(|cwd, fs| async move {
+                let report_path = PathUri::from_abs_path(&cwd.join("report.txt"));
+                fs.write_file(
+                    &report_path,
+                    vec![b'x'; STREAMED_FILE_SIZE],
+                    Default::default(),
+                    /*sandbox*/ None,
+                )
+                .await?;
+                Ok(())
+            });
+        let test = builder.build_with_auto_env(&server).await?;
+        let permission_profile = test.config.permissions.permission_profile().clone();
 
-    run_extract_turn(&test, &server, permission_profile).await?;
+        run_extract_turn(&test, &server, permission_profile).await?;
 
-    let requests = server.received_requests().await.expect("capture requests");
-    let bodies: Vec<_> = requests
-        .iter()
-        .filter(|request| request.url.path() == "/upload/file_123")
-        .map(|request| request.body.as_slice())
-        .collect();
-    let contents = vec![b'x'; STREAMED_FILE_SIZE];
-    assert_eq!(bodies, vec![contents.as_slice(); 2]);
+        let requests = server.received_requests().await.expect("capture requests");
+        let bodies: Vec<_> = requests
+            .iter()
+            .filter(|request| request.url.path() == "/upload/file_123")
+            .map(|request| request.body.as_slice())
+            .collect();
+        let contents = vec![b'x'; STREAMED_FILE_SIZE];
+        assert_eq!(bodies, vec![contents.as_slice(); 2]);
 
-    let apps_tool_call =
-        recorded_apps_tool_call_by_name(&server, CALENDAR_EXTRACT_TEXT_TOOL_NAME).await;
-    assert_eq!(
-        apps_tool_call.pointer("/params/arguments/file"),
-        Some(&schema_filtered_uploaded_file(&server))
-    );
-    server.verify().await;
-    Ok(())
+        let apps_tool_call =
+            recorded_apps_tool_call_by_name(&server, CALENDAR_EXTRACT_TEXT_TOOL_NAME).await;
+        assert_eq!(
+            apps_tool_call.pointer("/params/arguments/file"),
+            Some(&schema_filtered_uploaded_file(&server))
+        );
+        server.verify().await;
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -394,43 +404,47 @@ async fn codex_apps_file_params_reject_denied_file_before_upload() -> Result<()>
     skip_if_sandbox!(Ok(()));
 
     let server = start_mock_server().await;
-    let apps_server = AppsTestServer::mount(&server).await?;
-    let mut builder = apps_enabled_builder(apps_server.chatgpt_base_url)
-        .with_config(|config| restrict_apps_upload_reads(config, "report.txt"))
-        .with_workspace_setup(|cwd, fs| async move {
-            let report_path = PathUri::from_abs_path(&cwd.join("report.txt"));
-            fs.write_file(
-                &report_path,
-                b"private".to_vec(),
-                Default::default(),
-                /*sandbox*/ None,
-            )
-            .await?;
-            Ok(())
-        });
-    let test = builder.build_with_auto_env(&server).await?;
-    let permission_profile = test.config.permissions.permission_profile().clone();
+    mock_server::run(&[&server], async {
+        let apps_server = AppsTestServer::mount(&server).await?;
+        let mut builder = apps_enabled_builder(apps_server.chatgpt_base_url)
+            .with_config(|config| restrict_apps_upload_reads(config, "report.txt"))
+            .with_workspace_setup(|cwd, fs| async move {
+                let report_path = PathUri::from_abs_path(&cwd.join("report.txt"));
+                fs.write_file(
+                    &report_path,
+                    b"private".to_vec(),
+                    Default::default(),
+                    /*sandbox*/ None,
+                )
+                .await?;
+                Ok(())
+            });
+        let test = builder.build_with_auto_env(&server).await?;
+        let permission_profile = test.config.permissions.permission_profile().clone();
 
-    let responses = run_extract_turn(&test, &server, permission_profile).await?;
-    let requests = responses.requests();
-    let output_item = requests[2].function_call_output("extract-call-1");
-    let output = output_item["output"][0]["text"]
-        .as_str()
-        .context("denied Apps upload should return a tool error")?;
+        let responses = run_extract_turn(&test, &server, permission_profile).await?;
+        let requests = responses.requests();
+        let output_item = requests[2].function_call_output("extract-call-1");
+        let output = output_item["output"][0]["text"]
+            .as_str()
+            .context("denied Apps upload should return a tool error")?;
 
-    assert!(
-        output.contains("failed to upload `report.txt`")
-            && (output.contains("Permission denied") || output.contains("Operation not permitted")),
-        "unexpected upload error: {output}"
-    );
-    assert!(
-        server
-            .received_requests()
-            .await
-            .context("mock server should expose received requests")?
-            .iter()
-            .all(|request| request.url.path() != "/files"),
-        "denied files must not start an upload"
-    );
-    Ok(())
+        assert!(
+            output.contains("failed to upload `report.txt`")
+                && (output.contains("Permission denied")
+                    || output.contains("Operation not permitted")),
+            "unexpected upload error: {output}"
+        );
+        assert!(
+            server
+                .received_requests()
+                .await
+                .context("mock server should expose received requests")?
+                .iter()
+                .all(|request| request.url.path() != "/files"),
+            "denied files must not start an upload"
+        );
+        Ok(())
+    })
+    .await
 }

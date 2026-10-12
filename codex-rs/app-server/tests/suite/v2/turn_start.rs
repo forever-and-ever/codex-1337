@@ -3688,49 +3688,52 @@ async fn turn_start_does_not_stream_apply_patch_change_updates_without_feature_v
         create_final_assistant_message_sse_response("patch applied")?,
     ];
     let server = create_mock_responses_server_sequence(responses).await;
-    MockResponsesConfig::new(&server.uri()).write(&codex_home)?;
+    mock_server::run(&[&server], async {
+        MockResponsesConfig::new(&server.uri()).write(&codex_home)?;
 
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(&codex_home)
-        .build_initialized()
-        .await?;
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(&codex_home)
+            .build_initialized()
+            .await?;
 
-    let ThreadStartResponse { thread, .. } = mcp
-        .start_thread(ThreadStartParams {
-            model: Some("mock-model".to_string()),
-            cwd: Some(workspace.to_string_lossy().into_owned()),
-            ..Default::default()
-        })
-        .await?;
-
-    let _: TurnStartResponse = mcp
-        .request(|request_id| ClientRequest::TurnStart {
-            request_id,
-            params: TurnStartParams {
-                thread_id: thread.id,
-                client_user_message_id: None,
-                input: vec![V2UserInput::Text {
-                    text: "apply patch".into(),
-                    text_elements: Vec::new(),
-                }],
-                cwd: Some(workspace),
+        let ThreadStartResponse { thread, .. } = mcp
+            .start_thread(ThreadStartParams {
+                model: Some("mock-model".to_string()),
+                cwd: Some(workspace.to_string_lossy().into_owned()),
                 ..Default::default()
-            },
-        })
-        .await?;
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/completed"),
-    )
-    .await??;
+            })
+            .await?;
 
-    assert!(
-        !mcp.pending_notification_methods()
-            .iter()
-            .any(|method| method == "item/fileChange/patchUpdated")
-    );
+        let _: TurnStartResponse = mcp
+            .request(|request_id| ClientRequest::TurnStart {
+                request_id,
+                params: TurnStartParams {
+                    thread_id: thread.id,
+                    client_user_message_id: None,
+                    input: vec![V2UserInput::Text {
+                        text: "apply patch".into(),
+                        text_elements: Vec::new(),
+                    }],
+                    cwd: Some(workspace),
+                    ..Default::default()
+                },
+            })
+            .await?;
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_notification_message("turn/completed"),
+        )
+        .await??;
 
-    Ok(())
+        assert!(
+            !mcp.pending_notification_methods()
+                .iter()
+                .any(|method| method == "item/fileChange/patchUpdated")
+        );
+
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test]
@@ -3801,84 +3804,87 @@ async fn turn_start_streams_apply_patch_change_updates_v2() -> Result<()> {
         create_final_assistant_message_sse_response("patch applied")?,
     ];
     let server = create_mock_responses_server_sequence(responses).await;
-    MockResponsesConfig::new(&server.uri())
-        .enable_feature(Feature::ApplyPatchStreamingEvents)
-        .disable_feature(Feature::Plugins)
-        .disable_feature(Feature::RemoteModels)
-        .disable_feature(Feature::ShellSnapshot)
-        .write(&codex_home)?;
-    write_models_cache(&codex_home).await?;
-    let cache_path = codex_home.join(codex_model_provider_info::models_cache_file_name(
-        "mock_provider",
-    ));
-    let mut cache: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&cache_path)?)?;
-    let models = cache["models"]
-        .as_array_mut()
-        .expect("models_cache.json models should be an array");
-    let model = models
-        .first_mut()
-        .expect("models_cache.json should contain at least one model");
-    model["slug"] = serde_json::Value::from("mock-model");
-    model["display_name"] = serde_json::Value::from("mock-model");
-    model["apply_patch_tool_type"] = serde_json::Value::from("freeform");
-    std::fs::write(&cache_path, serde_json::to_string_pretty(&cache)?)?;
+    mock_server::run(&[&server], async {
+        MockResponsesConfig::new(&server.uri())
+            .enable_feature(Feature::ApplyPatchStreamingEvents)
+            .disable_feature(Feature::Plugins)
+            .disable_feature(Feature::RemoteModels)
+            .disable_feature(Feature::ShellSnapshot)
+            .write(&codex_home)?;
+        write_models_cache(&codex_home).await?;
+        let cache_path = codex_home.join(codex_model_provider_info::models_cache_file_name(
+            "mock_provider",
+        ));
+        let mut cache: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&cache_path)?)?;
+        let models = cache["models"]
+            .as_array_mut()
+            .expect("models_cache.json models should be an array");
+        let model = models
+            .first_mut()
+            .expect("models_cache.json should contain at least one model");
+        model["slug"] = serde_json::Value::from("mock-model");
+        model["display_name"] = serde_json::Value::from("mock-model");
+        model["apply_patch_tool_type"] = serde_json::Value::from("freeform");
+        std::fs::write(&cache_path, serde_json::to_string_pretty(&cache)?)?;
 
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(&codex_home)
-        .build_initialized()
-        .await?;
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(&codex_home)
+            .build_initialized()
+            .await?;
 
-    let ThreadStartResponse { thread, .. } = mcp
-        .start_thread(ThreadStartParams {
-            model: Some("mock-model".to_string()),
-            cwd: Some(workspace.to_string_lossy().into_owned()),
-            ..Default::default()
-        })
-        .await?;
-
-    let TurnStartResponse { turn } = mcp
-        .request(|request_id| ClientRequest::TurnStart {
-            request_id,
-            params: TurnStartParams {
-                thread_id: thread.id.clone(),
-                client_user_message_id: None,
-                input: vec![V2UserInput::Text {
-                    text: "apply patch".into(),
-                    text_elements: Vec::new(),
-                }],
-                cwd: Some(workspace.clone()),
+        let ThreadStartResponse { thread, .. } = mcp
+            .start_thread(ThreadStartParams {
+                model: Some("mock-model".to_string()),
+                cwd: Some(workspace.to_string_lossy().into_owned()),
                 ..Default::default()
-            },
-        })
-        .await?;
+            })
+            .await?;
 
-    let mut streamed_content = String::new();
-    while streamed_content != "live line\n" {
-        let delta: FileChangePatchUpdatedNotification = timeout(
+        let TurnStartResponse { turn } = mcp
+            .request(|request_id| ClientRequest::TurnStart {
+                request_id,
+                params: TurnStartParams {
+                    thread_id: thread.id.clone(),
+                    client_user_message_id: None,
+                    input: vec![V2UserInput::Text {
+                        text: "apply patch".into(),
+                        text_elements: Vec::new(),
+                    }],
+                    cwd: Some(workspace.clone()),
+                    ..Default::default()
+                },
+            })
+            .await?;
+
+        let mut streamed_content = String::new();
+        while streamed_content != "live line\n" {
+            let delta: FileChangePatchUpdatedNotification = timeout(
+                DEFAULT_READ_TIMEOUT,
+                mcp.read_notification("item/fileChange/patchUpdated"),
+            )
+            .await??;
+            assert_eq!(delta.thread_id, thread.id);
+            assert_eq!(delta.turn_id, turn.id);
+            assert_eq!(delta.item_id, call_id);
+            let change = delta
+                .changes
+                .iter()
+                .find(|change| change.path == "live.txt")
+                .expect("live.txt change");
+            assert!(matches!(change.kind, PatchChangeKind::Add));
+            streamed_content = change.diff.clone();
+        }
+
+        timeout(
             DEFAULT_READ_TIMEOUT,
-            mcp.read_notification("item/fileChange/patchUpdated"),
+            mcp.read_stream_until_notification_message("turn/completed"),
         )
         .await??;
-        assert_eq!(delta.thread_id, thread.id);
-        assert_eq!(delta.turn_id, turn.id);
-        assert_eq!(delta.item_id, call_id);
-        let change = delta
-            .changes
-            .iter()
-            .find(|change| change.path == "live.txt")
-            .expect("live.txt change");
-        assert!(matches!(change.kind, PatchChangeKind::Add));
-        streamed_content = change.diff.clone();
-    }
 
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/completed"),
-    )
-    .await??;
-
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test]

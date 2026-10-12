@@ -21,6 +21,7 @@ use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::TurnStartResponse;
 use codex_app_server_protocol::TurnStatus;
 use codex_app_server_protocol::UserInput;
+use core_test_support::mock_server;
 use pretty_assertions::assert_eq;
 use std::time::Duration;
 use tempfile::TempDir;
@@ -157,88 +158,95 @@ async fn model_list_applies_gateway_provider_changes_without_restart() -> Result
 async fn token_exchange_failure_completes_login_and_updates_readiness() -> Result<()> {
     let home = TempDir::new()?;
     let oauth = MockServer::start().await;
-    let secret = "issuer-query-credential";
-    Mock::given(method("POST"))
-        .and(path("/token"))
-        .and(body_string_contains("grant_type=authorization_code"))
-        .and(body_string_contains("code=accepted"))
-        .respond_with(
-            ResponseTemplate::new(/*s*/ 400)
-                .insert_header("x-request-id", secret)
-                .set_body_json(serde_json::json!({
-                    "error": "invalid_grant", "error_description": secret,
-                })),
+    mock_server::run(&[&oauth], async {
+        let secret = "issuer-query-credential";
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .and(body_string_contains("grant_type=authorization_code"))
+            .and(body_string_contains("code=accepted"))
+            .respond_with(
+                ResponseTemplate::new(/*s*/ 400)
+                    .insert_header("x-request-id", secret)
+                    .set_body_json(serde_json::json!({
+                        "error": "invalid_grant", "error_description": secret,
+                    })),
+            )
+            .expect(/*r*/ 1)
+            .mount(&oauth)
+            .await;
+        std::fs::write(
+            home.path().join("config.toml"),
+            gateway_config(&oauth).replace(
+                "/authorize\"",
+                &format!("/authorize?issuer_secret={secret}\""),
+            ),
+        )?;
+        let mut server = gateway_server(home.path()).await?;
+        let login = server
+            .send_raw_request("account/gatewayOAuth/login", /*params*/ None)
+            .await?;
+        let authorization_url = authorization_url(&mut server).await?;
+        let query = authorization_url
+            .query_pairs()
+            .into_owned()
+            .collect::<std::collections::HashMap<_, _>>();
+        let mut callback = url::Url::parse(query.get("redirect_uri").context("callback URI")?)?;
+        callback
+            .query_pairs_mut()
+            .append_pair("code", "accepted")
+            .append_pair("state", query.get("state").context("OAuth state")?);
+        codex_login::default_client::create_client_without_request_logging()
+            .get(callback.as_str())
+            .send()
+            .await?
+            .error_for_status()?;
+        let error = timeout(
+            TIMEOUT,
+            server.read_stream_until_error_message(RequestId::Integer(login)),
         )
-        .expect(/*r*/ 1)
-        .mount(&oauth)
-        .await;
-    std::fs::write(
-        home.path().join("config.toml"),
-        gateway_config(&oauth).replace(
-            "/authorize\"",
-            &format!("/authorize?issuer_secret={secret}\""),
-        ),
-    )?;
-    let mut server = gateway_server(home.path()).await?;
-    let login = server
-        .send_raw_request("account/gatewayOAuth/login", /*params*/ None)
-        .await?;
-    let authorization_url = authorization_url(&mut server).await?;
-    let query = authorization_url
-        .query_pairs()
-        .into_owned()
-        .collect::<std::collections::HashMap<_, _>>();
-    let mut callback = url::Url::parse(query.get("redirect_uri").context("callback URI")?)?;
-    callback
-        .query_pairs_mut()
-        .append_pair("code", "accepted")
-        .append_pair("state", query.get("state").context("OAuth state")?);
-    codex_login::default_client::create_client_without_request_logging()
-        .get(callback.as_str())
-        .send()
-        .await?
-        .error_for_status()?;
-    let error = timeout(
-        TIMEOUT,
-        server.read_stream_until_error_message(RequestId::Integer(login)),
-    )
-    .await??;
-    let message = "Gateway sign-in failed; check the gateway configuration and credential store.";
-    assert_eq!(error.error.message, message);
-    let changed = timeout(
-        TIMEOUT,
-        server.read_stream_until_matching_notification("gateway login failure", |notification| {
-            notification.method == "account/gatewayOAuth/changed"
-                && notification
-                    .params
-                    .as_ref()
-                    .is_some_and(|params| params["status"] == "failed")
-        }),
-    )
-    .await??;
-    assert_eq!(
-        serde_json::from_value::<GatewayOAuthChangedNotification>(
-            changed.params.context("gateway status")?
-        )?,
-        GatewayOAuthChangedNotification {
-            provider_id: "gateway".into(),
-            status: GatewayOAuthStatus::Failed,
-            auth_url: None,
-            error: Some(message.into()),
-        }
-    );
-    let state: GatewayOAuthReadResponse = read_gateway(&mut server).await?;
-    assert_eq!(
-        state,
-        GatewayOAuthReadResponse {
-            provider_id: "gateway".to_string(),
-            provider_name: "Test gateway".to_string(),
-            required: true,
-            status: Some(GatewayOAuthStatus::Failed),
-            error: Some(error.error.message),
-        }
-    );
-    Ok(())
+        .await??;
+        let message =
+            "Gateway sign-in failed; check the gateway configuration and credential store.";
+        assert_eq!(error.error.message, message);
+        let changed = timeout(
+            TIMEOUT,
+            server.read_stream_until_matching_notification(
+                "gateway login failure",
+                |notification| {
+                    notification.method == "account/gatewayOAuth/changed"
+                        && notification
+                            .params
+                            .as_ref()
+                            .is_some_and(|params| params["status"] == "failed")
+                },
+            ),
+        )
+        .await??;
+        assert_eq!(
+            serde_json::from_value::<GatewayOAuthChangedNotification>(
+                changed.params.context("gateway status")?
+            )?,
+            GatewayOAuthChangedNotification {
+                provider_id: "gateway".into(),
+                status: GatewayOAuthStatus::Failed,
+                auth_url: None,
+                error: Some(message.into()),
+            }
+        );
+        let state: GatewayOAuthReadResponse = read_gateway(&mut server).await?;
+        assert_eq!(
+            state,
+            GatewayOAuthReadResponse {
+                provider_id: "gateway".to_string(),
+                provider_name: "Test gateway".to_string(),
+                required: true,
+                status: Some(GatewayOAuthStatus::Failed),
+                error: Some(error.error.message),
+            }
+        );
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test]
