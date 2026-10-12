@@ -1437,28 +1437,21 @@ mod tests {
             .await
             .expect("write stderr log");
 
-        let context = daemon.app_server_not_ready_context().await;
-        assert!(context.starts_with(&format!(
-            "app server did not become ready on {}\n\n\
-             Daemon used app-server:\n  path: {}\n\nReadiness failure snapshot:",
-            daemon.socket_path.display(),
-            daemon.managed_codex_bin.display(),
-        )));
-        assert!(context.contains(&format!(
-            "PID record ({}): missing",
-            daemon.pid_file.display()
-        )));
-        assert!(context.contains(&format!(
-            "stderr ({}): nonempty (19 bytes)",
-            stderr_log.display()
-        )));
-        assert!(context.contains(&format!(
-            "socket ({}): missing",
-            daemon.socket_path.display()
-        )));
-        assert!(context.ends_with(&format!(
-            "Managed app-server stderr ({}):\n  unexpected argument",
-            stderr_log.display()
-        )));
+        assert_eq!(
+            daemon.app_server_not_ready_context().await,
+            format!(
+                "app server did not become ready on {}\n\n\
+                 Daemon used app-server:\n  path: {}\n\n\
+                 Readiness failure snapshot:\n  PID record ({}): missing\n  \
+                 stderr ({}): nonempty (19 bytes)\n  socket ({}): missing\n\n\
+                 Managed app-server stderr ({}):\n  unexpected argument",
+                daemon.socket_path.display(),
+                daemon.managed_codex_bin.display(),
+                daemon.pid_file.display(),
+                stderr_log.display(),
+                daemon.socket_path.display(),
+                stderr_log.display(),
+            )
+        );
     }
 }
