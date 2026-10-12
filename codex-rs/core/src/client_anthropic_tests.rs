@@ -507,7 +507,7 @@ async fn native_regular_replay_profiles(
                     json!({"type":"message_start","message":{"id":"committed","usage":{"input_tokens":1,"output_tokens":0}}}),
                     json!({"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"Completed thought.","signature":"committed-signature/=="}}),
                     json!({"type":"content_block_stop","index":0}),
-                    json!({"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"one-action","name":"functions__update_plan","input":{"arguments":{"plan":[{"step":"Native commit once","status":"completed"}]}}}}),
+                    json!({"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"one-action","name":"update_plan","input":{"arguments":{"plan":[{"step":"Native commit once","status":"completed"}]}}}}),
                     json!({"type":"content_block_stop","index":1}),
                     json!({"type":"content_block_start","index":2,"content_block":{"type":"text","text":""}}),
                     json!({"type":"content_block_delta","index":2,"delta":{"type":"text_delta","text":"FAILED_NATIVE_TEXT"}}),
@@ -694,16 +694,14 @@ async fn native_regular_replay_profiles(
             );
         }
         let committed = matches!(profile, NativeReplayProfile::Committed);
-        assert_eq!(observed.iter().filter(|event| {
-            matches!(event, EventMsg::PlanUpdate(event) if event.plan.len() == 1 && event.plan[0].step == "Native commit once")
-        }).count(), usize::from(committed));
+
         if committed {
             assert!(
                 bodies[0]["tools"]
                     .as_array()
                     .unwrap()
                     .iter()
-                    .any(|tool| tool["name"] == "functions__update_plan")
+                    .any(|tool| tool["name"] == "update_plan")
             );
             let history = session
                 .clone_history()
@@ -717,13 +715,25 @@ async fn native_regular_replay_profiles(
                     if call_id.as_deref() == Some("one-action") && output.success == Some(true))
                     })
                     .count(),
-                1
+                1,
+                "native completed tool outputs={:?}, terminal={:?}",
+                history
+                    .iter()
+                    .filter(|item| {
+                        matches!(item, ResponseItem::FunctionCallOutput { call_id, .. }
+                        if call_id.as_deref() == Some("one-action"))
+                    })
+                    .collect::<Vec<_>>(),
+                observed.last(),
             );
             assert!(history.iter().any(|item| {
                 matches!(item, ResponseItem::Reasoning { encrypted_content: Some(signature), .. }
                     if signature == "committed-signature/==")
             }));
         }
+        assert_eq!(observed.iter().filter(|event| {
+            matches!(event, EventMsg::PlanUpdate(event) if event.plan.len() == 1 && event.plan[0].step == "Native commit once")
+        }).count(), usize::from(committed));
         server.verify().await;
     }
     Ok(())
