@@ -294,7 +294,7 @@ impl App {
             .and_then(|index| self.agents_overview.visible_thread_ids.get(index).copied());
         let displayed = self.current_displayed_thread_id();
         let restoring_draft = self.chat_widget.session_draft.is_some();
-        self.handle_submission_event(super::turn_submissions::SubmissionEvent::Retire)
+        self.handle_submission_event(app_server, super::turn_submissions::SubmissionEvent::Retire)
             .await;
         let queued_edits = self.queued_messages.retire();
         self.chat_widget.project_server_queue_mutation(false);

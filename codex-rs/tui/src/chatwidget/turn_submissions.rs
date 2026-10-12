@@ -476,3 +476,12 @@ fn steer_draft(steer: &PendingSteer) -> SubmissionDraft {
         },
     }
 }
+
+impl ChatWidget {
+    pub(crate) fn cancel_unsent_turn_operation(&mut self) {
+        if self.input_queue.cancel_unsent_operation() {
+            self.update_task_running_state();
+            self.request_redraw();
+        }
+    }
+}

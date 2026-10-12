@@ -7,6 +7,7 @@ use codex_app_server_protocol as api;
 #[derive(Clone)]
 pub(in crate::app) enum ThreadOperation {
     Mutation(ThreadMutation),
+    Control(control::ControlOperation),
     Catalog(CatalogRequest),
     Connection(ConnectionMutation),
 }
@@ -39,6 +40,9 @@ pub(in crate::app) enum ConnectionMutation {
 #[derive(Debug)]
 pub(in crate::app) enum OperationReceipt {
     Compacted,
+    Interrupted,
+    ExitDetached(detach::DetachReceipt),
+    StopAndExitCompleted,
     Renamed(String),
     Review {
         response: api::ReviewStartResponse,
@@ -57,6 +61,13 @@ pub(in crate::app) enum OperationReceipt {
 impl ThreadOperation {
     pub(in crate::app) fn label(&self) -> &'static str {
         match self {
+            Self::Control(control::ControlOperation::DetachAndExit { .. }) => {
+                "Detaching frontend before exit"
+            }
+            Self::Control(control::ControlOperation::Interrupt { .. }) => "Interrupting turn",
+            Self::Control(control::ControlOperation::StopAndExit { .. }) => {
+                "Stopping task before exit"
+            }
             Self::Mutation(mutation) => match mutation {
                 ThreadMutation::Compact => "Starting compaction",
                 ThreadMutation::Rename(_) => "Renaming conversation",
@@ -75,6 +86,8 @@ impl ThreadOperation {
     pub(super) fn lane(&self, thread_id: ThreadId) -> OperationLane {
         match self {
             Self::Connection(_) => OperationLane::Connection,
+            Self::Control(control::ControlOperation::DetachAndExit { .. }) => OperationLane::Exit,
+            Self::Control(_) => OperationLane::Control(thread_id),
             Self::Mutation(_) | Self::Catalog(_) => OperationLane::Thread(thread_id),
         }
     }
@@ -90,6 +103,9 @@ pub(super) async fn send(
     let request_id = api::RequestId::String(format!("tui-operation-{id}"));
     let thread = thread_id.to_string();
     match operation {
+        ThreadOperation::Control(operation) => {
+            control::send(&handle, thread_id, id, operation, &store).await
+        }
         ThreadOperation::Mutation(mutation) => match mutation {
             ThreadMutation::Compact => {
                 let _: api::ThreadCompactStartResponse = handle
@@ -233,6 +249,22 @@ impl App {
         receipt: OperationReceipt,
     ) -> Result<()> {
         match receipt {
+            OperationReceipt::StopAndExitCompleted => self
+                .app_event_tx
+                .send(AppEvent::Exit(ExitMode::ShutdownAfterInterrupt)),
+            OperationReceipt::Interrupted => {}
+            OperationReceipt::ExitDetached(receipt) => {
+                if let ThreadOperation::Control(control::ControlOperation::DetachAndExit {
+                    plan,
+                    reason,
+                }) = operation
+                {
+                    self.finish_detach_plan(plan, receipt).await;
+                    self.pending_shutdown_exit_thread_id = None;
+                    self.app_event_tx
+                        .send(AppEvent::ServerOperationExitReady(reason.clone()));
+                }
+            }
             OperationReceipt::Renamed(name) => {
                 self.chat_widget.expect_manual_thread_name(thread_id, name);
                 self.cancel_thread_title_generation(thread_id);
@@ -331,29 +363,72 @@ impl App {
             return;
         }
         if self.chat_widget.thread_id() == Some(thread_id) {
-            if matches!(
-                operation,
-                ThreadOperation::Mutation(ThreadMutation::DisarmAlarm(_))
-            ) && matches!(failure, SubmissionFailure::Rejected(_))
-            {
-                self.chat_widget.alarm_disarm_failed(message);
-            } else if matches!(
-                operation,
-                ThreadOperation::Mutation(ThreadMutation::Compact | ThreadMutation::Review(_))
-            ) && matches!(failure, SubmissionFailure::Rejected(_))
-            {
-                if !self
-                    .chat_widget
-                    .handle_turn_start_rejection(message.clone())
-                {
-                    self.chat_widget.add_error_message(message);
-                }
-            } else {
-                self.chat_widget.add_error_message(message);
-            }
+            self.chat_widget.add_error_message(message);
         } else {
             self.chat_widget
                 .add_error_message(format!("Conversation {thread_id}: {message}"));
         }
     }
+}
+
+impl App {
+    pub(super) async fn cleanup_unsent_operations<'a>(
+        &mut self,
+        entries: impl IntoIterator<Item = &'a PendingSubmission>,
+        protected_starts: &HashSet<ThreadId>,
+    ) {
+        for entry in entries {
+            let SubmissionRequest::Operation(operation) = &entry.request else {
+                continue;
+            };
+            let thread_id = entry.thread_id;
+            if !self
+                .thread_event_channels
+                .get(&thread_id)
+                .is_some_and(|channel| Arc::ptr_eq(&channel.store, &entry.store))
+            {
+                continue;
+            }
+            match &**operation {
+                ThreadOperation::Mutation(ThreadMutation::DisarmAlarm(id)) => {
+                    if let Some(widget) = self.voice_widget_for_thread(thread_id) {
+                        widget.cancel_unsent_alarm_disarm(id);
+                    }
+                }
+                ThreadOperation::Mutation(ThreadMutation::Compact | ThreadMutation::Review(_)) => {
+                    let outstanding = self.server_operations.lanes.values().any(|lane| {
+                        std::iter::once(&lane.active)
+                            .chain(lane.waiting.iter())
+                            .any(|other| other.thread_id == thread_id && holds_start_lease(other))
+                    });
+                    if protected_starts.contains(&thread_id) || outstanding {
+                        continue;
+                    }
+                    if let Some(widget) = self.voice_widget_for_thread(thread_id) {
+                        widget.cancel_unsent_turn_operation();
+                    }
+                    if let Some(input) = self.agents_overview.input_states.get_mut(&thread_id)
+                        && input.input_queue.cancel_unsent_operation()
+                    {
+                        input.task_running = input.agent_turn_running;
+                    }
+                    if let Some(input) = entry.store.lock().await.input_state.as_mut()
+                        && input.input_queue.cancel_unsent_operation()
+                    {
+                        input.task_running = input.agent_turn_running;
+                    }
+                }
+                // These payloads own no widget-local pending lease before dispatch.
+                ThreadOperation::Mutation(_)
+                | ThreadOperation::Catalog(_)
+                | ThreadOperation::Connection(_)
+                | ThreadOperation::Control(_) => {}
+            }
+        }
+    }
+}
+
+pub(super) fn holds_start_lease(entry: &PendingSubmission) -> bool {
+    matches!(&entry.request, SubmissionRequest::Operation(operation) if matches!(&**operation,
+        ThreadOperation::Mutation(ThreadMutation::Compact | ThreadMutation::Review(_))))
 }

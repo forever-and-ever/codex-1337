@@ -25,11 +25,6 @@ pub(super) enum LocalThreadCompletion {
         include_logs: bool,
         result: Result<String, String>,
     },
-    InterruptFailed {
-        thread_id: ThreadId,
-        store: Arc<Mutex<ThreadEventStore>>,
-        message: String,
-    },
     VerificationFinished {
         thread_id: ThreadId,
         server_name: String,
@@ -179,27 +174,6 @@ impl App {
             } => {
                 self.handle_feedback_submitted(origin_thread_id, category, include_logs, result)
                     .await;
-            }
-            LocalThreadCompletion::InterruptFailed {
-                thread_id,
-                store,
-                message,
-            } => {
-                if self
-                    .thread_event_channels
-                    .get(&thread_id)
-                    .is_none_or(|channel| !Arc::ptr_eq(&store, &channel.store))
-                {
-                    return Ok(());
-                }
-                self.enqueue_thread_notification(
-                    thread_id,
-                    ServerNotification::Warning(codex_app_server_protocol::WarningNotification {
-                        thread_id: Some(thread_id.to_string()),
-                        message,
-                    }),
-                )
-                .await?;
             }
             LocalThreadCompletion::VerificationFinished {
                 thread_id,

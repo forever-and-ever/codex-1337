@@ -10,8 +10,6 @@ use super::*;
 use crate::app_event::ThreadTitleDestination;
 use crate::chatwidget::ThreadInputStateRestoreMode;
 use codex_app_server_protocol::ThreadStartedNotification;
-use codex_app_server_protocol::TurnInterruptParams;
-use codex_app_server_protocol::TurnInterruptResponse;
 
 // Leave time for side-thread cleanup and unsubscribe inside the two-second exit budget.
 const REALTIME_STOP_TIMEOUT: Duration = Duration::from_secs(/*secs*/ 1);
@@ -673,62 +671,26 @@ impl App {
     ) -> Result<bool> {
         match op {
             AppCommand::Interrupt => {
-                let mut turn_id = self
+                let turn_id = self
                     .active_turn_id_for_thread(thread_id)
                     .await
                     .unwrap_or_default();
-                let thread_event_store = {
-                    let channel = self.ensure_thread_channel(thread_id);
-                    Arc::clone(&channel.store)
-                };
-                let completion_tx = self.thread_delivery.completion_tx.clone();
+                let store = Arc::clone(&self.ensure_thread_channel(thread_id).store);
                 self.reset_backtrack_state();
                 if !turn_id.is_empty() {
-                    let mut store = thread_event_store.lock().await;
+                    let mut store = store.lock().await;
                     if store.pending_interrupt_turn_id.as_deref() == Some(turn_id.as_str()) {
                         return Ok(true);
                     }
                     store.pending_interrupt_turn_id = Some(turn_id.clone());
                 }
-                let request_handle = app_server.request_handle();
-                let request_ids = [app_server.next_request_id(), app_server.next_request_id()];
-                tokio::spawn(async move {
-                    for (attempt, request_id) in request_ids.into_iter().enumerate() {
-                        let result = request_handle
-                            .request_typed::<TurnInterruptResponse>(ClientRequest::TurnInterrupt {
-                                request_id,
-                                params: TurnInterruptParams {
-                                    thread_id: thread_id.to_string(),
-                                    turn_id: turn_id.clone(),
-                                },
-                            })
-                            .await;
-
-                        match result {
-                            Ok(_) => break,
-                            Err(error) => {
-                                if attempt == 0
-                                    && let Some(actual_turn_id) = active_turn_interrupt_race(&error)
-                                    && actual_turn_id != turn_id
-                                {
-                                    thread_event_store.lock().await.pending_interrupt_turn_id =
-                                        Some(actual_turn_id.clone());
-                                    turn_id = actual_turn_id;
-                                    continue;
-                                }
-                                tracing::warn!(error = %error, "turn/interrupt failed in TUI");
-                                let _ = completion_tx
-                                    .send(LocalThreadCompletion::InterruptFailed {
-                                        thread_id,
-                                        store: thread_event_store,
-                                        message: format!("Failed to interrupt turn: {error}"),
-                                    })
-                                    .await;
-                                break;
-                            }
-                        }
-                    }
-                });
+                self.enqueue_server_operation(
+                    app_server,
+                    thread_id,
+                    ThreadOperation::Control(
+                        super::turn_submissions::ControlOperation::Interrupt { turn_id },
+                    ),
+                );
                 Ok(true)
             }
             AppCommand::UserTurn {

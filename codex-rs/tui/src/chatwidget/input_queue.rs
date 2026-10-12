@@ -265,6 +265,20 @@ pub(crate) struct InputQueueState {
 }
 
 impl InputQueueState {
+    /// Release only a definitively unsent non-message start, never a submitted prompt.
+    pub(crate) fn cancel_unsent_operation(&mut self) -> bool {
+        if !matches!(
+            self.turn,
+            UserTurnInput::AwaitingStart(PendingTurnStart::Operation)
+        ) {
+            return false;
+        }
+        self.turn = UserTurnInput::Idle;
+        true
+    }
+}
+
+impl InputQueueState {
     pub(crate) fn has_unconfirmed_messages(&self) -> bool {
         self.queued_user_messages
             .iter()

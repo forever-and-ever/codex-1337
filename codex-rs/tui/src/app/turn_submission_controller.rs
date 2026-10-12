@@ -145,11 +145,14 @@ impl App {
                     .map(|entry| entry.id)
             });
         if let Some(id) = waiting {
-            self.handle_submission_event(SubmissionEvent::Edit {
-                thread_id,
-                id,
-                action,
-            })
+            self.handle_submission_event(
+                server,
+                SubmissionEvent::Edit {
+                    thread_id,
+                    id,
+                    action,
+                },
+            )
             .await;
         } else {
             let draft = if self.chat_widget.thread_id() == Some(thread_id) {
@@ -249,6 +252,9 @@ impl App {
             SubmissionRequest::Operation(operation) => operation.lane(thread_id),
             _ => OperationLane::Thread(thread_id),
         };
+        if key == OperationLane::Exit && self.server_operations.lanes.contains_key(&key) {
+            return;
+        }
         let order = self.server_operations.next_order;
         self.server_operations.next_order =
             order.checked_add(1).expect("operation sequence exhausted");
@@ -293,6 +299,7 @@ impl App {
                     return None;
                 }
                 let ready = match key {
+                    OperationLane::Control(_) | OperationLane::Exit => true,
                     OperationLane::Thread(_) => {
                         barrier.is_none_or(|order| lane.active.order < order)
                     }
@@ -302,7 +309,7 @@ impl App {
                             .lanes
                             .iter()
                             .any(|(other, predecessor)| {
-                                *other != OperationLane::Connection
+                                matches!(other, OperationLane::Thread(_))
                                     && predecessor.active.order < lane.active.order
                             })
                     }
@@ -333,6 +340,8 @@ impl App {
         let handle = server.request_handle();
         let store = Arc::clone(&active.store);
         let completions = self.thread_delivery.completion_tx.clone();
+        let control_completions = self.server_operations.control_tx.clone();
+        let urgent = matches!(&active.request, SubmissionRequest::Operation(operation) if matches!(&**operation, ThreadOperation::Control(_)));
         let settings_supported = server.operation_settings_supported();
         let task = AbortOnDropHandle::new(tokio::spawn(async move {
             let outcome = if !settings_supported
@@ -342,6 +351,15 @@ impl App {
             } else {
                 worker::send(handle, thread_id, request, store).await
             };
+            if urgent {
+                let _ = control_completions.send(ControlCompletion {
+                    thread_id,
+                    id,
+                    epoch,
+                    outcome,
+                });
+                return;
+            }
             let _ = completions
                 .send(LocalThreadCompletion::Submission {
                     thread_id,
@@ -365,7 +383,11 @@ impl App {
         );
     }
 
-    pub(in crate::app) async fn handle_submission_event(&mut self, event: SubmissionEvent) {
+    pub(in crate::app) async fn handle_submission_event(
+        &mut self,
+        server: &AppServerSession,
+        event: SubmissionEvent,
+    ) {
         match event {
             SubmissionEvent::Edit {
                 thread_id,
@@ -375,21 +397,13 @@ impl App {
                 let entry = self.server_operations.take_unsent(thread_id, id, action);
                 if let Some(entry) = entry {
                     let origin = entry.thread_id;
+                    self.cleanup_unsent_operations(std::iter::once(&entry), &HashSet::new())
+                        .await;
                     if let SubmissionRequest::Operation(operation) = &entry.request {
                         self.chat_widget.add_info_message(
                             format!("{} cancelled before sending.", operation.label()),
                             None,
                         );
-                        if self.chat_widget.thread_id() == Some(origin)
-                            && matches!(
-                                &**operation,
-                                ThreadOperation::Mutation(requests::ThreadMutation::DisarmAlarm(_))
-                            )
-                        {
-                            self.chat_widget.alarm_disarm_failed(
-                                "Alarm disarm was cancelled before sending.".into(),
-                            );
-                        }
                     }
                     if let Some(draft) = entry.into_draft() {
                         self.restore_submission_drafts(origin, vec![draft], action.into())
@@ -409,11 +423,38 @@ impl App {
                     .checked_add(1)
                     .expect("operation epoch exhausted");
                 let lanes = std::mem::take(&mut self.server_operations.lanes);
+                let protected_starts = lanes
+                    .values()
+                    .filter(|lane| {
+                        !matches!(lane.state, LaneState::Queued)
+                            && requests::holds_start_lease(&lane.active)
+                    })
+                    .map(|lane| lane.active.thread_id)
+                    .collect::<HashSet<_>>();
                 if !lanes.is_empty() {
                     self.chat_widget.add_error_message("Connection changed while sending. The original may still be delivered; pending messages return as drafts and have not been resent.".into());
                 }
                 for (_, lane) in lanes {
                     let thread_id = lane.active.thread_id;
+                    if let SubmissionRequest::Operation(operation) = &lane.active.request
+                        && let ThreadOperation::Control(control::ControlOperation::DetachAndExit {
+                            reason,
+                            ..
+                        }) = &**operation
+                    {
+                        self.pending_shutdown_exit_thread_id = None;
+                        self.app_event_tx
+                            .send(AppEvent::ServerOperationExitReady(reason.clone()));
+                    }
+                    self.cleanup_unsent_operations(lane.waiting.iter(), &protected_starts)
+                        .await;
+                    if matches!(lane.state, LaneState::Queued) {
+                        self.cleanup_unsent_operations(
+                            std::iter::once(&lane.active),
+                            &protected_starts,
+                        )
+                        .await;
+                    }
                     let uncertain_id = (!matches!(lane.state, LaneState::Queued))
                         .then(|| lane.active.client_id().map(str::to_owned))
                         .flatten();
@@ -431,6 +472,7 @@ impl App {
                 }
             }
         }
+        self.drive_server_operations(server);
         self.refresh_submission_preview();
     }
 
@@ -446,7 +488,8 @@ impl App {
             return Ok(());
         }
         if self.reconnect.offline {
-            self.handle_submission_event(SubmissionEvent::Retire).await;
+            self.handle_submission_event(server, SubmissionEvent::Retire)
+                .await;
             return Ok(());
         }
         let Some(key) = self
@@ -481,6 +524,8 @@ impl App {
             } else {
                 "Couldn’t continue this chat. Review its latest status before trying again."
             }.into());
+            self.cleanup_unsent_operations(waiting.iter(), &HashSet::new())
+                .await;
             let drafts = recoverable_drafts(waiting.drain(..));
             self.restore_submission_drafts(
                 thread_id,
@@ -506,7 +551,10 @@ impl App {
             let SubmissionRequest::Operation(operation) = &active.request else {
                 unreachable!("RPC receipt for a turn operation");
             };
-            let applicable = self
+            let applicable = matches!(
+                &**operation,
+                ThreadOperation::Control(control::ControlOperation::DetachAndExit { .. })
+            ) || self
                 .thread_event_channels
                 .get(&thread_id)
                 .is_some_and(|channel| Arc::ptr_eq(&channel.store, &active.store));
@@ -520,10 +568,29 @@ impl App {
                 }
                 Ok(_) => {}
                 Err(failure) => {
-                    self.reject_server_operation(thread_id, operation, &failure);
+                    if matches!(&failure, SubmissionFailure::Rejected(_)) {
+                        let protected = waiting
+                            .iter()
+                            .filter(|entry| requests::holds_start_lease(entry))
+                            .map(|entry| entry.thread_id)
+                            .collect::<HashSet<_>>();
+                        self.cleanup_unsent_operations(std::iter::once(&active), &protected)
+                            .await;
+                    }
+                    if applicable {
+                        self.reject_server_operation(thread_id, operation, &failure);
+                    } else {
+                        self.chat_widget.add_error_message(format!("Earlier conversation {thread_id}: {} did not receive a usable acknowledgement; no retry was sent.", operation.label()));
+                    }
                     if !matches!(failure, SubmissionFailure::Rejected(_))
                         && !matches!(&**operation, ThreadOperation::Catalog(_))
                     {
+                        let protected = requests::holds_start_lease(&active)
+                            .then_some(thread_id)
+                            .into_iter()
+                            .collect::<HashSet<_>>();
+                        self.cleanup_unsent_operations(waiting.iter(), &protected)
+                            .await;
                         let drafts = recoverable_drafts(waiting.drain(..));
                         self.restore_submission_drafts(
                             thread_id,
@@ -647,6 +714,8 @@ impl App {
             }
         };
         if let Some(error) = failure {
+            self.cleanup_unsent_operations(waiting.iter(), &HashSet::new())
+                .await;
             let drafts = recoverable_drafts(std::iter::once(active).chain(waiting));
             self.restore_submission_drafts(
                 thread_id,
@@ -759,14 +828,16 @@ impl App {
     ) -> Result<()> {
         tokio::time::timeout(Duration::from_secs(5), async {
             while !self.server_operations.is_empty() {
-                let completion = self
-                    .thread_delivery
-                    .completion_rx
-                    .recv()
-                    .await
-                    .ok_or_else(|| color_eyre::eyre::eyre!("submission receipt channel closed"))?;
-                self.handle_local_thread_completion(server, completion)
-                    .await?;
+                tokio::select! {
+                    completion = self.thread_delivery.completion_rx.recv() => {
+                        let completion = completion.ok_or_else(|| color_eyre::eyre::eyre!("submission receipt channel closed"))?;
+                        self.handle_local_thread_completion(server, completion).await?;
+                    }
+                    completion = self.server_operations.control_rx.recv() => {
+                        let completion = completion.ok_or_else(|| color_eyre::eyre::eyre!("control receipt channel closed"))?;
+                        self.finish_submission(server, completion.thread_id, completion.id, completion.epoch, completion.outcome).await?;
+                    }
+                }
             }
             Ok::<_, color_eyre::Report>(())
         })

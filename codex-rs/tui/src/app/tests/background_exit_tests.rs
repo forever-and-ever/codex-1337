@@ -540,11 +540,16 @@ async fn exit_interrupts_before_requesting_shutdown() -> Result<()> {
 
     assert_matches!(control, AppRunControl::Continue);
     assert!(op_rx.try_recv().is_err());
+    app.settle_turn_submissions(&mut app_server).await?;
     let exit_event = app_event_rx.try_recv()?;
     assert_matches!(exit_event, AppEvent::Exit(ExitMode::ShutdownAfterInterrupt));
-    let AppRunControl::Exit(reason) = app
+    let control = app
         .handle_event(&mut tui, &mut app_server, exit_event)
-        .await?
+        .await?;
+    assert_matches!(control, AppRunControl::Continue);
+    app.settle_turn_submissions(&mut app_server).await?;
+    let ready = app_event_rx.try_recv()?;
+    let AppRunControl::Exit(reason) = app.handle_event(&mut tui, &mut app_server, ready).await?
     else {
         panic!("stop-and-exit must exit");
     };

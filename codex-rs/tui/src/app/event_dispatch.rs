@@ -144,6 +144,7 @@ impl App {
             event => (event, None),
         };
         match event {
+            AppEvent::ServerOperationExitReady(reason) => return Ok(AppRunControl::Exit(reason)),
             AppEvent::OpenDaemonMenu => self.open_daemon_menu(),
             AppEvent::ReloadUi => self.reload_requested = true,
             AppEvent::UserVerificationApproved { thread_id, server_name, request_id } => {
@@ -270,7 +271,7 @@ impl App {
             }
             AppEvent::OpenWarnings => self.chat_widget.open_warnings(&self.transcript_cells),
             AppEvent::Queue(event) => self.handle_queue_event(app_server, event).await,
-            AppEvent::Submission(event) => self.handle_submission_event(event).await,
+            AppEvent::Submission(event) => self.handle_submission_event(app_server, event).await,
             AppEvent::UpdateWarnings { transcript, dismissed, kept } => {
                 if !Arc::ptr_eq(&transcript, &self.chat_widget.warning_display_state.transcript) {
                     return Ok(AppRunControl::Continue);
@@ -803,37 +804,16 @@ impl App {
                     }
                 }
                 RunningTaskExitAction::Exit => {
-                    if self.chat_widget.thread_id() == Some(thread_id)
-                        && self.chat_widget.is_active_goal_turn_running()
-                        && let Err(error) = app_server
-                            .thread_goal_set(
-                                thread_id,
-                                /*objective*/ None,
-                                Some(codex_app_server_protocol::ThreadGoalStatus::Paused),
-                                /*token_budget*/ None,
-                            )
-                            .await
-                    {
-                        self.chat_widget
-                            .add_error_message(format!("Failed to pause task goal: {error}"));
-                        return Ok(AppRunControl::Continue);
-                    }
-                    let interrupt = if let Some(turn_id) =
-                        self.active_turn_id_for_thread(thread_id).await
-                    {
-                        app_server.turn_interrupt(thread_id, turn_id).await
+                    let goal = if self.chat_widget.thread_id() == Some(thread_id)
+                        && self.chat_widget.is_active_goal_turn_running() {
+                        super::turn_submissions::GoalStop::Pause
                     } else {
-                        Ok(())
+                        super::turn_submissions::GoalStop::Preserve
                     };
-                    if let Err(error) = interrupt
-                        && self.active_turn_id_for_thread(thread_id).await.is_some()
-                    {
-                        self.chat_widget
-                            .add_error_message(format!("Failed to interrupt task: {error}"));
-                    } else {
-                        self.app_event_tx
-                            .send(AppEvent::Exit(ExitMode::ShutdownAfterInterrupt));
-                    }
+                    let turn_id = self.active_turn_id_for_thread(thread_id).await;
+                    self.enqueue_server_operation(app_server, thread_id,
+                        super::turn_submissions::ThreadOperation::Control(
+                            super::turn_submissions::ControlOperation::StopAndExit { turn_id, goal }));
                 }
             },
             AppEvent::Logout => match app_server.logout_account(self.current_displayed_thread_id()).await {
@@ -3430,43 +3410,37 @@ impl App {
         app_server: &mut AppServerSession,
         mode: ExitMode,
     ) -> AppRunControl {
-        match mode {
-            ExitMode::ShutdownFirst | ExitMode::ShutdownAfterInterrupt => {
-                // Mark the thread we are explicitly shutting down for exit so
-                // its shutdown completion does not trigger agent failover.
-                self.pending_shutdown_exit_thread_id =
-                    self.active_thread_id.or(self.chat_widget.thread_id());
-                if self.pending_shutdown_exit_thread_id.is_some()
-                    || self.voice_owner_thread_id().is_some()
-                {
-                    // This is a UI escape-hatch budget, not a protocol
-                    // deadline. A healthy local thread/unsubscribe round trip
-                    // should finish comfortably inside two seconds, while a
-                    // longer wait makes Ctrl+C feel broken when the app-server
-                    // is already wedged.
-                    if tokio::time::timeout(
-                        SHUTDOWN_FIRST_EXIT_TIMEOUT,
-                        self.shutdown_current_thread(app_server),
-                    )
-                    .await
-                    .is_err()
-                    {
-                        tracing::warn!("timed out waiting for app-server thread shutdown");
-                    }
-                }
-                self.pending_shutdown_exit_thread_id = None;
-                AppRunControl::Exit(if mode == ExitMode::ShutdownAfterInterrupt {
-                    ExitReason::TurnInterrupted
-                } else {
-                    ExitReason::UserRequested
-                })
-            }
-            ExitMode::Immediate => {
-                self.stop_realtime_conversation(app_server).await;
-                self.pending_shutdown_exit_thread_id = None;
-                AppRunControl::Exit(ExitReason::UserRequested)
-            }
+        let reason = if mode == ExitMode::ShutdownAfterInterrupt {
+            ExitReason::TurnInterrupted
+        } else {
+            ExitReason::UserRequested
+        };
+        let scope = if mode == ExitMode::Immediate {
+            super::turn_submissions::DetachScope::VoiceOnly
+        } else {
+            super::turn_submissions::DetachScope::Exit
+        };
+        let plan = self.prepare_detach_plan(scope).await;
+        if plan.is_empty() {
+            return AppRunControl::Exit(reason);
         }
+        let origin = self
+            .active_thread_id
+            .or(self.chat_widget.thread_id())
+            .or_else(|| plan.origin());
+        let Some(thread_id) = origin else {
+            return AppRunControl::Exit(reason);
+        };
+        self.pending_shutdown_exit_thread_id =
+            self.active_thread_id.or(self.chat_widget.thread_id());
+        self.enqueue_server_operation(
+            app_server,
+            thread_id,
+            super::turn_submissions::ThreadOperation::Control(
+                super::turn_submissions::ControlOperation::DetachAndExit { plan, reason },
+            ),
+        );
+        AppRunControl::Continue
     }
 
     pub(super) async fn archive_current_thread(

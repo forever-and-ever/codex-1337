@@ -361,6 +361,28 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     })
     .await
     .expect("skills worker reached withheld response");
+    // Urgent control shares ownership but bypasses the withheld lane and config barrier.
+    let interrupts_before = recorded_params(&requests, "turn/interrupt").len();
+    app.submit_thread_op(&mut server, other_id, AppCommand::interrupt())
+        .await?;
+    let control = tokio::time::timeout(
+        Duration::from_secs(5),
+        app.server_operations.control_rx.recv(),
+    )
+    .await?
+    .expect("owned interrupt receipt");
+    app.finish_submission(
+        &mut server,
+        control.thread_id,
+        control.id,
+        control.epoch,
+        control.outcome,
+    )
+    .await?;
+    assert_eq!(
+        recorded_params(&requests, "turn/interrupt").len(),
+        interrupts_before + 1
+    );
     app.submit_thread_op(&mut server, other_id, AppCommand::ReloadUserConfig)
         .await?;
     app.submit_thread_op(
@@ -409,11 +431,14 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
             .expect("queued mutation remains visible and cancellable"),
         _ => panic!("queued mutation preview"),
     };
-    app.handle_submission_event(crate::app::turn_submissions::SubmissionEvent::Edit {
-        thread_id,
-        id: rename_id,
-        action: crate::app_command::PendingSteerCancelAction::Remove,
-    })
+    app.handle_submission_event(
+        &server,
+        crate::app::turn_submissions::SubmissionEvent::Edit {
+            thread_id,
+            id: rename_id,
+            action: crate::app_command::PendingSteerCancelAction::Remove,
+        },
+    )
     .await;
     tokio::time::pause();
     tokio::time::advance(Duration::from_secs(31)).await;
@@ -439,6 +464,59 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         recorded_params(&requests, "thread/name/set").len(),
         renames_before
     );
+    assert!(app.server_operations.is_empty());
+    // Retirement releases definitively unsent alarm/compaction leases, never sends them.
+    app.submit_thread_op(
+        &mut server,
+        other_id,
+        AppCommand::ListSkills {
+            cwds: vec![app.config.cwd.to_path_buf()],
+            force_reload: false,
+        },
+    )
+    .await?;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while recorded_params(&requests, "skills/list").len() < skills_before + 2 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await?;
+    app.disarm_alarm(&mut server, other_id, "queued-alarm".into())
+        .await;
+    assert!(
+        !app.chat_widget
+            .begin_alarm_disarm(other_id, "different-alarm")
+    );
+    app.chat_widget.apply_external_edit("/compact".into());
+    app.handle_key_event(
+        &mut tui,
+        &mut server,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+    )
+    .await;
+    let compact = loop {
+        if let event @ AppEvent::CodexOp(AppCommand::Compact) =
+            events.recv().await.expect("compact event")
+        {
+            break event;
+        }
+    };
+    Box::pin(app.handle_event(&mut tui, &mut server, compact)).await?;
+    app.handle_submission_event(
+        &server,
+        crate::app::turn_submissions::SubmissionEvent::Retire,
+    )
+    .await;
+    assert!(
+        app.chat_widget
+            .begin_alarm_disarm(other_id, "after-retirement")
+    );
+    app.chat_widget
+        .cancel_unsent_alarm_disarm("after-retirement");
+    let input = serde_json::to_value(app.chat_widget.capture_thread_input_state())?;
+    assert_eq!(input["input_queue"]["turn"], "Idle");
+    assert!(recorded_params(&requests, "thread/alarm/disarm").is_empty());
+    assert!(recorded_params(&requests, "thread/compact/start").is_empty());
     assert!(app.server_operations.is_empty());
     server.shutdown().await?;
     proxy.await??;

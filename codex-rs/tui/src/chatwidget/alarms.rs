@@ -102,4 +102,11 @@ impl ChatWidget {
         self.alarms.disarming = None;
         self.add_error_message(message);
     }
+
+    pub(crate) fn cancel_unsent_alarm_disarm(&mut self, id: &str) {
+        if self.alarms.disarming.as_deref() == Some(id) {
+            self.alarms.disarming = None;
+            self.request_redraw();
+        }
+    }
 }

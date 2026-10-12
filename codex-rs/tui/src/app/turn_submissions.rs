@@ -23,9 +23,29 @@ mod requests;
 use requests::OperationReceipt;
 pub(in crate::app) use requests::ThreadOperation;
 
+#[path = "server_control_operations.rs"]
+mod control;
+pub(in crate::app) use control::ControlOperation;
+pub(in crate::app) use control::GoalStop;
+
+#[derive(Debug)]
+pub(in crate::app) struct ControlCompletion {
+    pub(in crate::app) thread_id: ThreadId,
+    pub(in crate::app) id: Uuid,
+    pub(in crate::app) epoch: u64,
+    pub(in crate::app) outcome: SubmissionOutcome,
+}
+
+#[path = "server_detach_operations.rs"]
+mod detach;
+
+pub(in crate::app) use detach::DetachScope;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum OperationLane {
     Thread(ThreadId),
+    Control(ThreadId),
+    Exit,
     Connection,
 }
 
@@ -33,11 +53,25 @@ pub(in crate::app) use requests::CatalogRequest;
 pub(in crate::app) use requests::ConnectionMutation;
 pub(in crate::app) use requests::ThreadMutation;
 
-#[derive(Default)]
 pub(super) struct ServerOperations {
     lanes: HashMap<OperationLane, SubmissionLane>,
     next_order: u64,
     epoch: u64,
+    control_tx: mpsc::UnboundedSender<ControlCompletion>,
+    pub(in crate::app) control_rx: mpsc::UnboundedReceiver<ControlCompletion>,
+}
+
+impl Default for ServerOperations {
+    fn default() -> Self {
+        let (control_tx, control_rx) = mpsc::unbounded_channel();
+        Self {
+            lanes: HashMap::new(),
+            next_order: 0,
+            epoch: 0,
+            control_tx,
+            control_rx,
+        }
+    }
 }
 
 struct SubmissionLane {
@@ -408,7 +442,12 @@ impl ServerOperations {
             return SubmissionPreview::Idle;
         };
         let mut entries = Vec::new();
-        for key in [OperationLane::Thread(thread_id), OperationLane::Connection] {
+        for key in [
+            OperationLane::Thread(thread_id),
+            OperationLane::Control(thread_id),
+            OperationLane::Connection,
+            OperationLane::Exit,
+        ] {
             if let Some(lane) = self.lanes.get(&key) {
                 entries.push((
                     &lane.active,

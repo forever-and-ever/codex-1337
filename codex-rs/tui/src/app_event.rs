@@ -686,6 +686,8 @@ pub(crate) enum AppEvent {
     /// escape hatch that skips shutdown and may drop in-flight work (e.g.,
     /// background tasks, rollout flush, or child process cleanup).
     Exit(ExitMode),
+    /// Owned bounded frontend detach finished; this does not claim runtime shutdown.
+    ServerOperationExitReady(crate::app::ExitReason),
 
     /// Apply a choice from the running-task exit menu to its originating thread.
     RunningTaskExit {
