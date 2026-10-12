@@ -3,7 +3,11 @@
 import argparse
 import os
 import shlex
+import shutil
+import socket
+import struct
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -14,6 +18,104 @@ UNITS = (
 )
 STAGING_UNIT = "codex-app-server-staging.service"
 STAGING_LAUNCHER = "codex-staging"
+
+
+def host_live_binaries() -> set[Path]:
+    # The host user manager is the existing local integration boundary. Two
+    # processes inside a sandbox (including its PID 1) prove nothing about it.
+    # SO_PEERCRED reports PID 0 when that manager is outside our PID namespace.
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as manager:
+        manager.connect(f"/run/user/{os.getuid()}/systemd/private")
+        pid, uid, _ = struct.unpack(
+            "3i",
+            manager.getsockopt(
+                socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i")
+            ),
+        )
+        proc = Path("/proc")
+        if (
+            pid <= 0
+            or uid != os.getuid()
+            or not (proc / "self/ns/pid").samefile(proc / str(pid) / "ns/pid")
+        ):
+            raise OSError("host user manager is outside the visible PID namespace")
+
+    # hidepid can conceal even same-user, non-dumpable processes. A matching
+    # namespace alone does not prove this procfs mount exposes all its PIDs.
+    device = proc.stat().st_dev
+    proc_device = f"{os.major(device)}:{os.minor(device)}"
+    visible_mount = False
+    for mount in (proc / "self/mountinfo").read_text().splitlines():
+        location, filesystem = mount.split(" - ", 1)
+        fields, details = location.split(), filesystem.split()
+        if fields[4].startswith("/proc/") and fields[4].split("/")[2].isdigit():
+            raise OSError("procfs contains a masked process mount")
+        if fields[4] != "/proc" or fields[2] != proc_device:
+            continue
+        options = details[2].split(",")
+        if (
+            fields[3] != "/"
+            or details[0] != "proc"
+            or any(
+                option.startswith("hidepid=")
+                and option not in ("hidepid=0", "hidepid=off")
+                for option in options
+            )
+        ):
+            raise OSError("procfs process visibility is restricted")
+        visible_mount = True
+    if not visible_mount:
+        raise OSError("cannot verify the procfs mount")
+
+    binaries: set[Path] = set()
+    for process in proc.iterdir():
+        if not process.name.isdecimal():
+            continue
+        try:
+            binaries.add((process / "exe").readlink())
+        except FileNotFoundError:
+            # Exited processes, zombies and kernel threads have no executable.
+            continue
+        except PermissionError:
+            try:
+                owners = next(
+                    (
+                        line.split()[1:]
+                        for line in (process / "status").read_text().splitlines()
+                        if line.startswith("Uid:")
+                    ),
+                    (),
+                )
+                if not owners:
+                    raise OSError(f"cannot determine executable owner: {process}")
+                if str(os.getuid()) not in owners:
+                    continue
+            except FileNotFoundError:
+                continue
+            # A hidden same-user executable could be an older installed TUI.
+            raise
+    return binaries
+
+
+def prune_distributions(distributions: Path, previous: str) -> None:
+    try:
+        binaries = host_live_binaries()
+    except OSError as error:
+        print(f"skipping bundle pruning: {error}", file=sys.stderr)
+        return
+    distributions = distributions.resolve(strict=True)
+    current = (distributions / "current").readlink().name
+    for candidate in distributions.iterdir():
+        if (
+            candidate.is_symlink()
+            or not candidate.is_dir()
+            or candidate.name in (current, previous)
+            or not (candidate / "distribution").is_file()
+            or any(candidate / "bin" in binary.parents for binary in binaries)
+        ):
+            continue
+        # A live older TUI may still launch sibling helpers from its bundle.
+        shutil.rmtree(candidate)
 
 
 def xdg(name: str, fallback: str) -> Path:
@@ -168,14 +270,18 @@ if __name__ == "__main__":
             "uninstall",
             "install-staging",
             "uninstall-staging",
+            "prune-distributions",
         ),
     )
     parser.add_argument("install_root", type=Path)
     parser.add_argument("launcher", nargs="?", type=Path)
+    parser.add_argument("--previous", default="")
     args = parser.parse_args()
     if not args.install_root.is_absolute():
         parser.error("install_root must be absolute")
-    if args.action in ("install-launcher", "check-launcher-ownership"):
+    if args.action == "prune-distributions":
+        prune_distributions(args.install_root, args.previous)
+    elif args.action in ("install-launcher", "check-launcher-ownership"):
         if args.launcher is None:
             parser.error("launcher action requires a destination")
         if args.action == "check-launcher-ownership":

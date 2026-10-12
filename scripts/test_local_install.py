@@ -2,6 +2,7 @@
 
 import hashlib
 import os
+import struct
 import subprocess
 import tempfile
 import unittest
@@ -16,6 +17,85 @@ from codex_package.targets import TARGET_SPECS
 
 
 class LocalInstallTest(unittest.TestCase):
+    def test_bundle_pruning_requires_host_visibility_and_preserves_active_releases(
+        self,
+    ) -> None:
+        # PID 1 can belong to the sandbox, and non-dumpable same-user processes
+        # can have root-owned proc directories. Neither is evidence of absence.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            distributions, proc = root / "distributions", root / "proc"
+            for name in ("current-release", "previous", "live", "unused", "unowned"):
+                bundle = distributions / name
+                (bundle / "bin").mkdir(parents=True)
+                if name != "unowned":
+                    (bundle / "distribution").touch()
+            (distributions / "current").symlink_to("current-release")
+            (distributions / "alias").symlink_to("unused")
+            (proc / "self/ns").mkdir(parents=True)
+            (proc / "self/ns/pid").touch()
+            (proc / "7/ns").mkdir(parents=True)
+            (proc / "7/ns/pid").hardlink_to(proc / "self/ns/pid")
+            (proc / "7/exe").symlink_to(distributions / "live/bin/codex")
+            (proc / "7/status").write_text(
+                f"Uid:\t{os.getuid()}\t{os.getuid()}\t{os.getuid()}\t{os.getuid()}\n"
+            )
+            device = proc.stat().st_dev
+            mountinfo = (
+                f"1 0 {os.major(device)}:{os.minor(device)} / /proc rw - proc proc rw\n"
+            )
+            (proc / "self/mountinfo").write_text(mountinfo)
+
+            with (
+                patch.object(local_integration, "Path", return_value=proc),
+                patch.object(local_integration.socket, "socket") as socket,
+                patch.object(local_integration.sys, "stderr"),
+            ):
+                manager = socket.return_value.__enter__.return_value
+                credentials = manager.getsockopt
+                for pid, uid in ((0, os.getuid()), (7, os.getuid() + 1)):
+                    credentials.return_value = struct.pack("3i", pid, uid, 0)
+                    local_integration.prune_distributions(distributions, "previous")
+                    self.assertTrue((distributions / "unused").exists())
+                credentials.return_value = struct.pack("3i", 7, os.getuid(), 0)
+
+                (proc / "7/ns/pid").unlink()
+                (proc / "7/ns/pid").touch()
+                local_integration.prune_distributions(distributions, "previous")
+                self.assertTrue((distributions / "unused").exists())
+                (proc / "7/ns/pid").unlink()
+                (proc / "7/ns/pid").hardlink_to(proc / "self/ns/pid")
+
+                for restricted in (
+                    mountinfo.rstrip() + ",hidepid=4\n",
+                    mountinfo + "2 1 0:1 / /proc/8 rw - tmpfs tmpfs rw\n",
+                    "",
+                ):
+                    (proc / "self/mountinfo").write_text(restricted)
+                    local_integration.prune_distributions(distributions, "previous")
+                    self.assertTrue((distributions / "unused").exists())
+                (proc / "self/mountinfo").write_text(mountinfo)
+
+                with patch.object(Path, "readlink", side_effect=PermissionError):
+                    local_integration.prune_distributions(distributions, "previous")
+                    self.assertTrue((distributions / "unused").exists())
+                manager.connect.side_effect = PermissionError
+                local_integration.prune_distributions(distributions, "previous")
+                self.assertTrue((distributions / "unused").exists())
+                manager.connect.side_effect = None
+
+                # A process disappearing during enumeration is not hidden.
+                (proc / "8").mkdir()
+                local_integration.prune_distributions(distributions, "previous")
+                manager.connect.assert_called_with(
+                    f"/run/user/{os.getuid()}/systemd/private"
+                )
+            self.assertFalse((distributions / "unused").exists())
+            self.assertEqual(
+                {entry.name for entry in distributions.iterdir()},
+                {"current-release", "previous", "live", "unowned", "current", "alias"},
+            )
+
     def test_tui_revisions_survive_reinstallation_and_serialize_publishers(
         self,
     ) -> None:
