@@ -538,21 +538,36 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
     let scoped: Arc<dyn HistoryCell> = Arc::new(terminal.clone());
     let ThreadItem::CodeMode(fact) = code_mode(
         "exec-a",
-        CodeModeEvent::Started {
-            call_id: "legacy-start".into(),
-            script: None,
+        CodeModeEvent::ToolCall {
+            call_id: "legacy-child".into(),
         },
     ) else {
         unreachable!();
     };
     let legacy_fact: Arc<dyn HistoryCell> = Arc::new(history_cell::CodeModeFactCell(fact, false));
-    let (range, replacements) =
-        history_cell::reconcile_code_mode(&[Arc::clone(&scoped)], &legacy_fact).unwrap();
-    assert_eq!(range, 0..1);
-    assert_eq!(replacements.len(), 2);
-    assert!(Arc::ptr_eq(&replacements[1], &scoped));
-    assert_eq!(replacements[0].activity_ids(), vec!["code-mode:exec-a"]);
-    assert!(replacements[0].raw_lines().is_empty());
+    // The earlier unowned child forces the legacy reconciliation span across the scoped row.
+    let unowned = thread_items_to_transcript_cells(
+        Some(thread),
+        &app.config.cwd,
+        [call("legacy-child", ActivityKind::Exploration, "completed")],
+        RawReasoningVisibility::Hidden,
+        None,
+        &|_| crate::multi_agents::AgentMetadata::default(),
+    )
+    .pop()
+    .unwrap();
+    let mut mixed = vec![Arc::clone(&unowned), Arc::clone(&scoped)];
+    let (range, replacements) = history_cell::reconcile_code_mode(&mixed, &legacy_fact).unwrap();
+    mixed.splice(range, replacements);
+    assert_eq!(mixed.len(), 2);
+    assert!(Arc::ptr_eq(&mixed[1], &scoped));
+    let legacy = mixed[0]
+        .as_any()
+        .downcast_ref::<history_cell::CodeModeCell>()
+        .unwrap();
+    assert!(legacy.owner().is_none());
+    assert_eq!(legacy.members().len(), 1);
+    assert!(Arc::ptr_eq(&legacy.members()[0], &unowned));
 
     // Snapshot-native scopes normalize once; a live scope cannot borrow another routed thread.
     let started = ServerNotification::ItemStarted(ItemStartedNotification {
