@@ -70,6 +70,11 @@ impl AgentControl for LocalAgentControl {
                 source,
                 options,
             } = request;
+            if options.user_request.is_some() {
+                return Err(CodexErr::InvalidRequest(
+                    "user delegation must use farm_spawn".into(),
+                ));
+            }
             let input = match input {
                 AgentInput::UserInput(input) => SpawnInitialInput::UserInput(input),
                 AgentInput::Message { message, mode } => {
@@ -117,6 +122,16 @@ impl AgentControl for LocalAgentControl {
             };
             Box::pin(self.spawn_agent_internal(config, input, Some(source), options)).await
         })
+    }
+
+    fn farm_spawn(
+        &self,
+        request: crate::agent::farm::FarmSpawnRequest,
+    ) -> BoxFuture<
+        '_,
+        std::result::Result<crate::agent::farm::FarmReceipt, crate::agent::farm::FarmError>,
+    > {
+        Box::pin(self.spawn_farm(request))
     }
 
     fn send(&self, request: SendRequest) -> BoxFuture<'_, Result<DeliveryReceipt>> {

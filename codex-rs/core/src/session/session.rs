@@ -1135,7 +1135,10 @@ impl Session {
                                 },
                             },
                         };
-                        if is_paginated_subagent
+                        if let Some(startup) = &startup {
+                            startup.allocation.begin_creation(thread_id);
+                        }
+                        let created = if is_paginated_subagent
                             && matches!(
                                 &fork_persistence,
                                 ForkPersistence::Copied | ForkPersistence::CopiedDeferred
@@ -1153,7 +1156,11 @@ impl Session {
                             guard
                                 .acquire(LiveThread::create(Arc::clone(&thread_store), params))
                                 .await?
+                        };
+                        if let Some(startup) = &startup {
+                            startup.allocation.allocated(thread_id);
                         }
+                        created
                     }
                     InitialHistory::Resumed(resumed_history) => {
                         let params = ResumeThreadParams {

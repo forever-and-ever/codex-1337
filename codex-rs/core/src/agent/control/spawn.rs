@@ -702,16 +702,34 @@ impl LocalAgentControl {
         }
     }
 
-    #[expect(
-        clippy::await_holding_invalid_type,
-        reason = "Retirement must exclude child creation through initial input submission."
-    )]
     pub(super) async fn spawn_agent_internal(
         &self,
         config: Config,
         initial_input: SpawnInitialInput,
         session_source: Option<SessionSource>,
         options: SpawnAgentOptions,
+    ) -> CodexResult<(LiveAgent, ThreadConfigSnapshot)> {
+        self.spawn_agent_reserved(
+            config,
+            initial_input,
+            session_source,
+            options,
+            super::farm_reservation::SpawnAdmission::Ordinary,
+        )
+        .await
+    }
+
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "Retirement must exclude child creation through initial input submission."
+    )]
+    pub(super) async fn spawn_agent_reserved(
+        &self,
+        config: Config,
+        initial_input: SpawnInitialInput,
+        session_source: Option<SessionSource>,
+        options: SpawnAgentOptions,
+        admission: super::farm_reservation::SpawnAdmission,
     ) -> CodexResult<(LiveAgent, ThreadConfigSnapshot)> {
         let _lifecycle = self.runtime.lifecycle.read().await;
         let membership = self.runtime.admit_start()?;
@@ -757,10 +775,18 @@ impl LocalAgentControl {
         } else {
             agent_max_threads
         };
-        let mut reservation = self
-            .runtime
-            .registry
-            .reserve_spawn_slot(reservation_max_threads)?;
+        let (mut reservation, startup) = match admission {
+            super::farm_reservation::SpawnAdmission::Ordinary => (
+                self.runtime
+                    .registry
+                    .reserve_spawn_slot(reservation_max_threads)?,
+                None,
+            ),
+            super::farm_reservation::SpawnAdmission::Farm {
+                reservation,
+                startup,
+            } => (reservation, Some(startup)),
+        };
         let inheritance = SpawnAgentThreadInheritance {
             environments: match &options.environments {
                 Some(environments) => Some(environments.clone()),
@@ -794,6 +820,9 @@ impl LocalAgentControl {
             }
             other => (other, AgentMetadata::default()),
         };
+        if options.user_request.is_none() {
+            self.check_farm_path_owner(session_source.as_ref()).await?;
+        }
         let notification_source = session_source.clone();
 
         let service_tier = config.service_tier.clone();
@@ -810,6 +839,7 @@ impl LocalAgentControl {
                 &options,
                 inheritance,
                 multi_agent_version,
+                startup.clone(),
             ))
             .await
             .map_err(|err| err.with_agent_context(AgentErrorContext::ForkHistory))?,
@@ -852,6 +882,7 @@ impl LocalAgentControl {
                     inheritance.environments,
                     inheritance.exec_policy,
                     environments,
+                    startup.clone(),
                 ))
                 .await
                 .map_err(|err| err.with_agent_context(AgentErrorContext::ChildStartup))?;
@@ -1074,6 +1105,7 @@ impl LocalAgentControl {
         options: &SpawnAgentOptions,
         inheritance: SpawnAgentThreadInheritance,
         multi_agent_version: MultiAgentVersion,
+        startup: Option<Arc<crate::session::startup::SessionStartup>>,
     ) -> CodexResult<SpawnedThreadResult> {
         let SpawnAgentThreadInheritance {
             environments: inherited_environments,
@@ -1413,6 +1445,7 @@ impl LocalAgentControl {
                 inherited_exec_policy,
                 /*environments*/ None,
                 thread_extension_init,
+                startup,
             )
             .await
             .map_err(|err| err.with_agent_context(AgentErrorContext::ChildStartup))?;

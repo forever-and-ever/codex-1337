@@ -92,7 +92,7 @@ async fn farm_spawns_and_replays_without_steering_parent(
     }]);
     // Ordinary terminal mail can wake the parent; subsequent explicit work and
     // the named-child replay case share the same finite mock response tail.
-    streams.extend((0..8).map(|_| {
+    streams.extend((0..16).map(|_| {
         vec![StreamingSseChunk {
             gate: None,
             body: response.clone(),
@@ -342,15 +342,115 @@ async fn farm_spawns_and_replays_without_steering_parent(
             .await?;
     }
     if params.task_name.is_some() {
+        let pool = config
+            .sqlite
+            .open_read_write_pool(&config.sqlite.state_db_path())
+            .await?;
+        // Enqueue both calls behind an owned SQLite admission barrier, not a sleep.
+        let barrier = pool.begin_with("BEGIN IMMEDIATE").await?;
         let mut next = params.clone();
         next.request_id = uuid::Uuid::new_v4().to_string();
-        let second: ThreadFarmResponse = app
+        let first = app
+            .send_request("thread/farm", Some(serde_json::to_value(&next)?))
+            .await?;
+        next.request_id = uuid::Uuid::new_v4().to_string();
+        let second = app
+            .send_request("thread/farm", Some(serde_json::to_value(&next)?))
+            .await?;
+        barrier.commit().await?;
+        let first: ThreadFarmResponse = app.read_response(first).await?;
+        let second: ThreadFarmResponse = app.read_response(second).await?;
+        let mut paths = [first.agent_path, second.agent_path];
+        paths.sort();
+        assert_eq!(
+            paths,
+            ["/root/farm_impl_staging_1", "/root/farm_impl_staging_2"]
+        );
+
+        next.request_id = uuid::Uuid::new_v4().to_string();
+        // Generated names must coalesce too, while the winner's path is only a placeholder.
+        next.task_name = None;
+        let barrier = pool.begin_with("BEGIN IMMEDIATE").await?;
+        let first = app
+            .send_request("thread/farm", Some(serde_json::to_value(&next)?))
+            .await?;
+        let second = app
+            .send_request("thread/farm", Some(serde_json::to_value(&next)?))
+            .await?;
+        barrier.commit().await?;
+        let ids = [RequestId::Integer(first), RequestId::Integer(second)];
+        let mut accepted = None;
+        let mut completed = 0;
+        while completed < 2 {
+            match app.read_next_message().await? {
+                codex_app_server_protocol::JSONRPCMessage::Response(response)
+                    if ids.contains(&response.id) =>
+                {
+                    let child: ThreadFarmResponse = serde_json::from_value(response.result)?;
+                    if let Some(original) = &accepted {
+                        assert_eq!(original, &child);
+                    }
+                    accepted = Some(child);
+                    completed += 1;
+                }
+                codex_app_server_protocol::JSONRPCMessage::Error(error)
+                    if ids.contains(&error.id) =>
+                {
+                    assert_eq!(
+                        error.error.data.as_ref().map(|data| &data["farmOutcome"]),
+                        Some(&json!("uncertain"))
+                    );
+                    completed += 1;
+                }
+                _ => {}
+            }
+        }
+        let accepted = accepted.expect("one same-ID submission owns construction");
+        let replay: ThreadFarmResponse = app
+            .request(|request_id| ClientRequest::ThreadFarm {
+                request_id,
+                params: next.clone(),
+            })
+            .await?;
+        assert_eq!(replay, accepted);
+
+        // A real allocation precedes this failed pointer write. NULL is not proof
+        // of nonallocation, and removing the fault cannot authorize another child.
+        sqlx::query("CREATE TRIGGER farm_pointer_fault BEFORE UPDATE OF child_thread_id ON thread_farm_requests WHEN NEW.agent_path = '/root/farm_pointer_fault' BEGIN SELECT RAISE(ABORT, 'farm pointer fault'); END").execute(&pool).await?;
+        next.request_id = uuid::Uuid::new_v4().to_string();
+        next.task_name = Some("farm_pointer_fault".into());
+        let fault = app
+            .send_request("thread/farm", Some(serde_json::to_value(&next)?))
+            .await?;
+        let fault = app
+            .read_stream_until_error_message(RequestId::Integer(fault))
+            .await?;
+        sqlx::query("DROP TRIGGER farm_pointer_fault")
+            .execute(&pool)
+            .await?;
+        assert_eq!(
+            fault.error.data,
+            Some(
+                json!({"farmOutcome": "uncertain", "requestId": next.request_id, "childThreadId": null, "agentPath": null})
+            )
+        );
+        assert!(fault.error.message.contains("was allocated"));
+        let replay = app
+            .send_request("thread/farm", Some(serde_json::to_value(&next)?))
+            .await?;
+        let replay = app
+            .read_stream_until_error_message(RequestId::Integer(replay))
+            .await?;
+        assert_eq!(replay.error.data, fault.error.data);
+        next.request_id = uuid::Uuid::new_v4().to_string();
+        let next: ThreadFarmResponse = app
             .request(|request_id| ClientRequest::ThreadFarm {
                 request_id,
                 params: next,
             })
             .await?;
-        assert_eq!(second.agent_path, "/root/farm_impl_staging_1");
+        assert_eq!(next.agent_path, "/root/farm_pointer_fault_1");
+        pool.close().await;
     }
     // A farm must leave the loaded parent able to accept work and resume.
     timeout(
@@ -598,6 +698,7 @@ async fn farm_provider_lock_rejects_before_claiming_request(mode: ThreadFarmMode
         ThreadId::from_string(&parent.id)?,
         &params.request_id,
         &payload_sha256,
+        "/root/interrupted_farm",
     )
     .await?;
     db.close().await;

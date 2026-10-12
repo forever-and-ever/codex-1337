@@ -39,11 +39,11 @@ impl TurnRequestProcessor {
             task_name: params.task_name,
         }).await.map_err(|error| match error {
             FarmError::Rejected(error) => {
-                if matches!(error.details(), CodexErrorDetails::InvalidRequest(_)) {
-                    let mut error = invalid_params(error.to_string());
-                    error.data = Some(serde_json::json!({ "farmOutcome": "rejected", "requestId": farm_request_id }));
-                    error
-                } else { internal_error(error.to_string()) }
+                let mut error = if matches!(error.details(), CodexErrorDetails::InvalidRequest(_)) {
+                    invalid_params(error.to_string())
+                } else { internal_error(error.to_string()) };
+                error.data = Some(serde_json::json!({ "farmOutcome": "rejected", "requestId": farm_request_id }));
+                error
             },
             FarmError::IdentityMismatch { request_id, child } => {
                 let mut error = invalid_params("requestId is already bound to a different farm submission; inspect the original delegation rather than resubmitting it");

@@ -1,3 +1,4 @@
+pub(crate) mod farm_allocation;
 mod response_thought;
 pub(crate) mod startup;
 

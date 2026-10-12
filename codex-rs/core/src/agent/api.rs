@@ -63,6 +63,14 @@ pub trait AgentControl: Send + Sync {
         request: SpawnRequest,
     ) -> BoxFuture<'_, Result<(LiveAgent, ThreadConfigSnapshot)>>;
 
+    fn farm_spawn(
+        &self,
+        request: crate::agent::farm::FarmSpawnRequest,
+    ) -> BoxFuture<
+        '_,
+        std::result::Result<crate::agent::farm::FarmReceipt, crate::agent::farm::FarmError>,
+    >;
+
     /// Resolve, reload if needed and accept input. Agent messages retain their attribution
     /// and task identity: ordinary messages may wake idle work and follow-ups cannot target
     /// the root. Legacy user input can address loaded threads outside the agent registry.

@@ -374,6 +374,13 @@ impl SpawnReservation {
     }
 
     pub(crate) fn reserve_agent_path(&mut self, agent_path: &AgentPath) -> Result<()> {
+        if let Some(owned) = &self.reserved_agent_path {
+            assert_eq!(
+                owned, agent_path,
+                "spawn reservation cannot change its path"
+            );
+            return Ok(());
+        }
         self.state.reserve_agent_path(agent_path)?;
         self.reserved_agent_path = Some(agent_path.clone());
         Ok(())

@@ -1369,6 +1369,111 @@ async fn v2_family_survives_unload_until_idle_subtree_retirement() {
     persist_thread_for_tree_resume(&worker_thread, "worker persisted").await;
     persist_thread_for_tree_resume(&reviewer_thread, "reviewer persisted").await;
     persist_thread_for_tree_resume(&sibling_thread, "sibling persisted").await;
+    // A missing mandatory capture fails after claim but before creation. Unlike a
+    // synthetic store update, this exercises the spawn owner's allocation report.
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let rejected_path = AgentPath::root()
+        .join("rejected_farm")
+        .expect("rejected path");
+    let farm_turn = parent_thread.session.new_inject_items_context().await;
+    let farm = || crate::agent::farm::FarmSpawnRequest {
+        spawn: crate::agent::api::SpawnRequest {
+            caller: parent_thread_id,
+            config: harness.config.clone(),
+            input: crate::agent::api::AgentInput::UserInput(text_input("inspect")),
+            source: SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+                parent_thread_id,
+                depth: 1,
+                agent_path: Some(rejected_path.clone()),
+                agent_nickname: None,
+                agent_role: None,
+            }),
+            options: SpawnAgentOptions {
+                user_request: Some(crate::agent::types::UserSpawnRequest {
+                    request_id: request_id.clone(),
+                    instructions: String::new(),
+                    parent_developer_instructions: None,
+                    fork_history: None,
+                }),
+                fork_mode: Some(SpawnAgentForkMode::FullHistory),
+                parent_thread_id: Some(parent_thread_id),
+                ..Default::default()
+            },
+        },
+        payload_sha256: "a".repeat(64),
+        task_name: Some("rejected_farm".into()),
+        authorization: codex_history::RetainedUserMessage {
+            turn_id: String::new(),
+            message_id: Some(format!("farm:{request_id}")),
+            text: "/farm inspect".into(),
+            complete: true,
+            origin: codex_history::UserInputOrigin::User,
+            phase: None,
+        },
+        task_preview: "inspect".into(),
+        turn: Arc::clone(&farm_turn),
+    };
+    for _ in 0..2 {
+        assert!(matches!(
+            harness.control.spawn_farm(farm()).await,
+            Err(crate::agent::farm::FarmError::Rejected(error))
+                if matches!(error.details(), CodexErrorDetails::InvalidRequest(message)
+                    if message == "full user delegation requires captured history")
+        ));
+    }
+    let db = parent_thread.state_db().expect("durable parent");
+    assert!(matches!(
+        db.farm_request(parent_thread_id, &request_id)
+            .await
+            .expect("read rejection")
+            .expect("request survives rejection")
+            .state,
+        codex_state::FarmRequestState::Rejected(_)
+    ));
+    assert_eq!(
+        db.farm_request_id_for_path(parent_thread_id, rejected_path.as_str())
+            .await
+            .expect("released name"),
+        None
+    );
+    assert_eq!(
+        harness
+            .control
+            .runtime
+            .registry
+            .agent_id_for_path(&rejected_path),
+        None
+    );
+    let mut mismatch = farm();
+    mismatch.payload_sha256 = "b".repeat(64);
+    assert!(matches!(
+        harness.control.spawn_farm(mismatch).await,
+        Err(crate::agent::farm::FarmError::IdentityMismatch { .. })
+    ));
+    let historical_id = uuid::Uuid::new_v4().to_string();
+    assert!(matches!(
+        db.claim_farm_request(
+            parent_thread_id,
+            &historical_id,
+            &"c".repeat(64),
+            worker_path.as_str()
+        )
+        .await
+        .expect("historical farm claim"),
+        codex_state::FarmRequestClaim::Claimed
+    ));
+    db.record_farm_child(
+        parent_thread_id,
+        &historical_id,
+        worker_thread_id,
+        worker_path.as_str(),
+        "",
+    )
+    .await
+    .expect("historical child");
+    db.accept_farm_request(parent_thread_id, &historical_id)
+        .await
+        .expect("historical acceptance");
     wait_for_live_thread_spawn_children(
         &harness.control,
         parent_thread_id,
@@ -1555,6 +1660,24 @@ async fn v2_family_survives_unload_until_idle_subtree_retirement() {
         .retire_agent(parent_thread_id, worker_thread_id)
         .await
         .expect("retiring a stopped subtree should succeed");
+    let reused = resumed_control
+        .spawn_agent(
+            harness.config.clone(),
+            text_input("must never run"),
+            Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+                parent_thread_id,
+                depth: 1,
+                agent_path: Some(worker_path.clone()),
+                agent_nickname: None,
+                agent_role: None,
+            })),
+        )
+        .await
+        .expect_err("ordinary spawn cannot steal a retired farm name");
+    assert!(
+        matches!(reused.details(), CodexErrorDetails::UnsupportedOperation(message)
+        if message.contains("historical user delegation"))
+    );
 
     let closed_worker = resumed_control.runtime.ensure_agent_known(worker_thread_id);
     let surviving_sibling = resumed_control

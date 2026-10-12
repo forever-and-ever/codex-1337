@@ -15,20 +15,15 @@ use super::types::SpawnAgentForkMode;
 use super::types::SpawnAgentOptions;
 use super::types::UserSpawnRequest;
 use crate::codex_thread::CodexThread;
-use crate::context::ContextualUserFragment;
-use crate::context::MAX_DELEGATION_RECEIPT_PATH_BYTES;
-use crate::context::UserDelegationReceipt;
 use crate::session::thread_settings;
 use codex_history::RetainedUserMessage;
 use codex_history::UserInputOrigin;
 use codex_protocol::AgentPath;
-use codex_protocol::ThreadId;
 use codex_protocol::error::CodexErr;
 use codex_protocol::protocol::MultiAgentVersion;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
 use codex_protocol::user_input::UserInput;
-use codex_state::FarmRequestClaim;
 use codex_state::FarmRequestRecord;
 use serde::Deserialize;
 use serde::Serialize;
@@ -56,11 +51,16 @@ pub struct FarmRequest {
     pub task_name: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FarmReceipt {
-    pub child_thread_id: ThreadId,
-    pub agent_path: String,
+pub struct FarmSpawnRequest {
+    pub spawn: SpawnRequest,
+    pub payload_sha256: String,
+    pub task_name: Option<String>,
+    pub authorization: RetainedUserMessage,
+    pub task_preview: String,
+    pub turn: Arc<crate::TurnContext>,
 }
+
+pub use codex_state::FarmReceipt;
 
 /// Only a definitive rejection may safely be edited and submitted as a different request.
 #[derive(Debug)]
@@ -97,35 +97,37 @@ impl From<CodexErr> for FarmError {
     }
 }
 
-fn replay(
+pub(crate) fn replay(
     request_id: &str,
     payload_sha256: &str,
     record: FarmRequestRecord,
 ) -> Result<FarmReceipt, FarmError> {
-    let child =
-        record
-            .child_thread_id
-            .zip(record.agent_path)
-            .map(|(child_thread_id, agent_path)| FarmReceipt {
-                child_thread_id,
-                agent_path,
-            });
+    use codex_state::FarmRequestState;
+    let child = match &record.state {
+        FarmRequestState::Allocated(child) | FarmRequestState::Accepted(child) => {
+            Some(child.clone())
+        }
+        _ => None,
+    };
     if record.payload_sha256 != payload_sha256 {
         return Err(FarmError::IdentityMismatch {
             request_id: request_id.to_owned(),
             child,
         });
     }
-    if record.accepted
-        && let Some(child) = child.as_ref()
-    {
-        return Ok(child.clone());
+    match record.state {
+        FarmRequestState::Accepted(child) => Ok(child),
+        FarmRequestState::Rejected(rejection) => Err(FarmError::Rejected(match rejection.kind {
+            codex_state::FarmRejectionKind::InvalidRequest => CodexErr::InvalidRequest(rejection.message),
+            codex_state::FarmRejectionKind::UnsupportedOperation => CodexErr::UnsupportedOperation(rejection.message),
+            codex_state::FarmRejectionKind::Fatal => CodexErr::Fatal(rejection.message),
+        })),
+        _ => Err(FarmError::Uncertain {
+            request_id: request_id.to_owned(),
+            child,
+            message: "Delegation outcome is uncertain. Inspect the agent roster before taking further action. This submission will not be executed again.".to_owned(),
+        }),
     }
-    Err(FarmError::Uncertain {
-        request_id: request_id.to_owned(),
-        child,
-        message: "Delegation outcome is uncertain. The child may already be running; inspect the agent roster before taking further action. This submission will not be executed again.".to_owned(),
-    })
 }
 
 impl CodexThread {
@@ -150,7 +152,13 @@ impl CodexThread {
         if let Some(record) = db
             .farm_request(self.session.thread_id, &request_id)
             .await
-            .map_err(|error| CodexErr::Fatal(format!("could not read farm receipt: {error}")))?
+            .map_err(|error| FarmError::Uncertain {
+                request_id: request_id.clone(),
+                child: None,
+                message: format!(
+                    "could not read the existing farm outcome: {error}; replay this request ID"
+                ),
+            })?
         {
             return replay(&request_id, &payload_sha256, record);
         }
@@ -313,66 +321,16 @@ impl CodexThread {
             .session_source
             .get_agent_path()
             .unwrap_or_else(AgentPath::root);
-        let agent_path = if let Some(name) = &request.task_name {
-            parent_path.join(name).map_err(CodexErr::InvalidRequest)?;
-            let agents = self
-                .session
-                .services
-                .agent_control
-                .child_agent_paths(self.session.thread_id)
-                .await;
-            let mut chosen = None;
-            for suffix in 0..10_000 {
-                let tail = if suffix == 0 {
-                    String::new()
-                } else {
-                    format!("_{suffix}")
-                };
-                let capacity = MAX_DELEGATION_RECEIPT_PATH_BYTES
-                    .saturating_sub(parent_path.as_str().len() + 1 + tail.len());
-                if capacity == 0 {
-                    break;
-                }
-                let stem = &name[..name.len().min(capacity)];
-                let candidate = parent_path
-                    .join(&format!("{stem}{tail}"))
-                    .map_err(CodexErr::InvalidRequest)?;
-                if agents.contains(&candidate) {
-                    continue;
-                }
-                if db
-                    .farm_request_id_for_path(self.session.thread_id, candidate.as_str())
-                    .await
-                    .map_err(|error| {
-                        CodexErr::Fatal(format!("could not validate farm child path: {error}"))
-                    })?
-                    .is_none()
-                {
-                    chosen = Some(candidate);
-                    break;
-                }
-            }
-            chosen.ok_or_else(|| {
-                CodexErr::InvalidRequest("No available named farm child path".into())
-            })?
-        } else {
+        let agent_path =
             parent_path
-                .join(&format!(
-                    "farm_{}",
-                    &request_uuid.simple().to_string()[..12]
-                ))
-                .map_err(CodexErr::InvalidRequest)?
-        };
-        if agent_path.as_str().len() > MAX_DELEGATION_RECEIPT_PATH_BYTES {
-            return Err(CodexErr::InvalidRequest(
-                "farm child path exceeds the bounded receipt limit".to_owned(),
-            )
-            .into());
-        }
+                .join(&request.task_name.clone().unwrap_or_else(|| {
+                    format!("farm_{}", &request_uuid.simple().to_string()[..12])
+                }))
+                .map_err(CodexErr::InvalidRequest)?;
         let source = SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
             parent_thread_id: self.session.thread_id,
             depth,
-            agent_path: Some(agent_path.clone()),
+            agent_path: Some(agent_path),
             agent_nickname: None,
             agent_role: prepared.role_name,
         });
@@ -380,49 +338,18 @@ impl CodexThread {
             .services
             .agent_control
             .check_turn_admission(turn.multi_agent_version, &source)?;
-        if db
-            .farm_request_id_for_path(self.session.thread_id, agent_path.as_str())
-            .await
-            .map_err(|error| {
-                CodexErr::Fatal(format!("could not validate farm child path: {error}"))
-            })?
-            .is_some()
-        {
-            return Err(CodexErr::InvalidRequest(format!(
-                "farm child path `{agent_path}` is already reserved by another delegation"
-            ))
-            .into());
-        }
-        match db
-            .claim_farm_request(self.session.thread_id, &request_id, &payload_sha256)
-            .await
-            .map_err(|error| CodexErr::Fatal(format!("could not claim farm request: {error}")))?
-        {
-            FarmRequestClaim::Existing(record) => {
-                return replay(&request_id, &payload_sha256, record);
-            }
-            FarmRequestClaim::Claimed => {}
-        }
-
-        let result = async {
-            self.session
-                .record_user_delegation(authorization)
-                .await
-                .map_err(|error| {
-                    CodexErr::Fatal(format!("could not persist user authorization: {error}"))
-                })?;
-            let (child, _) = self
-                .session
-                .services
-                .agent_control
-                .spawn(SpawnRequest {
+        self.session
+            .services
+            .agent_control
+            .farm_spawn(FarmSpawnRequest {
+                spawn: SpawnRequest {
                     caller: self.session.thread_id,
                     config,
                     input: AgentInput::UserInput(request.input),
                     source,
                     options: SpawnAgentOptions {
                         user_request: Some(UserSpawnRequest {
-                            request_id: request_id.clone(),
+                            request_id,
                             instructions,
                             parent_developer_instructions: turn.developer_instructions.clone(),
                             fork_history,
@@ -433,54 +360,13 @@ impl CodexThread {
                         cyber_access_program: turn.cyber_access_program,
                         ..Default::default()
                     },
-                })
-                .await?;
-            let receipt = FarmReceipt {
-                child_thread_id: child.thread_id,
-                agent_path: agent_path.to_string(),
-            };
-            self.session
-                .record_conversation_items(
-                    &turn,
-                    turn.model_info(),
-                    &[ContextualUserFragment::into(UserDelegationReceipt {
-                        task_preview: task,
-                        agent_path: receipt.agent_path.clone(),
-                    })],
-                )
-                .await;
-            self.flush_rollout().await.map_err(|error| {
-                CodexErr::Fatal(format!("could not persist delegation receipt: {error}"))
-            })?;
-            db.accept_farm_request(self.session.thread_id, &request_id)
-                .await
-                .map_err(|error| {
-                    CodexErr::Fatal(format!("could not accept farm receipt: {error}"))
-                })?;
-            Ok::<_, CodexErr>(receipt)
-        }
-        .await;
-        match result {
-            Ok(receipt) => Ok(receipt),
-            Err(error) => {
-                let child = db
-                    .farm_request(self.session.thread_id, &request_id)
-                    .await
-                    .ok()
-                    .flatten()
-                    .and_then(|record| record.child_thread_id.zip(record.agent_path))
-                    .map(|(child_thread_id, agent_path)| FarmReceipt {
-                        child_thread_id,
-                        agent_path,
-                    });
-                Err(FarmError::Uncertain {
-                    request_id,
-                    child,
-                    message: format!(
-                        "Delegation outcome is uncertain: {error}. The child may already be running; inspect the agent roster. This submission will not be executed again."
-                    ),
-                })
-            }
-        }
+                },
+                payload_sha256,
+                task_name: request.task_name,
+                authorization,
+                task_preview: task,
+                turn,
+            })
+            .await
     }
 }

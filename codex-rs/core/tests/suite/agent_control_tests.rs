@@ -98,6 +98,18 @@ impl AgentControl for TestAgentControl {
         Box::pin(async { Err(CodexErr::InvalidRequest("host spawn rejection".to_string())) })
     }
 
+    fn farm_spawn(
+        &self,
+        request: codex_core::FarmSpawnRequest,
+    ) -> BoxFuture<'_, std::result::Result<codex_core::FarmReceipt, codex_core::FarmError>> {
+        assert_eq!(request.spawn.caller, self.thread_id);
+        Box::pin(async {
+            Err(codex_core::FarmError::Rejected(CodexErr::InvalidRequest(
+                "host farm rejection".to_string(),
+            )))
+        })
+    }
+
     fn send(&self, request: SendRequest) -> BoxFuture<'_, CodexResult<DeliveryReceipt>> {
         assert_eq!(request.caller, self.thread_id);
         Box::pin(async { Err(CodexErr::InvalidRequest("host send rejection".to_string())) })

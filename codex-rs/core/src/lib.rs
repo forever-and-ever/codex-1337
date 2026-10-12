@@ -82,6 +82,7 @@ pub use agent::farm::FarmError;
 pub use agent::farm::FarmMode;
 pub use agent::farm::FarmReceipt;
 pub use agent::farm::FarmRequest;
+pub use agent::farm::FarmSpawnRequest;
 pub use agent::types::AgentExecutionGuard;
 pub use agent::types::AgentMessage;
 pub use agent::types::AgentMetadata;

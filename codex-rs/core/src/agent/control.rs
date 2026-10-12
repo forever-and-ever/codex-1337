@@ -86,6 +86,7 @@ mod sender_context;
 mod service_tier;
 pub(crate) use service_tier::AgentTierStatus;
 pub(crate) use service_tier::normalize_agent_service_tier;
+mod farm_reservation;
 pub(super) mod spawn;
 mod spawn_guard;
 mod spawn_telemetry;

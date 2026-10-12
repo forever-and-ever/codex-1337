@@ -27,6 +27,7 @@ pub(crate) struct SessionStartup {
     pub(crate) persistence: Mutex<LiveThreadInitGuard>,
     pub(crate) session: OnceLock<Arc<Session>>,
     pub(crate) io: OnceLock<SessionIo>,
+    pub(crate) allocation: super::farm_allocation::FarmAllocation,
 }
 
 impl SessionStartup {

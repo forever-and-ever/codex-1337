@@ -1,34 +1,84 @@
-//! Direct-user spawn receipts, not a job queue. A claimed request is never executed twice.
+//! Direct-user spawn reservations, not a job queue. An identity is never executed twice.
 
 use super::*;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FarmReceipt {
+    pub child_thread_id: ThreadId,
+    pub agent_path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FarmRejectionKind {
+    InvalidRequest,
+    UnsupportedOperation,
+    Fatal,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FarmRejection {
+    pub kind: FarmRejectionKind,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FarmRequestState {
+    /// Old pathless claims cannot prove that no child was allocated.
+    LegacyUnknown,
+    Reserved {
+        agent_path: String,
+    },
+    Allocated(FarmReceipt),
+    Accepted(FarmReceipt),
+    Rejected(FarmRejection),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FarmRequestRecord {
     pub payload_sha256: String,
-    pub child_thread_id: Option<ThreadId>,
-    pub agent_path: Option<String>,
-    pub accepted: bool,
+    pub state: FarmRequestState,
 }
 
 pub enum FarmRequestClaim {
     Claimed,
     Existing(FarmRequestRecord),
+    PathOccupied,
 }
 
 fn record_from_row(row: &sqlx::sqlite::SqliteRow) -> anyhow::Result<FarmRequestRecord> {
+    let path = || -> anyhow::Result<String> { Ok(row.try_get("agent_path")?) };
+    let child = || -> anyhow::Result<FarmReceipt> {
+        Ok(FarmReceipt {
+            child_thread_id: ThreadId::from_string(&row.try_get::<String, _>("child_thread_id")?)?,
+            agent_path: path()?,
+        })
+    };
+    let state = match row.try_get::<String, _>("state")?.as_str() {
+        "legacy" => FarmRequestState::LegacyUnknown,
+        "reserved" => FarmRequestState::Reserved {
+            agent_path: path()?,
+        },
+        "allocated" => FarmRequestState::Allocated(child()?),
+        "accepted" => FarmRequestState::Accepted(child()?),
+        "rejected" => FarmRequestState::Rejected(FarmRejection {
+            kind: match row.try_get::<String, _>("rejection_kind")?.as_str() {
+                "invalid_request" => FarmRejectionKind::InvalidRequest,
+                "unsupported_operation" => FarmRejectionKind::UnsupportedOperation,
+                "fatal" => FarmRejectionKind::Fatal,
+                kind => anyhow::bail!("unknown farm rejection kind {kind}"),
+            },
+            message: row.try_get("rejection_message")?,
+        }),
+        state => anyhow::bail!("unknown farm request state {state}"),
+    };
     Ok(FarmRequestRecord {
         payload_sha256: row.try_get("payload_sha256")?,
-        child_thread_id: row
-            .try_get::<Option<String>, _>("child_thread_id")?
-            .map(|id| ThreadId::from_string(&id))
-            .transpose()?,
-        agent_path: row.try_get("agent_path")?,
-        accepted: row.try_get("accepted")?,
+        state,
     })
 }
 
 impl StateRuntime {
-    /// Matches only an actual persisted farm branch, never a task-name resemblance.
+    /// Matches only a persisted farm reservation, never a task-name resemblance.
     pub async fn farm_request_id_for_path(
         &self,
         parent: ThreadId,
@@ -49,49 +99,111 @@ impl StateRuntime {
         parent: ThreadId,
         request_id: &str,
     ) -> anyhow::Result<Option<FarmRequestRecord>> {
-        sqlx::query("SELECT payload_sha256, child_thread_id, agent_path, accepted FROM thread_farm_requests WHERE parent_thread_id = ? AND request_id = ?")
-            .bind(parent.to_string())
-            .bind(request_id)
-            .fetch_optional(self.pool.as_ref())
-            .await?
-            .as_ref()
-            .map(record_from_row)
-            .transpose()
+        sqlx::query(
+            "SELECT * FROM thread_farm_requests WHERE parent_thread_id = ? AND request_id = ?",
+        )
+        .bind(parent.to_string())
+        .bind(request_id)
+        .fetch_optional(self.pool.as_ref())
+        .await?
+        .as_ref()
+        .map(record_from_row)
+        .transpose()
     }
 
-    /// Atomically claims an identity; even an interrupted claim continues to suppress replay.
+    /// The caller holds the registry path reservation through this transaction and spawn.
     pub async fn claim_farm_request(
         &self,
         parent: ThreadId,
         request_id: &str,
         payload_sha256: &str,
+        agent_path: &str,
     ) -> anyhow::Result<FarmRequestClaim> {
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        // Identity takes precedence over path contention, including payload mismatch.
+        if let Some(row) = sqlx::query(
+            "SELECT * FROM thread_farm_requests WHERE parent_thread_id = ? AND request_id = ?",
+        )
+        .bind(parent.to_string())
+        .bind(request_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        {
+            let record = record_from_row(&row)?;
+            tx.commit().await?;
+            return Ok(FarmRequestClaim::Existing(record));
+        }
         let inserted = sqlx::query_scalar::<_, i64>(
-            "INSERT INTO thread_farm_requests (parent_thread_id, request_id, payload_sha256) VALUES (?, ?, ?) ON CONFLICT DO NOTHING RETURNING 1",
+            "INSERT INTO thread_farm_requests (parent_thread_id, request_id, payload_sha256, agent_path, state) VALUES (?, ?, ?, ?, 'reserved') ON CONFLICT (parent_thread_id, agent_path) DO NOTHING RETURNING 1",
         )
         .bind(parent.to_string())
         .bind(request_id)
         .bind(payload_sha256)
+        .bind(agent_path)
         .fetch_optional(&mut *tx)
         .await?;
-        let claim = if inserted.is_some() {
+        tx.commit().await?;
+        Ok(if inserted.is_some() {
             FarmRequestClaim::Claimed
         } else {
-            let row = sqlx::query(
-                "SELECT payload_sha256, child_thread_id, agent_path, accepted FROM thread_farm_requests WHERE parent_thread_id = ? AND request_id = ?",
-            )
-            .bind(parent.to_string())
-            .bind(request_id)
-            .fetch_one(&mut *tx)
-            .await?;
-            FarmRequestClaim::Existing(record_from_row(&row)?)
-        };
-        tx.commit().await?;
-        Ok(claim)
+            FarmRequestClaim::PathOccupied
+        })
     }
 
-    /// Records allocation before execution starts, making interrupted outcomes inspectable.
+    pub async fn reject_unclaimed_farm_request(
+        &self,
+        parent: ThreadId,
+        request_id: &str,
+        payload_sha256: &str,
+        message: &str,
+    ) -> anyhow::Result<FarmRequestRecord> {
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        sqlx::query(
+            "INSERT INTO thread_farm_requests (parent_thread_id, request_id, payload_sha256, state, rejection_kind, rejection_message) VALUES (?, ?, ?, 'rejected', 'invalid_request', ?) ON CONFLICT (parent_thread_id, request_id) DO NOTHING",
+        )
+        .bind(parent.to_string()).bind(request_id).bind(payload_sha256).bind(message)
+        .execute(&mut *tx).await?;
+        let row = sqlx::query(
+            "SELECT * FROM thread_farm_requests WHERE parent_thread_id = ? AND request_id = ?",
+        )
+        .bind(parent.to_string())
+        .bind(request_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        let record = record_from_row(&row)?;
+        tx.commit().await?;
+        Ok(record)
+    }
+
+    /// Only the spawn owner may certify this transition, before entering creation.
+    pub async fn reject_farm_request(
+        &self,
+        parent: ThreadId,
+        request_id: &str,
+        rejection: &FarmRejection,
+    ) -> anyhow::Result<()> {
+        let kind = match rejection.kind {
+            FarmRejectionKind::InvalidRequest => "invalid_request",
+            FarmRejectionKind::UnsupportedOperation => "unsupported_operation",
+            FarmRejectionKind::Fatal => "fatal",
+        };
+        let result = sqlx::query(
+            "UPDATE thread_farm_requests SET state = 'rejected', agent_path = NULL, rejection_kind = ?, rejection_message = ? WHERE parent_thread_id = ? AND request_id = ? AND state = 'reserved'",
+        )
+        .bind(kind)
+        .bind(&rejection.message)
+        .bind(parent.to_string())
+        .bind(request_id)
+        .execute(self.pool.as_ref())
+        .await?;
+        anyhow::ensure!(
+            result.rows_affected() == 1,
+            "farm rejection was not recorded"
+        );
+        Ok(())
+    }
+
+    /// Records allocation without changing the path already owned by this request.
     pub async fn record_farm_child(
         &self,
         parent: ThreadId,
@@ -101,13 +213,13 @@ impl StateRuntime {
         instructions: &str,
     ) -> anyhow::Result<()> {
         let result = sqlx::query(
-            "UPDATE thread_farm_requests SET child_thread_id = ?, agent_path = ?, instructions = ? WHERE parent_thread_id = ? AND request_id = ? AND child_thread_id IS NULL",
+            "UPDATE thread_farm_requests SET child_thread_id = ?, instructions = ?, state = 'allocated' WHERE parent_thread_id = ? AND request_id = ? AND state = 'reserved' AND agent_path = ?",
         )
         .bind(child.to_string())
-        .bind(agent_path)
         .bind(instructions)
         .bind(parent.to_string())
         .bind(request_id)
+        .bind(agent_path)
         .execute(self.pool.as_ref())
         .await?;
         anyhow::ensure!(
@@ -117,7 +229,6 @@ impl StateRuntime {
         Ok(())
     }
 
-    /// Restores the child-only additive prompt, independently of current farm preferences.
     pub async fn farm_child_instructions(&self, child: ThreadId) -> anyhow::Result<Option<String>> {
         Ok(sqlx::query_scalar::<_, Option<String>>(
             "SELECT instructions FROM thread_farm_requests WHERE child_thread_id = ?",
@@ -128,14 +239,14 @@ impl StateRuntime {
         .flatten())
     }
 
-    /// Acceptance never depends on the child's later lifecycle, including retirement.
+    /// Acceptance survives the child's later lifecycle, including retirement.
     pub async fn accept_farm_request(
         &self,
         parent: ThreadId,
         request_id: &str,
     ) -> anyhow::Result<()> {
         let result = sqlx::query(
-            "UPDATE thread_farm_requests SET accepted = 1 WHERE parent_thread_id = ? AND request_id = ? AND child_thread_id IS NOT NULL AND agent_path IS NOT NULL",
+            "UPDATE thread_farm_requests SET state = 'accepted' WHERE parent_thread_id = ? AND request_id = ? AND state = 'allocated'",
         )
         .bind(parent.to_string())
         .bind(request_id)
