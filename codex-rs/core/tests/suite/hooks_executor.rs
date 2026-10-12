@@ -67,13 +67,13 @@ use super::rmcp_client::remote_aware_environment_id;
 async fn thread_plugin_selection_disables_executor_hooks_without_disabling_their_server()
 -> Result<()> {
     skip_if_no_network!(Ok(()));
-    let fixture = executor_hook_fixture(
+    let (server, fixture) = executor_hook_fixture(
         ["disabled", "enabled", "disabled-again"]
             .map(completed_turn_response)
             .to_vec(),
     )
     .await?;
-    mock_server::run(&[&fixture.server], async {
+    mock_server::run(&[&server], async {
         fixture.attach().await?;
         for (disabled_plugin_ids, expected_calls) in [
             (vec!["computer-use@openai-bundled".to_string()], 0),
@@ -93,7 +93,7 @@ async fn thread_plugin_selection_disables_executor_hooks_without_disabling_their
             if enabled {
                 fixture.wait_for_hook_call().await?;
             }
-            assert_eq!(fixture.calls().await?.len(), expected_calls);
+            assert_eq!(recorded_hook_calls(&server).await?.len(), expected_calls);
         }
         fixture
             .test
@@ -106,8 +106,7 @@ async fn thread_plugin_selection_disables_executor_hooks_without_disabling_their
             )
             .await?;
         assert_eq!(
-            fixture
-                .calls()
+            recorded_hook_calls(&server)
                 .await?
                 .last()
                 .context("standalone tool call")?["params"]["name"],
@@ -122,13 +121,13 @@ async fn thread_plugin_selection_disables_executor_hooks_without_disabling_their
 async fn executor_stop_hook_runs_after_attachment() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
-    let fixture = executor_stop_hook_fixture().await?;
-    mock_server::run(&[&fixture.server], async {
+    let (server, fixture) = executor_stop_hook_fixture().await?;
+    mock_server::run(&[&server], async {
         fixture
             .test
             .submit_text_turn("before the executor plugin attaches")
             .await?;
-        assert_eq!(fixture.calls().await?, Vec::<Value>::new());
+        assert_eq!(recorded_hook_calls(&server).await?, Vec::<Value>::new());
 
         fixture.attach().await?;
         fixture
@@ -137,7 +136,7 @@ async fn executor_stop_hook_runs_after_attachment() -> Result<()> {
             .await?;
         fixture.wait_for_hook_call().await?;
 
-        let calls = fixture.calls().await?;
+        let calls = recorded_hook_calls(&server).await?;
         assert_eq!(calls.len(), 1);
         let call = &calls[0];
         let turn_metadata = &call["params"]["_meta"]["x-codex-turn-metadata"];
@@ -182,7 +181,7 @@ async fn executor_stop_hook_runs_after_attachment() -> Result<()> {
 async fn executor_interrupt_hook_runs_after_attachment() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
-    let fixture = executor_hook_fixture(vec![
+    let (server, fixture) = executor_hook_fixture(vec![
         completed_turn_response("turn").set_delay(Duration::from_secs(60)),
     ])
     .await?;
@@ -211,7 +210,7 @@ async fn executor_interrupt_hook_runs_after_attachment() -> Result<()> {
     .await;
     fixture.wait_for_hook_call().await?;
 
-    let calls = fixture.calls().await?;
+    let calls = recorded_hook_calls(&server).await?;
     assert_eq!(calls.len(), 1);
     let call = &calls[0]["params"];
     let response = fixture.responses.single_request().body_json();
@@ -237,7 +236,8 @@ async fn executor_interrupt_hook_skips_turn_without_step_context() -> Result<()>
         "standalone user shell commands require a local environment"
     );
 
-    let fixture = executor_hook_fixture(vec![completed_turn_response("first-turn")]).await?;
+    let (_server, fixture) =
+        executor_hook_fixture(vec![completed_turn_response("first-turn")]).await?;
     fixture.attach().await?;
     fixture
         .test
@@ -269,8 +269,8 @@ async fn executor_interrupt_hook_skips_turn_without_step_context() -> Result<()>
 async fn executor_stop_hook_stops_after_disconnection() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
-    let fixture = executor_stop_hook_fixture().await?;
-    mock_server::run(&[&fixture.server], async {
+    let (server, fixture) = executor_stop_hook_fixture().await?;
+    mock_server::run(&[&server], async {
         let selection = fixture.attach().await?;
         fixture
             .test
@@ -288,7 +288,7 @@ async fn executor_stop_hook_stops_after_disconnection() -> Result<()> {
             .submit_text_turn("after the executor disconnects")
             .await?;
 
-        assert_eq!(fixture.calls().await?.len(), 1);
+        assert_eq!(recorded_hook_calls(&server).await?.len(), 1);
 
         Ok(())
     })
@@ -299,13 +299,13 @@ async fn executor_stop_hook_stops_after_disconnection() -> Result<()> {
 async fn executor_stop_hook_rejects_mismatched_environment() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
-    let fixture = executor_hook_fixture(
+    let (server, fixture) = executor_hook_fixture(
         ["first-turn", "switch-environments", "second-turn"]
             .map(completed_turn_response)
             .to_vec(),
     )
     .await?;
-    mock_server::run(&[&fixture.server], async {
+    mock_server::run(&[&server], async {
         let selection = fixture.attach().await?;
         fixture
             .test
@@ -442,8 +442,7 @@ async fn executor_stop_hook_rejects_mismatched_environment() -> Result<()> {
         }
 
         assert_eq!(
-            fixture
-                .calls()
+            recorded_hook_calls(&server)
                 .await?
                 .iter()
                 .filter(|call| call["params"]["name"] == "turn_ended")
@@ -544,7 +543,7 @@ async fn executor_browser_and_computer_use_cleanup_hooks_use_separate_mcp_routes
             ),
             ("computer-use@openai-bundled", computer_use_hook_manifest()),
         ];
-        let mut fixture = executor_plugin_hook_fixture(
+        let (server, mut fixture) = executor_plugin_hook_fixture(
             apps_enabled_builder(apps.chatgpt_base_url)
                 .with_pre_build_hook(move |home| {
                     std::fs::write(home.join("config.toml"), user_config)
@@ -561,7 +560,7 @@ async fn executor_browser_and_computer_use_cleanup_hooks_use_separate_mcp_routes
             }],
         )
         .await?;
-        mock_server::run(&[&fixture.server], async {
+        mock_server::run(&[&server], async {
             if hook_event == "SubagentStop" {
                 let child = fixture
                     .test
@@ -622,7 +621,7 @@ async fn executor_browser_and_computer_use_cleanup_hooks_use_separate_mcp_routes
                 fixture.test.submit_text_turn("finish browsing").await?;
             }
             fixture.wait_for_hook_call().await?;
-            let node_calls = fixture.calls().await?;
+            let node_calls = recorded_hook_calls(&server).await?;
             let expected_node_tools = if hook_event == "SubagentStop" {
                 vec!["js", "turn_ended"]
             } else {
@@ -694,7 +693,7 @@ fn completed_turn_response(id: &str) -> ResponseTemplate {
     ]))
 }
 
-async fn executor_stop_hook_fixture() -> Result<ExecutorHookFixture> {
+async fn executor_stop_hook_fixture() -> Result<(MockServer, ExecutorHookFixture)> {
     executor_hook_fixture(
         ["first-turn", "second-turn"]
             .map(completed_turn_response)
@@ -703,7 +702,9 @@ async fn executor_stop_hook_fixture() -> Result<ExecutorHookFixture> {
     .await
 }
 
-async fn executor_hook_fixture(responses: Vec<ResponseTemplate>) -> Result<ExecutorHookFixture> {
+async fn executor_hook_fixture(
+    responses: Vec<ResponseTemplate>,
+) -> Result<(MockServer, ExecutorHookFixture)> {
     executor_plugin_hook_fixture(
         test_codex(),
         &[("computer-use@openai-bundled", computer_use_hook_manifest())],
@@ -755,7 +756,7 @@ async fn executor_plugin_hook_fixture(
     builder: TestCodexBuilder,
     plugins: &[(&'static str, Value)],
     responses: Vec<ResponseTemplate>,
-) -> Result<ExecutorHookFixture> {
+) -> Result<(MockServer, ExecutorHookFixture)> {
     let server = start_mock_server().await;
     let result = async {
         let hook_called = Arc::new(Notify::new());
@@ -854,19 +855,20 @@ async fn executor_plugin_hook_fixture(
     }
     .await;
     match result {
-        Ok((test, responses, hook_called, plugin_roots)) => Ok(ExecutorHookFixture {
+        Ok((test, responses, hook_called, plugin_roots)) => Ok((
             server,
-            test,
-            responses,
-            hook_called,
-            plugin_roots,
-        }),
+            ExecutorHookFixture {
+                test,
+                responses,
+                hook_called,
+                plugin_roots,
+            },
+        )),
         Err(error) => mock_server::run(&[&server], async { Err(error) }).await,
     }
 }
 
 struct ExecutorHookFixture {
-    server: MockServer,
     test: TestCodex,
     responses: ResponseMock,
     hook_called: Arc<Notify>,
@@ -938,16 +940,15 @@ impl ExecutorHookFixture {
 
         Ok(())
     }
+}
 
-    async fn calls(&self) -> Result<Vec<Value>> {
-        Ok(self
-            .server
-            .received_requests()
-            .await
-            .context("mock server should record requests")?
-            .into_iter()
-            .filter_map(|request| serde_json::from_slice::<Value>(&request.body).ok())
-            .filter(|request| request["method"] == "tools/call")
-            .collect())
-    }
+async fn recorded_hook_calls(server: &MockServer) -> Result<Vec<Value>> {
+    Ok(server
+        .received_requests()
+        .await
+        .context("mock server should record requests")?
+        .into_iter()
+        .filter_map(|request| serde_json::from_slice::<Value>(&request.body).ok())
+        .filter(|request| request["method"] == "tools/call")
+        .collect())
 }
