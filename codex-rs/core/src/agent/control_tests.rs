@@ -961,6 +961,7 @@ async fn mail_family_harness() -> (MockServer, AgentControlHarness) {
     let (home, mut config) = test_config().await;
     let _ = config.features.enable(Feature::MultiAgentV2);
     config.model_provider.base_url = Some(format!("{}/v1", server.uri()));
+    config.model_provider.supports_websockets = false;
     (
         server,
         AgentControlHarness::new_with_config(home, config).await,
