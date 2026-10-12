@@ -55,6 +55,10 @@ impl ModelProvider for NativeBoundary {
         self.inner.info()
     }
 
+    fn capabilities(&self) -> codex_model_provider::ProviderCapabilities {
+        self.inner.capabilities()
+    }
+
     fn auth_manager(&self) -> Option<Arc<AuthManager>> {
         self.inner.auth_manager()
     }
