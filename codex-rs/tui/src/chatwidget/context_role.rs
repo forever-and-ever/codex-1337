@@ -8,18 +8,45 @@ pub(crate) enum ContextRoleCommand {
     Set(Option<ContextRole>),
 }
 
+const CONTEXT_ROLE_USAGE: &str = "Usage: /contextrole [set <role>|clear]";
+pub(crate) const CONTEXT_ROLE_DESCRIPTION: &str =
+    "show the context role; /contextrole set <role> changes it";
+
+impl ContextRoleCommand {
+    fn parse(argument: &str) -> Result<Self, String> {
+        match argument.trim() {
+            "" => Ok(Self::Show),
+            "clear" => Ok(Self::Set(None)),
+            text => {
+                let Some(("set", role)) = text.split_once(char::is_whitespace) else {
+                    return Err(CONTEXT_ROLE_USAGE.to_string());
+                };
+                ContextRole::new(role.trim())
+                    .map(|role| Self::Set(Some(role)))
+                    .map_err(str::to_owned)
+            }
+        }
+    }
+}
+
 impl ChatWidget {
-    pub(super) fn dispatch_context_role(&mut self, argument: &str) {
-        let command = match argument.trim() {
-            "" => ContextRoleCommand::Show,
-            "clear" => ContextRoleCommand::Set(None),
-            text => match ContextRole::new(text) {
-                Ok(role) => ContextRoleCommand::Set(Some(role)),
-                Err(err) => {
-                    self.add_error_message(err.to_owned());
-                    return;
+    pub(super) fn reject_invalid_context_role_command(&mut self, args: &str) -> bool {
+            match ContextRoleCommand::parse(args) {
+                Ok(_) => false,
+                Err(error) => {
+                    self.add_error_message(error);
+                    true
                 }
-            },
+            }
+        }
+
+    pub(super) fn dispatch_context_role(&mut self, argument: &str) {
+        let command = match ContextRoleCommand::parse(argument) {
+            Ok(command) => command,
+            Err(error) => {
+                self.add_error_message(error);
+                return;
+            }
         };
         if let Some(thread_id) = self.thread_id {
             self.app_event_tx

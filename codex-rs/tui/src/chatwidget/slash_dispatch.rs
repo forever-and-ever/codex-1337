@@ -86,7 +86,12 @@ impl ChatWidget {
         text_elements: Vec<TextElement>,
     ) {
         // TELOS(explicit-command-verbs): a typo cannot start a draft session.
-        if cmd == SlashCommand::Goal && self.reject_invalid_goal_command(&args) {
+        if match cmd {
+            SlashCommand::Goal => self.reject_invalid_goal_command(&args),
+            SlashCommand::ContextRole => self.reject_invalid_context_role_command(&args),
+            SlashCommand::Pets => self.reject_invalid_pet_command(&args),
+            _ => false,
+        } {
             return;
         }
         if self.defer_draft_command(cmd) {
@@ -1060,17 +1065,7 @@ impl ChatWidget {
                 self.app_event_tx
                     .send(AppEvent::ResumeSessionByIdOrName(args));
             }
-            SlashCommand::Pets
-                if matches!(
-                    args.trim().to_ascii_lowercase().as_str(),
-                    "disable" | "disabled" | "hide" | "hidden" | "off" | "none"
-                ) =>
-            {
-                self.app_event_tx.send(AppEvent::PetDisabled);
-            }
-            SlashCommand::Pets if !trimmed.is_empty() => {
-                self.select_pet_by_id(args);
-            }
+            SlashCommand::Pets if !trimmed.is_empty() => self.dispatch_pet_command(trimmed),
             _ => self.dispatch_command_from_source(cmd, source),
         }
         if source == SlashCommandDispatchSource::Live && cmd != SlashCommand::Goal {

@@ -131,7 +131,7 @@ impl SlashCommand {
             SlashCommand::Reload => "reload the UI without interrupting your agents",
             SlashCommand::Warnings => "view retained warnings and diagnostic details",
             SlashCommand::Comms => "show or change cross-context message access",
-            SlashCommand::ContextRole => "show or set this context's role for other agents",
+            SlashCommand::ContextRole => crate::chatwidget::context_role::CONTEXT_ROLE_DESCRIPTION,
             SlashCommand::Context => {
                 "inspect the instructions, tools and injections retained in context"
             }
@@ -143,7 +143,7 @@ impl SlashCommand {
             SlashCommand::Title => "configure which items appear in the terminal title",
             SlashCommand::Statusline => "configure which items appear in the status line",
             SlashCommand::Theme => "choose a syntax highlighting theme",
-            SlashCommand::Pets => "choose or hide the terminal pet",
+            SlashCommand::Pets => crate::chatwidget::pets_command::PETS_DESCRIPTION,
             SlashCommand::Ps => "list background terminals",
             SlashCommand::Stop => "stop all background terminals",
             SlashCommand::MemoryDrop => "DO NOT USE",

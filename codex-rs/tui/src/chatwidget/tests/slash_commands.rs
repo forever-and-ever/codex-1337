@@ -3118,8 +3118,19 @@ async fn slash_pets_with_arg_selects_named_pet() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     force_pet_image_support(&mut chat);
 
+    for input in ["/pets chefito", "/pets disbale", "/pets select", "/pets disable extra"] {
+        chat.bottom_pane
+            .set_composer_text(input.to_string(), Vec::new(), Vec::new());
+        chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
+        assert_matches!(rx.try_recv(), Ok(AppEvent::FollowTranscript));
+        assert_matches!(rx.try_recv(), Ok(AppEvent::InsertHistoryCell(_)));
+        assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
+        assert_eq!(chat.bottom_pane.composer_text(), input);
+        assert_no_submit_op(&mut op_rx);
+    }
+
     chat.bottom_pane
-        .set_composer_text("/pets chefito".to_string(), Vec::new(), Vec::new());
+        .set_composer_text("/pets select chefito".to_string(), Vec::new(), Vec::new());
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
     assert_matches!(rx.try_recv(), Ok(AppEvent::FollowTranscript));
 
@@ -3183,7 +3194,7 @@ async fn slash_pets_with_arg_on_unsupported_terminal_shows_notice_without_select
     force_tmux_pet_image_unsupported(&mut chat);
 
     chat.bottom_pane
-        .set_composer_text("/pets chefito".to_string(), Vec::new(), Vec::new());
+        .set_composer_text("/pets select chefito".to_string(), Vec::new(), Vec::new());
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
 
     assert!(chat.bottom_pane.has_active_view());
