@@ -1365,7 +1365,7 @@ See the Codex keymap documentation for supported actions and examples."
                         }
                     }
                     Some(completion) = app.server_operations.control_rx.recv() => {
-                        match app.finish_submission(&mut app_server, completion.thread_id, completion.id, completion.epoch, completion.outcome).await {
+                        match app.finish_submission(&mut app_server, completion.scope, completion.id, completion.epoch, completion.outcome).await {
                             Ok(()) => {},
                             Err(err) if app.recover_transport_error(&err) => {},
                             Err(err) => break Err(err),

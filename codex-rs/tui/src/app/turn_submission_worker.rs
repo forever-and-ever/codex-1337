@@ -21,24 +21,20 @@ fn request_id() -> AppServerRequestId {
 
 pub(super) async fn send(
     handle: AppServerRequestHandle,
-    thread_id: ThreadId,
     request: WorkerRequest,
-    store: Arc<Mutex<ThreadEventStore>>,
+    origin: OperationOrigin,
 ) -> SubmissionOutcome {
     if let WorkerRequest::Operation { id, operation } = request {
         let result = if matches!(
             &*operation,
             ThreadOperation::Mutation(requests::ThreadMutation::ServerShell(_))
         ) {
-            requests::send(handle, thread_id, id, *operation, store)
+            requests::send(handle, id, *operation, origin)
                 .await
                 .map_err(classify_failure)
         } else {
-            match tokio::time::timeout(
-                ACK_TIMEOUT,
-                requests::send(handle, thread_id, id, *operation, store),
-            )
-            .await
+            match tokio::time::timeout(ACK_TIMEOUT, requests::send(handle, id, *operation, origin))
+                .await
             {
                 Ok(result) => result.map_err(classify_failure),
                 Err(_) => Err(SubmissionFailure::TimedOut),
@@ -46,7 +42,13 @@ pub(super) async fn send(
         };
         return SubmissionOutcome::Operation(result);
     }
-    match tokio::time::timeout(ACK_TIMEOUT, send_inner(handle, thread_id, request, store)).await {
+    let (thread_id, store) = origin.thread();
+    match tokio::time::timeout(
+        ACK_TIMEOUT,
+        send_inner(handle, thread_id, request, Arc::clone(store)),
+    )
+    .await
+    {
         Ok(outcome) => outcome,
         Err(_) => SubmissionOutcome::Finished {
             replacement: ReplacementContinuation::NoReceipt,

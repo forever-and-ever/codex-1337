@@ -153,14 +153,15 @@ async fn check_remote_voice_start(
     app.config.realtime.voice = Some(codex_protocol::protocol::RealtimeVoice::Maple);
     app.chat_widget
         .on_realtime_voice_saved(codex_protocol::protocol::RealtimeVoice::Maple);
-    crate::chatwidget::prepare_voice_for_thread(&mut app.chat_widget, thread_id);
+    let (attempt_id, input_generation) =
+        crate::chatwidget::prepare_voice_for_thread(&mut app.chat_widget, thread_id);
     Box::pin(app.handle_event(
         &mut tui,
         &mut app_server,
         AppEvent::CodexOp(Op::RealtimeConversationStart {
             thread_id,
-            attempt_id: 0,
-            input_generation: 0,
+            attempt_id,
+            input_generation,
             offer_sdp: String::from("v=0\r\n").into(),
         }),
     ))
@@ -1799,14 +1800,15 @@ async fn remote_voice_config_read_failure_does_not_start_with_local_voice() -> R
     let (mut app_server, requests, proxy) = start_recording_remote_app_server(&app.config).await?;
     std::fs::write(app.config.codex_home.join("config.toml"), "realtime = [")?;
     let thread_id = ThreadId::new();
-    crate::chatwidget::prepare_voice_for_thread(&mut app.chat_widget, thread_id);
+    let (attempt_id, input_generation) =
+        crate::chatwidget::prepare_voice_for_thread(&mut app.chat_widget, thread_id);
     app.try_submit_active_thread_op_via_app_server(
         &mut app_server,
         thread_id,
         &AppCommand::RealtimeConversationStart {
             thread_id,
-            attempt_id: 0,
-            input_generation: 0,
+            attempt_id,
+            input_generation,
             offer_sdp: String::from("v=0\r\n").into(),
         },
     )
@@ -1872,14 +1874,15 @@ async fn embedded_voice_settings_follow_project_after_thread_switch() -> Result<
             popup.contains(&format!("{} (current)", voice.wire_name())),
             "{popup}"
         );
-        crate::chatwidget::prepare_voice_for_thread(&mut app.chat_widget, thread_id);
+        let (attempt_id, input_generation) =
+            crate::chatwidget::prepare_voice_for_thread(&mut app.chat_widget, thread_id);
         app.try_submit_active_thread_op_via_app_server(
             &mut server,
             thread_id,
             &AppCommand::RealtimeConversationStart {
                 thread_id,
-                attempt_id: 0,
-                input_generation: 0,
+                attempt_id,
+                input_generation,
                 offer_sdp: String::from("v=0\r\n").into(),
             },
         )
@@ -1989,10 +1992,11 @@ async fn remote_voice_catalog_success_and_failure() -> Result<()> {
                                 app.config.cwd.to_path_buf(),
                             ));
                         app.active_thread_id = Some(thread_id);
-                        crate::chatwidget::prepare_voice_for_thread(
-                            &mut app.chat_widget,
-                            thread_id,
-                        );
+                        let (attempt_id, input_generation) =
+                            crate::chatwidget::prepare_voice_for_thread(
+                                &mut app.chat_widget,
+                                thread_id,
+                            );
                         assert!(app.chat_widget.may_receive_realtime_transcripts());
                         let mut tui = crate::tui::test_support::make_test_tui()?;
                         Box::pin(app.handle_event(
@@ -2000,8 +2004,8 @@ async fn remote_voice_catalog_success_and_failure() -> Result<()> {
                             &mut server,
                             AppEvent::CodexOp(Op::RealtimeConversationStart {
                                 thread_id,
-                                attempt_id: 0,
-                                input_generation: 0,
+                                attempt_id,
+                                input_generation,
                                 offer_sdp: String::from("v=0\r\n").into(),
                             }),
                         ))

@@ -248,9 +248,38 @@ impl App {
         thread_id: ThreadId,
         request: SubmissionRequest,
     ) {
+        let origin = if matches!(&request, SubmissionRequest::Operation(operation) if matches!(&**operation, ThreadOperation::Connection(_)))
+        {
+            OperationOrigin::Connection
+        } else {
+            OperationOrigin::Thread {
+                thread_id,
+                store: Arc::clone(&self.ensure_thread_channel(thread_id).store),
+            }
+        };
+        self.enqueue_origin_submission(server, origin, request);
+    }
+
+    pub(in crate::app) fn enqueue_connection_operation(
+        &mut self,
+        server: &AppServerSession,
+        operation: ThreadOperation,
+    ) {
+        self.enqueue_origin_submission(
+            server,
+            OperationOrigin::Connection,
+            SubmissionRequest::Operation(Box::new(operation)),
+        );
+    }
+    fn enqueue_origin_submission(
+        &mut self,
+        server: &AppServerSession,
+        origin: OperationOrigin,
+        request: SubmissionRequest,
+    ) {
         let key = match &request {
-            SubmissionRequest::Operation(operation) => operation.lane(thread_id),
-            _ => OperationLane::Thread(thread_id),
+            SubmissionRequest::Operation(operation) => operation.lane(origin.scope()),
+            _ => OperationLane::Thread(origin.thread().0),
         };
         if key == OperationLane::Exit && self.server_operations.lanes.contains_key(&key) {
             return;
@@ -258,13 +287,11 @@ impl App {
         let order = self.server_operations.next_order;
         self.server_operations.next_order =
             order.checked_add(1).expect("operation sequence exhausted");
-        let store = Arc::clone(&self.ensure_thread_channel(thread_id).store);
         let entry = PendingSubmission {
             id: Uuid::new_v4(),
             order,
             epoch: self.server_operations.epoch,
-            thread_id,
-            store,
+            origin,
             request,
             buffering: None,
         };
@@ -334,7 +361,7 @@ impl App {
                 .lanes
                 .remove(&key)
                 .expect("queued operation lane disappeared");
-            self.start_submission(server, lane.active.thread_id, lane.active, lane.waiting);
+            self.start_submission(server, lane.active, lane.waiting);
         }
         self.drive_navigation_operation(server);
     }
@@ -342,19 +369,21 @@ impl App {
     fn start_submission(
         &mut self,
         server: &AppServerSession,
-        thread_id: ThreadId,
         active: PendingSubmission,
         waiting: VecDeque<PendingSubmission>,
     ) {
+        let scope = active.origin.scope();
         let permitted = match &active.request {
             SubmissionRequest::Operation(operation) => match &**operation {
                 ThreadOperation::Control(control::ControlOperation::RealtimeStop {
                     attempt_id,
-                }) => self
-                    .voice_widget_for_thread(thread_id)
-                    .is_none_or(|widget| widget.owns_realtime_attempt(thread_id, *attempt_id)),
+                }) => {
+                    let thread_id = active.origin.thread().0;
+                    self.voice_widget_for_thread(thread_id)
+                        .is_none_or(|widget| widget.owns_realtime_attempt(thread_id, *attempt_id))
+                }
                 ThreadOperation::Realtime(operation) => {
-                    self.realtime_operation_is_current(thread_id, operation)
+                    self.realtime_operation_is_current(active.origin.thread().0, operation)
                 }
                 _ => true,
             },
@@ -364,16 +393,16 @@ impl App {
             && let SubmissionRequest::Operation(operation) = &active.request
             && let ThreadOperation::Realtime(operation) = &**operation
         {
-            self.cancel_unsent_realtime_operation(thread_id, operation);
+            self.cancel_unsent_realtime_operation(active.origin.thread().0, operation);
         }
         let id = active.id;
         let epoch = active.epoch;
         let request = active.worker_request();
         let handle = server.request_handle();
-        let store = Arc::clone(&active.store);
+        let origin = active.origin.clone();
         let completions = self.thread_delivery.completion_tx.clone();
         let control_completions = self.server_operations.control_tx.clone();
-        let urgent = matches!(&active.request, SubmissionRequest::Operation(operation) if matches!(&**operation, ThreadOperation::Control(_) | ThreadOperation::Realtime(_) | ThreadOperation::Response(_)));
+        let urgent = matches!(&active.request, SubmissionRequest::Operation(operation) if matches!(&**operation, ThreadOperation::Control(_) | ThreadOperation::Realtime(_) | ThreadOperation::Response(_) | ThreadOperation::Connection(_)));
         let settings_supported = server.operation_settings_supported();
         let task = AbortOnDropHandle::new(tokio::spawn(async move {
             let outcome = if !permitted {
@@ -383,17 +412,20 @@ impl App {
             {
                 SubmissionOutcome::Operation(Ok(OperationReceipt::SettingsUnsupported))
             } else {
-                worker::send(handle, thread_id, request, store).await
+                worker::send(handle, request, origin).await
             };
             if urgent {
                 let _ = control_completions.send(ControlCompletion {
-                    thread_id,
+                    scope,
                     id,
                     epoch,
                     outcome,
                 });
                 return;
             }
+            let OperationScope::Thread(thread_id) = scope else {
+                unreachable!("connection receipt must use owned completion channel")
+            };
             let _ = completions
                 .send(LocalThreadCompletion::Submission {
                     thread_id,
@@ -404,8 +436,8 @@ impl App {
                 .await;
         }));
         let key = match &active.request {
-            SubmissionRequest::Operation(operation) => operation.lane(thread_id),
-            _ => OperationLane::Thread(thread_id),
+            SubmissionRequest::Operation(operation) => operation.lane(scope),
+            _ => OperationLane::Thread(active.origin.thread().0),
         };
         self.server_operations.lanes.insert(
             key,
@@ -430,7 +462,7 @@ impl App {
             } => {
                 let entry = self.server_operations.take_unsent(thread_id, id, action);
                 if let Some(entry) = entry {
-                    let origin = entry.thread_id;
+                    let origin = entry.origin.thread_id();
                     self.cleanup_unsent_operations(std::iter::once(&entry), &HashSet::new())
                         .await;
                     if let SubmissionRequest::Operation(operation) = &entry.request {
@@ -439,7 +471,9 @@ impl App {
                             None,
                         );
                     }
-                    if let Some(draft) = entry.into_draft() {
+                    if let Some(origin) = origin
+                        && let Some(draft) = entry.into_draft()
+                    {
                         self.restore_submission_drafts(origin, vec![draft], action.into())
                             .await;
                     }
@@ -467,13 +501,13 @@ impl App {
                         !matches!(lane.state, LaneState::Queued)
                             && requests::holds_start_lease(&lane.active)
                     })
-                    .map(|lane| lane.active.thread_id)
+                    .filter_map(|lane| lane.active.origin.thread_id())
                     .collect::<HashSet<_>>();
                 if !lanes.is_empty() {
                     self.chat_widget.add_error_message("Connection changed while sending. The original may still be delivered; pending messages return as drafts and have not been resent.".into());
                 }
                 for (_, lane) in lanes {
-                    let thread_id = lane.active.thread_id;
+                    let thread_id = lane.active.origin.thread_id();
                     if let SubmissionRequest::Operation(operation) = &lane.active.request
                         && let ThreadOperation::Control(control::ControlOperation::DetachAndExit {
                             reason,
@@ -504,16 +538,24 @@ impl App {
                     if matches!(&lane.active.request, SubmissionRequest::Operation(operation)
                         if matches!(&**operation, ThreadOperation::Control(control::ControlOperation::Interrupt { .. })))
                     {
-                        lane.active.store.lock().await.pending_interrupt_turn_id = None;
+                        lane.active
+                            .origin
+                            .thread()
+                            .1
+                            .lock()
+                            .await
+                            .pending_interrupt_turn_id = None;
                     }
                     let drafts =
                         recoverable_drafts(std::iter::once(lane.active).chain(lane.waiting));
-                    self.restore_submission_drafts(
-                        thread_id,
-                        drafts,
-                        DraftDisposition::Recover { uncertain_id },
-                    )
-                    .await;
+                    if let Some(thread_id) = thread_id {
+                        self.restore_submission_drafts(
+                            thread_id,
+                            drafts,
+                            DraftDisposition::Recover { uncertain_id },
+                        )
+                        .await;
+                    }
                 }
             }
         }
@@ -524,11 +566,12 @@ impl App {
     pub(in crate::app) async fn finish_submission(
         &mut self,
         server: &mut AppServerSession,
-        thread_id: ThreadId,
+        scope: impl Into<OperationScope>,
         id: Uuid,
         epoch: u64,
         outcome: SubmissionOutcome,
     ) -> Result<()> {
+        let scope = scope.into();
         if epoch != self.server_operations.epoch {
             return Ok(());
         }
@@ -537,12 +580,9 @@ impl App {
                 .await;
             return Ok(());
         }
-        let Some(key) = self
-            .server_operations
-            .lanes
-            .iter()
-            .find_map(|(key, lane)| (lane.active.id == id).then_some(*key))
-        else {
+        let Some(key) = self.server_operations.lanes.iter().find_map(|(key, lane)| {
+            (lane.active.id == id && lane.active.origin.scope() == scope).then_some(*key)
+        }) else {
             return Ok(());
         };
         let entry = match self.server_operations.lanes.entry(key) {
@@ -557,12 +597,14 @@ impl App {
             mut waiting,
         } = entry.remove();
         drop(state);
+        let origin = active.origin.clone();
         if matches!(&active.request, SubmissionRequest::Continuation { .. })
             && let SubmissionOutcome::Finished {
                 result: Err(failure),
                 ..
             } = &outcome
         {
+            let thread_id = origin.thread().0;
             let uncertain = !matches!(failure, SubmissionFailure::Rejected(_));
             self.chat_widget.add_error_message(if uncertain {
                 "Continuation outcome is unknown. The original may still be delivered; no retry was sent."
@@ -594,11 +636,12 @@ impl App {
         }
         if let SubmissionOutcome::Operation(Ok(OperationReceipt::RealtimePrepared(result))) =
             &outcome
+            && let OperationOrigin::Thread { thread_id, store } = &origin
             && self
                 .thread_event_channels
-                .get(&thread_id)
-                .is_some_and(|channel| Arc::ptr_eq(&channel.store, &active.store))
-            && self.continue_realtime_preparation(thread_id, &mut active, result.clone())
+                .get(thread_id)
+                .is_some_and(|channel| Arc::ptr_eq(&channel.store, store))
+            && self.continue_realtime_preparation(*thread_id, &mut active, result.clone())
         {
             self.server_operations.lanes.insert(
                 key,
@@ -622,21 +665,24 @@ impl App {
             ) {
                 // This is the sole active control lease for this captured store. A successor
                 // cannot dispatch before this receipt is reduced, including a wrong-turn retry.
-                active.store.lock().await.pending_interrupt_turn_id = None;
+                origin.thread().1.lock().await.pending_interrupt_turn_id = None;
             }
             let applicable = matches!(
                 &**operation,
                 ThreadOperation::Control(control::ControlOperation::DetachAndExit { .. })
-            ) || self
-                .thread_event_channels
-                .get(&thread_id)
-                .is_some_and(|channel| Arc::ptr_eq(&channel.store, &active.store));
+            ) || match &origin {
+                OperationOrigin::Connection => true,
+                OperationOrigin::Thread { thread_id, store } => self
+                    .thread_event_channels
+                    .get(thread_id)
+                    .is_some_and(|channel| Arc::ptr_eq(&channel.store, store)),
+            };
             if matches!(&result, Ok(OperationReceipt::SettingsUnsupported)) {
                 server.note_operation_settings_unsupported();
             }
             match result {
                 Ok(receipt) if applicable => {
-                    self.finish_server_operation(thread_id, operation, receipt)
+                    self.finish_server_operation(&origin, operation, receipt)
                         .await?;
                 }
                 Ok(_) => {}
@@ -647,15 +693,15 @@ impl App {
                         let protected = waiting
                             .iter()
                             .filter(|entry| requests::holds_start_lease(entry))
-                            .map(|entry| entry.thread_id)
+                            .filter_map(|entry| entry.origin.thread_id())
                             .collect::<HashSet<_>>();
                         self.cleanup_unsent_operations(std::iter::once(&active), &protected)
                             .await;
                     }
                     if applicable {
-                        self.reject_server_operation(thread_id, operation, &failure);
+                        self.reject_server_operation(&origin, operation, &failure);
                     } else {
-                        self.chat_widget.add_error_message(format!("Earlier conversation {thread_id}: {} did not receive a usable acknowledgement; no retry was sent.", operation.label()));
+                        self.chat_widget.add_error_message(format!("Earlier {:?}: {} did not receive a usable acknowledgement; no retry was sent.", scope, operation.label()));
                     }
                     if !matches!(failure, SubmissionFailure::Rejected(_))
                         && !matches!(&**operation, ThreadOperation::Realtime(operation) if operation.is_preparation())
@@ -665,19 +711,22 @@ impl App {
                         )
                     {
                         let protected = requests::holds_start_lease(&active)
-                            .then_some(thread_id)
+                            .then(|| origin.thread_id())
+                            .flatten()
                             .into_iter()
                             .collect::<HashSet<_>>();
                         if !matches!(&**operation, ThreadOperation::Response(_)) {
                             self.cleanup_unsent_operations(waiting.iter(), &protected)
                                 .await;
                             let drafts = recoverable_drafts(waiting.drain(..));
-                            self.restore_submission_drafts(
-                                thread_id,
-                                drafts,
-                                DraftDisposition::Recover { uncertain_id: None },
-                            )
-                            .await;
+                            if let Some(thread_id) = origin.thread_id() {
+                                self.restore_submission_drafts(
+                                    thread_id,
+                                    drafts,
+                                    DraftDisposition::Recover { uncertain_id: None },
+                                )
+                                .await;
+                            }
                         }
                         self.server_operations.lanes.insert(
                             key,
@@ -706,6 +755,7 @@ impl App {
             self.refresh_submission_preview();
             return Ok(());
         }
+        let thread_id = origin.thread().0;
         let current = self.chat_widget.thread_id() == Some(thread_id);
         let mut transport_failed = false;
         let uncertain_id = match &outcome {
@@ -916,7 +966,7 @@ impl App {
                     }
                     completion = self.server_operations.control_rx.recv() => {
                         let completion = completion.ok_or_else(|| color_eyre::eyre::eyre!("control receipt channel closed"))?;
-                        self.finish_submission(server, completion.thread_id, completion.id, completion.epoch, completion.outcome).await?;
+                        self.finish_submission(server, completion.scope, completion.id, completion.epoch, completion.outcome).await?;
                     }
                 }
             }

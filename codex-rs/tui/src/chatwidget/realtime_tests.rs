@@ -60,18 +60,53 @@ fn activate_voice(chat: &mut ChatWidget) -> ThreadId {
     thread_id
 }
 
-pub(crate) fn activate_voice_for_thread(chat: &mut ChatWidget, thread_id: ThreadId) {
+pub(crate) fn activate_voice_for_thread(chat: &mut ChatWidget, thread_id: ThreadId) -> (u64, u64) {
     chat.thread_id = Some(thread_id);
     chat.realtime_conversation.phase = RealtimeConversationPhase::Active;
     chat.realtime_conversation.thread_id = Some(thread_id);
     chat.realtime_conversation.backend_started = true;
     chat.realtime_conversation.latest_input_was_voice = true;
+    (
+        chat.realtime_conversation.attempt_id,
+        chat.realtime_conversation.input_generation,
+    )
 }
 
-pub(crate) fn prepare_voice_for_thread(chat: &mut ChatWidget, thread_id: ThreadId) {
+pub(crate) fn prepare_voice_for_thread(chat: &mut ChatWidget, thread_id: ThreadId) -> (u64, u64) {
     activate_voice_for_thread(chat, thread_id);
     chat.realtime_conversation.phase = RealtimeConversationPhase::Starting;
     chat.realtime_conversation.backend_started = false;
+    (
+        chat.realtime_conversation.attempt_id,
+        chat.realtime_conversation.input_generation,
+    )
+}
+
+pub(crate) fn queue_fixture_realtime_speech(
+    chat: &mut ChatWidget,
+    thread_id: ThreadId,
+    text: &str,
+) -> AppCommand {
+    let state = &mut chat.realtime_conversation;
+    let delivery_id =
+        super::NEXT_REALTIME_SPEECH_DELIVERY_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    state
+        .pending_speech
+        .push_back(super::PendingRealtimeSpeech {
+            state: super::PendingSpeechState::Queued(delivery_id),
+            captioned: false,
+            input_generation: state.input_generation,
+            thread_id,
+            turn_id: "fixture-speech".into(),
+            item: agent_item("fixture-speech", text, Some(MessagePhase::FinalAnswer)),
+        });
+    AppCommand::RealtimeConversationSpeech {
+        thread_id,
+        attempt_id: state.attempt_id,
+        input_generation: state.input_generation,
+        delivery_id,
+        text: text.to_string().into(),
+    }
 }
 
 fn user_item(text: &str) -> ThreadItem {

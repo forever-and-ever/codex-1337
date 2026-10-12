@@ -19,14 +19,14 @@ async fn misalignment_precaution_retires_voice_and_keeps_late_turn_blocked() {
     );
 
     assert!(!chat.realtime_conversation_is_running());
-    assert_matches!(
-        ops.try_recv(),
-        Ok(Op::RealtimeConversationStop { thread_id: stopped }) if stopped == thread_id
-    );
+    let stop = ops
+        .try_recv()
+        .expect("precaution emits stop with original attempt");
+    assert_matches!(&stop, Op::RealtimeConversationStop { thread_id: stopped, .. } if *stopped == thread_id);
     assert!(ops.try_recv().is_err());
     assert!(chat.has_misalignment_policy_violation());
     assert!(!chat.bottom_pane.composer_input_enabled());
-    assert!(chat.submit_op(Op::RealtimeConversationStop { thread_id }));
+    assert!(chat.submit_op(stop));
     assert_matches!(ops.try_recv(), Ok(Op::RealtimeConversationStop { .. }));
 
     // A handoff already in flight may still produce a TurnStarted notification.

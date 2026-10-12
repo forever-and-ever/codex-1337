@@ -39,7 +39,7 @@ pub(in crate::app) use control::GoalStop;
 
 #[derive(Debug)]
 pub(in crate::app) struct ControlCompletion {
-    pub(in crate::app) thread_id: ThreadId,
+    pub(in crate::app) scope: OperationScope,
     pub(in crate::app) id: Uuid,
     pub(in crate::app) epoch: u64,
     pub(in crate::app) outcome: SubmissionOutcome,
@@ -57,7 +57,7 @@ enum OperationLane {
     Exit,
     Connection,
     Realtime(ThreadId),
-    Response(ThreadId),
+    Response(OperationScope),
 }
 
 pub(in crate::app) use requests::CatalogRequest;
@@ -103,12 +103,50 @@ enum LaneState {
     Uncertain,
 }
 
+#[derive(Clone)]
+enum OperationOrigin {
+    Thread {
+        thread_id: ThreadId,
+        store: Arc<Mutex<ThreadEventStore>>,
+    },
+    Connection,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(in crate::app) enum OperationScope {
+    Thread(ThreadId),
+    Connection,
+}
+impl From<ThreadId> for OperationScope {
+    fn from(thread_id: ThreadId) -> Self {
+        Self::Thread(thread_id)
+    }
+}
+impl OperationOrigin {
+    fn scope(&self) -> OperationScope {
+        match self {
+            Self::Thread { thread_id, .. } => OperationScope::Thread(*thread_id),
+            Self::Connection => OperationScope::Connection,
+        }
+    }
+    fn thread_id(&self) -> Option<ThreadId> {
+        match self {
+            Self::Thread { thread_id, .. } => Some(*thread_id),
+            Self::Connection => None,
+        }
+    }
+    fn thread(&self) -> (ThreadId, &Arc<Mutex<ThreadEventStore>>) {
+        match self {
+            Self::Thread { thread_id, store } => (*thread_id, store),
+            Self::Connection => panic!("thread operation has connection origin"),
+        }
+    }
+}
+
 struct PendingSubmission {
     id: Uuid,
     order: u64,
     epoch: u64,
-    thread_id: ThreadId,
-    store: Arc<Mutex<ThreadEventStore>>,
+    origin: OperationOrigin,
     request: SubmissionRequest,
     buffering: Option<codex_app_server_protocol::ModelSafetyBufferingUpdatedNotification>,
 }
@@ -430,7 +468,12 @@ impl ServerOperations {
                         && matches!(&entry.request, SubmissionRequest::Operation(operation) if operation.cancellable_before_send()))
         };
         let key = self.lanes.iter().find_map(|(key, lane)| {
-            if *key != OperationLane::Connection && lane.active.thread_id != thread_id {
+            if lane
+                .active
+                .origin
+                .thread_id()
+                .is_some_and(|origin| origin != thread_id)
+            {
                 return None;
             }
             ((matches!(lane.state, LaneState::Queued) && editable(&lane.active))
@@ -503,18 +546,21 @@ impl ServerOperations {
         &self,
         thread_id: Option<ThreadId>,
     ) -> ThreadSubmissionPreview {
-        let Some(thread_id) = thread_id else {
-            return ThreadSubmissionPreview::Idle;
-        };
-        let mut entries = Vec::new();
-        for key in [
-            OperationLane::Thread(thread_id),
-            OperationLane::Response(thread_id),
-            OperationLane::Realtime(thread_id),
-            OperationLane::Control(thread_id),
+        let mut keys = vec![
             OperationLane::Connection,
+            OperationLane::Response(OperationScope::Connection),
             OperationLane::Exit,
-        ] {
+        ];
+        if let Some(thread_id) = thread_id {
+            keys.extend([
+                OperationLane::Thread(thread_id),
+                OperationLane::Response(OperationScope::Thread(thread_id)),
+                OperationLane::Realtime(thread_id),
+                OperationLane::Control(thread_id),
+            ]);
+        }
+        let mut entries = Vec::new();
+        for key in keys {
             if let Some(lane) = self.lanes.get(&key) {
                 entries.push((
                     &lane.active,

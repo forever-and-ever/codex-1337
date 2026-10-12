@@ -1112,48 +1112,7 @@ impl AppServerSession {
         thread_id: ThreadId,
         include_turns: bool,
     ) -> Result<Thread> {
-        let request_id = self.next_request_id();
-        let response = self
-            .client
-            .request_typed::<ThreadReadResponse>(ClientRequest::ThreadRead {
-                request_id,
-                params: ThreadReadParams {
-                    thread_id: thread_id.to_string(),
-                    include_turns,
-                },
-            })
-            .await;
-        let mut response: ThreadReadResponse = match response {
-            Ok(response) => return Ok(response.thread),
-            Err(TypedRequestError::Server { source, .. })
-                if include_turns
-                    && source.message
-                        == "paginated threads do not support thread/read(includeTurns=true)" =>
-            {
-                let request_id = self.next_request_id();
-                self.client
-                    .request_typed(ClientRequest::ThreadRead {
-                        request_id,
-                        params: ThreadReadParams {
-                            thread_id: thread_id.to_string(),
-                            include_turns: false,
-                        },
-                    })
-                    .await
-                    .wrap_err("thread/read failed during TUI session lookup")?
-            }
-            Err(err) => return Err(err).wrap_err("thread/read failed during TUI session lookup"),
-        };
-        self.hydrate_initial_thread_history(
-            &mut response.thread,
-            /*turn_cursor*/ None,
-            /*item_cursor*/ None,
-            /*config*/ None,
-            /*local_settings*/ None,
-            HistoryHydrationScope::Initial,
-        )
-        .await?;
-        Ok(response.thread)
+        history::preparation::read_thread(&self.request_handle(), thread_id, include_turns).await
     }
 
     pub(crate) async fn thread_archive(&mut self, thread_id: ThreadId) -> Result<()> {
@@ -1502,14 +1461,6 @@ impl AppServerSession {
             .await
             .wrap_err("thread/unsubscribe failed in TUI")?;
         Ok(())
-    }
-
-    pub(crate) async fn reject_server_request(
-        &self,
-        request_id: RequestId,
-        error: JSONRPCErrorError,
-    ) -> std::io::Result<()> {
-        self.client.reject_server_request(request_id, error).await
     }
 
     pub(crate) async fn shutdown(self) -> std::io::Result<()> {

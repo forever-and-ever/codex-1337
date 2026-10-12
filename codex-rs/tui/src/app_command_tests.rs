@@ -14,18 +14,24 @@ fn realtime_offer_is_redacted_in_diagnostics_and_preserved_for_signaling() {
     let command = AppCommand::RealtimeConversationStart {
         thread_id,
         offer_sdp: original_offer.clone().into(),
+        attempt_id: 7,
+        input_generation: 11,
     };
 
     assert_eq!(
         format!("{command:?}"),
-        format!("RealtimeConversationStart {{ thread_id: {thread_id:?}, offer_sdp: <redacted> }}")
+        format!(
+            "RealtimeConversationStart {{ thread_id: {thread_id:?}, offer_sdp: <redacted>, attempt_id: 7, input_generation: 11 }}"
+        )
     );
     assert_eq!(
         serde_json::to_value(&command).expect("command diagnostics serialize"),
         json!({
             "RealtimeConversationStart": {
                 "thread_id": thread_id,
-                "offer_sdp": "<redacted>"
+                "offer_sdp": "<redacted>",
+                "attempt_id": 7,
+                "input_generation": 11
             }
         })
     );

@@ -17,7 +17,8 @@ async fn rejected_voice_start_does_not_leave_local_capture_active() -> Result<()
                 thread_id,
                 app.config.cwd.to_path_buf(),
             ));
-        crate::chatwidget::activate_voice_for_thread(&mut app.chat_widget, thread_id);
+        let (attempt_id, input_generation) =
+            crate::chatwidget::prepare_voice_for_thread(&mut app.chat_widget, thread_id);
         assert!(app.chat_widget.may_receive_realtime_transcripts());
         if replay_only {
             app.app_server_target = AppServerTarget::Remote {
@@ -33,8 +34,8 @@ async fn rejected_voice_start_does_not_leave_local_capture_active() -> Result<()
             &mut app_server,
             AppEvent::CodexOp(Op::RealtimeConversationStart {
                 thread_id,
-                attempt_id: 0,
-                input_generation: 0,
+                attempt_id,
+                input_generation,
                 offer_sdp: String::from("v=0\r\n").into(),
             }),
         ))
@@ -78,7 +79,8 @@ async fn rejected_voice_stop_clears_the_owned_session() -> Result<()> {
                 thread_id,
                 app.config.cwd.to_path_buf(),
             ));
-        crate::chatwidget::activate_voice_for_thread(&mut app.chat_widget, thread_id);
+        let (attempt_id, _) =
+            crate::chatwidget::activate_voice_for_thread(&mut app.chat_widget, thread_id);
         if replay_only {
             app.app_server_target = AppServerTarget::Remote {
                 endpoint: crate::resolve_remote_addr("ws://127.0.0.1:9")?,
@@ -92,7 +94,7 @@ async fn rejected_voice_stop_clears_the_owned_session() -> Result<()> {
             &mut app_server,
             AppEvent::CodexOp(Op::RealtimeConversationStop {
                 thread_id,
-                attempt_id: 0,
+                attempt_id,
             }),
         ))
         .await?;

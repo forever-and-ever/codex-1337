@@ -1013,10 +1013,12 @@ impl App {
         self.enqueue_server_operation(
             app_server,
             thread_id,
-            ThreadOperation::Response(Box::new(super::turn_submissions::ServerRequestDelivery {
-                resolution,
-                command: op.clone(),
-            })),
+            ThreadOperation::Response(Box::new(
+                super::turn_submissions::ServerRequestDelivery::Resolved {
+                    resolution,
+                    command: op.clone(),
+                },
+            )),
         );
         Ok(true)
     }

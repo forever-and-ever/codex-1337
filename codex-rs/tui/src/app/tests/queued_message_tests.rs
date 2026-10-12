@@ -388,7 +388,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         .expect("unknown interrupt receipt");
     app.finish_submission(
         &mut server,
-        control.thread_id,
+        control.scope,
         control.id,
         control.epoch,
         control.outcome,
@@ -598,7 +598,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     .expect("owned response-delivery receipt");
     app.finish_submission(
         &mut server,
-        delivery.thread_id,
+        delivery.scope,
         delivery.id,
         delivery.epoch,
         delivery.outcome,
@@ -622,14 +622,15 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     assert!(app.server_operations.is_empty());
     // Realtime preparation owns no signaling effect yet. Retiring its read-only stage
     // releases the matching local helper lease and cannot later start a stale attempt.
-    crate::chatwidget::prepare_voice_for_thread(&mut app.chat_widget, other_id);
+    let (attempt_id, input_generation) =
+        crate::chatwidget::prepare_voice_for_thread(&mut app.chat_widget, other_id);
     app.submit_thread_op(
         &mut server,
         other_id,
         AppCommand::RealtimeConversationStart {
             thread_id: other_id,
-            attempt_id: 0,
-            input_generation: 0,
+            attempt_id,
+            input_generation,
             offer_sdp: String::from("v=0\\r\\n").into(),
         },
     )

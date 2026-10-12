@@ -15,23 +15,25 @@ use codex_app_server_protocol::ServerRequest;
 use codex_protocol::request_permissions::RequestPermissionProfile as CoreRequestPermissionProfile;
 
 impl App {
-    pub(super) async fn reject_app_server_request(
-        &self,
+    pub(super) fn reject_app_server_request(
+        &mut self,
         app_server_client: &AppServerSession,
         request_id: AppServerRequestId,
         reason: String,
-    ) -> std::result::Result<(), String> {
-        app_server_client
-            .reject_server_request(
-                request_id,
-                JSONRPCErrorError {
-                    code: -32000,
-                    message: reason,
-                    data: None,
+    ) {
+        self.enqueue_connection_operation(
+            app_server_client,
+            super::turn_submissions::ThreadOperation::Response(Box::new(
+                super::turn_submissions::ServerRequestDelivery::Rejected {
+                    request_id,
+                    error: JSONRPCErrorError {
+                        code: -32000,
+                        message: reason,
+                        data: None,
+                    },
                 },
-            )
-            .await
-            .map_err(|err| format!("failed to reject app-server request: {err}"))
+            )),
+        );
     }
 }
 

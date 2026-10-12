@@ -437,32 +437,14 @@ impl InProcessAppServerClient {
             .await
     }
 
-    /// Rejects a pending server request with JSON-RPC error payload.
     pub async fn reject_server_request(
         &self,
         request_id: RequestId,
         error: JSONRPCErrorError,
     ) -> IoResult<()> {
-        let (response_tx, response_rx) = oneshot::channel();
-        self.command_tx
-            .send(ClientCommand::RejectServerRequest {
-                request_id,
-                error,
-                response_tx,
-            })
+        self.request_handle()
+            .reject_server_request(request_id, error)
             .await
-            .map_err(|_| {
-                IoError::new(
-                    ErrorKind::BrokenPipe,
-                    "in-process app-server worker channel is closed",
-                )
-            })?;
-        response_rx.await.map_err(|_| {
-            IoError::new(
-                ErrorKind::BrokenPipe,
-                "in-process app-server reject channel is closed",
-            )
-        })?
     }
 
     /// Returns the next in-process event, or `None` when worker exits.

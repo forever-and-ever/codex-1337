@@ -386,6 +386,8 @@ pub(crate) use realtime::tests::activate_voice_for_thread;
 pub(crate) use realtime::tests::commit_realtime_history_events;
 #[cfg(test)]
 pub(crate) use realtime::tests::prepare_voice_for_thread;
+#[cfg(test)]
+pub(crate) use realtime::tests::queue_fixture_realtime_speech;
 mod reasoning_shortcuts;
 use self::realtime::RealtimeConversationUiState;
 mod rendering;

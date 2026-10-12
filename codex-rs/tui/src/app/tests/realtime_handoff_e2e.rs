@@ -124,21 +124,32 @@ async fn delegated_core_events_keep_private_output_hidden_and_deliver_final_spee
     let thread_id = started.session.thread_id;
     app.enqueue_primary_thread_session(started.session, started.turns)
         .await?;
-    crate::chatwidget::activate_voice_for_thread(&mut app.chat_widget, thread_id);
+    let (attempt_id, input_generation) =
+        crate::chatwidget::prepare_voice_for_thread(&mut app.chat_widget, thread_id);
     while ops.try_recv().is_ok() {}
     let mut tui = crate::tui::test_support::make_test_tui()?;
-    app_server
-        .thread_realtime_start(
+    app.handle_event(
+        &mut tui,
+        &mut app_server,
+        AppEvent::CodexOp(Op::RealtimeConversationStart {
             thread_id,
-            "v=offer\r\n".to_string(),
-            /*model*/ None,
-            /*voice*/ None,
-        )
-        .await?;
+            attempt_id,
+            input_generation,
+            offer_sdp: "v=offer\r\n".to_string().into(),
+        }),
+    )
+    .await?;
+    app.settle_turn_submissions(&mut app_server).await?;
+    crate::chatwidget::activate_voice_for_thread(&mut app.chat_widget, thread_id);
     // The sideband fixture sends its delegation after the first outbound request.
-    app_server
-        .thread_realtime_append_speech(thread_id, "fixture prompt".to_string())
+    let fixture_speech = crate::chatwidget::queue_fixture_realtime_speech(
+        &mut app.chat_widget,
+        thread_id,
+        "fixture prompt",
+    );
+    app.handle_event(&mut tui, &mut app_server, AppEvent::CodexOp(fixture_speech))
         .await?;
+    app.settle_turn_submissions(&mut app_server).await?;
 
     // Keep the real Core delegation running while another session is visible.
     let other = app_server.start_thread(&app.config).await?;
@@ -188,6 +199,7 @@ async fn delegated_core_events_keep_private_output_hidden_and_deliver_final_spee
     );
     app.handle_event(&mut tui, &mut app_server, AppEvent::CodexOp(speech))
         .await?;
+    app.settle_turn_submissions(&mut app_server).await?;
     assert_eq!(
         timeout(
             Duration::from_secs(5),

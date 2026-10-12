@@ -621,6 +621,7 @@ pub(crate) enum AppEvent {
     /// Return a completed client-owned dynamic tool call to app server.
     DynamicToolCallCompleted {
         request_id: AppServerRequestId,
+        epoch: u64,
         response: DynamicToolCallResponse,
     },
 

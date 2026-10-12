@@ -611,22 +611,17 @@ impl App {
         if thread_id
             .is_some_and(|thread_id| self.temporary_structured_requests.contains_key(&thread_id))
         {
-            if let Err(err) = self
-                .reject_app_server_request(
-                    app_server_client,
-                    request.id().clone(),
-                    "temporary structured threads cannot request tools or user interaction"
-                        .to_string(),
-                )
-                .await
-            {
-                tracing::debug!("{err}");
-            }
+            self.reject_app_server_request(
+                app_server_client,
+                request.id().clone(),
+                "temporary structured threads cannot request tools or user interaction".to_string(),
+            );
             return;
         }
         if let ServerRequest::DynamicToolCall { request_id, .. } = &request {
             self.app_event_tx.send(AppEvent::DynamicToolCallCompleted {
                 request_id: request_id.clone(),
+                epoch: self.server_operations.epoch,
                 response: crate::dynamic_tools::failure_response("Thread coordination is owned by the app server; this frontend does not execute task tools."),
             });
             return;
@@ -638,16 +633,11 @@ impl App {
                 && owner.thread_id() == thread_id
         });
         if thread_id.is_some_and(|thread_id| self.abandoned_side_threads.contains(&thread_id)) {
-            if let Err(err) = self
-                .reject_app_server_request(
-                    app_server_client,
-                    request.id().clone(),
-                    "side conversation was closed".to_string(),
-                )
-                .await
-            {
-                tracing::warn!("{err}");
-            }
+            self.reject_app_server_request(
+                app_server_client,
+                request.id().clone(),
+                "side conversation was closed".to_string(),
+            );
             return;
         }
         if thread_id.is_some()
@@ -770,16 +760,11 @@ impl App {
             );
             self.chat_widget
                 .add_error_message(unsupported.message.clone());
-            if let Err(err) = self
-                .reject_app_server_request(
-                    app_server_client,
-                    unsupported.request_id,
-                    unsupported.message,
-                )
-                .await
-            {
-                tracing::warn!("{err}");
-            }
+            self.reject_app_server_request(
+                app_server_client,
+                unsupported.request_id,
+                unsupported.message,
+            );
             return;
         }
 

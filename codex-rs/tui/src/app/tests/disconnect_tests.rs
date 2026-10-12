@@ -284,10 +284,12 @@ async fn remote_disconnect_retires_voice_before_reconnecting() -> Result<()> {
     app.app_server_target = AppServerTarget::Remote {
         endpoint: crate::resolve_remote_addr("ws://127.0.0.1:9")?,
     };
-    crate::chatwidget::activate_voice_for_thread(&mut app.chat_widget, thread_id);
-    assert!(app.chat_widget.is_current_realtime_attempt(
-        thread_id, /*attempt_id*/ 0, /*input_generation*/ 0
-    ));
+    let (attempt_id, input_generation) =
+        crate::chatwidget::activate_voice_for_thread(&mut app.chat_widget, thread_id);
+    assert!(
+        app.chat_widget
+            .is_current_realtime_attempt(thread_id, attempt_id, input_generation)
+    );
 
     let (replacement, _, _, _) = make_chatwidget_manual_with_sender().await;
     app.replace_chat_widget(replacement);
@@ -302,7 +304,7 @@ async fn remote_disconnect_retires_voice_before_reconnecting() -> Result<()> {
         &mut session,
         AppEvent::CodexOp(Op::RealtimeConversationStop {
             thread_id,
-            attempt_id: 0,
+            attempt_id,
         }),
     )
     .await?;
@@ -313,16 +315,16 @@ async fn remote_disconnect_retires_voice_before_reconnecting() -> Result<()> {
     assert_eq!(
         (
             app.reconnect.offline,
-            app.chat_widget.is_current_realtime_attempt(
-                thread_id, /*attempt_id*/ 0, /*input_generation*/ 0
-            ),
+            app.chat_widget
+                .is_current_realtime_attempt(thread_id, attempt_id, input_generation),
         ),
         (true, false)
     );
     assert!(app.begin_reconnect());
-    assert!(!app.chat_widget.is_current_realtime_attempt(
-        thread_id, /*attempt_id*/ 0, /*input_generation*/ 0
-    ));
+    assert!(
+        !app.chat_widget
+            .is_current_realtime_attempt(thread_id, attempt_id, input_generation)
+    );
     session.shutdown().await?;
     Ok(())
 }

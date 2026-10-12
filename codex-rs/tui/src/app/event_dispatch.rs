@@ -230,24 +230,14 @@ impl App {
                 self.handle_startup_thread_started(app_server, result)
                     .await?;
             }
-            AppEvent::DynamicToolCallCompleted {
-                request_id,
-                response,
-            } => {
-                match serde_json::to_value(response) {
-                    Ok(result) => {
-                        if let Err(error) = app_server
-                            .resolve_server_request(request_id.clone(), result)
-                            .await
-                        {
-                            tracing::warn!(?request_id, %error, "failed to resolve dynamic tool call");
-                        }
-                    }
-                    Err(error) => {
-                        tracing::warn!(?request_id, %error, "failed to serialize dynamic tool response");
-                    }
-                }
-            }
+            AppEvent::DynamicToolCallCompleted { request_id, epoch, response } => {
+    if epoch == self.server_operations.epoch {
+        match serde_json::to_value(response) {
+            Ok(result) => self.enqueue_connection_operation(app_server, super::turn_submissions::ThreadOperation::Response(Box::new(super::turn_submissions::ServerRequestDelivery::DynamicTool(super::app_server_requests::AppServerRequestResolution { request_id, result })))),
+            Err(error) => tracing::warn!(?request_id, %error, "failed to serialize dynamic tool response"),
+        }
+    } else { tracing::debug!(?request_id, "discarded dynamic tool response from retired connection"); }
+}
             AppEvent::RequestOlderScrollbackHistory { thread_id } => {
                 if self.chat_widget.thread_id() == Some(thread_id)
                     && self.overlay.is_none()

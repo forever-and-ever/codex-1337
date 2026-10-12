@@ -40,9 +40,31 @@ pub(in crate::app) enum ConnectionMutation {
 }
 
 #[derive(Clone)]
-pub(in crate::app) struct ServerRequestDelivery {
-    pub(in crate::app) resolution: super::super::app_server_requests::AppServerRequestResolution,
-    pub(in crate::app) command: AppCommand,
+pub(in crate::app) enum ServerRequestDelivery {
+    Resolved {
+        resolution: super::super::app_server_requests::AppServerRequestResolution,
+        command: AppCommand,
+    },
+    DynamicTool(super::super::app_server_requests::AppServerRequestResolution),
+    Rejected {
+        request_id: codex_app_server_protocol::RequestId,
+        error: codex_app_server_protocol::JSONRPCErrorError,
+    },
+}
+
+impl ServerRequestDelivery {
+    async fn send(self, handle: &AppServerRequestHandle) -> std::io::Result<()> {
+        match self {
+            Self::Resolved { resolution, .. } | Self::DynamicTool(resolution) => {
+                handle
+                    .resolve_server_request(resolution.request_id, resolution.result)
+                    .await
+            }
+            Self::Rejected { request_id, error } => {
+                handle.reject_server_request(request_id, error).await
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -104,43 +126,65 @@ impl ThreadOperation {
         !matches!(self, Self::Control(_) | Self::Response(_))
     }
 
-    pub(super) fn lane(&self, thread_id: ThreadId) -> OperationLane {
+    pub(super) fn lane(&self, scope: OperationScope) -> OperationLane {
+        let thread_id = || match scope {
+            OperationScope::Thread(id) => id,
+            OperationScope::Connection => panic!("thread request has connection scope"),
+        };
         match self {
-            Self::Response(_) => OperationLane::Response(thread_id),
-            Self::Realtime(_) => OperationLane::Realtime(thread_id),
+            Self::Response(_) => OperationLane::Response(scope),
+            Self::Realtime(_) => OperationLane::Realtime(thread_id()),
             Self::Connection(_) => OperationLane::Connection,
             Self::Control(control::ControlOperation::DetachAndExit { .. }) => OperationLane::Exit,
-            Self::Control(_) => OperationLane::Control(thread_id),
-            Self::Mutation(_) | Self::Catalog(_) => OperationLane::Thread(thread_id),
+            Self::Control(_) => OperationLane::Control(thread_id()),
+            Self::Mutation(_) | Self::Catalog(_) => OperationLane::Thread(thread_id()),
         }
     }
 }
 
 pub(super) async fn send(
     handle: AppServerRequestHandle,
-    thread_id: ThreadId,
     id: Uuid,
     operation: ThreadOperation,
-    store: Arc<Mutex<ThreadEventStore>>,
+    origin: OperationOrigin,
 ) -> Result<OperationReceipt, TypedRequestError> {
     let request_id = api::RequestId::String(format!("tui-operation-{id}"));
-    let thread = thread_id.to_string();
     match operation {
         ThreadOperation::Response(delivery) => {
-            handle
-                .resolve_server_request(delivery.resolution.request_id, delivery.resolution.result)
+            delivery
+                .send(&handle)
                 .await
                 .map_err(|source| TypedRequestError::Transport {
                     method: "server-request response delivery".into(),
                     source,
                 })?;
-            Ok(OperationReceipt::ServerRequestDelivered)
+            return Ok(OperationReceipt::ServerRequestDelivered);
         }
+        ThreadOperation::Connection(ConnectionMutation::ReloadUserConfig) => {
+            let _: api::ConfigWriteResponse = handle
+                .request_typed(api::ClientRequest::ConfigBatchWrite {
+                    request_id,
+                    params: api::ConfigBatchWriteParams {
+                        edits: Vec::new(),
+                        file_path: None,
+                        expected_version: None,
+                        reload_user_config: true,
+                    },
+                })
+                .await?;
+            return Ok(OperationReceipt::ConfigReloaded);
+        }
+        _ => {}
+    }
+    let (thread_id, store) = origin.thread();
+    let thread = thread_id.to_string();
+    match operation {
+        ThreadOperation::Response(_) => unreachable!("response handled before thread projection"),
         ThreadOperation::Realtime(operation) => {
             realtime::send(handle, thread_id, id, operation).await
         }
         ThreadOperation::Control(operation) => {
-            control::send(&handle, thread_id, id, operation, &store).await
+            control::send(&handle, thread_id, id, operation, store).await
         }
         ThreadOperation::Mutation(mutation) => match mutation {
             ThreadMutation::Compact => {
@@ -247,19 +291,8 @@ pub(super) async fn send(
             .request_typed(api::ClientRequest::SkillsList { request_id, params })
             .await
             .map(OperationReceipt::Skills),
-        ThreadOperation::Connection(ConnectionMutation::ReloadUserConfig) => {
-            let _: api::ConfigWriteResponse = handle
-                .request_typed(api::ClientRequest::ConfigBatchWrite {
-                    request_id,
-                    params: api::ConfigBatchWriteParams {
-                        edits: Vec::new(),
-                        file_path: None,
-                        expected_version: None,
-                        reload_user_config: true,
-                    },
-                })
-                .await?;
-            Ok(OperationReceipt::ConfigReloaded)
+        ThreadOperation::Connection(_) => {
+            unreachable!("connection request handled before thread projection")
         }
     }
 }
@@ -280,17 +313,21 @@ impl App {
 
     pub(in crate::app) async fn finish_server_operation(
         &mut self,
-        thread_id: ThreadId,
+        origin: &OperationOrigin,
         operation: &ThreadOperation,
         receipt: OperationReceipt,
     ) -> Result<()> {
+        if matches!(origin, OperationOrigin::Connection) {
+            return Ok(());
+        }
+        let thread_id = origin.thread().0;
         match receipt {
             OperationReceipt::ServerRequestDelivered => {
                 if let ThreadOperation::Response(delivery) = operation
-                    && ThreadEventStore::op_can_change_pending_replay_state(&delivery.command)
+                    && let ServerRequestDelivery::Resolved { command, .. } = &**delivery
+                    && ThreadEventStore::op_can_change_pending_replay_state(command)
                 {
-                    self.note_thread_outbound_op(thread_id, &delivery.command)
-                        .await;
+                    self.note_thread_outbound_op(thread_id, command).await;
                     self.refresh_pending_thread_approvals().await;
                     self.refresh_side_parent_status_from_store(thread_id).await;
                 }
@@ -384,15 +421,19 @@ impl App {
 
     pub(in crate::app) fn reject_server_operation(
         &mut self,
-        thread_id: ThreadId,
+        origin: &OperationOrigin,
         operation: &ThreadOperation,
         failure: &SubmissionFailure,
     ) {
-        if let ThreadOperation::Realtime(operation) = operation {
+        let thread_id = origin.thread_id();
+        if let Some(thread_id) = thread_id
+            && let ThreadOperation::Realtime(operation) = operation
+        {
             self.reject_realtime_operation(thread_id, operation, failure);
             return;
         }
-        if let ThreadOperation::Mutation(ThreadMutation::Rename(params)) = operation
+        if let Some(thread_id) = thread_id
+            && let ThreadOperation::Mutation(ThreadMutation::Rename(params)) = operation
             && let SubmissionFailure::Rejected(error) = failure
             && self.confirm_thread_name_conflict(
                 error,
@@ -415,7 +456,8 @@ impl App {
                 operation.label()
             ),
         };
-        if let ThreadOperation::Mutation(ThreadMutation::Rename(params)) = operation
+        if let Some(thread_id) = thread_id
+            && let ThreadOperation::Mutation(ThreadMutation::Rename(params)) = operation
             && self.agents_overview.rendered_full_screen
         {
             if let Ok(mut state) = self.agents_overview.view_state.lock() {
@@ -426,11 +468,13 @@ impl App {
             self.add_agents_overview_error(message);
             return;
         }
-        if self.chat_widget.thread_id() == Some(thread_id) {
+        if thread_id.is_none() || self.chat_widget.thread_id() == thread_id {
             self.chat_widget.add_error_message(message);
         } else {
-            self.chat_widget
-                .add_error_message(format!("Conversation {thread_id}: {message}"));
+            self.chat_widget.add_error_message(format!(
+                "Conversation {}: {message}",
+                thread_id.expect("noncurrent thread origin")
+            ));
         }
     }
 }
@@ -445,11 +489,14 @@ impl App {
             let SubmissionRequest::Operation(operation) = &entry.request else {
                 continue;
             };
-            let thread_id = entry.thread_id;
+            let OperationOrigin::Thread { thread_id, store } = &entry.origin else {
+                continue;
+            };
+            let thread_id = *thread_id;
             if !self
                 .thread_event_channels
                 .get(&thread_id)
-                .is_some_and(|channel| Arc::ptr_eq(&channel.store, &entry.store))
+                .is_some_and(|channel| Arc::ptr_eq(&channel.store, store))
             {
                 continue;
             }
@@ -466,7 +513,10 @@ impl App {
                     let outstanding = self.server_operations.lanes.values().any(|lane| {
                         std::iter::once(&lane.active)
                             .chain(lane.waiting.iter())
-                            .any(|other| other.thread_id == thread_id && holds_start_lease(other))
+                            .any(|other| {
+                                other.origin.thread_id() == Some(thread_id)
+                                    && holds_start_lease(other)
+                            })
                     });
                     if protected_starts.contains(&thread_id) || outstanding {
                         continue;
@@ -479,7 +529,7 @@ impl App {
                     {
                         input.task_running = input.agent_turn_running;
                     }
-                    if let Some(input) = entry.store.lock().await.input_state.as_mut()
+                    if let Some(input) = store.lock().await.input_state.as_mut()
                         && input.input_queue.cancel_unsent_operation()
                     {
                         input.task_running = input.agent_turn_running;

@@ -319,7 +319,7 @@ async fn startup_retry_waits_for_closed_then_uses_a_fresh_attempt_and_preserves_
         Err(codex_realtime_webrtc::ConnectionError::NegotiationTimedOut),
     );
     assert!(
-        matches!(ops.try_recv().unwrap(), AppCommand::RealtimeConversationStop { thread_id: id } if id == thread_id)
+        matches!(ops.try_recv().unwrap(), AppCommand::RealtimeConversationStop { thread_id: id, .. } if id == thread_id)
     );
     assert_eq!(
         (
@@ -509,7 +509,7 @@ async fn startup_retry_never_retries_twice_or_retries_other_errors_or_active_ses
         if phase == RealtimeConversationPhase::Starting {
             assert!(matches!(
                 ops.try_recv(),
-                Ok(AppCommand::RealtimeConversationStop { thread_id: stopped }) if stopped == thread_id
+                Ok(AppCommand::RealtimeConversationStop { thread_id: stopped, .. }) if stopped == thread_id
             ));
         }
         assert!(ops.try_recv().is_err(), "no retry may be queued");

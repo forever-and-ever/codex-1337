@@ -975,16 +975,11 @@ impl App {
                         !matches!(event, ThreadBufferedEvent::Request(request)
                             if request.id() == &unsupported.request_id)
                     });
-                    if let Err(error) = self
-                        .reject_app_server_request(
-                            app_server,
-                            unsupported.request_id,
-                            unsupported.message,
-                        )
-                        .await
-                    {
-                        tracing::warn!("{error}");
-                    }
+                    self.reject_app_server_request(
+                        app_server,
+                        unsupported.request_id,
+                        unsupported.message,
+                    );
                 }
                 if started.can_accept_text_input {
                     self.agent_navigation

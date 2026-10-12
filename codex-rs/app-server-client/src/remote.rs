@@ -593,26 +593,9 @@ impl RemoteAppServerClient {
         request_id: RequestId,
         error: JSONRPCErrorError,
     ) -> IoResult<()> {
-        let (response_tx, response_rx) = oneshot::channel();
-        self.command_tx
-            .send(RemoteClientCommand::RejectServerRequest {
-                request_id,
-                error,
-                response_tx,
-            })
+        self.request_handle()
+            .reject_server_request(request_id, error)
             .await
-            .map_err(|_| {
-                IoError::new(
-                    ErrorKind::BrokenPipe,
-                    "remote app-server worker channel is closed",
-                )
-            })?;
-        response_rx.await.map_err(|_| {
-            IoError::new(
-                ErrorKind::BrokenPipe,
-                "remote app-server reject channel is closed",
-            )
-        })?
     }
 
     pub async fn next_event(&mut self) -> Option<AppServerEvent> {
