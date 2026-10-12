@@ -46,6 +46,7 @@ pub(super) enum FreshStage {
         fences: Vec<ThreadId>,
     },
     Uncertain(Vec<ThreadId>),
+    RestoreDraft(detach::DetachPlan),
 }
 
 pub(super) struct FreshReceipt {
@@ -96,6 +97,7 @@ impl FreshStage {
             }
             Self::Cleaning { thread_id, fences } => *thread_id == id || fences.contains(&id),
             Self::Uncertain(fences) => fences.contains(&id),
+            Self::RestoreDraft(plan) => plan.targets.iter().any(|target| target.thread_id == id),
             _ => false,
         }
     }
@@ -105,7 +107,7 @@ impl FreshStage {
             Self::Admitted(input) | Self::Defaults { input, .. } => input,
             Self::Starting(context) => &mut context.input,
             Self::Naming(ready) | Self::Detaching { ready, .. } => &mut ready.context.input,
-            Self::Cleaning { .. } | Self::Uncertain(_) => return None,
+            Self::RestoreDraft(_) | Self::Cleaning { .. } | Self::Uncertain(_) => return None,
         };
         input.message.take().map(|message| LocalDraftRecovery {
             origin: input.origin.clone(),
@@ -144,11 +146,30 @@ impl App {
         );
     }
 
+    pub(in crate::app) async fn enqueue_parked_draft_restore(&mut self, server: &AppServerSession) {
+        let plan = self
+            .prepare_detach_plan(detach::DetachScope::Navigation { destination: None })
+            .await;
+        self.enqueue_navigation(
+            server,
+            NavigationIntent::Fresh(FreshStage::RestoreDraft(plan)),
+        );
+    }
+
     pub(super) fn dispatch_fresh_defaults(
         &self,
         server: &AppServerSession,
         operation: &mut PendingNavigation,
     ) {
+        if let NavigationIntent::Fresh(FreshStage::RestoreDraft(plan)) = &operation.intent {
+            let plan = plan.clone();
+            self.spawn_fresh_effect(
+                operation,
+                server.request_handle(),
+                FreshEffect::Detach(plan),
+            );
+            return;
+        }
         let NavigationIntent::Fresh(FreshStage::Admitted(input)) =
             std::mem::replace(&mut operation.intent, NavigationIntent::Transitioning)
         else {
@@ -333,6 +354,36 @@ impl App {
         };
         let FreshReceipt { handle, outcome } = receipt;
         match (stage, outcome) {
+            (FreshStage::RestoreDraft(plan), FreshOutcome::Detached(receipt)) => {
+                let fences = match &receipt {
+                    detach::DetachReceipt::Complete(results) => results
+                        .iter()
+                        .filter(|result| result.result.is_err())
+                        .map(|result| result.thread_id)
+                        .collect::<Vec<_>>(),
+                    detach::DetachReceipt::BudgetExpired => {
+                        plan.targets.iter().map(|target| target.thread_id).collect()
+                    }
+                };
+                if same_epoch && let detach::DetachReceipt::Complete(results) = receipt {
+                    self.finish_detach_plan(
+                        &plan,
+                        detach::DetachReceipt::Complete(
+                            results
+                                .into_iter()
+                                .filter(|result| result.result.is_ok())
+                                .collect(),
+                        ),
+                    )
+                    .await;
+                }
+                if same_epoch && !fences.is_empty() {
+                    self.chat_widget.add_error_message("Draft restoration detachment was not confirmed. Close and reopen this TUI to resynchronize; no detach was retried.".into());
+                    self.retain_fresh_uncertainty(operation, fences);
+                } else if matching {
+                    self.commit_parked_session_draft(tui, server).await?;
+                }
+            }
             (FreshStage::Defaults { mut input, cwd }, FreshOutcome::Defaults(result)) => {
                 if !matching {
                     self.recover_fresh_input(&mut input);
@@ -508,6 +559,10 @@ impl App {
                 }
                 self.chat_widget.add_error_message("New conversation preparation terminated unexpectedly. No request was retried; close and reopen this TUI to resynchronize.".into());
                 match stage {
+                    FreshStage::RestoreDraft(plan) if same_epoch => self.retain_fresh_uncertainty(
+                        operation,
+                        plan.targets.iter().map(|target| target.thread_id).collect(),
+                    ),
                     FreshStage::Starting(_) if same_epoch => {
                         self.retain_fresh_uncertainty(operation, Vec::new())
                     }

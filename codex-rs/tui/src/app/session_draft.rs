@@ -18,23 +18,28 @@ impl App {
         if self.agents_overview.parked_draft.is_none() {
             return Ok(false);
         }
+        self.enqueue_parked_draft_restore(server).await;
+        tui.frame_requester().schedule_frame();
+        Ok(true)
+    }
+
+    pub(super) async fn commit_parked_session_draft(
+        &mut self,
+        tui: &mut tui::Tui,
+        server: &mut AppServerSession,
+    ) -> Result<()> {
         self.reset_for_thread_switch(tui)?;
         self.store_active_thread_receiver().await;
-        self.detach_current_thread_for_navigation(server, /*destination*/ None)
-            .await;
         self.reset_thread_event_state().await;
         let Some(draft) = self.agents_overview.parked_draft.take() else {
-            return Ok(false);
+            return Ok(());
         };
         self.config = draft.config;
         self.model_catalog = draft.catalog;
         server.set_available_models(self.model_catalog.models.clone());
         self.local_settings = self.local_settings.reloaded(&self.config);
-        let init = self.chatwidget_init_for_forked_or_resumed_thread(
-            tui,
-            self.config.clone(),
-            /*initial_user_message*/ None,
-        );
+        let init =
+            self.chatwidget_init_for_forked_or_resumed_thread(tui, self.config.clone(), None);
         self.replace_chat_widget(ChatWidget::new_with_app_event(init));
         self.chat_widget.restore_thread_input_state(
             Some(draft.input),
@@ -47,7 +52,7 @@ impl App {
             FileSearchManager::new(self.config.cwd.to_path_buf(), self.app_event_tx.clone());
         self.refresh_skills(server);
         tui.frame_requester().schedule_frame();
-        Ok(true)
+        Ok(())
     }
 
     pub(super) fn start_draft_session(&mut self, server: &AppServerSession) {
