@@ -141,8 +141,11 @@
 //! On submit/queue paths, the composer:
 //!
 //! - Dispatches a visible `!!` prefix locally before parent-owned restrictions or queuing,
-//!   without recording command history. Bare `!!` opens the client-only result viewer.
-//!   Hidden paste expansion cannot create local execution intent; attachments are rejected.
+//!   without recording command history. Runs acquire the single local admission lease before
+//!   clearing input; an occupied lease leaves the complete draft intact, even before App dispatch.
+//!   Bare `!!` views the client-only result or restores a retained, never-started command into
+//!   an empty composer without executing it. Hidden paste expansion cannot create local execution
+//!   intent; attachments are rejected.
 //! - Expands pending paste placeholders so element ranges align with the final text.
 //! - Trims whitespace and rebases elements when `trim_submission` is enabled (the default).
 //!   Otherwise, preserves both.
@@ -637,6 +640,7 @@ pub(crate) struct ChatComposer {
     history: ChatComposerHistory,
     agents_navigation_enabled: bool,
     footer: FooterState,
+    local_shell_admission: Option<crate::local_shell::LocalShellAdmission>,
     has_focus: bool,
     frame_requester: Option<FrameRequester>,
     sparkle: sparkle::Sparkle,
@@ -767,6 +771,7 @@ impl ChatComposer {
             app_event_tx,
             history: ChatComposerHistory::new(),
             agents_navigation_enabled: false,
+            local_shell_admission: None,
             footer: FooterState {
                 quit_shortcut_expires_at: None,
                 quit_shortcut_key: key_hint::ctrl(KeyCode::Char('c')),

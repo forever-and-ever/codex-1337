@@ -2,11 +2,14 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use codex_shell_command::shell_detect::default_user_shell;
 use codex_utils_pty::SpawnedProcess;
 use codex_utils_pty::spawn_pipe_process_no_stdin;
+use tokio::sync::OwnedSemaphorePermit;
+use tokio::sync::Semaphore;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
@@ -22,19 +25,58 @@ impl LocalShellCommand {
     }
 }
 
+/// One admission capability shared by App and whichever composer is currently visible.
+#[derive(Clone, Debug)]
+pub(crate) struct LocalShellAdmission(Arc<Semaphore>);
+
+impl Default for LocalShellAdmission {
+    fn default() -> Self {
+        Self(Arc::new(Semaphore::new(1)))
+    }
+}
+
+impl LocalShellAdmission {
+    pub(crate) fn try_acquire(&self) -> Option<OwnedSemaphorePermit> {
+        self.0.clone().try_acquire_owned().ok()
+    }
+
+    pub(crate) fn is_claimed(&self) -> bool {
+        self.0.available_permits() == 0
+    }
+}
+
+/// Owns the sole admission until execution ends or the unstarted command is restored.
+#[derive(Debug)]
+pub struct LocalShellSubmission {
+    pub(crate) command: LocalShellCommand,
+    pub(crate) lease: OwnedSemaphorePermit,
+}
+
+impl PartialEq for LocalShellSubmission {
+    fn eq(&self, other: &Self) -> bool {
+        self.command == other.command
+            && Arc::ptr_eq(self.lease.semaphore(), other.lease.semaphore())
+    }
+}
+
+impl Eq for LocalShellSubmission {}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum LocalShellRequest {
     Show,
-    Run(LocalShellCommand),
+    Run(LocalShellSubmission),
 }
 
 impl LocalShellRequest {
-    pub(crate) fn parse(text: &str) -> Option<Self> {
+    pub(crate) fn parse(text: &str, lease: Option<OwnedSemaphorePermit>) -> Option<Self> {
         let command = text.trim_start().strip_prefix("!!")?.trim();
         Some(if command.is_empty() {
             Self::Show
         } else {
-            Self::Run(LocalShellCommand(command.to_owned()))
+            Self::Run(LocalShellSubmission {
+                command: LocalShellCommand(command.to_owned()),
+                lease: lease?,
+            })
         })
     }
 }

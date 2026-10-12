@@ -1,6 +1,7 @@
 use super::ChatComposer;
 use super::InputResult;
 use crate::key_hint::KeyBindingListExt;
+use crate::local_shell::LocalShellAdmission;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 use ratatui::style::Stylize;
@@ -23,9 +24,27 @@ impl ChatComposer {
             );
             return Some(InputResult::None);
         }
+        // Bare !! never needs admission. Every run claims the capability before the
+        // destructive prepare, including while its App event is still in flight.
+        let lease = if self.current_text().trim() == "!!" {
+            None
+        } else {
+            let Some(lease) = self
+                .local_shell_admission
+                .as_ref()
+                .and_then(|admission| admission.try_acquire())
+            else {
+                self.show_footer_flash(
+                    Line::from("Local shell occupied; draft unchanged · !! view/restore"),
+                    Duration::from_secs(5),
+                );
+                return Some(InputResult::None);
+            };
+            Some(lease)
+        };
         Some(
             match self.prepare_submission_text(/*record_history*/ false) {
-                Some((text, _)) => crate::local_shell::LocalShellRequest::parse(&text)
+                Some((text, _)) => crate::local_shell::LocalShellRequest::parse(&text, lease)
                     .map(InputResult::LocalShell)
                     .unwrap_or(InputResult::None),
                 None => InputResult::None,
@@ -33,7 +52,12 @@ impl ChatComposer {
         )
     }
 
-    pub(crate) fn set_local_shell_notice(&mut self, notice: Option<String>) {
+    pub(crate) fn set_local_shell_context(
+        &mut self,
+        admission: LocalShellAdmission,
+        notice: Option<String>,
+    ) {
+        self.local_shell_admission = Some(admission);
         self.footer.local_shell_notice = notice.map(Line::from);
     }
 

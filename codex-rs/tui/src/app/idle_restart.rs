@@ -4,7 +4,7 @@ use super::*;
 
 impl App {
     pub(super) fn ready_for_idle_restart(&self) -> bool {
-        if self.local_shell.is_running() {
+        if self.local_shell.blocks_reload() {
             return false;
         }
         if !matches!(self.farm.state, farm::FarmRequestState::Idle)

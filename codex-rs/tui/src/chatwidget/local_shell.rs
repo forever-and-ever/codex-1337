@@ -1,21 +1,24 @@
 use super::ChatWidget;
+use crate::local_shell::LocalShellAdmission;
 use ratatui::text::Line;
 use std::time::Duration;
 
 impl ChatWidget {
-    pub(crate) fn set_local_shell_notice(&mut self, notice: Option<String>) {
-        self.bottom_pane.set_local_shell_notice(notice);
+    pub(crate) fn set_local_shell_context(
+        &mut self,
+        admission: LocalShellAdmission,
+        notice: Option<String>,
+    ) {
+        self.bottom_pane.set_local_shell_context(admission, notice);
     }
 
-    pub(crate) fn restore_local_shell_command(&mut self, command: &str) {
-        if self.composer_text_with_pending().is_empty() {
-            self.bottom_pane
-                .set_composer_text(format!("!! {command}"), Vec::new(), Vec::new());
-        } else {
-            self.flash_local_shell_error(
-                "Local command was not started; another draft is already being edited".to_owned(),
-            );
+    pub(crate) fn restore_local_shell_command(&mut self, command: &str) -> bool {
+        if !self.composer_is_empty() {
+            return false;
         }
+        self.bottom_pane
+            .set_composer_text(format!("!! {command}"), Vec::new(), Vec::new());
+        true
     }
 
     pub(crate) fn flash_local_shell_error(&mut self, error: String) {

@@ -285,6 +285,7 @@ async fn pasted_input_preserves_app_boundary_and_local_shell_authority() -> Resu
     }
     assert!(op_rx.try_recv().is_err());
 
+    app.sync_local_shell_notice();
     let directory = tempfile::tempdir()?;
     let marker = directory.path().join("ready");
     let marker_text = marker.to_string_lossy();
@@ -300,11 +301,30 @@ async fn pasted_input_preserves_app_boundary_and_local_shell_authority() -> Resu
         let event = app_event_rx
             .try_recv()
             .expect("local request bypasses the agent queue");
-        assert!(!matches!(event, AppEvent::AppendMessageHistoryEntry { .. }));
+        assert!(!matches!(
+            event,
+            AppEvent::CodexOp(_) | AppEvent::AppendMessageHistoryEntry { .. }
+        ));
         if let AppEvent::LocalShellRequest(request) = event {
             break request;
         }
     };
+    // The in-flight request, not just App's eventual job state, owns admission.
+    app.chat_widget
+        .apply_external_edit("!!printf %s ".to_owned());
+    app.chat_widget.handle_paste("second".repeat(200));
+    let second_draft = app.chat_widget.composer_text_with_pending();
+    app.chat_widget
+        .handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    assert_eq!(app.chat_widget.composer_text_with_pending(), second_draft);
+    while let Ok(event) = app_event_rx.try_recv() {
+        assert!(!matches!(
+            event,
+            AppEvent::LocalShellRequest(_)
+                | AppEvent::CodexOp(_)
+                | AppEvent::AppendMessageHistoryEntry { .. }
+        ));
+    }
     let transcript_len = app.transcript_cells.len();
     app.handle_event(
         &mut tui,
@@ -313,6 +333,17 @@ async fn pasted_input_preserves_app_boundary_and_local_shell_authority() -> Resu
     )
     .await?;
     assert!(app.local_shell.is_running());
+    app.chat_widget
+        .handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    assert_eq!(app.chat_widget.composer_text_with_pending(), second_draft);
+    while let Ok(event) = app_event_rx.try_recv() {
+        assert!(!matches!(
+            event,
+            AppEvent::LocalShellRequest(_)
+                | AppEvent::CodexOp(_)
+                | AppEvent::AppendMessageHistoryEntry { .. }
+        ));
+    }
     assert!(app.overlay.is_none());
     assert!(op_rx.try_recv().is_err());
 
@@ -379,6 +410,111 @@ async fn pasted_input_preserves_app_boundary_and_local_shell_authority() -> Resu
     app.handle_event(&mut tui, &mut app_server, event).await?;
     assert!(app.overlay.is_some());
     assert!(op_rx.try_recv().is_err());
+    app.overlay = None;
+
+    // Residual rejection keeps the sole lease and exact command instead of overwriting
+    // a newer draft, admitting another run, or feeding an agent/history queue.
+    let recovery_command = "!! printf '%s' 'retained\u{1b}[31m\nvalue'";
+    app.chat_widget
+        .apply_external_edit(recovery_command.to_owned());
+    app.chat_widget
+        .handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    let rejected = loop {
+        let event = app_event_rx
+            .try_recv()
+            .expect("local admission before rejection");
+        assert!(!matches!(
+            event,
+            AppEvent::CodexOp(_) | AppEvent::AppendMessageHistoryEntry { .. }
+        ));
+        if let AppEvent::LocalShellRequest(crate::local_shell::LocalShellRequest::Run(submission)) =
+            event
+        {
+            break submission;
+        }
+    };
+    app.chat_widget
+        .apply_external_edit("newer agent draft".to_owned());
+    app.reject_local_shell_submission(
+        rejected,
+        "Host cwd unavailable: witness".to_owned(),
+        &mut tui,
+    );
+    assert_eq!(
+        app.chat_widget.composer_text_with_pending(),
+        "newer agent draft"
+    );
+    assert!(app.local_shell.blocks_reload());
+    app.handle_local_shell_request(crate::local_shell::LocalShellRequest::Show, &mut tui);
+    assert!(app.overlay.is_some());
+    assert_eq!(
+        app.chat_widget.composer_text_with_pending(),
+        "newer agent draft"
+    );
+    assert!(app.local_shell.blocks_reload());
+    app.overlay = None;
+
+    app.chat_widget
+        .apply_external_edit("!!printf blocked".to_owned());
+    app.chat_widget
+        .handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    assert_eq!(
+        app.chat_widget.composer_text_with_pending(),
+        "!!printf blocked"
+    );
+    while let Ok(event) = app_event_rx.try_recv() {
+        assert!(!matches!(
+            event,
+            AppEvent::LocalShellRequest(_)
+                | AppEvent::CodexOp(_)
+                | AppEvent::AppendMessageHistoryEntry { .. }
+        ));
+    }
+    app.chat_widget.apply_external_edit("!!".to_owned());
+    app.handle_tui_event(
+        &mut tui,
+        &mut app_server,
+        TuiEvent::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+    )
+    .await?;
+    let event = app_event_rx
+        .recv()
+        .await
+        .expect("explicit recovery request");
+    assert!(matches!(
+        &event,
+        AppEvent::LocalShellRequest(crate::local_shell::LocalShellRequest::Show)
+    ));
+    app.handle_event(&mut tui, &mut app_server, event).await?;
+    assert_eq!(
+        app.chat_widget.composer_text_with_pending(),
+        recovery_command
+    );
+    assert!(!app.local_shell.blocks_reload());
+    assert!(app.overlay.is_none());
+
+    // Exit discloses a request not yet dispatched, escapes controls, and releases admission.
+    app.chat_widget
+        .handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    let disclosure = app
+        .shutdown_local_shell(&mut app_event_rx)
+        .await
+        .expect("unstarted local command at exit");
+    assert!(disclosure.contains("Client-only"));
+    assert!(
+        disclosure.contains(
+            &recovery_command
+                .strip_prefix("!! ")
+                .unwrap()
+                .escape_debug()
+                .to_string()
+        )
+    );
+    assert!(!disclosure.contains('\u{1b}'));
+    assert!(!app.local_shell.blocks_reload());
+    assert!(!app.local_shell.is_running());
+    assert!(op_rx.try_recv().is_err());
+    assert_eq!(app.transcript_cells.len(), transcript_len);
 
     Ok(())
 }

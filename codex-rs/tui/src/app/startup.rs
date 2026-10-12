@@ -1502,7 +1502,13 @@ See the Codex keymap documentation for supported actions and examples."
                 }
             }
         };
-        app.local_shell.shutdown().await;
+        let exit_reason_result = match app.shutdown_local_shell(&mut app_event_rx).await {
+            Some(recovery) => Err(match exit_reason_result {
+                Ok(_) => color_eyre::eyre::eyre!(recovery),
+                Err(error) => error.wrap_err(recovery),
+            }),
+            None => exit_reason_result,
+        };
         if let Err(err) = app_server.shutdown().await {
             tracing::warn!(error = %err, "failed to shut down embedded app server");
         }

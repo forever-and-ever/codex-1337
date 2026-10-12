@@ -1,8 +1,10 @@
 use super::App;
 use crate::app_event::AppEvent;
+use crate::local_shell::LocalShellAdmission;
 use crate::local_shell::LocalShellCommand;
 use crate::local_shell::LocalShellRequest;
 use crate::local_shell::LocalShellResult;
+use crate::local_shell::LocalShellSubmission;
 use crate::local_shell::LocalShellUpdate;
 use crate::pager_overlay::Overlay;
 use crate::tui::Tui;
@@ -10,14 +12,16 @@ use crate::tui::TuiEvent;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEventKind;
 use crossterm::event::KeyModifiers;
-use ratatui::text::Line;
 use std::path::PathBuf;
+use tokio::sync::OwnedSemaphorePermit;
+use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::AbortOnDropHandle;
 
 pub(crate) struct LocalShell {
     cwd: Result<PathBuf, String>,
     state: State,
+    admission: LocalShellAdmission,
 }
 
 enum State {
@@ -26,19 +30,24 @@ enum State {
     Stopping(Job),
     Stalled(Job),
     Finished(LocalShellResult),
+    Rejected {
+        submission: LocalShellSubmission,
+        error: String,
+    },
 }
 
 struct Job {
     command: LocalShellCommand,
     cancellation: CancellationToken,
     task: AbortOnDropHandle<()>,
+    _lease: OwnedSemaphorePermit,
 }
 
 impl State {
     fn job_mut(&mut self) -> Option<&mut Job> {
         match self {
             Self::Running(job) | Self::Stopping(job) | Self::Stalled(job) => Some(job),
-            Self::Idle | Self::Finished(_) => None,
+            Self::Idle | Self::Finished(_) | Self::Rejected { .. } => None,
         }
     }
 
@@ -63,6 +72,7 @@ impl LocalShell {
         Self {
             cwd: std::env::current_dir().map_err(|error| format!("Host cwd unavailable: {error}")),
             state: State::Idle,
+            admission: LocalShellAdmission::default(),
         }
     }
 
@@ -73,9 +83,16 @@ impl LocalShell {
         )
     }
 
+    pub(super) fn blocks_reload(&self) -> bool {
+        self.admission.is_claimed()
+    }
+
     fn notice(&self) -> Option<String> {
         Some(match &self.state {
             State::Idle => return None,
+            State::Rejected { .. } => {
+                "Local shell not started; command retained · !! restore/view".to_owned()
+            }
             State::Stalled(_) => {
                 "Local shell did not stop; still waiting for exit · !! view".to_owned()
             }
@@ -91,7 +108,7 @@ impl LocalShell {
         })
     }
 
-    pub(super) async fn shutdown(&mut self) {
+    pub(super) async fn shutdown(&mut self) -> Option<String> {
         self.state.request_stop();
         if let Some(Job { task, .. }) = self.state.job_mut() {
             // Abort-on-drop still owns cleanup if the normal exit wait cannot finish.
@@ -103,6 +120,15 @@ impl LocalShell {
                 task.abort();
                 let _ = (&mut *task).await;
             }
+        }
+        // Disclose only commands that never reached execute; a possibly executed command
+        // is not retryable recovery. Taking the state releases the owned lease.
+        match std::mem::replace(&mut self.state, State::Idle) {
+            State::Rejected { submission, error } => Some(format!(
+                "Client-only local command was not started ({error}); retained command at exit (escaped):\n!! {}",
+                submission.command.text().escape_debug()
+            )),
+            _ => None,
         }
     }
 }
@@ -129,25 +155,77 @@ impl App {
 
     pub(super) fn handle_local_shell_request(&mut self, request: LocalShellRequest, tui: &mut Tui) {
         match request {
-            LocalShellRequest::Show => self.show_local_shell(tui),
-            LocalShellRequest::Run(command) => self.start_local_shell(command, tui),
+            LocalShellRequest::Show => {
+                if !self.restore_rejected_local_shell(tui) {
+                    self.show_local_shell(tui);
+                }
+            }
+            LocalShellRequest::Run(submission) => self.start_local_shell(submission, tui),
         }
     }
 
-    fn start_local_shell(&mut self, command: LocalShellCommand, tui: &mut Tui) {
-        if self.local_shell.is_running() {
-            self.chat_widget.restore_local_shell_command(command.text());
-            self.sync_local_shell_notice();
-            return;
+    pub(super) fn reject_local_shell_submission(
+        &mut self,
+        submission: LocalShellSubmission,
+        error: String,
+        tui: &mut Tui,
+    ) {
+        self.local_shell.state = State::Rejected {
+            submission,
+            error: error.clone(),
+        };
+        self.chat_widget.flash_local_shell_error(error);
+        self.sync_local_shell_notice();
+        tui.frame_requester().schedule_frame();
+    }
+
+    fn restore_rejected_local_shell(&mut self, tui: &mut Tui) -> bool {
+        let State::Rejected { submission, .. } = &self.local_shell.state else {
+            return false;
+        };
+        if !self
+            .chat_widget
+            .restore_local_shell_command(submission.command.text())
+        {
+            return false;
         }
+        self.local_shell.state = State::Idle;
+        self.chat_widget
+            .flash_local_shell_error("Local command restored, not run".to_owned());
+        self.sync_local_shell_notice();
+        tui.frame_requester().schedule_frame();
+        true
+    }
+
+    pub(super) async fn shutdown_local_shell(
+        &mut self,
+        pending_events: &mut UnboundedReceiver<AppEvent>,
+    ) -> Option<String> {
+        // At most one unstarted run can exist: it still owns the same admission lease.
+        while let Ok(event) = pending_events.try_recv() {
+            if let AppEvent::LocalShellRequest(LocalShellRequest::Run(submission)) = event {
+                debug_assert!(!self.local_shell.is_running());
+                self.local_shell.state = State::Rejected {
+                    submission,
+                    error: "TUI closed before dispatch".to_owned(),
+                };
+            }
+        }
+        self.local_shell.shutdown().await
+    }
+
+    fn start_local_shell(&mut self, submission: LocalShellSubmission, tui: &mut Tui) {
+        // The request owns the sole admission from before the composer was cleared.
+        debug_assert!(!self.local_shell.is_running());
         let cwd = match &self.local_shell.cwd {
             Ok(cwd) => cwd.clone(),
             Err(error) => {
-                self.chat_widget.restore_local_shell_command(command.text());
-                self.chat_widget.flash_local_shell_error(error.clone());
+                let error = error.clone();
+                self.reject_local_shell_submission(submission, error, tui);
                 return;
             }
         };
+        let LocalShellSubmission { command, lease } = submission;
         let cancellation = CancellationToken::new();
         let worker_cancellation = cancellation.clone();
         let worker_command = command.clone();
@@ -162,6 +240,7 @@ impl App {
             command,
             cancellation,
             task,
+            _lease: lease,
         });
         self.sync_local_shell_notice();
         tui.frame_requester().schedule_frame();
@@ -185,8 +264,10 @@ impl App {
     }
 
     pub(super) fn sync_local_shell_notice(&mut self) {
-        self.chat_widget
-            .set_local_shell_notice(self.local_shell.notice());
+        self.chat_widget.set_local_shell_context(
+            self.local_shell.admission.clone(),
+            self.local_shell.notice(),
+        );
     }
 
     pub(super) fn cancel_local_shell_key(&mut self, event: &TuiEvent, tui: &mut Tui) -> bool {
@@ -247,6 +328,14 @@ impl App {
                 }
                 append("Status snapshot; close and use !! to refresh.");
                 append("Close this viewer, then Ctrl-C to stop the local process group.");
+            }
+            State::Rejected { submission, error } => {
+                append(&format!("!! {}", submission.command.text()));
+                append(&format!("Not started: {error}"));
+                append("Command retained here, not queued for execution.");
+                append(
+                    "Close this viewer, clear the composer, then use !! to restore it without running.",
+                );
             }
             State::Finished(result) => {
                 append(&format!("!! {}", result.command.text()));
