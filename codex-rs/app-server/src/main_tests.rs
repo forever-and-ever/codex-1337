@@ -13,10 +13,17 @@ fn app_server_accepts_cli_config_overrides() {
         "model=\"gpt-5-codex\"",
         "--config",
         "sandbox_mode=\"read-only\"",
+        "--linux-sandbox-pid-namespace",
+        "inherit",
         "--listen",
         "off",
     ])
     .expect("parse app-server args");
+
+    assert_eq!(
+        args.local_exec.linux_sandbox_pid_namespace,
+        codex_sandboxing::LinuxSandboxPidNamespace::Inherit
+    );
 
     let parsed_overrides = args
         .config_overrides

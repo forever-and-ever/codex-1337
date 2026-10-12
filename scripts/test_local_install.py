@@ -170,6 +170,10 @@ class LocalInstallTest(unittest.TestCase):
                     str(prefix / "bin/codex"),
                     (units / local_integration.UNITS[0]).read_text(),
                 )
+                self.assertIn(
+                    "--linux-sandbox-pid-namespace inherit",
+                    (units / local_integration.UNITS[0]).read_text(),
+                )
                 systemctl.reset_mock()
                 local_integration.integrate("install", prefix)
                 self.assertEqual(systemctl.call_args_list[0].args, ("daemon-reload",))

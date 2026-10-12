@@ -546,6 +546,9 @@ struct LogoutCommand {
 
 #[derive(Debug, Parser)]
 struct AppServerCommand {
+    #[command(flatten)]
+    local_exec: codex_app_server::AppServerLocalExecArgs,
+
     /// Omit to run the app server; specify a subcommand for tooling.
     #[command(subcommand)]
     subcommand: Option<AppServerSubcommand>,
@@ -1188,6 +1191,7 @@ async fn cli_main(
         }
         Some(Subcommand::AppServer(app_server_cli)) => {
             let AppServerCommand {
+                local_exec,
                 subcommand,
                 code_mode_host,
                 strict_config: app_server_strict_config,
@@ -1214,6 +1218,7 @@ async fn cli_main(
                     };
                     let auth = auth.try_into_settings()?;
                     let runtime_options = codex_app_server::AppServerRuntimeOptions {
+                        linux_sandbox_pid_namespace: local_exec.linux_sandbox_pid_namespace,
                         code_mode_host_transport: code_mode_host.into(),
                         managed_daemon,
                         remote_control_startup_mode: match (remote_control, remote_control_disabled)
@@ -4431,8 +4436,21 @@ mod tests {
 
     #[test]
     fn app_server_listen_unix_socket_url_parses() {
-        let app_server =
-            app_server_from_args(["codex", "app-server", "--listen", "unix://"].as_ref());
+        let app_server = app_server_from_args(
+            [
+                "codex",
+                "app-server",
+                "--listen",
+                "unix://",
+                "--linux-sandbox-pid-namespace",
+                "inherit",
+            ]
+            .as_ref(),
+        );
+        assert_eq!(
+            app_server.local_exec.linux_sandbox_pid_namespace,
+            codex_sandboxing::LinuxSandboxPidNamespace::Inherit
+        );
         assert_eq!(
             app_server.listen,
             codex_app_server::AppServerTransport::UnixSocket {

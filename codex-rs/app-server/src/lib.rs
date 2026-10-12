@@ -127,6 +127,7 @@ mod gateway_oauth_notifications;
 mod image_url;
 pub mod in_process;
 mod jira_store;
+mod local_exec;
 mod log_write_warning;
 #[cfg(unix)]
 mod managed_daemon;
@@ -159,6 +160,7 @@ pub use crate::code_mode_host::CodeModeHostTransport;
 pub use crate::embedding::install_embedded_runtime;
 pub use crate::error_code::INPUT_TOO_LARGE_ERROR_CODE;
 pub use crate::error_code::INVALID_PARAMS_ERROR_CODE;
+pub use crate::local_exec::AppServerLocalExecArgs;
 pub use crate::transport::AppServerTransport;
 pub use crate::transport::RemoteControlStartupMode;
 pub use crate::transport::app_server_control_socket_path;
@@ -370,6 +372,7 @@ pub enum PluginStartupTasks {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppServerRuntimeOptions {
+    pub linux_sandbox_pid_namespace: codex_sandboxing::LinuxSandboxPidNamespace,
     pub code_mode_host_transport: CodeModeHostTransport,
     pub plugin_startup_tasks: PluginStartupTasks,
     pub remote_control_startup_mode: RemoteControlStartupMode,
@@ -380,6 +383,7 @@ pub struct AppServerRuntimeOptions {
 impl Default for AppServerRuntimeOptions {
     fn default() -> Self {
         Self {
+            linux_sandbox_pid_namespace: Default::default(),
             code_mode_host_transport: CodeModeHostTransport::Local,
             plugin_startup_tasks: PluginStartupTasks::Start,
             remote_control_startup_mode: RemoteControlStartupMode::ResolvePersisted,
@@ -429,7 +433,8 @@ pub async fn run_main_with_transport_options(
     let local_runtime_paths = ExecServerRuntimeOptions::from_optional_paths(
         arg0_paths.codex_self_exe.clone(),
         arg0_paths.codex_linux_sandbox_exe.clone(),
-    )?;
+    )?
+    .with_linux_sandbox_pid_namespace(runtime_options.linux_sandbox_pid_namespace);
     let ignore_user_config = loader_overrides.ignore_user_config;
     let config_manager = ConfigManager::new(
         codex_home.to_path_buf(),

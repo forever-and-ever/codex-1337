@@ -99,6 +99,17 @@ manifest when copying a release. The status line pairs the connected server vers
 with the running executable's revision, never the latest installation's revision.
 Uninstalled development binaries display `tui-dev`.
 
+The production and staging managed app servers start with
+`--linux-sandbox-pid-namespace inherit`: their local Linux tool sandboxes share
+the host PID namespace and `/proc`, including same-UID signaling authority.
+Filesystem, network, user-namespace and seccomp restrictions remain in force
+for directly executed tools; services launched through the host user manager
+are outside those tool sandboxes.
+Ordinary app-server startup defaults to `isolate`; this trusted startup setting
+is not a request permission or repository configuration, and does not change
+remote executors' own startup policy. Production adopts changed unit arguments
+on its next idle refresh; staging adopts them on its install-time restart.
+
 `scripts/install-local --staging` installs a trial build beside production: a bundle
 under `codex-1337/staging/distributions` whose `distribution` manifest carries
 `channel=staging`, the `codex-staging` launcher, and `codex-app-server-staging.service`,

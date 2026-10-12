@@ -3,7 +3,7 @@ Description=Staging Codex app server (trial build beside production)
 
 [Service]
 Type=simple
-ExecStart=:@CODEX@ app-server --listen unix://
+ExecStart=:@CODEX@ app-server --listen unix:// --linux-sandbox-pid-namespace inherit
 # Production owns the persisted remote-control enrollment.
 Environment=CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED=1
 OOMPolicy=continue

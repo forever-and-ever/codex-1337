@@ -31,6 +31,9 @@ const DISABLE_MANAGED_CONFIG_ENV_VAR: &str = "CODEX_APP_SERVER_DISABLE_MANAGED_C
 #[command(version)]
 struct AppServerArgs {
     #[command(flatten)]
+    local_exec: codex_app_server::AppServerLocalExecArgs,
+
+    #[command(flatten)]
     config_overrides: CliConfigOverrides,
 
     #[command(flatten)]
@@ -81,6 +84,7 @@ fn main() -> anyhow::Result<()> {
     arg0_dispatch_or_else(move |arg0_paths: Arg0DispatchPaths| async move {
         let AppServerArgs {
             config_overrides,
+            local_exec,
             code_mode_host,
             listen,
             session_source,
@@ -101,6 +105,7 @@ fn main() -> anyhow::Result<()> {
         let transport = listen;
         let auth = auth.try_into_settings()?;
         let mut runtime_options = AppServerRuntimeOptions {
+            linux_sandbox_pid_namespace: local_exec.linux_sandbox_pid_namespace,
             code_mode_host_transport: code_mode_host.into(),
             managed_daemon,
             ..Default::default()
