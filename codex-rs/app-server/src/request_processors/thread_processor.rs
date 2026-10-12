@@ -2381,7 +2381,8 @@ impl ThreadRequestProcessor {
             .check_thread_model_provider(thread.config().await.as_ref())
             .await
             .map_err(|error| config_load_error(&error))?;
-        self.submit_core_op(request_id, thread.as_ref(), Op::Compact)
+        thread
+            .start_compaction_with_trace(self.request_trace_context(request_id).await)
             .await
             .map_err(|err| internal_error(format!("failed to start compaction: {err}")))?;
         Ok(ThreadCompactStartResponse {})

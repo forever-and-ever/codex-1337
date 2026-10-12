@@ -127,7 +127,8 @@ async fn steering_does_not_wait_for_realtime_history() {
                 listen_to_cancellation_token: true,
             },
         )
-        .await;
+        .await
+        .unwrap();
 
     let history = session
         .realtime_history
@@ -228,7 +229,8 @@ async fn start_only_rejects_active_turn_without_injecting() {
                 listen_to_cancellation_token: true,
             },
         )
-        .await;
+        .await
+        .unwrap();
 
     assert_eq!(
         session.new_inject_items_context().await.sub_id,
@@ -292,7 +294,8 @@ async fn recovery_rejects_active_turn_without_injecting_or_applying_settings() {
                 listen_to_cancellation_token: true,
             },
         )
-        .await;
+        .await
+        .unwrap();
 
     let submission = handle_recovery(
         &session,
@@ -920,7 +923,8 @@ async fn steer_only_enforces_expected_turn_id() {
                 listen_to_cancellation_token: false,
             },
         )
-        .await;
+        .await
+        .unwrap();
 
     let submission = submit_steer_only(
         &session,
@@ -1023,7 +1027,8 @@ async fn rejects_non_regular_turns() {
                     listen_to_cancellation_token: true,
                 },
             )
-            .await;
+            .await
+            .unwrap();
 
         let steer_input = vec![UserInput::Text {
             text: "steer".to_string(),
@@ -1080,7 +1085,8 @@ async fn steer_preserves_request_origin(
                 listen_to_cancellation_token: false,
             },
         )
-        .await;
+        .await
+        .unwrap();
     let content = vec![UserInput::Text {
         text: "Create the worktree now.".to_owned(),
         text_elements: Vec::new(),

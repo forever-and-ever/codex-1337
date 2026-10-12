@@ -535,7 +535,8 @@ async fn interrupting_regular_turn_waiting_on_startup_prewarm_emits_turn_aborted
         Vec::new(),
         crate::tasks::RegularTask::new(),
     )
-    .await;
+    .await
+    .unwrap();
 
     let first = tokio::time::timeout(std::time::Duration::from_millis(200), rx.recv())
         .await
@@ -2469,6 +2470,184 @@ async fn record_inter_agent_communication_preserves_item_id_in_rollout_and_resum
             .any(|item| item.id() == Some(&uncertain_id))
     );
 
+    // Exercise the actual submission-loop reply owner: no fenced no-op may
+    // return Started or acknowledge compact registration. The client retains
+    // custody on these definitive errors, rather than persisting new input.
+    let reserved = {
+        let mut active = session.active_turn.lock().await;
+        Arc::clone(&active.get_or_insert_with(ActiveTurn::default).turn_state)
+    };
+    let reserved_input = TurnInput::UserInput {
+        content: vec![UserInput::Text {
+            text: "already queued input keeps its existing owner".into(),
+            text_elements: Vec::new(),
+        }],
+        client_id: Some("reserved-input".into()),
+        metadata: Default::default(),
+    };
+    session
+        .input_queue
+        .extend_pending_input_for_turn_state(&reserved, vec![reserved_input.clone()])
+        .await;
+    assert!(
+        session
+            .start_task(Arc::clone(&turn_context), Vec::new(), RegularTask::new())
+            .await
+            .is_err()
+    );
+    assert!(Arc::ptr_eq(
+        &session
+            .active_turn
+            .lock()
+            .await
+            .as_ref()
+            .unwrap()
+            .turn_state,
+        &reserved
+    ));
+    assert_eq!(
+        session
+            .input_queue
+            .take_pending_input_for_turn_state(&reserved)
+            .await,
+        vec![reserved_input]
+    );
+    *session.active_turn.lock().await = None;
+    let before_rejection = session.clone_history().await.annotated_items().to_vec();
+    while _rx.try_recv().is_ok() {}
+    let (tx_sub, rx_sub) = async_channel::unbounded();
+    let mut submissions = Box::pin(submission_loop(
+        Arc::clone(&session),
+        Arc::clone(&turn_context.config),
+        rx_sub,
+    ));
+    for mode in [TurnInputMode::StartOrSteer, TurnInputMode::StartIfIdle] {
+        let (reply, rejected) = tokio::sync::oneshot::channel();
+        tx_sub
+            .send(Submission {
+                id: "fenced-user-start".into(),
+                op: Op::TurnInput {
+                    request: Box::new(TurnInputRequest::new(SubmittedTurnInput::UserInput {
+                        content: vec![UserInput::Text {
+                            text: "draft must remain with the rejected caller".into(),
+                            text_elements: Vec::new(),
+                        }],
+                        client_id: Some("rejected-draft".into()),
+                    })),
+                    mode,
+                    reply,
+                },
+                turn_extension_init: None,
+                trace: None,
+                parent_turn_id: None,
+                root_turn_id: None,
+                residency_guard: None,
+            })
+            .await
+            .unwrap();
+        let error = tokio::time::timeout(Duration::from_secs(5), async {
+            tokio::select! {
+                response = rejected => response.unwrap().unwrap_err(),
+                _ = submissions.as_mut() => panic!("submission loop ended before rejection"),
+            }
+        })
+        .await
+        .unwrap();
+        assert!(error.to_string().contains("Unload/reload or resume"));
+    }
+    let (reply, rejected) = tokio::sync::oneshot::channel();
+    tx_sub
+        .send(Submission {
+            id: "fenced-compact-start".into(),
+            op: Op::StartCompaction { reply },
+            turn_extension_init: None,
+            trace: None,
+            parent_turn_id: None,
+            root_turn_id: None,
+            residency_guard: None,
+        })
+        .await
+        .unwrap();
+    let error = tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::select! {
+            response = rejected => response.unwrap().unwrap_err(),
+            _ = submissions.as_mut() => panic!("submission loop ended before compact rejection"),
+        }
+    })
+    .await
+    .unwrap();
+    assert!(error.to_string().contains("Unload/reload or resume"));
+    assert!(
+        _rx.try_recv().is_err(),
+        "acknowledged rejection must not fabricate lifecycle events"
+    );
+    tx_sub
+        .send(Submission {
+            id: "fenced-legacy-compact".into(),
+            op: Op::Compact,
+            turn_extension_init: None,
+            trace: None,
+            parent_turn_id: None,
+            root_turn_id: None,
+            residency_guard: None,
+        })
+        .await
+        .unwrap();
+    let event = tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::select! {
+            event = _rx.recv() => event.unwrap(),
+            _ = submissions.as_mut() => panic!("submission loop ended before legacy error"),
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(event.id, "fenced-legacy-compact");
+    assert!(matches!(event.msg, EventMsg::Error(_)));
+    assert!(
+        _rx.try_recv().is_err(),
+        "legacy rejection is an error, not fabricated completion"
+    );
+    drop(submissions);
+    drop(tx_sub);
+    assert!(session.active_turn.lock().await.is_none());
+    assert_eq!(
+        session.clone_history().await.annotated_items(),
+        before_rejection
+    );
+    assert!(
+        !serde_json::to_string(
+            &session
+                .live_thread()
+                .unwrap()
+                .load_history(true)
+                .await
+                .unwrap()
+                .items
+        )
+        .unwrap()
+        .contains("draft must remain with the rejected caller")
+    );
+    let mut queued = later.clone();
+    queued.id = Some(ResponseItemId::new("amsg"));
+    queued.content = "queue custody survives failed wake".into();
+    session
+        .input_queue
+        .enqueue_mailbox_communication(queued.clone(), Default::default())
+        .await;
+    assert_eq!(
+        session.input_queue.pending_mailbox_snapshot().await.0,
+        vec![queued.clone()]
+    );
+    session.maybe_start_turn_for_pending_work().await;
+    assert_eq!(
+        session.input_queue.pending_mailbox_snapshot().await.0,
+        vec![queued.clone()]
+    );
+    assert_eq!(
+        session.input_queue.drain_mailbox().await[0].communication,
+        queued
+    );
+
     // A fresh session uses the same ordinary initial-history reconstruction as
     // production resume. It does not inherit the uncertain live-runtime fence.
     let InitialHistory::Resumed(resumed) = RolloutRecorder::get_rollout_history(&rollout_path)
@@ -3348,7 +3527,8 @@ async fn turn_start_lifecycle_exposes_turn_metadata_and_token_baseline() {
             listen_to_cancellation_token: true,
         },
     )
-    .await;
+    .await
+    .unwrap();
     sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
 
     let actual = records
@@ -7827,7 +8007,8 @@ async fn new_task_does_not_change_an_already_running_tasks_environments() {
                 finish: Arc::clone(&finish),
             },
         )
-        .await;
+        .await
+        .unwrap();
 
     let candidate = session
         .new_turn_with_default_settings("candidate".into(), Default::default())
@@ -8288,7 +8469,8 @@ async fn submission_loop_channel_close_aborts_active_turn_before_thread_stop_lif
                 listen_to_cancellation_token: true,
             },
         )
-        .await;
+        .await
+        .unwrap();
 
     let (tx_sub, rx_sub) = async_channel::bounded(1);
     drop(tx_sub);
@@ -9067,7 +9249,8 @@ async fn mcp_elicitation_reviewer_keeps_issuing_step_authority(live_update: bool
     };
     session
         .spawn_task(Arc::clone(&old_turn), Vec::new(), task)
-        .await;
+        .await
+        .unwrap();
 
     session.mark_mcp_runtime_dirty();
     session.refresh_mcp_if_dirty().await;
@@ -9276,7 +9459,8 @@ async fn mcp_elicitation_reviewer_keeps_issuing_step_authority(live_update: bool
     assert_eq!(next_turn.config.approvals_reviewer, ApprovalsReviewer::User);
     session
         .spawn_task(Arc::clone(&next_turn), Vec::new(), task)
-        .await;
+        .await
+        .unwrap();
     session.refresh_mcp_if_dirty().await;
     assert_eq!(
         session
@@ -9314,7 +9498,10 @@ async fn mcp_elicitation_reviewer_keeps_issuing_step_authority(live_update: bool
     let restricted_turn = session
         .new_turn_with_default_settings("owner-restricted".to_string(), Default::default())
         .await;
-    session.spawn_task(restricted_turn, Vec::new(), task).await;
+    session
+        .spawn_task(restricted_turn, Vec::new(), task)
+        .await
+        .unwrap();
     session.refresh_mcp_if_dirty().await;
     assert_eq!(
         session
@@ -9735,7 +9922,8 @@ async fn spawn_task_does_not_update_previous_turn_settings_for_non_run_turn_task
             listen_to_cancellation_token: true,
         },
     )
-    .await;
+    .await
+    .unwrap();
 
     sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
     assert_eq!(sess.previous_turn_settings().await, None);
@@ -11374,7 +11562,8 @@ async fn finished_turn_retains_last_known_step_context(terminal: TerminalEventKi
                 finish: Arc::clone(&finish),
             },
         )
-        .await;
+        .await
+        .unwrap();
     let expected = session
         .capture_step_context(turn, &CancellationToken::new())
         .await
@@ -11455,7 +11644,8 @@ async fn remote_compaction_v2_retains_only_the_selected_step(first_attempt: Firs
                 listen_to_cancellation_token: true,
             },
         )
-        .await;
+        .await
+        .unwrap();
     let primary_turn = Arc::new(
         turn.with_model("gpt-5.4".to_string(), &session.services.models_manager)
             .await,
@@ -11592,7 +11782,8 @@ async fn interrupting_compaction_fallback_retains_last_known_step_context() {
         .await;
     session
         .spawn_task(turn, Vec::new(), crate::tasks::RegularTask::new())
-        .await;
+        .await
+        .unwrap();
     let state = {
         let active = session.active_turn.lock().await;
         Arc::clone(&active.as_ref().expect("active turn").turn_state)
@@ -11666,7 +11857,8 @@ async fn extension_interrupt_emits_thread_idle() {
 
     Arc::new(session)
         .spawn_task(Arc::new(turn_context), Vec::new(), ExtensionInterruptedTask)
-        .await;
+        .await
+        .unwrap();
 
     timeout(StdDuration::from_secs(5), idle_rx.recv())
         .await
@@ -11693,7 +11885,8 @@ async fn extension_interrupt_survives_the_calling_runtime() {
             listen_to_cancellation_token: true,
         },
     )
-    .await;
+    .await
+    .unwrap();
 
     let session_for_review = Arc::clone(&sess);
     let review_thread = std::thread::spawn(move || {
@@ -11751,7 +11944,8 @@ async fn turn_complete_flushes_terminal_event_after_delivery() {
         client_id: None,
     }];
     sess.spawn_task(Arc::clone(&tc), input, CompletingTask)
-        .await;
+        .await
+        .unwrap();
 
     let event = recv_terminal_event(&rx, TerminalEventKind::TurnComplete).await;
     assert!(matches!(event.msg, EventMsg::TurnComplete(_)));
@@ -11786,7 +11980,8 @@ async fn turn_aborted_flushes_terminal_event_after_delivery() {
             listen_to_cancellation_token: true,
         },
     )
-    .await;
+    .await
+    .unwrap();
 
     let abort_task = tokio::spawn({
         let sess = Arc::clone(&sess);
@@ -11829,7 +12024,8 @@ async fn abort_regular_task_emits_marker_before_turn_aborted() {
             listen_to_cancellation_token: false,
         },
     )
-    .await;
+    .await
+    .unwrap();
 
     sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
 
@@ -11871,7 +12067,8 @@ async fn abort_gracefully_emits_marker_before_turn_aborted() {
             listen_to_cancellation_token: true,
         },
     )
-    .await;
+    .await
+    .unwrap();
 
     sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
 
@@ -11948,7 +12145,8 @@ async fn task_finish_emits_turn_item_lifecycle_for_leftover_pending_user_input()
             listen_to_cancellation_token: false,
         },
     )
-    .await;
+    .await
+    .unwrap();
 
     while rx.try_recv().is_ok() {}
 
@@ -12110,7 +12308,8 @@ async fn task_finish_emits_thread_idle_lifecycle_after_active_turn_clears() {
     let session = Arc::new(session);
     session
         .spawn_task(Arc::new(turn_context), Vec::new(), CompletingTask)
-        .await;
+        .await
+        .unwrap();
 
     timeout(StdDuration::from_secs(2), idle_rx.recv())
         .await
@@ -12227,7 +12426,8 @@ async fn queue_only_mailbox_mail_waits_for_next_turn_after_answer_boundary() {
             listen_to_cancellation_token: true,
         },
     )
-    .await;
+    .await
+    .unwrap();
 
     sess.input_queue
         .defer_mailbox_delivery_to_next_turn(&sess.active_turn, &tc.sub_id)
@@ -12267,7 +12467,8 @@ async fn trigger_turn_mailbox_mail_waits_for_next_turn_after_answer_boundary() {
             listen_to_cancellation_token: true,
         },
     )
-    .await;
+    .await
+    .unwrap();
 
     sess.input_queue
         .defer_mailbox_delivery_to_next_turn(&sess.active_turn, &tc.sub_id)
@@ -12345,7 +12546,8 @@ async fn active_turn_keeps_first_root_when_mail_coalesces(inherited_root: Option
                     listen_to_cancellation_token: true,
                 },
             )
-            .await;
+            .await
+            .unwrap();
         }
     }
 
@@ -12383,7 +12585,8 @@ async fn steered_input_reopens_mailbox_delivery_for_current_turn() {
             listen_to_cancellation_token: true,
         },
     )
-    .await;
+    .await
+    .unwrap();
 
     sess.input_queue
         .defer_mailbox_delivery_to_next_turn(&sess.active_turn, &tc.sub_id)
@@ -12439,7 +12642,8 @@ async fn stale_defer_mailbox_delivery_does_not_override_steered_input() {
             listen_to_cancellation_token: true,
         },
     )
-    .await;
+    .await
+    .unwrap();
 
     sess.input_queue
         .defer_mailbox_delivery_to_next_turn(&sess.active_turn, &tc.sub_id)
@@ -12499,7 +12703,8 @@ async fn tool_calls_reopen_mailbox_delivery_for_current_turn() {
             listen_to_cancellation_token: true,
         },
     )
-    .await;
+    .await
+    .unwrap();
 
     sess.input_queue
         .defer_mailbox_delivery_to_next_turn(&sess.active_turn, &tc.sub_id)
@@ -12549,7 +12754,8 @@ async fn abort_review_task_emits_exited_then_aborted_and_records_history() {
         client_id: None,
     }];
     sess.spawn_task(Arc::clone(&tc), input, ReviewTask::new())
-        .await;
+        .await
+        .unwrap();
 
     sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
 

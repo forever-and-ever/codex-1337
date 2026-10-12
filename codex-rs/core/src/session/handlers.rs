@@ -95,6 +95,14 @@ pub async fn run_user_shell_command(
     command: String,
     timeout_ms: Option<u64>,
 ) {
+    if let Err(error) = sess.check_agent_mail_task_start().await {
+        sess.send_event_raw(Event {
+            id: sub_id,
+            msg: EventMsg::Error(error.to_error_event(/*message_prefix*/ None)),
+        })
+        .await;
+        return;
+    }
     let _extension_admission = sess
         .mcp_extension_admission
         .acquire()
@@ -121,12 +129,20 @@ pub async fn run_user_shell_command(
     let turn_context = sess
         .new_turn_with_default_settings(sub_id, Default::default())
         .await;
-    sess.spawn_task(
-        turn_context,
-        Vec::new(),
-        UserShellCommandTask::new(command, timeout_ms),
-    )
-    .await;
+    if let Err(error) = sess
+        .spawn_task(
+            Arc::clone(&turn_context),
+            Vec::new(),
+            UserShellCommandTask::new(command, timeout_ms),
+        )
+        .await
+    {
+        sess.send_event(
+            &turn_context,
+            EventMsg::Error(error.to_error_event(/*message_prefix*/ None)),
+        )
+        .await;
+    }
 }
 
 pub async fn resolve_elicitation(
@@ -242,7 +258,8 @@ pub async fn reload_user_config(sess: &Arc<Session>) {
     Box::pin(sess.reload_user_config_layer()).await;
 }
 
-pub async fn compact(sess: &Arc<Session>, sub_id: String) {
+pub async fn compact(sess: &Arc<Session>, sub_id: String) -> CodexResult<()> {
+    sess.check_agent_mail_task_start().await?;
     // Stop the old turn before the compact task picks up the next turn's environments.
     sess.abort_all_tasks(TurnAbortReason::Replaced).await;
     let _extension_admission = sess
@@ -254,7 +271,7 @@ pub async fn compact(sess: &Arc<Session>, sub_id: String) {
         .new_turn_with_default_settings(sub_id, Default::default())
         .await;
 
-    sess.spawn_task(turn_context, Vec::new(), CompactTask).await;
+    sess.spawn_task(turn_context, Vec::new(), CompactTask).await
 }
 
 pub(super) async fn persist_thread_memory_mode_update(
@@ -683,7 +700,17 @@ pub(super) async fn submission_loop(
                     false
                 }
                 Op::Compact => {
-                    compact(&sess, sub.id.clone()).await;
+                    if let Err(error) = compact(&sess, sub.id.clone()).await {
+                        sess.send_event_raw(Event {
+                            id: sub.id.clone(),
+                            msg: EventMsg::Error(error.to_error_event(/*message_prefix*/ None)),
+                        })
+                        .await;
+                    }
+                    false
+                }
+                Op::StartCompaction { reply } => {
+                    let _ = reply.send(compact(&sess, sub.id.clone()).await);
                     false
                 }
                 Op::SetThreadMemoryMode { mode } => {

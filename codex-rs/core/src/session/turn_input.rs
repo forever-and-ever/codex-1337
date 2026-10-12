@@ -228,6 +228,7 @@ pub(super) async fn handle(
     mode: TurnInputMode,
     submission_id: String,
 ) -> CodexResult<TurnInputSubmission> {
+    session.check_agent_mail_task_start().await?;
     let request = request.into();
     let result = match mode {
         TurnInputMode::StartOrSteer => {
@@ -299,6 +300,7 @@ pub(super) async fn handle_recovery(
     start_options: TurnStartOptions,
     submission_id: String,
 ) -> CodexResult<TurnInputSubmission> {
+    session.check_agent_mail_task_start().await?;
     let WithTurnExtensionData {
         request: thread_settings,
         turn_extension_init,
@@ -431,7 +433,7 @@ async fn start_or_steer(
             }
             session
                 .spawn_task(Arc::clone(&turn_context), task_input, RegularTask::new())
-                .await;
+                .await?;
             Ok(TurnInputSubmission::Started {
                 turn_id: submission_id,
                 root_turn_id: turn_context.root_turn_id(),
@@ -606,7 +608,7 @@ async fn start_if_idle(
     }
     session
         .start_task(Arc::clone(&turn_context), task_input, RegularTask::new())
-        .await;
+        .await?;
     Ok(TurnInputSubmission::Started {
         turn_id: submission_id,
         root_turn_id: turn_context.root_turn_id(),

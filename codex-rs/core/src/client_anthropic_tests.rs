@@ -613,7 +613,8 @@ async fn native_regular_replay_profiles(
                 }],
                 RegularTask::new(),
             )
-            .await;
+            .await
+            .unwrap();
         let observed = tokio::time::timeout(Duration::from_secs(30), async {
             let mut observed = Vec::new();
             loop {

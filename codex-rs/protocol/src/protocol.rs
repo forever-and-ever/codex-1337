@@ -739,6 +739,11 @@ pub enum Op {
     /// The agent will use its existing context (either conversation history or previous response id)
     /// to generate a summary which will be returned as an AgentMessage event.
     Compact,
+    /// Request compaction and acknowledge actual task registration.
+    #[debug("StartCompaction")]
+    StartCompaction {
+        reply: oneshot::Sender<CodexResult<()>>,
+    },
 
     /// Set whether the thread remains eligible for memory generation.
     ///
@@ -972,6 +977,7 @@ impl Op {
             Self::RefreshMcpServers => "refresh_mcp_servers",
             Self::ReloadUserConfig => "reload_user_config",
             Self::Compact => "compact",
+            Self::StartCompaction { .. } => "start_compaction",
             Self::SetThreadMemoryMode { .. } => "set_thread_memory_mode",
             Self::Review { .. } => "review",
             Self::ApproveGuardianDeniedAction { .. } => "approve_guardian_denied_action",

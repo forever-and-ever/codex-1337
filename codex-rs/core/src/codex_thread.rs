@@ -1,3 +1,5 @@
+#[path = "codex_thread_agent_mail.rs"]
+mod agent_mail;
 #[path = "codex_thread_context_inventory.rs"]
 mod context_inventory;
 #[path = "codex_thread_prompt_cache.rs"]

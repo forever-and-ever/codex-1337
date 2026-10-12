@@ -444,7 +444,8 @@ async fn activation_fixture(models: Vec<ModelInfo>) -> ActivationFixture {
                 finish: Arc::clone(&finish),
             },
         )
-        .await;
+        .await
+        .unwrap();
     ActivationFixture {
         session,
         turn,
@@ -845,7 +846,8 @@ async fn delayed_activation_does_not_retarget_a_task(change: TaskChangeDuringLoo
                         finish: Arc::new(Notify::new()),
                     },
                 )
-                .await;
+                .await
+                .unwrap();
             assert!(Arc::ptr_eq(&turn.next_step_settings.load_full(), &original));
             (replacement, inputs)
         }

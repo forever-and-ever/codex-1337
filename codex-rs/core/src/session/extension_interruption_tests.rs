@@ -29,7 +29,8 @@ async fn interrupt_if_no_pending_input_handles_cancelled_submission() {
                 finish: Arc::new(Notify::new()),
             },
         )
-        .await;
+        .await
+        .unwrap();
     let cancellation_token = session
         .active_turn
         .lock()

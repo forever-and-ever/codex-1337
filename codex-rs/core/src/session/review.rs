@@ -9,6 +9,14 @@ pub(super) async fn spawn_review_thread(
     sub_id: String,
     resolved: crate::review_prompts::ResolvedReviewRequest,
 ) {
+    if let Err(error) = sess.check_agent_mail_task_start().await {
+        sess.send_event(
+            &parent_turn_context,
+            EventMsg::Error(error.to_error_event(/*message_prefix*/ None)),
+        )
+        .await;
+        return;
+    }
     let model = config
         .review_model
         .clone()
@@ -174,6 +182,14 @@ pub(super) async fn spawn_review_thread(
     }
     sess.abort_all_tasks(TurnAbortReason::Replaced).await;
     sess.clear_connector_selection().await;
+    if let Err(error) = sess.check_agent_mail_task_start().await {
+        sess.send_event(
+            &tc,
+            EventMsg::Error(error.to_error_event(/*message_prefix*/ None)),
+        )
+        .await;
+        return;
+    }
 
     // Announce entering review mode so UIs can switch modes.
     let item = TurnItem::EnteredReviewMode(EnteredReviewModeItem {
@@ -187,6 +203,14 @@ pub(super) async fn spawn_review_thread(
     // TODO(ccunningham): Review turns currently rely on `spawn_task` for TurnComplete but do not
     // emit a parent TurnStarted. Consider giving review a full parent turn lifecycle
     // (TurnStarted + TurnComplete) for consistency with other standalone tasks.
-    sess.start_task(Arc::clone(&tc), input, ReviewTask::new())
+    if let Err(error) = sess
+        .start_task(Arc::clone(&tc), input, ReviewTask::new())
+        .await
+    {
+        sess.send_event(
+            &tc,
+            EventMsg::Error(error.to_error_event(/*message_prefix*/ None)),
+        )
         .await;
+    }
 }

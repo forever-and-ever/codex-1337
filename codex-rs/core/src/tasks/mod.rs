@@ -275,10 +275,11 @@ impl Session {
         turn_context: Arc<TurnContext>,
         input: Vec<TurnInput>,
         task: T,
-    ) {
+    ) -> CodexResult<()> {
+        self.check_agent_mail_task_start().await?;
         self.abort_all_tasks(TurnAbortReason::Replaced).await;
         self.clear_connector_selection().await;
-        self.start_task(turn_context, input, task).await;
+        self.start_task(turn_context, input, task).await
     }
 
     #[expect(
@@ -290,19 +291,16 @@ impl Session {
         turn_context: Arc<TurnContext>,
         input: Vec<TurnInput>,
         task: T,
-    ) {
+    ) -> CodexResult<()> {
         if let Err(error) = self.check_agent_mail_task_start().await {
             let mut active = self.active_turn.lock().await;
-            if active.as_ref().is_some_and(|turn| turn.task.is_none()) {
+            if let Some(turn) = active.as_ref()
+                && turn.task.is_none()
+                && turn.turn_state.lock().await.pending_input.is_empty()
+            {
                 *active = None;
             }
-            drop(active);
-            self.send_event(
-                &turn_context,
-                EventMsg::Error(error.to_error_event(/*message_prefix*/ None)),
-            )
-            .await;
-            return;
+            return Err(error);
         }
         self.activate_plugin_selection(&turn_context).await;
         // Inherited or recovered roots are applied before task start. Otherwise this
@@ -441,6 +439,7 @@ impl Session {
             _timer: timer,
         };
         turn.task = Some(running_task);
+        Ok(())
     }
 
     /// Returns whether an extension has marked this thread as durably asleep.
@@ -476,6 +475,14 @@ impl Session {
         self: &Arc<Self>,
         sub_id: String,
     ) {
+        if let Err(error) = self.check_agent_mail_task_start().await {
+            self.send_event_raw(Event {
+                id: sub_id,
+                msg: EventMsg::Error(error.to_error_event(/*message_prefix*/ None)),
+            })
+            .await;
+            return;
+        }
         let _extension_admission = self
             .mcp_extension_admission
             .acquire()
@@ -523,11 +530,8 @@ impl Session {
         {
             return;
         }
-        let (input, mut start_options) =
-            self.input_queue.get_pending_input(&self.active_turn).await;
-        if !input.iter().any(
-            |item| matches!(item, TurnInput::InterAgentCommunication(mail) if mail.trigger_turn),
-        ) {
+        let (input, mut start_options) = self.input_queue.pending_mailbox_snapshot().await;
+        if !input.iter().any(|mail| mail.trigger_turn) {
             // Ordinary mail resumes the recipient without selecting a new task's settings.
             start_options = previous_options;
             start_options.cyber_access_program = self
@@ -550,14 +554,7 @@ impl Session {
         if let Some(id) = start_options.parent_turn_id {
             if let Some(initiating_agent_path) = input
                 .iter()
-                .find_map(|item| {
-                    let TurnInput::InterAgentCommunication(communication) = item else {
-                        return None;
-                    };
-                    communication
-                        .trigger_turn
-                        .then(|| communication.author.clone())
-                })
+                .find_map(|item| item.trigger_turn.then(|| item.author.clone()))
                 .or(start_options.initiating_agent_path)
             {
                 turn_context
@@ -571,10 +568,7 @@ impl Session {
         }
         self.maybe_emit_model_warnings_for_turn(turn_context.as_ref())
             .await;
-        // Task completion must still save this mail if pre-turn compaction fails.
-        self.input_queue
-            .extend_pending_input_for_turn_state(turn_state.as_ref(), input)
-            .await;
+        // InputQueue retains custody until start_task passes admission and drains it.
         // Context construction can outlive an interrupt or replacement. Do not let
         // start_task recreate a turn whose reservation is no longer ours.
         if self
@@ -586,8 +580,16 @@ impl Session {
         {
             return;
         }
-        self.start_task(turn_context, Vec::new(), RegularTask::new())
+        if let Err(error) = self
+            .start_task(Arc::clone(&turn_context), Vec::new(), RegularTask::new())
+            .await
+        {
+            self.send_event(
+                &turn_context,
+                EventMsg::Error(error.to_error_event(/*message_prefix*/ None)),
+            )
             .await;
+        }
     }
 
     pub async fn abort_all_tasks(self: &Arc<Self>, reason: TurnAbortReason) {
