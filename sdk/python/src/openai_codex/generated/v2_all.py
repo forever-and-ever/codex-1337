@@ -3867,13 +3867,6 @@ class ProjectSortKey(Enum):
     recency_at = "recencyAt"
 
 
-class UnknownPromptCacheEstimate(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    type: Annotated[Literal["unknown"], Field(title="UnknownPromptCacheEstimateType")]
-
-
 class WarmPromptCacheEstimate(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -3889,15 +3882,13 @@ class ColdPromptCacheEstimate(BaseModel):
     type: Annotated[Literal["cold"], Field(title="ColdPromptCacheEstimateType")]
 
 
-class PromptCacheEstimate(
-    RootModel[UnknownPromptCacheEstimate | WarmPromptCacheEstimate | ColdPromptCacheEstimate]
-):
+class PromptCacheEstimate(RootModel[WarmPromptCacheEstimate | ColdPromptCacheEstimate]):
     model_config = ConfigDict(
         populate_by_name=True,
     )
     root: Annotated[
-        UnknownPromptCacheEstimate | WarmPromptCacheEstimate | ColdPromptCacheEstimate,
-        Field(description="How warm a thread's provider prompt cache probably is."),
+        WarmPromptCacheEstimate | ColdPromptCacheEstimate,
+        Field(description="Whether the thread's provider prompt cache is confidently warm."),
     ]
 
 

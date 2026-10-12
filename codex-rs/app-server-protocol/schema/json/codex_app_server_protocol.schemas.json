@@ -19862,27 +19862,10 @@
         "type": "string"
       },
       "PromptCacheEstimate": {
-        "description": "How warm a thread's provider prompt cache probably is.",
+        "description": "Whether the thread's provider prompt cache is confidently warm.",
         "oneOf": [
           {
-            "description": "Nothing is cached yet, or the provider gives no lore.",
-            "properties": {
-              "type": {
-                "enum": [
-                  "unknown"
-                ],
-                "title": "UnknownPromptCacheEstimateType",
-                "type": "string"
-              }
-            },
-            "required": [
-              "type"
-            ],
-            "title": "UnknownPromptCacheEstimate",
-            "type": "object"
-          },
-          {
-            "description": "Probably warm; clients treat it as cold from `expiresAt` on.",
+            "description": "Observed cache usage with established retention; clients treat it as cold from `expiresAt` on.",
             "properties": {
               "expiresAt": {
                 "format": "int64",
@@ -19904,7 +19887,7 @@
             "type": "object"
           },
           {
-            "description": "The next request will probably rewrite the cached prefix.",
+            "description": "Not confidently warm, including absent evidence or unestablished retention. This is not a claim that the provider evicted its cache.",
             "properties": {
               "type": {
                 "enum": [
