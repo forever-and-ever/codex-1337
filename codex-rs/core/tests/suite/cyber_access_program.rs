@@ -6,6 +6,8 @@ use codex_core::TurnInputSubmission;
 use codex_core::TurnStartOptions;
 use codex_features::Feature;
 use codex_login::CodexAuth;
+use codex_protocol::models::AgentMessageInputContent;
+use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::Op;
 use codex_protocol::protocol::TurnCompleteEvent;
@@ -297,12 +299,37 @@ async fn cyber_access_program_is_inherited_by_child_turns() -> Result<()> {
                 })
                 .respond_with(move |request: &wiremock::Request| {
                     let messages = responses::ResponsesRequest::from(request.clone())
-                        .message_input_texts("assistant");
+                        .inputs_of_type("agent_message")
+                        .into_iter()
+                        .filter_map(|item| {
+                            let ResponseItem::AgentMessage {
+                                author,
+                                recipient,
+                                content,
+                                ..
+                            } = serde_json::from_value(item).expect("typed agent message input")
+                            else {
+                                unreachable!("inputs_of_type selects only agent messages");
+                            };
+                            if author != "/root/worker" || recipient != "/root" {
+                                return None;
+                            }
+                            content.into_iter().find_map(|content| {
+                                let AgentMessageInputContent::InputText { text } = content else {
+                                    return None;
+                                };
+                                let (_, payload) = text
+                                    .strip_prefix("Message Type: FINAL_ANSWER\n")?
+                                    .split_once("\nPayload:\n")?;
+                                Some(payload.to_owned())
+                            })
+                        })
+                        .collect::<Vec<_>>();
                     let result = child_results
                         .iter()
                         .rev()
                         .copied()
-                        .find(|result| messages.iter().any(|message| message.contains(*result)))
+                        .find(|result| messages.iter().any(|message| message == *result))
                         .unwrap_or("resp-parent-done");
                     responses::sse_response(final_response(result))
                 })
