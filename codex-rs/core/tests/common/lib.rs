@@ -27,6 +27,7 @@ use std::path::PathBuf;
 pub mod apps_test_server;
 pub mod context_snapshot;
 pub mod hooks;
+pub mod mock_server;
 pub mod process;
 pub mod responses;
 pub mod startup;
