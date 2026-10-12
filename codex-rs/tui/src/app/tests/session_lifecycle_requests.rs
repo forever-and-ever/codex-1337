@@ -1878,7 +1878,7 @@ async fn paginated_resume_and_fork_survive_post_response_hydration_failure() -> 
         Box::pin(app.replace_chat_widget_with_app_server_thread(
             &mut tui,
             resumed,
-            ThreadAttachPresentation::SessionLineage,
+            crate::app::session_lifecycle::ThreadAttachPresentation::SessionLineage,
             /*initial_user_message*/ None,
         ))
         .await?;
