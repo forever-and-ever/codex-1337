@@ -1,9 +1,11 @@
-//! Initial context, with a token summary and the retained raw value on expansion.
+//! Initial context, with a token summary and a separately disclosed retained raw value.
 
 use super::ActivityDisclosure;
 use super::HistoryCell;
 use super::HistoryTimestamp;
 use super::activity_parts::ActivityHeader;
+use super::activity_parts::ActivityParts;
+use super::activity_parts::PartControl;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::terminal_hyperlinks::visible_lines;
 use crate::transcript_view::FeedEntry;
@@ -15,6 +17,7 @@ use codex_protocol::num_format::format_with_separators;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
 use std::collections::BTreeMap;
+use std::collections::HashSet;
 
 /// Changed parts named in full before the rest are counted.
 const CHANGE_NAMES: usize = 8;
@@ -79,7 +82,7 @@ impl PreambleCell {
         heading
     }
 
-    fn detail_lines(&self) -> Vec<Line<'static>> {
+    fn summary_lines(&self) -> Vec<Line<'static>> {
         let mut lines = Vec::new();
         for section in [
             PreambleSection::Instructions,
@@ -157,16 +160,21 @@ impl PreambleCell {
                 lines.push(Line::from(listed.dim()));
             }
         }
-        if let Some(raw) = &self.raw {
+        lines
+    }
+
+    fn detail_lines(&self) -> Vec<Line<'static>> {
+        let mut lines = self.summary_lines();
+        if self.raw.is_some() {
             lines.push(Line::default());
-            lines.push(Line::from("Raw context".bold()));
-            lines.extend(
-                super::sanitize_user_text(raw.as_str().into())
-                    .lines()
-                    .map(|line| Line::from(line.to_string())),
-            );
+            lines.push(Line::from("Raw Context".bold()));
+            lines.extend(self.raw_lines());
         }
         lines
+    }
+
+    fn raw_fold(&self) -> String {
+        format!("preamble-raw:{}", self.id)
     }
 }
 
@@ -223,12 +231,33 @@ impl FeedEntry for PreambleCell {
         self.heading()
     }
 
-    fn feed_body(&self, _width: u16) -> Vec<HyperlinkLine> {
-        crate::terminal_hyperlinks::prefix_hyperlink_lines(
-            self.detail_lines().into_iter().map(Into::into).collect(),
-            "  ".into(),
-            "  ".into(),
-        )
+    fn feed_body(&self, _width: u16, expanded: &HashSet<String>) -> ActivityParts {
+        let mut lines = self.summary_lines();
+        let mut controls = Vec::new();
+        if self.raw.is_some() {
+            let id = self.raw_fold();
+            let expanded = expanded.contains(&id);
+            lines.push(Line::default());
+            controls.push(PartControl {
+                id,
+                line: lines.len(),
+                expanded,
+            });
+            lines.push(Line::from("Raw Context".bold()));
+            if expanded {
+                lines.extend(self.raw_lines());
+            }
+        }
+        ActivityParts {
+            lines: crate::terminal_hyperlinks::prefix_hyperlink_lines(
+                lines.into_iter().map(Into::into).collect(),
+                "  ".into(),
+                "  ".into(),
+            ),
+            header: None,
+            output: None,
+            controls,
+        }
     }
 }
 

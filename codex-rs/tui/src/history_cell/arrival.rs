@@ -6,6 +6,7 @@ use super::ActivityDisclosure;
 use super::HistoryCell;
 use super::HistoryTimestamp;
 use super::activity_parts::ActivityHeader;
+use super::activity_parts::ActivityParts;
 use super::sanitize_user_text;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::terminal_hyperlinks::visible_lines;
@@ -16,6 +17,7 @@ use codex_app_server_protocol::ArrivalItem;
 use codex_protocol::step_admission::ArrivalKind;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
+use std::collections::HashSet;
 
 #[derive(Debug)]
 pub(crate) struct ArrivalCell(ArrivalItem);
@@ -61,12 +63,17 @@ impl FeedEntry for ArrivalCell {
         self.heading()
     }
 
-    fn feed_body(&self, width: u16) -> Vec<HyperlinkLine> {
-        crate::terminal_hyperlinks::prefix_hyperlink_lines(
-            self.body(width).into_iter().map(Into::into).collect(),
-            "  ".into(),
-            "  ".into(),
-        )
+    fn feed_body(&self, width: u16, _expanded: &HashSet<String>) -> ActivityParts {
+        ActivityParts {
+            lines: crate::terminal_hyperlinks::prefix_hyperlink_lines(
+                self.body(width).into_iter().map(Into::into).collect(),
+                "  ".into(),
+                "  ".into(),
+            ),
+            header: None,
+            output: None,
+            controls: Vec::new(),
+        }
     }
 }
 

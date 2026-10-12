@@ -46,6 +46,7 @@ use crate::history_cell::HistoryTimestamp;
 use crate::history_cell::PreambleCell;
 use crate::history_cell::ThoughtCell;
 use crate::history_cell::UserHistoryCell;
+use crate::history_cell::activity_parts::ActivityParts;
 use crate::history_cell::activity_parts::FoldTarget;
 use crate::history_cell::activity_preview::compact_header;
 use crate::history_cell::output_provenance::OutputMode;
@@ -61,8 +62,8 @@ use std::ops::Range;
 /// A cell that is a Feed Item of its own: its header carries the title and its fold the body.
 pub(crate) trait FeedEntry {
     fn feed_title(&self) -> Line<'static>;
-    /// The body for a column `width` wide, with its own indentation.
-    fn feed_body(&self, width: u16) -> Vec<HyperlinkLine>;
+    /// The body and its controls share one projection of the viewer's disclosure state.
+    fn feed_body(&self, width: u16, expanded: &HashSet<String>) -> ActivityParts;
 }
 
 fn feed_entry(cell: &dyn HistoryCell) -> Option<&dyn FeedEntry> {
@@ -74,9 +75,12 @@ fn feed_entry(cell: &dyn HistoryCell) -> Option<&dyn FeedEntry> {
         .map(|preamble| preamble as &dyn FeedEntry)
 }
 
-/// What unfolding a feed entry shows under its header.
-pub(super) fn entry_body(cell: &dyn HistoryCell, width: u16) -> Vec<HyperlinkLine> {
-    feed_entry(cell).map_or_else(Vec::new, |entry| entry.feed_body(width))
+pub(super) fn entry_body(
+    cell: &dyn HistoryCell,
+    width: u16,
+    expanded: &HashSet<String>,
+) -> Option<ActivityParts> {
+    feed_entry(cell).map(|entry| entry.feed_body(width, expanded))
 }
 
 #[derive(Default)]
@@ -145,7 +149,7 @@ impl Contribution {
 struct Item {
     kind: Kind,
     fold: String,
-    /// Recorded in the expanded set while the reader keeps the item folded.
+    /// Records the reader's deviation from this kind's default disclosure.
     fold_mark: String,
     steps: Vec<String>,
     segments: Vec<Vec<usize>>,
@@ -168,9 +172,9 @@ enum Kind {
 }
 
 impl Item {
-    /// Every item unfolds until the reader folds it.
+    /// Preambles start closed; other items start open. The saved mark toggles that default.
     fn unfolded(&self, expanded: &HashSet<String>) -> bool {
-        !expanded.contains(&self.fold_mark)
+        expanded.contains(&self.fold_mark) == matches!(self.kind, Kind::Preamble)
     }
 
     /// User turns and replies stand apart.
