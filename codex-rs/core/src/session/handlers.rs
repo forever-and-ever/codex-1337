@@ -7,6 +7,7 @@ use crate::realtime_conversation::handle_start as handle_realtime_conversation_s
 use crate::realtime_conversation::handle_text as handle_realtime_conversation_text;
 use async_channel::Receiver;
 use codex_otel::set_parent_from_w3c_trace_context;
+use codex_protocol::error::Result as CodexResult;
 use tracing::Instrument;
 use tracing::debug_span;
 use tracing::info_span;
