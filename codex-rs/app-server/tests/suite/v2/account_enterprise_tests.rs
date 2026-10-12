@@ -182,37 +182,40 @@ async fn enterprise_login_attempt_lifecycle() -> Result<()> {
         // The app server and callback worker share only this child's mock keyring.
         let home = TempDir::new()?;
         let oauth_server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .and(path("/oauth/revoke"))
-            .respond_with(ResponseTemplate::new(200))
-            .expect(1)
-            .mount(&oauth_server)
-            .await;
-        let output = Command::new(std::env::current_exe()?)
-            .args([
-                "--exact",
-                "suite::v2::account::enterprise_tests::enterprise_login_attempt_lifecycle",
-                "--nocapture",
-            ])
-            .env(CHILD, "1")
-            .env("CODEX_HOME", home.path())
-            .env(
-                REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR,
-                format!("{}/oauth/token", oauth_server.uri()),
-            )
-            .env_remove("OPENAI_API_KEY")
-            .env_remove("CODEX_API_KEY")
-            .env_remove(CODEX_ACCESS_TOKEN_ENV_VAR)
-            .current_dir(home.path())
-            .output()
-            .await?;
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(
-            output.status.success() && stdout.contains("1 passed; 0 failed"),
-            "{stdout}\n{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        return Ok(());
+        return mock_server::run(&[&oauth_server], async {
+            Mock::given(method("POST"))
+                .and(path("/oauth/revoke"))
+                .respond_with(ResponseTemplate::new(200))
+                .expect(1)
+                .mount(&oauth_server)
+                .await;
+            let output = Command::new(std::env::current_exe()?)
+                .args([
+                    "--exact",
+                    "suite::v2::account::enterprise_tests::enterprise_login_attempt_lifecycle",
+                    "--nocapture",
+                ])
+                .env(CHILD, "1")
+                .env("CODEX_HOME", home.path())
+                .env(
+                    REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR,
+                    format!("{}/oauth/token", oauth_server.uri()),
+                )
+                .env_remove("OPENAI_API_KEY")
+                .env_remove("CODEX_API_KEY")
+                .env_remove(CODEX_ACCESS_TOKEN_ENV_VAR)
+                .current_dir(home.path())
+                .output()
+                .await?;
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(
+                output.status.success() && stdout.contains("1 passed; 0 failed"),
+                "{stdout}\n{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            Ok(())
+        })
+        .await;
     }
 
     keyring::set_default_credential_builder(Box::<TestKeyring>::default());
@@ -623,6 +626,7 @@ async fn enterprise_login_setup_is_cancelled_by_account_changes() -> Result<()> 
         // The app server and callback worker share only this child's mock keyring.
         let home = TempDir::new()?;
         let oauth_server = MockServer::start().await;
+        return mock_server::run(&[&oauth_server], async {
         Mock::given(method("POST"))
             .and(path("/oauth/revoke"))
             .respond_with(ResponseTemplate::new(200))
@@ -653,7 +657,9 @@ async fn enterprise_login_setup_is_cancelled_by_account_changes() -> Result<()> 
             "{stdout}\n{}",
             String::from_utf8_lossy(&output.stderr)
         );
-        return Ok(());
+        Ok(())
+        })
+        .await;
     }
 
     keyring::set_default_credential_builder(Box::<TestKeyring>::default());
