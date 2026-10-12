@@ -3678,7 +3678,7 @@ trusted_hash = "sha256:unrelated"
         &server,
         "available-hooks",
         Some(
-            r#"{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"echo available"}]}]}}"#,
+            r#"{"hooks":{"PreToolUse":[{"selector":{"type":"tool","namespace":"^functions$","name":"^exec_command$"},"hooks":[{"type":"command","command":"echo available"}]}]}}"#,
         ),
     )
     .await?;

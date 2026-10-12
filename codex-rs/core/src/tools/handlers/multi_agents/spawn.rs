@@ -239,6 +239,8 @@ pub(crate) struct SpawnAgentResult {
     nickname: Option<String>,
 }
 
+impl codex_tools::HookToolOutput for SpawnAgentResult {}
+
 impl ToolOutput for SpawnAgentResult {
     fn log_output(&self) -> String {
         tool_output_json_text(self, "spawn_agent")

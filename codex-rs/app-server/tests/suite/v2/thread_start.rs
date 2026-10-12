@@ -1068,7 +1068,7 @@ async fn thread_start_fails_when_required_mcp_server_fails_to_initialize() -> Re
 }
 
 #[tokio::test]
-async fn thread_start_fails_when_managed_hook_matcher_is_invalid() -> Result<()> {
+async fn thread_start_fails_when_managed_hook_selector_is_invalid() -> Result<()> {
     let server = create_mock_responses_server_repeating_assistant("Done").await;
     let codex_home = TempDir::new()?;
     create_config_toml_without_approval_policy(codex_home.path(), &server.uri())?;
@@ -1077,7 +1077,7 @@ async fn thread_start_fails_when_managed_hook_matcher_is_invalid() -> Result<()>
         r#"[hooks]
 
 [[hooks.PreToolUse]]
-matcher = "["
+selector = { type = "tool", name = "[" }
 
 [[hooks.PreToolUse.hooks]]
 type = "command"
@@ -1099,7 +1099,7 @@ command = "echo managed"
     .await??;
 
     assert!(
-        error.error.message.contains("managed") && error.error.message.contains("invalid matcher"),
+        error.error.message.contains("managed") && error.error.message.contains("invalid selector"),
         "unexpected error message: {}",
         error.error.message
     );
@@ -1117,7 +1117,7 @@ async fn thread_start_fails_when_managed_hook_handler_is_unsupported() -> Result
         r#"[hooks]
 
 [[hooks.PreToolUse]]
-matcher = "^Bash$"
+selector = { type = "tool", namespace = "^functions$", name = "^exec_command$" }
 
 [[hooks.PreToolUse.hooks]]
 type = "prompt"
@@ -1156,7 +1156,7 @@ async fn thread_start_succeeds_when_managed_mcp_hook_is_supported() -> Result<()
         r#"[hooks]
 
 [[hooks.PreToolUse]]
-matcher = "^Bash$"
+selector = { type = "tool", namespace = "^functions$", name = "^exec_command$" }
 
 [[hooks.PreToolUse.hooks]]
 type = "mcp_tool"

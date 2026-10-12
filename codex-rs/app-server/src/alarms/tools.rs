@@ -360,6 +360,8 @@ struct Disarm {
 struct Empty {}
 
 struct Porcelain(String);
+impl codex_tools::HookToolOutput for Porcelain {}
+
 impl ToolOutput for Porcelain {
     fn log_output(&self) -> String {
         self.0.clone()

@@ -228,7 +228,8 @@ async fn cloud_preference_preserves_aliases_reads_and_executor_fallback() -> Tes
                     })
                     .await?;
                 let response = output
-                    .post_tool_use_response("call", &payload)
+                    .post_tool_use_payload(&tool.tool_name(), "call", serde_json::Value::Null)
+                    .map(|receipt| receipt.tool_response)
                     .ok_or("missing response")?;
                 if let Some(resource) = expected_resource {
                     assert_eq!(response["resource"], resource);

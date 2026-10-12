@@ -259,8 +259,8 @@ fn parse_completed(
     let mut should_block = false;
     let mut block_reason = None;
     let mut continuation_prompt = None;
-    let hook_event_name = match handler.event_name {
-        HookEventName::Stop | HookEventName::SubagentStop => handler.event_name,
+    let hook_event_name = match handler.selection.event_name() {
+        HookEventName::Stop | HookEventName::SubagentStop => handler.selection.event_name(),
         event_name => {
             panic!("expected stop hook event, got {event_name:?}");
         }
@@ -693,8 +693,7 @@ mod tests {
     fn handler_with_async(r#async: bool) -> ConfiguredHandler {
         ConfiguredHandler {
             builtin: false,
-            event_name: HookEventName::Stop,
-            matcher: None,
+            selection: crate::engine::HookSelection::fixture(HookEventName::Stop, None),
             timeout_sec: 600,
             status_message: None,
             additional_context_limit: Default::default(),

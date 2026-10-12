@@ -23,7 +23,6 @@ use crate::tools::handlers::resolve_sandbox_permissions;
 use crate::tools::handlers::resolve_tool_environment;
 use crate::tools::handlers::rewrite_function_string_argument;
 use crate::tools::handlers::updated_hook_command;
-use crate::tools::hook_names::HookToolName;
 use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::PostToolUsePayload;
 use crate::tools::registry::PreToolUsePayload;
@@ -171,6 +170,7 @@ impl ExecCommandHandler {
             cancellation_token,
             tracker,
             call_id,
+            tool_name,
             payload,
             ..
         } = invocation;
@@ -190,6 +190,7 @@ impl ExecCommandHandler {
             step_context.clone(),
             cancellation_token,
             call_id.clone(),
+            tool_name,
         );
         let environment_args: ExecCommandEnvironmentArgs = parse_arguments(&arguments)?;
         let turn_environment = resolve_tool_environment(
@@ -439,7 +440,7 @@ impl ExecCommandHandler {
                 exit_code: None,
                 original_token_count: None,
                 output_omitted_bytes: None,
-                hook_command: None,
+                hook_context: None,
             }));
         }
 
@@ -499,7 +500,10 @@ impl ExecCommandHandler {
                     exit_code: Some(output.exit_code),
                     original_token_count: Some(original_token_count),
                     output_omitted_bytes,
-                    hook_command: Some(hook_command),
+                    hook_context: Some(crate::tools::context::ExecHookContext {
+                        tool_name: context.tool_name.clone(),
+                        command: hook_command,
+                    }),
                 }))
             }
             Err(err) => {
@@ -557,7 +561,7 @@ impl CoreToolRuntime for ExecCommandHandler {
         parse_arguments::<ExecCommandArgs>(arguments)
             .ok()
             .map(|args| PreToolUsePayload {
-                tool_name: HookToolName::bash(),
+                tool_name: invocation.tool_name.clone(),
                 tool_input: serde_json::json!({ "command": args.cmd }),
             })
     }

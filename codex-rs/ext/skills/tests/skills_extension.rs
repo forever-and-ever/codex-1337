@@ -1763,7 +1763,8 @@ async fn skills_list_only_returns_model_visible_bounded_metadata() -> TestResult
     };
     let output = list_tool.handle(call.clone()).await?;
     let complete_response = output
-        .post_tool_use_response("call-1", &payload)
+        .post_tool_use_payload(&list_tool.tool_name(), "call-1", serde_json::Value::Null)
+        .map(|receipt| receipt.tool_response)
         .ok_or("skills.list should expose structured output")?;
     let complete_skills = complete_response["skills"]
         .as_array()
@@ -1830,7 +1831,8 @@ async fn skills_list_only_returns_model_visible_bounded_metadata() -> TestResult
             .await?;
         assert!(output.contains_external_context());
         let response = output
-            .post_tool_use_response(&call_id, &payload)
+            .post_tool_use_payload(&list_tool.tool_name(), &call_id, serde_json::Value::Null)
+            .map(|receipt| receipt.tool_response)
             .ok_or("skills.list should expose structured output")?;
         assert!(serde_json::to_vec(&response)?.len() <= byte_budget);
         let next_cursor = response["next_cursor"].as_str().map(str::to_owned);
@@ -1871,7 +1873,13 @@ async fn skills_list_only_returns_model_visible_bounded_metadata() -> TestResult
                 })
                 .await?;
             assert_eq!(
-                output.post_tool_use_response(&call.call_id, &legacy_payload),
+                output
+                    .post_tool_use_payload(
+                        &list_tool.tool_name(),
+                        &call.call_id,
+                        serde_json::Value::Null
+                    )
+                    .map(|receipt| receipt.tool_response),
                 Some(serde_json::json!({
                     "skills": &complete_skills[2..],
                     "warnings": [],

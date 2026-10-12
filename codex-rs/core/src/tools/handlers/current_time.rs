@@ -26,6 +26,8 @@ const TOOL_NAME: &str = "curr_time";
 
 struct CurrentTimeOutput(CurrentTimeReminder);
 
+impl codex_tools::HookToolOutput for CurrentTimeOutput {}
+
 impl ToolOutput for CurrentTimeOutput {
     fn log_output(&self) -> String {
         self.0.body()

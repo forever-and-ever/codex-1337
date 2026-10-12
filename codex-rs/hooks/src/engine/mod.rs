@@ -2,11 +2,13 @@ pub(crate) mod command_runner;
 pub(crate) mod discovery;
 pub(crate) mod dispatcher;
 mod matcher;
+mod selection;
+pub(crate) use selection::HookSelection;
 pub(crate) mod mcp_runner;
 pub(crate) mod output_parser;
 pub(crate) mod schema_loader;
 
-pub(crate) use matcher::HookMatcher;
+pub(crate) use selector::HookMatcher;
 
 use crate::events::compact::PostCompactRequest;
 use crate::events::compact::PreCompactOutcome;
@@ -62,8 +64,7 @@ pub(crate) struct CommandShell {
 pub(crate) struct ConfiguredHandler {
     /// Internally admitted cleanup hook, enabled independently of per-hook state.
     pub builtin: bool,
-    pub event_name: codex_protocol::protocol::HookEventName,
-    pub matcher: Option<HookMatcher>,
+    pub selection: HookSelection,
     pub timeout_sec: u64,
     pub status_message: Option<String>,
     pub additional_context_limit: AdditionalContextLimit,
@@ -168,7 +169,7 @@ impl ConfiguredHandler {
     }
 
     fn event_name_label(&self) -> &'static str {
-        match self.event_name {
+        match self.selection.event_name() {
             codex_protocol::protocol::HookEventName::PreToolUse => "pre-tool-use",
             codex_protocol::protocol::HookEventName::PermissionRequest => "permission-request",
             codex_protocol::protocol::HookEventName::PostToolUse => "post-tool-use",
@@ -205,7 +206,7 @@ pub struct HookListEntry {
     pub key: String,
     pub event_name: HookEventName,
     pub handler: HookListEntryHandler,
-    pub matcher: Option<String>,
+    pub selector: Option<codex_protocol::HookSelector>,
     pub timeout_sec: u64,
     pub status_message: Option<String>,
     pub additional_context_limit: Option<usize>,
@@ -322,8 +323,8 @@ impl ClaudeHooksEngine {
                 }
                 self.handlers.push(ConfiguredHandler {
                     builtin: true,
-                    event_name,
-                    matcher: None,
+                    selection: HookSelection::compile(event_name, None)
+                        .expect("unfiltered executor hook"),
                     timeout_sec: timeout_sec.unwrap_or(5).max(1),
                     status_message,
                     additional_context_limit: Default::default(),
@@ -375,7 +376,7 @@ impl ClaudeHooksEngine {
             self.handlers
                 .iter()
                 .filter(|handler| {
-                    handler.event_name == HookEventName::PermissionRequest
+                    handler.selection.event_name() == HookEventName::PermissionRequest
                         && handler.can_apply_control_effects()
                 })
                 .map(|handler| handler.timeout_sec)

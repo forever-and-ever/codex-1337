@@ -1093,7 +1093,7 @@ fn hooks_append_groups_and_reject_conflicting_managed_dirs() {
 managed_dir = "/managed/hooks"
 
 [[hooks.PreToolUse]]
-matcher = "Bash"
+selector = { type = "tool", namespace = "^functions$", name = "^exec_command$" }
 
 [[hooks.PreToolUse.hooks]]
 type = "command"
@@ -1108,7 +1108,7 @@ command = "low"
 managed_dir = "/managed/hooks"
 
 [[hooks.PreToolUse]]
-matcher = "Edit"
+selector = { type = "tool", namespace = "^functions$", name = "^apply_patch$" }
 
 [[hooks.PreToolUse.hooks]]
 type = "command"
@@ -1129,14 +1129,14 @@ command = "high"
 managed_dir = "/managed/hooks"
 
 [[hooks.PreToolUse]]
-matcher = "Edit"
+selector = { type = "tool", namespace = "^functions$", name = "^apply_patch$" }
 
 [[hooks.PreToolUse.hooks]]
 type = "command"
 command = "high"
 
 [[hooks.PreToolUse]]
-matcher = "Bash"
+selector = { type = "tool", namespace = "^functions$", name = "^exec_command$" }
 
 [[hooks.PreToolUse.hooks]]
 type = "command"
@@ -1215,7 +1215,7 @@ managed_dir = "/managed/hooks"
 windows_managed_dir = 'C:\managed\low'
 
 [[hooks.PreToolUse]]
-matcher = "Bash"
+selector = { type = "tool", namespace = "^functions$", name = "^exec_command$" }
 
 [[hooks.PreToolUse.hooks]]
 type = "command"
@@ -1231,7 +1231,7 @@ managed_dir = "/managed/hooks"
 windows_managed_dir = 'C:\managed\high'
 
 [[hooks.PreToolUse]]
-matcher = "Edit"
+selector = { type = "tool", namespace = "^functions$", name = "^apply_patch$" }
 
 [[hooks.PreToolUse.hooks]]
 type = "command"
@@ -1253,14 +1253,14 @@ managed_dir = "/managed/hooks"
 windows_managed_dir = 'C:\managed\high'
 
 [[hooks.PreToolUse]]
-matcher = "Edit"
+selector = { type = "tool", namespace = "^functions$", name = "^apply_patch$" }
 
 [[hooks.PreToolUse.hooks]]
 type = "command"
 command = "high"
 
 [[hooks.PreToolUse]]
-matcher = "Bash"
+selector = { type = "tool", namespace = "^functions$", name = "^exec_command$" }
 
 [[hooks.PreToolUse.hooks]]
 type = "command"
@@ -1280,7 +1280,7 @@ managed_dir = "/managed/low"
 windows_managed_dir = 'C:\managed\hooks'
 
 [[hooks.PreToolUse]]
-matcher = "Bash"
+selector = { type = "tool", namespace = "^functions$", name = "^exec_command$" }
 
 [[hooks.PreToolUse.hooks]]
 type = "command"
@@ -1296,7 +1296,7 @@ managed_dir = "/managed/high"
 windows_managed_dir = 'C:\managed\hooks'
 
 [[hooks.PreToolUse]]
-matcher = "Edit"
+selector = { type = "tool", namespace = "^functions$", name = "^apply_patch$" }
 
 [[hooks.PreToolUse.hooks]]
 type = "command"
@@ -1318,14 +1318,14 @@ managed_dir = "/managed/high"
 windows_managed_dir = 'C:\managed\hooks'
 
 [[hooks.PreToolUse]]
-matcher = "Edit"
+selector = { type = "tool", namespace = "^functions$", name = "^apply_patch$" }
 
 [[hooks.PreToolUse.hooks]]
 type = "command"
 command = "high"
 
 [[hooks.PreToolUse]]
-matcher = "Bash"
+selector = { type = "tool", namespace = "^functions$", name = "^exec_command$" }
 
 [[hooks.PreToolUse.hooks]]
 type = "command"

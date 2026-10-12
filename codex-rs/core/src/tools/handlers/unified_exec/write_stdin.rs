@@ -73,6 +73,7 @@ impl WriteStdinHandler {
             step_context,
             cancellation_token,
             call_id,
+            tool_name,
             payload,
             ..
         } = invocation;
@@ -99,8 +100,13 @@ impl WriteStdinHandler {
                 "unified exec is unavailable in this session",
             )?;
         }
-        let context =
-            UnifiedExecContext::new(session.clone(), step_context, cancellation_token, call_id);
+        let context = UnifiedExecContext::new(
+            session.clone(),
+            step_context,
+            cancellation_token,
+            call_id,
+            tool_name,
+        );
         let response = session
             .services
             .unified_exec_manager
@@ -160,7 +166,7 @@ impl CoreToolRuntime for WriteStdinHandler {
         result: &dyn crate::tools::context::ToolOutput,
     ) -> Option<PostToolUsePayload> {
         // A `write_stdin` poll can observe final completion for the original
-        // `exec_command`; emit that command's matching Bash PostToolUse.
+        // execution; retain its original identity and tool-use id.
         post_unified_exec_tool_use_payload(invocation, result)
     }
 }

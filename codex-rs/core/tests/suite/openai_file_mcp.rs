@@ -18,7 +18,7 @@ use codex_utils_path_uri::PathUri;
 use core_test_support::PathExt;
 use core_test_support::apps_test_server::AppsTestServer;
 use core_test_support::apps_test_server::CALENDAR_EXTRACT_TEXT_TOOL_NAME;
-use core_test_support::apps_test_server::DIRECT_CALENDAR_EXTRACT_TEXT_TOOL as DOCUMENT_EXTRACT_HOOK_MATCHER;
+
 use core_test_support::apps_test_server::DOCUMENT_EXTRACT_TEXT_RESOURCE_URI;
 use core_test_support::apps_test_server::SEARCH_CALENDAR_EXTRACT_TEXT_TOOL as DOCUMENT_EXTRACT_TOOL;
 use core_test_support::apps_test_server::SEARCH_CALENDAR_NAMESPACE as DOCUMENT_EXTRACT_NAMESPACE;
@@ -108,7 +108,7 @@ print(json.dumps({{
     let hooks = serde_json::json!({
         "hooks": {
             "PostToolUse": [{
-                "matcher": DOCUMENT_EXTRACT_HOOK_MATCHER,
+                "selector": {"type": "tool", "namespace": DOCUMENT_EXTRACT_NAMESPACE, "name": DOCUMENT_EXTRACT_TOOL},
                 "hooks": [{
                     "type": "command",
                     "command": format!("python3 {}", script_path.display()),

@@ -1,6 +1,5 @@
 use super::*;
 use crate::sandboxing::SandboxPermissions;
-use crate::tools::hook_names::HookToolName;
 use codex_network_proxy::ManagedNetworkSandboxContext;
 use codex_protocol::permissions::FileSystemAccessMode;
 use codex_protocol::permissions::FileSystemPath;
@@ -11,6 +10,7 @@ use codex_protocol::protocol::GranularApprovalConfig;
 use codex_sandboxing::SandboxCommand;
 use codex_sandboxing::SandboxManager;
 use codex_sandboxing::SandboxType;
+use codex_tools::ToolName;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_path_uri::PathUri;
 use pretty_assertions::assert_eq;
@@ -18,25 +18,30 @@ use serde_json::json;
 use std::collections::HashMap;
 
 #[test]
-fn bash_permission_request_payload_omits_missing_description() {
+fn command_permission_request_payload_omits_missing_description() {
     assert_eq!(
-        PermissionRequestPayload::bash("echo hi".to_string(), /*description*/ None),
+        PermissionRequestPayload::command(
+            Some(ToolName::plain("exec_command")),
+            "echo hi".to_string(),
+            /*description*/ None
+        ),
         PermissionRequestPayload {
-            tool_name: HookToolName::bash(),
+            tool_name: Some(ToolName::plain("exec_command")),
             tool_input: json!({ "command": "echo hi" }),
         }
     );
 }
 
 #[test]
-fn bash_permission_request_payload_includes_description_when_present() {
+fn command_permission_request_payload_includes_description_when_present() {
     assert_eq!(
-        PermissionRequestPayload::bash(
+        PermissionRequestPayload::command(
+            Some(ToolName::plain("exec_command")),
             "echo hi".to_string(),
             Some("network-access example.com".to_string()),
         ),
         PermissionRequestPayload {
-            tool_name: HookToolName::bash(),
+            tool_name: Some(ToolName::plain("exec_command")),
             tool_input: json!({
                 "command": "echo hi",
                 "description": "network-access example.com",

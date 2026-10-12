@@ -94,6 +94,7 @@ pub(crate) struct UnifiedExecContext {
     pub step_context: Arc<StepContext>,
     pub cancellation_token: CancellationToken,
     pub call_id: String,
+    pub tool_name: codex_tools::ToolName,
 }
 
 impl UnifiedExecContext {
@@ -102,12 +103,14 @@ impl UnifiedExecContext {
         step_context: Arc<StepContext>,
         cancellation_token: CancellationToken,
         call_id: String,
+        tool_name: codex_tools::ToolName,
     ) -> Self {
         Self {
             session,
             step_context,
             cancellation_token,
             call_id,
+            tool_name: tool_name.with_default_namespace(),
         }
     }
 }
@@ -196,7 +199,7 @@ struct ProcessEntry {
     process_id: i32,
     cwd: PathUri,
     initial_exec_command_active: Arc<std::sync::atomic::AtomicBool>,
-    hook_command: String,
+    hook_context: crate::tools::context::ExecHookContext,
     tty: bool,
     environment_id: String,
     permissions: TerminalPermissions,

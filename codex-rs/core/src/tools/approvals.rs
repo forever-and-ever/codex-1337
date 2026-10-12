@@ -12,7 +12,6 @@ use crate::hook_runtime::run_permission_request_hooks;
 use crate::mcp_tool_call::request_mcp_tool_user_approval;
 use crate::sandboxing::SandboxPermissions;
 use crate::session::session::Session;
-use crate::tools::hook_names::HookToolName;
 use crate::tools::runtimes::apply_patch::ApplyPatchApprovalKey;
 use crate::tools::runtimes::unified_exec::UnifiedExecApprovalKey;
 use crate::tools::sandboxing::ApprovalRequestReasons;
@@ -124,7 +123,6 @@ pub(crate) enum ApprovalAction {
         tool_description: Option<String>,
         annotations: Option<crate::guardian::GuardianMcpAnnotations>,
         #[serde(skip_serializing)]
-        hook_tool_name: HookToolName,
         approval_policy: AskForApproval,
         reviewer: ApprovalsReviewer,
         approval_mode: AppToolApproval,
@@ -164,13 +162,21 @@ pub(crate) enum ApprovalCacheKey {
 }
 
 impl ApprovalAction {
-    pub(crate) fn permission_request_payload(&self) -> PermissionRequestPayload {
+    pub(crate) fn permission_request_payload(
+        &self,
+        tool_name: &ToolName,
+    ) -> PermissionRequestPayload {
+        let attributed_tool = Some(tool_name.clone());
         match self {
             Self::ExecCommand {
                 hook_command,
                 justification,
                 ..
-            } => PermissionRequestPayload::bash(hook_command.clone(), justification.clone()),
+            } => PermissionRequestPayload::command(
+                attributed_tool,
+                hook_command.clone(),
+                justification.clone(),
+            ),
             Self::WriteStdin {
                 id,
                 approval_id,
@@ -182,34 +188,25 @@ impl ApprovalAction {
                 sandbox_permissions,
                 additional_permissions,
             } => PermissionRequestPayload {
-                tool_name: HookToolName::new("write_stdin"),
+                tool_name: attributed_tool,
                 tool_input: serde_json::json!({
-                    "session_id": process_id,
-                    "chars": input,
-                    "parent_call_id": id,
-                    "approval_id": approval_id,
-                    "environment_id": environment_id,
-                    "cwd": cwd,
-                    "tty": tty,
-                    "sandbox_permissions": sandbox_permissions,
-                    "additional_permissions": additional_permissions,
+                    "session_id": process_id, "chars": input, "parent_call_id": id,
+                    "approval_id": approval_id, "environment_id": environment_id, "cwd": cwd,
+                    "tty": tty, "sandbox_permissions": sandbox_permissions, "additional_permissions": additional_permissions,
                 }),
             },
             #[cfg(unix)]
-            Self::Execve { command, .. } => PermissionRequestPayload::bash(
+            Self::Execve { command, .. } => PermissionRequestPayload::command(
+                attributed_tool,
                 codex_shell_command::parse_command::shlex_join(command),
-                /*description*/ None,
+                None,
             ),
             Self::ApplyPatch { patch, .. } => PermissionRequestPayload {
-                tool_name: HookToolName::apply_patch(),
+                tool_name: attributed_tool,
                 tool_input: serde_json::json!({ "command": patch }),
             },
-            Self::McpToolCall {
-                hook_tool_name,
-                arguments,
-                ..
-            } => PermissionRequestPayload {
-                tool_name: hook_tool_name.clone(),
+            Self::McpToolCall { arguments, .. } => PermissionRequestPayload {
+                tool_name: attributed_tool,
                 tool_input: arguments
                     .clone()
                     .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new())),
@@ -217,8 +214,10 @@ impl ApprovalAction {
             Self::NetworkAccess {
                 hook_command,
                 target,
+                trigger,
                 ..
-            } => PermissionRequestPayload::bash(
+            } => PermissionRequestPayload::command(
+                trigger.as_ref().map(|trigger| trigger.tool_name.clone()),
                 hook_command.clone(),
                 Some(format!("network-access {target}")),
             ),
@@ -227,11 +226,8 @@ impl ApprovalAction {
                 permissions,
                 ..
             } => PermissionRequestPayload {
-                tool_name: HookToolName::new("request_permissions"),
-                tool_input: serde_json::json!({
-                    "reason": reason,
-                    "permissions": permissions,
-                }),
+                tool_name: attributed_tool,
+                tool_input: serde_json::json!({ "reason": reason, "permissions": permissions }),
             },
         }
     }
@@ -509,7 +505,7 @@ impl Session {
             self,
             &ctx.review_context,
             &permission_request_run_id,
-            action.permission_request_payload(),
+            action.permission_request_payload(&ctx.tool_name),
         )
         .await
         {

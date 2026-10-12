@@ -88,7 +88,7 @@ fn expected_source(index: usize) -> ExecutorPluginHookSource {
         source_relative_path: format!(".codex-plugin/plugin.json#hooks[{index}]"),
         hooks: HookEventsToml {
             stop: vec![MatcherGroup {
-                matcher: None,
+                selector: None,
                 hooks: vec![HookHandlerConfig::McpTool {
                     server: "node_repl".to_string(),
                     tool: "turn_ended".to_string(),
@@ -180,7 +180,7 @@ fn filters_mixed_handlers_without_rewriting_allowed_groups() {
     input.insert("order".to_string(), json!(2));
     expected.hooks.stop[0].hooks.push(second_handler.clone());
     expected.hooks.stop.push(MatcherGroup {
-        matcher: None,
+        selector: None,
         hooks: vec![second_handler],
     });
 
@@ -409,8 +409,9 @@ fn ignores_unallowlisted_executor_plugin_hooks() {
     wrong_server["hooks"]["hooks"]["Stop"][0]["hooks"][0]["server"] = json!("other");
     let mut wrong_tool = cleanup_hook_manifest();
     wrong_tool["hooks"]["hooks"]["Stop"][0]["hooks"][0]["tool"] = json!("other");
-    let mut wrong_matcher = cleanup_hook_manifest();
-    wrong_matcher["hooks"]["hooks"]["Stop"][0]["matcher"] = json!("unexpected");
+    let mut wrong_selector = cleanup_hook_manifest();
+    wrong_selector["hooks"]["hooks"]["Stop"][0]["selector"] =
+        json!({"type": "event_value", "pattern": "unexpected"});
     for (name, plugin_id, manifest) in [
         (
             "unallowlisted bundled plugin",
@@ -441,9 +442,9 @@ fn ignores_unallowlisted_executor_plugin_hooks() {
         ("wrong server", "computer-use@openai-bundled", wrong_server),
         ("wrong tool", "computer-use@openai-bundled", wrong_tool),
         (
-            "wrong matcher",
+            "wrong selector",
             "computer-use@openai-bundled",
-            wrong_matcher,
+            wrong_selector,
         ),
     ] {
         let snapshot = snapshot_for_manifest(

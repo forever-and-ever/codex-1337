@@ -3,6 +3,7 @@ use codex_protocol::models::FunctionCallOutputPayload;
 use codex_protocol::models::ImageDetail;
 use codex_protocol::models::ImageReference;
 use codex_protocol::models::ResponseInputItem;
+use codex_tools::HookToolOutput;
 use codex_tools::ToolOutput;
 use codex_tools::ToolPayload;
 use pretty_assertions::assert_eq;
@@ -52,12 +53,13 @@ fn preserves_images_as_separate_output_items_without_logging_bytes() {
         json!({"encrypted_output": "enc_payload"}).to_string()
     );
     assert_eq!(
-        output.post_tool_use_response(
-            "call-1",
-            &ToolPayload::Function {
-                arguments: "{}".to_string()
-            }
-        ),
+        output
+            .post_tool_use_payload(
+                &codex_tools::ToolName::plain("history_notes"),
+                "call-1",
+                json!({})
+            )
+            .map(|receipt| receipt.tool_response),
         Some(json!({"encrypted_output": "enc_payload"}))
     );
     assert_eq!(

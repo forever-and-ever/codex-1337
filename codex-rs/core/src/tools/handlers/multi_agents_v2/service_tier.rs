@@ -45,6 +45,8 @@ struct Args {
     service_tier: String,
 }
 
+impl codex_tools::HookToolOutput for AgentTierStatus {}
+
 impl ToolOutput for AgentTierStatus {
     fn log_output(&self) -> String {
         tool_output_json_text(self, "set_agent_service_tier")

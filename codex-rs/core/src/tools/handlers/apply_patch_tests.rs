@@ -30,10 +30,10 @@ fn local_context(cwd: &PathUri) -> FileSystemSandboxPolicyContext<'_> {
 use crate::session::step_context::StepContext;
 use crate::session::tests::make_session_and_context;
 use crate::tools::context::ToolInvocation;
-use crate::tools::hook_names::HookToolName;
 use crate::tools::registry::PostToolUsePayload;
 use crate::tools::registry::PreToolUsePayload;
 use crate::turn_diff_tracker::TurnDiffTracker;
+use codex_tools::ToolName;
 
 fn sample_patch() -> &'static str {
     r#"*** Begin Patch
@@ -70,7 +70,7 @@ async fn pre_tool_use_payload_uses_freeform_patch_input() {
     assert_eq!(
         handler.pre_tool_use_payload(&invocation),
         Some(PreToolUsePayload {
-            tool_name: HookToolName::apply_patch(),
+            tool_name: ToolName::plain("apply_patch"),
             tool_input: json!({ "command": patch }),
         })
     );
@@ -89,7 +89,7 @@ async fn post_tool_use_payload_uses_patch_input_and_tool_output() {
     assert_eq!(
         handler.post_tool_use_payload(&invocation, &output),
         Some(PostToolUsePayload {
-            tool_name: HookToolName::apply_patch(),
+            tool_name: ToolName::plain("apply_patch"),
             tool_use_id: "call-apply-patch".to_string(),
             tool_input: json!({ "command": patch }),
             tool_response: json!("Success. Updated files."),

@@ -90,7 +90,7 @@ fn hooks_to_info(hooks: &[codex_hooks::HookListEntry]) -> Vec<HookMetadata> {
                 key: hook.key.clone(),
                 event_name: hook.event_name.into(),
                 handler,
-                matcher: hook.matcher.clone(),
+                selector: hook.selector.clone(),
                 timeout_sec: hook.timeout_sec,
                 status_message: hook.status_message.clone(),
                 additional_context_limit: hook.additional_context_limit,

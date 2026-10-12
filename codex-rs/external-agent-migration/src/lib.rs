@@ -2,6 +2,7 @@
 
 mod config_values;
 mod detect;
+mod hook_selectors;
 mod hooks_cla;
 mod hooks_common;
 mod hooks_cur;

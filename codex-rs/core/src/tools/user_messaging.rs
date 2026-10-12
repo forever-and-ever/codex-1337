@@ -88,15 +88,19 @@ impl AnyToolResult {
             return None;
         }
         let payload = self.post_tool_use_payload.as_ref()?;
-        // MCP hook names normalize prefixed/unprefixed and flat/namespaced calls.
-        // Both connector spellings also have a form for catalogs without connector metadata.
-        if !matches!(
-            payload.tool_name.name(),
-            "mcp__codex_apps__user_messaging__send_message"
-                | "mcp__codex_apps__user_messaging_send_message"
-                | "mcp__codex_apps__user_message__send_message"
-                | "mcp__codex_apps__user_message_send_message"
-        ) {
+        // Match the executed callable address, not a lossy hook-specific projection.
+        let tool = &payload.tool_name;
+        let confirmed_send = match tool.namespace.as_deref() {
+            Some("codex_apps__user_messaging" | "codex_apps__user_message") => {
+                matches!(tool.name.as_str(), "send_message" | "_send_message")
+            }
+            Some("codex_apps") => matches!(
+                tool.name.as_str(),
+                "user_messaging_send_message" | "user_message_send_message"
+            ),
+            _ => false,
+        };
+        if !confirmed_send {
             return None;
         }
         let text = payload.tool_input.get("text")?.as_str()?;

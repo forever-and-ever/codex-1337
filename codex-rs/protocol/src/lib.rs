@@ -33,6 +33,8 @@ pub use thread_id::RolloutId;
 pub use thread_id::ThreadId;
 pub use tool_name::DEFAULT_FUNCTION_NAMESPACE;
 pub use tool_name::ToolName;
+mod hook_selector;
+pub use hook_selector::HookSelector;
 pub mod approvals;
 pub mod capabilities;
 pub mod code_mode;

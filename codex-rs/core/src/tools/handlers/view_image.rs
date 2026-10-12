@@ -225,6 +225,8 @@ pub struct ViewImageOutput {
     unified_image_budget: bool,
 }
 
+impl codex_tools::HookToolOutput for ViewImageOutput {}
+
 impl ToolOutput for ViewImageOutput {
     fn log_output(&self) -> String {
         format!("<image data URL omitted: {} bytes>", self.image_url.len())

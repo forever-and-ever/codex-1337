@@ -98,7 +98,7 @@ pub fn executor_plugin_hook_sources<'a>(
                         is_allowlisted_bundled_cleanup_hook(
                             &plugin_id,
                             event,
-                            group.matcher.as_deref(),
+                            group.selector.as_ref(),
                             handler,
                             app_connector_id,
                         )

@@ -19,10 +19,10 @@ use crate::tools::context::ExecCommandToolOutput;
 use crate::tools::context::ToolCallSource;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
-use crate::tools::hook_names::HookToolName;
 use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::ToolExecutor;
 use crate::turn_diff_tracker::TurnDiffTracker;
+use codex_tools::ToolName;
 use tokio::sync::Mutex;
 
 const TEST_TRUNCATION_POLICY: TruncationPolicy = TruncationPolicy::Tokens(10_000);
@@ -565,7 +565,7 @@ async fn exec_command_pre_tool_use_payload_uses_raw_command() {
             payload,
         }),
         Some(crate::tools::registry::PreToolUsePayload {
-            tool_name: HookToolName::bash(),
+            tool_name: ToolName::plain("exec_command"),
             tool_input: serde_json::json!({ "command": "printf exec command" }),
         })
     );
@@ -612,14 +612,17 @@ async fn exec_command_post_tool_use_payload_uses_output_for_noninteractive_one_s
         exit_code: Some(0),
         original_token_count: None,
         output_omitted_bytes: None,
-        hook_command: Some("echo three".to_string()),
+        hook_context: Some(crate::tools::context::ExecHookContext {
+            tool_name: codex_tools::ToolName::plain("exec_command"),
+            command: "echo three".to_string(),
+        }),
     };
     let invocation = invocation_for_payload("exec_command", "call-43", payload).await;
     let handler = ExecCommandHandler::default();
     assert_eq!(
         handler.post_tool_use_payload(&invocation, &output),
         Some(crate::tools::registry::PostToolUsePayload {
-            tool_name: HookToolName::bash(),
+            tool_name: ToolName::plain("exec_command"),
             tool_use_id: "call-43".to_string(),
             tool_input: serde_json::json!({ "command": "echo three" }),
             tool_response: serde_json::json!("three"),
@@ -643,7 +646,10 @@ async fn exec_command_post_tool_use_payload_uses_output_for_interactive_completi
         exit_code: Some(0),
         original_token_count: None,
         output_omitted_bytes: None,
-        hook_command: Some("echo three".to_string()),
+        hook_context: Some(crate::tools::context::ExecHookContext {
+            tool_name: codex_tools::ToolName::plain("exec_command"),
+            command: "echo three".to_string(),
+        }),
     };
     let invocation = invocation_for_payload("exec_command", "call-44", payload).await;
     let handler = ExecCommandHandler::default();
@@ -651,7 +657,7 @@ async fn exec_command_post_tool_use_payload_uses_output_for_interactive_completi
     assert_eq!(
         handler.post_tool_use_payload(&invocation, &output),
         Some(crate::tools::registry::PostToolUsePayload {
-            tool_name: HookToolName::bash(),
+            tool_name: ToolName::plain("exec_command"),
             tool_use_id: "call-44".to_string(),
             tool_input: serde_json::json!({ "command": "echo three" }),
             tool_response: serde_json::json!("three"),
@@ -675,7 +681,10 @@ async fn exec_command_post_tool_use_payload_skips_running_sessions() {
         exit_code: None,
         original_token_count: None,
         output_omitted_bytes: None,
-        hook_command: Some("echo three".to_string()),
+        hook_context: Some(crate::tools::context::ExecHookContext {
+            tool_name: codex_tools::ToolName::plain("exec_command"),
+            command: "echo three".to_string(),
+        }),
     };
     let invocation = invocation_for_payload("exec_command", "call-45", payload).await;
     let handler = ExecCommandHandler::default();
@@ -702,7 +711,10 @@ async fn write_stdin_post_tool_use_payload_uses_original_exec_call_id_and_comman
         exit_code: Some(0),
         original_token_count: None,
         output_omitted_bytes: None,
-        hook_command: Some("sleep 1; echo finished".to_string()),
+        hook_context: Some(crate::tools::context::ExecHookContext {
+            tool_name: codex_tools::ToolName::plain("exec_command"),
+            command: "sleep 1; echo finished".to_string(),
+        }),
     };
     let invocation = invocation_for_payload("write_stdin", "write-stdin-call", payload).await;
     let handler = WriteStdinHandler::default();
@@ -710,7 +722,7 @@ async fn write_stdin_post_tool_use_payload_uses_original_exec_call_id_and_comman
     assert_eq!(
         handler.post_tool_use_payload(&invocation, &output),
         Some(crate::tools::registry::PostToolUsePayload {
-            tool_name: HookToolName::bash(),
+            tool_name: ToolName::plain("exec_command"),
             tool_use_id: "exec-call-45".to_string(),
             tool_input: serde_json::json!({ "command": "sleep 1; echo finished" }),
             tool_response: serde_json::json!("finished\n"),
@@ -734,7 +746,10 @@ async fn write_stdin_post_tool_use_payload_keeps_parallel_session_metadata_separ
         exit_code: Some(0),
         original_token_count: None,
         output_omitted_bytes: None,
-        hook_command: Some("sleep 2; echo alpha".to_string()),
+        hook_context: Some(crate::tools::context::ExecHookContext {
+            tool_name: codex_tools::ToolName::namespaced("functions", "python"),
+            command: "sleep 2; echo alpha".to_string(),
+        }),
     };
     let output_b = ExecCommandToolOutput {
         event_call_id: "exec-call-b".to_string(),
@@ -747,8 +762,12 @@ async fn write_stdin_post_tool_use_payload_keeps_parallel_session_metadata_separ
         exit_code: Some(0),
         original_token_count: None,
         output_omitted_bytes: None,
-        hook_command: Some("sleep 1; echo beta".to_string()),
+        hook_context: Some(crate::tools::context::ExecHookContext {
+            tool_name: codex_tools::ToolName::namespaced("functions", "bash"),
+            command: "sleep 1; echo beta".to_string(),
+        }),
     };
+    let output_b = Box::new(output_b);
     let invocation_b = invocation_for_payload("write_stdin", "write-call-b", payload.clone()).await;
     let invocation_a = invocation_for_payload("write_stdin", "write-call-a", payload).await;
     let handler = WriteStdinHandler::default();
@@ -762,13 +781,13 @@ async fn write_stdin_post_tool_use_payload_keeps_parallel_session_metadata_separ
         payloads,
         [
             Some(crate::tools::registry::PostToolUsePayload {
-                tool_name: HookToolName::bash(),
+                tool_name: ToolName::namespaced("functions", "bash"),
                 tool_use_id: "exec-call-b".to_string(),
                 tool_input: serde_json::json!({ "command": "sleep 1; echo beta" }),
                 tool_response: serde_json::json!("beta\n"),
             }),
             Some(crate::tools::registry::PostToolUsePayload {
-                tool_name: HookToolName::bash(),
+                tool_name: ToolName::namespaced("functions", "python"),
                 tool_use_id: "exec-call-a".to_string(),
                 tool_input: serde_json::json!({ "command": "sleep 2; echo alpha" }),
                 tool_response: serde_json::json!("alpha\n"),

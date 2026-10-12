@@ -187,7 +187,12 @@ impl CodexThread {
                 .ok_or(TerminalWatchError::Missing(session_id))?;
             (
                 Arc::clone(&entry.process),
-                entry.hook_command.chars().take(512).collect::<String>(),
+                entry
+                    .hook_context
+                    .command
+                    .chars()
+                    .take(512)
+                    .collect::<String>(),
             )
         };
         let output = process.output_handles().output_buffer.lock().await;

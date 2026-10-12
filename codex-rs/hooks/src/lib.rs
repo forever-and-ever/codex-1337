@@ -35,23 +35,6 @@ pub const HOOK_EVENT_NAMES: [&str; 12] = [
     "Interrupt",
 ];
 
-/// Hook event names whose matcher fields are meaningful during dispatch.
-///
-/// Other events can appear in hooks JSON, but Codex ignores their matcher
-/// fields because those events do not dispatch against a tool, compaction
-/// trigger, session-start source, or session-end reason.
-pub const HOOK_EVENT_NAMES_WITH_MATCHERS: [&str; 9] = [
-    "PreToolUse",
-    "PermissionRequest",
-    "PostToolUse",
-    "PreCompact",
-    "PostCompact",
-    "SessionStart",
-    "SessionEnd",
-    "SubagentStart",
-    "SubagentStop",
-];
-
 pub use events::compact::PostCompactRequest;
 pub use events::compact::PreCompactOutcome;
 pub use events::compact::PreCompactRequest;

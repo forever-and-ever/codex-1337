@@ -21,6 +21,8 @@ pub struct PlanToolOutput;
 
 const PLAN_UPDATED_MESSAGE: &str = "Plan updated";
 
+impl codex_tools::HookToolOutput for PlanToolOutput {}
+
 impl ToolOutput for PlanToolOutput {
     fn log_output(&self) -> String {
         PLAN_UPDATED_MESSAGE.to_string()

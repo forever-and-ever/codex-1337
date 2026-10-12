@@ -4300,7 +4300,7 @@ managed_dir = "/enterprise/hooks"
 windows_managed_dir = 'C:\enterprise\hooks'
 
 [[PreToolUse]]
-matcher = "^Bash$"
+selector = { type = "tool", namespace = "^functions$", name = "^exec_command$" }
 
 [[PreToolUse.hooks]]
 type = "command"
@@ -4330,7 +4330,7 @@ statusMessage = "checking"
 managed_dir = "/cloud/hooks"
 
 [[hooks.PreToolUse]]
-matcher = "^Bash$"
+selector = { type = "tool", namespace = "^functions$", name = "^exec_command$" }
 
 [[hooks.PreToolUse.hooks]]
 type = "command"
@@ -4348,7 +4348,7 @@ command = "python3 /cloud/hooks/pre.py"
 managed_dir = "/system/hooks"
 
 [[hooks.PreToolUse]]
-matcher = "^Bash$"
+selector = { type = "tool", namespace = "^functions$", name = "^exec_command$" }
 
 [[hooks.PreToolUse.hooks]]
 type = "command"
@@ -4380,7 +4380,7 @@ command = "python3 /system/hooks/pre.py"
 managed_dir = "/enterprise/hooks"
 
 [[hooks.PreToolUse]]
-matcher = "^Bash$"
+selector = { type = "tool", namespace = "^functions$", name = "^exec_command$" }
 
 [[hooks.PreToolUse.hooks]]
 type = "command"

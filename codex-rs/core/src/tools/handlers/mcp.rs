@@ -15,7 +15,6 @@ use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolOutput;
 use crate::tools::context::ToolPayload;
 use crate::tools::context::boxed_tool_output;
-use crate::tools::hook_names::HookToolName;
 use crate::tools::lifecycle::notify_tool_start;
 use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::PostToolUsePayload;
@@ -42,8 +41,6 @@ use futures::future::BoxFuture;
 use serde_json::Map;
 use serde_json::Value;
 
-const LEGACY_MCP_TOOL_NAME_PREFIX: &str = "mcp__";
-const MCP_TOOL_NAME_DELIMITER: &str = "__";
 const MAX_AGENT_PLUGIN_MCP_NAMESPACE_DESCRIPTION_BYTES: usize = 1_000;
 const MAX_MCP_NAMESPACE_DESCRIPTION_BYTES: usize = 512 * 1024;
 
@@ -109,29 +106,6 @@ impl McpHandler {
 
     pub(crate) fn model_spec_bytes(&self) -> Result<usize, serde_json::Error> {
         serde_json::to_vec(&self.spec).map(|spec| spec.len())
-    }
-
-    fn hook_tool_name(&self) -> HookToolName {
-        HookToolName::new(ensure_mcp_prefix(&join_tool_name(&self.tool_name())))
-    }
-}
-
-fn join_tool_name(tool_name: &ToolName) -> String {
-    match tool_name.namespace.as_deref() {
-        Some(namespace) => {
-            let namespace = namespace.trim_end_matches('_');
-            let name = tool_name.name.trim_start_matches('_');
-            format!("{namespace}{MCP_TOOL_NAME_DELIMITER}{name}")
-        }
-        None => tool_name.name.clone(),
-    }
-}
-
-fn ensure_mcp_prefix(name: &str) -> String {
-    if name.starts_with(LEGACY_MCP_TOOL_NAME_PREFIX) {
-        name.to_string()
-    } else {
-        format!("{LEGACY_MCP_TOOL_NAME_PREFIX}{name}")
     }
 }
 
@@ -255,7 +229,6 @@ impl McpHandler {
             originating_call,
             &self.tool_info,
             prepared_mcp_call,
-            self.hook_tool_name(),
             tool_name,
             &source,
             payload,
@@ -444,7 +417,7 @@ impl CoreToolRuntime for McpHandler {
         };
 
         Some(PreToolUsePayload {
-            tool_name: self.hook_tool_name(),
+            tool_name: invocation.tool_name.clone(),
             tool_input: mcp_hook_tool_input(arguments),
         })
     }
@@ -479,15 +452,11 @@ impl CoreToolRuntime for McpHandler {
         let ToolPayload::Function { .. } = &invocation.payload else {
             return None;
         };
-
-        let tool_response =
-            result.post_tool_use_response(&invocation.call_id, &invocation.payload)?;
-        Some(PostToolUsePayload {
-            tool_name: self.hook_tool_name(),
-            tool_use_id: invocation.call_id.clone(),
-            tool_input: result.post_tool_use_input(&invocation.payload)?,
-            tool_response,
-        })
+        result.post_tool_use_payload(
+            &invocation.tool_name,
+            &invocation.call_id,
+            serde_json::Value::Null,
+        )
     }
 }
 
@@ -592,7 +561,6 @@ mod tests {
     use crate::session::step_context::StepContext;
     use crate::session::tests::make_session_and_context;
     use crate::tools::context::ToolCallSource;
-    use crate::tools::hook_names::HookToolName;
     use crate::tools::registry::PostToolUsePayload;
     use crate::tools::registry::PreToolUsePayload;
     use crate::turn_diff_tracker::TurnDiffTracker;
@@ -603,7 +571,7 @@ mod tests {
     use tokio::sync::Mutex;
 
     #[tokio::test]
-    async fn mcp_pre_tool_use_payload_uses_prefixed_tool_name_and_raw_args() {
+    async fn mcp_pre_tool_use_payload_preserves_tool_address_and_raw_args() {
         let payload = ToolPayload::Function {
             arguments: json!({
                 "entities": [{
@@ -630,7 +598,7 @@ mod tests {
                 payload,
             }),
             Some(PreToolUsePayload {
-                tool_name: HookToolName::new("mcp__memory__create_entities"),
+                tool_name: ToolName::namespaced("memory", "create_entities"),
                 tool_input: json!({
                     "entities": [{
                         "name": "Ada",
@@ -664,7 +632,7 @@ mod tests {
                 payload,
             }),
             Some(PreToolUsePayload {
-                tool_name: HookToolName::new("mcp__foo__exec_command"),
+                tool_name: ToolName::namespaced("mcp__foo", "exec_command"),
                 tool_input: json!({ "message": "hello" }),
             })
         );
@@ -704,7 +672,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mcp_post_tool_use_payload_uses_prefixed_tool_name_args_and_result() {
+    async fn mcp_post_tool_use_payload_preserves_tool_address_args_and_result() {
         let payload = ToolPayload::Function {
             arguments: json!({ "path": "/tmp/notes.txt" }).to_string(),
         };
@@ -757,7 +725,7 @@ mod tests {
         assert_eq!(
             handler.post_tool_use_payload(&invocation, &output),
             Some(PostToolUsePayload {
-                tool_name: HookToolName::new("mcp__filesystem__read_file"),
+                tool_name: ToolName::namespaced("filesystem", "read_file"),
                 tool_use_id: "call-mcp-post".to_string(),
                 tool_input: json!({
                     "path": {

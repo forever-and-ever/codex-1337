@@ -194,7 +194,6 @@ async fn explicit_mcp_reviewer_override_takes_precedence_over_action_context() {
         tool_title: None,
         tool_description: None,
         annotations: None,
-        hook_tool_name: HookToolName::new("mcp__example__dangerous"),
         approval_policy: AskForApproval::OnRequest,
         reviewer: ApprovalsReviewer::User,
         approval_mode: AppToolApproval::Prompt,

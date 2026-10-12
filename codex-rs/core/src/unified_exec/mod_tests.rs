@@ -132,6 +132,7 @@ async fn exec_command_with_tty(
         crate::session::step_context::StepContext::for_test(Arc::clone(turn)),
         tokio_util::sync::CancellationToken::new(),
         "call".to_string(),
+        codex_tools::ToolName::plain("exec_command"),
     );
     let started_at = Instant::now();
     let process_started_alive = !process.has_exited() && process.exit_code().is_none();
@@ -143,7 +144,10 @@ async fn exec_command_with_tty(
             process_id,
             cwd: cwd.clone().into(),
             initial_exec_command_active: Arc::new(std::sync::atomic::AtomicBool::new(true)),
-            hook_command: cmd.to_string(),
+            hook_context: crate::tools::context::ExecHookContext {
+                tool_name: codex_tools::ToolName::namespaced("functions", "exec_command"),
+                command: cmd.to_string(),
+            },
             tty,
             environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
             permissions: TerminalPermissions::for_launch(
@@ -214,7 +218,10 @@ async fn exec_command_with_tty(
         exit_code,
         original_token_count: Some(original_token_count),
         output_omitted_bytes,
-        hook_command: Some(cmd.to_string()),
+        hook_context: Some(crate::tools::context::ExecHookContext {
+            tool_name: codex_tools::ToolName::plain("exec_command"),
+            command: cmd.to_string(),
+        }),
     })
 }
 
@@ -333,6 +340,7 @@ async fn write_stdin(
                 crate::session::step_context::StepContext::for_test(Arc::clone(turn)),
                 tokio_util::sync::CancellationToken::new(),
                 "write".to_string(),
+                codex_tools::ToolName::plain("write_stdin"),
             ),
             WriteStdinRequest {
                 process_id,
@@ -619,7 +627,10 @@ async fn terminating_initial_exec_command_rechecks_initial_response_state() -> a
             process_id,
             cwd: cwd.into(),
             initial_exec_command_active: Arc::new(std::sync::atomic::AtomicBool::new(true)),
-            hook_command: "sleep 60".to_string(),
+            hook_context: crate::tools::context::ExecHookContext {
+                tool_name: codex_tools::ToolName::namespaced("functions", "exec_command"),
+                command: "sleep 60".to_string(),
+            },
             tty: true,
             environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
             permissions: TerminalPermissions::for_launch(
@@ -705,7 +716,10 @@ async fn terminating_during_stdin_poll_returns_exited_response() -> anyhow::Resu
             process_id,
             cwd: cwd.into(),
             initial_exec_command_active: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            hook_command: "sleep 60".to_string(),
+            hook_context: crate::tools::context::ExecHookContext {
+                tool_name: codex_tools::ToolName::namespaced("functions", "exec_command"),
+                command: "sleep 60".to_string(),
+            },
             tty: true,
             environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
             permissions: TerminalPermissions::for_launch(
@@ -1132,6 +1146,7 @@ async fn stdin_approval_observes_strict_review_enabled_while_queued() -> anyhow:
         StepContext::for_test(turn),
         tokio_util::sync::CancellationToken::new(),
         "write".to_string(),
+        codex_tools::ToolName::plain("write_stdin"),
     );
     let interaction = process.interaction_lock().lock_owned().await;
     let mut queued = Box::pin(manager.write_stdin(

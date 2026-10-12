@@ -1,3 +1,5 @@
+use codex_protocol::HookSelector;
+
 use pretty_assertions::assert_eq;
 
 use std::collections::BTreeMap;
@@ -10,14 +12,14 @@ use super::ManagedHooksRequirementsToml;
 use super::MatcherGroup;
 
 #[test]
-fn hooks_file_deserializes_existing_json_shape() {
+fn hooks_file_deserializes_typed_selectors() {
     let parsed: HooksFile = serde_json::from_str(
         r#"{
   "description": "Optional stop-time review gate for Codex Companion.",
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "^Bash$",
+        "selector": {"type": "tool", "namespace": "^functions$", "name": "^exec_command$"},
         "hooks": [
           {
             "type": "command",
@@ -27,7 +29,12 @@ fn hooks_file_deserializes_existing_json_shape() {
             "additionalContextLimit": 4096
           }
         ]
-      }
+      },
+      {"selector": {"type": "tool"}, "hooks": []},
+      {"hooks": []}
+    ],
+    "SessionStart": [
+      {"selector": {"type": "event_value", "pattern": "^startup$"}, "hooks": []}
     ]
   }
 }"#,
@@ -39,21 +46,60 @@ fn hooks_file_deserializes_existing_json_shape() {
         HooksFile {
             description: Some("Optional stop-time review gate for Codex Companion.".to_string()),
             hooks: HookEventsToml {
-                pre_tool_use: vec![MatcherGroup {
-                    matcher: Some("^Bash$".to_string()),
-                    hooks: vec![HookHandlerConfig::Command {
-                        command: "python3 /tmp/pre.py".to_string(),
-                        command_windows: None,
-                        timeout_sec: Some(10),
-                        r#async: false,
-                        status_message: Some("checking".to_string()),
-                        additional_context_limit: Some(4096),
-                    }],
+                pre_tool_use: vec![
+                    MatcherGroup {
+                        selector: Some(HookSelector::Tool {
+                            namespace: Some("^functions$".to_string()),
+                            name: Some("^exec_command$".to_string()),
+                        }),
+                        hooks: vec![HookHandlerConfig::Command {
+                            command: "python3 /tmp/pre.py".to_string(),
+                            command_windows: None,
+                            timeout_sec: Some(10),
+                            r#async: false,
+                            status_message: Some("checking".to_string()),
+                            additional_context_limit: Some(4096),
+                        }],
+                    },
+                    MatcherGroup {
+                        selector: Some(HookSelector::Tool {
+                            namespace: None,
+                            name: None
+                        }),
+                        hooks: Vec::new(),
+                    },
+                    MatcherGroup::default()
+                ],
+                session_start: vec![MatcherGroup {
+                    selector: Some(HookSelector::EventValue {
+                        pattern: "^startup$".to_string()
+                    }),
+                    hooks: Vec::new(),
                 }],
                 ..Default::default()
             },
         }
     );
+    assert!(
+        serde_json::from_value::<HooksFile>(serde_json::json!({
+            "hooks": {"PreToolUse": [{"matcher": {"type": "tool"}, "hooks": []}]},
+        }))
+        .is_err(),
+        "retired fields must not silently become an unfiltered hook"
+    );
+    for selector in [
+        serde_json::json!("exec_command"),
+        serde_json::json!({"type": "tool", "name": "exec_command", "pattern": "startup"}),
+        serde_json::json!({"type": "event_value", "pattern": "startup", "namespace": "functions"}),
+    ] {
+        assert!(
+            serde_json::from_value::<HooksFile>(serde_json::json!({
+                "hooks": {"PreToolUse": [{"selector": selector, "hooks": []}]},
+            }))
+            .is_err(),
+            "selector domains must not accept strings or each other's fields"
+        );
+    }
 }
 
 #[test]
@@ -61,7 +107,7 @@ fn hooks_file_deserializes_mcp_tool_handler_with_json_inputs() {
     let parsed: HooksFile = serde_json::from_value(serde_json::json!({
         "hooks": {
             "PostToolUse": [{
-                "matcher": "Write|Edit",
+                "selector": {"type": "tool", "namespace": "^functions$", "name": "^apply_patch$"},
                 "hooks": [{
                     "type": "mcp_tool",
                     "server": "security",
@@ -158,7 +204,7 @@ fn hook_events_deserialize_from_toml_arrays_of_tables() {
     let parsed: HookEventsToml = toml::from_str(
         r#"
 [[PreToolUse]]
-matcher = "^Bash$"
+selector = { type = "tool", namespace = "^functions$", name = "^exec_command$" }
 
 [[PreToolUse.hooks]]
 type = "command"
@@ -174,7 +220,10 @@ additionalContextLimit = 4096
         parsed,
         HookEventsToml {
             pre_tool_use: vec![MatcherGroup {
-                matcher: Some("^Bash$".to_string()),
+                selector: Some(HookSelector::Tool {
+                    namespace: Some("^functions$".to_string()),
+                    name: Some("^exec_command$".to_string()),
+                }),
                 hooks: vec![HookHandlerConfig::Command {
                     command: "python3 /tmp/pre.py".to_string(),
                     command_windows: None,
@@ -198,7 +247,7 @@ enabled = false
 trusted_hash = "sha256:abc123"
 
 [[PreToolUse]]
-matcher = "^Bash$"
+selector = { type = "tool", namespace = "^functions$", name = "^exec_command$" }
 
 [[PreToolUse.hooks]]
 type = "command"
@@ -212,7 +261,10 @@ command = "python3 /tmp/pre.py"
         HooksToml {
             events: HookEventsToml {
                 pre_tool_use: vec![MatcherGroup {
-                    matcher: Some("^Bash$".to_string()),
+                    selector: Some(HookSelector::Tool {
+                        namespace: Some("^functions$".to_string()),
+                        name: Some("^exec_command$".to_string()),
+                    }),
                     hooks: vec![HookHandlerConfig::Command {
                         command: "python3 /tmp/pre.py".to_string(),
                         command_windows: None,
@@ -242,7 +294,7 @@ fn managed_hooks_requirements_flatten_hook_events() {
 managed_dir = "/enterprise/place"
 
 [[PreToolUse]]
-matcher = "^Bash$"
+selector = { type = "tool", namespace = "^functions$", name = "^exec_command$" }
 
 [[PreToolUse.hooks]]
 type = "command"
@@ -258,7 +310,10 @@ command = "python3 /enterprise/place/pre.py"
             windows_managed_dir: None,
             hooks: HookEventsToml {
                 pre_tool_use: vec![MatcherGroup {
-                    matcher: Some("^Bash$".to_string()),
+                    selector: Some(HookSelector::Tool {
+                        namespace: Some("^functions$".to_string()),
+                        name: Some("^exec_command$".to_string()),
+                    }),
                     hooks: vec![HookHandlerConfig::Command {
                         command: "python3 /enterprise/place/pre.py".to_string(),
                         command_windows: None,
@@ -279,7 +334,7 @@ fn hook_events_deserialize_windows_override_from_toml() {
     let parsed: HookEventsToml = toml::from_str(
         r#"
 [[PreToolUse]]
-matcher = "^Bash$"
+selector = { type = "tool", namespace = "^functions$", name = "^exec_command$" }
 
 [[PreToolUse.hooks]]
 type = "command"
@@ -293,7 +348,10 @@ command_windows = "powershell -File C:\\enterprise\\hooks\\pre.ps1"
         parsed,
         HookEventsToml {
             pre_tool_use: vec![MatcherGroup {
-                matcher: Some("^Bash$".to_string()),
+                selector: Some(HookSelector::Tool {
+                    namespace: Some("^functions$".to_string()),
+                    name: Some("^exec_command$".to_string()),
+                }),
                 hooks: vec![HookHandlerConfig::Command {
                     command: "bash /enterprise/hooks/pre.sh".to_string(),
                     command_windows: Some(
@@ -315,7 +373,7 @@ fn hook_events_deserialize_camel_case_windows_override_from_toml() {
     let parsed: HookEventsToml = toml::from_str(
         r#"
 [[PreToolUse]]
-matcher = "^Bash$"
+selector = { type = "tool", namespace = "^functions$", name = "^exec_command$" }
 
 [[PreToolUse.hooks]]
 type = "command"
@@ -329,7 +387,10 @@ commandWindows = "powershell -File C:\\enterprise\\hooks\\pre.ps1"
         parsed,
         HookEventsToml {
             pre_tool_use: vec![MatcherGroup {
-                matcher: Some("^Bash$".to_string()),
+                selector: Some(HookSelector::Tool {
+                    namespace: Some("^functions$".to_string()),
+                    name: Some("^exec_command$".to_string()),
+                }),
                 hooks: vec![HookHandlerConfig::Command {
                     command: "bash /enterprise/hooks/pre.sh".to_string(),
                     command_windows: Some(

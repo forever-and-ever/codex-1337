@@ -656,7 +656,7 @@ pub struct ManagedHooksRequirements {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct ConfiguredHookMatcherGroup {
-    pub matcher: Option<String>,
+    pub selector: Option<codex_protocol::HookSelector>,
     pub hooks: Vec<ConfiguredHookHandler>,
 }
 

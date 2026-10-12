@@ -99,8 +99,7 @@ fn error(text: &str) -> HookOutputEntry {
 fn handler() -> ConfiguredHandler {
     ConfiguredHandler {
         builtin: false,
-        event_name: HookEventName::Interrupt,
-        matcher: None,
+        selection: crate::engine::HookSelection::fixture(HookEventName::Interrupt, None),
         timeout_sec: 600,
         status_message: None,
         additional_context_limit: Default::default(),

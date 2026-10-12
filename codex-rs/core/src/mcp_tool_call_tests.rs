@@ -13,7 +13,6 @@ use crate::session::tests::update_turn_settings_for_test;
 use crate::session::turn_context::TurnEnvironment;
 use crate::state::ActiveTurn;
 use crate::test_support::models_manager_with_provider;
-use crate::tools::hook_names::HookToolName;
 use crate::turn_metadata::ExecutionMetadata;
 use codex_app_server_protocol as app_server_protocol;
 use codex_config::CONFIG_TOML_FILE;
@@ -41,6 +40,7 @@ use codex_protocol::protocol::McpInvocation;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
 use codex_protocol::protocol::TurnEnvironmentSelection;
+use codex_tools::ToolName;
 use codex_utils_path_uri::PathUri;
 use core_test_support::hooks::trusted_config_layer_stack;
 use core_test_support::responses::ev_assistant_message;
@@ -249,7 +249,7 @@ fn prompt_options(
 fn install_mcp_permission_request_hook(
     session: &mut Session,
     turn_context: &TurnContext,
-    matcher: &str,
+    selector: codex_protocol::HookSelector,
     hook_output: &serde_json::Value,
 ) -> std::path::PathBuf {
     let script_path = turn_context
@@ -293,7 +293,7 @@ print({hook_output:?})
         serde_json::json!({
             "hooks": {
                 "PermissionRequest": [{
-                    "matcher": matcher,
+                    "selector": selector,
                     "hooks": [{
                         "type": "command",
                         "command": format!("{python} {script_path_arg}"),
@@ -2398,7 +2398,6 @@ async fn dispatched_mcp_approval_with_closed_response_is_classified_as_approval(
         tool_title: None,
         tool_description: None,
         annotations: None,
-        hook_tool_name: HookToolName::new("mcp__calendar__send"),
         approval_policy: AskForApproval::OnRequest,
         reviewer: ApprovalsReviewer::User,
         approval_mode: AppToolApproval::Auto,
@@ -2891,7 +2890,6 @@ async fn approve_mode_skips_when_annotations_do_not_require_approval() {
         "call-1",
         &invocation,
         &ToolName::namespaced(&invocation.server, &invocation.tool),
-        &HookToolName::new("mcp__test__tool"),
         &metadata,
         &approval_config(&turn_context),
         turn_context.config.permissions.permission_profile(),
@@ -2973,7 +2971,6 @@ async fn guardian_mode_skips_auto_when_annotations_do_not_require_approval() {
         "call-guardian",
         &invocation,
         &ToolName::namespaced(&invocation.server, &invocation.tool),
-        &HookToolName::new("mcp__test__tool"),
         &metadata,
         &approval_config(&turn_context),
         turn_context.config.permissions.permission_profile(),
@@ -2990,7 +2987,10 @@ async fn permission_request_hook_allows_mcp_tool_call() {
     let log_path = install_mcp_permission_request_hook(
         &mut session,
         &turn_context,
-        "mcp__memory__.*",
+        codex_protocol::HookSelector::Tool {
+            namespace: Some("^memory$".into()),
+            name: None,
+        },
         &serde_json::json!({
             "hookSpecificOutput": {
                 "hookEventName": "PermissionRequest",
@@ -3037,7 +3037,6 @@ async fn permission_request_hook_allows_mcp_tool_call() {
         "call-mcp-hook",
         &invocation,
         &ToolName::namespaced(&invocation.server, &invocation.tool),
-        &HookToolName::new("mcp__memory__create_entities"),
         &metadata,
         &approval_config(&turn_context),
         turn_context.config.permissions.permission_profile(),
@@ -3062,7 +3061,7 @@ async fn permission_request_hook_allows_mcp_tool_call() {
             "transcript_path": null,
             "model": turn_context.model_info().slug,
             "permission_mode": "default",
-            "tool_name": "mcp__memory__create_entities",
+            "tool_name": {"namespace": "memory", "name": "create_entities"},
             "hook_event_name": "PermissionRequest",
             "tool_input": {
                 "entities": [{
@@ -3075,12 +3074,15 @@ async fn permission_request_hook_allows_mcp_tool_call() {
 }
 
 #[tokio::test]
-async fn permission_request_hook_uses_hook_tool_name_without_metadata() {
+async fn permission_request_hook_preserves_callable_address_without_metadata() {
     let (mut session, turn_context) = make_session_and_context().await;
     let log_path = install_mcp_permission_request_hook(
         &mut session,
         &turn_context,
-        "mcp__memory__.*",
+        codex_protocol::HookSelector::Tool {
+            namespace: Some("^memory$".into()),
+            name: None,
+        },
         &serde_json::json!({
             "hookSpecificOutput": {
                 "hookEventName": "PermissionRequest",
@@ -3108,7 +3110,6 @@ async fn permission_request_hook_uses_hook_tool_name_without_metadata() {
         "call-mcp-hook-no-metadata",
         &invocation,
         &ToolName::namespaced(&invocation.server, &invocation.tool),
-        &HookToolName::new("mcp__memory__create_entities"),
         &metadata,
         &approval_config(&turn_context),
         turn_context.config.permissions.permission_profile(),
@@ -3133,7 +3134,7 @@ async fn permission_request_hook_uses_hook_tool_name_without_metadata() {
             "transcript_path": null,
             "model": turn_context.model_info().slug,
             "permission_mode": "default",
-            "tool_name": "mcp__memory__create_entities",
+            "tool_name": {"namespace": "memory", "name": "create_entities"},
             "hook_event_name": "PermissionRequest",
             "tool_input": { "entities": [] }
         })]
@@ -3146,7 +3147,10 @@ async fn permission_request_hook_runs_after_remembered_mcp_approval() {
     let log_path = install_mcp_permission_request_hook(
         &mut session,
         &turn_context,
-        "mcp__memory__.*",
+        codex_protocol::HookSelector::Tool {
+            namespace: Some("^memory$".into()),
+            name: None,
+        },
         &serde_json::json!({
             "hookSpecificOutput": {
                 "hookEventName": "PermissionRequest",
@@ -3195,7 +3199,6 @@ async fn permission_request_hook_runs_after_remembered_mcp_approval() {
         "call-mcp-remembered",
         &invocation,
         &ToolName::namespaced(&invocation.server, &invocation.tool),
-        &HookToolName::new("mcp__memory__create_entities"),
         &metadata,
         &approval_config(&turn_context),
         turn_context.config.permissions.permission_profile(),
@@ -3291,7 +3294,6 @@ async fn strict_auto_review_forces_guardian_for_mcp_policy_skip() {
         "call-guardian-deny",
         &invocation,
         &ToolName::namespaced(&invocation.server, &invocation.tool),
-        &HookToolName::new("mcp__test__tool"),
         &metadata,
         &mcp_config,
         &mcp_config.permission_profile,
@@ -3370,7 +3372,6 @@ async fn assert_mcp_user_approval_persistence(
                 "call-mcp-persist",
                 &invocation,
                 &ToolName::namespaced(&invocation.server, &invocation.tool),
-                &HookToolName::new("mcp__memory__create_entities"),
                 &metadata,
                 &approval_config(&turn_context),
                 turn_context.config.permissions.permission_profile(),
@@ -3457,7 +3458,6 @@ async fn prompt_mode_waits_for_approval_when_annotations_do_not_require_approval
                 "call-prompt",
                 &invocation,
                 &ToolName::namespaced(&invocation.server, &invocation.tool),
-                &HookToolName::new("mcp__test__tool"),
                 &metadata,
                 &approval_config(&turn_context),
                 turn_context.config.permissions.permission_profile(),
@@ -3524,7 +3524,6 @@ async fn full_access_mode_skips_mcp_tool_approval_for_all_approval_modes() {
             "call-2",
             &invocation,
             &ToolName::namespaced(&invocation.server, &invocation.tool),
-            &HookToolName::new("mcp__test__tool"),
             &metadata,
             &approval_config(&turn_context),
             turn_context.config.permissions.permission_profile(),
@@ -3619,7 +3618,6 @@ async fn approve_mode_skips_guardian_in_every_permission_mode() {
             "call-3",
             &invocation,
             &ToolName::namespaced(&invocation.server, &invocation.tool),
-            &HookToolName::new("mcp__test__tool"),
             &metadata,
             &approval_config(&turn_context),
             turn_context.config.permissions.permission_profile(),

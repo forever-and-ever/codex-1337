@@ -29,8 +29,7 @@ pub struct PreToolUseRequest {
     pub transcript_path: Option<PathBuf>,
     pub model: String,
     pub permission_mode: String,
-    pub tool_name: String,
-    pub matcher_aliases: Vec<String>,
+    pub tool_name: codex_protocol::ToolName,
     pub tool_use_id: String,
     pub tool_input: Value,
 }
@@ -56,11 +55,10 @@ pub(crate) fn preview(
     handlers: &[ConfiguredHandler],
     request: &PreToolUseRequest,
 ) -> Vec<HookRunSummary> {
-    let matcher_inputs = common::matcher_inputs(&request.tool_name, &request.matcher_aliases);
-    dispatcher::select_handlers_for_matcher_inputs(
+    dispatcher::select_tool_handlers(
         handlers,
         HookEventName::PreToolUse,
-        &matcher_inputs,
+        Some(&request.tool_name),
     )
     .into_iter()
     .map(|handler| {
@@ -73,11 +71,10 @@ pub(crate) async fn run(
     engine: &ClaudeHooksEngine,
     request: PreToolUseRequest,
 ) -> PreToolUseOutcome {
-    let matcher_inputs = common::matcher_inputs(&request.tool_name, &request.matcher_aliases);
-    let matched = dispatcher::select_handlers_for_matcher_inputs(
+    let matched = dispatcher::select_tool_handlers(
         &engine.handlers,
         HookEventName::PreToolUse,
-        &matcher_inputs,
+        Some(&request.tool_name),
     );
     if matched.is_empty() {
         return PreToolUseOutcome {
@@ -168,10 +165,9 @@ fn latest_updated_input(
 
 /// Serializes command stdin for a selected `PreToolUse` hook.
 ///
-/// Handler selection may include internal matcher aliases, but hook stdin keeps
-/// the canonical `tool_name` so audit logs and downstream policy decisions stay
-/// stable. Shell-like tools pass `{ "command": ... }` as `tool_input`; MCP
-/// tools pass their resolved JSON arguments.
+/// Hook stdin preserves the structured callable address used for selection.
+/// Execution tools pass `{ "command": ... }` as `tool_input`; MCP tools pass
+/// their resolved JSON arguments.
 fn command_input_json(request: &PreToolUseRequest) -> Result<String, serde_json::Error> {
     let subagent = SubagentCommandInputFields::from(request.subagent.as_ref());
     serde_json::to_string(&PreToolUseCommandInput {
@@ -774,8 +770,10 @@ mod tests {
     fn handler_with_async(r#async: bool) -> ConfiguredHandler {
         ConfiguredHandler {
             builtin: false,
-            event_name: HookEventName::PreToolUse,
-            matcher: Some(crate::engine::HookMatcher::new("^Bash$").expect("valid matcher")),
+            selection: crate::engine::HookSelection::fixture(
+                HookEventName::PreToolUse,
+                Some(crate::engine::HookMatcher::new("^exec_command$").expect("valid matcher")),
+            ),
             timeout_sec: 5,
             status_message: None,
             additional_context_limit: Default::default(),
@@ -811,8 +809,7 @@ mod tests {
             transcript_path: None,
             model: "gpt-test".to_string(),
             permission_mode: "default".to_string(),
-            tool_name: "Bash".to_string(),
-            matcher_aliases: Vec::new(),
+            tool_name: codex_protocol::ToolName::namespaced("functions", "exec_command"),
             tool_use_id: tool_use_id.to_string(),
             tool_input: serde_json::json!({ "command": "echo hello" }),
         }

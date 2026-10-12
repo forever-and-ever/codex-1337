@@ -1,11 +1,11 @@
 use super::RewriteProfile;
 use super::external_agent_config_dir;
+use super::hook_selectors::import_selector;
 use super::invalid_data_error;
 use super::json_u64;
 use super::rewrite_hook_command_for_source;
 use super::write_hook_migration;
 use codex_hooks::HOOK_EVENT_NAMES;
-use codex_hooks::HOOK_EVENT_NAMES_WITH_MATCHERS;
 use serde_json::Value as JsonValue;
 use std::fs;
 use std::io;
@@ -91,7 +91,7 @@ pub(super) fn hook_migration_cla(
             &mut migration,
             target_config_dir,
             rewrite_profile,
-        );
+        )?;
     }
 
     Ok(migration)
@@ -102,9 +102,9 @@ pub(super) fn append_convertible_hook_groups_cla(
     hooks_payload: &mut serde_json::Map<String, JsonValue>,
     target_config_dir: Option<&Path>,
     rewrite_profile: RewriteProfile,
-) {
+) -> io::Result<()> {
     let Some(hooks_config) = settings.get("hooks").and_then(JsonValue::as_object) else {
-        return;
+        return Ok(());
     };
 
     for event_name in HOOK_EVENT_NAMES {
@@ -203,13 +203,19 @@ pub(super) fn append_convertible_hook_groups_cla(
             }
 
             let mut group_payload = serde_json::Map::new();
-            if HOOK_EVENT_NAMES_WITH_MATCHERS.contains(&event_name)
-                && let Some(matcher) = group_object.get("matcher").and_then(JsonValue::as_str)
-            {
-                group_payload.insert(
-                    "matcher".to_string(),
-                    JsonValue::String(matcher.to_string()),
-                );
+            match import_selector(event_name, group_object.get("matcher")) {
+                Ok(Some(selector)) => {
+                    group_payload.insert(
+                        "selector".to_string(),
+                        serde_json::to_value(selector).expect("serializable hook selector"),
+                    );
+                }
+                Ok(None) => {}
+                Err(reason) => {
+                    return Err(invalid_data_error(format!(
+                        "cannot import {event_name} hook selector: {reason}"
+                    )));
+                }
             }
             group_payload.insert("hooks".to_string(), JsonValue::Array(hook_commands));
             if let Some(groups) = hooks_payload
@@ -221,6 +227,7 @@ pub(super) fn append_convertible_hook_groups_cla(
             }
         }
     }
+    Ok(())
 }
 
 pub(super) fn rewrite_hook_command_cla(command: &str, target_config_dir: Option<&Path>) -> String {

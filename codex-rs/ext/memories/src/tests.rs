@@ -237,7 +237,9 @@ async fn add_ad_hoc_note_tool_creates_note_file() {
         .expect("ad-hoc note should be written");
 
     assert_eq!(
-        output.post_tool_use_response("call-1", &payload),
+        output
+            .post_tool_use_payload(&tool.tool_name(), "call-1", serde_json::Value::Null)
+            .map(|receipt| receipt.tool_response),
         Some(json!({}))
     );
     assert_eq!(
@@ -330,7 +332,9 @@ async fn read_tool_reads_memory_file() {
         .expect("read should succeed");
 
     assert_eq!(
-        output.post_tool_use_response("call-1", &payload),
+        output
+            .post_tool_use_payload(&tool.tool_name(), "call-1", serde_json::Value::Null)
+            .map(|receipt| receipt.tool_response),
         Some(json!({
             "path": "MEMORY.md",
             "content": "second needle line\n",
@@ -447,7 +451,9 @@ async fn search_tool_accepts_multiple_queries() {
         .expect("search should succeed");
 
     assert_eq!(
-        output.post_tool_use_response("call-1", &payload),
+        output
+            .post_tool_use_payload(&tool.tool_name(), "call-1", serde_json::Value::Null)
+            .map(|receipt| receipt.tool_response),
         Some(json!({
             "queries": ["alpha", "needle"],
             "match_mode": {
@@ -523,7 +529,9 @@ async fn search_tool_accepts_windowed_all_match_mode() {
         .expect("search should succeed");
 
     assert_eq!(
-        output.post_tool_use_response("call-1", &payload),
+        output
+            .post_tool_use_payload(&tool.tool_name(), "call-1", serde_json::Value::Null)
+            .map(|receipt| receipt.tool_response),
         Some(json!({
             "queries": ["alpha", "needle"],
             "match_mode": {

@@ -290,7 +290,7 @@ pub(crate) struct PreToolUseCommandInput {
     pub model: String,
     #[schemars(schema_with = "permission_mode_schema")]
     pub permission_mode: String,
-    pub tool_name: String,
+    pub tool_name: codex_protocol::ToolName,
     pub tool_input: Value,
     pub tool_use_id: String,
 }
@@ -313,7 +313,7 @@ pub(crate) struct PermissionRequestCommandInput {
     pub model: String,
     #[schemars(schema_with = "permission_mode_schema")]
     pub permission_mode: String,
-    pub tool_name: String,
+    pub tool_name: Option<codex_protocol::ToolName>,
     pub tool_input: Value,
 }
 
@@ -335,7 +335,7 @@ pub(crate) struct PostToolUseCommandInput {
     pub model: String,
     #[schemars(schema_with = "permission_mode_schema")]
     pub permission_mode: String,
-    pub tool_name: String,
+    pub tool_name: codex_protocol::ToolName,
     pub tool_input: Value,
     pub tool_response: Value,
     pub tool_use_id: String,
@@ -1210,7 +1210,7 @@ mod tests {
             hook_event_name: "PreToolUse".to_string(),
             model: "gpt-test".to_string(),
             permission_mode: "default".to_string(),
-            tool_name: "Bash".to_string(),
+            tool_name: codex_protocol::ToolName::namespaced("functions", "exec_command"),
             tool_input: json!({ "command": "echo hello" }),
             tool_use_id: "tool-1".to_string(),
         };
@@ -1227,7 +1227,7 @@ mod tests {
                 "hook_event_name": "PreToolUse",
                 "model": "gpt-test",
                 "permission_mode": "default",
-                "tool_name": "Bash",
+                "tool_name": {"namespace": "functions", "name": "exec_command"},
                 "tool_input": { "command": "echo hello" },
                 "tool_use_id": "tool-1",
             })
@@ -1243,7 +1243,7 @@ mod tests {
             hook_event_name: "PreToolUse".to_string(),
             model: "gpt-test".to_string(),
             permission_mode: "default".to_string(),
-            tool_name: "Bash".to_string(),
+            tool_name: codex_protocol::ToolName::namespaced("functions", "exec_command"),
             tool_input: json!({ "command": "echo hello" }),
             tool_use_id: "tool-1".to_string(),
         };

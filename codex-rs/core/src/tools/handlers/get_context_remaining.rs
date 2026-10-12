@@ -35,6 +35,8 @@ impl GetContextRemainingOutput {
     }
 }
 
+impl codex_tools::HookToolOutput for GetContextRemainingOutput {}
+
 impl ToolOutput for GetContextRemainingOutput {
     fn log_output(&self) -> String {
         self.fragment()

@@ -94,6 +94,8 @@ pub(crate) struct InterruptAgentResult {
     pub(crate) previous_status: AgentStatus,
 }
 
+impl codex_tools::HookToolOutput for InterruptAgentResult {}
+
 impl ToolOutput for InterruptAgentResult {
     fn log_output(&self) -> String {
         tool_output_json_text(self, "interrupt_agent")

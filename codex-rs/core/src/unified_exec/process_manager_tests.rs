@@ -457,6 +457,7 @@ async fn failed_initial_end_for_unstored_process_uses_fallback_output() {
         crate::session::step_context::StepContext::for_test(Arc::clone(&turn)),
         tokio_util::sync::CancellationToken::new(),
         "call-unified-denied".to_string(),
+        codex_tools::ToolName::plain("exec_command"),
     );
     let request = ExecCommandRequest {
         command: vec![
@@ -651,7 +652,10 @@ async fn pruning_does_not_evict_live_process_while_exited_process_is_finalizing(
                 process_id,
                 cwd: cwd.clone(),
                 initial_exec_command_active: Arc::new(AtomicBool::new(false)),
-                hook_command: format!("command-{process_id}"),
+                hook_context: crate::tools::context::ExecHookContext {
+                    tool_name: codex_tools::ToolName::namespaced("functions", "exec_command"),
+                    command: format!("command-{process_id}"),
+                },
                 tty: false,
                 environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
                 permissions: super::super::TerminalPermissions::for_launch(

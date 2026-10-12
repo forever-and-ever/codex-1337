@@ -419,7 +419,7 @@ fn frontmatter_accepts_crlf_delimiters() {
 
 #[test]
 fn hook_migration_ignores_unsupported_handlers() {
-    let settings = serde_json::json!({
+    let mut settings = serde_json::json!({
         "hooks": {
             "PreToolUse": [{
                 "matcher": "Bash",
@@ -448,6 +448,9 @@ fn hook_migration_ignores_unsupported_handlers() {
                     "type": "command",
                     "command": source_hook_command("approve.py")
                 }]
+            }, {
+                "matcher": "*",
+                "hooks": [{"type":"command","command":source_hook_command("all.py")}]
             }],
             "SessionEnd": [{
                 "matcher": "clear",
@@ -463,25 +466,41 @@ fn hook_migration_ignores_unsupported_handlers() {
         }
     });
     let mut migration = serde_json::Map::new();
+    let error = append_convertible_hook_groups_cla(
+        &settings,
+        &mut migration,
+        Some(Path::new("/repo/.codex")),
+        TEST_REWRITE_PROFILE,
+    )
+    .expect_err("unrepresentable tool selector must reject import");
+    assert!(
+        error
+            .to_string()
+            .contains("cannot import PermissionRequest hook selector")
+    );
+    settings["hooks"]["PermissionRequest"]
+        .as_array_mut()
+        .expect("groups")
+        .remove(0);
     append_convertible_hook_groups_cla(
         &settings,
         &mut migration,
         Some(Path::new("/repo/.codex")),
         TEST_REWRITE_PROFILE,
-    );
+    )
+    .expect("convert supported hook groups");
 
     assert_eq!(
         migration,
         serde_json::json!({
             "PermissionRequest": [{
-                "matcher": "Bash",
                 "hooks": [{
                     "type": "command",
-                    "command": migrated_hook_command("approve.py")
+                    "command": migrated_hook_command("all.py")
                 }]
             }],
             "SessionEnd": [{
-                "matcher": "clear",
+                "selector": {"type":"event_value","pattern":"clear"},
                 "hooks": [{
                     "type": "command",
                     "command": migrated_hook_command("cleanup.py")
@@ -561,13 +580,13 @@ fn hook_migration_honors_settings_local_disable_override() {
         .unwrap(),
         serde_json::json!({
             "SessionStart": [{
-                "matcher": "project",
+                "selector": {"type":"event_value","pattern":"project"},
                 "hooks": [{
                     "type": "command",
                     "command": "echo project"
                 }]
             }, {
-                "matcher": "local",
+                "selector": {"type":"event_value","pattern":"local"},
                 "hooks": [{
                     "type": "command",
                     "command": "echo local"
@@ -768,13 +787,14 @@ fn hook_migration_drops_negative_timeouts() {
         &mut migration,
         /*target_config_dir*/ None,
         TEST_REWRITE_PROFILE,
-    );
+    )
+    .expect("convert supported hook groups");
 
     assert_eq!(
         migration,
         serde_json::json!({
             "SessionStart": [{
-                "matcher": "startup",
+                "selector": {"type":"event_value","pattern":"startup"},
                 "hooks": [{
                     "type": "command",
                     "command": "echo setup"

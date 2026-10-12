@@ -69,9 +69,9 @@ use crate::session::session::Session;
 use crate::session::step_context::StepContext;
 use crate::session::turn_context::TurnContext;
 use crate::state::TurnState;
-use crate::tools::hook_names::HookToolName;
 use crate::tools::sandboxing::PermissionRequestPayload;
 use crate::turn_metadata::ExecutionMetadata;
+use codex_tools::ToolName;
 
 pub(crate) struct HookRuntimeOutcome {
     pub should_stop: bool,
@@ -182,14 +182,13 @@ pub(crate) async fn run_pending_session_start_hooks(
 
 /// Runs matching `PreToolUse` hooks before a tool executes.
 ///
-/// `tool_name` is the canonical name serialized to hook stdin. Matcher aliases
-/// are internal compatibility names used only for selecting configured hook
-/// handlers.
+/// `tool_name` retains the executed callable's namespace and name. Default
+/// function addresses are canonicalized before hook selection and serialization.
 pub(crate) async fn run_pre_tool_use_hooks(
     sess: &Arc<Session>,
     step_context: &StepContext,
     tool_use_id: String,
-    tool_name: &HookToolName,
+    tool_name: &ToolName,
     tool_input: &Value,
 ) -> PreToolUseHookResult {
     let turn_context = &step_context.turn;
@@ -201,8 +200,7 @@ pub(crate) async fn run_pre_tool_use_hooks(
         transcript_path: sess.hook_transcript_path().await,
         model: step_context.settings.model_info.slug.clone(),
         permission_mode: hook_permission_mode(step_context.settings.approval_policy()),
-        tool_name: tool_name.name().to_string(),
-        matcher_aliases: tool_name.matcher_aliases().to_vec(),
+        tool_name: tool_name.clone().with_default_namespace(),
         tool_use_id,
         tool_input: tool_input.clone(),
     };
@@ -230,7 +228,8 @@ pub(crate) async fn run_pre_tool_use_hooks(
         };
     };
 
-    if (tool_name.name() == "Bash" || tool_name.name() == "apply_patch")
+    if tool_name.is_default_namespace()
+        && matches!(tool_name.name.as_str(), "exec_command" | "python" | "bash")
         && let Some(command) = tool_input.get("command").and_then(Value::as_str)
     {
         PreToolUseHookResult::Blocked(format!(
@@ -239,7 +238,7 @@ pub(crate) async fn run_pre_tool_use_hooks(
     } else {
         PreToolUseHookResult::Blocked(format!(
             "Tool call blocked by PreToolUse hook: {reason}. Tool: {}",
-            tool_name.name()
+            tool_name
         ))
     }
 }
@@ -270,8 +269,7 @@ pub(crate) async fn run_permission_request_hooks(
         transcript_path: sess.hook_transcript_path().await,
         model: review_context.model_info.slug.clone(),
         permission_mode: hook_permission_mode(review_context.approval_policy),
-        tool_name: payload.tool_name.name().to_string(),
-        matcher_aliases: payload.tool_name.matcher_aliases().to_vec(),
+        tool_name: payload.tool_name.map(ToolName::with_default_namespace),
         run_id_suffix: run_id_suffix.to_string(),
         tool_input: payload.tool_input,
     };
@@ -290,16 +288,14 @@ pub(crate) async fn run_permission_request_hooks(
 
 /// Runs matching `PostToolUse` hooks after a tool has produced a successful output.
 ///
-/// The `tool_name`, matcher aliases, `tool_input`, and `tool_response` values are
-/// already adapted by the tool handler into the stable hook contract. Passing
-/// raw internal tool data here would leak implementation details into user hook
-/// matchers and hook logs.
+/// The handler supplies one invocation's original identity and hook-visible input
+/// and response. Delayed completion retains the execution's identity rather than
+/// the identity of the call that polled it.
 pub(crate) async fn run_post_tool_use_hooks(
     sess: &Arc<Session>,
     step_context: &StepContext,
     tool_use_id: String,
-    tool_name: String,
-    matcher_aliases: Vec<String>,
+    tool_name: ToolName,
     tool_input: Value,
     tool_response: Value,
 ) -> PostToolUseOutcome {
@@ -312,8 +308,7 @@ pub(crate) async fn run_post_tool_use_hooks(
         transcript_path: sess.hook_transcript_path().await,
         model: step_context.settings.model_info.slug.clone(),
         permission_mode: hook_permission_mode(step_context.settings.approval_policy()),
-        tool_name,
-        matcher_aliases,
+        tool_name: tool_name.with_default_namespace(),
         tool_use_id,
         tool_input,
         tool_response,

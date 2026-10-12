@@ -845,7 +845,10 @@ async fn mcp_tool_output_limit_applies_to_hook_feedback() -> Result<()> {
             super::hooks_mcp::write_mcp_tool_hook(
                 home,
                 "PostToolUse",
-                Some("^mcp__rmcp__echo$"),
+                Some(codex_protocol::HookSelector::Tool {
+                    namespace: Some("^mcp__rmcp$".to_string()),
+                    name: Some("^echo$".to_string()),
+                }),
                 "rmcp",
                 &json!({ "continue": false, "stopReason": "hook feedback ".repeat(100) })
                     .to_string(),

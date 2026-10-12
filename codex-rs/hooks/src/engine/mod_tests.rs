@@ -91,8 +91,7 @@ fn permission_request_timeout_only_counts_synchronous_handlers() {
     let command = "echo synchronous permission hook";
     let synchronous_handler = ConfiguredHandler {
         builtin: false,
-        event_name: HookEventName::PermissionRequest,
-        matcher: None,
+        selection: crate::engine::HookSelection::fixture(HookEventName::PermissionRequest, None),
         timeout_sec: 5,
         status_message: None,
         additional_context_limit: Default::default(),
@@ -148,7 +147,10 @@ fn managed_hooks_for_current_platform(
 fn pre_tool_use_hook_events(command: impl Into<String>) -> HookEventsToml {
     HookEventsToml {
         pre_tool_use: vec![MatcherGroup {
-            matcher: Some("^Bash$".to_string()),
+            selector: Some(codex_protocol::HookSelector::Tool {
+                namespace: Some("^functions$".to_string()),
+                name: Some("^exec_command$".to_string()),
+            }),
             hooks: vec![HookHandlerConfig::Command {
                 command: command.into(),
                 command_windows: None,
@@ -176,8 +178,12 @@ fn config_toml_with_pre_tool_use(command: &str) -> TomlValue {
         unreachable!("PreToolUse group should be a table");
     };
     pre_tool_use_group_entries.insert(
-        "matcher".to_string(),
-        TomlValue::String("^Bash$".to_string()),
+        "selector".to_string(),
+        TomlValue::try_from(codex_protocol::HookSelector::Tool {
+            namespace: Some("^functions$".into()),
+            name: Some("^exec_command$".into()),
+        })
+        .expect("typed selector"),
     );
     let mut handler = TomlValue::Table(Default::default());
     let TomlValue::Table(handler_entries) = &mut handler else {
@@ -287,7 +293,10 @@ fn required_managed_hooks_allow_disabled_hooks_feature() {
 fn required_managed_hooks_reject_invalid_matchers() {
     let temp = tempdir().expect("create temp dir");
     let mut events = pre_tool_use_hook_events("echo managed");
-    events.pre_tool_use[0].matcher = Some("[".to_string());
+    events.pre_tool_use[0].selector = Some(codex_protocol::HookSelector::Tool {
+        namespace: None,
+        name: Some("[".to_string()),
+    });
     let config_layer_stack = required_hooks_stack(
         managed_hooks_for_current_platform(temp.path(), events),
         RequirementSource::LegacyManagedConfigTomlFromMdm,
@@ -303,9 +312,9 @@ fn required_managed_hooks_reject_invalid_matchers() {
         mcp_executor(),
     )
     .err()
-    .expect("invalid required managed matcher should reject startup");
+    .expect("invalid required managed selector should reject startup");
 
-    assert!(error.to_string().contains("invalid matcher"));
+    assert!(error.to_string().contains("invalid selector"));
 }
 
 #[test]
@@ -313,7 +322,10 @@ fn required_managed_hooks_allow_invalid_matchers_without_handlers() {
     let temp = tempdir().expect("create temp dir");
     let mut events = pre_tool_use_hook_events("echo managed");
     events.pre_tool_use.push(MatcherGroup {
-        matcher: Some("[".to_string()),
+        selector: Some(codex_protocol::HookSelector::Tool {
+            namespace: Some("^functions$".to_string()),
+            name: Some("[".to_string()),
+        }),
         hooks: Vec::new(),
     });
     let config_layer_stack = required_hooks_stack(
@@ -330,10 +342,10 @@ fn required_managed_hooks_allow_invalid_matchers_without_handlers() {
         ThreadId::new(),
         mcp_executor(),
     )
-    .expect("an empty matcher group should not prevent required managed hooks from loading");
+    .expect("an empty selector group should not prevent required managed hooks from loading");
 
     assert_eq!(hooks.startup_warnings().len(), 1);
-    assert!(hooks.startup_warnings()[0].contains("invalid matcher"));
+    assert!(hooks.startup_warnings()[0].contains("invalid selector"));
 }
 
 #[test]
@@ -364,7 +376,10 @@ fn required_managed_hooks_reject_unsupported_handler_types() {
     let temp = tempdir().expect("create temp dir");
     let events = HookEventsToml {
         pre_tool_use: vec![MatcherGroup {
-            matcher: Some("^Bash$".to_string()),
+            selector: Some(codex_protocol::HookSelector::Tool {
+                namespace: Some("^functions$".to_string()),
+                name: Some("^exec_command$".to_string()),
+            }),
             hooks: vec![HookHandlerConfig::Prompt {}],
         }],
         ..Default::default()
@@ -398,7 +413,10 @@ fn required_managed_mcp_hooks_reject_empty_targets() {
     let temp = tempdir().expect("create temp dir");
     let events = HookEventsToml {
         pre_tool_use: vec![MatcherGroup {
-            matcher: Some("^Bash$".to_string()),
+            selector: Some(codex_protocol::HookSelector::Tool {
+                namespace: Some("^functions$".to_string()),
+                name: Some("^exec_command$".to_string()),
+            }),
             hooks: vec![HookHandlerConfig::McpTool {
                 server: "policy".to_string(),
                 tool: " ".to_string(),
@@ -438,7 +456,7 @@ fn required_managed_session_end_mcp_hooks_reject_startup() {
     let temp = tempdir().expect("create temp dir");
     let events = HookEventsToml {
         session_end: vec![MatcherGroup {
-            matcher: None,
+            selector: None,
             hooks: vec![HookHandlerConfig::McpTool {
                 server: "policy".to_string(),
                 tool: "check".to_string(),
@@ -576,7 +594,10 @@ with Path(r"{log_path}").open("a", encoding="utf-8") as handle:
         managed_dir.clone(),
         HookEventsToml {
             pre_tool_use: vec![MatcherGroup {
-                matcher: Some("^Bash$".to_string()),
+                selector: Some(codex_protocol::HookSelector::Tool {
+                    namespace: Some("^functions$".to_string()),
+                    name: Some("^exec_command$".to_string()),
+                }),
                 hooks: vec![HookHandlerConfig::Command {
                     command: format!("python3 {}", script_path.display()),
                     command_windows: None,
@@ -644,8 +665,7 @@ with Path(r"{log_path}").open("a", encoding="utf-8") as handle:
         transcript_path: None,
         model: "gpt-test".to_string(),
         permission_mode: "default".to_string(),
-        tool_name: "Bash".to_string(),
-        matcher_aliases: Vec::new(),
+        tool_name: codex_protocol::ToolName::namespaced("functions", "exec_command"),
         tool_use_id: "tool-1".to_string(),
         tool_input: serde_json::json!({ "command": "echo hello" }),
     });
@@ -661,8 +681,7 @@ with Path(r"{log_path}").open("a", encoding="utf-8") as handle:
             transcript_path: None,
             model: "gpt-test".to_string(),
             permission_mode: "default".to_string(),
-            tool_name: "Bash".to_string(),
-            matcher_aliases: Vec::new(),
+            tool_name: codex_protocol::ToolName::namespaced("functions", "exec_command"),
             tool_use_id: "tool-1".to_string(),
             tool_input: serde_json::json!({ "command": "echo hello" }),
         })
@@ -684,7 +703,10 @@ async fn requirements_managed_hooks_execute_windows_command_override() {
         managed_dir,
         HookEventsToml {
             pre_tool_use: vec![MatcherGroup {
-                matcher: Some("^Bash$".to_string()),
+                selector: Some(codex_protocol::HookSelector::Tool {
+                    namespace: Some("^functions$".to_string()),
+                    name: Some("^exec_command$".to_string()),
+                }),
                 hooks: vec![HookHandlerConfig::Command {
                     command: "exit 17".to_string(),
                     command_windows: Some("exit /B 19".to_string()),
@@ -735,8 +757,7 @@ async fn requirements_managed_hooks_execute_windows_command_override() {
             transcript_path: None,
             model: "gpt-test".to_string(),
             permission_mode: "default".to_string(),
-            tool_name: "Bash".to_string(),
-            matcher_aliases: Vec::new(),
+            tool_name: codex_protocol::ToolName::namespaced("functions", "exec_command"),
             tool_use_id: "tool-1".to_string(),
             tool_input: serde_json::json!({ "command": "echo hello" }),
         })
@@ -765,7 +786,10 @@ fn unknown_requirement_source_hooks_stay_managed() {
         managed_dir,
         HookEventsToml {
             pre_tool_use: vec![MatcherGroup {
-                matcher: Some("^Bash$".to_string()),
+                selector: Some(codex_protocol::HookSelector::Tool {
+                    namespace: Some("^functions$".to_string()),
+                    name: Some("^exec_command$".to_string()),
+                }),
                 hooks: vec![HookHandlerConfig::Command {
                     command: "python3 /tmp/managed.py".to_string(),
                     command_windows: None,
@@ -835,7 +859,10 @@ fn user_disablement_filters_non_managed_hooks_but_not_managed_hooks() {
         managed_dir.clone(),
         HookEventsToml {
             pre_tool_use: vec![MatcherGroup {
-                matcher: Some("^Bash$".to_string()),
+                selector: Some(codex_protocol::HookSelector::Tool {
+                    namespace: Some("^functions$".to_string()),
+                    name: Some("^exec_command$".to_string()),
+                }),
                 hooks: vec![HookHandlerConfig::Command {
                     command: "python3 /tmp/managed.py".to_string(),
                     command_windows: None,
@@ -1079,7 +1106,10 @@ fn requirements_managed_hooks_load_when_managed_dir_is_missing() {
         missing_dir.clone(),
         HookEventsToml {
             pre_tool_use: vec![MatcherGroup {
-                matcher: Some("^Bash$".to_string()),
+                selector: Some(codex_protocol::HookSelector::Tool {
+                    namespace: Some("^functions$".to_string()),
+                    name: Some("^exec_command$".to_string()),
+                }),
                 hooks: vec![HookHandlerConfig::Command {
                     command: "echo hi".to_string(),
                     command_windows: None,
@@ -1131,8 +1161,7 @@ fn requirements_managed_hooks_load_when_managed_dir_is_missing() {
         transcript_path: None,
         model: "gpt-test".to_string(),
         permission_mode: "default".to_string(),
-        tool_name: "Bash".to_string(),
-        matcher_aliases: Vec::new(),
+        tool_name: codex_protocol::ToolName::namespaced("functions", "exec_command"),
         tool_use_id: "tool-1".to_string(),
         tool_input: serde_json::json!({ "command": "echo hello" }),
     });
@@ -1277,7 +1306,7 @@ fn allow_managed_hooks_only_skips_unmanaged_json_and_toml_hooks() {
               "hooks": {
                 "PreToolUse": [
                   {
-                    "matcher": "^Bash$",
+                    "selector": {"type":"tool","namespace":"^functions$","name":"^exec_command$"},
                     "hooks": [
                       {
                         "type": "command",
@@ -1472,7 +1501,7 @@ fn discovers_hooks_from_json_and_toml_in_the_same_layer() {
               "hooks": {
                 "PreToolUse": [
                   {
-                    "matcher": "^Bash$",
+                    "selector": {"type":"tool","namespace":"^functions$","name":"^exec_command$"},
                     "hooks": [
                       {
                         "type": "command",
@@ -1498,8 +1527,12 @@ fn discovers_hooks_from_json_and_toml_in_the_same_layer() {
         unreachable!("PreToolUse group should be a table");
     };
     pre_tool_use_group_entries.insert(
-        "matcher".to_string(),
-        TomlValue::String("^Bash$".to_string()),
+        "selector".to_string(),
+        TomlValue::try_from(codex_protocol::HookSelector::Tool {
+            namespace: Some("^functions$".into()),
+            name: Some("^exec_command$".into()),
+        })
+        .expect("typed selector"),
     );
     pre_tool_use_group_entries.insert(
         "hooks".to_string(),
@@ -1561,8 +1594,7 @@ fn discovers_hooks_from_json_and_toml_in_the_same_layer() {
         transcript_path: None,
         model: "gpt-test".to_string(),
         permission_mode: "default".to_string(),
-        tool_name: "Bash".to_string(),
-        matcher_aliases: Vec::new(),
+        tool_name: codex_protocol::ToolName::namespaced("functions", "exec_command"),
         tool_use_id: "tool-1".to_string(),
         tool_input: serde_json::json!({ "command": "echo hello" }),
     });
@@ -1594,7 +1626,7 @@ fn profile_user_layers_load_shared_hooks_json_once() {
               "hooks": {
                 "PreToolUse": [
                   {
-                    "matcher": "^Bash$",
+                    "selector": {"type":"tool","namespace":"^functions$","name":"^exec_command$"},
                     "hooks": [
                       {
                         "type": "command",
@@ -1652,8 +1684,7 @@ fn profile_user_layers_load_shared_hooks_json_once() {
         transcript_path: None,
         model: "gpt-test".to_string(),
         permission_mode: "default".to_string(),
-        tool_name: "Bash".to_string(),
-        matcher_aliases: Vec::new(),
+        tool_name: codex_protocol::ToolName::namespaced("functions", "exec_command"),
         tool_use_id: "tool-1".to_string(),
         tool_input: serde_json::json!({ "command": "echo hello" }),
     });
@@ -1815,7 +1846,10 @@ fn bundled_cleanup_trust_does_not_extend_to_other_handlers() {
         },
     ]);
     source.hooks.stop.push(MatcherGroup {
-        matcher: Some("Bash".to_string()),
+        selector: Some(codex_protocol::HookSelector::Tool {
+            namespace: Some("^functions$".to_string()),
+            name: Some("exec_command".to_string()),
+        }),
         hooks: vec![cleanup],
     });
     let discovered = super::discovery::discover_handlers(
@@ -2031,7 +2065,10 @@ print(json.dumps({
         source_relative_path: "hooks/hooks.json".to_string(),
         hooks: HookEventsToml {
             pre_tool_use: vec![MatcherGroup {
-                matcher: Some("Bash".to_string()),
+                selector: Some(codex_protocol::HookSelector::Tool {
+                    namespace: Some("^functions$".to_string()),
+                    name: Some("exec_command".to_string()),
+                }),
                 hooks: vec![HookHandlerConfig::Command {
                     command: format!("python3 {}", script_path.display()),
                     command_windows: None,
@@ -2069,8 +2106,7 @@ print(json.dumps({
         transcript_path: None,
         model: "gpt-test".to_string(),
         permission_mode: "default".to_string(),
-        tool_name: "Bash".to_string(),
-        matcher_aliases: Vec::new(),
+        tool_name: codex_protocol::ToolName::namespaced("functions", "exec_command"),
         tool_use_id: "tool-1".to_string(),
         tool_input: serde_json::json!({ "command": "echo hello" }),
     });
@@ -2101,8 +2137,7 @@ print(json.dumps({
             transcript_path: None,
             model: "gpt-test".to_string(),
             permission_mode: "default".to_string(),
-            tool_name: "Bash".to_string(),
-            matcher_aliases: Vec::new(),
+            tool_name: codex_protocol::ToolName::namespaced("functions", "exec_command"),
             tool_use_id: "tool-1".to_string(),
             tool_input: serde_json::json!({ "command": "echo hello" }),
         })
@@ -2150,7 +2185,7 @@ fn plugin_hook_sources_expand_plugin_placeholders() {
         source_relative_path: "hooks/hooks.json".to_string(),
         hooks: HookEventsToml {
             pre_tool_use: vec![MatcherGroup {
-                matcher: Some("Bash".to_string()),
+                selector: Some(codex_protocol::HookSelector::Tool { namespace: Some("^functions$".to_string()), name: Some("exec_command".to_string()) }),
                 hooks: vec![HookHandlerConfig::Command {
                     command:
                         "run ${PLUGIN_ROOT} ${CLAUDE_PLUGIN_ROOT} ${PLUGIN_DATA} ${CLAUDE_PLUGIN_DATA}"
@@ -2293,7 +2328,7 @@ fn executor_stop_hook_fixture() -> (
         source_relative_path: ".codex-plugin/plugin.json#hooks[0]".to_string(),
         hooks: HookEventsToml {
             stop: vec![MatcherGroup {
-                matcher: None,
+                selector: None,
                 hooks: vec![HookHandlerConfig::McpTool {
                     server: "node_repl".to_string(),
                     tool: "turn_ended".to_string(),
@@ -2314,7 +2349,7 @@ fn executor_stop_hook_fixture() -> (
         vec![ConfiguredHandler {
             builtin: true,
             event_name: HookEventName::Stop,
-            matcher: None,
+            selector: None,
             timeout_sec: 5,
             status_message: None,
             additional_context_limit: Default::default(),
@@ -2402,8 +2437,7 @@ async fn executor_stop_hooks_run_unless_regular_hooks_block_without_stopping() {
 
     engine.handlers.push(ConfiguredHandler {
         builtin: false,
-        event_name: HookEventName::Stop,
-        matcher: None,
+        selection: crate::engine::HookSelection::fixture(HookEventName::Stop, None),
         timeout_sec: 30,
         status_message: None,
         additional_context_limit: Default::default(),
@@ -2437,8 +2471,7 @@ async fn executor_stop_hooks_run_unless_regular_hooks_block_without_stopping() {
 
     engine.handlers.push(ConfiguredHandler {
         builtin: false,
-        event_name: HookEventName::Stop,
-        matcher: None,
+        selection: crate::engine::HookSelection::fixture(HookEventName::Stop, None),
         timeout_sec: 30,
         status_message: None,
         additional_context_limit: Default::default(),
@@ -2523,7 +2556,7 @@ async fn executor_interrupt_hooks_register_and_run() {
         engine
             .handlers
             .iter()
-            .map(|handler| handler.event_name)
+            .map(|handler| handler.selection.event_name())
             .collect::<Vec<_>>(),
         vec![
             HookEventName::SubagentStop,
@@ -2563,7 +2596,7 @@ fn executor_hooks_register_events_from_each_environment() {
     second_source.environment_id = "executor-b".to_string();
     second_source.hooks.stop = std::mem::take(&mut second_source.hooks.interrupt);
     let mut second_handler = expected_handlers[0].clone();
-    second_handler.event_name = HookEventName::Stop;
+    second_handler.selection = crate::engine::HookSelection::Stop;
     second_handler.display_order = 1;
     let HandlerSourcePath::ExecutorScoped { environment_id, .. } = &mut second_handler.source_path
     else {
@@ -2688,7 +2721,7 @@ async fn mcp_tool_hooks_expand_event_input_and_apply_pre_tool_decisions() {
         serde_json::json!({
             "hooks": {
                 "PreToolUse": [{
-                    "matcher": "Bash",
+                    "selector": {"type":"tool","namespace":"^functions$","name":"exec_command"},
                     "hooks": [{
                         "type": "mcp_tool",
                         "server": "security",
@@ -2723,8 +2756,7 @@ async fn mcp_tool_hooks_expand_event_input_and_apply_pre_tool_decisions() {
         transcript_path: None,
         model: "gpt-test".to_string(),
         permission_mode: "default".to_string(),
-        tool_name: "Bash".to_string(),
-        matcher_aliases: Vec::new(),
+        tool_name: codex_protocol::ToolName::namespaced("functions", "exec_command"),
         tool_use_id: "tool-1".to_string(),
         tool_input: serde_json::json!({ "command": "rm important.txt" }),
     };

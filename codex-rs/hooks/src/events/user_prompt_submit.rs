@@ -462,8 +462,7 @@ mod tests {
     fn handler_with_async(r#async: bool) -> ConfiguredHandler {
         ConfiguredHandler {
             builtin: false,
-            event_name: HookEventName::UserPromptSubmit,
-            matcher: None,
+            selection: crate::engine::HookSelection::fixture(HookEventName::UserPromptSubmit, None),
             timeout_sec: 5,
             status_message: None,
             additional_context_limit: Default::default(),

@@ -721,7 +721,7 @@ fn load_plugin_hooks_discovers_default_hooks_file() {
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash",
+        "selector": {"type": "tool", "namespace": "^functions$", "name": "^exec_command$"},
         "hooks": [{ "type": "command", "command": "echo default" }]
       }
     ]
@@ -790,7 +790,7 @@ fn load_plugin_hooks_supports_inline_manifest_hooks() {
     "hooks": {
       "SessionStart": [
         {
-          "matcher": "startup",
+          "selector": {"type": "event_value", "pattern": "startup"},
           "hooks": [{ "type": "command", "command": "echo inline" }]
         }
       ]

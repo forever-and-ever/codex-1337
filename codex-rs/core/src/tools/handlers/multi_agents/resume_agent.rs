@@ -152,6 +152,8 @@ pub(crate) struct ResumeAgentResult {
     pub(crate) status: AgentStatus,
 }
 
+impl codex_tools::HookToolOutput for ResumeAgentResult {}
+
 impl ToolOutput for ResumeAgentResult {
     fn log_output(&self) -> String {
         tool_output_json_text(self, "resume_agent")

@@ -588,7 +588,7 @@ pub struct HookMetadata {
     pub event_name: HookEventName,
     #[serde(flatten)]
     pub handler: HookHandlerMetadata,
-    pub matcher: Option<String>,
+    pub selector: Option<codex_protocol::HookSelector>,
     pub timeout_sec: u64,
     pub status_message: Option<String>,
     /// Configured `additionalContext` spill threshold.

@@ -558,7 +558,7 @@ async fn detect_repo_lists_mcp_hooks_commands_and_subagents() {
     .expect("write mcp");
     fs::write(
         repo_root.join(EXTERNAL_AGENT_DIR).join("settings.json"),
-        r#"{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"echo external-agent","timeout":3},{"type":"http","url":"https://example.invalid/hook"}]}]}}"#,
+        r#"{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"echo external-agent","timeout":3},{"type":"http","url":"https://example.invalid/hook"}]}]}}"#,
     )
     .expect("write hooks");
     fs::write(
@@ -726,7 +726,7 @@ async fn import_repo_migrates_mcp_hooks_commands_and_subagents() {
     .expect("write mcp");
     fs::write(
         repo_root.join(EXTERNAL_AGENT_DIR).join("settings.json"),
-        r#"{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"echo external-agent","timeout":3},{"type":"prompt","prompt":"skip"}]}],"Stop":[{"matcher":"ignored","hooks":[{"command":"echo done"}]}]}}"#,
+        r#"{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"echo external-agent","timeout":3},{"type":"prompt","prompt":"skip"}]}],"Stop":[{"hooks":[{"command":"echo done"}]}]}}"#,
     )
     .expect("write hooks");
     fs::write(
@@ -826,7 +826,6 @@ STATIC = "yes"
         serde_json::json!({
             "hooks": {
                 "PreToolUse": [{
-                    "matcher": "Bash",
                     "hooks": [{
                         "type": "command",
                         "command": "echo external-agent",

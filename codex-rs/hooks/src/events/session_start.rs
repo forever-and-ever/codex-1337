@@ -244,7 +244,7 @@ fn parse_completed(
             Some(0) => {
                 let trimmed_stdout = run_result.stdout.trim();
                 if trimmed_stdout.is_empty() {
-                } else if let Some(parsed) = match handler.event_name {
+                } else if let Some(parsed) = match handler.selection.event_name() {
                     HookEventName::SessionStart => {
                         output_parser::parse_session_start(&run_result.stdout)
                     }
@@ -271,7 +271,7 @@ fn parse_completed(
                     }
                     let _ = parsed.universal.suppress_output;
                     if handler.can_apply_control_effects()
-                        && handler.event_name == HookEventName::SessionStart
+                        && handler.selection.event_name() == HookEventName::SessionStart
                         && !parsed.universal.continue_processing
                     {
                         status = HookRunStatus::Stopped;
@@ -288,7 +288,7 @@ fn parse_completed(
                     status = HookRunStatus::Failed;
                     entries.push(HookOutputEntry {
                         kind: HookOutputEntryKind::Error,
-                        text: match handler.event_name {
+                        text: match handler.selection.event_name() {
                             HookEventName::SessionStart => {
                                 "hook returned invalid session start JSON output"
                             }
@@ -543,8 +543,7 @@ mod tests {
     fn handler_for(event_name: HookEventName) -> ConfiguredHandler {
         ConfiguredHandler {
             builtin: false,
-            event_name,
-            matcher: None,
+            selection: crate::engine::HookSelection::fixture(event_name, None),
             timeout_sec: 600,
             status_message: None,
             additional_context_limit: Default::default(),

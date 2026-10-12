@@ -524,8 +524,7 @@ mod tests {
     fn handler(event_name: HookEventName) -> ConfiguredHandler {
         ConfiguredHandler {
             builtin: false,
-            event_name,
-            matcher: None,
+            selection: crate::engine::HookSelection::fixture(event_name, None),
             timeout_sec: 5,
             status_message: Some("running compact hook".to_string()),
             additional_context_limit: Default::default(),

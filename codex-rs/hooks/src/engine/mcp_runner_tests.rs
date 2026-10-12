@@ -92,8 +92,7 @@ async fn mcp_tool_results_use_command_hook_output_contract() {
     .expect("object input");
     let handler = ConfiguredHandler {
         builtin: false,
-        event_name: HookEventName::PostToolUse,
-        matcher: None,
+        selection: crate::engine::HookSelection::fixture(HookEventName::PostToolUse, None),
         timeout_sec: 30,
         status_message: None,
         additional_context_limit: Default::default(),

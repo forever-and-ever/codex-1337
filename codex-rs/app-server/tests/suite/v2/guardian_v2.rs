@@ -829,7 +829,7 @@ async fn guardian_v2_routes_scoped_tool_approvals(
         std::fs::write(
             codex_home.path().join("requirements.toml"),
             format!(
-                "[hooks]\n\n[[hooks.PostToolUse]]\nmatcher = '^request_user_input$'\n\n[[hooks.PostToolUse.hooks]]\ntype = 'command'\ncommand = 'python3 {}'\n",
+                "[hooks]\n\n[[hooks.PostToolUse]]\nselector = {{ type = 'tool', namespace = '^functions$', name = '^request_user_input$' }}\n\n[[hooks.PostToolUse.hooks]]\ntype = 'command'\ncommand = 'python3 {}'\n",
                 hook_path.display()
             ),
         )?;

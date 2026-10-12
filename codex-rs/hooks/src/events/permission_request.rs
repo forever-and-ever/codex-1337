@@ -41,8 +41,7 @@ pub struct PermissionRequestRequest {
     pub transcript_path: Option<PathBuf>,
     pub model: String,
     pub permission_mode: String,
-    pub tool_name: String,
-    pub matcher_aliases: Vec<String>,
+    pub tool_name: Option<codex_protocol::ToolName>,
     pub run_id_suffix: String,
     pub tool_input: Value,
 }
@@ -68,11 +67,10 @@ pub(crate) fn preview(
     handlers: &[ConfiguredHandler],
     request: &PermissionRequestRequest,
 ) -> Vec<HookRunSummary> {
-    let matcher_inputs = common::matcher_inputs(&request.tool_name, &request.matcher_aliases);
-    dispatcher::select_handlers_for_matcher_inputs(
+    dispatcher::select_tool_handlers(
         handlers,
         HookEventName::PermissionRequest,
-        &matcher_inputs,
+        request.tool_name.as_ref(),
     )
     .into_iter()
     .map(|handler| {
@@ -88,11 +86,10 @@ pub(crate) async fn run(
     engine: &ClaudeHooksEngine,
     request: PermissionRequestRequest,
 ) -> PermissionRequestOutcome {
-    let matcher_inputs = common::matcher_inputs(&request.tool_name, &request.matcher_aliases);
-    let matched = dispatcher::select_handlers_for_matcher_inputs(
+    let matched = dispatcher::select_tool_handlers(
         &engine.handlers,
         HookEventName::PermissionRequest,
-        &matcher_inputs,
+        request.tool_name.as_ref(),
     );
     if matched.is_empty() {
         return PermissionRequestOutcome {

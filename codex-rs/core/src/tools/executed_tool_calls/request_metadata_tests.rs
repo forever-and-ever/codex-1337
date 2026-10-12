@@ -441,6 +441,8 @@ async fn stale_runtime_refresh_preserves_recording_state() {
 async fn recorder_refreshes_without_changing_execution_features_or_claiming_missing_history() {
     struct MetadataLookup<'a>(std::cell::Cell<usize>, JsonValue, &'a ExecutedToolCalls);
 
+    impl codex_tools::HookToolOutput for MetadataLookup<'_> {}
+
     impl ToolOutput for MetadataLookup<'_> {
         fn log_output(&self) -> String {
             panic!("recording must not read the diagnostic output")

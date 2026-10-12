@@ -372,7 +372,7 @@ async fn self_aborted_turn_runs_interrupt_hook_before_turn_aborted() -> Result<(
             )
             .expect("parse interrupt hook configuration");
             hooks["hooks"]["PreCompact"] = json!([{
-                "matcher": "manual",
+                "selector": {"type": "event_value", "pattern": "manual"},
                 "hooks": [{
                     "type": "command",
                     "command": r#"python3 -c 'import json; print(json.dumps({"continue": False, "stopReason": "stop compaction"}))'"#,

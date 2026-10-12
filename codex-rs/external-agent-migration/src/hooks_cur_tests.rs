@@ -18,9 +18,12 @@ fn imports_supported_cur_hooks_and_drops_failure_policy() {
         serde_json::json!({
             "hooks": {
                 "preToolUse": [{
+                    "command": "echo filtered",
+                    "matcher": "Shell"
+                }, {
                     "type": "command",
                     "command": "sh .source/hooks/check.sh",
-                    "matcher": "Shell",
+                    "matcher": "*",
                     "statusMessage": "Source agent check",
                     "timeoutSec": "7",
                     "failClosed": false
@@ -34,8 +37,7 @@ fn imports_supported_cur_hooks_and_drops_failure_policy() {
                     "failClosed": true
                 }],
                 "beforeSubmitPrompt": [{
-                    "command": "echo ready",
-                    "matcher": "ignored"
+                    "command": "echo ready"
                 }],
                 "preCompact": [{
                     "command": "echo compact",
@@ -46,6 +48,28 @@ fn imports_supported_cur_hooks_and_drops_failure_policy() {
         .to_string(),
     )
     .expect("hooks config");
+
+    let error = import_hooks_cur(
+        &source_dir,
+        &source_hooks,
+        &target_hooks,
+        TEST_REWRITE_PROFILE,
+    )
+    .expect_err("unrepresentable tool selector must reject import");
+    assert!(
+        error
+            .to_string()
+            .contains("cannot import PreToolUse hook selector")
+    );
+    assert!(!target_hooks.exists());
+    let mut supported: JsonValue =
+        serde_json::from_str(&fs::read_to_string(&source_hooks).expect("source hooks"))
+            .expect("source JSON");
+    supported["hooks"]["preToolUse"]
+        .as_array_mut()
+        .expect("handlers")
+        .remove(0);
+    fs::write(&source_hooks, supported.to_string()).expect("supported source hooks");
 
     assert!(
         import_hooks_cur(
@@ -70,7 +94,6 @@ fn imports_supported_cur_hooks_and_drops_failure_policy() {
         serde_json::json!({
             "hooks": {
                 "PreToolUse": [{
-                    "matcher": "Shell",
                     "hooks": [{
                         "type": "command",
                         "command": format!("sh '{}'", rewritten_script.display()),
@@ -85,7 +108,7 @@ fn imports_supported_cur_hooks_and_drops_failure_policy() {
                     }]
                 }],
                 "PreCompact": [{
-                    "matcher": "auto",
+                    "selector": {"type":"event_value","pattern":"auto"},
                     "hooks": [{
                         "type": "command",
                         "command": "echo compact"

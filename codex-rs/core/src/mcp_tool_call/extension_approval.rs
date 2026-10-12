@@ -11,7 +11,6 @@ use codex_tools::ToolApproval;
 use codex_tools::ToolApprovalMode;
 
 use crate::tools::context::ToolInvocation;
-use crate::tools::hook_names::HookToolName;
 
 use super::McpToolApprovalMetadata;
 use super::McpToolApprovalPolicy;
@@ -156,7 +155,6 @@ pub(crate) async fn approve_extension_tool(
         .permission_profile_for_server(&invocation.server)
         .filter(|_| !native_policy_owner)
         .unwrap_or(&mcp_config.permission_profile);
-    let hook_name = HookToolName::new(format!("mcp__{}__{tool}", invocation.server));
     let decision = maybe_request_mcp_tool_approval(
         &call.session,
         &call.step_context,
@@ -164,7 +162,6 @@ pub(crate) async fn approve_extension_tool(
         &call.call_id,
         &invocation,
         &call.tool_name,
-        &hook_name,
         &metadata,
         &mcp_config,
         permission_profile,

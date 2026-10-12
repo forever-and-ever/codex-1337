@@ -36,11 +36,18 @@ use serde_json::json;
 use super::rmcp_client::remote_aware_environment_id;
 use super::rmcp_client::remote_aware_stdio_server_bin;
 
+use codex_protocol::HookSelector;
+
 const RMCP_SERVER: &str = "rmcp";
 const RMCP_PREFIXED_NAMESPACE: &str = "mcp__rmcp";
 const RMCP_UNPREFIXED_NAMESPACE: &str = "rmcp";
-const RMCP_ECHO_TOOL_NAME: &str = "mcp__rmcp__echo";
-const RMCP_HOOK_MATCHER: &str = RMCP_ECHO_TOOL_NAME;
+
+fn rmcp_echo_selector() -> HookSelector {
+    HookSelector::Tool {
+        namespace: Some("^(mcp__rmcp|rmcp)$".to_string()),
+        name: Some("^echo$".to_string()),
+    }
+}
 const RMCP_ECHO_MESSAGE: &str = "hook e2e ping";
 
 #[derive(Clone, Copy)]
@@ -83,7 +90,7 @@ print(json.dumps({{
     let hooks = serde_json::json!({
         "hooks": {
             "PreToolUse": [{
-                "matcher": RMCP_HOOK_MATCHER,
+                "selector": rmcp_echo_selector(),
                 "hooks": [{
                     "type": "command",
                     "command": format!("python3 {}", script_path.display()),
@@ -127,7 +134,7 @@ print(json.dumps({{
     let hooks = serde_json::json!({
         "hooks": {
             "PreToolUse": [{
-                "matcher": RMCP_HOOK_MATCHER,
+                "selector": rmcp_echo_selector(),
                 "hooks": [{
                     "type": "command",
                     "command": format!("python3 {}", script_path.display()),
@@ -170,7 +177,7 @@ print(json.dumps({{
     let hooks = serde_json::json!({
         "hooks": {
             "PostToolUse": [{
-                "matcher": RMCP_HOOK_MATCHER,
+                "selector": rmcp_echo_selector(),
                 "hooks": [{
                     "type": "command",
                     "command": format!("python3 {}", script_path.display()),
@@ -219,7 +226,7 @@ print({python_output_literal})
     let hooks = json!({
         "hooks": {
             "PermissionRequest": [{
-                "matcher": RMCP_HOOK_MATCHER,
+                "selector": rmcp_echo_selector(),
                 "hooks": [{
                     "type": "command",
                     "command": format!("python3 {}", script_path.display()),
@@ -238,27 +245,26 @@ print({python_output_literal})
 pub(super) fn write_mcp_tool_hook(
     home: &Path,
     event_name: &str,
-    matcher: Option<&str>,
+    selector: Option<HookSelector>,
     server: &str,
     output: &str,
 ) -> Result<()> {
-    let hooks = json!({
-        "hooks": {
-            event_name: [{
-                "matcher": matcher,
-                "hooks": [{
-                    "type": "mcp_tool",
-                    "server": server,
-                    "tool": "image_scenario",
-                    "input": {
-                        "scenario": "text_only",
-                        "caption": output,
-                    },
-                    "timeout": 5,
-                }],
-            }],
-        },
+    let mut group = json!({
+        "hooks": [{
+            "type": "mcp_tool",
+            "server": server,
+            "tool": "image_scenario",
+            "input": {
+                "scenario": "text_only",
+                "caption": output,
+            },
+            "timeout": 5,
+        }],
     });
+    if let Some(selector) = selector {
+        group["selector"] = serde_json::to_value(selector)?;
+    }
+    let hooks = json!({"hooks": {event_name: [group]}});
     fs::write(home.join("hooks.json"), hooks.to_string()).context("write MCP tool hook config")
 }
 
@@ -443,7 +449,7 @@ async fn run_mcp_permission_request_hook_test(outcome: PermissionRequestHookOutc
             }),
             json!({
                 "hook_event_name": "PermissionRequest",
-                "tool_name": RMCP_ECHO_TOOL_NAME,
+                "tool_name": {"namespace": RMCP_PREFIXED_NAMESPACE, "name": "echo"},
                 "tool_input": { "message": RMCP_ECHO_MESSAGE },
             }),
         );
@@ -477,7 +483,7 @@ async fn mcp_tool_hook_interpolates_prompt_and_runs_without_tool_approval() -> R
             write_mcp_tool_hook(
                 home,
                 "UserPromptSubmit",
-                /*matcher*/ None,
+                /*selector*/ None,
                 RMCP_SERVER,
                 r#"{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"MCP scanner checked ${prompt}"}}"#,
             )
@@ -599,7 +605,7 @@ async fn mcp_tool_hook_marks_thread_memory_mode_polluted_when_configured() -> Re
             write_mcp_tool_hook(
                 home,
                 "UserPromptSubmit",
-                /*matcher*/ None,
+                /*selector*/ None,
                 RMCP_SERVER,
                 r#"{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"external MCP context"}}"#,
             )
@@ -669,7 +675,7 @@ async fn mcp_tool_hook_blocks_model_tool_without_recursive_hooks_or_approval() -
             write_mcp_tool_hook(
                 home,
                 "PreToolUse",
-                Some("mcp__rmcp__.*"),
+                Some(HookSelector::Tool { namespace: Some("^mcp__rmcp$".to_string()), name: None }),
                 RMCP_SERVER,
                 r#"{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"MCP blocked ${tool_input.message}"}}"#,
             )
@@ -726,7 +732,7 @@ async fn mcp_tool_hook_fails_open_when_server_is_unavailable() -> Result<()> {
             write_mcp_tool_hook(
                 home,
                 "UserPromptSubmit",
-                /*matcher*/ None,
+                /*selector*/ None,
                 "missing-server",
                 r#"{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"this must not appear"}}"#,
             )
@@ -836,7 +842,7 @@ async fn pre_tool_use_blocks_mcp_tool_before_execution(
             .expect("blocked MCP tool output should be a string");
         assert!(
             output.contains(&format!(
-                "Tool call blocked by PreToolUse hook: {block_reason}. Tool: {RMCP_ECHO_TOOL_NAME}"
+                "Tool call blocked by PreToolUse hook: {block_reason}. Tool: {mcp_namespace}.echo"
             )),
             "blocked MCP tool output should surface the hook reason and tool name",
         );
@@ -852,7 +858,7 @@ async fn pre_tool_use_blocks_mcp_tool_before_execution(
             }),
             json!({
                 "hook_event_name": "PreToolUse",
-                "tool_name": RMCP_ECHO_TOOL_NAME,
+                "tool_name": {"namespace": mcp_namespace, "name": "echo"},
                 "tool_use_id": call_id,
                 "tool_input": { "message": RMCP_ECHO_MESSAGE },
             })
@@ -1044,7 +1050,7 @@ async fn post_tool_use_records_mcp_tool_payload_and_context(
         }),
         json!({
             "hook_event_name": "PostToolUse",
-            "tool_name": RMCP_ECHO_TOOL_NAME,
+            "tool_name": {"namespace": mcp_namespace, "name": "echo"},
             "tool_use_id": call_id,
             "tool_input": { "message": RMCP_ECHO_MESSAGE },
             "tool_response": {

@@ -460,19 +460,6 @@ async fn readiness_selects_exact_tool_with_registry_owned_exposure() {
 async fn function_tools_expose_default_hook_payloads_and_rewrites() -> anyhow::Result<()> {
     let (session, turn) = crate::session::tests::make_session_and_context().await;
     let tool_name = codex_tools::ToolName::namespaced("functions.", "echo");
-    // Hooks keep their existing selector spelling even when it conflates addresses.
-    assert_eq!(
-        HookToolName::from_tool_name(&codex_tools::ToolName::namespaced("a", "bc")),
-        HookToolName::new("abc"),
-    );
-    assert_eq!(
-        HookToolName::from_tool_name(&codex_tools::ToolName::namespaced("ab", "c")),
-        HookToolName::new("abc"),
-    );
-    assert_eq!(
-        HookToolName::from_tool_name(&codex_tools::ToolName::namespaced("functions", "echo")),
-        HookToolName::new("echo"),
-    );
     let handler = TestHandler {
         tool_name: tool_name.clone(),
     };
@@ -488,14 +475,14 @@ async fn function_tools_expose_default_hook_payloads_and_rewrites() -> anyhow::R
     assert_eq!(
         handler.pre_tool_use_payload(&invocation),
         Some(PreToolUsePayload {
-            tool_name: HookToolName::new("functions.echo"),
+            tool_name: codex_tools::ToolName::namespaced("functions.", "echo"),
             tool_input: serde_json::json!({ "message": "hello" }),
         })
     );
     assert_eq!(
         handler.post_tool_use_payload(&invocation, &output),
         Some(PostToolUsePayload {
-            tool_name: HookToolName::new("functions.echo"),
+            tool_name: codex_tools::ToolName::namespaced("functions.", "echo"),
             tool_use_id: "call-1".to_string(),
             tool_input: serde_json::json!({ "message": "hello" }),
             tool_response: serde_json::json!("echoed"),
@@ -532,54 +519,9 @@ async fn function_hook_input_defaults_empty_arguments_to_object() {
     assert_eq!(
         handler.pre_tool_use_payload(&invocation),
         Some(PreToolUsePayload {
-            tool_name: HookToolName::new("echo"),
+            tool_name: ToolName::plain("echo"),
             tool_input: serde_json::json!({}),
         })
-    );
-}
-
-#[tokio::test]
-async fn spawn_agent_function_tools_use_agent_matcher_alias() {
-    let (session, turn) = crate::session::tests::make_session_and_context().await;
-    let session = Arc::new(session);
-    let turn = Arc::new(turn);
-
-    let hook_payloads = [
-        codex_tools::ToolName::plain("spawn_agent"),
-        codex_tools::ToolName::namespaced(DEFAULT_FUNCTION_NAMESPACE, "spawn_agent"),
-        codex_tools::ToolName::namespaced(MULTI_AGENT_V1_NAMESPACE, "spawn_agent"),
-    ]
-    .into_iter()
-    .map(|tool_name| {
-        let handler = TestHandler {
-            tool_name: tool_name.clone(),
-        };
-        let invocation = ToolInvocation {
-            payload: ToolPayload::Function {
-                arguments: serde_json::json!({ "message": "inspect this repo" }).to_string(),
-            },
-            ..test_invocation(Arc::clone(&session), Arc::clone(&turn), "call-1", tool_name)
-        };
-        handler.pre_tool_use_payload(&invocation)
-    })
-    .collect::<Vec<_>>();
-
-    assert_eq!(
-        hook_payloads,
-        vec![
-            Some(PreToolUsePayload {
-                tool_name: HookToolName::spawn_agent(),
-                tool_input: serde_json::json!({ "message": "inspect this repo" }),
-            }),
-            Some(PreToolUsePayload {
-                tool_name: HookToolName::spawn_agent(),
-                tool_input: serde_json::json!({ "message": "inspect this repo" }),
-            }),
-            Some(PreToolUsePayload {
-                tool_name: HookToolName::spawn_agent(),
-                tool_input: serde_json::json!({ "message": "inspect this repo" }),
-            }),
-        ]
     );
 }
 

@@ -250,7 +250,6 @@ mod tests {
     use crate::tools::context::ToolCallSource;
     use crate::tools::context::ToolInvocation;
     use crate::tools::context::ToolPayload;
-    use crate::tools::hook_names::HookToolName;
     use crate::tools::registry::CoreToolRuntime;
     use crate::tools::registry::PostToolUsePayload;
     use crate::tools::registry::PreToolUsePayload;
@@ -403,14 +402,14 @@ mod tests {
         assert_eq!(
             CoreToolRuntime::pre_tool_use_payload(&handler, &invocation),
             Some(PreToolUsePayload {
-                tool_name: HookToolName::new("extension_echo"),
+                tool_name: ToolName::plain("extension_echo"),
                 tool_input: json!({ "message": "hello" }),
             })
         );
         assert_eq!(
             CoreToolRuntime::post_tool_use_payload(&handler, &invocation, &output),
             Some(PostToolUsePayload {
-                tool_name: HookToolName::new("extension_echo"),
+                tool_name: ToolName::plain("extension_echo"),
                 tool_use_id: "call-extension".to_string(),
                 tool_input: json!({ "message": "hello" }),
                 tool_response: json!({ "ok": true }),

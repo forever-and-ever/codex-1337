@@ -60,7 +60,7 @@ mod tests {
             source_relative_path: "hooks/hooks.json".to_string(),
             hooks: HookEventsToml {
                 pre_tool_use: vec![MatcherGroup {
-                    matcher: None,
+                    selector: None,
                     hooks: vec![
                         HookHandlerConfig::Prompt {},
                         HookHandlerConfig::Command {
@@ -74,7 +74,7 @@ mod tests {
                     ],
                 }],
                 session_start: vec![MatcherGroup {
-                    matcher: None,
+                    selector: None,
                     hooks: vec![HookHandlerConfig::Agent {}],
                 }],
                 ..Default::default()

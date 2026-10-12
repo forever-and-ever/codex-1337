@@ -683,6 +683,36 @@ async fn active_call_preserves_triggering_command_context() {
     assert_eq!(call.tool_name, tool_name);
     assert_eq!(call.command, "curl https://example.com");
     assert_eq!(call.environment_id, "remote");
+    let mut action = crate::tools::approvals::ApprovalAction::NetworkAccess {
+        id: "network-call".to_string(),
+        turn_id: "turn-1".to_string(),
+        environment_id: "remote".to_string(),
+        target: "example.com:443".to_string(),
+        host: "example.com".to_string(),
+        protocol: codex_protocol::protocol::NetworkApprovalProtocol::Https,
+        port: 443,
+        trigger: Some(call.trigger.clone()),
+        hook_command: call.command.clone(),
+        hook_run_id: "network-hook".to_string(),
+        command: expected.command.clone(),
+        cwd: codex_utils_absolute_path::AbsolutePathBuf::try_from(
+            std::env::current_dir().expect("cwd"),
+        )
+        .expect("absolute cwd"),
+    };
+    let telemetry_name = ToolName::plain("network_access");
+    assert_eq!(
+        action.permission_request_payload(&telemetry_name).tool_name,
+        Some(tool_name)
+    );
+    let crate::tools::approvals::ApprovalAction::NetworkAccess { trigger, .. } = &mut action else {
+        unreachable!()
+    };
+    *trigger = None;
+    assert_eq!(
+        action.permission_request_payload(&telemetry_name).tool_name,
+        None
+    );
 }
 
 #[tokio::test]

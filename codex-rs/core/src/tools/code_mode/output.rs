@@ -51,6 +51,8 @@ impl CodeModeToolOutput {
     }
 }
 
+impl codex_tools::HookToolOutput for CodeModeToolOutput {}
+
 impl ToolOutput for CodeModeToolOutput {
     fn log_output(&self) -> String {
         format!(

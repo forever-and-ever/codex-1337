@@ -117,7 +117,7 @@ const ALLOWLISTED_BUNDLED_HOOKS: &[BundledHook] = &[
 pub fn is_allowlisted_bundled_cleanup_hook(
     plugin_id: &str,
     event: HookEventName,
-    matcher: Option<&str>,
+    selector: Option<&codex_protocol::HookSelector>,
     handler: &HookHandlerConfig,
     app_connector_id: Option<&str>,
 ) -> bool {
@@ -131,7 +131,7 @@ pub fn is_allowlisted_bundled_cleanup_hook(
         return false;
     };
 
-    matcher.is_none()
+    selector.is_none()
         && ALLOWLISTED_BUNDLED_HOOKS.iter().any(|hook| {
             hook.plugin_id == plugin_id
                 && hook.events.contains(&event)

@@ -4,6 +4,7 @@ use codex_app_server_protocol::HookMetadata;
 use codex_app_server_protocol::HookSource;
 use codex_app_server_protocol::HookTrustStatus;
 use codex_app_server_protocol::HooksListEntry;
+use codex_protocol::HookSelector;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
@@ -500,10 +501,30 @@ impl HooksBrowserView {
         };
 
         let mut lines = vec![detail_line("Event", event_label(event_name))];
-        if let Some(matcher) = hook.matcher.as_deref() {
-            lines.extend(detail_wrapped_lines(
-                "Matcher", matcher, width, /*max_lines*/ None,
-            ));
+        match &hook.selector {
+            Some(HookSelector::Tool { namespace, name }) => {
+                lines.extend(detail_wrapped_lines(
+                    "Tool namespace",
+                    namespace.as_deref().unwrap_or("Any"),
+                    width,
+                    /*max_lines*/ None,
+                ));
+                lines.extend(detail_wrapped_lines(
+                    "Tool name",
+                    name.as_deref().unwrap_or("Any"),
+                    width,
+                    /*max_lines*/ None,
+                ));
+            }
+            Some(HookSelector::EventValue { pattern }) => {
+                lines.extend(detail_wrapped_lines(
+                    "Event value",
+                    pattern,
+                    width,
+                    /*max_lines*/ None,
+                ));
+            }
+            None => {}
         }
         lines.extend(detail_wrapped_lines(
             "Source",
@@ -863,7 +884,15 @@ mod tests {
                 r#async: false,
             },
             is_managed,
-            matcher: Some("Bash".to_string()),
+            selector: match event_name {
+                HookEventName::PreToolUse
+                | HookEventName::PermissionRequest
+                | HookEventName::PostToolUse => Some(HookSelector::Tool {
+                    namespace: Some("^functions$".to_string()),
+                    name: Some("^exec_command$".to_string()),
+                }),
+                _ => None,
+            },
             timeout_sec: 30,
             status_message: None,
             additional_context_limit: None,
@@ -1022,7 +1051,7 @@ mod tests {
         let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
         let view = HooksBrowserView::new(
             Vec::new(),
-            vec!["skipped invalid matcher for PreToolUse".to_string()],
+            vec!["skipped invalid selector for PreToolUse".to_string()],
             vec![HookErrorInfo {
                 path: test_path_buf("/tmp/hooks.json"),
                 message: "failed to parse hooks config".to_string(),

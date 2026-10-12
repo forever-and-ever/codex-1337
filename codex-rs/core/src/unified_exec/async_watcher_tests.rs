@@ -58,6 +58,7 @@ async fn streaming_output_harness() -> anyhow::Result<StreamingOutputHarness> {
         crate::session::step_context::StepContext::for_test(turn),
         tokio_util::sync::CancellationToken::new(),
         "streaming-output-test".to_string(),
+        codex_tools::ToolName::plain("exec_command"),
     );
     let output_buffer = Arc::clone(&process.output_handles().output_buffer);
 

@@ -748,7 +748,7 @@ fn map_hook_matcher_groups_to_api(
 
 fn map_hook_matcher_group_to_api(group: CoreMatcherGroup) -> ConfiguredHookMatcherGroup {
     ConfiguredHookMatcherGroup {
-        matcher: group.matcher,
+        selector: group.selector,
         hooks: group
             .hooks
             .into_iter()

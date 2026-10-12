@@ -113,6 +113,8 @@ pub(crate) struct CloseAgentResult {
     pub(crate) previous_status: AgentStatus,
 }
 
+impl codex_tools::HookToolOutput for CloseAgentResult {}
+
 impl ToolOutput for CloseAgentResult {
     fn log_output(&self) -> String {
         tool_output_json_text(self, "close_agent")

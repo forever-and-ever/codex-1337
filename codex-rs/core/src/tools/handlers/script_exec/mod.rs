@@ -4,7 +4,6 @@ use crate::tools::context::ToolOutput;
 use crate::tools::context::ToolPayload;
 use crate::tools::handlers::unified_exec::ExecCommandHandler;
 use crate::tools::handlers::unified_exec::ExecCommandHandlerOptions;
-use crate::tools::hook_names::HookToolName;
 use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::PostToolUsePayload;
 use crate::tools::registry::PreToolUsePayload;
@@ -147,8 +146,7 @@ impl CoreToolRuntime for ScriptExecHandler {
         };
         parser::parse(input).ok()?;
         Some(PreToolUsePayload {
-            // Bash is the historical process-execution hook identity, including non-Bash interpreters.
-            tool_name: HookToolName::bash(),
+            tool_name: invocation.tool_name.clone(),
             tool_input: serde_json::json!({ "command": self.language.review_command(input).ok()? }),
         })
     }
@@ -173,13 +171,7 @@ impl CoreToolRuntime for ScriptExecHandler {
         result: &dyn ToolOutput,
     ) -> Option<PostToolUsePayload> {
         let pre = self.pre_tool_use_payload(invocation)?;
-        Some(PostToolUsePayload {
-            tool_name: pre.tool_name,
-            tool_input: pre.tool_input,
-            tool_use_id: result.post_tool_use_id(&invocation.call_id),
-            tool_response: result
-                .post_tool_use_response(&invocation.call_id, &invocation.payload)?,
-        })
+        result.post_tool_use_payload(&pre.tool_name, &invocation.call_id, pre.tool_input)
     }
 }
 

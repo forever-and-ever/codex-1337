@@ -4,6 +4,9 @@
 mod code_mode;
 mod dynamic_tool;
 mod function_call_error;
+mod hook_output;
+pub use hook_output::HookToolOutput;
+pub use hook_output::PostToolUsePayload;
 mod image_detail;
 mod indirect_namespace_prefixes;
 mod json_schema;

@@ -27,10 +27,11 @@ use super::ConfiguredHandler;
 use super::ConfiguredHandlerKind;
 use super::HookListEntry;
 use super::HookListEntryHandler;
+use super::HookSelection;
 use super::dispatcher::hook_event_name_label;
 use crate::config_rules::hook_states_from_stack;
+#[cfg(test)]
 use crate::engine::HookMatcher;
-use crate::events::common::matcher_pattern_for_event;
 use crate::events::session_end::SESSION_END_DEFAULT_TIMEOUT_SEC;
 use crate::events::session_end::SESSION_END_MAX_TIMEOUT_SEC;
 use crate::output_spill::AdditionalContextLimit;
@@ -485,13 +486,12 @@ fn append_matcher_groups(
     groups: Vec<MatcherGroup>,
 ) {
     for (group_index, group) in groups.into_iter().enumerate() {
-        let matcher = matcher_pattern_for_event(event_name, group.matcher.as_deref());
-        let compiled_matcher = match matcher.map(HookMatcher::new).transpose() {
-            Ok(matcher) => matcher,
+        let selector = group.selector.as_ref();
+        let selection = match HookSelection::compile(event_name, selector) {
+            Ok(selector) => selector,
             Err(err) => {
-                let matcher = matcher.unwrap_or_default();
                 let warning = format!(
-                    "invalid matcher {matcher:?} in {}: {err}",
+                    "invalid selector {selector:?} in {}: {err}",
                     source.path.display()
                 );
                 if group.hooks.is_empty() {
@@ -663,14 +663,14 @@ fn append_matcher_groups(
                 status_message,
                 additional_context_limit,
             } = normalized;
-            let current_hash = hook_hash(event_name, matcher, &group, &config);
+            let current_hash = hook_hash(event_name, selector, &group, &config);
             let key = crate::hook_key(&source.key_source, event_name, group_index, handler_index);
             let state = source.hook_states.get(&key);
             let builtin = source.plugin_id.as_deref().is_some_and(|plugin_id| {
                 is_allowlisted_bundled_cleanup_hook(
                     plugin_id,
                     event_name,
-                    group.matcher.as_deref(),
+                    group.selector.as_ref(),
                     &config,
                     /*app_connector_id*/ None,
                 )
@@ -699,7 +699,7 @@ fn append_matcher_groups(
                 key,
                 event_name,
                 handler,
-                matcher: matcher.map(ToOwned::to_owned),
+                selector: selector.cloned(),
                 timeout_sec,
                 status_message: status_message.clone(),
                 additional_context_limit,
@@ -721,8 +721,7 @@ fn append_matcher_groups(
             {
                 handlers.push(ConfiguredHandler {
                     builtin,
-                    event_name,
-                    matcher: compiled_matcher.clone(),
+                    selection: selection.clone(),
                     timeout_sec,
                     status_message,
                     additional_context_limit: AdditionalContextLimit::from_config(
@@ -776,12 +775,12 @@ struct NormalizedHookIdentity {
 
 fn hook_hash(
     event_name: codex_protocol::protocol::HookEventName,
-    matcher: Option<&str>,
+    selector: Option<&codex_protocol::HookSelector>,
     group: &MatcherGroup,
     normalized_handler: &HookHandlerConfig,
 ) -> String {
     let mut group = group.clone();
-    group.matcher = matcher.map(ToOwned::to_owned);
+    group.selector = selector.cloned();
     group.hooks = vec![normalized_handler.clone()];
     let identity = NormalizedHookIdentity {
         event_name: crate::hook_event_key_label(event_name),
@@ -969,9 +968,12 @@ mod tests {
         assert!(!source_path.contains("Name <Admin>"));
     }
 
-    fn command_group(matcher: Option<&str>) -> MatcherGroup {
+    fn command_group(selector: Option<&str>) -> MatcherGroup {
         MatcherGroup {
-            matcher: matcher.map(str::to_string),
+            selector: selector.map(|pattern| codex_protocol::HookSelector::Tool {
+                namespace: Some("^functions$".to_string()),
+                name: Some(pattern.to_string()),
+            }),
             hooks: vec![HookHandlerConfig::Command {
                 command: "echo hello".to_string(),
                 command_windows: None,
@@ -987,7 +989,7 @@ mod tests {
         additional_context_limit: usize,
     ) -> MatcherGroup {
         MatcherGroup {
-            matcher: None,
+            selector: None,
             hooks: vec![HookHandlerConfig::Command {
                 command: "echo hello".to_string(),
                 command_windows: None,
@@ -1021,7 +1023,10 @@ mod tests {
             &mut hook_handler_source(&source_path, &hook_states),
             HookEventName::PostToolUse,
             vec![MatcherGroup {
-                matcher: Some("Write|Edit".to_string()),
+                selector: Some(codex_protocol::HookSelector::Tool {
+                    namespace: None,
+                    name: Some("apply_patch".to_string()),
+                }),
                 hooks: vec![HookHandlerConfig::McpTool {
                     server: "security".to_string(),
                     tool: "scan".to_string(),
@@ -1062,7 +1067,7 @@ mod tests {
             &mut hook_handler_source(&source_path, &hook_states),
             HookEventName::SessionEnd,
             vec![MatcherGroup {
-                matcher: None,
+                selector: None,
                 hooks: vec![HookHandlerConfig::McpTool {
                     server: "security".to_string(),
                     tool: "scan".to_string(),
@@ -1101,7 +1106,7 @@ mod tests {
             &mut hook_handler_source(&source_path, &hook_states),
             HookEventName::Interrupt,
             vec![MatcherGroup {
-                matcher: None,
+                selector: None,
                 hooks: vec![
                     HookHandlerConfig::McpTool {
                         server: "security".to_string(),
@@ -1168,7 +1173,7 @@ mod tests {
             event_name,
             vec![match additional_context_limit {
                 Some(limit) => command_group_with_additional_context_limit(limit),
-                None => command_group(/*matcher*/ None),
+                None => command_group(/*selector*/ None),
             }],
         );
         (handlers.remove(0), entries.remove(0), warnings)
@@ -1236,43 +1241,63 @@ mod tests {
     }
 
     #[test]
-    fn user_prompt_submit_ignores_invalid_matcher_during_discovery() {
-        let mut handlers = Vec::new();
-        let mut warnings = Vec::new();
-        let mut display_order = 0;
-        let source_path = source_path();
-        let hook_states = std::collections::HashMap::new();
-
-        append_matcher_groups(
-            &mut handlers,
-            &mut Vec::new(),
-            &mut warnings,
-            &mut display_order,
-            &mut hook_handler_source(&source_path, &hook_states),
-            HookEventName::UserPromptSubmit,
-            vec![command_group(Some("["))],
-        );
-
-        assert_eq!(warnings, Vec::<String>::new());
-        assert_eq!(
-            handlers,
-            vec![ConfiguredHandler {
-                builtin: false,
-                event_name: HookEventName::UserPromptSubmit,
-                matcher: None,
-                timeout_sec: 600,
-                status_message: None,
-                additional_context_limit: Default::default(),
-                source_path: source_path.clone().into(),
-                source: hook_source(),
-                display_order: 0,
-                kind: ConfiguredHandlerKind::Command {
-                    command: "echo hello".to_string(),
-                    r#async: false,
-                    env: std::collections::HashMap::new(),
+    fn discovery_rejects_selectors_outside_the_event_domain() {
+        use codex_protocol::HookSelector;
+        for (event, selector) in [
+            (
+                HookEventName::UserPromptSubmit,
+                HookSelector::EventValue {
+                    pattern: "startup".into(),
                 },
-            }]
-        );
+            ),
+            (
+                HookEventName::Stop,
+                HookSelector::Tool {
+                    namespace: None,
+                    name: None,
+                },
+            ),
+            (
+                HookEventName::Interrupt,
+                HookSelector::EventValue {
+                    pattern: "*".into(),
+                },
+            ),
+            (
+                HookEventName::PreToolUse,
+                HookSelector::EventValue {
+                    pattern: "exec_command".into(),
+                },
+            ),
+            (
+                HookEventName::SessionStart,
+                HookSelector::Tool {
+                    namespace: None,
+                    name: None,
+                },
+            ),
+        ] {
+            let mut handlers = Vec::new();
+            let mut entries = Vec::new();
+            let mut warnings = Vec::new();
+            let source_path = source_path();
+            let states = std::collections::HashMap::new();
+            let mut group = command_group(None);
+            group.selector = Some(selector);
+            append_matcher_groups(
+                &mut handlers,
+                &mut entries,
+                &mut warnings,
+                &mut 0,
+                &mut hook_handler_source(&source_path, &states),
+                event,
+                vec![group],
+            );
+            assert!(handlers.is_empty());
+            assert!(entries.is_empty());
+            assert_eq!(warnings.len(), 1);
+            assert!(warnings[0].contains("invalid selector"));
+        }
     }
 
     #[test]
@@ -1290,7 +1315,7 @@ mod tests {
             &mut display_order,
             &mut hook_handler_source(&source_path, &hook_states),
             HookEventName::PreToolUse,
-            vec![command_group(Some("^Bash$"))],
+            vec![command_group(Some("^exec_command$"))],
         );
 
         assert_eq!(warnings, Vec::<String>::new());
@@ -1298,8 +1323,10 @@ mod tests {
             handlers,
             vec![ConfiguredHandler {
                 builtin: false,
-                event_name: HookEventName::PreToolUse,
-                matcher: Some(HookMatcher::new("^Bash$").expect("valid matcher")),
+                selection: crate::engine::HookSelection::fixture(
+                    HookEventName::PreToolUse,
+                    Some(HookMatcher::new("^exec_command$").expect("valid selector"))
+                ),
                 timeout_sec: 600,
                 status_message: None,
                 additional_context_limit: Default::default(),
@@ -1332,7 +1359,9 @@ mod tests {
             &mut hook_handler_source(&source_path, &hook_states),
             HookEventName::SessionEnd,
             vec![MatcherGroup {
-                matcher: Some("other".to_string()),
+                selector: Some(codex_protocol::HookSelector::EventValue {
+                    pattern: "other".to_string(),
+                }),
                 hooks: vec![
                     HookHandlerConfig::Command {
                         command: "echo default".to_string(),
@@ -1369,9 +1398,15 @@ mod tests {
         assert_eq!(
             handlers
                 .iter()
-                .map(|handler| handler.matcher.as_ref().map(HookMatcher::as_str))
+                .map(|handler| handler.selection.clone())
                 .collect::<Vec<_>>(),
-            vec![Some("other"), Some("other")]
+            vec![
+                crate::engine::HookSelection::fixture(
+                    HookEventName::SessionEnd,
+                    Some(HookMatcher::new("other").unwrap())
+                );
+                2
+            ]
         );
         assert_eq!(
             hook_entries
@@ -1387,9 +1422,14 @@ mod tests {
         assert_eq!(
             hook_entries
                 .iter()
-                .map(|entry| entry.matcher.as_deref())
+                .map(|entry| entry.selector.clone())
                 .collect::<Vec<_>>(),
-            vec![Some("other"), Some("other")]
+            vec![
+                Some(codex_protocol::HookSelector::EventValue {
+                    pattern: "other".to_string()
+                });
+                2
+            ]
         );
         assert_eq!(
             warnings,
@@ -1423,7 +1463,7 @@ mod tests {
             &mut hook_handler_source(&source_path, &hook_states),
             HookEventName::Interrupt,
             vec![MatcherGroup {
-                matcher: Some("ignored".to_string()),
+                selector: None,
                 hooks: vec![HookHandlerConfig::Command {
                     command: "echo interrupt".to_string(),
                     command_windows: None,
@@ -1449,16 +1489,20 @@ mod tests {
                 .iter()
                 .map(|handler| (
                     handler.timeout_sec,
-                    handler.matcher.as_ref().map(HookMatcher::as_str),
+                    handler.selection.clone(),
                     handler.execution_mode()
                 ))
                 .collect::<Vec<_>>(),
-            vec![(3, None, HookExecutionMode::Async)]
+            vec![(
+                3,
+                crate::engine::HookSelection::Interrupt,
+                HookExecutionMode::Async
+            )]
         );
         assert_eq!(
             hook_entries
                 .iter()
-                .map(|entry| (entry.timeout_sec, entry.matcher.as_deref()))
+                .map(|entry| (entry.timeout_sec, entry.selector.clone()))
                 .collect::<Vec<_>>(),
             vec![(3, None)]
         );
@@ -1495,7 +1539,7 @@ mod tests {
                 /*bypass_hook_trust*/ true,
             ),
             HookEventName::PreToolUse,
-            vec![command_group(Some("Bash"))],
+            vec![command_group(Some("exec_command"))],
         );
 
         assert_eq!(warnings, Vec::<String>::new());
@@ -1531,7 +1575,7 @@ mod tests {
                 /*bypass_hook_trust*/ true,
             ),
             HookEventName::PreToolUse,
-            vec![command_group(Some("Bash"))],
+            vec![command_group(Some("exec_command"))],
         );
 
         assert_eq!(warnings, Vec::<String>::new());
@@ -1562,8 +1606,11 @@ mod tests {
         assert_eq!(warnings, Vec::<String>::new());
         assert_eq!(handlers.len(), 1);
         assert_eq!(
-            handlers[0].matcher.as_ref().map(HookMatcher::as_str),
-            Some("*")
+            handlers[0].selection.clone(),
+            crate::engine::HookSelection::fixture(
+                HookEventName::PreToolUse,
+                Some(HookMatcher::new("*").unwrap())
+            )
         );
     }
 
@@ -1582,15 +1629,21 @@ mod tests {
             &mut display_order,
             &mut hook_handler_source(&source_path, &hook_states),
             HookEventName::PostToolUse,
-            vec![command_group(Some("Edit|Write"))],
+            vec![command_group(Some("apply_patch|echo"))],
         );
 
         assert_eq!(warnings, Vec::<String>::new());
         assert_eq!(handlers.len(), 1);
-        assert_eq!(handlers[0].event_name, HookEventName::PostToolUse);
         assert_eq!(
-            handlers[0].matcher.as_ref().map(HookMatcher::as_str),
-            Some("Edit|Write")
+            handlers[0].selection.event_name(),
+            HookEventName::PostToolUse
+        );
+        assert_eq!(
+            handlers[0].selection.clone(),
+            crate::engine::HookSelection::fixture(
+                HookEventName::PostToolUse,
+                Some(HookMatcher::new("apply_patch|echo").unwrap())
+            )
         );
     }
 
@@ -1613,7 +1666,7 @@ mod tests {
             hooks,
             HookEventsToml {
                 session_start: vec![MatcherGroup {
-                    matcher: None,
+                    selector: None,
                     hooks: vec![HookHandlerConfig::Command {
                         command: "echo hello".to_string(),
                         command_windows: None,
@@ -1644,7 +1697,10 @@ mod tests {
             &mut hook_handler_source(&source_path, &hook_states),
             HookEventName::PreToolUse,
             vec![MatcherGroup {
-                matcher: Some("^Bash$".to_string()),
+                selector: Some(codex_protocol::HookSelector::Tool {
+                    namespace: None,
+                    name: Some("^exec_command$".to_string()),
+                }),
                 hooks: vec![HookHandlerConfig::Command {
                     command: "echo unix".to_string(),
                     command_windows: Some("echo windows".to_string()),

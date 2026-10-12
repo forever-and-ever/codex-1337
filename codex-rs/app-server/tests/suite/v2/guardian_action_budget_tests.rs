@@ -113,7 +113,7 @@ with urllib.request.urlopen(request, timeout=30) as response:
     let command = serde_json::to_string(&format!("python3 \"{}\"", hook_path.display()))?;
     let hooks = ["PreToolUse", "PermissionRequest"]
         .map(|event| format!(
-                "[[hooks.{event}]]\nmatcher = '^mcp__'\n[[hooks.{event}.hooks]]\ntype = 'command'\ncommand = {command}\n"
+                "[[hooks.{event}]]\nselector = {{ type = 'tool', namespace = '^mcp__' }}\n[[hooks.{event}.hooks]]\ntype = 'command'\ncommand = {command}\n"
         ))
         .join("\n");
     std::fs::write(codex_home.path().join("requirements.toml"), hooks)?;

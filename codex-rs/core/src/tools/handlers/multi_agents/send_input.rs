@@ -154,6 +154,8 @@ pub(crate) struct SendInputResult {
     submission_id: String,
 }
 
+impl codex_tools::HookToolOutput for SendInputResult {}
+
 impl ToolOutput for SendInputResult {
     fn log_output(&self) -> String {
         tool_output_json_text(self, "send_input")

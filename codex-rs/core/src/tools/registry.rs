@@ -17,8 +17,6 @@ use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolOutput;
 use crate::tools::context::ToolPayload;
 use crate::tools::control_tool_analytics::ControlToolCallGuard;
-use crate::tools::handlers::multi_agents_spec::MULTI_AGENT_V1_NAMESPACE;
-use crate::tools::hook_names::HookToolName;
 use crate::tools::lifecycle::notify_tool_finish;
 use crate::tools::lifecycle::notify_tool_start;
 use crate::tools::router::tool_log_payload;
@@ -109,30 +107,28 @@ pub(crate) trait CoreToolRuntime: ToolExecutor<ToolInvocation> {
         let ToolPayload::Function { arguments } = &invocation.payload else {
             return None;
         };
-
-        Some(PostToolUsePayload {
-            tool_name: function_hook_tool_name(invocation),
-            tool_use_id: result.post_tool_use_id(&invocation.call_id),
-            tool_input: result
-                .post_tool_use_input(&invocation.payload)
-                .unwrap_or_else(|| function_hook_tool_input(arguments)),
-            tool_response: result
-                .post_tool_use_response(&invocation.call_id, &invocation.payload)
-                .or_else(|| {
-                    // Most function tools can expose their model-facing output
-                    // as the hook response. Outputs with a more stable hook
-                    // contract should override post_tool_use_response above.
-                    let ResponseInputItem::FunctionCallOutput {
-                        output: FunctionCallOutputPayload { body, .. },
-                        ..
-                    } = result.to_response_item(&invocation.call_id, &invocation.payload)
-                    else {
-                        return None;
-                    };
-
-                    serde_json::to_value(body).ok()
-                })?,
-        })
+        let tool_input = function_hook_tool_input(arguments);
+        result
+            .post_tool_use_payload(
+                &invocation.tool_name,
+                &invocation.call_id,
+                tool_input.clone(),
+            )
+            .or_else(|| {
+                let ResponseInputItem::FunctionCallOutput {
+                    output: FunctionCallOutputPayload { body, .. },
+                    ..
+                } = result.to_response_item(&invocation.call_id, &invocation.payload)
+                else {
+                    return None;
+                };
+                Some(PostToolUsePayload::new(
+                    &invocation.tool_name,
+                    &invocation.call_id,
+                    tool_input,
+                    serde_json::to_value(body).ok()?,
+                ))
+            })
     }
 
     fn pre_tool_use_payload(&self, invocation: &ToolInvocation) -> Option<PreToolUsePayload> {
@@ -141,7 +137,7 @@ pub(crate) trait CoreToolRuntime: ToolExecutor<ToolInvocation> {
         };
 
         Some(PreToolUsePayload {
-            tool_name: function_hook_tool_name(invocation),
+            tool_name: invocation.tool_name.clone(),
             tool_input: function_hook_tool_input(arguments),
         })
     }
@@ -230,6 +226,8 @@ struct PostToolUseFeedbackOutput {
     model_visible: FunctionToolOutput,
 }
 
+impl codex_tools::HookToolOutput for PostToolUseFeedbackOutput {}
+
 impl ToolOutput for PostToolUseFeedbackOutput {
     fn log_output(&self) -> String {
         self.original.log_output()
@@ -262,11 +260,8 @@ impl ToolOutput for PostToolUseFeedbackOutput {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PreToolUsePayload {
-    /// Hook-facing tool name model.
-    ///
-    /// The canonical name is serialized to hook stdin, while aliases are used
-    /// only for matcher compatibility.
-    pub(crate) tool_name: HookToolName,
+    /// The executed callable address, retaining namespace and name independently.
+    pub(crate) tool_name: ToolName,
     /// Tool-specific input exposed at `tool_input`.
     ///
     /// Shell-like tools use `{ "command": ... }`; MCP tools use their resolved
@@ -274,20 +269,7 @@ pub(crate) struct PreToolUsePayload {
     pub(crate) tool_input: Value,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct PostToolUsePayload {
-    /// Hook-facing tool name model.
-    ///
-    /// The canonical name is serialized to hook stdin, while aliases are used
-    /// only for matcher compatibility.
-    pub(crate) tool_name: HookToolName,
-    /// The originating tool-use id exposed at `tool_use_id`.
-    pub(crate) tool_use_id: String,
-    /// Tool-specific input exposed at `tool_input`.
-    pub(crate) tool_input: Value,
-    /// Tool result exposed at `tool_response`.
-    pub(crate) tool_response: Value,
-}
+pub(crate) use codex_tools::PostToolUsePayload;
 
 /// A tool runtime together with its effective exposure for the current step.
 pub(crate) struct RegisteredTool {
@@ -536,6 +518,7 @@ impl ToolRegistry {
         mut invocation: ToolInvocation,
         call_state: Option<Arc<ToolCallState>>,
     ) -> Result<AnyToolResult, FunctionCallError> {
+        invocation.tool_name = invocation.tool_name.with_default_namespace();
         let tool_name = invocation.tool_name.clone();
         let call_id_owned = invocation.call_id.clone();
         let otel = invocation
@@ -731,8 +714,7 @@ impl ToolRegistry {
                     &invocation.session,
                     invocation.step_context.as_ref(),
                     post_tool_use_payload.tool_use_id,
-                    post_tool_use_payload.tool_name.name().to_string(),
-                    post_tool_use_payload.tool_name.matcher_aliases().to_vec(),
+                    post_tool_use_payload.tool_name,
                     post_tool_use_payload.tool_input,
                     post_tool_use_payload.tool_response,
                 )
@@ -844,17 +826,6 @@ async fn handle_any_tool(
         .await;
     }
     Ok(result)
-}
-
-fn function_hook_tool_name(invocation: &ToolInvocation) -> HookToolName {
-    if invocation.tool_name.name == "spawn_agent"
-        && (invocation.tool_name.is_default_namespace()
-            || invocation.tool_name.namespace.as_deref() == Some(MULTI_AGENT_V1_NAMESPACE))
-    {
-        return HookToolName::spawn_agent();
-    }
-
-    HookToolName::from_tool_name(&invocation.tool_name)
 }
 
 fn function_hook_tool_input(arguments: &str) -> Value {

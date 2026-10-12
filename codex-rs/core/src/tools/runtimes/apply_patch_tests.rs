@@ -109,7 +109,7 @@ async fn approval_action_preserves_patch_path_uris() {
 }
 
 #[tokio::test]
-async fn permission_request_payload_uses_apply_patch_hook_name_and_aliases() {
+async fn permission_request_payload_preserves_apply_patch_identity() {
     let path = std::env::temp_dir()
         .join("apply-patch-permission-request-payload.txt")
         .abs();
@@ -129,13 +129,12 @@ async fn permission_request_payload_uses_apply_patch_hook_name_and_aliases() {
         permissions_preapproved: false,
     };
 
-    let payload =
-        ApplyPatchRuntime::build_approval_action(&req, "call-1").permission_request_payload();
+    let payload = ApplyPatchRuntime::build_approval_action(&req, "call-1")
+        .permission_request_payload(&codex_tools::ToolName::plain("apply_patch"));
 
-    assert_eq!(payload.tool_name.name(), "apply_patch");
     assert_eq!(
-        payload.tool_name.matcher_aliases(),
-        &["Write".to_string(), "Edit".to_string()]
+        payload.tool_name,
+        Some(codex_tools::ToolName::plain("apply_patch"))
     );
     assert_eq!(
         payload.tool_input,

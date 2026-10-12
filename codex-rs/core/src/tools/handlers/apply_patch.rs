@@ -29,7 +29,6 @@ use crate::tools::handlers::apply_patch_spec::create_apply_patch_freeform_tool;
 use crate::tools::handlers::file_system_sandbox_policy_context_for_cwd;
 use crate::tools::handlers::resolve_tool_environment;
 use crate::tools::handlers::updated_hook_command;
-use crate::tools::hook_names::HookToolName;
 use crate::tools::orchestrator::ToolOrchestrator;
 use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::PostToolUsePayload;
@@ -394,7 +393,7 @@ impl CoreToolRuntime for ApplyPatchHandler {
 
     fn pre_tool_use_payload(&self, invocation: &ToolInvocation) -> Option<PreToolUsePayload> {
         apply_patch_payload_command(&invocation.payload).map(|command| PreToolUsePayload {
-            tool_name: HookToolName::apply_patch(),
+            tool_name: invocation.tool_name.clone(),
             tool_input: serde_json::json!({ "command": command }),
         })
     }
@@ -419,16 +418,13 @@ impl CoreToolRuntime for ApplyPatchHandler {
         invocation: &ToolInvocation,
         result: &dyn crate::tools::context::ToolOutput,
     ) -> Option<PostToolUsePayload> {
-        let tool_response =
-            result.post_tool_use_response(&invocation.call_id, &invocation.payload)?;
-        Some(PostToolUsePayload {
-            tool_name: HookToolName::apply_patch(),
-            tool_use_id: invocation.call_id.clone(),
-            tool_input: serde_json::json!({
+        result.post_tool_use_payload(
+            &invocation.tool_name,
+            &invocation.call_id,
+            serde_json::json!({
                 "command": apply_patch_payload_command(&invocation.payload)?,
             }),
-            tool_response,
-        })
+        )
     }
 }
 

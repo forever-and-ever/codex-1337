@@ -1,9 +1,9 @@
 use super::RewriteProfile;
+use super::hook_selectors::import_selector;
 use super::invalid_data_error;
 use super::json_u64;
 use super::rewrite_hook_command_for_source;
 use super::write_hook_migration;
-use codex_hooks::HOOK_EVENT_NAMES_WITH_MATCHERS;
 use serde_json::Value as JsonValue;
 use std::fs;
 use std::io;
@@ -127,13 +127,19 @@ fn hook_migration_cur(
             }
 
             let mut group_payload = serde_json::Map::new();
-            if HOOK_EVENT_NAMES_WITH_MATCHERS.contains(&event_name)
-                && let Some(matcher) = handler.get("matcher").and_then(JsonValue::as_str)
-            {
-                group_payload.insert(
-                    "matcher".to_string(),
-                    JsonValue::String(matcher.to_string()),
-                );
+            match import_selector(event_name, handler.get("matcher")) {
+                Ok(Some(selector)) => {
+                    group_payload.insert(
+                        "selector".to_string(),
+                        serde_json::to_value(selector).expect("serializable hook selector"),
+                    );
+                }
+                Ok(None) => {}
+                Err(reason) => {
+                    return Err(invalid_data_error(format!(
+                        "cannot import {event_name} hook selector: {reason}"
+                    )));
+                }
             }
             group_payload.insert(
                 "hooks".to_string(),

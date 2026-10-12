@@ -48,6 +48,7 @@ impl UnifiedExecProcessManager {
             Arc::clone(&context.step_context),
             context.cancellation_token.child_token(),
             context.call_id.clone(),
+            context.tool_name.clone(),
         );
         let _cancel_on_drop = context.cancellation_token.clone().drop_guard();
         let task = async move {

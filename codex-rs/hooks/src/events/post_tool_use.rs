@@ -29,8 +29,7 @@ pub struct PostToolUseRequest {
     pub transcript_path: Option<PathBuf>,
     pub model: String,
     pub permission_mode: String,
-    pub tool_name: String,
-    pub matcher_aliases: Vec<String>,
+    pub tool_name: codex_protocol::ToolName,
     pub tool_use_id: String,
     pub tool_input: Value,
     pub tool_response: Value,
@@ -55,11 +54,10 @@ pub(crate) fn preview(
     handlers: &[ConfiguredHandler],
     request: &PostToolUseRequest,
 ) -> Vec<HookRunSummary> {
-    let matcher_inputs = common::matcher_inputs(&request.tool_name, &request.matcher_aliases);
-    dispatcher::select_handlers_for_matcher_inputs(
+    dispatcher::select_tool_handlers(
         handlers,
         HookEventName::PostToolUse,
-        &matcher_inputs,
+        Some(&request.tool_name),
     )
     .into_iter()
     .map(|handler| {
@@ -72,11 +70,10 @@ pub(crate) async fn run(
     engine: &ClaudeHooksEngine,
     request: PostToolUseRequest,
 ) -> PostToolUseOutcome {
-    let matcher_inputs = common::matcher_inputs(&request.tool_name, &request.matcher_aliases);
-    let matched = dispatcher::select_handlers_for_matcher_inputs(
+    let matched = dispatcher::select_tool_handlers(
         &engine.handlers,
         HookEventName::PostToolUse,
-        &matcher_inputs,
+        Some(&request.tool_name),
     );
     if matched.is_empty() {
         return PostToolUseOutcome {
@@ -143,10 +140,9 @@ pub(crate) async fn run(
 
 /// Serializes command stdin for a selected `PostToolUse` hook.
 ///
-/// Handler selection may include internal matcher aliases, but hook stdin keeps
-/// the canonical `tool_name` for logs and for consumers that pair pre/post
-/// events across processes. Shell-like tools pass `{ "command": ... }` as
-/// `tool_input`; MCP tools pass their resolved JSON arguments.
+/// Hook stdin preserves the original invocation's structured callable address
+/// and tool-use id. Execution tools pass `{ "command": ... }` as `tool_input`;
+/// MCP tools pass their resolved JSON arguments.
 fn command_input_json(request: &PostToolUseRequest) -> Result<String, serde_json::Error> {
     let subagent = SubagentCommandInputFields::from(request.subagent.as_ref());
     serde_json::to_string(&PostToolUseCommandInput {
@@ -590,8 +586,10 @@ mod tests {
     fn handler_with_async(r#async: bool) -> ConfiguredHandler {
         ConfiguredHandler {
             builtin: false,
-            event_name: HookEventName::PostToolUse,
-            matcher: Some(crate::engine::HookMatcher::new("^Bash$").expect("valid matcher")),
+            selection: crate::engine::HookSelection::fixture(
+                HookEventName::PostToolUse,
+                Some(crate::engine::HookMatcher::new("^exec_command$").expect("valid matcher")),
+            ),
             timeout_sec: 5,
             status_message: Some("running post tool use hook".to_string()),
             additional_context_limit: Default::default(),
@@ -627,8 +625,7 @@ mod tests {
             transcript_path: None,
             model: "gpt-test".to_string(),
             permission_mode: "default".to_string(),
-            tool_name: "Bash".to_string(),
-            matcher_aliases: Vec::new(),
+            tool_name: codex_protocol::ToolName::namespaced("functions", "exec_command"),
             tool_use_id: tool_use_id.to_string(),
             tool_input: json!({ "command": "echo hello" }),
             tool_response: json!({"ok": true}),

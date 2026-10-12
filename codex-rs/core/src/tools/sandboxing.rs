@@ -10,7 +10,6 @@ use crate::session::session::Session;
 use crate::session::step_context::StepContext;
 use crate::session::turn_context::TurnEnvironment;
 use crate::state::SessionServices;
-use crate::tools::hook_names::HookToolName;
 use crate::tools::network_approval::NetworkApprovalSpec;
 use codex_file_system::FileSystemSandboxContext;
 use codex_file_system::WindowsSandboxSelection;
@@ -126,12 +125,16 @@ pub(crate) use super::approvals::ApprovalAction;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PermissionRequestPayload {
-    pub tool_name: HookToolName,
+    pub tool_name: Option<ToolName>,
     pub tool_input: serde_json::Value,
 }
 
 impl PermissionRequestPayload {
-    pub(crate) fn bash(command: String, description: Option<String>) -> Self {
+    pub(crate) fn command(
+        tool_name: Option<ToolName>,
+        command: String,
+        description: Option<String>,
+    ) -> Self {
         let mut tool_input = serde_json::Map::new();
         tool_input.insert("command".to_string(), serde_json::Value::String(command));
         if let Some(description) = description {
@@ -140,9 +143,8 @@ impl PermissionRequestPayload {
                 serde_json::Value::String(description),
             );
         }
-
         Self {
-            tool_name: HookToolName::bash(),
+            tool_name,
             tool_input: serde_json::Value::Object(tool_input),
         }
     }

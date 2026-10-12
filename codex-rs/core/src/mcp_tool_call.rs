@@ -17,7 +17,6 @@ use crate::session::step_context::StepContext;
 use crate::session::turn_context::TurnContext;
 use crate::tools::ApprovalContext;
 use crate::tools::context::ToolCallOrigin;
-use crate::tools::hook_names::HookToolName;
 use crate::tools::lifecycle::process_mcp_tool_result;
 use crate::tools::sandboxing::ApprovalAction;
 use crate::tools::sandboxing::ToolError;
@@ -141,7 +140,6 @@ pub(crate) async fn handle_mcp_tool_call(
     originating_call: Option<ToolCallOrigin>,
     tool_info: &ToolInfo,
     prepared_call: Option<PreparedMcpCall>,
-    hook_tool_name: HookToolName,
     invocation_tool_name: ToolName,
     source: &crate::tools::context::ToolCallSource,
     arguments: String,
@@ -289,7 +287,6 @@ pub(crate) async fn handle_mcp_tool_call(
         &call_id,
         &invocation,
         &invocation_tool_name,
-        &hook_tool_name,
         &metadata,
         prepared_call.config(),
         &issuing_permission_profile(step_context, &prepared_call),
@@ -1507,7 +1504,6 @@ async fn maybe_request_mcp_tool_approval(
     call_id: &str,
     invocation: &McpInvocation,
     invocation_tool_name: &ToolName,
-    hook_tool_name: &HookToolName,
     metadata: &McpToolApprovalMetadata,
     config: &codex_mcp::McpConfig,
     permission_profile: &PermissionProfile,
@@ -1575,7 +1571,6 @@ async fn maybe_request_mcp_tool_approval(
                 open_world_hint: annotations.open_world_hint,
                 read_only_hint: annotations.read_only_hint,
             }),
-        hook_tool_name: hook_tool_name.clone(),
         approval_policy: step_context.settings.approval_policy(),
         reviewer: approvals_reviewer,
         approval_mode: policy.mode,

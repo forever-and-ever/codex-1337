@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::path::PathBuf;
 
+use codex_protocol::HookSelector;
 use codex_protocol::protocol::HookEventName;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -151,9 +152,10 @@ impl HookEventsToml {
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct MatcherGroup {
     #[serde(default)]
-    pub matcher: Option<String>,
+    pub selector: Option<HookSelector>,
     #[serde(default)]
     pub hooks: Vec<HookHandlerConfig>,
 }

@@ -630,6 +630,8 @@ struct GeneratedImageOutput {
     output_hint: Option<String>,
 }
 
+impl codex_tools::HookToolOutput for GeneratedImageOutput {}
+
 impl ToolOutput for GeneratedImageOutput {
     /// Avoids copying image bytes into tool-call telemetry.
     fn log_output(&self) -> String {

@@ -261,7 +261,7 @@ struct PreparedProcessHandles {
     session: Option<Arc<crate::session::session::Session>>,
     network_approval: Option<DeferredNetworkApproval>,
     call_id: String,
-    hook_command: String,
+    hook_context: crate::tools::context::ExecHookContext,
     process_id: i32,
     tty: bool,
 }
@@ -836,7 +836,10 @@ impl UnifiedExecProcessManager {
             exit_code,
             original_token_count: Some(original_token_count),
             output_omitted_bytes,
-            hook_command: Some(request.hook_command.clone()),
+            hook_context: Some(crate::tools::context::ExecHookContext {
+                tool_name: context.tool_name.clone(),
+                command: request.hook_command.clone(),
+            }),
         };
 
         Ok(response)
@@ -972,7 +975,7 @@ impl UnifiedExecProcessManager {
             session,
             network_approval,
             call_id,
-            hook_command,
+            hook_context,
             process_id,
             tty,
             ..
@@ -1066,24 +1069,23 @@ impl UnifiedExecProcessManager {
         } else {
             self.refresh_process_state(process_id).await
         };
-        let (process_id, exit_code, event_call_id) = match status {
+        let (process_id, exit_code) = match status {
             ProcessStatus::Alive {
                 exit_code,
-                call_id,
                 process_id,
-            } => (Some(process_id), exit_code, call_id),
+                ..
+            } => (Some(process_id), exit_code),
             ProcessStatus::Exited { exit_code, entry } => {
-                let call_id = entry.call_id.clone();
                 if let Err(message) =
                     finish_network_approval_after_process_exit_for_entry(&entry).await
                 {
                     return Err(fail_process_with_message(entry.process.as_ref(), message));
                 }
-                (None, exit_code, call_id)
+                (None, exit_code)
             }
             ProcessStatus::Unknown => {
                 if process.has_exited() {
-                    (None, process.exit_code(), call_id)
+                    (None, process.exit_code())
                 } else {
                     return Err(UnifiedExecError::UnknownProcessId {
                         process_id: request.process_id,
@@ -1093,7 +1095,7 @@ impl UnifiedExecProcessManager {
         };
 
         let response = ExecCommandToolOutput {
-            event_call_id,
+            event_call_id: call_id,
             chunk_id,
             wall_time,
             raw_output: collected,
@@ -1103,7 +1105,7 @@ impl UnifiedExecProcessManager {
             exit_code,
             original_token_count: Some(original_token_count),
             output_omitted_bytes,
-            hook_command: Some(hook_command),
+            hook_context: Some(hook_context),
         };
 
         let should_emit_interaction = !request.input.is_empty() || response.process_id.is_some();
@@ -1180,7 +1182,7 @@ impl UnifiedExecProcessManager {
             session,
             network_approval: entry.network_approval.clone(),
             call_id: entry.call_id.clone(),
-            hook_command: entry.hook_command.clone(),
+            hook_context: entry.hook_context.clone(),
             process_id: entry.process_id,
             tty: entry.tty,
         })
@@ -1215,7 +1217,10 @@ impl UnifiedExecProcessManager {
             process_id,
             cwd: cwd.clone(),
             initial_exec_command_active,
-            hook_command,
+            hook_context: crate::tools::context::ExecHookContext {
+                tool_name: context.tool_name.clone(),
+                command: hook_command,
+            },
             tty,
             environment_id,
             permissions,
@@ -1527,7 +1532,7 @@ impl UnifiedExecProcessManager {
             step_context: Arc::clone(&context.step_context),
             cancellation_token: context.cancellation_token.clone(),
             call_id: context.call_id.clone(),
-            tool_name: ToolName::plain(request.execution.tool_name()),
+            tool_name: context.tool_name.clone(),
         };
         let result = orchestrator
             .run(&mut runtime, &req, &tool_ctx)
@@ -1833,7 +1838,7 @@ impl UnifiedExecProcessManager {
             .map(|entry| BackgroundTerminalInfo {
                 item_id: entry.call_id.clone(),
                 process_id: entry.process_id.to_string(),
-                command: entry.hook_command.clone(),
+                command: entry.hook_context.command.clone(),
                 cwd: entry.cwd.clone(),
             })
             .collect()

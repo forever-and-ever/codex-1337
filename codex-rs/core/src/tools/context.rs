@@ -34,7 +34,9 @@ use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 pub use codex_tools::ToolOutput;
+mod hook_outputs;
 pub use codex_tools::ToolPayload;
+pub use hook_outputs::ExecHookContext;
 
 pub(crate) fn boxed_tool_output<T>(output: T) -> Box<dyn ToolOutput>
 where
@@ -174,14 +176,6 @@ impl ToolOutput for McpToolOutput {
         }
         self.result.meta.as_ref()
     }
-
-    fn post_tool_use_input(&self, _payload: &ToolPayload) -> Option<JsonValue> {
-        Some(self.tool_input.clone())
-    }
-
-    fn post_tool_use_response(&self, _call_id: &str, _payload: &ToolPayload) -> Option<JsonValue> {
-        serde_json::to_value(&self.result).ok()
-    }
 }
 
 impl McpToolOutput {
@@ -285,10 +279,6 @@ impl ToolOutput for FunctionToolOutput {
     fn to_response_item(&self, call_id: &str, payload: &ToolPayload) -> ResponseInputItem {
         function_tool_response(call_id, payload, self.body.clone(), self.success)
     }
-
-    fn post_tool_use_response(&self, _call_id: &str, _payload: &ToolPayload) -> Option<JsonValue> {
-        self.post_tool_use_response.clone()
-    }
 }
 
 pub struct ApplyPatchToolOutput {
@@ -319,10 +309,6 @@ impl ToolOutput for ApplyPatchToolOutput {
             }],
             Some(true),
         )
-    }
-
-    fn post_tool_use_response(&self, _call_id: &str, _payload: &ToolPayload) -> Option<JsonValue> {
-        Some(JsonValue::String(self.text.clone()))
     }
 
     fn code_mode_result(&self, _payload: &ToolPayload) -> JsonValue {
@@ -377,7 +363,7 @@ pub struct ExecCommandToolOutput {
     pub original_token_count: Option<usize>,
     /// Bytes omitted by the output collection cap before model-facing truncation.
     pub output_omitted_bytes: Option<NonZeroUsize>,
-    pub hook_command: Option<String>,
+    pub hook_context: Option<ExecHookContext>,
 }
 
 impl ToolOutput for ExecCommandToolOutput {
@@ -406,30 +392,6 @@ impl ToolOutput for ExecCommandToolOutput {
             }],
             Some(true),
         )
-    }
-
-    fn post_tool_use_id(&self, call_id: &str) -> String {
-        if self.event_call_id.is_empty() {
-            call_id.to_string()
-        } else {
-            self.event_call_id.clone()
-        }
-    }
-
-    fn post_tool_use_input(&self, _payload: &ToolPayload) -> Option<JsonValue> {
-        self.hook_command
-            .as_ref()
-            .map(|command| serde_json::json!({ "command": command }))
-    }
-
-    fn post_tool_use_response(&self, _call_id: &str, _payload: &ToolPayload) -> Option<JsonValue> {
-        if self.process_id.is_some() || self.hook_command.is_none() {
-            return None;
-        }
-
-        Some(JsonValue::String(
-            self.truncated_output_with_policy(self.model_output_policy()),
-        ))
     }
 
     fn code_mode_result(&self, _payload: &ToolPayload) -> JsonValue {

@@ -201,10 +201,10 @@ impl CommandHookRuntime {
     level = "trace",
     skip_all,
     fields(
-        hook.event_name = hook_event_name_label(handler.event_name),
+        hook.event_name = hook_event_name_label(handler.selection.event_name()),
         hook.handler_type = hook_handler_type_label(HookHandlerType::Command),
         hook.execution_mode = hook_execution_mode_label(handler.execution_mode()),
-        hook.scope = hook_scope_label(scope_for_event(handler.event_name)),
+        hook.scope = hook_scope_label(scope_for_event(handler.selection.event_name())),
         hook.source = hook_source_label(handler.source),
         hook.display_order = handler.display_order,
         hook.timeout_sec = handler.timeout_sec,

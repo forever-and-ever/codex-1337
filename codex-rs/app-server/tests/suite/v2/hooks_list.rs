@@ -29,6 +29,7 @@ use codex_core::config::set_project_trust_level;
 use codex_core_plugins::store::PluginStore;
 use codex_features::Feature;
 use codex_plugin::PluginId;
+use codex_protocol::HookSelector;
 use codex_protocol::config_types::TrustLevel;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use core_test_support::skip_if_host_windows;
@@ -47,9 +48,16 @@ struct NormalizedHookIdentity {
     group: codex_config::MatcherGroup,
 }
 
+fn exec_command_selector() -> HookSelector {
+    HookSelector::Tool {
+        namespace: Some("^functions$".to_string()),
+        name: Some("^exec_command$".to_string()),
+    }
+}
+
 fn command_hook_hash(
     event_name: &'static str,
-    matcher: Option<&str>,
+    selector: Option<HookSelector>,
     command: &str,
     timeout_sec: u64,
     r#async: bool,
@@ -59,7 +67,7 @@ fn command_hook_hash(
     let identity = NormalizedHookIdentity {
         event_name,
         group: codex_config::MatcherGroup {
-            matcher: matcher.map(ToOwned::to_owned),
+            selector,
             hooks: vec![codex_config::HookHandlerConfig::Command {
                 command: command.to_string(),
                 command_windows: None,
@@ -82,7 +90,7 @@ fn write_user_hook_config(codex_home: &std::path::Path) -> Result<()> {
         r#"[hooks]
 
 [[hooks.PreToolUse]]
-matcher = "Bash"
+selector = { type = "tool", namespace = "^functions$", name = "^exec_command$" }
 
 [[hooks.PreToolUse.hooks]]
 type = "command"
@@ -174,7 +182,7 @@ hooks = true
 [hooks]
 
 [[hooks.PreToolUse]]
-matcher = "Bash"
+selector = { type = "tool", namespace = "^functions$", name = "^exec_command$" }
 
 [[hooks.PreToolUse.hooks]]
 type = "command"
@@ -218,7 +226,7 @@ async fn hooks_list_shows_discovered_hook() -> Result<()> {
                     command: "python3 /tmp/listed-hook.py".to_string(),
                     r#async: true,
                 },
-                matcher: Some("Bash".to_string()),
+                selector: Some(exec_command_selector()),
                 timeout_sec: 5,
                 status_message: Some("running listed hook".to_string()),
                 additional_context_limit: Some(4_096),
@@ -230,7 +238,7 @@ async fn hooks_list_shows_discovered_hook() -> Result<()> {
                 is_managed: false,
                 current_hash: command_hook_hash(
                     "pre_tool_use",
-                    Some("Bash"),
+                    Some(exec_command_selector()),
                     "python3 /tmp/listed-hook.py",
                     /*timeout_sec*/ 5,
                     /*async*/ true,
@@ -256,7 +264,7 @@ async fn hooks_list_shows_discovered_plugin_hook() -> Result<()> {
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash",
+        "selector": {"type": "tool", "namespace": "^functions$", "name": "^exec_command$"},
         "hooks": [
           {
             "type": "command",
@@ -300,7 +308,7 @@ async fn hooks_list_shows_discovered_plugin_hook() -> Result<()> {
                     command: "echo plugin hook".to_string(),
                     r#async: false,
                 },
-                matcher: Some("Bash".to_string()),
+                selector: Some(exec_command_selector()),
                 timeout_sec: 7,
                 status_message: Some("running plugin hook".to_string()),
                 additional_context_limit: None,
@@ -312,7 +320,7 @@ async fn hooks_list_shows_discovered_plugin_hook() -> Result<()> {
                 is_managed: false,
                 current_hash: command_hook_hash(
                     "pre_tool_use",
-                    Some("Bash"),
+                    Some(exec_command_selector()),
                     "echo plugin hook",
                     /*timeout_sec*/ 7,
                     /*async*/ false,
@@ -826,7 +834,7 @@ async fn hooks_list_shows_discovered_plugin_mcp_tool_hook() -> Result<()> {
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash",
+        "selector": {"type": "tool", "namespace": "^functions$", "name": "^exec_command$"},
         "hooks": [
           {
             "type": "mcp_tool",
@@ -864,7 +872,7 @@ async fn hooks_list_shows_discovered_plugin_mcp_tool_hook() -> Result<()> {
     let identity = NormalizedHookIdentity {
         event_name: "pre_tool_use",
         group: codex_config::MatcherGroup {
-            matcher: Some("Bash".to_string()),
+            selector: Some(exec_command_selector()),
             hooks: vec![codex_config::HookHandlerConfig::McpTool {
                 server: "security".to_string(),
                 tool: "inspect".to_string(),
@@ -889,7 +897,7 @@ async fn hooks_list_shows_discovered_plugin_mcp_tool_hook() -> Result<()> {
                     server: "security".to_string(),
                     tool: "inspect".to_string(),
                 },
-                matcher: Some("Bash".to_string()),
+                selector: Some(exec_command_selector()),
                 timeout_sec: 9,
                 status_message: Some("checking security policy".to_string()),
                 additional_context_limit: None,
@@ -980,7 +988,7 @@ enabled = false
                     command: ordinary_command.to_string(),
                     r#async: false,
                 },
-                matcher: None,
+                selector: None,
                 timeout_sec: 5,
                 status_message: None,
                 additional_context_limit: None,
@@ -992,7 +1000,7 @@ enabled = false
                 is_managed: false,
                 current_hash: command_hook_hash(
                     "stop",
-                    /*matcher*/ None,
+                    /*selector*/ None,
                     ordinary_command,
                     /*timeout_sec*/ 5,
                     /*async*/ false,
@@ -1130,7 +1138,7 @@ hooks = true
 [hooks]
 
 [[hooks.PreToolUse]]
-matcher = "Bash"
+selector = { type = "tool", namespace = "^functions$", name = "^exec_command$" }
 
 [[hooks.PreToolUse.hooks]]
 type = "command"
@@ -1179,7 +1187,7 @@ timeout = 5
                         command: "echo project hook".to_string(),
                         r#async: false,
                     },
-                    matcher: Some("Bash".to_string()),
+                    selector: Some(exec_command_selector()),
                     timeout_sec: 5,
                     status_message: None,
                     additional_context_limit: None,
@@ -1191,7 +1199,7 @@ timeout = 5
                     is_managed: false,
                     current_hash: command_hook_hash(
                         "pre_tool_use",
-                        Some("Bash"),
+                        Some(exec_command_selector()),
                         "echo project hook",
                         /*timeout_sec*/ 5,
                         /*async*/ false,

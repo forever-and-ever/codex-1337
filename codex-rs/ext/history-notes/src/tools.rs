@@ -380,6 +380,23 @@ impl HistoryNotesToolOutput {
     }
 }
 
+impl codex_tools::HookToolOutput for HistoryNotesToolOutput {
+    fn post_tool_use_payload(
+        &self,
+        tool_name: &codex_tools::ToolName,
+        tool_use_id: &str,
+        tool_input: Value,
+    ) -> Option<codex_tools::PostToolUsePayload> {
+        // Hooks must not receive model-only image attachments.
+        Some(codex_tools::PostToolUsePayload::new(
+            tool_name,
+            tool_use_id,
+            tool_input,
+            self.result.clone(),
+        ))
+    }
+}
+
 impl ToolOutput for HistoryNotesToolOutput {
     fn log_output(&self) -> String {
         JsonToolOutput::new(self.result.clone()).log_output()
@@ -387,11 +404,6 @@ impl ToolOutput for HistoryNotesToolOutput {
 
     fn success_for_logging(&self) -> bool {
         true
-    }
-
-    fn post_tool_use_response(&self, _call_id: &str, _payload: &ToolPayload) -> Option<Value> {
-        // Hooks must not receive model-only image attachments.
-        Some(self.result.clone())
     }
 
     fn to_response_item(&self, call_id: &str, _payload: &ToolPayload) -> ResponseInputItem {
