@@ -127,7 +127,7 @@ async fn hidden_last_item_keeps_turn_groups_and_completion_boundaries() {
 
         let cells = app.project_older_history_cells(
             &mut tui,
-            items.clone(),
+            HistoryPage::Items(items.clone()),
             &turns,
             &hidden,
             thread_id,
@@ -161,7 +161,7 @@ async fn hidden_last_item_keeps_turn_groups_and_completion_boundaries() {
 
         let repeated = app.project_older_history_cells(
             &mut tui,
-            items,
+            HistoryPage::Items(items),
             &turns,
             &hidden,
             thread_id,

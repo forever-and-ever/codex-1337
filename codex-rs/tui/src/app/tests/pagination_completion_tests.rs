@@ -425,7 +425,7 @@ async fn beginning_navigation_holds_the_view_until_the_last_page_arrives() -> Re
         app.transcript_view.history = TranscriptHistoryState::Partial;
         let mut tui = crate::tui::test_support::make_test_tui()?;
         tui.set_owned_screen(/*owned*/ true)?;
-        let size = ratatui::layout::Size::new(/*width*/ 80, /*height*/ 12);
+        let size = ratatui::layout::Size::new(/*width*/ 80, /*height*/ 18);
         let render = |app: &mut App, tui: &mut tui::Tui| -> Result<Buffer> {
             tui.screen_size_for_event(&TuiEvent::Resize(size))?;
             let bottom = app.render_owned_transcript(tui, size)?;
@@ -451,6 +451,15 @@ async fn beginning_navigation_holds_the_view_until_the_last_page_arrives() -> Re
                 .scroll(&app.transcript_cells, initial_scroll);
         }
         let before = render(&mut app, &mut tui)?;
+        // Keep real content inside the comparison region, not just a blank composer gap.
+        assert!(
+            before
+                .content()
+                .iter()
+                .map(ratatui::buffer::Cell::symbol)
+                .collect::<String>()
+                .contains("Newest answer")
+        );
 
         // Hold a small first page so the test can inspect each request/completion boundary.
         let cursor = app_server
@@ -578,7 +587,10 @@ async fn returning_to_latest_retains_pending_pages_without_continuing_to_the_beg
                 limit,
             )
             .await?;
-        let next_cursor = page.next_cursor.clone();
+        let HistoryPage::Items(item_page) = &page else {
+            panic!("item page");
+        };
+        let next_cursor = item_page.next_cursor.clone().map(HistoryPage::Items);
         let before = app.transcript_cells.len();
         app.transcript_view.handle_key(
             KeyEvent::new(KeyCode::End, KeyModifiers::CONTROL),
@@ -697,7 +709,11 @@ async fn stale_history_completions_preserve_the_current_request_and_failure_can_
     app.transcript_view.begin_search();
     app.transcript_view.paste_search("Middle answer");
     app.transcript_view.advance_search(&app.transcript_cells);
-    let next_cursor = page.next_cursor.clone().expect("another older page");
+    let HistoryPage::Items(item_page) = &page else {
+        panic!("item page");
+    };
+    let next_cursor =
+        HistoryPage::Items(item_page.next_cursor.clone().expect("another older page"));
     app.handle_older_history_page(&mut tui, &mut app_server, thread_id, &cursor, Ok(page))
         .await?;
     assert_eq!(app.transcript_view.history, TranscriptHistoryState::Partial);
