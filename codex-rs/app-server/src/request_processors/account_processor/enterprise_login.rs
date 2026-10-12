@@ -86,29 +86,16 @@ impl EnterpriseLoginState {
             setup_cancel.cancel();
             *setup_cancel = CancellationToken::new();
         }
-        let (login_id, mut completion) = {
-            let active = self.active.lock().await;
-            if login_id.is_some_and(|id| active.as_ref().is_none_or(|a| a.login_id != id)) {
-                return false;
-            }
-            let Some(attempt) = active.as_ref() else {
-                return false;
-            };
-            attempt.cancel.cancel();
-            (attempt.login_id.clone(), attempt.completion.clone())
-        };
-        // A partial callback request can stall the blocking HTTP worker. Cancellation
-        // already fences commit; primary logout must not wait indefinitely for I/O.
-        if tokio::time::timeout(std::time::Duration::from_secs(10), async {
-            let _start = self.start_gate.lock().await;
-            completion.wait_for(|state| state.is_complete()).await
-        })
-        .await
-        .is_ok()
-        {
-            self.clear(&login_id).await;
+        let active = self.active.lock().await;
+        if login_id.is_some_and(|id| active.as_ref().is_none_or(|a| a.login_id != id)) {
+            return false;
         }
-        // Retain a timed-out attempt so a replacement still waits for port cleanup.
+        let Some(attempt) = active.as_ref() else {
+            return false;
+        };
+        // This mutex fences synchronous credential commit. Callback closure only
+        // gates port reuse: the worker clears this attempt, and replacement waits.
+        attempt.cancel.cancel();
         true
     }
 

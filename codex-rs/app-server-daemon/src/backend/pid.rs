@@ -2,6 +2,10 @@
 
 #[path = "pid_identity.rs"]
 mod identity;
+#[path = "readiness_diagnostics.rs"]
+mod readiness_diagnostics;
+
+pub(crate) use readiness_diagnostics::readiness_failure_context;
 
 #[cfg(any(unix, windows))]
 use std::borrow::Cow;

@@ -681,24 +681,12 @@ impl Daemon {
     }
 
     async fn app_server_not_ready_context(&self) -> String {
-        let mut context = format!(
-            "app server did not become ready on {}",
-            self.socket_path.display()
-        );
-        self.append_daemon_app_server_context(&mut context).await;
-        backend::append_stderr_log_tail_context(&self.pid_file, &mut context).await;
-        context
-    }
-
-    async fn append_daemon_app_server_context(&self, context: &mut String) {
-        let managed_codex_version = self
-            .managed_codex_version_best_effort()
-            .await
-            .unwrap_or_else(|| "unknown".to_string());
-        context.push_str(&format!(
-            "\n\nDaemon used app-server:\n  path: {}\n  version: {managed_codex_version}",
-            self.managed_codex_bin.display()
-        ));
+        backend::readiness_failure_context(
+            &self.pid_file,
+            &self.socket_path,
+            &self.managed_codex_bin,
+        )
+        .await
     }
 
     async fn bootstrap(&self, options: BootstrapOptions) -> Result<BootstrapOutput> {
@@ -1449,16 +1437,28 @@ mod tests {
             .await
             .expect("write stderr log");
 
-        assert_eq!(
-            daemon.app_server_not_ready_context().await,
-            format!(
-                "app server did not become ready on {}\n\n\
-                 Daemon used app-server:\n  path: {}\n  version: unknown\n\n\
-                 Managed app-server stderr ({}):\n  unexpected argument",
-                daemon.socket_path.display(),
-                daemon.managed_codex_bin.display(),
-                stderr_log.display()
-            )
-        );
+        let context = daemon.app_server_not_ready_context().await;
+        assert!(context.starts_with(&format!(
+            "app server did not become ready on {}\n\n\
+             Daemon used app-server:\n  path: {}\n\nReadiness failure snapshot:",
+            daemon.socket_path.display(),
+            daemon.managed_codex_bin.display(),
+        )));
+        assert!(context.contains(&format!(
+            "PID record ({}): missing",
+            daemon.pid_file.display()
+        )));
+        assert!(context.contains(&format!(
+            "stderr ({}): nonempty (19 bytes)",
+            stderr_log.display()
+        )));
+        assert!(context.contains(&format!(
+            "socket ({}): missing",
+            daemon.socket_path.display()
+        )));
+        assert!(context.ends_with(&format!(
+            "Managed app-server stderr ({}):\n  unexpected argument",
+            stderr_log.display()
+        )));
     }
 }
