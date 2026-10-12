@@ -1,6 +1,6 @@
 ---
 source: core/tests/suite/scenarios.rs
-assertion_line: 1658
+assertion_line: 1663
 expression: "context_snapshot::format_request_history_snapshot(\"Astra checks for Notes, refreshes its installed plugin without restarting, and uses the new skill and Code Mode MCP tool across turns.\",\n&mock.requests(),\n&ContextSnapshotOptions::default().include_request_settings(),)"
 ---
 Scenario: Astra checks for Notes, refreshes its installed plugin without restarting, and uses the new skill and Code Mode MCP tool across turns.
@@ -17,8 +17,8 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=10add372b5a6b355):
-        - namespace/functions; hash=23dcd4f361a08c29
+00:additional_tools/developer (2; hash=146d9b75f365c1f7):
+        - namespace/functions; hash=d5b870baedec65b5
           - custom/exec
           - function/wait
           - custom/python
@@ -106,8 +106,8 @@ Settings:
 -- request 3 (turn) --
 09:message/assistant:
     The Notes tool is not installed yet.
-10:additional_tools/developer (1; hash=a07d655aba3b605f):
-        - namespace/functions: This is an incremental namespace update. Previously declared tools remain available for direct ca...; hash=effe10d1a6040105
+10:additional_tools/developer (1; hash=ef119f66f5ad2e95):
+        - namespace/functions: This is an incremental namespace update. Previously declared tools remain available for direct ca...; hash=a6a3d96aec6d4251
           - custom/exec
 11:message/developer:
     <skills_instructions>

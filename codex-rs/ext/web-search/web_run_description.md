@@ -1,4 +1,4 @@
-Tool for accessing the internet.
+Search and read the web, plus finance, weather, sports, and time lookups. Browse when facts may have changed, are niche or high-stakes, or need sources.
 
 
 ---

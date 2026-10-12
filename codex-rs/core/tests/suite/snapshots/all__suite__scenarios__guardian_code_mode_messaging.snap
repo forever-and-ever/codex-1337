@@ -1,6 +1,6 @@
 ---
 source: core/tests/suite/scenarios.rs
-assertion_line: 1747
+assertion_line: 1752
 expression: snapshot
 ---
 Scenario: A root uses Code Mode to send a confirmation and receives a real user reply; a worker then requests an action that Guardian reviews with the confirmed question as assistant context. Independent model streams are grouped as root, worker, then Guardian.
@@ -86,8 +86,8 @@ Scenario: A root uses Code Mode to send a confirmation and receives a real user 
 
 ## Window 3 (after request 6: input diverged at item 00, settings changed (model, parallel_tool_calls, prompt_cache_key, reasoning, text, tools))
 -- request 7 (turn) --
-00:additional_tools/developer (1; hash=e870eacd0a3dc21c):
-        - namespace/functions; hash=14b9f3ae341ecece
+00:additional_tools/developer (1; hash=7b438b3c2b5a9f95):
+        - namespace/functions; hash=9801f6872592c845
           - custom/exec
           - function/wait
 01:message/developer:
@@ -156,8 +156,8 @@ Scenario: A root uses Code Mode to send a confirmation and receives a real user 
 
 ## Window 4 (after request 7: input diverged at item 04, settings changed (prompt_cache_key))
 -- request 8 (turn) --
-00:additional_tools/developer (1; hash=e870eacd0a3dc21c):
-        - namespace/functions; hash=14b9f3ae341ecece
+00:additional_tools/developer (1; hash=7b438b3c2b5a9f95):
+        - namespace/functions; hash=9801f6872592c845
           - custom/exec
           - function/wait
 01:message/developer:

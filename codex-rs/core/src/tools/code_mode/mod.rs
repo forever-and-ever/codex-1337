@@ -1,4 +1,5 @@
 mod delegate;
+mod disclosure;
 mod lifecycle;
 pub(crate) use lifecycle::CaptureOrigin;
 pub(crate) use lifecycle::NotificationLease;
@@ -54,6 +55,7 @@ use codex_utils_output_truncation::truncate_function_output_items_with_policy;
 use delegate::CodeModeCellDelegate;
 use delegate::CodeModeDispatchBroker;
 use delegate::CodeModeDispatchWorker;
+pub(crate) use disclosure::Disclosure;
 pub(crate) use execute_handler::CodeModeExecuteHandler;
 use output::CodeModeToolOutput;
 use response_adapter::into_function_call_output_content_items;

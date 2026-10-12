@@ -17,8 +17,8 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (request) --
-00:additional_tools/developer (2; hash=fb933bbdda6f8794):
-        - namespace/functions; hash=d882980dfdb5e7c2
+00:additional_tools/developer (2; hash=bbd1a400eca8e7bb):
+        - namespace/functions; hash=631ad97cf571cb67
           - custom/exec
           - function/wait
           - custom/python

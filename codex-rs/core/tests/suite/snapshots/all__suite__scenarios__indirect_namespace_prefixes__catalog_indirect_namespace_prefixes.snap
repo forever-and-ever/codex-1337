@@ -1,6 +1,6 @@
 ---
 source: core/tests/suite/scenarios_indirect_namespace_prefixes.rs
-assertion_line: 224
+assertion_line: 225
 expression: "context_snapshot::format_request_history_snapshot(\"Catalog namespace and raw MCP server prefixes annotate embedded docs and describe_tool contracts; a model switch clears them without changing nested dispatch.\",\n&requests,\n&ContextSnapshotOptions::default().rewrite_known_segments().include_request_settings(),)"
 ---
 Scenario: Catalog namespace and raw MCP server prefixes annotate embedded docs and describe_tool contracts; a model switch clears them without changing nested dispatch.
@@ -16,8 +16,8 @@ Settings:
   stream: true
   text: {"verbosity":"low"}
   tool_choice: "auto"
-  tools (9; hash=fac1fd4bb68bdc0e):
-    - custom/exec: Run JavaScript code to orchestrate/compose tool calls - Evaluates the provided JavaScript code in...; hash=2facbbfd980506e2
+  tools (9; hash=1d2f32e7daa997b0):
+    - custom/exec: Run JavaScript code to orchestrate/compose tool calls - Evaluates the provided JavaScript code in...; hash=e06d2582dc0bf0c8
     - function/wait: Waits on a yielded `exec` cell and returns new output or completion. - Use `wait` only after `exe...; args=[cell_id, max_tokens, terminate]; hash=0d6841040273c1cc
     - custom/python: Execute ordinary python source in a fresh python3 -u process, not a REPL or JavaScript. Supply so...; hash=fa80d4eff151e99a
     - custom/bash: Execute ordinary bash source in a fresh bash process, not a REPL or JavaScript. Supply source dir...; hash=e39c65dbec586069
@@ -55,8 +55,8 @@ Settings:
 ## Window 2 (after request 2)
 Settings: relative to window 1
   model: "prefixes-cleared"
-  tools (9; hash=df8b50f58909d766):
-    ~ custom/exec: Run JavaScript code to orchestrate/compose tool calls - Evaluates the provided JavaScript code in...; hash=0f95b6a33a0b94a0
+  tools (9; hash=feeb317422c95d8d):
+    ~ custom/exec: Run JavaScript code to orchestrate/compose tool calls - Evaluates the provided JavaScript code in...; hash=9bdc2b930ad1e5b7
 -- request 3 (turn) --
 00:message/developer:
     <MODEL_INSTRUCTIONS>

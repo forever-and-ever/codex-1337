@@ -2356,15 +2356,25 @@ async fn guardian_review_request_layout_matches_model_visible_request_snapshot()
         .find(|tool| tool["name"] == "exec")
         .and_then(|tool| tool["description"].as_str())
         .expect("guardian code-mode exec description");
-    let mut guardian_nested_tool_names = guardian_exec_description
+    let guardian_declared_tool_names = guardian_exec_description
         .lines()
-        .filter_map(|line| line.strip_prefix("### `"))
-        .filter_map(|line| line.strip_suffix('`'))
+        .filter_map(|line| line.strip_prefix("### `")?.strip_suffix('`'))
         .collect::<Vec<_>>();
-    guardian_nested_tool_names.sort_unstable();
+    assert_eq!(guardian_declared_tool_names, vec!["exec_command"]);
+    // Roster entries read `- name` or `- name: purpose`; guidance bullets never start lowercase.
+    let guardian_rostered_tool_names = guardian_exec_description
+        .lines()
+        .filter_map(|line| {
+            let entry = line.strip_prefix("- ")?;
+            let name = entry.split_once(": ").map_or(entry, |(name, _)| name);
+            name.chars()
+                .all(|ch| ch == '_' || ch.is_ascii_lowercase())
+                .then_some(name)
+        })
+        .collect::<Vec<_>>();
     assert_eq!(
-        guardian_nested_tool_names,
-        vec!["exec_command", "view_image", "write_stdin"]
+        guardian_rostered_tool_names,
+        vec!["view_image", "write_stdin"]
     );
     // Check exact separators before the snapshot normalizes trailing whitespace.
     let guardian_user_text = request.message_input_texts("user").concat();

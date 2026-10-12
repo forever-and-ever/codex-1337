@@ -974,6 +974,25 @@ async fn code_mode_only_restricts_prompt_tools() -> Result<()> {
             "web_search".to_string()
         ]
     );
+    let exec_description = first_body["tools"]
+        .as_array()
+        .and_then(|tools| tools.iter().find(|tool| tool["name"] == "exec"))
+        .and_then(|exec| exec["description"].as_str())
+        .expect("exec description");
+    assert_eq!(
+        exec_description
+            .lines()
+            .filter_map(|line| line.strip_prefix("### `")?.strip_suffix('`'))
+            .collect::<Vec<_>>(),
+        vec!["apply_patch", "exec_command"],
+        "Code Mode Only declares only its bootstrap tools"
+    );
+    assert!(
+        exec_description.contains(
+            "\n- view_image: View a local image file from the filesystem when visual inspection is needed. Use this for images already available on disk.\n"
+        ),
+        "other nested tools are rostered beside the purpose ALL_TOOLS reports: {exec_description}"
+    );
 
     Ok(())
 }

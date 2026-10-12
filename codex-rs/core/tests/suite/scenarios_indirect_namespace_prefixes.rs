@@ -169,8 +169,9 @@ text({descriptions, echo: report.structuredContent.echo, agent: agents.agents[0]
                 .expect("exec"),
         );
         let description = exec["description"].as_str().expect("description");
-        // `exec` declares built-in namespaces; MCP servers appear only in its roster.
-        for (&prefix, declared) in prefixes.iter().zip([true, true, false]) {
+        // `exec` declares only its bootstrap tools; agent tools and MCP servers appear in its
+        // roster, and their prefixes reach `describe_tool` contracts instead.
+        for (&prefix, declared) in prefixes.iter().zip([true, false, false]) {
             assert_eq!(
                 description.matches(prefix).count(),
                 usize::from(declared && !include_search && index == 0),

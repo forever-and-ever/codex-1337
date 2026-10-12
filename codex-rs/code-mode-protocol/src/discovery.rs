@@ -53,24 +53,52 @@ impl EnabledToolMetadata {
     }
 }
 
+/// Collapses whitespace and keeps the leading whole sentences that fit; a first sentence longer
+/// than the budget is cut at a word boundary and marked with an ellipsis. A period followed by a
+/// lowercase word, as in "e.g. this", does not end a sentence.
 pub(crate) fn compact_tool_summary(purpose: &str) -> String {
-    let mut characters = purpose
-        .split_whitespace()
-        .enumerate()
-        .flat_map(|(index, word)| (index > 0).then_some(' ').into_iter().chain(word.chars()));
-    let mut prefix = characters
-        .by_ref()
-        .take(MAX_SUMMARY_CHARACTERS)
-        .collect::<String>();
-    if characters.next().is_none() {
-        return prefix;
+    let mut summary = String::new();
+    let mut characters = 0;
+    // Byte lengths of `summary` after its last confirmed sentence and after a pending one.
+    let mut sentence_end = None;
+    let mut pending_end = None;
+    for word in purpose.split_whitespace() {
+        if let Some(end) = pending_end.take()
+            && !word.starts_with(char::is_lowercase)
+        {
+            sentence_end = Some(end);
+        }
+        let width = usize::from(characters > 0) + word.chars().count();
+        if characters + width > MAX_SUMMARY_CHARACTERS {
+            if let Some(end) = sentence_end {
+                summary.truncate(end);
+                return summary;
+            }
+            // Keep whole words, leaving room for the ellipsis.
+            if characters == MAX_SUMMARY_CHARACTERS {
+                match summary.rfind(' ') {
+                    Some(boundary) => summary.truncate(boundary),
+                    None => {
+                        summary.pop();
+                    }
+                }
+            }
+            if summary.is_empty() {
+                summary.extend(word.chars().take(MAX_SUMMARY_CHARACTERS - 1));
+            }
+            summary.push('…');
+            return summary;
+        }
+        if characters > 0 {
+            summary.push(' ');
+        }
+        summary.push_str(word);
+        characters += width;
+        if word.ends_with(['.', '!', '?']) {
+            pending_end = Some(summary.len());
+        }
     }
-    prefix.pop();
-    if let Some(boundary) = prefix.rfind(' ') {
-        prefix.truncate(boundary);
-    }
-    prefix.push('…');
-    prefix
+    summary
 }
 
 pub(crate) fn render_output_type(
