@@ -984,7 +984,8 @@ fn turn_user_input(input: &[TurnInput]) -> Vec<UserInput> {
         .iter()
         .filter_map(|item| match item {
             TurnInput::UserInput { content, .. } => Some(content.as_slice()),
-            TurnInput::ResponseItem(_)
+            TurnInput::CodeModeNotification
+            | TurnInput::ResponseItem(_)
             | TurnInput::FunctionCallOutput(_)
             | TurnInput::InterAgentCommunication(_) => None,
         })
@@ -1327,7 +1328,8 @@ async fn track_turn_resolved_config_analytics(
                 .iter()
                 .filter_map(|item| match item {
                     TurnInput::UserInput { content, .. } => Some(content.as_slice()),
-                    TurnInput::ResponseItem(_)
+                    TurnInput::CodeModeNotification
+                    | TurnInput::ResponseItem(_)
                     | TurnInput::FunctionCallOutput(_)
                     | TurnInput::InterAgentCommunication(_) => None,
                 })

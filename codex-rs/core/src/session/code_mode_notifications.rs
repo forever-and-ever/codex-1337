@@ -1,4 +1,4 @@
-//! Attribute notify capture to its actual receiving input queue, not a stale worker turn.
+//! Admit notify before its callback completes, using the actual receiving turn.
 
 use super::Session;
 use super::TurnInput;
@@ -31,10 +31,25 @@ impl Session {
             call_id.clone(),
             Arc::downgrade(&active.turn_state),
         );
+        let pending = if let Some(task) = &active.task {
+            // Callback completion gates the runtime result. Admit notify to the
+            // same history owner now, rather than deferring it behind that result.
+            self.record_annotated_conversation_items(
+                &task.turn_context,
+                &task.turn_context.capture_current_model_info(),
+                vec![item],
+            )
+            .await;
+            vec![TurnInput::CodeModeNotification]
+        } else {
+            // Task completion already detached its context; its retained input
+            // queue remains the receiving owner during terminal cleanup.
+            vec![TurnInput::ResponseItem(item)]
+        };
         self.input_queue
             .extend_pending_input_and_accept_mailbox_delivery_for_turn_state(
                 active.turn_state.as_ref(),
-                vec![TurnInput::ResponseItem(item)],
+                pending,
             )
             .await;
         lease.accepted();

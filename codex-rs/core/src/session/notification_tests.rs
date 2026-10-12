@@ -1,4 +1,4 @@
-//! Task completion preserves a queued notification's budget alongside real user input.
+//! Notification admission preserves continuation, receiving ownership, and output budgets.
 
 use super::*;
 use pretty_assertions::assert_eq;
@@ -30,6 +30,19 @@ async fn task_finish_preserves_notification_budget_and_queued_user_input() {
         cell_id: None,
         started_at_ms: 1,
     };
+    // This is the final-answer boundary: mailbox delivery is deferred and the
+    // next-step decision depends on has_pending_input, not just a watch wakeup.
+    session
+        .input_queue
+        .defer_mailbox_delivery_to_next_turn(&session.active_turn, &turn.sub_id)
+        .await;
+    assert!(
+        !session
+            .input_queue
+            .has_pending_input(&session.active_turn)
+            .await
+    );
+    let (mut activity, _) = session.input_queue.subscribe_activity(None).await;
     session
         .inject_code_mode_notification(
             owner.clone(),
@@ -43,6 +56,56 @@ async fn task_finish_preserves_notification_budget_and_queued_user_input() {
         )
         .await
         .unwrap();
+    assert!(activity.has_changed().unwrap());
+    assert_eq!(
+        *activity.borrow_and_update(),
+        input_queue::InputQueueActivity::Steer
+    );
+    let admitted_history = session.clone_history().await;
+    assert_eq!(raw_history_items(&admitted_history).len(), 1);
+    assert!(
+        session
+            .input_queue
+            .has_pending_input(&session.active_turn)
+            .await
+    );
+
+    let turn_state = Arc::clone(
+        &session
+            .active_turn
+            .lock()
+            .await
+            .as_ref()
+            .unwrap()
+            .turn_state,
+    );
+    assert_eq!(
+        session
+            .input_queue
+            .subscribe_activity(Some(&turn_state))
+            .await
+            .1,
+        Some(input_queue::InputQueueActivity::Steer),
+    );
+
+    // Terminal cleanup detaches Task before draining input. A notification in
+    // that interval must still use the retained receiving queue and descriptor.
+    let task = session
+        .active_turn
+        .lock()
+        .await
+        .as_mut()
+        .unwrap()
+        .task
+        .take();
+    let late_text = "notification during terminal cleanup".to_string();
+    session
+        .inject_code_mode_notification(owner.clone(), notification(late_text.clone()).into())
+        .await
+        .unwrap();
+    assert_eq!(raw_history_items(&session.clone_history().await).len(), 1);
+    session.active_turn.lock().await.as_mut().unwrap().task = task;
+
     let user_input = vec![UserInput::Text {
         text: "keep this queued user input".to_string(),
         text_elements: Vec::new(),
@@ -65,6 +128,7 @@ async fn task_finish_preserves_notification_budget_and_queued_user_input() {
             &text,
             codex_utils_output_truncation::TruncationPolicy::Tokens(120),
         )),
+        notification(late_text),
         session.response_item_from_user_input(user_input),
     ];
     let history = session.clone_history().await;
@@ -88,7 +152,20 @@ async fn task_finish_preserves_notification_budget_and_queued_user_input() {
     let ResponseItem::CustomToolCallOutput { output, .. } = &expected[0] else {
         unreachable!()
     };
-    assert_eq!(captured, vec![(owner, output.body.clone())]);
+    let ResponseItem::CustomToolCallOutput {
+        output: late_output,
+        ..
+    } = &expected[1]
+    else {
+        unreachable!()
+    };
+    assert_eq!(
+        captured,
+        vec![
+            (owner.clone(), output.body.clone()),
+            (owner, late_output.body.clone())
+        ]
+    );
     assert_eq!(
         strip_response_item_ids(&strip_metadata_from_items(&raw_history_items(&history))),
         strip_response_item_ids(&strip_metadata_from_items(&expected)),
