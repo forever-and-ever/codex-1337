@@ -1,6 +1,6 @@
 use super::multi_agents_message::agent_message_parameters;
-use crate::agent::child_config::MAX_SPAWN_AGENT_MODEL_OVERRIDES;
 use crate::agent::child_config::model_supports_multi_agent_backend;
+use crate::agent::model_catalog::describe_agent_model;
 use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::protocol::MultiAgentVersion;
 use codex_tools::JsonSchema;
@@ -21,7 +21,6 @@ const SPAWN_AGENT_MODEL_CATALOG_GUIDANCE: &str =
     "Pick model overrides from the latest <model_catalog> listing.";
 const SPAWN_AGENT_TYPE_OVERRIDE_DESCRIPTION_V1: &str = "Agent type override for the new agent. Omit to inherit the parent agent type with a full-history fork; otherwise, `default` is used.";
 const SPAWN_AGENT_MODEL_OVERRIDE_DESCRIPTION: &str = "Model override for the new agent. Omit unless an explicit override is needed. Use a listed provider/model selector or an unambiguous model name. Only fresh agents may change provider; history forks retain the parent's provider.";
-const MAX_REASONING_EFFORT_CHARS_IN_SPAWN_AGENT_DESCRIPTION: usize = 64;
 
 fn service_tier_parameter() -> JsonSchema {
     JsonSchema::string(Some("Routing tier: `inherit` (default) follows the immediate parent live; `default` forces normal service; `priority` (`fast`) or another advertised tier pins that tier. Independent of model and history overrides. Changes affect subsequent inference requests, never an already-sent request.".to_owned()))
@@ -820,66 +819,18 @@ fn spawn_agent_models_description(
     models: &[ModelPreset],
     multi_agent_version: MultiAgentVersion,
 ) -> String {
-    let visible_models: Vec<&ModelPreset> = models
+    let model_descriptions = models
         .iter()
         .filter(|model| model.show_in_picker)
         .filter(|model| model_supports_multi_agent_backend(model, multi_agent_version))
-        .take(MAX_SPAWN_AGENT_MODEL_OVERRIDES)
-        .collect();
-    if visible_models.is_empty() {
+        .map(|model| describe_agent_model(model, &model.description))
+        .collect::<Vec<_>>();
+    if model_descriptions.is_empty() {
         return "No picker-visible model overrides are currently loaded.".to_string();
     }
-
-    let model_descriptions = visible_models
-        .into_iter()
-        .map(|model| {
-            let default_reasoning_effort = &model.default_reasoning_effort;
-            let efforts = model
-                .supported_reasoning_efforts
-                .iter()
-                .map(|preset| {
-                    let effort = preset.effort.as_str();
-                    let effort = match effort
-                        .char_indices()
-                        .nth(MAX_REASONING_EFFORT_CHARS_IN_SPAWN_AGENT_DESCRIPTION)
-                    {
-                        Some((index, _)) => &effort[..index],
-                        None => effort,
-                    };
-                    if &preset.effort == default_reasoning_effort {
-                        format!("{effort} (default)")
-                    } else {
-                        effort.to_string()
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join(", ");
-            let reasoning_efforts_suffix = if efforts.is_empty() {
-                String::new()
-            } else {
-                format!(" Reasoning efforts: {efforts}.")
-            };
-            let service_tiers = model
-                .service_tiers
-                .iter()
-                .map(|tier| tier.id.as_str())
-                .collect::<Vec<_>>()
-                .join(", ");
-            let service_tiers_suffix = if service_tiers.is_empty() {
-                String::new()
-            } else {
-                format!(" Service tiers: {service_tiers}.")
-            };
-            let model_slug = &model.model;
-            let description = &model.description;
-            format!(
-                "- `{model_slug}`: {description}{reasoning_efforts_suffix}{service_tiers_suffix}"
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
     format!(
-        "Available model overrides (optional; inherited parent model is preferred):\n{model_descriptions}"
+        "Available model overrides (optional; inherited parent model is preferred):\n{}",
+        model_descriptions.join("\n")
     )
 }
 
