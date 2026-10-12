@@ -1552,6 +1552,32 @@
           "default": null,
           "type": "string"
         },
+        "providers": {
+          "additionalProperties": {
+            "$ref": "#/definitions/FarmExecutorConfig"
+          },
+          "default": {},
+          "description": "Executor overrides keyed by the parent thread's configured provider ID.",
+          "type": "object"
+        },
+        "reasoning_effort": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ReasoningEffort"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
+    },
+    "FarmExecutorConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "model": {
+          "default": null,
+          "type": "string"
+        },
         "reasoning_effort": {
           "allOf": [
             {
@@ -6891,6 +6917,7 @@
           "default": {
             "instructions": null,
             "model": null,
+            "providers": {},
             "reasoning_effort": null
           },
           "description": "Executor and additive child instructions for direct user delegation."
@@ -8130,6 +8157,7 @@
         "farm": {
           "instructions": null,
           "model": null,
+          "providers": {},
           "reasoning_effort": null
         }
       },

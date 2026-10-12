@@ -14,6 +14,7 @@ mod config_requirements;
 pub mod config_toml;
 mod constraint;
 mod diagnostics;
+mod farm;
 mod filesystem_constraints;
 mod fingerprint;
 mod guardian;

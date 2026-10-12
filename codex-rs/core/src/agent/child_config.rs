@@ -16,6 +16,7 @@ use crate::session::turn_context::TurnContext;
 use codex_models_manager::manager::RefreshStrategy;
 use codex_protocol::models::BaseInstructions;
 use codex_protocol::models::BaseInstructionsProvenance;
+use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::openai_models::ReasoningEffortPreset;
@@ -58,6 +59,44 @@ pub(crate) struct PreparedSpawnConfig {
     pub(crate) role_name: Option<String>,
 }
 
+pub(crate) struct ResolvedSpawnModel {
+    pub(crate) provider_id: String,
+    model: String,
+    info: ModelInfo,
+}
+
+/// Freeze catalog routing and metadata before a farm chooses whether to inherit history.
+pub(crate) async fn resolve_spawn_agent_model(
+    session: &Session,
+    turn: &TurnContext,
+    config: &Config,
+    requested_model: Option<&str>,
+) -> Result<Option<ResolvedSpawnModel>, String> {
+    let Some(requested_model) =
+        requested_model.or(turn.config.agent_default_subagent_model.as_deref())
+    else {
+        return Ok(None);
+    };
+    let catalogs = session
+        .agent_model_catalogs(config, RefreshStrategy::OnlineIfUncached)
+        .await;
+    let (catalog, selected_model) =
+        find_spawn_agent_model(&catalogs, requested_model, turn.multi_agent_version)?;
+    let mut selected_config = config.clone();
+    if catalog.provider_id != selected_config.model_provider_id {
+        switch_agent_provider(&mut selected_config, &catalog.provider_id);
+    }
+    let info = catalog
+        .manager
+        .get_model_info(selected_model, &selected_config.to_models_manager_config())
+        .await;
+    Ok(Some(ResolvedSpawnModel {
+        provider_id: catalog.provider_id.clone(),
+        model: selected_model.to_owned(),
+        info,
+    }))
+}
+
 /// Resolves child settings before starting the thread, retaining the invoking tool's precedence.
 pub(crate) async fn prepare_agent_spawn_config(
     session: &Session,
@@ -73,12 +112,22 @@ pub(crate) async fn prepare_agent_spawn_config(
     .await
 }
 
-/// Also serves standalone user actions, which capture settings without preparing inference.
 pub(crate) async fn prepare_agent_spawn_config_from_settings(
     session: &Session,
     turn: &TurnContext,
     settings: &ResolvedStepSettings,
     options: SpawnConfigOptions<'_>,
+) -> Result<PreparedSpawnConfig, String> {
+    prepare_agent_spawn_config_from_selection(session, turn, settings, options, None).await
+}
+
+/// Also serves standalone user actions, which capture settings without preparing inference.
+pub(crate) async fn prepare_agent_spawn_config_from_selection(
+    session: &Session,
+    turn: &TurnContext,
+    settings: &ResolvedStepSettings,
+    options: SpawnConfigOptions<'_>,
+    selection: Option<ResolvedSpawnModel>,
 ) -> Result<PreparedSpawnConfig, String> {
     let full_history_fork = matches!(options.fork_mode, Some(SpawnAgentForkMode::FullHistory));
     let mut config =
@@ -101,6 +150,7 @@ pub(crate) async fn prepare_agent_spawn_config_from_settings(
         options.model,
         options.reasoning_effort.clone(),
         options.fork_mode,
+        selection,
     )
     .await?;
     if options.model_precedence == SpawnModelPrecedence::RoleOverrides {
@@ -257,6 +307,7 @@ async fn apply_requested_spawn_agent_model_overrides(
     requested_model: Option<&str>,
     requested_reasoning_effort: Option<ReasoningEffort>,
     fork_mode: Option<&SpawnAgentForkMode>,
+    selection: Option<ResolvedSpawnModel>,
 ) -> Result<(), String> {
     let requested_model = requested_model.or(turn.config.agent_default_subagent_model.as_deref());
     let requested_reasoning_effort = requested_reasoning_effort
@@ -265,27 +316,26 @@ async fn apply_requested_spawn_agent_model_overrides(
         return Ok(());
     }
 
-    if let Some(requested_model) = requested_model {
-        let catalogs = session
-            .agent_model_catalogs(config, RefreshStrategy::OnlineIfUncached)
-            .await;
-        let (catalog, selected_model_name) =
-            find_spawn_agent_model(&catalogs, requested_model, turn.multi_agent_version)?;
-        if catalog.provider_id != config.model_provider_id {
+    let selection = match selection {
+        Some(selection) => Some(selection),
+        None => resolve_spawn_agent_model(session, turn, config, requested_model).await?,
+    };
+    if let Some(ResolvedSpawnModel {
+        provider_id,
+        model: selected_model_name,
+        info: selected_model_info,
+    }) = selection
+    {
+        if provider_id != config.model_provider_id {
             if fork_mode.is_some() {
                 return Err("History-forked agents must retain the parent model provider; use fork_turns=none for a different provider.".to_owned());
             }
-            switch_agent_provider(config, &catalog.provider_id);
+            switch_agent_provider(config, &provider_id);
         }
-        let selected_model_info = catalog
-            .manager
-            .get_model_info(selected_model_name, &config.to_models_manager_config())
-            .await;
 
-        config.model = Some(selected_model_name.to_owned());
         if let Some(reasoning_effort) = requested_reasoning_effort {
             validate_spawn_agent_reasoning_effort(
-                selected_model_name,
+                &selected_model_name,
                 &selected_model_info.supported_reasoning_levels,
                 &reasoning_effort,
             )?;
@@ -293,6 +343,7 @@ async fn apply_requested_spawn_agent_model_overrides(
         } else {
             config.model_reasoning_effort = selected_model_info.default_reasoning_level;
         }
+        config.model = Some(selected_model_name);
 
         return Ok(());
     }

@@ -8,6 +8,9 @@ use serde::Serialize;
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase", export_to = "v2/")]
 pub enum ThreadFarmMode {
+    // Keep this a string enum in generated SDKs, not a per-variant oneOf schema.
+    // Automatic keeps history only when the selected executor retains the provider.
+    Automatic,
     FullHistory,
     Fresh,
 }

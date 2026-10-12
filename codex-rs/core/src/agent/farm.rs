@@ -5,7 +5,9 @@ use super::api::SpawnRequest;
 use super::child_config::SpawnConfigOptions;
 use super::child_config::SpawnConfigVersion;
 use super::child_config::SpawnModelPrecedence;
-use super::child_config::prepare_agent_spawn_config_from_settings;
+use super::child_config::build_agent_spawn_config;
+use super::child_config::prepare_agent_spawn_config_from_selection;
+use super::child_config::resolve_spawn_agent_model;
 use super::control::spawn::load_agent_model_context;
 use super::exceeds_thread_spawn_depth_limit;
 use super::next_thread_spawn_depth;
@@ -41,6 +43,8 @@ const MAX_EXTRA_INSTRUCTIONS_BYTES: usize = 512;
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum FarmMode {
+    /// Keep full history only when the selected executor retains the parent provider.
+    Automatic,
     FullHistory,
     Fresh,
 }
@@ -165,6 +169,7 @@ impl CodexThread {
             );
         }
         let command = match request.mode {
+            FarmMode::Automatic => "/farm_auto",
             FarmMode::FullHistory => "/farm",
             FarmMode::Fresh => "/farm_fresh",
         };
@@ -197,18 +202,30 @@ impl CodexThread {
             self.flush_rollout()
                 .await
                 .map_err(|error| CodexErr::Fatal(format!("could not flush parent: {error}")))?;
-            let history = if request.mode == FarmMode::FullHistory {
-                let state = self.session.services.local_agent_runtime.upgrade()?;
-                Some(Arc::new(
-                    load_agent_model_context(&state, self.session.thread_id, turn.history_mode)
-                        .await?
-                        .ok_or_else(|| {
-                            CodexErr::InvalidRequest(
-                                "parent history unavailable for farm".to_owned(),
+            // Automatic captures locally before catalog I/O so settings and history
+            // retain one checkpoint boundary. A fresh route discards both the history
+            // and any read error; mandatory persistence errors above still reject it.
+            let history = if request.mode != FarmMode::Fresh {
+                Some(
+                    async {
+                        let state = self.session.services.local_agent_runtime.upgrade()?;
+                        Ok::<_, CodexErr>(Arc::new(
+                            load_agent_model_context(
+                                &state,
+                                self.session.thread_id,
+                                turn.history_mode,
                             )
-                        })?
-                        .items,
-                ))
+                            .await?
+                            .ok_or_else(|| {
+                                CodexErr::InvalidRequest(
+                                    "parent history unavailable for farm".to_owned(),
+                                )
+                            })?
+                            .items,
+                        ))
+                    }
+                    .await,
+                )
             } else {
                 None
             };
@@ -223,9 +240,37 @@ impl CodexThread {
             )
             .into());
         }
-        let fork_mode =
-            (request.mode == FarmMode::FullHistory).then_some(SpawnAgentForkMode::FullHistory);
         let farm_config = &turn.config.wrangler.farm;
+        let executor = farm_config.executor(&turn.config.model_provider_id);
+        let selection = {
+            let parent_config = build_agent_spawn_config(
+                &self.session.get_base_instructions().await,
+                &turn,
+                &turn.initial_settings,
+            )
+            .map_err(CodexErr::InvalidRequest)?;
+            resolve_spawn_agent_model(
+                &self.session,
+                &turn,
+                &parent_config,
+                executor.model.as_deref(),
+            )
+            .await
+            .map_err(CodexErr::InvalidRequest)?
+        };
+        let fork_mode = match request.mode {
+            FarmMode::FullHistory => Some(SpawnAgentForkMode::FullHistory),
+            FarmMode::Fresh => None,
+            FarmMode::Automatic => selection
+                .as_ref()
+                .is_none_or(|selection| selection.provider_id == turn.config.model_provider_id)
+                .then_some(SpawnAgentForkMode::FullHistory),
+        };
+        let fork_history = if fork_mode.is_some() {
+            Some(fork_history.expect("history mode captures parent history")?)
+        } else {
+            None
+        };
         let extra = farm_config.instructions.as_deref().unwrap_or_default();
         if extra.len() > MAX_EXTRA_INSTRUCTIONS_BYTES {
             return Err(CodexErr::InvalidRequest(
@@ -238,7 +283,7 @@ impl CodexThread {
         } else {
             format!("{CHILD_INSTRUCTIONS}\n\n{extra}")
         };
-        let prepared = prepare_agent_spawn_config_from_settings(
+        let prepared = prepare_agent_spawn_config_from_selection(
             &self.session,
             &turn,
             &turn.initial_settings,
@@ -247,10 +292,11 @@ impl CodexThread {
                 model_precedence: SpawnModelPrecedence::RequestedOverrides,
                 fork_mode: fork_mode.as_ref(),
                 role_name: None,
-                model: farm_config.model.as_deref(),
-                reasoning_effort: farm_config.reasoning_effort.clone(),
+                model: executor.model.as_deref(),
+                reasoning_effort: executor.reasoning_effort,
                 service_tier: None,
             },
+            selection,
         )
         .await
         .map_err(CodexErr::InvalidRequest)?;
