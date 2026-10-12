@@ -35,6 +35,9 @@ impl LocalThreadStore {
         if ids.is_empty() {
             return Ok(HashMap::new());
         }
+        // Append owns this guard through canonical flush, not just recorder enqueue.
+        // Existing-lineage resolution never reacquires writer guards.
+        let _writer = self.live_writer_locks.lock(thread_id).await;
         let path = match self.live_rollout_path(thread_id).await {
             Ok(path) => path,
             Err(ThreadStoreError::ThreadNotFound { .. }) => {
@@ -99,7 +102,7 @@ impl LocalThreadStore {
                     ReverseJsonlScanner::new_at(reader, end).map_err(mail_history_error)?;
                 let mut next_ordinal = segment.end.map(|end| end.end_ordinal_exclusive);
                 let mut valid_ordinals = true;
-                let mut saw_header = false;
+                let mut oldest_header_mode = None;
                 while let Some(outcome) = scanner
                     .scan_next_rollout_line()
                     .map_err(mail_history_error)?
@@ -108,35 +111,27 @@ impl LocalThreadStore {
                         ScanOutcome::Parsed(line) => line,
                         ScanOutcome::Rejected(error) => return Err(mail_history_error(error)),
                     };
-                    if saw_header {
-                        return Err(mail_history_error(
-                            "records precede canonical session metadata",
-                        ));
-                    }
                     valid_ordinals &= line.ordinal.is_some_and(|ordinal| {
                         next_ordinal.is_none_or(|next| ordinal.checked_add(1) == Some(next))
                     });
                     next_ordinal = line.ordinal;
-                    match line.item {
-                        RolloutItem::SessionMeta(meta) => {
-                            if meta.meta.history_mode == ThreadHistoryMode::Paginated
-                                && (!valid_ordinals
-                                    || next_ordinal != segment.start_ordinal.checked_sub(1))
-                            {
-                                return Err(mail_history_error(
-                                    "incomplete canonical ordinal range",
-                                ));
-                            }
-                            saw_header = true;
-                        }
-                        RolloutItem::ResponseItem(envelope) => {
-                            retain_accepted_agent_mail(&mut found, &ids, envelope)?;
-                        }
-                        _ => {}
+                    // SessionMeta patches are appended records, not new segment headers.
+                    // Only the oldest physical record must be the canonical header.
+                    oldest_header_mode = match &line.item {
+                        RolloutItem::SessionMeta(meta) => Some(meta.meta.history_mode),
+                        _ => None,
+                    };
+                    if let RolloutItem::ResponseItem(envelope) = line.item {
+                        retain_accepted_agent_mail(&mut found, &ids, envelope)?;
                     }
                 }
-                if !saw_header {
-                    return Err(mail_history_error("incomplete canonical lineage segment"));
+                let Some(mode) = oldest_header_mode else {
+                    return Err(mail_history_error("missing canonical lineage header"));
+                };
+                if mode == ThreadHistoryMode::Paginated
+                    && (!valid_ordinals || next_ordinal != segment.start_ordinal.checked_sub(1))
+                {
+                    return Err(mail_history_error("incomplete canonical ordinal range"));
                 }
             }
             Ok(found)

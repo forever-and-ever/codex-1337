@@ -105,6 +105,7 @@ use core_test_support::responses::sse;
 use core_test_support::responses::sse_response;
 use core_test_support::responses::start_mock_server;
 use core_test_support::responses::strip_response_item_ids;
+use futures::FutureExt;
 use pretty_assertions::assert_eq;
 use std::future::Future;
 use std::sync::RwLock;
@@ -1050,7 +1051,7 @@ async fn send_inter_agent_communication_without_turn_preserves_message_attributi
         .find(|entry| captured_op_matches(entry, &expected));
     assert!(captured.is_some());
 
-    timeout(Duration::from_secs(5), async {
+    let admission = timeout(Duration::from_secs(5), async {
         loop {
             if history_contains_inter_agent_communication(
                 thread.session.clone_history().await.raw_items(),
@@ -1061,8 +1062,51 @@ async fn send_inter_agent_communication_without_turn_preserves_message_attributi
             sleep(Duration::from_millis(10)).await;
         }
     })
-    .await
-    .expect("ordinary inter-agent communication should be admitted without user input");
+    .await;
+    if let Err(error) = admission {
+        let errors: Vec<_> = std::iter::from_fn(|| thread.io.rx_event.try_recv().ok())
+            .take(128)
+            .filter_map(|event| match event.msg {
+                EventMsg::Error(error) => Some(error.message),
+                _ => None,
+            })
+            .collect();
+        let pending = timeout(Duration::from_millis(100), async {
+            thread
+                .session
+                .state_db()
+                .unwrap()
+                .thread_queue()
+                .pending_agent_mail(thread_id)
+                .await
+                .map(|records| {
+                    records
+                        .into_iter()
+                        .map(|record| record.id)
+                        .collect::<Vec<_>>()
+                })
+        })
+        .await;
+        let active = thread
+            .session
+            .active_turn
+            .try_lock()
+            .map(|turn| turn.is_some());
+        let queued = thread
+            .session
+            .input_queue
+            .has_pending_mailbox_items()
+            .now_or_never();
+        let held = thread
+            .session
+            .input_queue
+            .has_held_mailbox_items()
+            .now_or_never();
+        let health = thread.session.check_agent_mail_task_start().now_or_never();
+        panic!(
+            "ordinary inter-agent communication should be admitted without user input: {error}; pending_ids={pending:?}; active={active:?}; queued={queued:?}; held={held:?}; health={health:?}; errors={errors:?}"
+        );
+    }
 
     let history = thread.session.clone_history().await;
     assert!(history_contains_inter_agent_communication(

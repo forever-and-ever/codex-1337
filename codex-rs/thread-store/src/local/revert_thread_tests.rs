@@ -27,8 +27,10 @@ use crate::ListTurnsParams;
 use crate::RevertThreadParams;
 use crate::SortDirection;
 use crate::StoredTurnItemsView;
+use crate::ThreadMetadataPatch;
 use crate::ThreadPersistenceMetadata;
 use crate::ThreadStore;
+use crate::UpdateThreadMetadataParams;
 use crate::validate_accepted_agent_mail;
 
 #[tokio::test]
@@ -95,6 +97,18 @@ async fn revert_keeps_thread_id_and_hides_suffix_across_repeated_reverts() {
         .live_rollout_path(thread_id)
         .await
         .expect("source rollout path");
+    // Live metadata updates append SessionMeta; they must not hide earlier admission witnesses.
+    store
+        .update_thread_metadata(UpdateThreadMetadataParams {
+            thread_id,
+            patch: ThreadMetadataPatch {
+                memory_mode: Some(ThreadMemoryMode::Enabled),
+                ..Default::default()
+            },
+            include_archived: false,
+        })
+        .await
+        .expect("append metadata update after canonical mail");
     store
         .shutdown_thread(thread_id)
         .await
