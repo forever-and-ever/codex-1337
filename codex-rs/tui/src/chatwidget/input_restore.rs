@@ -257,16 +257,6 @@ impl ChatWidget {
         true
     }
 
-    pub(crate) fn discard_stale_pending_steer(&mut self, client_id: &str) -> bool {
-        if self.input_queue.pending_steer.client_id() != Some(client_id) {
-            return false;
-        }
-        self.input_queue.pending_steer.set(None);
-        self.refresh_pending_input_preview();
-        self.request_redraw();
-        true
-    }
-
     /// Handle a turn aborted due to user interrupt, budget exhaustion,
     /// or review completion.
     /// When there are queued user messages, restore them into the composer
