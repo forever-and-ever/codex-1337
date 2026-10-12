@@ -20,6 +20,13 @@ mod worker;
 
 #[path = "server_operation_requests.rs"]
 mod requests;
+
+#[path = "server_realtime_operations.rs"]
+mod realtime;
+
+pub(in crate::app) use realtime::RealtimeIdentity;
+
+pub(in crate::app) use realtime::RealtimeOperation;
 use requests::OperationReceipt;
 pub(in crate::app) use requests::ThreadOperation;
 
@@ -47,6 +54,7 @@ enum OperationLane {
     Control(ThreadId),
     Exit,
     Connection,
+    Realtime(ThreadId),
 }
 
 pub(in crate::app) use requests::CatalogRequest;
@@ -465,6 +473,19 @@ impl ServerOperations {
         }
     }
 
+    fn realtime_start_precedes(&self, thread_id: ThreadId, order: u64) -> bool {
+        self.lanes.get(&OperationLane::Realtime(thread_id)).is_some_and(|lane|
+            lane.active.order < order && !matches!(lane.state, LaneState::Uncertain)
+                && matches!(&lane.active.request, SubmissionRequest::Operation(operation)
+                    if matches!(&**operation, ThreadOperation::Realtime(realtime::RealtimeOperation::Start { .. }))))
+    }
+
+    fn realtime_stop_precedes(&self, thread_id: ThreadId, order: u64) -> bool {
+        self.lanes.get(&OperationLane::Control(thread_id)).is_some_and(|lane|
+            lane.active.order < order && matches!(&lane.active.request, SubmissionRequest::Operation(operation)
+                if matches!(&**operation, ThreadOperation::Control(control::ControlOperation::RealtimeStop { .. }))))
+    }
+
     pub(in crate::app) fn thread_preview(
         &self,
         thread_id: Option<ThreadId>,
@@ -475,6 +496,7 @@ impl ServerOperations {
         let mut entries = Vec::new();
         for key in [
             OperationLane::Thread(thread_id),
+            OperationLane::Realtime(thread_id),
             OperationLane::Control(thread_id),
             OperationLane::Connection,
             OperationLane::Exit,

@@ -85,6 +85,7 @@ enum PendingSpeechState {
     AwaitingTurn,
     Queued(u64),
     Accepted,
+    Uncertain(u64),
 }
 
 fn can_retain_realtime_speech(turn_id: &str, item: &ThreadItem) -> bool {
@@ -270,10 +271,16 @@ impl ChatWidget {
     pub(crate) fn toggle_realtime_conversation(&mut self) {
         if self.realtime_conversation.phase == RealtimeConversationPhase::Stopping {
             self.realtime_conversation.startup_retry = StartupRetry::Used;
-            self.add_info_message(
-                "Voice conversation is still stopping.".to_string(),
-                /*hint*/ None,
-            );
+            if let Some(thread_id) = self.realtime_conversation.thread_id {
+                self.submit_op(AppCommand::RealtimeConversationStop {
+                    thread_id,
+                    attempt_id: self.realtime_conversation.attempt_id,
+                });
+                self.add_info_message(
+                    "Requested voice stop again; no voice start was resent.".into(),
+                    None,
+                );
+            }
             return;
         }
 
@@ -386,13 +393,19 @@ impl ChatWidget {
                 self.reset_realtime_conversation();
                 return;
             };
-            if !self.submit_op(AppCommand::RealtimeConversationStop { thread_id }) {
+            if !self.submit_op(AppCommand::RealtimeConversationStop {
+                thread_id,
+                attempt_id: self.realtime_conversation.attempt_id,
+            }) {
                 self.record_realtime_failure();
                 self.reset_realtime_conversation();
             }
         } else {
             if let Some(thread_id) = self.reset_realtime_conversation() {
-                self.submit_op(AppCommand::RealtimeConversationStop { thread_id });
+                self.submit_op(AppCommand::RealtimeConversationStop {
+                    thread_id,
+                    attempt_id: self.realtime_conversation.attempt_id,
+                });
             }
         }
         self.request_redraw();
@@ -435,6 +448,8 @@ impl ChatWidget {
             .schedule_frame_in(MICROPHONE_METER_INTERVAL);
         if !self.submit_op(AppCommand::RealtimeConversationStart {
             thread_id,
+            attempt_id,
+            input_generation: self.realtime_conversation.input_generation,
             offer_sdp: offer.offer_sdp.into(),
         }) {
             self.record_realtime_failure();
@@ -493,7 +508,10 @@ impl ChatWidget {
                 self.realtime_conversation.phase = RealtimeConversationPhase::Stopping;
                 self.realtime_conversation.startup_retry = StartupRetry::WaitingForStop;
                 self.refresh_terminal_title();
-                if !self.submit_op(AppCommand::RealtimeConversationStop { thread_id }) {
+                if !self.submit_op(AppCommand::RealtimeConversationStop {
+                    thread_id,
+                    attempt_id: self.realtime_conversation.attempt_id,
+                }) {
                     self.record_realtime_failure();
                     self.reset_realtime_conversation();
                 } else {
@@ -555,6 +573,37 @@ impl ChatWidget {
             "Voice conversation started.".to_string(),
             Some("Use /voice mute to mute or /voice to stop.".to_string()),
         );
+    }
+
+    pub(crate) fn owns_realtime_attempt(&self, thread_id: ThreadId, attempt_id: u64) -> bool {
+        self.thread_id() == Some(thread_id) && self.realtime_conversation.attempt_id == attempt_id
+    }
+
+    pub(crate) fn reject_unsent_realtime_start(
+        &mut self,
+        thread_id: ThreadId,
+        attempt_id: u64,
+        message: String,
+    ) {
+        if self.realtime_conversation.phase == RealtimeConversationPhase::Starting
+            && self.owns_realtime_attempt(thread_id, attempt_id)
+        {
+            self.record_realtime_failure();
+            self.reset_realtime_conversation();
+            self.add_realtime_error(message);
+        }
+    }
+
+    pub(crate) fn is_starting_realtime_attempt(
+        &self,
+        thread_id: ThreadId,
+        attempt_id: u64,
+        input_generation: u64,
+    ) -> bool {
+        self.realtime_conversation.phase == RealtimeConversationPhase::Starting
+            && self.realtime_conversation.thread_id == Some(thread_id)
+            && self.realtime_conversation.attempt_id == attempt_id
+            && self.realtime_conversation.input_generation == input_generation
     }
 
     pub(crate) fn is_current_realtime_attempt(
@@ -1152,6 +1201,17 @@ impl ChatWidget {
                 super::ThreadItemRenderSource::Live,
                 /*timestamp*/ None,
             );
+        }
+    }
+
+    pub(crate) fn mark_realtime_speech_uncertain(&mut self, delivery_id: u64) {
+        if let Some(delivery) = self
+            .realtime_conversation
+            .pending_speech
+            .iter_mut()
+            .find(|delivery| delivery.state == PendingSpeechState::Queued(delivery_id))
+        {
+            delivery.state = PendingSpeechState::Uncertain(delivery_id);
         }
     }
 

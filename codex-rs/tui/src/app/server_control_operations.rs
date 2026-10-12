@@ -17,6 +17,9 @@ pub(in crate::app) enum ControlOperation {
         turn_id: Option<String>,
         goal: GoalStop,
     },
+    RealtimeStop {
+        attempt_id: u64,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -33,6 +36,17 @@ pub(super) async fn send(
     store: &Arc<Mutex<ThreadEventStore>>,
 ) -> Result<OperationReceipt, TypedRequestError> {
     let (turn_id, exit) = match control {
+        ControlOperation::RealtimeStop { .. } => {
+            let _: api::ThreadRealtimeStopResponse = handle
+                .request_typed(api::ClientRequest::ThreadRealtimeStop {
+                    request_id: api::RequestId::String(format!("tui-operation-{id}-voice-stop")),
+                    params: api::ThreadRealtimeStopParams {
+                        thread_id: thread_id.to_string(),
+                    },
+                })
+                .await?;
+            return Ok(OperationReceipt::RealtimeStopped);
+        }
         ControlOperation::DetachAndExit { plan, .. } => {
             let receipt = match tokio::time::timeout(
                 super::super::event_dispatch::SHUTDOWN_FIRST_EXIT_TIMEOUT,

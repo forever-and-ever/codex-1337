@@ -300,7 +300,10 @@ async fn remote_disconnect_retires_voice_before_reconnecting() -> Result<()> {
     app.handle_event(
         &mut tui,
         &mut session,
-        AppEvent::CodexOp(Op::RealtimeConversationStop { thread_id }),
+        AppEvent::CodexOp(Op::RealtimeConversationStop {
+            thread_id,
+            attempt_id: 0,
+        }),
     )
     .await?;
     assert_eq!(

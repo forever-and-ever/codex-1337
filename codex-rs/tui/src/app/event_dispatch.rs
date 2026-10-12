@@ -879,7 +879,7 @@ impl App {
                 );
                 let is_realtime_stop = matches!(&op, AppCommand::RealtimeConversationStop { .. });
                 let realtime_stop_thread_id = match &op {
-                    AppCommand::RealtimeConversationStop { thread_id } => Some(*thread_id),
+                    AppCommand::RealtimeConversationStop { thread_id, .. } => Some(*thread_id),
                     _ => None,
                 };
                 let realtime_speech_delivery_id = match &op {
@@ -906,7 +906,7 @@ impl App {
                 }
                 let parked_voice = match &op {
                     AppCommand::RealtimeConversationStart { thread_id, .. }
-                    | AppCommand::RealtimeConversationStop { thread_id }
+                    | AppCommand::RealtimeConversationStop { thread_id, .. }
                     | AppCommand::RealtimeConversationSpeech { thread_id, .. } => self
                         .background_voice
                         .as_ref()

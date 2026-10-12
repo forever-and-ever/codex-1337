@@ -153,16 +153,20 @@ async fn check_remote_voice_start(
     app.config.realtime.voice = Some(codex_protocol::protocol::RealtimeVoice::Maple);
     app.chat_widget
         .on_realtime_voice_saved(codex_protocol::protocol::RealtimeVoice::Maple);
+    crate::chatwidget::prepare_voice_for_thread(&mut app.chat_widget, thread_id);
     Box::pin(app.handle_event(
         &mut tui,
         &mut app_server,
         AppEvent::CodexOp(Op::RealtimeConversationStart {
             thread_id,
+            attempt_id: 0,
+            input_generation: 0,
             offer_sdp: String::from("v=0\r\n").into(),
         }),
     ))
     .await?;
 
+    app.settle_turn_submissions(&mut app_server).await?;
     let starts = recorded_params(&requests, "thread/realtime/start");
     assert_eq!(starts.len(), 1);
     let start = &starts[0];
@@ -359,6 +363,7 @@ async fn switching_agent_threads_preserves_backend_voice_and_routes_pending_spee
     assert_eq!(app.voice_owner_thread_id(), Some(source));
     assert!(recorded_params(&requests, "thread/realtime/stop").is_empty());
     Box::pin(app.handle_event(&mut tui, &mut app_server, AppEvent::CodexOp(speech))).await?;
+    app.settle_turn_submissions(&mut app_server).await?;
     assert_eq!(app.active_thread_id, Some(target));
     assert_eq!(app.chat_widget.thread_id(), Some(target));
     // The newer user caption interrupted this queued answer, even across navigation.
@@ -388,6 +393,7 @@ async fn switching_agent_threads_preserves_backend_voice_and_routes_pending_spee
     assert_eq!(app.voice_owner_thread_id(), None);
     let stop = ops.try_recv()?;
     Box::pin(app.handle_event(&mut tui, &mut app_server, AppEvent::CodexOp(stop))).await?;
+    app.settle_turn_submissions(&mut app_server).await?;
     assert_eq!(
         recorded_params(&requests, "thread/realtime/stop"),
         vec![serde_json::json!({"threadId": source.to_string()})]
@@ -1241,6 +1247,7 @@ async fn rejected_realtime_speech_restores_the_delegated_final_answer() -> Resul
     while events.try_recv().is_ok() {}
     let mut tui = crate::tui::test_support::make_test_tui()?;
     Box::pin(app.handle_event(&mut tui, &mut app_server, AppEvent::CodexOp(speech))).await?;
+    app.settle_turn_submissions(&mut app_server).await?;
     assert_eq!(
         recorded_params(&requests, "thread/realtime/appendSpeech").len(),
         1
@@ -1358,6 +1365,7 @@ async fn switching_threads_retains_undelivered_voice_answer_after_replay_evictio
 
     let mut tui = crate::tui::test_support::make_test_tui()?;
     Box::pin(app.handle_event(&mut tui, &mut app_server, AppEvent::CodexOp(speech))).await?;
+    app.settle_turn_submissions(&mut app_server).await?;
     assert!(recorded_params(&requests, "thread/realtime/appendSpeech").is_empty());
     while let Ok(event) = side_events.try_recv() {
         if let AppEvent::InsertHistoryCell(cell) = event {
@@ -1631,6 +1639,7 @@ async fn delegated_final_speech_reaches_app_server_once_and_stale_speech_is_reje
     let mut tui = crate::tui::test_support::make_test_tui()?;
     Box::pin(app.handle_event(&mut tui, &mut app_server, AppEvent::CodexOp(speech.clone())))
         .await?;
+    app.settle_turn_submissions(&mut app_server).await?;
     assert!(!app.chat_widget.has_pending_realtime_speech(delivery_id));
     assert_eq!(
         recorded_params(&requests, "thread/realtime/appendSpeech"),
@@ -1646,6 +1655,7 @@ async fn delegated_final_speech_reaches_app_server_once_and_stale_speech_is_reje
         ItemEventKind::Started,
     );
     Box::pin(app.handle_event(&mut tui, &mut app_server, AppEvent::CodexOp(speech))).await?;
+    app.settle_turn_submissions(&mut app_server).await?;
     assert_eq!(
         recorded_params(&requests, "thread/realtime/appendSpeech").len(),
         1
@@ -1710,6 +1720,7 @@ async fn delegated_final_speech_reaches_app_server_once_and_stale_speech_is_reje
             .has_pending_realtime_speech(queued_delivery_id)
     );
     Box::pin(app.handle_event(&mut tui, &mut app_server, AppEvent::CodexOp(queued))).await?;
+    app.settle_turn_submissions(&mut app_server).await?;
     assert_eq!(
         recorded_params(&requests, "thread/realtime/appendSpeech").len(),
         1
@@ -1784,22 +1795,26 @@ async fn rejected_voice_setting_preserves_current_selection() -> Result<()> {
 
 #[tokio::test]
 async fn remote_voice_config_read_failure_does_not_start_with_local_voice() -> Result<()> {
-    let (mut app, _events, _ops) = make_test_app_with_channels().await;
+    let (mut app, mut events, _ops) = make_test_app_with_channels().await;
     let (mut app_server, requests, proxy) = start_recording_remote_app_server(&app.config).await?;
     std::fs::write(app.config.codex_home.join("config.toml"), "realtime = [")?;
     let thread_id = ThreadId::new();
-    let error = app
-        .try_submit_active_thread_op_via_app_server(
-            &mut app_server,
+    crate::chatwidget::prepare_voice_for_thread(&mut app.chat_widget, thread_id);
+    app.try_submit_active_thread_op_via_app_server(
+        &mut app_server,
+        thread_id,
+        &AppCommand::RealtimeConversationStart {
             thread_id,
-            &AppCommand::RealtimeConversationStart {
-                thread_id,
-                offer_sdp: String::from("v=0\r\n").into(),
-            },
-        )
-        .await
-        .expect_err("invalid server config must not fall back to local voice");
-    assert!(error.to_string().contains("config/read"));
+            attempt_id: 0,
+            input_generation: 0,
+            offer_sdp: String::from("v=0\r\n").into(),
+        },
+    )
+    .await?;
+    app.settle_turn_submissions(&mut app_server).await?;
+    assert!(std::iter::from_fn(|| events.try_recv().ok()).any(|event| {
+        matches!(event, AppEvent::InsertHistoryCell(cell) if cell.display_lines(80).iter().any(|line| line.to_string().contains("config/read")))
+    }));
     assert!(recorded_params(&requests, "thread/realtime/start").is_empty());
     app_server.shutdown().await?;
     proxy.await??;
@@ -1857,15 +1872,19 @@ async fn embedded_voice_settings_follow_project_after_thread_switch() -> Result<
             popup.contains(&format!("{} (current)", voice.wire_name())),
             "{popup}"
         );
+        crate::chatwidget::prepare_voice_for_thread(&mut app.chat_widget, thread_id);
         app.try_submit_active_thread_op_via_app_server(
             &mut server,
             thread_id,
             &AppCommand::RealtimeConversationStart {
                 thread_id,
+                attempt_id: 0,
+                input_generation: 0,
                 offer_sdp: String::from("v=0\r\n").into(),
             },
         )
         .await?;
+        app.settle_turn_submissions(&mut server).await?;
         assert_eq!(
             recorded_params(&requests, "thread/realtime/start")
                 .last()
@@ -1970,7 +1989,7 @@ async fn remote_voice_catalog_success_and_failure() -> Result<()> {
                                 app.config.cwd.to_path_buf(),
                             ));
                         app.active_thread_id = Some(thread_id);
-                        crate::chatwidget::activate_voice_for_thread(
+                        crate::chatwidget::prepare_voice_for_thread(
                             &mut app.chat_widget,
                             thread_id,
                         );
@@ -1981,10 +2000,13 @@ async fn remote_voice_catalog_success_and_failure() -> Result<()> {
                             &mut server,
                             AppEvent::CodexOp(Op::RealtimeConversationStart {
                                 thread_id,
+                                attempt_id: 0,
+                                input_generation: 0,
                                 offer_sdp: String::from("v=0\r\n").into(),
                             }),
                         ))
                         .await?;
+                        app.settle_turn_submissions(&mut server).await?;
                         assert!(!app.chat_widget.may_receive_realtime_transcripts());
                         assert!(recorded_params(&requests, "thread/realtime/start").is_empty());
                     }

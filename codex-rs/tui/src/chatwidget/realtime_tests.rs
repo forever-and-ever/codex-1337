@@ -68,6 +68,12 @@ pub(crate) fn activate_voice_for_thread(chat: &mut ChatWidget, thread_id: Thread
     chat.realtime_conversation.latest_input_was_voice = true;
 }
 
+pub(crate) fn prepare_voice_for_thread(chat: &mut ChatWidget, thread_id: ThreadId) {
+    activate_voice_for_thread(chat, thread_id);
+    chat.realtime_conversation.phase = RealtimeConversationPhase::Starting;
+    chat.realtime_conversation.backend_started = false;
+}
+
 fn user_item(text: &str) -> ThreadItem {
     ThreadItem::UserMessage {
         id: format!("user-{text}"),

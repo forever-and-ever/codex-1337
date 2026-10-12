@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 /// Unknown voices belong to newer servers; omit the override instead of blocking audio.
 /// An unset preference explicitly selects the V1/V3 server default, not a stale thread preference.
-fn configured_voice(
+pub(super) fn configured_voice(
     config: &codex_app_server_protocol::Config,
     default_voice: RealtimeVoice,
 ) -> Result<Option<RealtimeVoice>> {

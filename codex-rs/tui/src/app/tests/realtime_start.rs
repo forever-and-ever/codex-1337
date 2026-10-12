@@ -33,6 +33,8 @@ async fn rejected_voice_start_does_not_leave_local_capture_active() -> Result<()
             &mut app_server,
             AppEvent::CodexOp(Op::RealtimeConversationStart {
                 thread_id,
+                attempt_id: 0,
+                input_generation: 0,
                 offer_sdp: String::from("v=0\r\n").into(),
             }),
         ))
@@ -88,7 +90,10 @@ async fn rejected_voice_stop_clears_the_owned_session() -> Result<()> {
         Box::pin(app.handle_event(
             &mut tui,
             &mut app_server,
-            AppEvent::CodexOp(Op::RealtimeConversationStop { thread_id }),
+            AppEvent::CodexOp(Op::RealtimeConversationStop {
+                thread_id,
+                attempt_id: 0,
+            }),
         ))
         .await?;
 

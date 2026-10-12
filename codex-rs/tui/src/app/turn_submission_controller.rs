@@ -299,9 +299,16 @@ impl App {
                         return None;
                     }
                     let ready = match key {
-                        OperationLane::Control(_) | OperationLane::Exit => true,
-                        OperationLane::Thread(_) => {
+                        OperationLane::Exit => true,
+                        OperationLane::Control(thread_id) => {
+                            !matches!(&lane.active.request, SubmissionRequest::Operation(operation)
+                                if matches!(&**operation, ThreadOperation::Control(control::ControlOperation::RealtimeStop { .. })))
+                                || !self.server_operations.realtime_start_precedes(*thread_id, lane.active.order)
+                        }
+                        OperationLane::Thread(_) => barrier.is_none_or(|order| lane.active.order < order),
+                        OperationLane::Realtime(thread_id) => {
                             barrier.is_none_or(|order| lane.active.order < order)
+                                && !self.server_operations.realtime_stop_precedes(*thread_id, lane.active.order)
                         }
                         OperationLane::Connection => {
                             !self
@@ -310,8 +317,10 @@ impl App {
                                 .precedes_barrier(lane.active.order, self.server_operations.epoch)
                                 && !self.server_operations.lanes.iter().any(
                                     |(other, predecessor)| {
-                                        matches!(other, OperationLane::Thread(_))
-                                            && predecessor.active.order < lane.active.order
+                                        matches!(
+                                            other,
+                                            OperationLane::Thread(_) | OperationLane::Realtime(_)
+                                        ) && predecessor.active.order < lane.active.order
                                     },
                                 )
                         }
@@ -337,6 +346,26 @@ impl App {
         active: PendingSubmission,
         waiting: VecDeque<PendingSubmission>,
     ) {
+        let permitted = match &active.request {
+            SubmissionRequest::Operation(operation) => match &**operation {
+                ThreadOperation::Control(control::ControlOperation::RealtimeStop {
+                    attempt_id,
+                }) => self
+                    .voice_widget_for_thread(thread_id)
+                    .is_none_or(|widget| widget.owns_realtime_attempt(thread_id, *attempt_id)),
+                ThreadOperation::Realtime(operation) => {
+                    self.realtime_operation_is_current(thread_id, operation)
+                }
+                _ => true,
+            },
+            _ => true,
+        };
+        if !permitted
+            && let SubmissionRequest::Operation(operation) = &active.request
+            && let ThreadOperation::Realtime(operation) = &**operation
+        {
+            self.cancel_unsent_realtime_operation(thread_id, operation);
+        }
         let id = active.id;
         let epoch = active.epoch;
         let request = active.worker_request();
@@ -344,10 +373,12 @@ impl App {
         let store = Arc::clone(&active.store);
         let completions = self.thread_delivery.completion_tx.clone();
         let control_completions = self.server_operations.control_tx.clone();
-        let urgent = matches!(&active.request, SubmissionRequest::Operation(operation) if matches!(&**operation, ThreadOperation::Control(_)));
+        let urgent = matches!(&active.request, SubmissionRequest::Operation(operation) if matches!(&**operation, ThreadOperation::Control(_) | ThreadOperation::Realtime(_)));
         let settings_supported = server.operation_settings_supported();
         let task = AbortOnDropHandle::new(tokio::spawn(async move {
-            let outcome = if !settings_supported
+            let outcome = if !permitted {
+                SubmissionOutcome::Operation(Ok(OperationReceipt::RealtimeDiscarded))
+            } else if !settings_supported
                 && matches!(&request, WorkerRequest::Operation { operation, .. } if matches!(&**operation, ThreadOperation::Mutation(requests::ThreadMutation::Settings(_))))
             {
                 SubmissionOutcome::Operation(Ok(OperationReceipt::SettingsUnsupported))
@@ -455,7 +486,9 @@ impl App {
                     }
                     self.cleanup_unsent_operations(lane.waiting.iter(), &protected_starts)
                         .await;
-                    if matches!(lane.state, LaneState::Queued) {
+                    if matches!(lane.state, LaneState::Queued)
+                        || matches!(&lane.active.request, SubmissionRequest::Operation(operation) if matches!(&**operation, ThreadOperation::Realtime(realtime) if realtime.is_preparation()))
+                    {
                         self.cleanup_unsent_operations(
                             std::iter::once(&lane.active),
                             &protected_starts,
@@ -519,7 +552,7 @@ impl App {
             }
         };
         let SubmissionLane {
-            active,
+            mut active,
             state,
             mut waiting,
         } = entry.remove();
@@ -559,6 +592,26 @@ impl App {
             self.refresh_submission_preview();
             return Ok(());
         }
+        if let SubmissionOutcome::Operation(Ok(OperationReceipt::RealtimePrepared(result))) =
+            &outcome
+            && self
+                .thread_event_channels
+                .get(&thread_id)
+                .is_some_and(|channel| Arc::ptr_eq(&channel.store, &active.store))
+            && self.continue_realtime_preparation(thread_id, &mut active, result.clone())
+        {
+            self.server_operations.lanes.insert(
+                key,
+                SubmissionLane {
+                    active,
+                    state: LaneState::Queued,
+                    waiting,
+                },
+            );
+            self.drive_server_operations(server);
+            self.refresh_submission_preview();
+            return Ok(());
+        }
         if let SubmissionOutcome::Operation(result) = outcome {
             let SubmissionRequest::Operation(operation) = &active.request else {
                 unreachable!("RPC receipt for a turn operation");
@@ -588,7 +641,9 @@ impl App {
                 }
                 Ok(_) => {}
                 Err(failure) => {
-                    if matches!(&failure, SubmissionFailure::Rejected(_)) {
+                    if matches!(&failure, SubmissionFailure::Rejected(_))
+                        && !matches!(&**operation, ThreadOperation::Realtime(_))
+                    {
                         let protected = waiting
                             .iter()
                             .filter(|entry| requests::holds_start_lease(entry))
@@ -603,6 +658,7 @@ impl App {
                         self.chat_widget.add_error_message(format!("Earlier conversation {thread_id}: {} did not receive a usable acknowledgement; no retry was sent.", operation.label()));
                     }
                     if !matches!(failure, SubmissionFailure::Rejected(_))
+                        && !matches!(&**operation, ThreadOperation::Realtime(operation) if operation.is_preparation())
                         && !matches!(
                             &**operation,
                             ThreadOperation::Catalog(_) | ThreadOperation::Control(_)

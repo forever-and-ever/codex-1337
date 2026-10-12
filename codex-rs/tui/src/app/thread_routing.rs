@@ -480,7 +480,7 @@ impl App {
                     .restore_undelivered_realtime_speech(*delivery_id);
             }
             if let AppCommand::RealtimeConversationStart { thread_id, .. }
-            | AppCommand::RealtimeConversationStop { thread_id } = &op
+            | AppCommand::RealtimeConversationStop { thread_id, .. } = &op
                 && self.chat_widget.thread_id() == Some(*thread_id)
             {
                 self.chat_widget.record_realtime_failure();
@@ -506,7 +506,7 @@ impl App {
                     .restore_undelivered_realtime_speech(*delivery_id);
             }
             if let AppCommand::RealtimeConversationStart { thread_id, .. }
-            | AppCommand::RealtimeConversationStop { thread_id } = &op
+            | AppCommand::RealtimeConversationStop { thread_id, .. } = &op
                 && self.chat_widget.thread_id() == Some(*thread_id)
             {
                 self.chat_widget.record_realtime_failure();
@@ -850,6 +850,8 @@ impl App {
             }
             AppCommand::RealtimeConversationStart {
                 thread_id: realtime_thread_id,
+                attempt_id,
+                input_generation,
                 offer_sdp,
             } => {
                 if *realtime_thread_id != thread_id {
@@ -860,22 +862,37 @@ impl App {
                     .config_ref()
                     .experimental_realtime_ws_model
                     .clone();
-                let voices = self.realtime_voices(app_server).await?;
-                let voice = self.effective_realtime_voice(app_server, &voices).await?;
-                app_server
-                    .thread_realtime_start(
-                        *realtime_thread_id,
-                        String::from(offer_sdp.clone()),
-                        model,
-                        voice,
-                    )
-                    .await?;
+                let cwd = self.chat_widget.config_ref().cwd.to_path_buf();
+                self.enqueue_server_operation(
+                    app_server,
+                    thread_id,
+                    ThreadOperation::Realtime(
+                        super::turn_submissions::RealtimeOperation::Prepare {
+                            identity: super::turn_submissions::RealtimeIdentity {
+                                attempt_id: *attempt_id,
+                                input_generation: *input_generation,
+                            },
+                            offer_sdp: String::from(offer_sdp.clone()),
+                            model,
+                            cwd,
+                        },
+                    ),
+                );
                 Ok(true)
             }
             AppCommand::RealtimeConversationStop {
                 thread_id: realtime_thread_id,
+                attempt_id,
             } => {
-                app_server.thread_realtime_stop(*realtime_thread_id).await?;
+                self.enqueue_server_operation(
+                    app_server,
+                    *realtime_thread_id,
+                    ThreadOperation::Control(
+                        super::turn_submissions::ControlOperation::RealtimeStop {
+                            attempt_id: *attempt_id,
+                        },
+                    ),
+                );
                 Ok(true)
             }
             AppCommand::RealtimeConversationSpeech {
@@ -885,24 +902,21 @@ impl App {
                 delivery_id,
                 text,
             } => {
-                if !self.chat_widget.has_pending_realtime_speech(*delivery_id) {
+                if *realtime_thread_id != thread_id {
                     return Ok(true);
                 }
-                if *realtime_thread_id != thread_id
-                    || !self.chat_widget.is_current_realtime_attempt(
-                        *realtime_thread_id,
-                        *attempt_id,
-                        *input_generation,
-                    )
-                {
-                    self.chat_widget
-                        .restore_undelivered_realtime_speech(*delivery_id);
-                    return Ok(true);
-                }
-                app_server
-                    .thread_realtime_append_speech(*realtime_thread_id, text.as_str().to_owned())
-                    .await?;
-                self.chat_widget.accept_realtime_speech(*delivery_id);
+                self.enqueue_server_operation(
+                    app_server,
+                    thread_id,
+                    ThreadOperation::Realtime(super::turn_submissions::RealtimeOperation::Speech {
+                        identity: super::turn_submissions::RealtimeIdentity {
+                            attempt_id: *attempt_id,
+                            input_generation: *input_generation,
+                        },
+                        delivery_id: *delivery_id,
+                        text: text.as_str().to_owned(),
+                    }),
+                );
                 Ok(true)
             }
             AppCommand::RunUserShellCommand { command } => {

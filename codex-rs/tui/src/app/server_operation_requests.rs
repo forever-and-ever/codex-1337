@@ -10,6 +10,7 @@ pub(in crate::app) enum ThreadOperation {
     Control(control::ControlOperation),
     Catalog(CatalogRequest),
     Connection(ConnectionMutation),
+    Realtime(realtime::RealtimeOperation),
 }
 
 #[derive(Clone)]
@@ -56,11 +57,18 @@ pub(in crate::app) enum OperationReceipt {
     GuardianApproved,
     Skills(api::SkillsListResponse),
     ConfigReloaded,
+    RealtimePrepared(Result<Option<codex_protocol::protocol::RealtimeVoice>, String>),
+    RealtimeStarted,
+    RealtimeSpeechAccepted,
+    RealtimeDiscarded,
+    RealtimeStopped,
 }
 
 impl ThreadOperation {
     pub(in crate::app) fn label(&self) -> &'static str {
         match self {
+            Self::Realtime(operation) => operation.label(),
+            Self::Control(control::ControlOperation::RealtimeStop { .. }) => "Stopping voice mode",
             Self::Control(control::ControlOperation::DetachAndExit { .. }) => {
                 "Detaching frontend before exit"
             }
@@ -85,6 +93,7 @@ impl ThreadOperation {
 
     pub(super) fn lane(&self, thread_id: ThreadId) -> OperationLane {
         match self {
+            Self::Realtime(_) => OperationLane::Realtime(thread_id),
             Self::Connection(_) => OperationLane::Connection,
             Self::Control(control::ControlOperation::DetachAndExit { .. }) => OperationLane::Exit,
             Self::Control(_) => OperationLane::Control(thread_id),
@@ -103,6 +112,9 @@ pub(super) async fn send(
     let request_id = api::RequestId::String(format!("tui-operation-{id}"));
     let thread = thread_id.to_string();
     match operation {
+        ThreadOperation::Realtime(operation) => {
+            realtime::send(handle, thread_id, id, operation).await
+        }
         ThreadOperation::Control(operation) => {
             control::send(&handle, thread_id, id, operation, &store).await
         }
@@ -249,6 +261,20 @@ impl App {
         receipt: OperationReceipt,
     ) -> Result<()> {
         match receipt {
+            OperationReceipt::RealtimeSpeechAccepted => {
+                if let ThreadOperation::Realtime(
+                    operation @ realtime::RealtimeOperation::Speech { delivery_id, .. },
+                ) = operation
+                    && self.realtime_operation_is_current(thread_id, operation)
+                    && let Some(widget) = self.voice_widget_for_thread(thread_id)
+                {
+                    widget.accept_realtime_speech(*delivery_id);
+                }
+            }
+            OperationReceipt::RealtimePrepared(_)
+            | OperationReceipt::RealtimeStarted
+            | OperationReceipt::RealtimeDiscarded
+            | OperationReceipt::RealtimeStopped => {}
             OperationReceipt::StopAndExitCompleted => self
                 .app_event_tx
                 .send(AppEvent::Exit(ExitMode::ShutdownAfterInterrupt)),
@@ -328,6 +354,10 @@ impl App {
         operation: &ThreadOperation,
         failure: &SubmissionFailure,
     ) {
+        if let ThreadOperation::Realtime(operation) = operation {
+            self.reject_realtime_operation(thread_id, operation, failure);
+            return;
+        }
         if let ThreadOperation::Mutation(ThreadMutation::Rename(params)) = operation
             && let SubmissionFailure::Rejected(error) = failure
             && self.confirm_thread_name_conflict(
@@ -390,6 +420,9 @@ impl App {
                 continue;
             }
             match &**operation {
+                ThreadOperation::Realtime(operation) => {
+                    self.cancel_unsent_realtime_operation(thread_id, operation)
+                }
                 ThreadOperation::Mutation(ThreadMutation::DisarmAlarm(id)) => {
                     if let Some(widget) = self.voice_widget_for_thread(thread_id) {
                         widget.cancel_unsent_alarm_disarm(id);

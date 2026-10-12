@@ -548,6 +548,47 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     assert!(recorded_params(&requests, "thread/alarm/disarm").is_empty());
     assert!(recorded_params(&requests, "thread/compact/start").is_empty());
     assert!(app.server_operations.is_empty());
+    // Realtime preparation owns no signaling effect yet. Retiring its read-only stage
+    // releases the matching local helper lease and cannot later start a stale attempt.
+    crate::chatwidget::prepare_voice_for_thread(&mut app.chat_widget, other_id);
+    app.submit_thread_op(
+        &mut server,
+        other_id,
+        AppCommand::RealtimeConversationStart {
+            thread_id: other_id,
+            attempt_id: 0,
+            input_generation: 0,
+            offer_sdp: String::from("v=0\\r\\n").into(),
+        },
+    )
+    .await?;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while recorded_params(&requests, "thread/realtime/listVoices").is_empty() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await?;
+    app.chat_widget
+        .apply_external_edit("voice preparation draft".into());
+    app.handle_key_event(
+        &mut tui,
+        &mut server,
+        KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
+    )
+    .await;
+    assert!(app.chat_widget.composer_text_with_pending().contains('x'));
+    app.handle_submission_event(
+        &server,
+        crate::app::turn_submissions::SubmissionEvent::Retire,
+    )
+    .await;
+    assert!(!app.chat_widget.may_receive_realtime_transcripts());
+    assert!(recorded_params(&requests, "thread/realtime/start").is_empty());
+    assert_eq!(
+        recorded_params(&requests, "thread/realtime/listVoices").len(),
+        1
+    );
+    assert!(app.server_operations.is_empty());
     server.shutdown().await?;
     proxy.await??;
     Ok(())
