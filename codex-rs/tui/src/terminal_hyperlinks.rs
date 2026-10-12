@@ -338,10 +338,14 @@ pub(crate) fn adaptive_wrap_hyperlink_lines(
                 .initial_indent(options.subsequent_indent.clone())
         };
         let mut source = line.clone();
-        source
+        let logical = source
             .source
-            .get_or_insert_with(|| LogicalLineSource::from_line(&line.line))
-            .continuation_indent = options.subsequent_indent.clone();
+            .get_or_insert_with(|| LogicalLineSource::from_line(&line.line));
+        // Reassembled fragments must retain the URL boundaries used for their first render.
+        if logical.wrap_policy == LineWrapPolicy::Word {
+            logical.wrap_policy = LineWrapPolicy::UrlAware;
+        }
+        logical.continuation_indent = options.subsequent_indent.clone();
         out.extend(remap_source_wrapped_line(
             &source,
             crate::wrapping::adaptive_wrap_line_with_source(&line.line, options),

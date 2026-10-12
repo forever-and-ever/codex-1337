@@ -253,6 +253,7 @@ fn paused_header_reservation_survives_copy_until_scroll_or_resize() {
             9
         };
         render(&mut view, &cells, /*width*/ 40, height);
-        assert_eq!(view.area.y, 1);
+        // Compact message bands leave the prompt itself visible; do not pin a duplicate.
+        assert_eq!(view.area.y, 0);
     }
 }

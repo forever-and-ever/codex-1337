@@ -1573,17 +1573,30 @@ async fn v2_family_survives_unload_until_idle_subtree_retirement() {
     // grant the old family authority over the independently reopened conversation.
     let stored_worker = worker_thread
         .read_thread(
-            /*include_archived*/ true, /*include_history*/ true,
+            /*include_archived*/ true, /*include_history*/ false,
         )
         .await
-        .expect("retirement should preserve readable worker history");
+        .expect("retirement should preserve readable worker metadata");
+    let state = resumed_control
+        .runtime
+        .manager
+        .upgrade()
+        .expect("live manager");
+    let stored_history = super::spawn::load_agent_model_context(
+        &state,
+        worker_thread_id,
+        stored_worker.history_mode,
+    )
+    .await
+    .expect("retirement should preserve readable worker history")
+    .expect("worker history");
     let reopened = resumed_manager
         .resume_thread_with_history(
             harness.config.clone(),
             InitialHistory::Resumed(ResumedHistory {
-                history_revision: None,
+                history_revision: stored_history.revision,
                 conversation_id: worker_thread_id,
-                history: Arc::new(stored_worker.history.expect("worker history").items),
+                history: Arc::new(stored_history.items),
                 rollout_path: stored_worker.rollout_path,
             }),
             resumed_manager.auth_manager(),

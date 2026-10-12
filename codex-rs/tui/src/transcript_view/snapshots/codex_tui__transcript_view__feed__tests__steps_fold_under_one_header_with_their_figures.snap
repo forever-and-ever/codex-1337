@@ -4,9 +4,7 @@ expression: "snapshots.join(\"\\n\\n\")"
 ---
 unfolded
         [-] User
-
               › Fix the failing test
-
 
   HH:MM [-] Command · failed cargo test -p          1342    120     34    ≈1188  (thought, output, self)
             codex-tui --lib transcript_view::feed
@@ -21,9 +19,7 @@ unfolded
               • Fixed the parser.
 
         [-] User                                       3
-
               › Thanks
-
 
   HH:MM [-] Called (Code Mode ζσξζ) [js]             154    120     34        …  (thought, output, self)
         [+]   • Command git status
@@ -38,11 +34,13 @@ unfolded
 
 
 
+
+
+
+
 script
         [-] User
-
               › Fix the failing test
-
 
   HH:MM [-] Command · failed cargo test -p          1342    120     34    ≈1188  (thought, output, self)
             codex-tui --lib transcript_view::feed
@@ -57,9 +55,7 @@ script
               • Fixed the parser.
 
         [-] User                                       3
-
               › Thanks
-
 
   HH:MM [-] Called (Code Mode ζσξζ) [js]             154    120     34        …  (thought, output, self)
               const status = await tools.exec_command({ cmd: "git status" });
@@ -74,11 +70,13 @@ script
 
 
 
+
+
+
+
 folded
         [-] User
-
               › Fix the failing test
-
 
   HH:MM [+] Command · failed cargo test -p codex…   1342    120     34    ≈1188  (thought, output, self)
               • I'll run the tests first.
@@ -90,9 +88,7 @@ folded
               • Fixed the parser.
 
         [-] User                                       3
-
               › Thanks
-
 
   HH:MM [+] Called (Code Mode ζσξζ)                  154    120     34        …  (thought, output, self)
 

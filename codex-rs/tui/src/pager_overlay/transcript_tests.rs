@@ -302,7 +302,7 @@ fn buffer_to_text(buf: &Buffer, area: Rect) -> String {
             if symbol.is_empty() {
                 out.push(' ');
             } else {
-                out.push(symbol.chars().next().unwrap_or(' '));
+                out.push_str(&crate::terminal_hyperlinks::strip_osc8(symbol));
             }
         }
         // Trim trailing spaces for stability.
@@ -839,7 +839,17 @@ fn completing_agent_and_plan_streams_preserves_reading_in_later_fragments() {
             overlay.view.jump_to_entry(&overlay.cells, /*index*/ 2);
             overlay.view.scroll(&overlay.cells, /*rows*/ 1);
             let before = render(&mut overlay, area);
-            assert!(buffer_to_text(&before, area).contains("Passage"));
+            let content = Rect {
+                y: 1,
+                height: area.height - 5,
+                ..area
+            };
+            // The later fragment may begin inside a paragraph, without its heading.
+            assert!(
+                buffer_to_text(&before, content)
+                    .chars()
+                    .any(char::is_alphanumeric)
+            );
             let end = overlay.cells.len();
             overlay.consolidate_cells(1..end, Arc::clone(&replacement));
             if resize_before_draw {
@@ -847,11 +857,6 @@ fn completing_agent_and_plan_streams_preserves_reading_in_later_fragments() {
             }
             let completed = render(&mut overlay, area);
             // Stream completion changes the activity footer, but not the passage being read.
-            let content = Rect {
-                y: 1,
-                height: area.height - 5,
-                ..area
-            };
             assert_eq!(
                 buffer_to_text(&completed, content),
                 buffer_to_text(&before, content),
