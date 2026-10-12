@@ -263,7 +263,7 @@ impl App {
                     let thread_id = plan.origin().expect("side cleanup has a target");
                     self.finish_detach_plan(&plan, receipt).await;
                     if unknown {
-                        self.add_agents_overview_error(format!("Closing side conversation {thread_id} was not confirmed. Close and reopen to resynchronize; the earlier request may still complete."));
+                        self.add_agents_overview_error(format!("Closing side conversation {thread_id} was not confirmed. Close and reopen this TUI to resynchronize; the earlier request may still complete."));
                         self.retain_uncertain_selection(operation, thread_id, false);
                     }
                 }
@@ -321,7 +321,7 @@ impl App {
                     }
                     Err(error) => match custody {
                         SubscriptionCustody::Uncertain(thread_id) => {
-                            self.add_agents_overview_error(format!("Conversation attachment outcome is unknown: {error}. No resume was retried; close and reopen to resynchronize. The earlier request may still complete."));
+                            self.add_agents_overview_error(format!("Conversation attachment outcome is unknown: {error}. No resume was retried; close and reopen this TUI to resynchronize. The earlier request may still complete."));
                             self.retain_uncertain_selection(operation, thread_id, true);
                         }
                         SubscriptionCustody::Subscribed(thread_id)
@@ -412,7 +412,7 @@ impl App {
                         }
                     }
                     Err(error) if same_epoch => {
-                        self.add_agents_overview_error(format!("Detaching superseded conversation {thread_id} was not confirmed: {error:?}. Close and reopen to resynchronize; no detach was retried."));
+                        self.add_agents_overview_error(format!("Detaching superseded conversation {thread_id} was not confirmed: {error:?}. Close and reopen this TUI to resynchronize; no detach was retried."));
                         self.retain_uncertain_selection(operation, thread_id, matching);
                     }
                     Err(_) => {}
@@ -420,7 +420,7 @@ impl App {
             }
             (stage, SelectionReceipt::Terminated) => {
                 let thread_id = stage.thread_id();
-                self.add_agents_overview_error("Conversation preparation terminated unexpectedly. No request was retried; close and reopen to resynchronize.".into());
+                self.add_agents_overview_error("Conversation preparation terminated unexpectedly. No request was retried; close and reopen this TUI to resynchronize.".into());
                 if same_epoch
                     && matches!(
                         stage,

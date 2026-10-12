@@ -185,7 +185,7 @@ impl App {
             _ => None,
         };
         let thread_blocked = thread_target.is_some_and(|thread_id| {
-            self.server_operations.navigation.retired.iter().any(|retired| retired.epoch == operation.epoch && matches!(retired.intent, NavigationIntent::Select(_)))
+            self.server_operations.navigation.precedes_thread(thread_id, operation.epoch, operation.order)
             || self.server_operations.lanes.iter().any(|(lane, earlier)| earlier.active.order < operation.order && matches!(lane, OperationLane::Thread(id) | OperationLane::Realtime(id) if *id == thread_id))
         });
         if !matches!(operation.state, LaneState::Queued)

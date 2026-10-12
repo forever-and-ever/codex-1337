@@ -2928,6 +2928,14 @@ fn selected_and_resumed_threads_use_server_capability_for_v1_and_v2_children() -
             .copied()
             .zip([MultiAgentVersion::V1, MultiAgentVersion::V2])
         {
+            // Persisted metadata alone is intentionally not a selectable live attachment.
+            // Load each child through the server before exercising normal selection.
+            let _started = app_server.resume_thread(
+                &app.local_settings,
+                app.config.clone(),
+                child_thread_id,
+                crate::app_server_session::ResumeModelSettings::PreserveExistingThread,
+            ).await?;
             let mut tui = crate::tui::test_support::make_test_tui()?;
             app.select_agent_thread_and_settle(&mut tui, &mut app_server, child_thread_id).await?;
             assert_eq!(app.thread_event_channels[&child_thread_id].attachment(), ThreadEventAttachment::Live);
