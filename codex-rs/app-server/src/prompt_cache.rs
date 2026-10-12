@@ -88,17 +88,15 @@ struct Entry {
 
 #[derive(Default)]
 enum Cache {
-    /// Nothing cached yet, or the provider gives no lore.
+    /// No current evidence of retained cache warmth.
     #[default]
-    Unknown,
+    Cold,
     /// The prefix was last read or written at refreshed; replay keeps it warm when retained.
     Warm {
         refreshed: RequestStart,
         lore: WarmingLore,
         replay: Option<Arc<WarmingRequest>>,
     },
-    /// The next request will not match the cached prefix.
-    Cold,
 }
 
 #[derive(Default, Clone, Copy)]
@@ -113,12 +111,12 @@ enum Warming {
 impl Entry {
     fn view(&self) -> (PromptCacheEstimate, PromptCacheWarming) {
         let estimate = match &self.cache {
-            Cache::Unknown => PromptCacheEstimate::Unknown,
             Cache::Warm {
                 refreshed, lore, ..
-            } => PromptCacheEstimate::Warm {
+            } if refreshed.age() < lore.lifetime() => PromptCacheEstimate::Warm {
                 expires_at: unix_seconds(refreshed.wall() + lore.lifetime()),
             },
+            Cache::Warm { .. } => PromptCacheEstimate::Cold,
             Cache::Cold => PromptCacheEstimate::Cold,
         };
         let warming = match self.warming {
@@ -151,7 +149,7 @@ impl Entry {
                 lore,
                 replay: Some(replay),
             } if refreshed.age() < lore.lifetime() => Some((replay, *refreshed, lore.lifetime())),
-            Cache::Unknown | Cache::Warm { .. } | Cache::Cold => None,
+            Cache::Warm { .. } | Cache::Cold => None,
         }
     }
 
@@ -196,7 +194,7 @@ impl Entry {
 fn refusal(lore: Option<WarmingLore>, replay: Option<Unreplayable>) -> Option<&'static str> {
     match (lore, replay) {
         (_, Some(Unreplayable::Subagent)) => Some("Subagents are not warmed."),
-        (None | Some(WarmingLore::OpenAi), _) | (_, Some(Unreplayable::Provider)) => {
+        (None, _) | (_, Some(Unreplayable::Provider)) => {
             Some("Only Claude conversations can be warmed.")
         }
         (
@@ -426,7 +424,11 @@ impl Shared {
                         cache_write = usage.cache_write_input_tokens,
                         "prompt-cache warm replay"
                     );
-                    *refreshed = started;
+                    if usage.cached_input_tokens > 0 || usage.cache_write_input_tokens > 0 {
+                        *refreshed = started;
+                    } else {
+                        entry.cache = Cache::Cold;
+                    }
                     if usage.cache_write_input_tokens == 0 && usage.cached_input_tokens > 0 {
                         return Vec::new();
                     }
@@ -470,9 +472,7 @@ impl PromptCacheObserver for Shared {
                 }
                 PromptCacheFact::Invalidated => {
                     entry.epoch += 1;
-                    if !matches!(entry.cache, Cache::Unknown) {
-                        entry.cache = Cache::Cold;
-                    }
+                    entry.cache = Cache::Cold;
                 }
             }
             Vec::new()
@@ -492,8 +492,7 @@ impl PromptCacheObserver for Shared {
                 return Vec::new();
             }
             let mut events = Vec::new();
-            if matches!(lore, WarmingLore::Claude { .. })
-                && entry.expected_hit(started)
+            if entry.expected_hit(started)
                 && usage.cached_input_tokens == 0
                 && usage.cache_write_input_tokens > 0
             {
@@ -508,10 +507,14 @@ impl PromptCacheObserver for Shared {
             if let Some(reason) = refusal(Some(lore), replay.as_ref().err().copied()) {
                 events.extend(entry.stop(thread, reason));
             }
-            entry.cache = Cache::Warm {
-                refreshed: started,
-                lore,
-                replay: replay.ok().map(Arc::new),
+            entry.cache = if usage.cached_input_tokens > 0 || usage.cache_write_input_tokens > 0 {
+                Cache::Warm {
+                    refreshed: started,
+                    lore,
+                    replay: replay.ok().map(Arc::new),
+                }
+            } else {
+                Cache::Cold
             };
             events
         });

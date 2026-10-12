@@ -2392,17 +2392,6 @@ impl ModelClientSession {
             self.websocket_session.auth_owner_generation = owner;
             self.turn_state = Arc::new(OnceLock::new());
         }
-        let dispatch = matches!(
-            responses_metadata.request_kind,
-            Some(CodexResponsesRequestKind::Turn)
-        )
-        .then(|| {
-            self.client
-                .prompt_cache_dispatch(model_info, effort.as_ref(), || {
-                    Err(crate::Unreplayable::Provider)
-                })
-        })
-        .flatten();
         let wire_api = self.client.state.provider.info().wire_api;
         let stream = match wire_api {
             WireApi::Responses => {
@@ -2424,7 +2413,7 @@ impl ModelClientSession {
                         .await?
                     {
                         WebsocketStreamOutcome::Stream(stream) => {
-                            return Ok(self.client.observe_prompt_cache_stream(stream, dispatch));
+                            return Ok(stream);
                         }
                         WebsocketStreamOutcome::FallbackToHttp => {
                             self.try_switch_fallback_transport(session_telemetry, model_info);
@@ -2445,7 +2434,7 @@ impl ModelClientSession {
                 .await?
             }
         };
-        Ok(self.client.observe_prompt_cache_stream(stream, dispatch))
+        Ok(stream)
     }
 
     /// Permanently disables WebSockets for this Codex session and resets WebSocket state.

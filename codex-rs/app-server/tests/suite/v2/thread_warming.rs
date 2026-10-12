@@ -21,11 +21,11 @@ use tokio::time::timeout;
 
 const READ_TIMEOUT: Duration = Duration::from_secs(/*secs*/ 60);
 
-// A completed request warms the estimate by its provider's lore, a client that attaches later
-// receives the current state, and warming refuses a provider that cannot replay a prefix.
+// Completion usage and thread metadata do not establish a provider's retention policy.
+// Attach/restart must report Cold (not confidently warm), and warming must refuse unsupported providers.
 // Native Claude requests reach only api.anthropic.com, so its holds have no mock here.
 #[tokio::test]
-async fn estimate_reaches_attaching_clients_and_warming_refuses_unreplayable_providers()
+async fn unestablished_cache_retention_stays_cold_across_completion_attach_and_restart()
 -> Result<()> {
     let server = create_mock_responses_server_repeating_assistant("Done").await;
     let home = TempDir::new()?;
@@ -58,7 +58,6 @@ async fn estimate_reaches_attaching_clients_and_warming_refuses_unreplayable_pro
         "Only Claude conversations can be warmed."
     );
 
-    let now = chrono::Utc::now().timestamp();
     let request = app
         .send_turn_start_request(TurnStartParams {
             thread_id: thread_id.clone(),
@@ -70,17 +69,11 @@ async fn estimate_reaches_attaching_clients_and_warming_refuses_unreplayable_pro
         })
         .await?;
     let _: TurnStartResponse = timeout(READ_TIMEOUT, app.read_response(request)).await??;
-    let warm: ThreadPromptCacheUpdatedNotification = timeout(
+    timeout(
         READ_TIMEOUT,
-        app.read_notification("thread/promptCache/updated"),
+        app.read_stream_until_notification_message("turn/completed"),
     )
     .await??;
-    let PromptCacheEstimate::Warm { expires_at } = warm.estimate else {
-        panic!("a completed request warms the estimate: {warm:?}");
-    };
-    // OpenAI's lore promises five idle minutes.
-    assert!((now + 5 * 60..now + 6 * 60).contains(&expires_at));
-    assert_eq!(warm.warming, PromptCacheWarming::Off);
 
     let request = app
         .send_thread_resume_request(ThreadResumeParams {
@@ -94,7 +87,9 @@ async fn estimate_reaches_attaching_clients_and_warming_refuses_unreplayable_pro
         app.read_notification("thread/promptCache/updated"),
     )
     .await??;
-    assert_eq!(attached, warm);
+    // Actual usage does not establish a route/model retention guarantee.
+    assert_eq!(attached.estimate, PromptCacheEstimate::Cold);
+    assert_eq!(attached.warming, PromptCacheWarming::Off);
 
     timeout(READ_TIMEOUT, app.shutdown_gracefully()).await??;
     let mut app = TestAppServer::builder()
@@ -115,7 +110,7 @@ async fn estimate_reaches_attaching_clients_and_warming_refuses_unreplayable_pro
     .await??;
     // Resume checkpoints settings, advancing updated_at without making a model request.
     // A restarted server has no observed request lease to recover from that metadata.
-    assert_eq!(restored.estimate, PromptCacheEstimate::Unknown);
+    assert_eq!(restored.estimate, PromptCacheEstimate::Cold);
     assert_eq!(restored.warming, PromptCacheWarming::Off);
     Ok(())
 }

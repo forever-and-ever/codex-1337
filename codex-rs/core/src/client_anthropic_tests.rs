@@ -19,6 +19,7 @@ use codex_protocol::openai_models::AnthropicModelCapabilities;
 use codex_protocol::openai_models::AnthropicThinkingMode;
 use codex_protocol::openai_models::ReasoningEffortPreset;
 use codex_protocol::protocol::EventMsg;
+use codex_protocol::protocol::TokenUsage;
 use codex_protocol::user_input::UserInput;
 use codex_tools::FreeformTool;
 use codex_tools::FreeformToolFormat;
@@ -379,6 +380,18 @@ async fn native_request_pins_recovery_then_switches_with_exact_custom_tool_repla
                 ttl: AnthropicCacheTtl::OneHour
             },
         ]
+    );
+    // A completed native request can be uncached; its actual usage, not the presence of a TTL,
+    // distinguishes it from the later request that read the prefix.
+    assert_eq!(
+        warmer
+            .usage
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|usage| (usage.cached_input_tokens, usage.cache_write_input_tokens))
+            .collect::<Vec<_>>(),
+        [(0, 0), (100, 0)]
     );
     let replay = warmer
         .replay
@@ -742,6 +755,7 @@ async fn native_regular_replay_profiles(
 #[derive(Default)]
 struct WarmCapture {
     lore: Mutex<Vec<crate::WarmingLore>>,
+    usage: Mutex<Vec<TokenUsage>>,
     replay: Mutex<Option<crate::WarmingRequest>>,
 }
 
@@ -752,6 +766,7 @@ impl crate::PromptCacheObserver for WarmCapture {
     fn fact(&self, _thread: ThreadId, _fact: crate::PromptCacheFact) {}
     fn completed(&self, _thread: ThreadId, request: crate::CompletedRequest) {
         self.lore.lock().unwrap().push(request.lore);
+        self.usage.lock().unwrap().push(request.usage);
         if let Ok(replay) = request.replay {
             *self.replay.lock().unwrap() = Some(replay);
         }

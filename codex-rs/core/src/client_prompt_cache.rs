@@ -35,9 +35,6 @@ pub enum WarmingLore {
     /// Native Claude: each request declares its TTL, each read refreshes it, and a zero-output
     /// replay keeps it warm.
     Claude { ttl: AnthropicCacheTtl },
-    /// OpenAI: provider-managed and best-effort. A prefix survives at least five minutes idle; a
-    /// false cold estimate costs nothing, a false warm one misleads.
-    OpenAi,
 }
 
 impl WarmingLore {
@@ -45,8 +42,7 @@ impl WarmingLore {
         match self {
             Self::Claude {
                 ttl: AnthropicCacheTtl::FiveMinutes,
-            }
-            | Self::OpenAi => Duration::from_secs(/*secs*/ 5 * 60),
+            } => Duration::from_secs(/*secs*/ 5 * 60),
             Self::Claude {
                 ttl: AnthropicCacheTtl::OneHour,
             } => Duration::from_secs(/*secs*/ 60 * 60),
@@ -173,23 +169,17 @@ impl ModelClient {
         )
     }
 
-    /// Lore for a request to this model, or none when the provider gives none.
+    /// Only native Messages carries an established request TTL; Responses route/model retention
+    /// is not inferred from the provider's brand.
     pub(crate) fn prompt_cache_lore(
         &self,
         model: &ModelInfo,
         effort: Option<&ReasoningEffort>,
     ) -> Option<WarmingLore> {
-        if self.uses_claude_subscription() {
-            Some(WarmingLore::Claude {
+        self.uses_claude_subscription()
+            .then(|| WarmingLore::Claude {
                 ttl: self.anthropic_cache_ttl(model, effort),
             })
-        } else {
-            self.state
-                .provider
-                .info()
-                .is_openai()
-                .then_some(WarmingLore::OpenAi)
-        }
     }
 
     /// Captures what a conversation request reports when it completes; none when nothing

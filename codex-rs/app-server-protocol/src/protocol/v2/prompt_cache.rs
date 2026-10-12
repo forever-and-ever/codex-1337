@@ -5,20 +5,20 @@ use crate::TS;
 use serde::Deserialize;
 use serde::Serialize;
 
-/// How warm a thread's provider prompt cache probably is.
+/// Whether the thread's provider prompt cache is confidently warm.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
 #[serde(tag = "type", rename_all = "camelCase")]
 #[ts(tag = "type", rename_all = "camelCase", export_to = "v2/")]
 pub enum PromptCacheEstimate {
-    /// Nothing is cached yet, or the provider gives no lore.
-    Unknown,
-    /// Probably warm; clients treat it as cold from `expiresAt` on.
+    /// Observed cache usage with established retention; clients treat it as cold from
+    /// `expiresAt` on.
     Warm {
         #[serde(rename = "expiresAt")]
         #[ts(rename = "expiresAt", type = "number")]
         expires_at: i64,
     },
-    /// The next request will probably rewrite the cached prefix.
+    /// Not confidently warm, including absent evidence or unestablished retention.
+    /// This is not a claim that the provider evicted its cache.
     Cold,
 }
 

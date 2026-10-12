@@ -1,5 +1,5 @@
 //! Prompt-cache glyphs in the composer's bottom padding row: a radiator while warming is on,
-//! a snowflake while the cache is probably cold. Material Design icons from a Nerd Font.
+//! a snowflake unless the cache is confidently warm. Material Design icons from a Nerd Font.
 use super::ChatComposer;
 use super::ComposerRenderOptions;
 use crate::style::StatusTone;
@@ -28,7 +28,7 @@ pub(crate) struct PromptCacheGlyphs {
 impl Default for PromptCacheGlyphs {
     fn default() -> Self {
         Self {
-            estimate: PromptCacheEstimate::Unknown,
+            estimate: PromptCacheEstimate::Cold,
             warming: PromptCacheWarming::Off,
         }
     }
@@ -46,7 +46,6 @@ impl PromptCacheGlyphs {
             }
         }
         let cold = match self.estimate {
-            PromptCacheEstimate::Unknown => false,
             PromptCacheEstimate::Warm { expires_at } => now >= expires_at,
             PromptCacheEstimate::Cold => true,
         };
