@@ -8,6 +8,7 @@ use codex_login::CodexAuth;
 use codex_mcp::ToolInfo;
 use codex_model_provider::create_model_provider;
 use codex_model_provider_info::ModelProviderInfo;
+use codex_protocol::DEFAULT_FUNCTION_NAMESPACE;
 use codex_protocol::config_types::WebSearchMode;
 use codex_protocol::dynamic_tools::DynamicToolSpec;
 use codex_protocol::error::CodexErrorDetails;
@@ -1810,12 +1811,19 @@ async fn unified_tool_runtimes_preserve_source_order_and_collision_priority() {
                     namespace: "registry_extension",
                     tool_name: "lookup",
                 }),
+                Arc::new(TestNamespaceExtensionTool {
+                    namespace: DEFAULT_FUNCTION_NAMESPACE,
+                    tool_name: "fence",
+                }),
             ],
-            dynamic_tools: vec![dynamic_tool(
-                Some("registry_dynamic"),
-                "lookup",
-                /*defer_loading*/ false,
-            )],
+            dynamic_tools: vec![
+                dynamic_tool(
+                    Some("registry_dynamic"),
+                    "lookup",
+                    /*defer_loading*/ false,
+                ),
+                dynamic_tool(None, "fence", /*defer_loading*/ false),
+            ],
             ..ToolPlanInputs::default()
         },
     )
@@ -1856,6 +1864,15 @@ async fn unified_tool_runtimes_preserve_source_order_and_collision_priority() {
         panic!("expected exactly one MCP tool after the extension collision");
     };
     assert_eq!(tool.description, "lookup test tool");
+    // Relaxed collisions still preserve the core fence, not the first external runtime.
+    assert_eq!(
+        plan.visible_spec("fence"),
+        &super::super::fence::FenceHandler.spec()
+    );
+    assert_eq!(
+        plan.exposures.get("fence"),
+        Some(&ToolExposure::DirectModelOnly)
+    );
 }
 
 #[tokio::test]
@@ -1957,6 +1974,35 @@ async fn strict_tool_collisions_reject_external_and_synthetic_duplicates() {
         ),
     ];
 
+    // The fence is installed after source tools; neither source may claim its control identity.
+    let fence_cases = [None, Some(DEFAULT_FUNCTION_NAMESPACE)].map(|namespace| {
+        [
+            (
+                "functions.fence",
+                ToolPlanInputs {
+                    dynamic_tools: vec![dynamic_tool(
+                        namespace, "fence", /*defer_loading*/ false,
+                    )],
+                    ..ToolPlanInputs::default()
+                },
+                false,
+                false,
+            ),
+            (
+                "functions.fence",
+                ToolPlanInputs {
+                    extension_tool_executors: vec![Arc::new(TestNamespaceExtensionTool {
+                        namespace: namespace.unwrap_or(""),
+                        tool_name: "fence",
+                    })],
+                    ..ToolPlanInputs::default()
+                },
+                false,
+                false,
+            ),
+        ]
+    });
+
     let namespace_cases = [
         (ToolExposure::Direct, ToolExposure::Direct, false),
         (ToolExposure::Direct, ToolExposure::Deferred, true),
@@ -1978,8 +2024,10 @@ async fn strict_tool_collisions_reject_external_and_synthetic_duplicates() {
         )
     });
 
-    for (expected_name, inputs, code_mode_enabled, search_enabled) in
-        cases.into_iter().chain(namespace_cases)
+    for (expected_name, inputs, code_mode_enabled, search_enabled) in cases
+        .into_iter()
+        .chain(fence_cases.into_iter().flatten())
+        .chain(namespace_cases)
     {
         let (_session, mut turn) = make_session_and_context().await;
         update_config(&mut turn, |config| {
@@ -2122,6 +2170,7 @@ async fn strict_tool_collisions_allow_identical_names_in_different_namespaces() 
             dynamic_tools: vec![
                 dynamic_tool(Some("first"), "lookup", /*defer_loading*/ false),
                 dynamic_tool(Some("second"), "lookup", /*defer_loading*/ false),
+                dynamic_tool(Some("client"), "fence", /*defer_loading*/ false),
             ],
             ..ToolPlanInputs::default()
         },
@@ -2131,6 +2180,7 @@ async fn strict_tool_collisions_allow_identical_names_in_different_namespaces() 
     plan.assert_registered_contains(&[
         &ToolName::namespaced("first", "lookup").to_string(),
         &ToolName::namespaced("second", "lookup").to_string(),
+        &ToolName::namespaced("client", "fence").to_string(),
     ]);
 }
 
