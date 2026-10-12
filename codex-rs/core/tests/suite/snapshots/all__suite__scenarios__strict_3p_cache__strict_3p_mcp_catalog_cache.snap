@@ -54,8 +54,8 @@ Settings:
     Output:
      | []
 -- request 3 (turn; turn 2: register MCP with lookup; omit-all, direct-only and excluded) --
-09:additional_tools/developer (1; hash=f14a9b6c9cf02008):
-        - namespace/functions: This is an incremental namespace update. Previously declared tools remain available for direct ca...; hash=882b392f46c2f56c
+09:additional_tools/developer (1; hash=8ee54e39f501e44c):
+        - namespace/functions: This is an incremental namespace update. Previously declared tools remain available for direct ca...; hash=a7abe5c0f4ffa5c2
           - custom/exec
 10:message/user:
     List and call the tools provided by the environment MCP server.
@@ -71,8 +71,8 @@ Settings:
     Output:
      | [{"name":"mcp__environment__lookup","result":"called lookup for  at  with "}]
 -- request 5 (turn; turn 3: same MCP name, new endpoint; replace lookup with resolve and search) --
-13:additional_tools/developer (1; hash=754cb523336959a2):
-        - namespace/functions: This is an incremental namespace update. Previously declared tools remain available for direct ca...; hash=d4a0a9923f77aa94
+13:additional_tools/developer (1; hash=e99b509a6a57cf7c):
+        - namespace/functions: This is an incremental namespace update. Previously declared tools remain available for direct ca...; hash=5e5a47840b8a7264
           - custom/exec
 14:message/user:
     List and call the tools provided by the environment MCP server.
@@ -88,8 +88,8 @@ Settings:
     Output:
      | [{"name":"mcp__environment__resolve","result":"called resolve for  at  with "},{"name":"mcp__environment__search","result":"called search for  at  with "}]
 -- request 7 (turn; turn 4: remove MCP server from config) --
-17:additional_tools/developer (1; hash=ef1c139747d69af4):
-        - namespace/functions: This is an incremental namespace update. Previously declared tools remain available for direct ca...; hash=1895eeb25ec92194
+17:additional_tools/developer (1; hash=5c4a6b4e210bb836):
+        - namespace/functions: This is an incremental namespace update. Previously declared tools remain available for direct ca...; hash=2542f9d7253b56ee
           - custom/exec
 18:message/user:
     List and call the tools provided by the environment MCP server.

@@ -16,12 +16,12 @@ Settings:
   stream: true
   text: {"verbosity":"low"}
   tool_choice: "auto"
-  tools (8; hash=ba5ff9f902e101ba):
-    - custom/exec: Run JavaScript code to orchestrate/compose tool calls - Evaluates the provided JavaScript code in...; hash=6f0ff29e741c787e
+  tools (8; hash=1ec4885d38293d04):
+    - custom/exec: Execute raw JavaScript in a fresh V8 async module. No JSON envelope, Markdown fences, Node, direc...; hash=1453476853e175cb
     - function/wait: Waits on a yielded `exec` cell and returns new output or completion. - Use `wait` only after `exe...; args=[cell_id, max_tokens, terminate]; hash=0d6841040273c1cc
     - custom/python: Execute ordinary python source in a fresh python3 -u process, not a REPL or JavaScript. Supply so...; hash=fa80d4eff151e99a
     - custom/bash: Execute ordinary bash source in a fresh bash process, not a REPL or JavaScript. Supply source dir...; hash=e39c65dbec586069
-    - function/write_stdin: Writes characters to an existing unified exec session and returns recent output.  exec tool decla...; args=[chars, max_output_tokens, session_id, yield_time_ms]; hash=59f58fe2bb4727ef
+    - function/write_stdin: Writes characters to an existing unified exec session and returns recent output.  Call: await too...; args=[chars, max_output_tokens, session_id, yield_time_ms]; hash=c1fa22f040154008
     - function/request_user_input: Request user input for one to three short questions and wait for the response. This tool is only ...; args=[questions]; hash=64a729b25c424fc6
     - function/fence: Barrier for client-dispatched tool calls within this model response; provider-hosted tools are ou...; args=[]; hash=580b65f59256ee3c
     - web_search; hash=e214d4db1bc49e89
@@ -38,10 +38,10 @@ Settings:
 04:custom_tool_call/exec:
     const results = ["default_schema", "expanded_schema"].map(server => {
       const description = describe_tool(`mcp__${server}__search`);
-      return [description.includes("budget_description_marker"), description.includes("query: string;")];
+      return [description.includes("budget_description_marker"), description.includes("query (required): string")];
     });
     const shared = describe_tool("mcp__default_schema__shared");
-    results.push([shared.includes("code_mode_description_marker"), shared.includes("term: string;")]);
+    results.push([shared.includes("code_mode_description_marker"), shared.includes("term (required): string")]);
     text(JSON.stringify(results));
 05:custom_tool_call_output:Script completed
     Output:

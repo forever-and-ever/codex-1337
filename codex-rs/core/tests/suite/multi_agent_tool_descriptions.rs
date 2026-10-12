@@ -288,6 +288,8 @@ async fn multi_agent_catalog_messages_change_only_selected_tool_fields(
                     expected_tool["parameters"]["properties"]["message"]["encrypted"] = json!(true);
                 }
                 if matches!(exposure, Exposure::CodeMode) && name != "wait_agent" {
+                    // Runtime schemas pass through ordered maps before contract rendering.
+                    expected_tool["parameters"].sort_all_objects();
                     let description = expected_tool["description"].as_str().expect("description");
                     let (prefix, contract) =
                         description.split_once("\nParameters:").expect("parameters");

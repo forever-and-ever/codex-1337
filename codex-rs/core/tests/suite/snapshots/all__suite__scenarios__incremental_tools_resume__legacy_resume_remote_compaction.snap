@@ -17,8 +17,8 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=c7b9bae9148f9847):
-        - namespace/functions; hash=5fe1c8f3ca05398f
+00:additional_tools/developer (2; hash=14cb05d1620e172c):
+        - namespace/functions; hash=b12b618c3d248b70
           - custom/exec
           - function/wait
           - custom/python
@@ -50,8 +50,8 @@ Settings:
 ## Window 2 (after request 3: input diverged at item 02)
 Settings: same as window 1
 -- request 4 (turn) --
-00:additional_tools/developer (2; hash=c7b9bae9148f9847):
-        - namespace/functions; hash=5fe1c8f3ca05398f
+00:additional_tools/developer (2; hash=14cb05d1620e172c):
+        - namespace/functions; hash=b12b618c3d248b70
           - custom/exec
           - function/wait
           - custom/python
@@ -83,8 +83,8 @@ Settings: same as window 1
 09:message/user:
     Resume with the new window unchanged.
 -- request 6 (turn) --
-10:additional_tools/developer (1; hash=22f8d451178454e1):
-        - namespace/functions: This is an incremental namespace update. Previously declared tools remain available for direct ca...; hash=1009c3ba477bb7bd
+10:additional_tools/developer (1; hash=9e923fdb548dfe6b):
+        - namespace/functions: This is an incremental namespace update. Previously declared tools remain available for direct ca...; hash=c306295bc96a2ced
           - custom/exec
           - function/update_plan
 11:message/developer:

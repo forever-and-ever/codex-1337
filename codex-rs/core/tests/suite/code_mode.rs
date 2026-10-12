@@ -1261,14 +1261,11 @@ async fn code_mode_excludes_mcp_servers_using_their_configured_identity() -> Res
                 assert_eq!(
                     (
                         exec_description.contains(&format!("### `{nested_tool_name}`")),
-                        exec_description.contains(&format!("\n- {nested_tool_name}")),
+                        exec_description.contains(&format!("(tools.{nested_tool_name}):")),
                     ),
-                    (
-                        false,
-                        !omit_code_mode && (!supports_search_tool || omit_deferred)
-                    ),
+                    (false, !omit_code_mode),
                     "Code Mode Only must never declare an MCP tool and must name it in its \
-                 roster unless search defers it; \
+                 roster even when search defers its contract; \
                  omit_tools_from={omit_tools_from:?}, \
                  supports_search_tool={supports_search_tool}, \
                  nested_tool_name={nested_tool_name}"
