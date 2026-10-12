@@ -168,7 +168,9 @@ impl ChatWidget {
                     .enumerate()
                     .map(|(index, path)| LocalImageAttachment {
                         path,
-                        placeholder: codex_protocol::models::local_image_label_text(index + 1),
+                        placeholder: codex_protocol::models::local_image_label_text(
+                            display.remote_image_urls.len() + index + 1,
+                        ),
                     })
                     .collect(),
                 remote_image_urls: display.remote_image_urls,
