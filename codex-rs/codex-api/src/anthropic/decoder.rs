@@ -281,7 +281,14 @@ impl<'a> Decoder<'a> {
                     }
                 }
                 if !matches!(open.block, Block::Compaction { .. }) {
-                    events.push(ResponseEvent::OutputItemAdded(self.item(&open)?));
+                    let mut item = self.item(&open)?;
+                    // Initial text is delivered by the addressed delta below, not twice.
+                    match &mut item {
+                        ResponseItem::Message { content, .. } => content.clear(),
+                        ResponseItem::Reasoning { summary, .. } => summary.clear(),
+                        _ => {}
+                    }
+                    events.push(ResponseEvent::OutputItemAdded(item));
                 }
                 match &open.block {
                     Block::Text { text } if !text.is_empty() => {

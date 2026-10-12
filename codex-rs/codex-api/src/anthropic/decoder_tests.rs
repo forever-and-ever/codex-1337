@@ -263,13 +263,69 @@ fn interleaved_tools_signed_blocks_and_cumulative_usage() {
     let mut output = Vec::new();
     let mut tool_deltas = Vec::new();
     let mut addressed_deltas = Vec::new();
+    let mut reconstructed = std::collections::BTreeMap::<ResponseItemId, String>::new();
     let mut usage = None;
     for frame in frames {
         for event in decoder.decode(&frame.to_string()).unwrap() {
             match event {
-                ResponseEvent::OutputItemDone(item) => output.push(item),
+                ResponseEvent::OutputItemAdded(ResponseItem::Message {
+                    id: Some(id),
+                    content,
+                    ..
+                }) => {
+                    assert!(content.is_empty());
+                    assert!(reconstructed.insert(id, String::new()).is_none());
+                }
+                ResponseEvent::OutputItemAdded(ResponseItem::Reasoning {
+                    id: Some(id),
+                    summary,
+                    ..
+                }) => {
+                    assert!(summary.is_empty());
+                    assert!(reconstructed.insert(id, String::new()).is_none());
+                }
+                ResponseEvent::OutputItemDone(item) => {
+                    let visible = match &item {
+                        ResponseItem::Message {
+                            id: Some(id),
+                            content,
+                            ..
+                        } => Some((
+                            id,
+                            content
+                                .iter()
+                                .map(|part| {
+                                    let ContentItem::OutputText { text } = part else {
+                                        panic!("expected output text");
+                                    };
+                                    text.as_str()
+                                })
+                                .collect::<String>(),
+                        )),
+                        ResponseItem::Reasoning {
+                            id: Some(id),
+                            summary,
+                            ..
+                        } => Some((
+                            id,
+                            summary
+                                .iter()
+                                .map(|part| {
+                                    let ReasoningItemReasoningSummary::SummaryText { text } = part;
+                                    text.as_str()
+                                })
+                                .collect::<String>(),
+                        )),
+                        _ => None,
+                    };
+                    if let Some((id, text)) = visible {
+                        assert_eq!(reconstructed.remove(id), Some(text));
+                    }
+                    output.push(item);
+                }
                 ResponseEvent::OutputTextDelta { item_id, delta } => {
-                    addressed_deltas.push((item_id.to_string(), delta))
+                    reconstructed.get_mut(&item_id).unwrap().push_str(&delta);
+                    addressed_deltas.push((item_id.to_string(), delta));
                 }
                 ResponseEvent::ReasoningSummaryDelta {
                     item_id,
@@ -278,6 +334,7 @@ fn interleaved_tools_signed_blocks_and_cumulative_usage() {
                 } => {
                     // Each signed block owns one summary, regardless of its outer block index.
                     assert_eq!(summary_index, 0);
+                    reconstructed.get_mut(&item_id).unwrap().push_str(&delta);
                     addressed_deltas.push((item_id.to_string(), delta));
                 }
                 ResponseEvent::ToolCallInputDelta {
@@ -299,6 +356,7 @@ fn interleaved_tools_signed_blocks_and_cumulative_usage() {
             }
         }
     }
+    assert!(reconstructed.is_empty());
     assert_eq!(
         addressed_deltas,
         [
