@@ -1657,7 +1657,7 @@ async fn replay_thread_snapshot_does_not_submit_queue_before_replay_catches_up()
         .capture_thread_input_state()
         .expect("expected queued follow-up state");
     let Op::UserTurn {
-        client_id: Some(client_id),
+        client_user_message_id: client_id,
         ..
     } = next_user_turn_op(&mut op_rx)
     else {
