@@ -8,6 +8,7 @@ use codex_features::Feature;
 use codex_login::CodexAuth;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::Op;
+use codex_protocol::protocol::TurnCompleteEvent;
 use codex_protocol::turn_input::CyberAccessProgram;
 use codex_protocol::user_input::UserInput;
 use codex_rollout::RolloutItem;
@@ -183,7 +184,7 @@ async fn cyber_access_program_omits_spoofed_custom_providers() -> Result<()> {
             })
             .build_with_auto_env(&server)
             .await?;
-        submit(&test, Some(CyberAccessProgram::DaybreakRed)).await?;
+        submit(&test, Some(CyberAccessProgram::DaybreakRed), "hello").await?;
         assert_eq!(
             request.single_request().body_json().get("access_programs"),
             None
@@ -240,7 +241,7 @@ async fn cyber_access_program_survives_mid_turn_remote_compaction_v2(
             .build_with_auto_env(&server)
             .await?;
 
-        submit(&test, Some(CyberAccessProgram::DaybreakBlue)).await?;
+        submit(&test, Some(CyberAccessProgram::DaybreakBlue), "hello").await?;
 
         let requests = requests.requests();
         assert_eq!(
@@ -258,11 +259,20 @@ async fn cyber_access_program_survives_mid_turn_remote_compaction_v2(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cyber_access_program_is_inherited_by_child_turns() -> Result<()> {
-    // Final answers defer late child completion mail to the next parent turn.
+    // Child completion can wake an idle parent under its previous program.
+    // Observe that mail before starting the next independently configured turn.
+    let child_results = [
+        "child-result-initial",
+        "child-result-standard",
+        "child-result-blue",
+        "child-result-none",
+        "child-result-standard-reloaded",
+    ];
+    let initial_prompt = "exercise-child-program-initial";
     let final_response = |id: &str| {
         responses::sse(vec![
             responses::ev_response_created(id),
-            responses::ev_assistant_message(&format!("message-{id}"), "Done."),
+            responses::ev_assistant_message(&format!("message-{id}"), id),
             responses::ev_completed(id),
         ])
     };
@@ -279,18 +289,35 @@ async fn cyber_access_program_is_inherited_by_child_turns() -> Result<()> {
         };
         let server = responses::start_mock_server().await;
         mock_server::run(&[&server], async {
-            // V1 completion notifications can require another parent response.
+            // Acknowledge only a child result already visible in the parent request.
             Mock::given(method("POST"))
                 .and(path("/v1/responses"))
                 .and(|request: &wiremock::Request| {
                     !request.headers.contains_key("x-openai-subagent")
                 })
-                .respond_with(responses::sse_response(final_response("resp-parent-done")))
+                .respond_with(move |request: &wiremock::Request| {
+                    let messages = responses::ResponsesRequest::from(request.clone())
+                        .message_input_texts("assistant");
+                    let result = child_results
+                        .iter()
+                        .rev()
+                        .copied()
+                        .find(|result| messages.iter().any(|message| message.contains(*result)))
+                        .unwrap_or("resp-parent-done");
+                    responses::sse_response(final_response(result))
+                })
                 .with_priority(/*p*/ 10)
                 .mount(&server)
                 .await;
-            responses::mount_sse_once(
+            responses::mount_sse_once_match(
                 &server,
+                move |request: &wiremock::Request| {
+                    !request.headers.contains_key("x-openai-subagent")
+                        && responses::ResponsesRequest::from(request.clone())
+                            .has_message_with_input_texts("user", |texts| {
+                                texts.iter().any(|text| text == initial_prompt)
+                            })
+                },
                 responses::sse(vec![
                     responses::ev_function_call_with_namespace(
                         "spawn-worker",
@@ -305,7 +332,7 @@ async fn cyber_access_program_is_inherited_by_child_turns() -> Result<()> {
             let initial_child_request = responses::mount_sse_once_match(
                 &server,
                 header("x-openai-subagent", "collab_spawn"),
-                final_response("resp-child-initial"),
+                final_response(child_results[0]),
             )
             .await;
             let test = test_codex()
@@ -326,7 +353,8 @@ async fn cyber_access_program_is_inherited_by_child_turns() -> Result<()> {
                 .build_with_auto_env(&server)
                 .await?;
             let mut created_threads = test.thread_manager.subscribe_thread_created();
-            submit(&test, Some(CyberAccessProgram::DaybreakRed)).await?;
+            let submitted =
+                submit(&test, Some(CyberAccessProgram::DaybreakRed), initial_prompt).await?;
             let child_id = created_threads.recv().await?;
             let child = test.thread_manager.get_thread(child_id).await?;
             wait_for_event(&child, |event| matches!(event, EventMsg::TurnComplete(_))).await;
@@ -347,7 +375,11 @@ async fn cyber_access_program_is_inherited_by_child_turns() -> Result<()> {
                 "namespace={namespace}, fork_turns={fork_turns}"
             );
 
-            for (program, expected, reload) in [
+            if is_v2 {
+                wait_for_child_mail(&test, submitted, child_results[0]).await?;
+            }
+
+            for (index, (program, expected, reload)) in [
                 (
                     Some(CyberAccessProgram::Standard),
                     json!({"cyber": "standard"}),
@@ -364,7 +396,12 @@ async fn cyber_access_program_is_inherited_by_child_turns() -> Result<()> {
                     json!({"cyber": "standard"}),
                     true,
                 ),
-            ] {
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let prompt = format!("exercise-child-program-{index}");
+                let child_result = child_results[index + 1];
                 if reload {
                     let child = test.thread_manager.get_thread(child_id).await?;
                     child.shutdown_and_wait().await?;
@@ -395,14 +432,26 @@ async fn cyber_access_program_is_inherited_by_child_turns() -> Result<()> {
                 ),
                 responses::ev_completed("resp-followup"),
             ]));
-                responses::mount_sse_sequence(&server, reply_sequence).await;
+                let match_prompt = prompt.clone();
+                responses::mount_sse_sequence_match(
+                    &server,
+                    move |request: &wiremock::Request| {
+                        !request.headers.contains_key("x-openai-subagent")
+                            && responses::ResponsesRequest::from(request.clone())
+                                .has_message_with_input_texts("user", |texts| {
+                                    texts.iter().any(|text| text == &match_prompt)
+                                })
+                    },
+                    reply_sequence,
+                )
+                .await;
                 let followup_child_request = responses::mount_sse_once_match(
                     &server,
                     header("x-openai-subagent", "collab_spawn"),
-                    final_response("resp-child-next"),
+                    final_response(child_result),
                 )
                 .await;
-                submit(&test, program).await?;
+                let submitted = submit(&test, program, &prompt).await?;
                 let child = test.thread_manager.get_thread(child_id).await?;
                 wait_for_event(&child, |event| matches!(event, EventMsg::TurnComplete(_))).await;
                 assert_eq!(
@@ -410,6 +459,9 @@ async fn cyber_access_program_is_inherited_by_child_turns() -> Result<()> {
                     vec![expected],
                     "namespace={namespace}, fork_turns={fork_turns}, reload={reload}"
                 );
+                if is_v2 {
+                    wait_for_child_mail(&test, submitted, child_result).await?;
+                }
             }
             Ok::<(), anyhow::Error>(())
         })
@@ -457,7 +509,7 @@ async fn cyber_access_program_changes_on_one_websocket_with_response_reuse(
         Some(CyberAccessProgram::Standard),
         None,
     ] {
-        submit(&test, program).await?;
+        submit(&test, program, "hello").await?;
     }
 
     let requests = server.single_connection();
@@ -493,11 +545,16 @@ async fn cyber_access_program_changes_on_one_websocket_with_response_reuse(
     Ok(())
 }
 
-async fn submit(test: &TestCodex, program: Option<CyberAccessProgram>) -> Result<()> {
-    test.codex
-        .start_or_steer_turn(
+async fn submit(
+    test: &TestCodex,
+    program: Option<CyberAccessProgram>,
+    prompt: &str,
+) -> Result<TurnCompleteEvent> {
+    let submission = test
+        .codex
+        .start_turn_if_idle(
             TurnInputRequest::user_input(vec![UserInput::Text {
-                text: "hello".to_owned(),
+                text: prompt.to_owned(),
                 text_elements: Vec::new(),
             }])
             .on_start(TurnStartOptions {
@@ -506,12 +563,38 @@ async fn submit(test: &TestCodex, program: Option<CyberAccessProgram>) -> Result
             }),
         )
         .await?;
-    let event = wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_) | EventMsg::Error(_))
+    let StartIfIdleSubmission::Started { turn_id, .. } = submission else {
+        anyhow::bail!("cyber program {program:?} did not start a turn: {submission:?}");
+    };
+    match wait_for_event(&test.codex, |event| {
+        matches!(event, EventMsg::TurnComplete(completed) if completed.turn_id == turn_id)
+            || matches!(event, EventMsg::Error(_))
     })
-    .await;
-    if let EventMsg::Error(error) = event {
-        anyhow::bail!("cyber program {program:?}: {error:?}");
+    .await
+    {
+        EventMsg::TurnComplete(completed) => Ok(completed),
+        EventMsg::Error(error) => anyhow::bail!("cyber program {program:?}: {error:?}"),
+        _ => unreachable!("the predicate accepts only completion or error"),
     }
-    Ok(())
+}
+
+async fn wait_for_child_mail(
+    test: &TestCodex,
+    submitted: TurnCompleteEvent,
+    child_result: &str,
+) -> Result<()> {
+    if submitted.last_agent_message.as_deref() == Some(child_result) {
+        return Ok(());
+    }
+    match wait_for_event(&test.codex, |event| {
+        matches!(event, EventMsg::TurnComplete(completed)
+            if completed.last_agent_message.as_deref() == Some(child_result))
+            || matches!(event, EventMsg::Error(_))
+    })
+    .await
+    {
+        EventMsg::TurnComplete(_) => Ok(()),
+        EventMsg::Error(error) => anyhow::bail!("child result {child_result}: {error:?}"),
+        _ => unreachable!("the predicate accepts only completion or error"),
+    }
 }
