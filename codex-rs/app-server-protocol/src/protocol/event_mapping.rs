@@ -367,6 +367,13 @@ pub fn item_event_to_server_notification(
                 completed_at_ms: end_event.completed_at_ms,
             })
         }
+        EventMsg::StreamItemsDiscarded(event) => {
+            ServerNotification::StreamItemsDiscarded(crate::StreamItemsDiscardedNotification {
+                thread_id,
+                turn_id,
+                item_ids: event.item_ids,
+            })
+        }
         EventMsg::AgentMessageContentDelta(event) => {
             let codex_protocol::protocol::AgentMessageContentDeltaEvent { item_id, delta, .. } =
                 event;

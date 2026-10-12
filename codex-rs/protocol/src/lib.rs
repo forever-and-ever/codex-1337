@@ -75,6 +75,8 @@ pub mod review_format;
 pub mod sandbox;
 pub mod security_risk;
 pub mod shell_environment;
+mod stream_discard;
 pub mod tool_policy;
 pub mod turn_input;
 pub mod user_input;
+pub use stream_discard::StreamItemsDiscardedEvent;

@@ -1730,6 +1730,36 @@ async fn live_app_server_stream_recovery_restores_previous_status_header() {
     );
     drain_insert_history(&mut rx);
 
+    // Retry warnings are presentation, not the lifecycle boundary: an unfinished
+    // source must be discarded explicitly even if a reconnect warning is suppressed.
+    let started = |id: &str| {
+        ServerNotification::ItemStarted(codex_app_server_protocol::ItemStartedNotification {
+            thread_id: "thread-1".into(),
+            turn_id: "turn-1".into(),
+            item: AppServerThreadItem::AgentMessage {
+                id: id.into(),
+                text: String::new(),
+                phase: None,
+                memory_citation: None,
+                delivery: None,
+                questions: None,
+            },
+            started_at_ms: 0,
+        })
+    };
+    chat.handle_server_notification(started("failed-item"), None);
+    chat.handle_server_notification(
+        ServerNotification::AgentMessageDelta(
+            codex_app_server_protocol::AgentMessageDeltaNotification {
+                thread_id: "thread-1".into(),
+                turn_id: "turn-1".into(),
+                item_id: "failed-item".into(),
+                delta: "Unfinished old prefix.\\n".into(),
+            },
+        ),
+        None,
+    );
+
     chat.handle_server_notification(
         ServerNotification::Error(ErrorNotification {
             error: AppServerTurnError {
@@ -1745,6 +1775,24 @@ async fn live_app_server_stream_recovery_restores_previous_status_header() {
         /*replay_kind*/ None,
     );
     drain_insert_history(&mut rx);
+    chat.handle_server_notification(
+        ServerNotification::StreamItemsDiscarded(
+            codex_app_server_protocol::StreamItemsDiscardedNotification {
+                thread_id: "thread-1".into(),
+                turn_id: "turn-1".into(),
+                item_ids: vec!["failed-item".into()],
+            },
+        ),
+        None,
+    );
+    assert!(chat.stream_controller.is_none());
+    assert!(!chat.active_cell_is_stream_tail());
+    assert!(
+        std::iter::from_fn(|| rx.try_recv().ok()).any(|event| matches!(
+            event, AppEvent::DiscardStreamItems(ids) if ids == ["failed-item"]
+        ))
+    );
+    chat.handle_server_notification(started("item-1"), None);
 
     chat.handle_server_notification(
         ServerNotification::AgentMessageDelta(
@@ -1763,6 +1811,8 @@ async fn live_app_server_stream_recovery_restores_previous_status_header() {
     assert!(chat.status_state.retry_status_header.is_none());
     assert!(chat.bottom_pane.status_widget().is_none());
     assert!(chat.active_cell_is_stream_tail());
+    let (_, source) = chat.stream_controller.as_mut().unwrap().finalize();
+    assert_eq!(source.as_deref().unwrap().trim_end(), "hello");
 }
 
 #[tokio::test]

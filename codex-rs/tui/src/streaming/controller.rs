@@ -590,6 +590,7 @@ pub(crate) struct StreamController {
     core: StreamCore,
     header_emitted: bool,
     pub(crate) timestamp: Option<history_cell::HistoryTimestamp>,
+    pub(crate) item_id: Option<String>,
 }
 
 impl StreamController {
@@ -624,6 +625,7 @@ impl StreamController {
             core: StreamCore::new(width, cwd, render_mode, inline_visualization_context),
             header_emitted: false,
             timestamp: None,
+            item_id: None,
         }
     }
 
@@ -730,6 +732,7 @@ impl StreamController {
             !header_emitted
         });
         cell.timestamp = self.timestamp;
+        cell.item_id = self.item_id.clone();
         Some(Box::new(cell))
     }
 }
@@ -745,6 +748,7 @@ pub(crate) struct PlanStreamController {
     core: StreamCore,
     header_emitted: bool,
     top_padding_emitted: bool,
+    pub(crate) item_id: Option<String>,
 }
 
 impl PlanStreamController {
@@ -769,6 +773,7 @@ impl PlanStreamController {
             ),
             header_emitted: false,
             top_padding_emitted: false,
+            item_id: None,
         }
     }
 
@@ -868,10 +873,9 @@ impl PlanStreamController {
         self.header_emitted = true;
         self.top_padding_emitted = true;
 
-        Some(Box::new(history_cell::new_proposed_plan_stream(
-            out_lines,
-            is_stream_continuation,
-        )))
+        let mut cell = history_cell::new_proposed_plan_stream(out_lines, is_stream_continuation);
+        cell.item_id = self.item_id.clone();
+        Some(Box::new(cell))
     }
 
     fn render_display_lines(

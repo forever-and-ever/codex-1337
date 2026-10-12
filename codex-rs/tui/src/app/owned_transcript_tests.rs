@@ -196,6 +196,29 @@ async fn list_spacing_completion_preserves_the_scrolled_reader() -> Result<()> {
     app.transcript_view
         .render(area, &mut after, &app.transcript_cells);
     assert_eq!(after, before);
+    // Abandoning one stream may span unrelated completed output. Splicing must
+    // retain those cells and the scrolled reader, not truncate the transcript tip.
+    let completed = app.transcript_cells[0].clone();
+    let mut failed = history_cell::AgentMessageCell::new(vec!["failed prefix".into()], true);
+    failed.item_id = Some("failed-agent".into());
+    let retained = user_cell("Interleaved retained output");
+    let mut plan = history_cell::new_proposed_plan_stream(
+        vec![ratatui::text::Line::from("failed plan")],
+        false,
+    );
+    plan.item_id = Some("failed-plan".into());
+    app.transcript_cells.extend([
+        Arc::new(failed) as Arc<dyn HistoryCell>,
+        retained.clone(),
+        Arc::new(plan) as Arc<dyn HistoryCell>,
+    ]);
+    app.discard_stream_items(&mut tui, &["failed-agent".into(), "failed-plan".into()]);
+    assert_eq!(app.transcript_cells.len(), 2);
+    assert!(Arc::ptr_eq(&app.transcript_cells[0], &completed));
+    assert!(Arc::ptr_eq(&app.transcript_cells[1], &retained));
+    app.transcript_view
+        .render(area, &mut after, &app.transcript_cells);
+    assert_eq!(after, before);
     Ok(())
 }
 

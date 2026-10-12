@@ -46,6 +46,14 @@ impl NativeHistory {
         });
     }
 
+    pub(super) fn discard(&mut self, previous: &[Arc<dyn HistoryCell>]) {
+        self.pending.retain(|entry| {
+            !previous
+                .iter()
+                .any(|cell| entry.owner.ptr_eq(&Arc::downgrade(cell)))
+        });
+    }
+
     /// Replace an entirely unprinted stream with final source. For a partly printed stream, keep
     /// only its remaining fragments; never replay the prefix already owned by the terminal.
     pub(super) fn consolidate(

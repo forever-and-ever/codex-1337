@@ -33,6 +33,8 @@ impl App {
             .find(|new| !retained.iter().any(|cell| Arc::ptr_eq(new, cell)))
         {
             self.native_history.consolidate(&previous, replacement);
+        } else {
+            self.native_history.discard(&previous);
         }
         match splice.shape {
             SpliceShape::Revision => {

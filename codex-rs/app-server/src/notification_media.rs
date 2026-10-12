@@ -101,6 +101,7 @@ pub(crate) fn without_notification_media(notification: ServerNotification) -> Se
         | ServerNotification::StrictReviewRequired(_)
         | ServerNotification::RawResponseCompleted(_)
         | ServerNotification::AgentMessageDelta(_)
+        | ServerNotification::StreamItemsDiscarded(_)
         | ServerNotification::PlanDelta(_)
         | ServerNotification::CommandExecOutputDelta(_)
         | ServerNotification::ProcessOutputDelta(_)

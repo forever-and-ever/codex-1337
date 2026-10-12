@@ -139,11 +139,11 @@ impl ChatWidget {
                 self.note_stream_consolidation_queued();
                 self.app_event_tx.send(AppEvent::ConsolidateAgentMessage {
                     source,
-                    // Only an item's completion supplies its message; a flush between items has
-                    // no identity to give.
-                    item_id: completed_message
-                        .and(self.transcript.last_completed_agent_message.as_ref())
-                        .map(|(_, id)| id.clone()),
+                    item_id: controller.item_id.clone().or_else(|| {
+                        completed_message
+                            .and(self.transcript.last_completed_agent_message.as_ref())
+                            .map(|(_, id)| id.clone())
+                    }),
                     copy_source,
                     cwd: self.config.cwd.to_path_buf(),
                     inline_visualization_context,
@@ -244,6 +244,9 @@ impl ChatWidget {
                     },
                 ),
             );
+        }
+        if let Some(controller) = self.plan_stream_controller.as_mut() {
+            controller.item_id = self.transcript.streaming_plan_item.clone();
         }
         let changed = self
             .plan_stream_controller
@@ -595,6 +598,7 @@ impl ChatWidget {
                 ListSpacing::AfterMultiline
             });
             controller.timestamp = timestamp;
+            controller.item_id = self.transcript.streaming_agent_item.clone();
             self.stream_controller = Some(controller);
         }
         let changed = self

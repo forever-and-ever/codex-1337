@@ -64,6 +64,8 @@ pub(super) struct TranscriptState {
     pub(super) plan_delta_buffer: String,
     /// True while a plan item is streaming.
     pub(super) plan_item_active: bool,
+    pub(super) streaming_agent_item: Option<String>,
+    pub(super) streaming_plan_item: Option<String>,
 }
 
 impl TranscriptState {

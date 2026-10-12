@@ -427,6 +427,7 @@ pub(crate) struct AgentMessageCell {
     lines: Vec<HyperlinkLine>,
     is_first_line: bool,
     pub(crate) timestamp: Option<HistoryTimestamp>,
+    pub(crate) item_id: Option<String>,
 }
 
 impl AgentMessageCell {
@@ -444,6 +445,7 @@ impl AgentMessageCell {
             lines,
             is_first_line,
             timestamp: None,
+            item_id: None,
         }
     }
 }

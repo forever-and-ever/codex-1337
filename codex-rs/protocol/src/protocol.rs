@@ -1560,6 +1560,7 @@ pub enum EventMsg {
     RawResponseItem(RawResponseItemEvent),
     RawResponseCompleted(RawResponseCompletedEvent),
 
+    StreamItemsDiscarded(crate::StreamItemsDiscardedEvent),
     ItemStarted(ItemStartedEvent),
     ItemCompleted(ItemCompletedEvent),
     HookStarted(HookStartedEvent),

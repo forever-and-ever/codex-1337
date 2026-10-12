@@ -95,5 +95,7 @@ pub use turn::*;
 pub use user_verification::*;
 pub use windows_sandbox::*;
 
+mod stream_discard;
 #[cfg(test)]
 mod tests;
+pub use stream_discard::StreamItemsDiscardedNotification;

@@ -1298,6 +1298,7 @@ impl Drop for App {
     }
 }
 
+mod stream_discard;
 #[cfg(test)]
 pub(super) mod test_support;
 #[cfg(test)]

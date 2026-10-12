@@ -2120,5 +2120,6 @@ pub(crate) fn extract_first_bold(s: &str) -> Option<String> {
     None
 }
 
+mod stream_discard;
 #[cfg(test)]
 pub(crate) mod tests;

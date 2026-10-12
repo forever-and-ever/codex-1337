@@ -87,6 +87,7 @@ pub(crate) fn new_proposed_plan_stream(
     ProposedPlanStreamCell {
         lines: lines.into_iter().map(Into::into).collect(),
         is_stream_continuation,
+        item_id: None,
     }
 }
 
@@ -120,6 +121,7 @@ pub(crate) struct ProposedPlanCell {
 pub(crate) struct ProposedPlanStreamCell {
     lines: Vec<HyperlinkLine>,
     is_stream_continuation: bool,
+    pub(crate) item_id: Option<String>,
 }
 
 impl ProposedPlanCell {

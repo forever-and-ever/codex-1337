@@ -1,7 +1,10 @@
+#[path = "stream_attempt.rs"]
+mod stream_attempt;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use stream_attempt::SamplingFailure;
 
 use crate::client::ModelClientSession;
 use crate::client_common::Prompt;
@@ -1762,7 +1765,7 @@ async fn run_sampling_request(
         }
         let mut response_runtime = tool_runtime.clone();
         response_runtime.batch = Arc::default();
-        let err = match try_run_sampling_request(
+        let failure = match try_run_sampling_request(
             response_runtime,
             Arc::clone(&sess),
             Arc::clone(&step_context),
@@ -1781,23 +1784,29 @@ async fn run_sampling_request(
                     original_input.unwrap_or(prompt.input),
                 ));
             }
-            Err(err) if sess.can_retry_after_account_handoff(&err) => {
+            Err(failure) if sess.can_retry_after_account_handoff(&failure.error) => {
+                stream_attempt::discard(&sess, &turn_context, failure.unfinished).await;
                 return Ok(SamplingRequestOutcome::AccountHandoff);
             }
-            Err(err) => match err.details() {
-                CodexErrorDetails::ContextWindowExceeded => {
-                    sess.set_total_tokens_full(&turn_context).await;
-                    return Err(err);
+            Err(failure) => failure,
+        };
+        let SamplingFailure {
+            error: err,
+            unfinished,
+        } = failure;
+        let err = match err.details() {
+            CodexErrorDetails::ContextWindowExceeded => {
+                sess.set_total_tokens_full(&turn_context).await;
+                return Err(err);
+            }
+            CodexErrorDetails::UsageLimitReached(e) => {
+                let rate_limits = e.rate_limits.clone();
+                if let Some(rate_limits) = rate_limits {
+                    sess.update_rate_limits(&turn_context, *rate_limits).await;
                 }
-                CodexErrorDetails::UsageLimitReached(e) => {
-                    let rate_limits = e.rate_limits.clone();
-                    if let Some(rate_limits) = rate_limits {
-                        sess.update_rate_limits(&turn_context, *rate_limits).await;
-                    }
-                    return Err(err);
-                }
-                _ => err,
-            },
+                return Err(err);
+            }
+            _ => err,
         };
 
         let original_input = original_input.get_or_insert(prompt.input);
@@ -1818,6 +1827,7 @@ async fn run_sampling_request(
             return Err(CodexErr::TurnAborted);
         }
         if preempt.is_cancelled() {
+            stream_attempt::discard(&sess, &turn_context, unfinished).await;
             return Ok(SamplingRequestOutcome::Completed(
                 SamplingRequestResult {
                     needs_follow_up: true,
@@ -1827,6 +1837,7 @@ async fn run_sampling_request(
             ));
         }
         retry??;
+        stream_attempt::discard(&sess, &turn_context, unfinished).await;
         turn_context.turn_timing_state.record_sampling_retry();
     }
 }
@@ -2621,7 +2632,7 @@ async fn try_run_sampling_request(
     turn_diff_tracker: SharedTurnDiffTracker,
     prompt: &Prompt,
     cancellation_token: CancellationToken,
-) -> CodexResult<SamplingRequestResult> {
+) -> Result<SamplingRequestResult, SamplingFailure> {
     let turn_context = Arc::clone(&step_context.turn);
     feedback_tags!(
         model = step_context.settings.model_info.slug.clone(),
@@ -2680,7 +2691,7 @@ async fn try_run_sampling_request(
         .or_cancel(&cancellation_token)
         .await??;
     if cancellation_token.is_cancelled() {
-        return Err(CodexErr::TurnAborted);
+        return Err(CodexErr::TurnAborted.into());
     }
     let mut in_flight: FuturesOrdered<InFlightFuture<'static>> = FuturesOrdered::new();
     let mut needs_follow_up = false;
@@ -3350,7 +3361,7 @@ async fn try_run_sampling_request(
     }
 
     if cancellation_token.is_cancelled() {
-        return Err(CodexErr::TurnAborted);
+        return Err(CodexErr::TurnAborted.into());
     }
 
     if should_emit_turn_diff {
@@ -3364,7 +3375,15 @@ async fn try_run_sampling_request(
         }
     }
 
-    outcome
+    outcome.map_err(|error| {
+        SamplingFailure::capture(
+            error,
+            active_item
+                .as_ref()
+                .filter(|_| active_item_is_streaming_to_client),
+            plan_mode_state.as_ref(),
+        )
+    })
 }
 
 pub(crate) fn get_last_assistant_message_from_turn<'a>(

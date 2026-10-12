@@ -216,6 +216,7 @@ fn persisted_event_msg(
         | EventMsg::ElicitationRequest(_)
         | EventMsg::ApplyPatchApprovalRequest(_)
         | EventMsg::StreamError(_)
+        | EventMsg::StreamItemsDiscarded(_)
         | EventMsg::PatchApplyBegin(_)
         | EventMsg::PatchApplyUpdated(_)
         | EventMsg::TurnDiff(_)

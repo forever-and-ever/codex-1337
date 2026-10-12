@@ -144,6 +144,9 @@ impl ChatWidget {
             ServerNotification::ItemCompleted(notification) => {
                 self.handle_item_completed_notification(notification, replay_kind);
             }
+            ServerNotification::StreamItemsDiscarded(notification) => {
+                self.discard_stream_items(notification.item_ids);
+            }
             ServerNotification::AgentMessageDelta(notification) => {
                 self.restore_realtime_transcripts_before_turn(&notification.turn_id);
                 if !self.is_realtime_delegated_reasoning_turn(&notification.turn_id)
@@ -623,7 +626,11 @@ impl ChatWidget {
             {
                 self.remember_realtime_delegated_reasoning_turn(&notification.turn_id);
             }
+            ThreadItem::Plan { id, .. } => {
+                self.transcript.streaming_plan_item = Some(id);
+            }
             ThreadItem::AgentMessage { id, .. } => {
+                self.transcript.streaming_agent_item = Some(id.clone());
                 self.transcript.agent_timestamp =
                     history_cell::HistoryTimestamp::from_millis(notification.started_at_ms);
                 if replay_kind.is_none() {

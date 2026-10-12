@@ -1059,6 +1059,17 @@ pub(crate) async fn apply_bespoke_event_handling(
             )
             .await;
         }
+        EventMsg::StreamItemsDiscarded(ev) => {
+            outgoing
+                .send_server_notification(ServerNotification::StreamItemsDiscarded(
+                    codex_app_server_protocol::StreamItemsDiscardedNotification {
+                        thread_id: ev.thread_id.to_string(),
+                        turn_id: ev.turn_id,
+                        item_ids: ev.item_ids,
+                    },
+                ))
+                .await;
+        }
         EventMsg::StreamError(ev) => {
             // We don't need to update the turn summary store for stream errors as they are intermediate error states for retries,
             // but we notify the client.

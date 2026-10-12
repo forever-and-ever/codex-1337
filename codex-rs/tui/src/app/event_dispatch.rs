@@ -692,6 +692,9 @@ impl App {
                 }
                 self.finish_initial_history_replay_buffer(tui);
             }
+            AppEvent::DiscardStreamItems(item_ids) => {
+                self.discard_stream_items(tui, &item_ids);
+            }
             AppEvent::ConsolidateAgentMessage {
                 source,
                 item_id,

@@ -18,9 +18,11 @@ use std::net::TcpListener;
 use wiremock::MockServer;
 
 fn sse_incomplete() -> String {
-    responses::sse(vec![serde_json::json!({
-        "type": "response.output_item.done",
-    })])
+    responses::sse(vec![
+        responses::ev_assistant_message("committed", "Retain this completed message."),
+        responses::ev_message_item_added("unfinished", ""),
+        responses::ev_output_text_delta("Discard this unfinished text."),
+    ])
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -90,8 +92,16 @@ async fn retries_on_early_close() {
         .await
         .unwrap();
 
-    // Wait until TurnComplete (should succeed after retry).
-    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+    // The retry's semantic boundary must not depend on an optional status warning.
+    let mut discarded = Vec::new();
+    wait_for_event(&codex, |event| {
+        if let EventMsg::StreamItemsDiscarded(event) = event {
+            discarded.extend(event.item_ids.clone());
+        }
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+    assert_eq!(discarded, ["unfinished"]);
 
     let requests = server.requests().await;
     assert_eq!(
@@ -99,6 +109,11 @@ async fn retries_on_early_close() {
         2,
         "expected retry after incomplete SSE stream"
     );
+
+    let retried: serde_json::Value = serde_json::from_slice(&requests[1]).unwrap();
+    let input = retried["input"].to_string();
+    assert!(input.contains("Retain this completed message."));
+    assert!(!input.contains("Discard this unfinished text."));
 
     server.shutdown().await;
 }
