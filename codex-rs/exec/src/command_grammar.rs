@@ -5,7 +5,9 @@ use crate::cli::ForkArgs;
 use crate::cli::ResumeArgs;
 use crate::cli::ReviewArgs;
 use clap::Args;
+use clap::Id;
 use clap::Parser;
+use clap::builder::Resettable;
 use codex_protocol::protocol::ThreadSource;
 use codex_utils_cli::CliConfigOverrides;
 use codex_utils_cli::SharedCliOptions;
@@ -124,14 +126,14 @@ pub(crate) fn augment_exec_shared_args(cmd: clap::Command, for_update: bool) -> 
             .map(|conflict| exec_shared_id(conflict.get_id().as_str()));
         arg.clone()
             .id(exec_shared_id(arg.get_id().as_str()))
-            .conflicts_with(None::<&str>)
+            .conflicts_with(Resettable::<Id>::Reset)
             .conflicts_with_all(conflicts)
             // Images belong to each command; global copies duplicate resumed attachments.
             .global(arg.get_id().as_str() != "images")
     });
     let groups = schema.get_groups().map(|group| {
         let members = group.get_args().map(|id| exec_shared_id(id.as_str()));
-        group.clone().arg(None::<&str>).args(members)
+        group.clone().arg(Resettable::<Id>::Reset).args(members)
     });
     cmd.args(args).groups(groups)
 }
