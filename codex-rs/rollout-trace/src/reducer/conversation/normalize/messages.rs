@@ -1,0 +1,152 @@
+//! Messages wire blocks projected into the shared conversation reducer vocabulary.
+
+use std::collections::HashSet;
+
+use anyhow::Context;
+use anyhow::Result;
+use anyhow::bail;
+use codex_protocol::models::AnthropicSignedCompaction;
+use serde_json::Value;
+
+use super::NormalizedConversationItem;
+use super::native_compaction_item;
+use super::normalize_model_item;
+use crate::payload::RawPayloadRef;
+
+pub(in super::super) fn normalize_messages_request(
+    request: &Value,
+    raw_payload: &RawPayloadRef,
+) -> Result<Vec<NormalizedConversationItem>> {
+    let messages = request
+        .get("messages")
+        .and_then(Value::as_array)
+        .with_context(|| {
+            format!(
+                "Messages request payload {} did not contain array messages",
+                raw_payload.raw_payload_id
+            )
+        })?;
+    let mut items = Vec::new();
+    let mut custom_calls = HashSet::new();
+    if let Some(system) = request.get("system") {
+        append_content(system, "system", raw_payload, &mut custom_calls, &mut items)?;
+    }
+    for message in messages {
+        let role = message
+            .get("role")
+            .and_then(Value::as_str)
+            .context("Messages request message had no role")?;
+        if !matches!(role, "user" | "assistant") {
+            bail!("Messages request contained unsupported message role");
+        }
+        let content = message
+            .get("content")
+            .context("Messages request message had no content")?;
+        append_content(content, role, raw_payload, &mut custom_calls, &mut items)?;
+    }
+    Ok(items)
+}
+
+fn append_content(
+    content: &Value,
+    role: &str,
+    raw_payload: &RawPayloadRef,
+    custom_calls: &mut HashSet<String>,
+    items: &mut Vec<NormalizedConversationItem>,
+) -> Result<()> {
+    if let Some(text) = content.as_str() {
+        items.push(normalize_model_item(
+            &serde_json::json!({
+                "type": "message", "role": role, "content": [{"type": "text", "text": text}],
+            }),
+            raw_payload,
+        )?);
+        return Ok(());
+    }
+    let blocks = content
+        .as_array()
+        .context("Messages content was neither a string nor an array")?;
+    for block in blocks {
+        let kind = block
+            .get("type")
+            .and_then(Value::as_str)
+            .context("Messages content block had no type")?;
+        let item = match kind {
+            "compaction" => {
+                let checkpoint: AnthropicSignedCompaction =
+                    serde_json::from_value(block.clone())
+                        .context("invalid signed Messages compaction block")?;
+                items.push(native_compaction_item(&checkpoint, raw_payload));
+                continue;
+            }
+            "tool_use" => {
+                let id = block
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .context("Messages tool_use had no id")?;
+                let input = block
+                    .get("input")
+                    .context("Messages tool_use had no input")?;
+                // These envelopes are the native adapter's explicit function/custom contract.
+                if let Some(input) = input
+                    .as_object()
+                    .filter(|input| input.len() == 1)
+                    .and_then(|input| input.get("input"))
+                    .and_then(Value::as_str)
+                {
+                    custom_calls.insert(id.to_string());
+                    serde_json::json!({"type": "custom_tool_call", "call_id": id, "input": input})
+                } else {
+                    serde_json::json!({"type": "function_call", "call_id": id,
+                        "arguments": input.get("arguments").unwrap_or(input)})
+                }
+            }
+            "tool_result" => {
+                let id = block
+                    .get("tool_use_id")
+                    .and_then(Value::as_str)
+                    .context("Messages tool_result had no tool_use_id")?;
+                serde_json::json!({"type": if custom_calls.contains(id) { "custom_tool_call_output" } else { "function_call_output" },
+                    "call_id": id, "output": block.get("content")})
+            }
+            "thinking" | "redacted_thinking" => {
+                // Signed thinking is lazy evidence, not JSON that might print its signature.
+                let (label, signature) = if kind == "thinking" {
+                    (
+                        "native_thinking",
+                        block.get("signature").and_then(Value::as_str),
+                    )
+                } else {
+                    (
+                        "native_redacted_thinking",
+                        block.get("data").and_then(Value::as_str),
+                    )
+                };
+                let signature = signature.context("signed Messages thinking had no signature")?;
+                let mut parts = Vec::new();
+                if let Some(text) = block.get("thinking").and_then(Value::as_str) {
+                    parts.push(crate::model::ConversationPart::Summary {
+                        text: text.to_string(),
+                    });
+                }
+                parts.push(super::signed_payload_ref_part(
+                    label,
+                    signature,
+                    raw_payload,
+                ));
+                items.push(NormalizedConversationItem {
+                    role: crate::model::ConversationRole::Assistant,
+                    channel: Some(crate::model::ConversationChannel::Analysis),
+                    kind: crate::model::ConversationItemKind::Reasoning,
+                    agent_message: None,
+                    body: crate::model::ConversationBody { parts },
+                    call_id: None,
+                });
+                continue;
+            }
+            _ => serde_json::json!({"type": "message", "role": role, "content": [block]}),
+        };
+        items.push(normalize_model_item(&item, raw_payload)?);
+    }
+    Ok(())
+}

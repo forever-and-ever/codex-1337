@@ -173,13 +173,35 @@ fn compaction_contexts_share_identity_across_models() -> anyhow::Result<()> {
         ThreadTraceContext::start_root_in_root_for_test(temp.path(), minimal_metadata(thread_id))?;
     thread_trace.record_codex_turn_started("turn-1");
 
-    for model in ["gpt-previous", "gpt-selected"] {
+    for (model, protocol) in [
+        ("gpt-previous", crate::ModelRequestProtocol::Responses),
+        ("gpt-selected", crate::ModelRequestProtocol::Messages),
+    ] {
         let compaction_trace =
             thread_trace.compaction_trace_context("turn-1", "compaction-1", model, "test-provider");
         assert!(compaction_trace.is_enabled());
-        compaction_trace
-            .start_attempt(&serde_json::json!({ "model": model }))
-            .record_failed("test failure");
+        if protocol == crate::ModelRequestProtocol::Responses {
+            compaction_trace
+                .start_attempt(&serde_json::json!({ "model": model }))
+                .record_failed("test failure");
+        } else {
+            let trace = compaction_trace.inference_trace_context();
+            let attempt = trace.start_attempt();
+            attempt.record_started_with_protocol(
+                &serde_json::json!({
+                    "model": model, "messages": [{"role": "user", "content": "compact"}],
+                    "compaction": {"type": "summarize"}
+                }),
+                protocol,
+            );
+            let output = serde_json::from_value(serde_json::json!({
+                "type": "native_compaction",
+                "provider": "anthropic", "content": "signed summary", "signature": "native-signature-secret"
+            }))?;
+            attempt.record_completed("native-response", None, &None, &[output]);
+            // Dropping the caller after completion must not rewrite the terminal observation.
+            attempt.record_cancelled("late cancellation", None, &[]);
+        }
     }
 
     let replayed = replay_bundle(&single_bundle_dir(temp.path())?)?;
@@ -196,6 +218,26 @@ fn compaction_contexts_share_identity_across_models() -> anyhow::Result<()> {
             ("gpt-selected".to_string(), "compaction-1".to_string()),
         ]
     );
+
+    assert!(replayed.inference_calls.is_empty());
+    assert!(replayed.compactions.is_empty());
+    assert!(replayed.conversation_items.is_empty());
+    let native = replayed
+        .compaction_requests
+        .values()
+        .find(|attempt| attempt.model == "gpt-selected")
+        .unwrap();
+    assert_eq!(
+        native.request_protocol,
+        crate::ModelRequestProtocol::Messages
+    );
+    assert_eq!(native.execution.status, crate::ExecutionStatus::Completed);
+    let raw = &replayed.raw_payloads[&native.raw_request_payload_id];
+    let request: serde_json::Value = serde_json::from_slice(&std::fs::read(
+        single_bundle_dir(temp.path())?.join(&raw.path),
+    )?)?;
+    assert!(request.get("messages").is_some());
+    assert!(request.get("input").is_none());
 
     Ok(())
 }

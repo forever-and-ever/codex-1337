@@ -283,24 +283,15 @@ async fn attempt(
         .compaction_responses_metadata(turn_context.as_ref(), compaction_metadata)
         .await;
     responses_metadata.tool_namespaces_info = tool_router.tool_namespaces_info().cloned();
-    let trace_attempt = compaction_trace.start_attempt(&serde_json::json!({
-        "model": turn_context.model_info().slug.as_str(),
-        "instructions": prompt.base_instructions.text.as_str(),
-        "input": &prompt.input,
-        "parallel_tool_calls": prompt.parallel_tool_calls,
-    }));
     let output = request(
         sess,
         step_context,
         client_session,
         &prompt,
         &responses_metadata,
+        compaction_trace,
     )
     .await;
-    trace_attempt.record_result(match &output {
-        Ok((item, _, _)) => Ok(std::slice::from_ref(item)),
-        Err(miss) => Err(miss.error()),
-    });
     let (item, response_id, token_usage) = output?;
     Ok(Checkpoint {
         item,
@@ -425,10 +416,13 @@ async fn install_checkpoint(
             .raw_items()
             .cloned()
             .collect::<Vec<_>>();
-        compaction_trace.record_installed(&CompactionCheckpointTracePayload {
-            input_history,
-            replacement_history: &replacement_history,
-        });
+        compaction_trace.record_installed_with_protocol(
+            &CompactionCheckpointTracePayload {
+                input_history,
+                replacement_history: &replacement_history,
+            },
+            codex_rollout_trace::ModelRequestProtocol::Messages,
+        );
     }
     sess.recompute_token_usage(turn_context).await;
     Ok(())

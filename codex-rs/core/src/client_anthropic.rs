@@ -243,7 +243,10 @@ impl ModelClientSession {
             let attempt = trace.start_attempt();
             let mut options = AnthropicStreamOptions::default();
             attempt.add_request_headers(&mut options.extra_headers);
-            attempt.record_started(&request.body());
+            attempt.record_started_with_protocol(
+                &request.body(),
+                codex_rollout_trace::ModelRequestProtocol::Messages,
+            );
             match client.stream_request(request.clone(), options).await {
                 Ok(stream) => {
                     let (stream, _) = map_response_stream(

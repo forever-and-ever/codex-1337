@@ -209,6 +209,7 @@ mod tests {
             }),
         )?;
         writer.append(RawTraceEventPayload::InferenceStarted {
+            request_protocol: crate::ModelRequestProtocol::Responses,
             inference_call_id: "inference-1".to_string(),
             thread_id: "thread-root".to_string(),
             codex_turn_id: "turn-1".to_string(),

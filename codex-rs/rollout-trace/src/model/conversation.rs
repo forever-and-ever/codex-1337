@@ -96,6 +96,15 @@ pub struct ConversationBody {
     pub parts: Vec<ConversationPart>,
 }
 
+/// Model-facing request protocol selected at the transport capture boundary.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelRequestProtocol {
+    #[default]
+    Responses,
+    Messages,
+}
+
 /// One model-visible part inside a conversation item.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "type")]
@@ -176,6 +185,8 @@ pub struct InferenceCall {
     /// Runtime tool calls whose model-visible call item came from this response.
     pub tool_call_ids_started_by_response: Vec<ToolCallId>,
     pub usage: Option<TokenUsage>,
+    #[serde(default)]
+    pub request_protocol: crate::ModelRequestProtocol,
     pub raw_request_payload_id: RawPayloadId,
     /// Full upstream response payload. `None` while running or after pre-stream failures.
     pub raw_response_payload_id: Option<RawPayloadId>,

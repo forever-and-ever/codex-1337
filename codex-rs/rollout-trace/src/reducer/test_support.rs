@@ -127,6 +127,7 @@ pub(crate) fn append_inference_start_for_thread(
     request_payload: RawPayloadRef,
 ) -> anyhow::Result<()> {
     writer.append(RawTraceEventPayload::InferenceStarted {
+        request_protocol: crate::ModelRequestProtocol::Responses,
         inference_call_id: inference_call_id.to_string(),
         thread_id: thread_id.to_string(),
         codex_turn_id: codex_turn_id.to_string(),

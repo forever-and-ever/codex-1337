@@ -42,6 +42,7 @@ pub struct InferenceTraceContext {
 enum InferenceTraceContextState {
     Disabled,
     Enabled(EnabledInferenceTraceContext),
+    Compaction(crate::CompactionTraceContext),
 }
 
 #[derive(Clone, Debug)]
@@ -68,6 +69,10 @@ pub struct InferenceTraceAttempt {
 enum InferenceTraceAttemptState {
     Disabled,
     Enabled(EnabledInferenceTraceAttempt),
+    Compaction {
+        attempt: crate::CompactionTraceAttempt,
+        terminal_recorded: AtomicBool,
+    },
 }
 
 #[derive(Debug)]
@@ -118,8 +123,22 @@ impl InferenceTraceContext {
         }
     }
 
+    pub(crate) fn for_compaction(context: crate::CompactionTraceContext) -> Self {
+        Self {
+            state: InferenceTraceContextState::Compaction(context),
+        }
+    }
+
     /// Starts a new attempt after the concrete provider request has been built.
     pub fn start_attempt(&self) -> InferenceTraceAttempt {
+        if let InferenceTraceContextState::Compaction(context) = &self.state {
+            return InferenceTraceAttempt {
+                state: InferenceTraceAttemptState::Compaction {
+                    attempt: context.new_attempt(),
+                    terminal_recorded: AtomicBool::new(false),
+                },
+            };
+        }
         let InferenceTraceContextState::Enabled(context) = &self.state else {
             return InferenceTraceAttempt::disabled();
         };
@@ -144,7 +163,8 @@ impl InferenceTraceAttempt {
 
     fn inference_call_id(&self) -> Option<&str> {
         match &self.state {
-            InferenceTraceAttemptState::Disabled => None,
+            InferenceTraceAttemptState::Disabled
+            | InferenceTraceAttemptState::Compaction { .. } => None,
             InferenceTraceAttemptState::Enabled(attempt) => {
                 Some(attempt.inference_call_id.as_str())
             }
@@ -166,12 +186,25 @@ impl InferenceTraceAttempt {
         headers.insert(INFERENCE_CALL_ID_HEADER, inference_call_id);
     }
 
+    /// Records a Responses request.
+    pub fn record_started(&self, request: &impl Serialize) {
+        self.record_started_with_protocol(request, crate::ModelRequestProtocol::Responses);
+    }
+
     /// Records the request payload replay should treat as the model-visible inference input.
     ///
     /// This is usually the exact provider request. Callers may instead pass a
     /// logical request when the transport omits already-sent input, such as
     /// websocket reuse after an untraced warmup response.
-    pub fn record_started(&self, request: &impl Serialize) {
+    pub fn record_started_with_protocol(
+        &self,
+        request: &impl Serialize,
+        request_protocol: crate::ModelRequestProtocol,
+    ) {
+        if let InferenceTraceAttemptState::Compaction { attempt, .. } = &self.state {
+            attempt.record_started_with_protocol(request, request_protocol);
+            return;
+        }
         let InferenceTraceAttemptState::Enabled(attempt) = &self.state else {
             return;
         };
@@ -191,6 +224,7 @@ impl InferenceTraceAttempt {
                 codex_turn_id: attempt.context.codex_turn_id.clone(),
                 model: attempt.context.model.clone(),
                 provider_name: attempt.context.provider_name.clone(),
+                request_protocol,
                 request_payload,
             },
         );
@@ -209,6 +243,10 @@ impl InferenceTraceAttempt {
         token_usage: &Option<TokenUsage>,
         output_items: &[ResponseItem],
     ) {
+        if let Some(attempt) = self.take_compaction_attempt() {
+            attempt.record_completed(output_items);
+            return;
+        }
         let Some(attempt) = self.take_terminal_attempt() else {
             return;
         };
@@ -240,6 +278,10 @@ impl InferenceTraceAttempt {
         upstream_request_id: Option<&str>,
         output_items: &[ResponseItem],
     ) {
+        if let Some(attempt) = self.take_compaction_attempt() {
+            attempt.record_failed(error);
+            return;
+        }
         let Some(attempt) = self.take_terminal_attempt() else {
             return;
         };
@@ -276,6 +318,10 @@ impl InferenceTraceAttempt {
         upstream_request_id: Option<&str>,
         output_items: &[ResponseItem],
     ) {
+        if let Some(attempt) = self.take_compaction_attempt() {
+            attempt.record_failed(reason);
+            return;
+        }
         let Some(attempt) = self.take_terminal_attempt() else {
             return;
         };
@@ -301,9 +347,21 @@ impl InferenceTraceAttempt {
         );
     }
 
+    fn take_compaction_attempt(&self) -> Option<&crate::CompactionTraceAttempt> {
+        let InferenceTraceAttemptState::Compaction {
+            attempt,
+            terminal_recorded,
+        } = &self.state
+        else {
+            return None;
+        };
+        (!terminal_recorded.swap(true, Ordering::AcqRel)).then_some(attempt)
+    }
+
     fn take_terminal_attempt(&self) -> Option<&EnabledInferenceTraceAttempt> {
         let attempt = match &self.state {
-            InferenceTraceAttemptState::Disabled => return None,
+            InferenceTraceAttemptState::Disabled
+            | InferenceTraceAttemptState::Compaction { .. } => return None,
             InferenceTraceAttemptState::Enabled(attempt) => attempt,
         };
         if attempt.terminal_recorded.swap(true, Ordering::AcqRel) {

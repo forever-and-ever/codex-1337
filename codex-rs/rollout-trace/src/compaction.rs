@@ -120,34 +120,59 @@ impl CompactionTraceContext {
         matches!(self.state, CompactionTraceContextState::Enabled(_))
     }
 
-    /// Starts a new upstream attempt and records the exact compact endpoint request.
-    pub fn start_attempt(&self, request: &impl Serialize) -> CompactionTraceAttempt {
+    /// Routes streaming model-client observations through the compaction lifecycle.
+    pub fn inference_trace_context(&self) -> crate::InferenceTraceContext {
+        crate::InferenceTraceContext::for_compaction(self.clone())
+    }
+
+    pub(crate) fn new_attempt(&self) -> CompactionTraceAttempt {
         let CompactionTraceContextState::Enabled(context) = &self.state else {
             return CompactionTraceAttempt::disabled();
         };
-
-        let attempt = CompactionTraceAttempt {
+        CompactionTraceAttempt {
             state: CompactionTraceAttemptState::Enabled(EnabledCompactionTraceAttempt {
                 context: context.clone(),
                 compaction_request_id: next_compaction_request_id(),
             }),
-        };
-        attempt.record_started(request);
+        }
+    }
+
+    /// Starts a new upstream attempt and records the exact compact endpoint request.
+    pub fn start_attempt(&self, request: &impl Serialize) -> CompactionTraceAttempt {
+        let attempt = self.new_attempt();
+        attempt.record_started_with_protocol(request, crate::ModelRequestProtocol::Responses);
         attempt
+    }
+
+    pub fn record_installed(&self, checkpoint: &CompactionCheckpointTracePayload<'_>) {
+        self.record_installed_with_protocol(checkpoint, crate::ModelRequestProtocol::Responses);
     }
 
     /// Records the point where compacted history becomes the live thread history.
     ///
     /// The checkpoint belongs to the same semantic compaction lifecycle as the
     /// compact endpoint attempts, so the context reuses its stable compaction ID.
-    pub fn record_installed(&self, checkpoint: &CompactionCheckpointTracePayload<'_>) {
+    pub fn record_installed_with_protocol(
+        &self,
+        checkpoint: &CompactionCheckpointTracePayload<'_>,
+        request_protocol: crate::ModelRequestProtocol,
+    ) {
+        #[derive(Serialize)]
+        struct CapturedCheckpoint<'a, 'b> {
+            request_protocol: crate::ModelRequestProtocol,
+            #[serde(flatten)]
+            checkpoint: &'a CompactionCheckpointTracePayload<'b>,
+        }
         let CompactionTraceContextState::Enabled(context) = &self.state else {
             return;
         };
-        let checkpoint_payload = match context
-            .writer
-            .write_json_payload(RawPayloadKind::CompactionCheckpoint, checkpoint)
-        {
+        let checkpoint_payload = match context.writer.write_json_payload(
+            RawPayloadKind::CompactionCheckpoint,
+            &CapturedCheckpoint {
+                request_protocol,
+                checkpoint,
+            },
+        ) {
             Ok(payload_ref) => payload_ref,
             Err(err) => {
                 warn!("failed to write rollout trace payload: {err:#}");
@@ -179,7 +204,11 @@ impl CompactionTraceAttempt {
         }
     }
 
-    fn record_started(&self, request: &impl Serialize) {
+    pub(crate) fn record_started_with_protocol(
+        &self,
+        request: &impl Serialize,
+        request_protocol: crate::ModelRequestProtocol,
+    ) {
         let CompactionTraceAttemptState::Enabled(attempt) = &self.state else {
             return;
         };
@@ -200,6 +229,7 @@ impl CompactionTraceAttempt {
                 codex_turn_id: attempt.context.codex_turn_id.clone(),
                 model: attempt.context.model.clone(),
                 provider_name: attempt.context.provider_name.clone(),
+                request_protocol,
                 request_payload,
             },
         );

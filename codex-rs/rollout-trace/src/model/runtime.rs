@@ -101,6 +101,8 @@ pub struct CompactionRequest {
     pub execution: ExecutionWindow,
     pub model: String,
     pub provider_name: String,
+    #[serde(default)]
+    pub request_protocol: crate::ModelRequestProtocol,
     pub raw_request_payload_id: RawPayloadId,
     /// Full compaction response payload. `None` while running or after pre-response failures.
     pub raw_response_payload_id: Option<RawPayloadId>,

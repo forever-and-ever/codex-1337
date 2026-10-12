@@ -68,6 +68,7 @@ impl TraceReducer {
                 },
                 model: started.model,
                 provider_name: started.provider_name,
+                request_protocol: started.request_protocol,
                 raw_request_payload_id: started.request_payload.raw_payload_id,
                 raw_response_payload_id: None,
             },
@@ -179,5 +180,6 @@ pub(super) struct StartedCompactionRequest {
     pub(super) codex_turn_id: String,
     pub(super) model: String,
     pub(super) provider_name: String,
+    pub(super) request_protocol: crate::ModelRequestProtocol,
     pub(super) request_payload: RawPayloadRef,
 }

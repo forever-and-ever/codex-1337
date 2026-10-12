@@ -98,6 +98,8 @@ pub enum RawTraceEventPayload {
         codex_turn_id: CodexTurnId,
         model: String,
         provider_name: String,
+        #[serde(default)]
+        request_protocol: crate::ModelRequestProtocol,
         request_payload: RawPayloadRef,
     },
     InferenceCompleted {
@@ -187,6 +189,8 @@ pub enum RawTraceEventPayload {
         codex_turn_id: CodexTurnId,
         model: String,
         provider_name: String,
+        #[serde(default)]
+        request_protocol: crate::ModelRequestProtocol,
         request_payload: RawPayloadRef,
     },
     CompactionRequestCompleted {

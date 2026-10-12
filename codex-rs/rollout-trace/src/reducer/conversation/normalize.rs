@@ -1,4 +1,4 @@
-//! Normalization from Responses-shaped JSON items into conversation item data.
+//! Normalization from model-facing wire payloads into shared conversation item data.
 
 use anyhow::Context;
 use anyhow::Result;
@@ -29,6 +29,84 @@ pub(super) struct NormalizedConversationItem {
     pub(super) agent_message: Option<AgentMessageMetadata>,
     pub(super) body: ConversationBody,
     pub(super) call_id: Option<String>,
+}
+
+#[path = "normalize/messages.rs"]
+mod messages;
+pub(super) use messages::normalize_messages_request;
+
+fn normalize_native_compaction_item(
+    item: &Value,
+    raw_payload: &RawPayloadRef,
+) -> Result<NormalizedConversationItem> {
+    let response_item = serde_json::from_value::<ResponseItem>(item.clone())
+        .context("invalid native compaction trace item")?;
+    let ResponseItem::NativeCompaction {
+        compaction: codex_protocol::models::NativeCompaction::Anthropic(compaction),
+        ..
+    } = response_item
+    else {
+        bail!("expected native compaction trace item");
+    };
+    Ok(native_compaction_item(&compaction, raw_payload))
+}
+
+fn signed_payload_ref_part(
+    label: &str,
+    signature: &str,
+    raw_payload: &RawPayloadRef,
+) -> ConversationPart {
+    use sha2::Digest;
+    use sha2::Sha256;
+    // Exact signatures stay in opt-in raw captures. Digests are identity, not model text.
+    let digest = format!("{:x}", Sha256::digest(signature.as_bytes()));
+    payload_ref_part(&format!("{label}:sha256:{digest}"), raw_payload)
+}
+
+pub(super) fn normalize_model_items_for_protocol(
+    items: &[Value],
+    raw_payload: &RawPayloadRef,
+    protocol: crate::ModelRequestProtocol,
+) -> Result<Vec<NormalizedConversationItem>> {
+    let mut normalized = normalize_model_items(items, raw_payload)?;
+    if protocol == crate::ModelRequestProtocol::Messages {
+        for item in &mut normalized {
+            if item.kind == ConversationItemKind::Reasoning {
+                for part in &mut item.body.parts {
+                    if let ConversationPart::Encoded { value, .. } = part {
+                        let (label, signature) = value
+                            .strip_prefix("claude-redacted-thinking:")
+                            .map_or(("native_thinking", value.as_str()), |signature| {
+                                ("native_redacted_thinking", signature)
+                            });
+                        *part = signed_payload_ref_part(label, signature, raw_payload);
+                    }
+                }
+            }
+        }
+    }
+    Ok(normalized)
+}
+
+fn native_compaction_item(
+    checkpoint: &codex_protocol::models::AnthropicSignedCompaction,
+    raw_payload: &RawPayloadRef,
+) -> NormalizedConversationItem {
+    NormalizedConversationItem {
+        role: ConversationRole::Assistant,
+        channel: Some(ConversationChannel::Summary),
+        kind: ConversationItemKind::Message,
+        agent_message: None,
+        body: ConversationBody {
+            parts: vec![
+                ConversationPart::Summary {
+                    text: checkpoint.content().to_string(),
+                },
+                signed_payload_ref_part("native_compaction", checkpoint.signature(), raw_payload),
+            ],
+        },
+        call_id: None,
+    }
 }
 
 pub(super) fn normalize_model_items(
@@ -72,6 +150,7 @@ fn normalize_model_item(
     };
     match item_type {
         "message" => normalize_message_item(item, raw_payload),
+        "native_compaction" => normalize_native_compaction_item(item, raw_payload),
         "agent_message" => normalize_agent_message_item(item, raw_payload),
         "reasoning" => normalize_reasoning_item(item, raw_payload),
         "function_call" => Ok(NormalizedConversationItem {

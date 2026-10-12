@@ -14,6 +14,7 @@ use crate::model::ToolCallKind;
 use crate::model::ToolCallSummary;
 use crate::payload::RawPayloadKind;
 use crate::raw_event::RawTraceEventPayload;
+use crate::reducer::test_support::ROOT_THREAD_ID;
 use crate::reducer::test_support::append_inference_completion;
 use crate::reducer::test_support::append_inference_start;
 use crate::reducer::test_support::create_started_writer;
@@ -1034,103 +1035,199 @@ fn unknown_previous_response_id_is_reducer_error() -> anyhow::Result<()> {
 
 #[test]
 fn compaction_boundary_repeats_prefix_and_reuses_replacement_items() -> anyhow::Result<()> {
-    let temp = TempDir::new()?;
-    let writer = create_started_writer(&temp)?;
-    start_turn(&writer, "turn-1")?;
+    for protocol in [
+        crate::ModelRequestProtocol::Responses,
+        crate::ModelRequestProtocol::Messages,
+    ] {
+        let native = protocol == crate::ModelRequestProtocol::Messages;
+        let temp = TempDir::new()?;
+        let writer = create_started_writer(&temp)?;
+        start_turn(&writer, "turn-1")?;
 
-    let developer = message("developer", "follow repo rules");
-    let user = message("user", "count files");
-    let request = writer.write_json_payload(
-        RawPayloadKind::InferenceRequest,
-        &json!({
-            "input": [developer, user]
-        }),
-    )?;
-    append_inference_start(&writer, "inference-1", "turn-1", request)?;
+        let developer = message(
+            if native { "system" } else { "developer" },
+            "follow repo rules",
+        );
+        let system = json!([{"type": "text", "text": "follow repo rules", "cache_control": {"type": "ephemeral"}}]);
+        let wire_user =
+            json!({"role": "user", "content": [{"type": "text", "text": "count files"}]});
+        let append_request = |id: &str, turn: &str, request_payload| {
+            writer.append_with_context(
+                trace_context(turn),
+                RawTraceEventPayload::InferenceStarted {
+                    inference_call_id: id.to_string(),
+                    thread_id: ROOT_THREAD_ID.to_string(),
+                    codex_turn_id: turn.to_string(),
+                    model: "test-model".to_string(),
+                    provider_name: "not-a-protocol-selector".to_string(),
+                    request_protocol: protocol,
+                    request_payload,
+                },
+            )
+        };
+        let user = message("user", "count files");
+        let request = writer.write_json_payload(
+            RawPayloadKind::InferenceRequest,
+            &if native {
+                json!({"system": system, "messages": [wire_user]})
+            } else {
+                json!({ "input": [developer, user] })
+            },
+        )?;
+        append_request("inference-1", "turn-1", request)?;
 
-    let summary = message("user", "summary from compacted history");
-    let compaction_summary = json!({
-        "type": "compaction",
-        "encrypted_content": "encrypted-summary",
-    });
-    let checkpoint = writer.write_json_payload(
-        RawPayloadKind::CompactionCheckpoint,
-        &json!({
-            "input_history": [developer, user],
-            "replacement_history": [user, summary, compaction_summary]
-        }),
-    )?;
-    writer.append_with_context(
-        trace_context("turn-1"),
-        RawTraceEventPayload::CompactionInstalled {
-            compaction_id: "compaction-1".to_string(),
-            checkpoint_payload: checkpoint,
-        },
-    )?;
+        let summary = message("user", "summary from compacted history");
+        let compaction_summary = if native {
+            json!({"type": "native_compaction",
+                "provider": "anthropic", "content": "signed summary", "signature": "native-signature-secret"
+            })
+        } else {
+            json!({"type": "compaction", "encrypted_content": "encrypted-summary"})
+        };
+        let wire_checkpoint = json!({"type": "compaction", "content": "signed summary", "signature": "native-signature-secret"});
+        let wire_summary = json!({"role": "user", "content": "summary from compacted history"});
+        let replacement_history = if native {
+            json!([compaction_summary, user, summary])
+        } else {
+            json!([user, summary, compaction_summary])
+        };
+        let checkpoint = writer.write_json_payload(
+            RawPayloadKind::CompactionCheckpoint,
+            &json!({
+                "request_protocol": protocol,
+                "input_history": [developer, user],
+                "replacement_history": replacement_history
+            }),
+        )?;
+        writer.append_with_context(
+            trace_context("turn-1"),
+            RawTraceEventPayload::CompactionInstalled {
+                compaction_id: "compaction-1".to_string(),
+                checkpoint_payload: checkpoint,
+            },
+        )?;
 
-    start_turn(&writer, "turn-2")?;
-    let post_compaction_request = writer.write_json_payload(
-        RawPayloadKind::InferenceRequest,
-        &json!({
-            "input": [developer, user, summary, compaction_summary]
-        }),
-    )?;
-    append_inference_start(&writer, "inference-2", "turn-2", post_compaction_request)?;
+        start_turn(&writer, "turn-2")?;
+        let post_compaction_request = writer.write_json_payload(
+            RawPayloadKind::InferenceRequest,
+            &if native {
+                json!({"system": system, "messages": [
+                    {"role": "assistant", "content": [wire_checkpoint]}, wire_user, wire_summary
+                ]})
+            } else {
+                json!({ "input": [developer, user, summary, compaction_summary] })
+            },
+        )?;
+        append_request("inference-2", "turn-2", post_compaction_request)?;
 
-    let rollout = replay_bundle(temp.path())?;
-    let first = &rollout.inference_calls["inference-1"];
-    let second = &rollout.inference_calls["inference-2"];
-    let compaction = &rollout.compactions["compaction-1"];
+        if native {
+            let response = writer.write_json_payload(RawPayloadKind::InferenceResponse, &json!({
+        "output_items": [
+            {"type": "reasoning", "summary": [{"type": "summary_text", "text": "think"}],
+                "encrypted_content": "native-thinking-signature-secret"},
+            {"type": "function_call", "call_id": "function-1", "arguments": "{\"path\":\".\"}"},
+            {"type": "custom_tool_call", "call_id": "custom-1", "name": "exec", "input": "text('ok')"}
+        ]
+    }))?;
+            append_inference_completion(&writer, "inference-2", "response-2", response)?;
+            // Summary text cannot alias another signature; native aliases still reuse exact tool inputs.
+            start_turn(&writer, "turn-3")?;
+            let changed = writer.write_json_payload(RawPayloadKind::InferenceRequest, &json!({
+        "system": system,
+        "messages": [{"role": "assistant", "content": [{
+            "type": "compaction", "content": "signed summary", "signature": "different-native-signature"
+        }]}, wire_user, wire_summary,
+        {"role": "assistant", "content": [
+            {"type": "thinking", "thinking": "think", "signature": "native-thinking-signature-secret"},
+            {"type": "tool_use", "id": "function-1", "name": "f0", "input": {"arguments": {"path": "."}}},
+            {"type": "tool_use", "id": "custom-1", "name": "c0", "input": {"input": "text('ok')"}}
+        ]},
+        {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "function-1", "content": [{"type": "text", "text": "files"}]},
+            {"type": "tool_result", "tool_use_id": "custom-1", "content": "ok"}
+        ]}]
+    }))?;
+            append_request("inference-3", "turn-3", changed)?;
+        }
+        let rollout = replay_bundle(temp.path())?;
+        let first = &rollout.inference_calls["inference-1"];
+        let second = &rollout.inference_calls["inference-2"];
+        let compaction = &rollout.compactions["compaction-1"];
 
-    assert_eq!(compaction.input_item_ids, first.request_item_ids);
-    assert_eq!(second.request_item_ids.len(), 4);
-    assert_eq!(
-        &second.request_item_ids[1..],
-        compaction.replacement_item_ids.as_slice()
-    );
-    let marker = &rollout.conversation_items[&compaction.marker_item_id];
-    assert_eq!(marker.kind, ConversationItemKind::CompactionMarker);
-    assert_eq!(marker.body.parts, Vec::<ConversationPart>::new());
-    assert_eq!(
-        marker.produced_by,
-        vec![ProducerRef::Compaction {
-            compaction_id: "compaction-1".to_string()
-        }],
-    );
-    assert_ne!(second.request_item_ids[0], first.request_item_ids[0]);
-    assert_ne!(
-        compaction.replacement_item_ids[0],
-        first.request_item_ids[1]
-    );
-    assert_eq!(
-        rollout.conversation_items[&compaction.replacement_item_ids[0]].produced_by,
-        vec![ProducerRef::Compaction {
-            compaction_id: "compaction-1".to_string()
-        }],
-    );
-    assert_eq!(
-        rollout.conversation_items[&compaction.replacement_item_ids[1]].produced_by,
-        vec![ProducerRef::Compaction {
-            compaction_id: "compaction-1".to_string()
-        }],
-    );
-    assert_eq!(
-        rollout.conversation_items[&compaction.replacement_item_ids[2]].channel,
-        Some(ConversationChannel::Summary),
-    );
-    assert_eq!(
-        rollout.conversation_items[&compaction.replacement_item_ids[2]].kind,
-        ConversationItemKind::Message,
-    );
-    assert_eq!(
-        rollout.conversation_items[&compaction.replacement_item_ids[2]]
+        assert_eq!(compaction.input_item_ids, first.request_item_ids);
+        assert_eq!(second.request_item_ids.len(), 4);
+        assert_eq!(
+            &second.request_item_ids[1..],
+            compaction.replacement_item_ids.as_slice()
+        );
+        let marker = &rollout.conversation_items[&compaction.marker_item_id];
+        assert_eq!(marker.kind, ConversationItemKind::CompactionMarker);
+        assert_eq!(marker.body.parts, Vec::<ConversationPart>::new());
+        assert_eq!(
+            marker.produced_by,
+            vec![ProducerRef::Compaction {
+                compaction_id: "compaction-1".to_string()
+            }],
+        );
+        assert_ne!(second.request_item_ids[0], first.request_item_ids[0]);
+        assert_ne!(
+            compaction.replacement_item_ids[0],
+            first.request_item_ids[1]
+        );
+        assert_eq!(
+            rollout.conversation_items[&compaction.replacement_item_ids[0]].produced_by,
+            vec![ProducerRef::Compaction {
+                compaction_id: "compaction-1".to_string()
+            }],
+        );
+        assert_eq!(
+            rollout.conversation_items[&compaction.replacement_item_ids[1]].produced_by,
+            vec![ProducerRef::Compaction {
+                compaction_id: "compaction-1".to_string()
+            }],
+        );
+        let summary_index = if native { 0 } else { 2 };
+        assert_eq!(
+            rollout.conversation_items[&compaction.replacement_item_ids[summary_index]].channel,
+            Some(ConversationChannel::Summary),
+        );
+        assert_eq!(
+            rollout.conversation_items[&compaction.replacement_item_ids[summary_index]].kind,
+            ConversationItemKind::Message,
+        );
+        let parts = &rollout.conversation_items[&compaction.replacement_item_ids[summary_index]]
             .body
-            .parts,
-        vec![ConversationPart::Encoded {
-            label: "encrypted_content".to_string(),
-            value: "encrypted-summary".to_string(),
-        }],
-    );
+            .parts;
+        if native {
+            assert!(matches!(parts.as_slice(), [
+            ConversationPart::Summary { text },
+            ConversationPart::PayloadRef { label, raw_payload_id }
+        ] if text == "signed summary" && label.starts_with("native_compaction:sha256:")
+            && rollout.raw_payloads.contains_key(raw_payload_id)));
+            assert_ne!(
+                rollout.inference_calls["inference-3"].request_item_ids[1],
+                second.request_item_ids[1]
+            );
+            assert_eq!(
+                &rollout.inference_calls["inference-3"].request_item_ids[4..7],
+                second.response_item_ids.as_slice()
+            );
+            assert!(!serde_json::to_string(&rollout)?.contains("signature-secret"));
+            let raw = &rollout.raw_payloads[&second.raw_request_payload_id];
+            assert!(
+                std::fs::read_to_string(temp.path().join(&raw.path))?
+                    .contains("native-signature-secret")
+            );
+        } else {
+            assert_eq!(
+                *parts,
+                vec![ConversationPart::Encoded {
+                    label: "encrypted_content".to_string(),
+                    value: "encrypted-summary".to_string(),
+                }]
+            );
+        }
+    }
 
     Ok(())
 }

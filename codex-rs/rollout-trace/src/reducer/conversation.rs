@@ -38,24 +38,34 @@ impl TraceReducer {
         thread_id: &str,
         codex_turn_id: &str,
         request_payload: &RawPayloadRef,
+        request_protocol: crate::ModelRequestProtocol,
     ) -> Result<Vec<String>> {
         let payload = self.read_payload_json(request_payload)?;
-        let Some(input) = payload.get("input") else {
-            bail!(
-                "inference request payload {} did not contain input",
-                request_payload.raw_payload_id
-            );
-        };
-        let Some(request_items) = input.as_array() else {
-            bail!(
-                "inference request payload {} had non-array input",
-                request_payload.raw_payload_id
-            );
+        let items = if request_protocol == crate::ModelRequestProtocol::Messages {
+            normalize::normalize_messages_request(&payload, request_payload)?
+        } else {
+            let Some(input) = payload.get("input") else {
+                bail!(
+                    "inference request payload {} did not contain input",
+                    request_payload.raw_payload_id
+                );
+            };
+            let Some(request_items) = input.as_array() else {
+                bail!(
+                    "inference request payload {} had non-array input",
+                    request_payload.raw_payload_id
+                );
+            };
+
+            normalize::normalize_model_items(request_items, request_payload)?
         };
 
-        let items = normalize::normalize_model_items(request_items, request_payload)?;
-
-        let previous_response_id = payload.get("previous_response_id").and_then(Value::as_str);
+        let previous_response_id = match request_protocol {
+            crate::ModelRequestProtocol::Responses => {
+                payload.get("previous_response_id").and_then(Value::as_str)
+            }
+            crate::ModelRequestProtocol::Messages => None,
+        };
         // After compaction, the next full request is compared against the installed replacement
         // history, not the pre-compaction prompt. Any repeated developer/context prefix that Codex
         // reinjects must therefore become a fresh post-compaction conversation item.
@@ -143,16 +153,26 @@ impl TraceReducer {
             );
         };
 
-        let Some((thread_id, codex_turn_id)) = self
+        let Some((thread_id, codex_turn_id, request_protocol)) = self
             .rollout
             .inference_calls
             .get(inference_call_id)
-            .map(|inference| (inference.thread_id.clone(), inference.codex_turn_id.clone()))
+            .map(|inference| {
+                (
+                    inference.thread_id.clone(),
+                    inference.codex_turn_id.clone(),
+                    inference.request_protocol,
+                )
+            })
         else {
             bail!("inference response referenced unknown call {inference_call_id}");
         };
 
-        let items = normalize::normalize_model_items(output_items, response_payload)?;
+        let items = normalize::normalize_model_items_for_protocol(
+            output_items,
+            response_payload,
+            request_protocol,
+        )?;
         // Response output is appended immediately: it was produced by the model,
         // so it is conversation even before a later request carries it forward.
         let append_at = self
@@ -293,9 +313,22 @@ impl TraceReducer {
         let replacement_history =
             required_array(&payload, "replacement_history", checkpoint_payload)?;
 
-        let input_items = normalize::normalize_model_items(input_history, checkpoint_payload)?;
-        let replacement_items =
-            normalize::normalize_model_items(replacement_history, checkpoint_payload)?;
+        let request_protocol = payload
+            .get("request_protocol")
+            .cloned()
+            .map(serde_json::from_value::<crate::ModelRequestProtocol>)
+            .transpose()?
+            .unwrap_or_default();
+        let input_items = normalize::normalize_model_items_for_protocol(
+            input_history,
+            checkpoint_payload,
+            request_protocol,
+        )?;
+        let replacement_items = normalize::normalize_model_items_for_protocol(
+            replacement_history,
+            checkpoint_payload,
+            request_protocol,
+        )?;
         let input_candidates = self
             .thread_conversation_snapshots
             .get(thread_id)
@@ -574,6 +607,20 @@ fn conversation_item_matches(
         && normalized.kind == ConversationItemKind::Reasoning
     {
         reasoning_body_matches(&item.body, &normalized.body)
+    } else if item.kind == ConversationItemKind::CustomToolCall
+        && normalized.kind == ConversationItemKind::CustomToolCall
+    {
+        // Native tool aliases do not carry the canonical custom tool's language.
+        // Text and attributed code still identify the same exact custom input.
+        fn source(body: &ConversationBody) -> Option<&str> {
+            match body.parts.as_slice() {
+                [ConversationPart::Code { source, .. }] => Some(source),
+                [ConversationPart::Text { text }] => Some(text),
+                _ => None,
+            }
+        }
+        conversation_body_matches(&item.body, &normalized.body)
+            || source(&item.body).is_some_and(|left| Some(left) == source(&normalized.body))
     } else {
         conversation_body_matches(&item.body, &normalized.body)
     };
@@ -603,6 +650,23 @@ fn conversation_body_matches(left: &ConversationBody, right: &ConversationBody) 
                         raw_payload_id: _,
                     },
                 ) => left_summary == right_summary,
+                (
+                    ConversationPart::PayloadRef {
+                        label: left_label, ..
+                    },
+                    ConversationPart::PayloadRef {
+                        label: right_label, ..
+                    },
+                ) if matches!(
+                    left_label.split_once(":sha256:"),
+                    Some((
+                        "native_compaction" | "native_thinking" | "native_redacted_thinking",
+                        _
+                    ))
+                ) =>
+                {
+                    left_label == right_label
+                }
                 _ => left == right,
             })
 }

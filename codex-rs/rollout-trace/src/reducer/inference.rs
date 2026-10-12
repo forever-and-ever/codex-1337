@@ -25,6 +25,7 @@ pub(super) struct StartedInferenceCall {
     pub(super) codex_turn_id: String,
     pub(super) model: String,
     pub(super) provider_name: String,
+    pub(super) request_protocol: crate::ModelRequestProtocol,
     pub(super) request_payload: RawPayloadRef,
 }
 
@@ -73,6 +74,7 @@ impl TraceReducer {
             &thread_id,
             &codex_turn_id,
             &request_payload,
+            started.request_protocol,
         )?;
 
         self.thread_mut(&thread_id)?;
@@ -98,6 +100,7 @@ impl TraceReducer {
                 response_item_ids: Vec::new(),
                 tool_call_ids_started_by_response: Vec::new(),
                 usage: None,
+                request_protocol: started.request_protocol,
                 raw_request_payload_id: started.request_payload.raw_payload_id,
                 raw_response_payload_id: None,
             },

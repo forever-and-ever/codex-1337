@@ -20,7 +20,7 @@ use codex_protocol::error::CodexErr;
 use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::TokenUsage;
-use codex_rollout_trace::InferenceTraceContext;
+use codex_rollout_trace::CompactionTraceContext;
 use futures::StreamExt;
 use http::StatusCode;
 use serde_json::Value;
@@ -47,12 +47,6 @@ impl Miss {
             Self::Refused(error)
         } else {
             Self::Failed(error)
-        }
-    }
-
-    pub(super) fn error(&self) -> &CodexErr {
-        match self {
-            Self::Refused(error) | Self::Unfinished(error) | Self::Failed(error) => error,
         }
     }
 }
@@ -88,8 +82,10 @@ pub(super) async fn request(
     client_session: &mut ModelClientSession,
     prompt: &Prompt,
     responses_metadata: &CodexResponsesMetadata,
+    compaction_trace: &CompactionTraceContext,
 ) -> Result<(ResponseItem, String, Option<TokenUsage>), Miss> {
     let turn_context = &step_context.turn;
+    let trace = compaction_trace.inference_trace_context();
     let max_retries = turn_context
         .provider
         .info()
@@ -119,7 +115,7 @@ pub(super) async fn request(
                     turn_context.reasoning_summary(),
                     step_context.settings.service_tier.clone(),
                     responses_metadata,
-                    &InferenceTraceContext::disabled(),
+                    &trace,
                 )
                 .await
                 .map_err(Miss::of)?;
