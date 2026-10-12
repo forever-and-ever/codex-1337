@@ -149,19 +149,8 @@ else
     python3 "$root/scripts/local_integration.py" install "$install_root"
 fi
 
-# A live older TUI may still launch sibling helpers from its original bundle.
-live_binaries=$(readlink /proc/[0-9]*/exe 2>/dev/null || true)
-for candidate in "$distribution_root"/*; do
-    [ -d "$candidate" ] && [ ! -L "$candidate" ] || continue
-    name=${candidate##*/}
-    [ "$name" = "$identity" ] && continue
-    [ -n "$previous" ] && [ "$name" = "$previous" ] && continue
-    [ -f "$candidate/distribution" ] || continue
-    case "$live_binaries" in
-        *"$candidate/bin/"*) continue ;;
-    esac
-    rm -rf -- "$candidate"
-done
+python3 "$root/scripts/local_integration.py" prune-distributions \
+    "$distribution_root" --previous "$previous"
 
 if [ "$channel" = staging ]; then
     printf 'installed staging Codex %s-1337 from %s; run codex-staging\n' \
