@@ -206,8 +206,8 @@ fn same_wait_reference(cell: &dyn HistoryCell, incoming: &CodeModeFactCell) -> b
     };
     match (&old.0.event, &incoming.0.event) {
         (
-            CodeModeEvent::WaitStarted { call_id: old },
-            CodeModeEvent::WaitCompleted { call_id: new },
+            CodeModeEvent::WaitStarted { call_id: old, .. },
+            CodeModeEvent::WaitCompleted { call_id: new, .. },
         ) => old == new,
         _ => old.0.id == incoming.0.id,
     }

@@ -3634,7 +3634,7 @@ async fn approve_mode_skips_guardian_in_every_permission_mode() {
 #[tokio::test]
 async fn approval_metadata_is_released_when_the_invocation_future_is_dropped() {
     let (session, turn_context) = crate::session::tests::make_session_and_context().await;
-    let step_context = Arc::new(StepContext::for_test(Arc::new(turn_context)));
+    let step_context = StepContext::for_test(Arc::new(turn_context));
     let cancellation = CancellationToken::new();
     let invocation = McpInvocation {
         server: CODEX_APPS_MCP_SERVER_NAME.to_string(),
