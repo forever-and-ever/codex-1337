@@ -204,7 +204,7 @@ async fn native_request_pins_recovery_then_switches_with_exact_custom_tool_repla
     let boundary = Arc::new(NativeBoundary {
         inner: create_model_provider_with_anthropic_account(
             info,
-            Some(runtime),
+            Some(Arc::clone(&runtime)),
             Some(id_a.to_string()),
         ),
         endpoint: format!("{}/v1", server.uri()),
@@ -429,7 +429,15 @@ async fn native_request_pins_recovery_then_switches_with_exact_custom_tool_repla
         "side replay emitted a protocol event"
     );
     server.verify().await;
-    native_regular_replay_profiles(&server, &boundary, &model, &prompt.input, home.path()).await?;
+    native_regular_replay_profiles(
+        &server,
+        &boundary,
+        &model,
+        &prompt.input,
+        &runtime,
+        home.path(),
+    )
+    .await?;
     Ok(())
 }
 
@@ -445,6 +453,7 @@ async fn native_regular_replay_profiles(
     boundary: &Arc<NativeBoundary>,
     model: &ModelInfo,
     history: &[ResponseItem],
+    runtime: &Arc<AuthManager>,
     home: &Path,
 ) -> anyhow::Result<()> {
     // The stream, item lifecycle, discard, retry and prompt all belong to the real
@@ -540,7 +549,8 @@ async fn native_regular_replay_profiles(
         let provider = Arc::new(NativeBoundary {
             inner: create_model_provider_with_anthropic_account(
                 info.clone(),
-                boundary.inner.auth_manager(),
+                // Native providers hide ChatGPT auth; reuse the fixture's runtime owner.
+                Some(Arc::clone(runtime)),
                 Some(boundary.account_b.clone()),
             ),
             endpoint: boundary.endpoint.clone(),
