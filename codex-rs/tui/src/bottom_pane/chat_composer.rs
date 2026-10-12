@@ -140,6 +140,9 @@
 //!
 //! On submit/queue paths, the composer:
 //!
+//! - Dispatches a visible `!!` prefix locally before parent-owned restrictions or queuing,
+//!   without recording command history. Bare `!!` opens the client-only result viewer.
+//!   Hidden paste expansion cannot create local execution intent; attachments are rejected.
 //! - Expands pending paste placeholders so element ranges align with the final text.
 //! - Trims whitespace and rebases elements when `trim_submission` is enabled (the default).
 //!   Otherwise, preserves both.
@@ -164,13 +167,15 @@
 //!
 //! Parent-owned subagent threads keep the draft editable while blocking agent-directed submission.
 //! On the `Enter` and `Tab` submission paths, normal prompts, disallowed slash commands, and `!`
-//! shell commands return `ParentOwnedInputBlocked` without clearing the draft. Bare local and
+//! shell commands return `ParentOwnedInputBlocked` without clearing the draft. Explicit `!!`
+//! commands are TUI-host actions and bypass this agent-input restriction. Bare local and
 //! navigation slash commands remain available so users can leave or manage the view. Transcript
 //! exports also remain available, including an explicit destination filename.
 //!
 //! During reconnection, `handle_restricted_key` edits the draft directly without popup dispatch,
 //! composer shortcuts, or submission; `?` becomes literal input. Enter and Tab leave the draft
-//! intact until reconnection succeeds, except for the local `/warnings` command.
+//! intact until reconnection succeeds, except for local `/warnings` and explicit `!!` actions.
+//! Local-shell completion and cancellation remain client-owned while disconnected.
 //! When connected but the thread is unavailable, configured
 //! submit keys may dispatch explicitly allowed recovery and local commands; other drafts stay put.
 //! Collapsed pastes expand into editable text so the full draft can be copied before quitting.
@@ -398,6 +403,7 @@ pub(crate) use alarm_indicator::alarm_label;
 
 mod prompt_cache_glyphs;
 pub(crate) use prompt_cache_glyphs::PromptCacheGlyphs;
+mod local_shell;
 mod reconnect;
 pub(crate) use reconnect::RestrictedInputMode;
 mod slash_input;
@@ -499,6 +505,7 @@ pub enum InputResult {
     /// Agent-directed input was attempted while viewing a parent-owned spawned child thread.
     ParentOwnedInputBlocked,
     None,
+    LocalShell(crate::local_shell::LocalShellRequest),
 }
 
 fn parent_owned_command_is_allowed(command: SlashCommand, args: &str) -> bool {
@@ -767,6 +774,7 @@ impl ChatComposer {
                 use_shift_enter_hint,
                 mode: FooterMode::ComposerEmpty,
                 hint_override: None,
+                local_shell_notice: None,
                 flash: None,
                 context_window_percent: None,
                 context_window_used_tokens: None,
@@ -3141,7 +3149,8 @@ impl ChatComposer {
     fn reset_vim_mode_after_successful_dispatch(&mut self, result: &InputResult) {
         if matches!(
             result,
-            InputResult::Submitted { .. }
+            InputResult::LocalShell(_)
+                | InputResult::Submitted { .. }
                 | InputResult::Queued { .. }
                 | InputResult::Command(_)
                 | InputResult::ServiceTierCommand(_)
@@ -3163,6 +3172,9 @@ impl ChatComposer {
             return (InputResult::None, true);
         }
 
+        if let Some(result) = self.try_local_shell_submission() {
+            return (result, true);
+        }
         if let Some(result) = self.handle_parent_owned_submission() {
             return result;
         }
@@ -3546,7 +3558,10 @@ impl ChatComposer {
             self.footer.mode = reset_mode_after_activity(self.footer.mode);
         }
         if self.queue_keys.is_pressed(key_event)
-            && (self.is_task_running || self.queue_submissions || !self.is_bang_shell_command())
+            && (self.is_task_running
+                || self.queue_submissions
+                || !self.is_bang_shell_command()
+                || self.is_local_shell_input())
         {
             return self.handle_submission(self.is_task_running || self.queue_submissions);
         }
@@ -3621,6 +3636,9 @@ impl ChatComposer {
     }
 
     fn shell_mode_footer_line(&self) -> Option<Line<'static>> {
+        if let Some(line) = self.local_shell_footer_line() {
+            return Some(line);
+        }
         self.is_bang_shell_command()
             .then_some(())
             .map(|_| Line::from(vec![Span::from("Shell mode").light_red()]))

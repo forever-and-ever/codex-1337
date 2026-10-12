@@ -291,6 +291,7 @@ use self::input_queue::InputQueueState;
 mod farm;
 mod idle_restart;
 mod input_flow;
+mod local_shell;
 pub(crate) use farm::FarmSubmission;
 mod input_restore;
 mod input_submission;

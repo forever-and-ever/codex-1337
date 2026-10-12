@@ -172,6 +172,7 @@ mod landing_page;
 mod line_truncation;
 pub(crate) mod live_wrap;
 mod local_settings;
+mod local_shell;
 pub use live_wrap::RowBuilder;
 mod agent_status;
 mod idle_restart;
@@ -1115,6 +1116,7 @@ async fn run_ratatui_app(
     launch_telemetry: daemon_telemetry::Launch<impl FnOnce(&AppServerTarget, bool)>,
     startup_draft: startup_draft::StartupDraft,
 ) -> color_eyre::Result<AppExitInfo> {
+    let local_shell = app::local_shell::LocalShell::capture();
     let uses_remote_workspace = app_server_target.uses_remote_workspace();
     let workload_identity_selected = is_workload_identity_selected();
     color_eyre::install()?;
@@ -1984,6 +1986,7 @@ async fn run_ratatui_app(
         app_server,
         config,
         current_cwd.to_path_buf(),
+        local_shell,
         cli_kv_overrides.clone(),
         overrides.clone(),
         loader_overrides.clone(),

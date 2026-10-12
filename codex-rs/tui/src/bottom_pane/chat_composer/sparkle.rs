@@ -243,7 +243,8 @@ impl ChatComposer {
                     self.sparkle.command_input.borrow_mut().clear();
                 }
             }
-            InputResult::Submitted { .. }
+            InputResult::LocalShell(_)
+            | InputResult::Submitted { .. }
             | InputResult::Queued { .. }
             | InputResult::ParentOwnedInputBlocked => self.dismiss_sparkle(),
             InputResult::CommandWithArgs(_, _, _)

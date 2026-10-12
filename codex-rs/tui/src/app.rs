@@ -230,6 +230,7 @@ mod farm;
 mod jira;
 mod jira_preview;
 mod jira_view;
+pub(crate) mod local_shell;
 pub(crate) use farm::FarmFailure;
 mod feedback_upload;
 mod file_change_approvals;
@@ -554,6 +555,7 @@ struct InitialHistoryReplayBuffer {
 pub(crate) struct App {
     pub(super) reload_requested: bool,
     farm: farm::FarmUi,
+    local_shell: local_shell::LocalShell,
     jira: Option<jira_view::JiraBrowser>,
     feature_write_lock: Arc<tokio::sync::Mutex<()>>,
     model_catalog: Arc<ModelCatalog>,
@@ -885,6 +887,7 @@ impl App {
         if self.handle_jira_input(tui, app_server, &event).await? {
             return Ok(AppRunControl::Continue);
         }
+        self.sync_local_shell_notice();
         let scheduled_draw = matches!(event, TuiEvent::Draw);
         tui.link_hover.observe(&event);
         self.refresh_link_hover(tui)?;
@@ -916,6 +919,9 @@ impl App {
             }
             _ => false,
         };
+        if !transcript_owns_input && self.cancel_local_shell_key(&event, tui) {
+            return Ok(AppRunControl::Continue);
+        }
         if self.reconnect.offline
             && !transcript_owns_input
             && !self.chat_widget.keymap_contexts().is_warnings()

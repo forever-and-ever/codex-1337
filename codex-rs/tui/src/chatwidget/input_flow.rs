@@ -45,7 +45,8 @@ impl ChatWidget {
             InputResult::Command(_)
             | InputResult::ServiceTierCommand(_)
             | InputResult::CommandWithArgs(..) => true,
-            InputResult::Submitted { .. }
+            InputResult::LocalShell(_)
+            | InputResult::Submitted { .. }
             | InputResult::Queued { .. }
             | InputResult::ParentOwnedInputBlocked
             | InputResult::None
@@ -55,6 +56,9 @@ impl ChatWidget {
             self.app_event_tx.send(AppEvent::FollowTranscript);
         }
         match input_result {
+            InputResult::LocalShell(request) => {
+                self.app_event_tx.send(AppEvent::LocalShellRequest(request));
+            }
             InputResult::NavigationDownBoundary => {
                 self.subagent_roster
                     .lock()

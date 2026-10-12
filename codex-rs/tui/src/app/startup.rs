@@ -215,6 +215,7 @@ impl App {
         mut app_server: AppServerSession,
         mut config: Config,
         launch_cwd: PathBuf,
+        local_shell: super::local_shell::LocalShell,
         cli_kv_overrides: Vec<(String, TomlValue)>,
         harness_overrides: ConfigOverrides,
         loader_overrides: LoaderOverrides,
@@ -861,6 +862,7 @@ See the Codex keymap documentation for supported actions and examples."
             config,
             local_settings,
             launch_cwd,
+            local_shell,
             runtime_working_directory_override: None,
             state_db,
             cli_kv_overrides,
@@ -1500,6 +1502,7 @@ See the Codex keymap documentation for supported actions and examples."
                 }
             }
         };
+        app.local_shell.shutdown().await;
         if let Err(err) = app_server.shutdown().await {
             tracing::warn!(error = %err, "failed to shut down embedded app server");
         }

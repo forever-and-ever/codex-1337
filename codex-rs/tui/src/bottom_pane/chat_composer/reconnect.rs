@@ -62,6 +62,9 @@ impl ChatComposer {
         self.set_disable_paste_burst(/*disabled*/ true);
         // Expand in reverse order so remaining ranges stay valid. Textarea replacement
         // preserves the cursor and other elements, including images and mentions.
+        if let Some(result) = self.try_restricted_local_shell_submission(key) {
+            return result;
+        }
         let pending_pastes = std::mem::take(&mut self.draft.pending_pastes);
         if !pending_pastes.is_empty() {
             for element in self.draft.textarea.text_elements().into_iter().rev() {

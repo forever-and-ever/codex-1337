@@ -188,25 +188,27 @@ impl ChatComposer {
                             show_queue_hint,
                         )
                     };
-                    let right_line =
-                        if let Some(label) = self.footer.side_conversation_context_label.as_ref() {
-                            Some(side_conversation_context_line(label))
-                        } else if let Some(line) = self.shell_mode_footer_line() {
-                            Some(line)
-                        } else if self.status_surface_height(options) > 0 || transition_active {
-                            None
-                        } else if status_line_active {
-                            let full = self.mode_indicator_line(show_cycle_hint);
-                            let compact = self.mode_indicator_line(/*show_cycle_hint*/ false);
-                            let full_width = full.as_ref().map(|l| l.width() as u16).unwrap_or(0);
-                            if can_show_left_with_context(hint_rect, left_width, full_width) {
-                                full
-                            } else {
-                                compact
-                            }
+                    let right_line = if let Some(line) = self.footer.local_shell_notice.as_ref() {
+                        Some(line.clone())
+                    } else if let Some(label) = self.footer.side_conversation_context_label.as_ref()
+                    {
+                        Some(side_conversation_context_line(label))
+                    } else if let Some(line) = self.shell_mode_footer_line() {
+                        Some(line)
+                    } else if self.status_surface_height(options) > 0 || transition_active {
+                        None
+                    } else if status_line_active {
+                        let full = self.mode_indicator_line(show_cycle_hint);
+                        let compact = self.mode_indicator_line(/*show_cycle_hint*/ false);
+                        let full_width = full.as_ref().map(|l| l.width() as u16).unwrap_or(0);
+                        if can_show_left_with_context(hint_rect, left_width, full_width) {
+                            full
                         } else {
-                            Some(self.right_footer_line_with_context())
-                        };
+                            compact
+                        }
+                    } else {
+                        Some(self.right_footer_line_with_context())
+                    };
                     let right_width = right_line.as_ref().map(|l| l.width() as u16).unwrap_or(0);
                     if status_line_active
                         && let Some(max_left) = max_left_width_for_right(hint_rect, right_width)

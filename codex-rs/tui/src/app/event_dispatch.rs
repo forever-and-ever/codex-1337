@@ -29,6 +29,9 @@ impl App {
         app_server: &mut AppServerSession,
         event: AppEvent,
     ) -> Result<AppRunControl> {
+        let Some(event) = self.consume_local_shell_event(event, tui) else {
+            return Ok(AppRunControl::Continue);
+        };
         let from_agents_overview = matches!(event, AppEvent::ForkAgentsOverviewThreadReady { .. });
         let event = if let AppEvent::ForkAgentsOverviewThreadReady { thread_id } = event {
             if self.current_displayed_thread_id() != Some(thread_id)
@@ -145,6 +148,9 @@ impl App {
         };
         match event {
             AppEvent::ServerOperationExitReady(reason) => return Ok(AppRunControl::Exit(reason)),
+            AppEvent::LocalShellRequest(_) | AppEvent::LocalShellUpdate(_) => {
+                unreachable!("Local-shell events are consumed before agent routing")
+            }
             AppEvent::OpenDaemonMenu => self.open_daemon_menu(),
             AppEvent::ReloadUi => self.reload_requested = true,
             AppEvent::UserVerificationApproved { thread_id, server_name, request_id } => {

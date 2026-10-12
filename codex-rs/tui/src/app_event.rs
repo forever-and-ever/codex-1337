@@ -1754,6 +1754,8 @@ pub(crate) enum AppEvent {
         thread_id: ThreadId,
         id: String,
     },
+    LocalShellRequest(crate::local_shell::LocalShellRequest),
+    LocalShellUpdate(crate::local_shell::LocalShellUpdate),
 }
 
 /// Named profile selection to apply after any required UI guardrails complete.

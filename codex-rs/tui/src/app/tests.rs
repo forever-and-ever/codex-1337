@@ -245,8 +245,8 @@ fn test_absolute_path(path: &str) -> AbsolutePathBuf {
 }
 
 #[tokio::test]
-async fn pasted_text_normalizes_mixed_line_endings_at_app_boundary() -> Result<()> {
-    let mut app = make_test_app().await;
+async fn pasted_input_preserves_app_boundary_and_local_shell_authority() -> Result<()> {
+    let (mut app, mut app_event_rx, mut op_rx) = make_test_app_with_channels().await;
     let mut app_server = start_config_write_test_app_server(&app).await?;
     let mut tui = crate::tui::test_support::make_test_tui()?;
 
@@ -263,6 +263,122 @@ async fn pasted_text_normalizes_mixed_line_endings_at_app_boundary() -> Result<(
     line3
     line4
     ");
+
+    // Explicit local intent must survive an active agent/queue and a disconnect;
+    // a bang hidden inside a paste must never acquire that authority.
+    let thread_id = ThreadId::new();
+    app.chat_widget
+        .handle_thread_session(test_thread_session(thread_id, app.config.cwd.to_path_buf()));
+    app.chat_widget.handle_server_notification(
+        turn_started_notification(thread_id, "turn-local-shell"),
+        None,
+    );
+    while app_event_rx.try_recv().is_ok() {}
+    while op_rx.try_recv().is_ok() {}
+    app.chat_widget.apply_external_edit(String::new());
+    app.chat_widget
+        .handle_paste(format!("!!printf %s {}", "x".repeat(1000)));
+    app.chat_widget
+        .handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    while let Ok(event) = app_event_rx.try_recv() {
+        assert!(!matches!(event, AppEvent::LocalShellRequest(_)));
+    }
+    assert!(op_rx.try_recv().is_err());
+
+    let directory = tempfile::tempdir()?;
+    let marker = directory.path().join("ready");
+    let marker_text = marker.to_string_lossy();
+    let quoted_marker = shlex::try_quote(&marker_text).expect("temporary path has no NUL");
+    let child = format!("sleep 60 & printf ready > {quoted_marker}; wait");
+    let quoted_child = shlex::try_quote(&child).expect("authored child command has no NUL");
+    app.chat_widget.apply_external_edit(format!(
+        "!!head -c 1100000 /dev/zero; sh -c {quoted_child} & wait"
+    ));
+    app.chat_widget
+        .handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    let request = loop {
+        let event = app_event_rx
+            .try_recv()
+            .expect("local request bypasses the agent queue");
+        assert!(!matches!(event, AppEvent::AppendMessageHistoryEntry { .. }));
+        if let AppEvent::LocalShellRequest(request) = event {
+            break request;
+        }
+    };
+    let transcript_len = app.transcript_cells.len();
+    app.handle_event(
+        &mut tui,
+        &mut app_server,
+        AppEvent::LocalShellRequest(request),
+    )
+    .await?;
+    assert!(app.local_shell.is_running());
+    assert!(app.overlay.is_none());
+    assert!(op_rx.try_recv().is_err());
+
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if std::fs::read_to_string(&marker).is_ok_and(|text| text == "ready") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("local child reached its ready marker");
+
+    app.reconnect.offline = true;
+    app.handle_tui_event(
+        &mut tui,
+        &mut app_server,
+        TuiEvent::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),
+    )
+    .await?;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while app.local_shell.is_running() {
+            let event = app_event_rx.recv().await.expect("owned local completion");
+            assert!(!matches!(
+                event,
+                AppEvent::CodexOp(_) | AppEvent::AppendMessageHistoryEntry { .. }
+            ));
+            if let AppEvent::LocalShellUpdate(crate::local_shell::LocalShellUpdate::Finished(
+                result,
+            )) = &event
+            {
+                assert!(result.cancelled);
+                assert!(result.output.len() <= 1024 * 1024);
+                assert!(result.discarded > 0);
+                assert_eq!(result.cwd, std::env::current_dir().expect("test host cwd"));
+            }
+            app.handle_event(&mut tui, &mut app_server, event).await?;
+        }
+        Result::<()>::Ok(())
+    })
+    .await
+    .expect("local group cancelled and its root reaped")?;
+    assert!(app.chat_widget.is_agent_turn_running());
+    assert!(op_rx.try_recv().is_err());
+    assert_eq!(app.transcript_cells.len(), transcript_len);
+    assert!(app.overlay.is_none());
+
+    app.chat_widget.apply_external_edit("!!".to_owned());
+    app.handle_tui_event(
+        &mut tui,
+        &mut app_server,
+        TuiEvent::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+    )
+    .await?;
+    let event = app_event_rx
+        .recv()
+        .await
+        .expect("offline local viewer request");
+    assert!(matches!(
+        event,
+        AppEvent::LocalShellRequest(crate::local_shell::LocalShellRequest::Show)
+    ));
+    app.handle_event(&mut tui, &mut app_server, event).await?;
+    assert!(app.overlay.is_some());
+    assert!(op_rx.try_recv().is_err());
 
     Ok(())
 }
@@ -6245,6 +6361,7 @@ async fn make_test_app() -> Box<App> {
         chat_widget,
         workspace_command_runner: None,
         launch_cwd: config.cwd.to_path_buf(),
+        local_shell: Default::default(),
         runtime_working_directory_override: None,
         local_settings: crate::local_settings::LocalSettings::from(&config),
         config,
@@ -6366,6 +6483,7 @@ pub(super) async fn make_test_app_with_channels() -> (
             chat_widget,
             workspace_command_runner: None,
             launch_cwd: config.cwd.to_path_buf(),
+            local_shell: Default::default(),
             runtime_working_directory_override: None,
             local_settings: crate::local_settings::LocalSettings::from(&config),
             config,

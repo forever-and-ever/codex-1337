@@ -12,6 +12,11 @@ impl App {
         &mut self,
         idle_candidate: Option<PathBuf>,
     ) -> std::io::Result<()> {
+        if self.local_shell.is_running() {
+            self.chat_widget
+                .flash_local_shell_error("Stop the local shell before reloading the UI".to_owned());
+            return Err(std::io::ErrorKind::WouldBlock.into());
+        }
         #[cfg(target_os = "linux")]
         {
             let result =
@@ -44,7 +49,8 @@ impl App {
 
     #[cfg(target_os = "linux")]
     pub(super) fn can_reload_ui(&self) -> bool {
-        crate::reload::worker::is_hosted()
+        !self.local_shell.is_running()
+            && crate::reload::worker::is_hosted()
             && !matches!(self.app_server_target, AppServerTarget::Embedded)
             && !self.reconnect.offline
             && self.chat_widget.can_reload_ui()

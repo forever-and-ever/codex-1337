@@ -151,6 +151,7 @@ mod experimental_features_view;
 mod file_search_popup;
 mod footer;
 mod list_selection_view;
+mod local_shell;
 mod memories_settings_view;
 mod mentions_v2;
 mod picker_presets;

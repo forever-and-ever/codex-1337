@@ -29,6 +29,7 @@ async fn run_startup_for_test(
         server,
         config.clone(),
         config.cwd.to_path_buf(),
+        Default::default(),
         Vec::new(),
         ConfigOverrides::default(),
         LoaderOverrides::default(),

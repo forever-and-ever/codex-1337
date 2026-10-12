@@ -28,6 +28,7 @@ pub(crate) async fn make_test_app() -> App {
         chat_widget,
         workspace_command_runner: None,
         launch_cwd: config.cwd.to_path_buf(),
+        local_shell: Default::default(),
         runtime_working_directory_override: None,
         local_settings: crate::local_settings::LocalSettings::from(&config),
         config,

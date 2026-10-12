@@ -399,6 +399,7 @@ pub(super) struct FooterState {
     pub(super) reasoning_down_key: Option<ShortcutHint>,
     pub(super) reasoning_up_key: Option<ShortcutHint>,
     pub(super) toggle_voice_key: Option<ShortcutHint>,
+    pub(super) local_shell_notice: Option<Line<'static>>,
 }
 
 #[derive(Clone, Debug)]
