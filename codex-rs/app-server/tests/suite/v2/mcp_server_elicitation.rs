@@ -1,3 +1,4 @@
+use core_test_support::mock_server;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -160,13 +161,17 @@ impl StrictReviewScenario {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn mcp_server_form_elicitation_round_trip() -> Result<()> {
-    let fixture = ElicitationRoundTripFixture::start(ElicitationScenario::StandardForm).await?;
-    assert_standard_form_elicitation_round_trip(fixture).await
+    let (responses_server, fixture) =
+        ElicitationRoundTripFixture::start(ElicitationScenario::StandardForm).await?;
+    mock_server::run(&[&responses_server], async {
+        assert_standard_form_elicitation_round_trip(fixture).await
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn mcp_server_form_elicitation_round_trip_in_full_access() -> Result<()> {
-    let fixture = ElicitationRoundTripFixture::start_with_thread_params(
+    let (responses_server, fixture) = ElicitationRoundTripFixture::start_with_thread_params(
         ElicitationScenario::StandardForm,
         ThreadStartParams {
             model: Some("mock-model".to_string()),
@@ -177,7 +182,10 @@ async fn mcp_server_form_elicitation_round_trip_in_full_access() -> Result<()> {
         },
     )
     .await?;
-    assert_standard_form_elicitation_round_trip(fixture).await
+    mock_server::run(&[&responses_server], async {
+        assert_standard_form_elicitation_round_trip(fixture).await
+    })
+    .await
 }
 
 async fn assert_standard_form_elicitation_round_trip(
@@ -215,95 +223,105 @@ async fn assert_standard_form_elicitation_round_trip(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn mcp_server_legacy_sep1034_elicitation_defaults_round_trip() -> Result<()> {
-    let mut fixture =
+    let (responses_server, mut fixture) =
         ElicitationRoundTripFixture::start(ElicitationScenario::LegacySep1034Defaults).await?;
-    let (request_id, params) = fixture.read_elicitation().await?;
-    let McpServerElicitationRequest::Form {
-        message,
-        requested_schema,
-        ..
-    } = params.request
-    else {
-        anyhow::bail!("omitted legacy elicitation mode must default to form");
-    };
+    mock_server::run(&[&responses_server], async {
+        let (request_id, params) = fixture.read_elicitation().await?;
+        let McpServerElicitationRequest::Form {
+            message,
+            requested_schema,
+            ..
+        } = params.request
+        else {
+            anyhow::bail!("omitted legacy elicitation mode must default to form");
+        };
 
-    assert_eq!(message, ELICITATION_MESSAGE);
-    assert_eq!(serde_json::to_value(requested_schema)?, sep1034_schema());
-    fixture
-        .accept(request_id.clone(), sep1034_defaults())
-        .await?;
-    fixture.finish(request_id, "legacy defaults accepted").await
+        assert_eq!(message, ELICITATION_MESSAGE);
+        assert_eq!(serde_json::to_value(requested_schema)?, sep1034_schema());
+        fixture
+            .accept(request_id.clone(), sep1034_defaults())
+            .await?;
+        fixture.finish(request_id, "legacy defaults accepted").await
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn mcp_server_openai_form_elicitation_round_trip() -> Result<()> {
-    let mut fixture = ElicitationRoundTripFixture::start(ElicitationScenario::OpenAiForm).await?;
-    let (request_id, params) = fixture.read_elicitation().await?;
-    assert_eq!(
-        params,
-        McpServerElicitationRequestParams {
-            thread_id: fixture.thread_id.clone(),
-            turn_id: Some(fixture.turn_id.clone()),
-            server_name: "codex_apps".to_string(),
-            request: McpServerElicitationRequest::OpenAiForm {
-                meta: None,
-                message: OPENAI_FORM_MESSAGE.to_string(),
-                requested_schema: json!({
-                    "type": "object",
-                    "properties": {
-                        "template": {
-                            "type": "openai/imagePicker",
-                            "title": "Template",
-                            "items": [{
-                                "id": "monthly-review",
-                                "title": "Monthly review",
-                                "image": IMAGE_DATA_URL,
-                            }],
+    let (responses_server, mut fixture) =
+        ElicitationRoundTripFixture::start(ElicitationScenario::OpenAiForm).await?;
+    mock_server::run(&[&responses_server], async {
+        let (request_id, params) = fixture.read_elicitation().await?;
+        assert_eq!(
+            params,
+            McpServerElicitationRequestParams {
+                thread_id: fixture.thread_id.clone(),
+                turn_id: Some(fixture.turn_id.clone()),
+                server_name: "codex_apps".to_string(),
+                request: McpServerElicitationRequest::OpenAiForm {
+                    meta: None,
+                    message: OPENAI_FORM_MESSAGE.to_string(),
+                    requested_schema: json!({
+                        "type": "object",
+                        "properties": {
+                            "template": {
+                                "type": "openai/imagePicker",
+                                "title": "Template",
+                                "items": [{
+                                    "id": "monthly-review",
+                                    "title": "Monthly review",
+                                    "image": IMAGE_DATA_URL,
+                                }],
+                            },
                         },
-                    },
-                    "required": ["template"],
-                }),
-            },
-        }
-    );
+                        "required": ["template"],
+                    }),
+                },
+            }
+        );
 
-    fixture
-        .accept(request_id.clone(), json!({ "template": "monthly-review" }))
-        .await?;
-    fixture.finish(request_id, "accepted monthly-review").await
+        fixture
+            .accept(request_id.clone(), json!({ "template": "monthly-review" }))
+            .await?;
+        fixture.finish(request_id, "accepted monthly-review").await
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn mcp_server_openai_elicitation_form_round_trip() -> Result<()> {
-    let mut fixture =
+    let (responses_server, mut fixture) =
         ElicitationRoundTripFixture::start(ElicitationScenario::OpenAiElicitationForm).await?;
-    let (request_id, params) = fixture.read_elicitation().await?;
-    assert_eq!(
-        params,
-        McpServerElicitationRequestParams {
-            thread_id: fixture.thread_id.clone(),
-            turn_id: Some(fixture.turn_id.clone()),
-            server_name: "codex_apps".to_string(),
-            request: McpServerElicitationRequest::OpenAiElicitationForm {
-                meta: Some(json!({ "example/request": "template-picker" })),
-                message: OPENAI_FORM_MESSAGE.to_string(),
-                requested_schema: openai_elicitation_form_schema(),
-            },
-        }
-    );
+    mock_server::run(&[&responses_server], async {
+        let (request_id, params) = fixture.read_elicitation().await?;
+        assert_eq!(
+            params,
+            McpServerElicitationRequestParams {
+                thread_id: fixture.thread_id.clone(),
+                turn_id: Some(fixture.turn_id.clone()),
+                server_name: "codex_apps".to_string(),
+                request: McpServerElicitationRequest::OpenAiElicitationForm {
+                    meta: Some(json!({ "example/request": "template-picker" })),
+                    message: OPENAI_FORM_MESSAGE.to_string(),
+                    requested_schema: openai_elicitation_form_schema(),
+                },
+            }
+        );
 
-    fixture
-        .mcp
-        .send_response(
-            request_id.clone(),
-            serde_json::to_value(McpServerElicitationRequestResponse {
-                action: McpServerElicitationAction::Accept,
-                content: Some(json!({ "template": "monthly-review" })),
-                meta: Some(json!({ "example/response": "selected" })),
-            })?,
-        )
-        .await?;
-    fixture.finish(request_id, "accepted monthly-review").await
+        fixture
+            .mcp
+            .send_response(
+                request_id.clone(),
+                serde_json::to_value(McpServerElicitationRequestResponse {
+                    action: McpServerElicitationAction::Accept,
+                    content: Some(json!({ "template": "monthly-review" })),
+                    meta: Some(json!({ "example/response": "selected" })),
+                })?,
+            )
+            .await?;
+        fixture.finish(request_id, "accepted monthly-review").await
+    })
+    .await
 }
 
 #[test_case(Review::Approved; "approved")]
@@ -323,184 +341,191 @@ async fn mcp_server_openai_elicitation_form_round_trip() -> Result<()> {
 #[test_case(Review::Persistent; "persistent")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn mcp_server_strict_auto_review(scenario: Review) -> Result<()> {
-    let mut fixture =
+    let (responses_server, mut fixture) =
         ElicitationRoundTripFixture::start(ElicitationScenario::Strict(scenario)).await?;
-    if !scenario.expects_user_confirmation() {
-        return fixture.finish(RequestId::Integer(0), "declined").await;
-    }
-    let (request_id, params) = fixture.read_elicitation().await?;
-    assert!(
-        matches!(params.request, McpServerElicitationRequest::Form { meta: None, message, .. }
+    mock_server::run(&[&responses_server], async {
+        if !scenario.expects_user_confirmation() {
+            return fixture.finish(RequestId::Integer(0), "declined").await;
+        }
+        let (request_id, params) = fixture.read_elicitation().await?;
+        assert!(
+            matches!(params.request, McpServerElicitationRequest::Form { meta: None, message, .. }
             if message == ELICITATION_MESSAGE),
-        "approved strict review must preserve the ordinary elicitation"
-    );
-    fixture
-        .accept(request_id.clone(), json!({ "confirmed": true }))
-        .await?;
-    fixture.finish(request_id, "accepted").await
+            "approved strict review must preserve the ordinary elicitation"
+        );
+        fixture
+            .accept(request_id.clone(), json!({ "confirmed": true }))
+            .await?;
+        fixture.finish(request_id, "accepted").await
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn openai_form_capability_follows_the_turn_starting_connection() -> Result<()> {
     let (responses_server, response_mock, apps_server_url, apps_server_handle) =
         start_elicitation_services(ElicitationScenario::OpenAiForm).await?;
-    let codex_home = TempDir::new()?;
-    write_config_toml(codex_home.path(), &responses_server.uri(), &apps_server_url)?;
-    write_chatgpt_auth(
-        codex_home.path(),
-        ChatGptAuthFixture::new("chatgpt-token")
-            .account_id("account-123")
-            .chatgpt_user_id("user-123")
-            .chatgpt_account_id("account-123"),
-        AuthCredentialsStoreMode::File,
-    )?;
+    mock_server::run(&[&responses_server], async {
+        let codex_home = TempDir::new()?;
+        write_config_toml(codex_home.path(), &responses_server.uri(), &apps_server_url)?;
+        write_chatgpt_auth(
+            codex_home.path(),
+            ChatGptAuthFixture::new("chatgpt-token")
+                .account_id("account-123")
+                .chatgpt_user_id("user-123")
+                .chatgpt_account_id("account-123"),
+            AuthCredentialsStoreMode::File,
+        )?;
 
-    let (mut process, bind_addr) = spawn_websocket_server(codex_home.path()).await?;
-    let mut supported_client = connect_websocket(bind_addr).await?;
-    initialize_websocket_client(
-        &mut supported_client,
-        /*id*/ 1,
-        "supported-client",
-        /*supports_openai_form_elicitation*/ true,
-    )
-    .await?;
+        let (mut process, bind_addr) = spawn_websocket_server(codex_home.path()).await?;
+        let mut supported_client = connect_websocket(bind_addr).await?;
+        initialize_websocket_client(
+            &mut supported_client,
+            /*id*/ 1,
+            "supported-client",
+            /*supports_openai_form_elicitation*/ true,
+        )
+        .await?;
 
-    send_request(
-        &mut supported_client,
-        "thread/start",
-        /*id*/ 2,
-        Some(serde_json::to_value(ThreadStartParams {
-            model: Some("mock-model".to_string()),
-            ..Default::default()
-        })?),
-    )
-    .await?;
-    let ThreadStartResponse { thread, .. } =
-        to_response(read_response_for_id(&mut supported_client, /*id*/ 2).await?)?;
+        send_request(
+            &mut supported_client,
+            "thread/start",
+            /*id*/ 2,
+            Some(serde_json::to_value(ThreadStartParams {
+                model: Some("mock-model".to_string()),
+                ..Default::default()
+            })?),
+        )
+        .await?;
+        let ThreadStartResponse { thread, .. } =
+            to_response(read_response_for_id(&mut supported_client, /*id*/ 2).await?)?;
 
-    send_request(
-        &mut supported_client,
-        "turn/start",
-        /*id*/ 3,
-        Some(serde_json::to_value(TurnStartParams {
-            thread_id: thread.id.clone(),
-            input: vec![V2UserInput::Text {
-                text: "Warm up connectors.".to_string(),
-                text_elements: Vec::new(),
-            }],
-            model: Some("mock-model".to_string()),
-            ..Default::default()
-        })?),
-    )
-    .await?;
-    let _: TurnStartResponse =
-        to_response(read_response_for_id(&mut supported_client, /*id*/ 3).await?)?;
-    let _: TurnCompletedNotification = serde_json::from_value(
-        read_notification_for_method(&mut supported_client, "turn/completed")
-            .await?
-            .params
-            .expect("turn/completed params"),
-    )?;
+        send_request(
+            &mut supported_client,
+            "turn/start",
+            /*id*/ 3,
+            Some(serde_json::to_value(TurnStartParams {
+                thread_id: thread.id.clone(),
+                input: vec![V2UserInput::Text {
+                    text: "Warm up connectors.".to_string(),
+                    text_elements: Vec::new(),
+                }],
+                model: Some("mock-model".to_string()),
+                ..Default::default()
+            })?),
+        )
+        .await?;
+        let _: TurnStartResponse =
+            to_response(read_response_for_id(&mut supported_client, /*id*/ 3).await?)?;
+        let _: TurnCompletedNotification = serde_json::from_value(
+            read_notification_for_method(&mut supported_client, "turn/completed")
+                .await?
+                .params
+                .expect("turn/completed params"),
+        )?;
 
-    let mut unsupported_client = connect_websocket(bind_addr).await?;
-    initialize_websocket_client(
-        &mut unsupported_client,
-        /*id*/ 4,
-        "unsupported-client",
-        /*supports_openai_form_elicitation*/ false,
-    )
-    .await?;
-    send_request(
-        &mut unsupported_client,
-        "thread/resume",
-        /*id*/ 5,
-        Some(serde_json::to_value(ThreadResumeParams {
-            thread_id: thread.id.clone(),
-            ..Default::default()
-        })?),
-    )
-    .await?;
-    let _ = read_response_for_id(&mut unsupported_client, /*id*/ 5).await?;
+        let mut unsupported_client = connect_websocket(bind_addr).await?;
+        initialize_websocket_client(
+            &mut unsupported_client,
+            /*id*/ 4,
+            "unsupported-client",
+            /*supports_openai_form_elicitation*/ false,
+        )
+        .await?;
+        send_request(
+            &mut unsupported_client,
+            "thread/resume",
+            /*id*/ 5,
+            Some(serde_json::to_value(ThreadResumeParams {
+                thread_id: thread.id.clone(),
+                ..Default::default()
+            })?),
+        )
+        .await?;
+        let _ = read_response_for_id(&mut unsupported_client, /*id*/ 5).await?;
 
-    send_request(
-        &mut supported_client,
-        "turn/start",
-        /*id*/ 6,
-        Some(serde_json::to_value(TurnStartParams {
-            thread_id: thread.id.clone(),
-            input: vec![V2UserInput::Text {
-                text: "Use [$calendar](app://calendar) to run the calendar tool.".to_string(),
-                text_elements: Vec::new(),
-            }],
-            model: Some("mock-model".to_string()),
-            ..Default::default()
-        })?),
-    )
-    .await?;
-    let TurnStartResponse { turn } =
-        to_response(read_response_for_id(&mut supported_client, /*id*/ 6).await?)?;
+        send_request(
+            &mut supported_client,
+            "turn/start",
+            /*id*/ 6,
+            Some(serde_json::to_value(TurnStartParams {
+                thread_id: thread.id.clone(),
+                input: vec![V2UserInput::Text {
+                    text: "Use [$calendar](app://calendar) to run the calendar tool.".to_string(),
+                    text_elements: Vec::new(),
+                }],
+                model: Some("mock-model".to_string()),
+                ..Default::default()
+            })?),
+        )
+        .await?;
+        let TurnStartResponse { turn } =
+            to_response(read_response_for_id(&mut supported_client, /*id*/ 6).await?)?;
 
-    let (request_id, params) = loop {
-        let JSONRPCMessage::Request(request) = read_jsonrpc_message(&mut supported_client).await?
-        else {
-            continue;
+        let (request_id, params) = loop {
+            let JSONRPCMessage::Request(request) =
+                read_jsonrpc_message(&mut supported_client).await?
+            else {
+                continue;
+            };
+            let request: ServerRequest = serde_json::from_value(serde_json::to_value(request)?)?;
+            let ServerRequest::McpServerElicitationRequest { request_id, params } = request else {
+                continue;
+            };
+            break (request_id, params);
         };
-        let request: ServerRequest = serde_json::from_value(serde_json::to_value(request)?)?;
-        let ServerRequest::McpServerElicitationRequest { request_id, params } = request else {
-            continue;
-        };
-        break (request_id, params);
-    };
-    assert_eq!(
-        params.request,
-        McpServerElicitationRequest::OpenAiForm {
-            meta: None,
-            message: OPENAI_FORM_MESSAGE.to_string(),
-            requested_schema: json!({
-                "type": "object",
-                "properties": {
-                    "template": {
-                        "type": "openai/imagePicker",
-                        "title": "Template",
-                        "items": [{
-                            "id": "monthly-review",
-                            "title": "Monthly review",
-                            "image": IMAGE_DATA_URL,
-                        }],
-                    },
-                },
-                "required": ["template"],
-            }),
-        }
-    );
-    send_jsonrpc(
-        &mut supported_client,
-        JSONRPCMessage::Response(JSONRPCResponse {
-            id: request_id,
-            result: serde_json::to_value(McpServerElicitationRequestResponse {
-                action: McpServerElicitationAction::Accept,
-                content: Some(json!({ "template": "monthly-review" })),
+        assert_eq!(
+            params.request,
+            McpServerElicitationRequest::OpenAiForm {
                 meta: None,
-            })?,
-        }),
-    )
-    .await?;
+                message: OPENAI_FORM_MESSAGE.to_string(),
+                requested_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "template": {
+                            "type": "openai/imagePicker",
+                            "title": "Template",
+                            "items": [{
+                                "id": "monthly-review",
+                                "title": "Monthly review",
+                                "image": IMAGE_DATA_URL,
+                            }],
+                        },
+                    },
+                    "required": ["template"],
+                }),
+            }
+        );
+        send_jsonrpc(
+            &mut supported_client,
+            JSONRPCMessage::Response(JSONRPCResponse {
+                id: request_id,
+                result: serde_json::to_value(McpServerElicitationRequestResponse {
+                    action: McpServerElicitationAction::Accept,
+                    content: Some(json!({ "template": "monthly-review" })),
+                    meta: None,
+                })?,
+            }),
+        )
+        .await?;
 
-    let completed: TurnCompletedNotification = serde_json::from_value(
-        read_notification_for_method(&mut supported_client, "turn/completed")
-            .await?
-            .params
-            .expect("turn/completed params"),
-    )?;
-    assert_eq!(completed.thread_id, thread.id);
-    assert_eq!(completed.turn.id, turn.id);
-    assert_eq!(completed.turn.status, TurnStatus::Completed);
-    assert_eq!(response_mock.requests().len(), 3);
+        let completed: TurnCompletedNotification = serde_json::from_value(
+            read_notification_for_method(&mut supported_client, "turn/completed")
+                .await?
+                .params
+                .expect("turn/completed params"),
+        )?;
+        assert_eq!(completed.thread_id, thread.id);
+        assert_eq!(completed.turn.id, turn.id);
+        assert_eq!(completed.turn.status, TurnStatus::Completed);
+        assert_eq!(response_mock.requests().len(), 3);
 
-    process.kill().await?;
-    apps_server_handle.abort();
-    let _ = apps_server_handle.await;
-    Ok(())
+        process.kill().await?;
+        apps_server_handle.abort();
+        let _ = apps_server_handle.await;
+        Ok(())
+    })
+    .await
 }
 
 async fn initialize_websocket_client(
@@ -536,80 +561,86 @@ async fn start_elicitation_services(
     scenario: ElicitationScenario,
 ) -> Result<(wiremock::MockServer, ResponseMock, String, JoinHandle<()>)> {
     let responses_server = responses::start_mock_server().await;
-    let tool_call_arguments = serde_json::to_string(&json!({}))?;
-    let response_mock = responses::mount_sse_sequence(&responses_server, {
-        let mut streams = vec![
-            responses::sse(vec![
-                responses::ev_response_created("resp-0"),
-                responses::ev_assistant_message("msg-0", "Warmup"),
-                responses::ev_completed("resp-0"),
-            ]),
-            responses::sse(vec![
-                responses::ev_response_created("resp-1"),
-                responses::ev_function_call_with_namespace(
-                    TOOL_CALL_ID,
-                    TOOL_NAMESPACE,
-                    CALLABLE_TOOL_NAME,
-                    &tool_call_arguments,
-                ),
-                responses::ev_completed("resp-1"),
-            ]),
-            responses::sse(vec![
-                responses::ev_response_created("resp-2"),
-                responses::ev_assistant_message("msg-1", "Done"),
-                responses::ev_completed("resp-2"),
-            ]),
-        ];
-        if let ElicitationScenario::Strict(strict) = scenario {
-            let completion = streams.pop().expect("parent model completion");
-            for approved in strict.review_outcomes() {
-                let assessment = if *approved {
-                    json!({ "outcome": "allow" })
-                } else {
-                    json!({ "outcome": "deny", "rationale": GUARDIAN_DENIAL_RATIONALE })
-                };
-                streams.push(responses::sse(vec![
-                    responses::ev_response_created("resp-guardian"),
-                    responses::ev_assistant_message("msg-guardian", &assessment.to_string()),
-                    responses::ev_completed("resp-guardian"),
-                ]));
+    let result = async {
+        let tool_call_arguments = serde_json::to_string(&json!({}))?;
+        let response_mock = responses::mount_sse_sequence(&responses_server, {
+            let mut streams = vec![
+                responses::sse(vec![
+                    responses::ev_response_created("resp-0"),
+                    responses::ev_assistant_message("msg-0", "Warmup"),
+                    responses::ev_completed("resp-0"),
+                ]),
+                responses::sse(vec![
+                    responses::ev_response_created("resp-1"),
+                    responses::ev_function_call_with_namespace(
+                        TOOL_CALL_ID,
+                        TOOL_NAMESPACE,
+                        CALLABLE_TOOL_NAME,
+                        &tool_call_arguments,
+                    ),
+                    responses::ev_completed("resp-1"),
+                ]),
+                responses::sse(vec![
+                    responses::ev_response_created("resp-2"),
+                    responses::ev_assistant_message("msg-1", "Done"),
+                    responses::ev_completed("resp-2"),
+                ]),
+            ];
+            if let ElicitationScenario::Strict(strict) = scenario {
+                let completion = streams.pop().expect("parent model completion");
+                for approved in strict.review_outcomes() {
+                    let assessment = if *approved {
+                        json!({ "outcome": "allow" })
+                    } else {
+                        json!({ "outcome": "deny", "rationale": GUARDIAN_DENIAL_RATIONALE })
+                    };
+                    streams.push(responses::sse(vec![
+                        responses::ev_response_created("resp-guardian"),
+                        responses::ev_assistant_message("msg-guardian", &assessment.to_string()),
+                        responses::ev_completed("resp-guardian"),
+                    ]));
+                }
+                if strict != Review::DeniedBurst {
+                    streams.push(completion.clone());
+                }
+                if strict == Review::Approved {
+                    streams.extend([
+                        responses::sse(vec![
+                            responses::ev_response_created("resp-next-turn"),
+                            responses::ev_function_call_with_namespace(
+                                NEXT_TURN_TOOL_CALL_ID,
+                                TOOL_NAMESPACE,
+                                CALLABLE_TOOL_NAME,
+                                &serde_json::to_string(&json!({ "ordinary": true }))?,
+                            ),
+                            responses::ev_completed("resp-next-turn"),
+                        ]),
+                        completion,
+                    ]);
+                }
             }
-            if strict != Review::DeniedBurst {
-                streams.push(completion.clone());
-            }
-            if strict == Review::Approved {
-                streams.extend([
-                    responses::sse(vec![
-                        responses::ev_response_created("resp-next-turn"),
-                        responses::ev_function_call_with_namespace(
-                            NEXT_TURN_TOOL_CALL_ID,
-                            TOOL_NAMESPACE,
-                            CALLABLE_TOOL_NAME,
-                            &serde_json::to_string(&json!({ "ordinary": true }))?,
-                        ),
-                        responses::ev_completed("resp-next-turn"),
-                    ]),
-                    completion,
-                ]);
-            }
-        }
-        streams
-    })
+            streams
+        })
+        .await;
+        let (apps_server_url, apps_server_handle) = start_apps_server(scenario).await?;
+        Ok((response_mock, apps_server_url, apps_server_handle))
+    }
     .await;
-    let (apps_server_url, apps_server_handle) = start_apps_server(scenario).await?;
-    Ok((
-        responses_server,
-        response_mock,
-        apps_server_url,
-        apps_server_handle,
-    ))
+    match result {
+        Ok((response_mock, apps_server_url, apps_server_handle)) => Ok((
+            responses_server,
+            response_mock,
+            apps_server_url,
+            apps_server_handle,
+        )),
+        Err(error) => mock_server::run(&[&responses_server], async { Err(error) }).await,
+    }
 }
 
 struct ElicitationRoundTripFixture {
     mcp: TestAppServer,
     _codex_home: TempDir,
     response_mock: ResponseMock,
-    _responses_server: wiremock::MockServer,
     scenario: ElicitationScenario,
     next_turn: bool,
     thread_id: String,
@@ -618,7 +649,7 @@ struct ElicitationRoundTripFixture {
 }
 
 impl ElicitationRoundTripFixture {
-    async fn start(scenario: ElicitationScenario) -> Result<Self> {
+    async fn start(scenario: ElicitationScenario) -> Result<(wiremock::MockServer, Self)> {
         let strict = if let ElicitationScenario::Strict(strict) = scenario {
             Some(strict)
         } else {
@@ -670,137 +701,147 @@ impl ElicitationRoundTripFixture {
     async fn start_with_thread_params(
         scenario: ElicitationScenario,
         thread_params: ThreadStartParams,
-    ) -> Result<Self> {
+    ) -> Result<(wiremock::MockServer, Self)> {
         let (responses_server, response_mock, apps_server_url, apps_server_handle) =
             start_elicitation_services(scenario).await?;
-        let codex_home = TempDir::new()?;
-        write_config_toml(codex_home.path(), &responses_server.uri(), &apps_server_url)?;
-        let strict = if let ElicitationScenario::Strict(strict) = scenario {
-            Some(strict)
-        } else {
-            None
-        };
-        let requirements = match strict {
-            Some(Review::ManagedReviewerForbidden) => "allowed_approvals_reviewers = [\"user\"]\n",
-            Some(Review::ManagedGuardianDisabled) => "[features]\nauto_review = false\n",
-            _ => "",
-        };
-        if !requirements.is_empty() {
-            std::fs::write(codex_home.path().join("requirements.toml"), requirements)?;
-        }
-        write_chatgpt_auth(
-            codex_home.path(),
-            ChatGptAuthFixture::new("chatgpt-token")
-                .account_id("account-123")
-                .chatgpt_user_id("user-123")
-                .chatgpt_account_id("account-123"),
-            AuthCredentialsStoreMode::File,
-        )?;
 
-        let mut mcp = TestAppServer::builder()
-            .with_codex_home(codex_home.path())
-            .build()
-            .await?;
-        let mut extensions = HashMap::from([(
-            OPENAI_STANDARD_FORM_INPUT_EXTENSION_ID.to_string(),
-            json!({}),
-        )]);
-        if matches!(scenario, ElicitationScenario::OpenAiElicitationForm) {
-            extensions.insert("openai/elicitation".to_string(), json!({ "form": {} }));
-        }
-        timeout(
-            DEFAULT_READ_TIMEOUT,
-            mcp.initialize_with_capabilities(
-                ClientInfo {
-                    name: "codex-app-server-tests".to_string(),
-                    title: None,
-                    version: "0.1.0".to_string(),
-                },
-                Some(InitializeCapabilities {
-                    experimental_api: true,
-                    mcp_server_openai_form_elicitation: !matches!(
-                        scenario,
-                        ElicitationScenario::OpenAiElicitationForm
-                    ),
-                    extensions: Some(extensions),
+        let result = async {
+            let codex_home = TempDir::new()?;
+            write_config_toml(codex_home.path(), &responses_server.uri(), &apps_server_url)?;
+            let strict = if let ElicitationScenario::Strict(strict) = scenario {
+                Some(strict)
+            } else {
+                None
+            };
+            let requirements = match strict {
+                Some(Review::ManagedReviewerForbidden) => {
+                    "allowed_approvals_reviewers = [\"user\"]\n"
+                }
+                Some(Review::ManagedGuardianDisabled) => "[features]\nauto_review = false\n",
+                _ => "",
+            };
+            if !requirements.is_empty() {
+                std::fs::write(codex_home.path().join("requirements.toml"), requirements)?;
+            }
+            write_chatgpt_auth(
+                codex_home.path(),
+                ChatGptAuthFixture::new("chatgpt-token")
+                    .account_id("account-123")
+                    .chatgpt_user_id("user-123")
+                    .chatgpt_account_id("account-123"),
+                AuthCredentialsStoreMode::File,
+            )?;
+
+            let mut mcp = TestAppServer::builder()
+                .with_codex_home(codex_home.path())
+                .build()
+                .await?;
+            let mut extensions = HashMap::from([(
+                OPENAI_STANDARD_FORM_INPUT_EXTENSION_ID.to_string(),
+                json!({}),
+            )]);
+            if matches!(scenario, ElicitationScenario::OpenAiElicitationForm) {
+                extensions.insert("openai/elicitation".to_string(), json!({ "form": {} }));
+            }
+            timeout(
+                DEFAULT_READ_TIMEOUT,
+                mcp.initialize_with_capabilities(
+                    ClientInfo {
+                        name: "codex-app-server-tests".to_string(),
+                        title: None,
+                        version: "0.1.0".to_string(),
+                    },
+                    Some(InitializeCapabilities {
+                        experimental_api: true,
+                        mcp_server_openai_form_elicitation: !matches!(
+                            scenario,
+                            ElicitationScenario::OpenAiElicitationForm
+                        ),
+                        extensions: Some(extensions),
+                        ..Default::default()
+                    }),
+                ),
+            )
+            .await??;
+
+            let thread_start_id = mcp
+                .send_thread_start_request_with_auto_env(thread_params)
+                .await?;
+            let thread_start_resp: JSONRPCResponse = timeout(
+                DEFAULT_READ_TIMEOUT,
+                mcp.read_stream_until_response_message(RequestId::Integer(thread_start_id)),
+            )
+            .await??;
+            let ThreadStartResponse { thread, .. } = to_response(thread_start_resp)?;
+
+            let warmup_turn_start_id = mcp
+                .send_turn_start_request(TurnStartParams {
+                    thread_id: thread.id.clone(),
+                    client_user_message_id: None,
+                    input: vec![V2UserInput::Text {
+                        text: "Warm up connectors.".to_string(),
+                        text_elements: Vec::new(),
+                    }],
+                    model: Some("mock-model".to_string()),
                     ..Default::default()
-                }),
-            ),
-        )
-        .await??;
+                })
+                .await?;
+            let warmup_turn_start_resp: JSONRPCResponse = timeout(
+                DEFAULT_READ_TIMEOUT,
+                mcp.read_stream_until_response_message(RequestId::Integer(warmup_turn_start_id)),
+            )
+            .await??;
+            let _: TurnStartResponse = to_response(warmup_turn_start_resp)?;
+            let warmup_completed = timeout(
+                DEFAULT_READ_TIMEOUT,
+                mcp.read_stream_until_notification_message("turn/completed"),
+            )
+            .await??;
+            let warmup_completed: TurnCompletedNotification = serde_json::from_value(
+                warmup_completed
+                    .params
+                    .clone()
+                    .expect("warmup turn/completed params"),
+            )?;
+            assert_eq!(warmup_completed.thread_id, thread.id);
+            assert_eq!(warmup_completed.turn.status, TurnStatus::Completed);
 
-        let thread_start_id = mcp
-            .send_thread_start_request_with_auto_env(thread_params)
-            .await?;
-        let thread_start_resp: JSONRPCResponse = timeout(
-            DEFAULT_READ_TIMEOUT,
-            mcp.read_stream_until_response_message(RequestId::Integer(thread_start_id)),
-        )
-        .await??;
-        let ThreadStartResponse { thread, .. } = to_response(thread_start_resp)?;
+            let turn_start_id = mcp
+                .send_turn_start_request(TurnStartParams {
+                    thread_id: thread.id.clone(),
+                    client_user_message_id: None,
+                    input: vec![V2UserInput::Text {
+                        text: "Use [$calendar](app://calendar) to run the calendar tool."
+                            .to_string(),
+                        text_elements: Vec::new(),
+                    }],
+                    model: Some("mock-model".to_string()),
+                    ..Default::default()
+                })
+                .await?;
+            let turn_start_resp: JSONRPCResponse = timeout(
+                DEFAULT_READ_TIMEOUT,
+                mcp.read_stream_until_response_message(RequestId::Integer(turn_start_id)),
+            )
+            .await??;
+            let TurnStartResponse { turn } = to_response(turn_start_resp)?;
 
-        let warmup_turn_start_id = mcp
-            .send_turn_start_request(TurnStartParams {
-                thread_id: thread.id.clone(),
-                client_user_message_id: None,
-                input: vec![V2UserInput::Text {
-                    text: "Warm up connectors.".to_string(),
-                    text_elements: Vec::new(),
-                }],
-                model: Some("mock-model".to_string()),
-                ..Default::default()
+            Ok(Self {
+                mcp,
+                _codex_home: codex_home,
+                response_mock,
+                scenario,
+                next_turn: false,
+                thread_id: thread.id,
+                turn_id: turn.id,
+                apps_server_handle,
             })
-            .await?;
-        let warmup_turn_start_resp: JSONRPCResponse = timeout(
-            DEFAULT_READ_TIMEOUT,
-            mcp.read_stream_until_response_message(RequestId::Integer(warmup_turn_start_id)),
-        )
-        .await??;
-        let _: TurnStartResponse = to_response(warmup_turn_start_resp)?;
-        let warmup_completed = timeout(
-            DEFAULT_READ_TIMEOUT,
-            mcp.read_stream_until_notification_message("turn/completed"),
-        )
-        .await??;
-        let warmup_completed: TurnCompletedNotification = serde_json::from_value(
-            warmup_completed
-                .params
-                .clone()
-                .expect("warmup turn/completed params"),
-        )?;
-        assert_eq!(warmup_completed.thread_id, thread.id);
-        assert_eq!(warmup_completed.turn.status, TurnStatus::Completed);
-
-        let turn_start_id = mcp
-            .send_turn_start_request(TurnStartParams {
-                thread_id: thread.id.clone(),
-                client_user_message_id: None,
-                input: vec![V2UserInput::Text {
-                    text: "Use [$calendar](app://calendar) to run the calendar tool.".to_string(),
-                    text_elements: Vec::new(),
-                }],
-                model: Some("mock-model".to_string()),
-                ..Default::default()
-            })
-            .await?;
-        let turn_start_resp: JSONRPCResponse = timeout(
-            DEFAULT_READ_TIMEOUT,
-            mcp.read_stream_until_response_message(RequestId::Integer(turn_start_id)),
-        )
-        .await??;
-        let TurnStartResponse { turn } = to_response(turn_start_resp)?;
-
-        Ok(Self {
-            mcp,
-            _codex_home: codex_home,
-            response_mock,
-            _responses_server: responses_server,
-            scenario,
-            next_turn: false,
-            thread_id: thread.id,
-            turn_id: turn.id,
-            apps_server_handle,
-        })
+        }
+        .await;
+        match result {
+            Ok(fixture) => Ok((responses_server, fixture)),
+            Err(error) => mock_server::run(&[&responses_server], async { Err(error) }).await,
+        }
     }
 
     async fn read_elicitation(&mut self) -> Result<(RequestId, McpServerElicitationRequestParams)> {
