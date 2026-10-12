@@ -46,12 +46,6 @@ impl App {
         }
     }
 
-    pub(super) async fn shutdown_current_thread(&mut self, app_server: &mut AppServerSession) {
-        self.stop_realtime_conversation(app_server).await;
-        self.detach_current_thread_for_navigation(app_server, /*destination*/ None)
-            .await;
-    }
-
     pub(super) async fn shutdown_side_threads(&mut self, app_server: &mut AppServerSession) {
         let side_thread_ids: Vec<ThreadId> = self.side_threads.keys().copied().collect();
         for side_thread_id in side_thread_ids {

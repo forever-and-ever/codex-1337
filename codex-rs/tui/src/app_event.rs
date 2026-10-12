@@ -688,6 +688,7 @@ pub(crate) enum AppEvent {
     Exit(ExitMode),
     /// Owned bounded frontend detach finished; this does not claim runtime shutdown.
     ServerOperationExitReady(crate::app::ExitReason),
+    ServerNavigationPrepared(Box<crate::app::turn_submissions::NavigationCompletion>),
 
     /// Apply a choice from the running-task exit menu to its originating thread.
     RunningTaskExit {

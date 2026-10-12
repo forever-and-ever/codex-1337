@@ -33,6 +33,7 @@ pub(super) struct LoadedSubagentBackfill {
 
 impl App {
     pub(super) async fn open_agent_picker(&mut self, app_server: &mut AppServerSession) {
+        self.supersede_pending_navigation();
         let backfill = if self.primary_thread_id.is_none() {
             self.backfill_loaded_subagent_threads(app_server).await
         } else {
@@ -592,6 +593,7 @@ impl App {
         app_server: &mut AppServerSession,
         thread_id: ThreadId,
     ) -> Result<()> {
+        self.supersede_pending_navigation();
         let pending_profile_on_unavailable_thread = self.thread_unavailable(thread_id)
             && self.pending_server_profiles.contains_key(&thread_id);
         let cached_session = if self.thread_unavailable(thread_id) {
@@ -1098,6 +1100,7 @@ impl App {
                 }
             }
         }
+        self.supersede_pending_navigation();
         // Start a fresh in-memory session while preserving resumability via persisted rollout
         // history. If an initial message is provided, `enqueue_primary_thread_session` suppresses it
         // until the new session is configured and any replayed turns have been rendered.
@@ -1464,6 +1467,7 @@ impl App {
         app_server: &mut AppServerSession,
         target_session: SessionTarget,
     ) -> Result<AppRunControl> {
+        self.supersede_pending_navigation();
         if self.ignore_same_thread_resume(&target_session) {
             self.agents_overview
                 .hidden_threads

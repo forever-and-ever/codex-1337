@@ -151,6 +151,7 @@ impl App {
             AppEvent::LocalShellRequest(_) | AppEvent::LocalShellUpdate(_) => {
                 unreachable!("Local-shell events are consumed before agent routing")
             }
+            AppEvent::ServerNavigationPrepared(completion) => return Box::pin(self.finish_navigation_operation(tui, app_server, *completion)).await,
             AppEvent::OpenDaemonMenu => self.open_daemon_menu(),
             AppEvent::ReloadUi => self.reload_requested = true,
             AppEvent::UserVerificationApproved { thread_id, server_name, request_id } => {

@@ -9454,7 +9454,7 @@ async fn new_session_requests_shutdown_for_previous_conversation() {
         ))
         .await
         .expect("embedded app server");
-        Box::pin(app.shutdown_current_thread(&mut app_server)).await;
+        Box::pin(app.handle_exit_mode(&mut app_server, ExitMode::ShutdownFirst)).await;
 
         assert!(
             op_rx.try_recv().is_err(),

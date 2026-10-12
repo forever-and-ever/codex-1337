@@ -361,16 +361,31 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     })
     .await
     .expect("skills worker reached withheld response");
-    // Urgent control shares ownership but bypasses the withheld lane and config barrier.
+    // Urgent control bypasses the withheld thread lane and its connection config barrier.
+    app.submit_thread_op(&mut server, other_id, AppCommand::ReloadUserConfig)
+        .await?;
+    let urgent_store = Arc::clone(&app.thread_event_channels[&other_id].store);
+    urgent_store
+        .lock()
+        .await
+        .set_active_turn_id("urgent-test".into());
     let interrupts_before = recorded_params(&requests, "turn/interrupt").len();
     app.submit_thread_op(&mut server, other_id, AppCommand::interrupt())
         .await?;
-    let control = tokio::time::timeout(
-        Duration::from_secs(5),
-        app.server_operations.control_rx.recv(),
-    )
-    .await?
-    .expect("owned interrupt receipt");
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while recorded_params(&requests, "turn/interrupt").len() < interrupts_before + 1 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await?;
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(31)).await;
+    let control = app
+        .server_operations
+        .control_rx
+        .recv()
+        .await
+        .expect("unknown interrupt receipt");
     app.finish_submission(
         &mut server,
         control.thread_id,
@@ -379,12 +394,27 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         control.outcome,
     )
     .await?;
+    tokio::time::resume();
+    assert!(
+        urgent_store
+            .lock()
+            .await
+            .pending_interrupt_turn_id
+            .is_none()
+    );
     assert_eq!(
         recorded_params(&requests, "turn/interrupt").len(),
         interrupts_before + 1
     );
-    app.submit_thread_op(&mut server, other_id, AppCommand::ReloadUserConfig)
+    // An unknown receipt never resends itself, but does not disable a new deliberate control.
+    app.submit_thread_op(&mut server, other_id, AppCommand::interrupt())
         .await?;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while recorded_params(&requests, "turn/interrupt").len() < interrupts_before + 2 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await?;
     app.submit_thread_op(
         &mut server,
         thread_id,

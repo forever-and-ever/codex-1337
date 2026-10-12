@@ -53,8 +53,13 @@ pub(in crate::app) use requests::CatalogRequest;
 pub(in crate::app) use requests::ConnectionMutation;
 pub(in crate::app) use requests::ThreadMutation;
 
+#[path = "server_navigation_operations.rs"]
+mod navigation;
+pub(crate) use navigation::NavigationCompletion;
+
 pub(super) struct ServerOperations {
     lanes: HashMap<OperationLane, SubmissionLane>,
+    navigation: navigation::NavigationOwner,
     next_order: u64,
     epoch: u64,
     control_tx: mpsc::UnboundedSender<ControlCompletion>,
@@ -66,6 +71,7 @@ impl Default for ServerOperations {
         let (control_tx, control_rx) = mpsc::unbounded_channel();
         Self {
             lanes: HashMap::new(),
+            navigation: navigation::NavigationOwner::default(),
             next_order: 0,
             epoch: 0,
             control_tx,
@@ -244,14 +250,33 @@ impl SubmissionPreviewEntry {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum NavigationPreview {
+    Preparing { id: Uuid },
+    Cleaning,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) enum SubmissionPreview {
     #[default]
     Idle,
+    Navigation {
+        navigation: NavigationPreview,
+        submissions: Box<SubmissionPreview>,
+    },
     Sending {
         active: SubmissionPreviewEntry,
         waiting: Vec<SubmissionPreviewEntry>,
     },
+}
+
+impl SubmissionPreview {
+    pub(crate) fn thread_preview(&self) -> &Self {
+        match self {
+            Self::Navigation { submissions, .. } => submissions.thread_preview(),
+            _ => self,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -260,6 +285,9 @@ pub(crate) enum SubmissionEvent {
         thread_id: ThreadId,
         id: Uuid,
         action: PendingSteerCancelAction,
+    },
+    CancelNavigation {
+        id: Uuid,
     },
     Retire,
 }
@@ -434,10 +462,21 @@ impl ServerOperations {
     }
 
     pub(super) fn is_empty(&self) -> bool {
-        self.lanes.is_empty()
+        self.lanes.is_empty() && self.navigation.is_empty()
     }
 
     pub(in crate::app) fn preview(&self, thread_id: Option<ThreadId>) -> SubmissionPreview {
+        let submissions = self.thread_preview(thread_id);
+        match self.navigation.preview() {
+            Some(navigation) => SubmissionPreview::Navigation {
+                navigation,
+                submissions: Box::new(submissions),
+            },
+            None => submissions,
+        }
+    }
+
+    pub(in crate::app) fn thread_preview(&self, thread_id: Option<ThreadId>) -> SubmissionPreview {
         let Some(thread_id) = thread_id else {
             return SubmissionPreview::Idle;
         };

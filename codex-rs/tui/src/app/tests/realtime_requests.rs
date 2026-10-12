@@ -208,8 +208,11 @@ async fn shutdown_stops_backend_voice_once_through_app_server() -> Result<()> {
     let (other, _, _, _) = make_chatwidget_manual_with_sender().await;
     app.replace_chat_widget(other);
     assert_eq!(app.voice_owner_thread_id(), Some(thread_id));
-    app.shutdown_current_thread(&mut app_server).await;
-    app.shutdown_current_thread(&mut app_server).await;
+    app.handle_exit_mode(&mut app_server, ExitMode::ShutdownFirst)
+        .await;
+    app.handle_exit_mode(&mut app_server, ExitMode::ShutdownFirst)
+        .await;
+    app.settle_turn_submissions(&mut app_server).await?;
 
     assert_eq!(
         recorded_params(&requests, "thread/realtime/stop"),
@@ -237,9 +240,13 @@ async fn stalled_voice_stop_leaves_time_for_shutdown_unsubscribe() -> Result<()>
 
     tokio::time::timeout(
         crate::app::event_dispatch::SHUTDOWN_FIRST_EXIT_TIMEOUT,
-        app.shutdown_current_thread(&mut app_server),
+        async {
+            app.handle_exit_mode(&mut app_server, ExitMode::ShutdownFirst)
+                .await;
+            app.settle_turn_submissions(&mut app_server).await
+        },
     )
-    .await?;
+    .await??;
 
     assert_eq!(
         recorded_params(&requests, "thread/realtime/stop"),

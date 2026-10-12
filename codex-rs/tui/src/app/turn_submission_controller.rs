@@ -290,33 +290,35 @@ impl App {
             .lanes
             .get(&OperationLane::Connection)
             .map(|lane| lane.active.order);
-        let ready: Vec<_> = self
-            .server_operations
-            .lanes
-            .iter()
-            .filter_map(|(key, lane)| {
-                if !matches!(lane.state, LaneState::Queued) {
-                    return None;
-                }
-                let ready = match key {
-                    OperationLane::Control(_) | OperationLane::Exit => true,
-                    OperationLane::Thread(_) => {
-                        barrier.is_none_or(|order| lane.active.order < order)
+        let ready: Vec<_> =
+            self.server_operations
+                .lanes
+                .iter()
+                .filter_map(|(key, lane)| {
+                    if !matches!(lane.state, LaneState::Queued) {
+                        return None;
                     }
-                    OperationLane::Connection => {
-                        !self
-                            .server_operations
-                            .lanes
-                            .iter()
-                            .any(|(other, predecessor)| {
-                                matches!(other, OperationLane::Thread(_))
-                                    && predecessor.active.order < lane.active.order
-                            })
-                    }
-                };
-                ready.then_some(*key)
-            })
-            .collect();
+                    let ready = match key {
+                        OperationLane::Control(_) | OperationLane::Exit => true,
+                        OperationLane::Thread(_) => {
+                            barrier.is_none_or(|order| lane.active.order < order)
+                        }
+                        OperationLane::Connection => {
+                            !self
+                                .server_operations
+                                .navigation
+                                .precedes_barrier(lane.active.order, self.server_operations.epoch)
+                                && !self.server_operations.lanes.iter().any(
+                                    |(other, predecessor)| {
+                                        matches!(other, OperationLane::Thread(_))
+                                            && predecessor.active.order < lane.active.order
+                                    },
+                                )
+                        }
+                    };
+                    ready.then_some(*key)
+                })
+                .collect();
         for key in ready {
             let lane = self
                 .server_operations
@@ -325,6 +327,7 @@ impl App {
                 .expect("queued operation lane disappeared");
             self.start_submission(server, lane.active.thread_id, lane.active, lane.waiting);
         }
+        self.drive_navigation_operation();
     }
 
     fn start_submission(
@@ -416,7 +419,11 @@ impl App {
                     );
                 }
             }
+            SubmissionEvent::CancelNavigation { id } => {
+                self.server_operations.navigation.cancel(id);
+            }
             SubmissionEvent::Retire => {
+                self.server_operations.navigation.retire_current();
                 self.server_operations.epoch = self
                     .server_operations
                     .epoch
@@ -460,6 +467,11 @@ impl App {
                         .flatten();
                     if let LaneState::Running(task) = lane.state {
                         task.abort();
+                    }
+                    if matches!(&lane.active.request, SubmissionRequest::Operation(operation)
+                        if matches!(&**operation, ThreadOperation::Control(control::ControlOperation::Interrupt { .. })))
+                    {
+                        lane.active.store.lock().await.pending_interrupt_turn_id = None;
                     }
                     let drafts =
                         recoverable_drafts(std::iter::once(lane.active).chain(lane.waiting));
@@ -551,6 +563,14 @@ impl App {
             let SubmissionRequest::Operation(operation) = &active.request else {
                 unreachable!("RPC receipt for a turn operation");
             };
+            if matches!(
+                &**operation,
+                ThreadOperation::Control(control::ControlOperation::Interrupt { .. })
+            ) {
+                // This is the sole active control lease for this captured store. A successor
+                // cannot dispatch before this receipt is reduced, including a wrong-turn retry.
+                active.store.lock().await.pending_interrupt_turn_id = None;
+            }
             let applicable = matches!(
                 &**operation,
                 ThreadOperation::Control(control::ControlOperation::DetachAndExit { .. })
@@ -583,7 +603,10 @@ impl App {
                         self.chat_widget.add_error_message(format!("Earlier conversation {thread_id}: {} did not receive a usable acknowledgement; no retry was sent.", operation.label()));
                     }
                     if !matches!(failure, SubmissionFailure::Rejected(_))
-                        && !matches!(&**operation, ThreadOperation::Catalog(_))
+                        && !matches!(
+                            &**operation,
+                            ThreadOperation::Catalog(_) | ThreadOperation::Control(_)
+                        )
                     {
                         let protected = requests::holds_start_lease(&active)
                             .then_some(thread_id)

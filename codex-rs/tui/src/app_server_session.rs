@@ -74,8 +74,6 @@ use codex_app_server_protocol::NewThreadModelDefaults;
 use codex_app_server_protocol::RateLimitSnapshot;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::SessionSource;
-use codex_app_server_protocol::SkillsListParams;
-use codex_app_server_protocol::SkillsListResponse;
 use codex_app_server_protocol::Thread;
 use codex_app_server_protocol::ThreadArchiveParams;
 use codex_app_server_protocol::ThreadArchiveResponse;
@@ -1504,17 +1502,6 @@ impl AppServerSession {
             .await
             .wrap_err("thread/unsubscribe failed in TUI")?;
         Ok(())
-    }
-
-    pub(crate) async fn skills_list(
-        &mut self,
-        params: SkillsListParams,
-    ) -> Result<SkillsListResponse> {
-        let request_id = self.next_request_id();
-        self.client
-            .request_typed(ClientRequest::SkillsList { request_id, params })
-            .await
-            .wrap_err("skills/list failed in TUI")
     }
 
     pub(crate) async fn reject_server_request(
