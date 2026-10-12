@@ -197,7 +197,7 @@ impl App {
         let SubmissionRequest::Operation(operation) = &mut active.request else {
             return false;
         };
-        let ThreadOperation::Realtime(realtime) = &mut **operation else {
+        let ServerOperation::Realtime(realtime) = &mut **operation else {
             return false;
         };
         if !self.realtime_operation_is_current(thread_id, realtime) {

@@ -4,19 +4,12 @@ use super::AppServerSession;
 use super::AppServerStartedThread;
 use super::HistoryHydrationScope;
 use super::ResumeModelSettings;
-use super::ThreadHistorySupport;
-use super::bootstrap_request_error;
-use super::is_history_pagination_unsupported;
-use super::started_thread_from_resume_response;
-use super::thread_resume_params_from_config;
 use super::thread_session_state_from_thread_response;
 use crate::legacy_core::config::Config;
-use codex_app_server_client::TypedRequestError;
 use codex_app_server_protocol::AskForApproval;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::SortDirection;
 use codex_app_server_protocol::ThreadHistoryMode;
-use codex_app_server_protocol::ThreadResumeResponse;
 use codex_app_server_protocol::ThreadTurnsListParams;
 use codex_app_server_protocol::ThreadTurnsListResponse;
 use codex_app_server_protocol::TurnItemsView;
@@ -150,116 +143,18 @@ impl AppServerSession {
         model_settings: ResumeModelSettings,
         permission_overrides: crate::resume_permissions::ResumePermissions,
     ) -> Result<AppServerStartedThread> {
-        let session_config = if matches!(
-            model_settings,
-            ResumeModelSettings::RestoreFromThread | ResumeModelSettings::PreserveExistingThread
-        ) {
-            config.clone()
-        } else {
-            self.session_config_with_effective_service_tier(&config)
-        };
-        let mut params = thread_resume_params_from_config(
-            session_config,
-            thread_id,
-            self.thread_params_mode(),
-            self.remote_cwd_override.as_deref(),
-            model_settings,
-            permission_overrides,
-        );
-        if model_settings == ResumeModelSettings::OverrideFromCurrentConfig {
-            params.model_provider = self.explicit_model_provider(&config);
-        }
-        let mut rollout_maintenance_guard = None;
-        params.exclude_turns = if self.history_support == ThreadHistorySupport::Paginated {
-            let known_legacy_history = self
-                .history_pagination
-                .get(&thread_id)
-                .is_some_and(|state| state.history_mode == ThreadHistoryMode::Legacy)
-                && (!self.uses_embedded_app_server()
-                    || ({
-                        // The guard prevents migration through the full resume,
-                        // regardless of the server's migration feature settings.
-                        rollout_maintenance_guard =
-                            codex_rollout::try_acquire_rollout_maintenance_lock(
-                                config.codex_home.as_path(),
-                            )
-                            .ok()
-                            .flatten();
-                        rollout_maintenance_guard.is_some()
-                    } && self
-                        .thread_read(thread_id, /*include_turns*/ false)
-                        .await
-                        .is_ok_and(|thread| thread.history_mode == ThreadHistoryMode::Legacy)));
-            !known_legacy_history
-        } else {
-            false
-        };
-        if params.exclude_turns {
-            rollout_maintenance_guard = None;
-        }
-        let request_id = self.next_request_id();
-        let resume_response = self
-            .client
-            .request_typed(ClientRequest::ThreadResume {
-                request_id,
-                params: params.clone(),
-            })
-            .await;
-        drop(rollout_maintenance_guard);
-        let mut response: ThreadResumeResponse = match resume_response {
-            Ok(response) => response,
-            Err(TypedRequestError::Server { source, .. })
-                if params.exclude_turns && is_history_pagination_unsupported(&source) =>
-            {
-                self.history_support = ThreadHistorySupport::LegacyOnly;
-                params.exclude_turns = false;
-                let request_id = self.next_request_id();
-                self.client
-                    .request_typed(ClientRequest::ThreadResume { request_id, params })
-                    .await
-                    .map_err(|err| {
-                        bootstrap_request_error("thread/resume failed during TUI bootstrap", err)
-                    })?
-            }
-            Err(err) => {
-                return Err(bootstrap_request_error(
-                    "thread/resume failed during TUI bootstrap",
-                    err,
-                ));
-            }
-        };
-        let history = self
-            .hydrate_initial_thread_history(
-                &mut response.thread,
-                response.turns_backwards_cursor.clone(),
-                response.items_backwards_cursor.clone(),
-                Some(&config),
-                Some(local_settings),
-                HistoryHydrationScope::Initial,
+        let prepared = self
+            .prepare_resume_thread(
+                local_settings,
+                config,
+                thread_id,
+                model_settings,
+                permission_overrides,
             )
+            .run()
             .await;
-        let history_notice = match history {
-            Ok(()) => None,
-            Err(error) if response.thread.history_mode == ThreadHistoryMode::Paginated => {
-                Some(format!("Conversation history is incomplete: {error:#}"))
-            }
-            Err(error) => return Err(error),
-        };
-        let fork_parent_title = self
-            .fork_parent_title_from_app_server(response.thread.forked_from_id.as_deref())
-            .await;
-        let mut started = started_thread_from_resume_response(
-            response,
-            local_settings,
-            self.thread_params_mode(),
-        )
-        .await?;
-        started.history_notice = history_notice;
-        started.session.fork_parent_title = fork_parent_title;
-        if self.task_tools_available(thread_id) {
-            started.task_tools_available = true;
-        }
-        Ok(started)
+        self.apply_session_observations(prepared.observations);
+        prepared.result
     }
 }
 

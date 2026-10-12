@@ -121,7 +121,7 @@ impl App {
         let SubmissionRequest::Operation(operation) = &mut active.request else {
             return false;
         };
-        let ThreadOperation::Connection(ConnectionMutation::Voice(preference)) = &mut **operation
+        let ServerOperation::Connection(ConnectionMutation::Voice(preference)) = &mut **operation
         else {
             return false;
         };

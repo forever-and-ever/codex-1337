@@ -143,7 +143,7 @@ impl App {
         self.enqueue_server_operation(
             app_server,
             thread_id,
-            super::turn_submissions::ThreadOperation::Mutation(
+            super::turn_submissions::ServerOperation::Mutation(
                 super::turn_submissions::ThreadMutation::Rename(ThreadSetNameParams {
                     thread_id: thread_id.to_string(),
                     name,

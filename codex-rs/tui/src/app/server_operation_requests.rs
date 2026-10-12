@@ -5,7 +5,7 @@ use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_protocol as api;
 
 #[derive(Clone)]
-pub(in crate::app) enum ThreadOperation {
+pub(in crate::app) enum ServerOperation {
     Mutation(ThreadMutation),
     Control(control::ControlOperation),
     Catalog(CatalogRequest),
@@ -96,7 +96,7 @@ pub(in crate::app) enum OperationReceipt {
     ServerRequestDelivered,
 }
 
-impl ThreadOperation {
+impl ServerOperation {
     pub(in crate::app) fn label(&self) -> &'static str {
         match self {
             Self::Response(_) => "Delivering app-server response",
@@ -165,12 +165,12 @@ impl ThreadOperation {
 pub(super) async fn send(
     handle: AppServerRequestHandle,
     id: Uuid,
-    operation: ThreadOperation,
+    operation: ServerOperation,
     origin: OperationOrigin,
 ) -> Result<OperationReceipt, TypedRequestError> {
     let request_id = api::RequestId::String(format!("tui-operation-{id}"));
     match operation {
-        ThreadOperation::Response(delivery) => {
+        ServerOperation::Response(delivery) => {
             delivery
                 .send(&handle)
                 .await
@@ -180,7 +180,7 @@ pub(super) async fn send(
                 })?;
             return Ok(OperationReceipt::ServerRequestDelivered);
         }
-        ThreadOperation::Connection(ConnectionMutation::ReloadUserConfig) => {
+        ServerOperation::Connection(ConnectionMutation::ReloadUserConfig) => {
             let _: api::ConfigWriteResponse = handle
                 .request_typed(api::ClientRequest::ConfigBatchWrite {
                     request_id,
@@ -194,7 +194,7 @@ pub(super) async fn send(
                 .await?;
             return Ok(OperationReceipt::ConfigReloaded);
         }
-        ThreadOperation::Connection(ConnectionMutation::Voice(operation)) => {
+        ServerOperation::Connection(ConnectionMutation::Voice(operation)) => {
             return super::voice_preferences::send(handle, id, operation).await;
         }
         _ => {}
@@ -202,14 +202,14 @@ pub(super) async fn send(
     let (thread_id, store) = origin.thread();
     let thread = thread_id.to_string();
     match operation {
-        ThreadOperation::Response(_) => unreachable!("response handled before thread projection"),
-        ThreadOperation::Realtime(operation) => {
+        ServerOperation::Response(_) => unreachable!("response handled before thread projection"),
+        ServerOperation::Realtime(operation) => {
             realtime::send(handle, thread_id, id, operation).await
         }
-        ThreadOperation::Control(operation) => {
+        ServerOperation::Control(operation) => {
             control::send(&handle, thread_id, id, operation, store).await
         }
-        ThreadOperation::Mutation(mutation) => match mutation {
+        ServerOperation::Mutation(mutation) => match mutation {
             ThreadMutation::Compact => {
                 let _: api::ThreadCompactStartResponse = handle
                     .request_typed(api::ClientRequest::ThreadCompactStart {
@@ -310,11 +310,11 @@ pub(super) async fn send(
                 Ok(OperationReceipt::GuardianApproved)
             }
         },
-        ThreadOperation::Catalog(CatalogRequest::Skills { params, .. }) => handle
+        ServerOperation::Catalog(CatalogRequest::Skills { params, .. }) => handle
             .request_typed(api::ClientRequest::SkillsList { request_id, params })
             .await
             .map(OperationReceipt::Skills),
-        ThreadOperation::Connection(_) => {
+        ServerOperation::Connection(_) => {
             unreachable!("connection request handled before thread projection")
         }
     }
@@ -325,7 +325,7 @@ impl App {
         &mut self,
         server: &AppServerSession,
         thread_id: ThreadId,
-        operation: ThreadOperation,
+        operation: ServerOperation,
     ) {
         self.enqueue_submission(
             server,
@@ -337,11 +337,11 @@ impl App {
     pub(in crate::app) async fn finish_server_operation(
         &mut self,
         origin: &OperationOrigin,
-        operation: &ThreadOperation,
+        operation: &ServerOperation,
         receipt: OperationReceipt,
     ) -> Result<()> {
         if matches!(origin, OperationOrigin::Connection) {
-            if let ThreadOperation::Connection(ConnectionMutation::Voice(operation)) = operation
+            if let ServerOperation::Connection(ConnectionMutation::Voice(operation)) = operation
                 && let OperationReceipt::VoicePreference(receipt) = receipt
             {
                 self.finish_voice_preference(operation, receipt);
@@ -351,7 +351,7 @@ impl App {
         let thread_id = origin.thread().0;
         match receipt {
             OperationReceipt::ServerRequestDelivered => {
-                if let ThreadOperation::Response(delivery) = operation
+                if let ServerOperation::Response(delivery) = operation
                     && let ServerRequestDelivery::Resolved { command, .. } = &**delivery
                     && ThreadEventStore::op_can_change_pending_replay_state(command)
                 {
@@ -361,7 +361,7 @@ impl App {
                 }
             }
             OperationReceipt::RealtimeSpeechAccepted => {
-                if let ThreadOperation::Realtime(
+                if let ServerOperation::Realtime(
                     operation @ realtime::RealtimeOperation::Speech { delivery_id, .. },
                 ) = operation
                     && self.realtime_operation_is_current(thread_id, operation)
@@ -379,7 +379,7 @@ impl App {
                 .send(AppEvent::Exit(ExitMode::ShutdownAfterInterrupt)),
             OperationReceipt::Interrupted => {}
             OperationReceipt::ExitDetached(receipt) => {
-                if let ThreadOperation::Control(control::ControlOperation::DetachAndExit {
+                if let ServerOperation::Control(control::ControlOperation::DetachAndExit {
                     plan,
                     reason,
                 }) = operation
@@ -416,14 +416,14 @@ impl App {
                 }
             }
             OperationReceipt::Skills(response) => {
-                if let ThreadOperation::Catalog(CatalogRequest::Skills { cwd, .. }) = operation
+                if let ServerOperation::Catalog(CatalogRequest::Skills { cwd, .. }) = operation
                     && self.chat_widget.config_ref().cwd.as_path() == cwd
                 {
                     self.handle_skills_list_result(Ok(response), "failed to refresh skills");
                 }
             }
             OperationReceipt::SettingsUpdated => {
-                if let ThreadOperation::Mutation(ThreadMutation::Settings(params)) = operation {
+                if let ServerOperation::Mutation(ThreadMutation::Settings(params)) = operation {
                     let permissions_changed = params.cwd.is_some()
                         || params.approval_policy.is_some()
                         || params.approvals_reviewer.is_some()
@@ -453,10 +453,10 @@ impl App {
     pub(in crate::app) fn reject_server_operation(
         &mut self,
         origin: &OperationOrigin,
-        operation: &ThreadOperation,
+        operation: &ServerOperation,
         failure: &SubmissionFailure,
     ) {
-        if let ThreadOperation::Connection(ConnectionMutation::Voice(
+        if let ServerOperation::Connection(ConnectionMutation::Voice(
             super::voice_preferences::VoicePreferenceOperation::Confirm { .. },
         )) = operation
         {
@@ -465,13 +465,13 @@ impl App {
         }
         let thread_id = origin.thread_id();
         if let Some(thread_id) = thread_id
-            && let ThreadOperation::Realtime(operation) = operation
+            && let ServerOperation::Realtime(operation) = operation
         {
             self.reject_realtime_operation(thread_id, operation, failure);
             return;
         }
         if let Some(thread_id) = thread_id
-            && let ThreadOperation::Mutation(ThreadMutation::Rename(params)) = operation
+            && let ServerOperation::Mutation(ThreadMutation::Rename(params)) = operation
             && let SubmissionFailure::Rejected(error) = failure
             && self.confirm_thread_name_conflict(
                 error,
@@ -495,7 +495,7 @@ impl App {
             ),
         };
         if let Some(thread_id) = thread_id
-            && let ThreadOperation::Mutation(ThreadMutation::Rename(params)) = operation
+            && let ServerOperation::Mutation(ThreadMutation::Rename(params)) = operation
             && self.agents_overview.rendered_full_screen
         {
             if let Ok(mut state) = self.agents_overview.view_state.lock() {
@@ -539,15 +539,15 @@ impl App {
                 continue;
             }
             match &**operation {
-                ThreadOperation::Realtime(operation) => {
+                ServerOperation::Realtime(operation) => {
                     self.cancel_unsent_realtime_operation(thread_id, operation)
                 }
-                ThreadOperation::Mutation(ThreadMutation::DisarmAlarm(id)) => {
+                ServerOperation::Mutation(ThreadMutation::DisarmAlarm(id)) => {
                     if let Some(widget) = self.voice_widget_for_thread(thread_id) {
                         widget.cancel_unsent_alarm_disarm(id);
                     }
                 }
-                ThreadOperation::Mutation(ThreadMutation::Compact | ThreadMutation::Review(_)) => {
+                ServerOperation::Mutation(ThreadMutation::Compact | ThreadMutation::Review(_)) => {
                     let outstanding = self.server_operations.lanes.values().any(|lane| {
                         std::iter::once(&lane.active)
                             .chain(lane.waiting.iter())
@@ -574,11 +574,11 @@ impl App {
                     }
                 }
                 // These payloads own no widget-local pending lease before dispatch.
-                ThreadOperation::Response(_)
-                | ThreadOperation::Mutation(_)
-                | ThreadOperation::Catalog(_)
-                | ThreadOperation::Connection(_)
-                | ThreadOperation::Control(_) => {}
+                ServerOperation::Response(_)
+                | ServerOperation::Mutation(_)
+                | ServerOperation::Catalog(_)
+                | ServerOperation::Connection(_)
+                | ServerOperation::Control(_) => {}
             }
         }
     }
@@ -586,5 +586,5 @@ impl App {
 
 pub(super) fn holds_start_lease(entry: &PendingSubmission) -> bool {
     matches!(&entry.request, SubmissionRequest::Operation(operation) if matches!(&**operation,
-        ThreadOperation::Mutation(ThreadMutation::Compact | ThreadMutation::Review(_))))
+        ServerOperation::Mutation(ThreadMutation::Compact | ThreadMutation::Review(_))))
 }

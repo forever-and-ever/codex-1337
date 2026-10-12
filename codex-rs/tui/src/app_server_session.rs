@@ -17,6 +17,7 @@ pub(crate) mod provider_selection;
 mod provider_selection_tests;
 mod realtime;
 mod rollout_history;
+pub(crate) mod session_preparation;
 mod startup_launch;
 mod thread_list;
 mod turn_submissions;
@@ -102,8 +103,8 @@ use codex_app_server_protocol::ThreadMetadataGitInfoUpdateParams;
 use codex_app_server_protocol::ThreadMetadataUpdateParams;
 use codex_app_server_protocol::ThreadMetadataUpdateResponse;
 use codex_app_server_protocol::ThreadNameMode;
-use codex_app_server_protocol::ThreadReadParams;
-use codex_app_server_protocol::ThreadReadResponse;
+
+
 use codex_app_server_protocol::ThreadResumeParams;
 use codex_app_server_protocol::ThreadResumeResponse;
 use codex_app_server_protocol::ThreadSetNameParams;

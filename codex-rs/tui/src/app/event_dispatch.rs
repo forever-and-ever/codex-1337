@@ -235,11 +235,11 @@ impl App {
                 epoch,
                 response,
             } => {
-                if epoch == self.server_operations.epoch {
+                if epoch == self.server_operations.epoch() {
                     match serde_json::to_value(response) {
                         Ok(result) => self.enqueue_connection_operation(
                             app_server,
-                            super::turn_submissions::ThreadOperation::Response(Box::new(
+                            super::turn_submissions::ServerOperation::Response(Box::new(
                                 super::turn_submissions::ServerRequestDelivery::DynamicTool(
                                     super::app_server_requests::AppServerRequestResolution {
                                         request_id,
@@ -832,7 +832,7 @@ impl App {
                     };
                     let turn_id = self.active_turn_id_for_thread(thread_id).await;
                     self.enqueue_server_operation(app_server, thread_id,
-                        super::turn_submissions::ThreadOperation::Control(
+                        super::turn_submissions::ServerOperation::Control(
                             super::turn_submissions::ControlOperation::StopAndExit { turn_id, goal }));
                 }
             },
@@ -3456,7 +3456,7 @@ impl App {
         self.enqueue_server_operation(
             app_server,
             thread_id,
-            super::turn_submissions::ThreadOperation::Control(
+            super::turn_submissions::ServerOperation::Control(
                 super::turn_submissions::ControlOperation::DetachAndExit { plan, reason },
             ),
         );

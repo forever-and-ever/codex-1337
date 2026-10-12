@@ -176,7 +176,7 @@ impl App {
     pub(super) fn open_realtime_voices(&mut self, app_server: &AppServerSession) {
         self.enqueue_connection_operation(
             app_server,
-            super::turn_submissions::ThreadOperation::Connection(
+            super::turn_submissions::ServerOperation::Connection(
                 super::turn_submissions::ConnectionMutation::Voice(
                     super::turn_submissions::voice_preferences::VoicePreferenceOperation::Open {
                         cwd: self.chat_widget.config_ref().cwd.to_path_buf(),
@@ -193,7 +193,7 @@ impl App {
     ) {
         self.enqueue_connection_operation(
             app_server,
-            super::turn_submissions::ThreadOperation::Connection(
+            super::turn_submissions::ServerOperation::Connection(
                 super::turn_submissions::ConnectionMutation::Voice(
                     super::turn_submissions::voice_preferences::VoicePreferenceOperation::Save {
                         cwd: self.chat_widget.config_ref().cwd.to_path_buf(),

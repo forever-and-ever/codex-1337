@@ -208,7 +208,7 @@ impl App {
         let SubmissionRequest::Continuation { review, .. } = &submission.request else {
             unreachable!("continuation receipt without reviewed intent");
         };
-        let mut store = submission.store.lock().await;
+        let mut store = submission.origin.thread().1.lock().await;
         if store
             .latest_turn_id
             .as_deref()
@@ -248,7 +248,7 @@ impl App {
         thread_id: ThreadId,
         request: SubmissionRequest,
     ) {
-        let origin = if matches!(&request, SubmissionRequest::Operation(operation) if matches!(&**operation, ThreadOperation::Connection(_)))
+        let origin = if matches!(&request, SubmissionRequest::Operation(operation) if matches!(&**operation, ServerOperation::Connection(_)))
         {
             OperationOrigin::Connection
         } else {
@@ -263,7 +263,7 @@ impl App {
     pub(in crate::app) fn enqueue_connection_operation(
         &mut self,
         server: &AppServerSession,
-        operation: ThreadOperation,
+        operation: ServerOperation,
     ) {
         self.enqueue_origin_submission(
             server,
@@ -329,7 +329,7 @@ impl App {
                         OperationLane::Exit | OperationLane::Response(_) => true,
                         OperationLane::Control(thread_id) => {
                             !matches!(&lane.active.request, SubmissionRequest::Operation(operation)
-                                if matches!(&**operation, ThreadOperation::Control(control::ControlOperation::RealtimeStop { .. })))
+                                if matches!(&**operation, ServerOperation::Control(control::ControlOperation::RealtimeStop { .. })))
                                 || !self.server_operations.realtime_start_precedes(*thread_id, lane.active.order)
                         }
                         OperationLane::Thread(_) => barrier.is_none_or(|order| lane.active.order < order),
@@ -375,14 +375,14 @@ impl App {
         let scope = active.origin.scope();
         let permitted = match &active.request {
             SubmissionRequest::Operation(operation) => match &**operation {
-                ThreadOperation::Control(control::ControlOperation::RealtimeStop {
+                ServerOperation::Control(control::ControlOperation::RealtimeStop {
                     attempt_id,
                 }) => {
                     let thread_id = active.origin.thread().0;
                     self.voice_widget_for_thread(thread_id)
                         .is_none_or(|widget| widget.owns_realtime_attempt(thread_id, *attempt_id))
                 }
-                ThreadOperation::Realtime(operation) => {
+                ServerOperation::Realtime(operation) => {
                     self.realtime_operation_is_current(active.origin.thread().0, operation)
                 }
                 _ => true,
@@ -391,7 +391,7 @@ impl App {
         };
         if !permitted
             && let SubmissionRequest::Operation(operation) = &active.request
-            && let ThreadOperation::Realtime(operation) = &**operation
+            && let ServerOperation::Realtime(operation) = &**operation
         {
             self.cancel_unsent_realtime_operation(active.origin.thread().0, operation);
         }
@@ -402,13 +402,13 @@ impl App {
         let origin = active.origin.clone();
         let completions = self.thread_delivery.completion_tx.clone();
         let control_completions = self.server_operations.control_tx.clone();
-        let urgent = matches!(&active.request, SubmissionRequest::Operation(operation) if matches!(&**operation, ThreadOperation::Control(_) | ThreadOperation::Realtime(_) | ThreadOperation::Response(_) | ThreadOperation::Connection(_)));
+        let urgent = matches!(&active.request, SubmissionRequest::Operation(operation) if matches!(&**operation, ServerOperation::Control(_) | ServerOperation::Realtime(_) | ServerOperation::Response(_) | ServerOperation::Connection(_)));
         let settings_supported = server.operation_settings_supported();
         let task = AbortOnDropHandle::new(tokio::spawn(async move {
             let outcome = if !permitted {
                 SubmissionOutcome::Operation(Ok(OperationReceipt::RealtimeDiscarded))
             } else if !settings_supported
-                && matches!(&request, WorkerRequest::Operation { operation, .. } if matches!(&**operation, ThreadOperation::Mutation(requests::ThreadMutation::Settings(_))))
+                && matches!(&request, WorkerRequest::Operation { operation, .. } if matches!(&**operation, ServerOperation::Mutation(requests::ThreadMutation::Settings(_))))
             {
                 SubmissionOutcome::Operation(Ok(OperationReceipt::SettingsUnsupported))
             } else {
@@ -508,12 +508,12 @@ impl App {
                 }
                 for (_, lane) in lanes {
                     let thread_id = lane.active.origin.thread_id();
-                    if matches!(&lane.active.request, SubmissionRequest::Operation(operation) if matches!(&**operation, ThreadOperation::Connection(ConnectionMutation::Voice(voice_preferences::VoicePreferenceOperation::Confirm { .. }))))
+                    if matches!(&lane.active.request, SubmissionRequest::Operation(operation) if matches!(&**operation, ServerOperation::Connection(ConnectionMutation::Voice(voice_preferences::VoicePreferenceOperation::Confirm { .. }))))
                     {
                         self.chat_widget.add_error_message("Voice preference was saved, but confirmation was interrupted by a connection change. No write was retried.".into());
                     }
                     if let SubmissionRequest::Operation(operation) = &lane.active.request
-                        && let ThreadOperation::Control(control::ControlOperation::DetachAndExit {
+                        && let ServerOperation::Control(control::ControlOperation::DetachAndExit {
                             reason,
                             ..
                         }) = &**operation
@@ -525,7 +525,7 @@ impl App {
                     self.cleanup_unsent_operations(lane.waiting.iter(), &protected_starts)
                         .await;
                     if matches!(lane.state, LaneState::Queued)
-                        || matches!(&lane.active.request, SubmissionRequest::Operation(operation) if matches!(&**operation, ThreadOperation::Realtime(realtime) if realtime.is_preparation()))
+                        || matches!(&lane.active.request, SubmissionRequest::Operation(operation) if matches!(&**operation, ServerOperation::Realtime(realtime) if realtime.is_preparation()))
                     {
                         self.cleanup_unsent_operations(
                             std::iter::once(&lane.active),
@@ -540,7 +540,7 @@ impl App {
                         task.abort();
                     }
                     if matches!(&lane.active.request, SubmissionRequest::Operation(operation)
-                        if matches!(&**operation, ThreadOperation::Control(control::ControlOperation::Interrupt { .. })))
+                        if matches!(&**operation, ServerOperation::Control(control::ControlOperation::Interrupt { .. })))
                     {
                         lane.active
                             .origin
@@ -682,7 +682,7 @@ impl App {
             };
             if matches!(
                 &**operation,
-                ThreadOperation::Control(control::ControlOperation::Interrupt { .. })
+                ServerOperation::Control(control::ControlOperation::Interrupt { .. })
             ) {
                 // This is the sole active control lease for this captured store. A successor
                 // cannot dispatch before this receipt is reduced, including a wrong-turn retry.
@@ -690,7 +690,7 @@ impl App {
             }
             let applicable = matches!(
                 &**operation,
-                ThreadOperation::Control(control::ControlOperation::DetachAndExit { .. })
+                ServerOperation::Control(control::ControlOperation::DetachAndExit { .. })
             ) || match &origin {
                 OperationOrigin::Connection => true,
                 OperationOrigin::Thread { thread_id, store } => self
@@ -709,7 +709,7 @@ impl App {
                 Ok(_) => {}
                 Err(failure) => {
                     if matches!(&failure, SubmissionFailure::Rejected(_))
-                        && !matches!(&**operation, ThreadOperation::Realtime(_))
+                        && !matches!(&**operation, ServerOperation::Realtime(_))
                     {
                         let protected = waiting
                             .iter()
@@ -725,11 +725,11 @@ impl App {
                         self.chat_widget.add_error_message(format!("Earlier {:?}: {} did not receive a usable acknowledgement; no retry was sent.", scope, operation.label()));
                     }
                     if !matches!(failure, SubmissionFailure::Rejected(_))
-                        && !matches!(&**operation, ThreadOperation::Realtime(operation) if operation.is_preparation())
-                        && !matches!(&**operation, ThreadOperation::Connection(ConnectionMutation::Voice(preference)) if preference.is_read_only())
+                        && !matches!(&**operation, ServerOperation::Realtime(operation) if operation.is_preparation())
+                        && !matches!(&**operation, ServerOperation::Connection(ConnectionMutation::Voice(preference)) if preference.is_read_only())
                         && !matches!(
                             &**operation,
-                            ThreadOperation::Catalog(_) | ThreadOperation::Control(_)
+                            ServerOperation::Catalog(_) | ServerOperation::Control(_)
                         )
                     {
                         let protected = requests::holds_start_lease(&active)
@@ -737,7 +737,7 @@ impl App {
                             .flatten()
                             .into_iter()
                             .collect::<HashSet<_>>();
-                        if !matches!(&**operation, ThreadOperation::Response(_)) {
+                        if !matches!(&**operation, ServerOperation::Response(_)) {
                             self.cleanup_unsent_operations(waiting.iter(), &protected)
                                 .await;
                             let drafts = recoverable_drafts(waiting.drain(..));

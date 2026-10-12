@@ -27,7 +27,7 @@ pub(super) async fn send(
     if let WorkerRequest::Operation { id, operation } = request {
         let result = if matches!(
             &*operation,
-            ThreadOperation::Mutation(requests::ThreadMutation::ServerShell(_))
+            ServerOperation::Mutation(requests::ThreadMutation::ServerShell(_))
         ) {
             requests::send(handle, id, *operation, origin)
                 .await

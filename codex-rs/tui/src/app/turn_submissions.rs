@@ -32,7 +32,7 @@ pub(in crate::app) use realtime::RealtimeIdentity;
 
 pub(in crate::app) use realtime::RealtimeOperation;
 use requests::OperationReceipt;
-pub(in crate::app) use requests::ThreadOperation;
+pub(in crate::app) use requests::ServerOperation;
 
 #[path = "server_control_operations.rs"]
 mod control;
@@ -160,7 +160,7 @@ enum SubmissionRequest {
         action: PendingSteerCancelAction,
         draft: Option<Box<SubmissionDraft>>,
     },
-    Operation(Box<ThreadOperation>),
+    Operation(Box<ServerOperation>),
     Continuation {
         review: Arc<crate::chatwidget::MisalignmentReview>,
         params: Box<TurnStartParams>,
@@ -234,7 +234,7 @@ enum WorkerRequest {
     },
     Operation {
         id: Uuid,
-        operation: Box<ThreadOperation>,
+        operation: Box<ServerOperation>,
     },
     Continuation {
         params: Box<TurnStartParams>,
@@ -535,13 +535,17 @@ impl ServerOperations {
         self.lanes.get(&OperationLane::Realtime(thread_id)).is_some_and(|lane|
             lane.active.order < order && !matches!(lane.state, LaneState::Uncertain)
                 && matches!(&lane.active.request, SubmissionRequest::Operation(operation)
-                    if matches!(&**operation, ThreadOperation::Realtime(realtime::RealtimeOperation::Start { .. }))))
+                    if matches!(&**operation, ServerOperation::Realtime(realtime::RealtimeOperation::Start { .. }))))
     }
 
     fn realtime_stop_precedes(&self, thread_id: ThreadId, order: u64) -> bool {
         self.lanes.get(&OperationLane::Control(thread_id)).is_some_and(|lane|
             lane.active.order < order && matches!(&lane.active.request, SubmissionRequest::Operation(operation)
-                if matches!(&**operation, ThreadOperation::Control(control::ControlOperation::RealtimeStop { .. }))))
+                if matches!(&**operation, ServerOperation::Control(control::ControlOperation::RealtimeStop { .. }))))
+    }
+
+    pub(in crate::app) fn epoch(&self) -> u64 {
+        self.epoch
     }
 
     pub(in crate::app) fn thread_preview(

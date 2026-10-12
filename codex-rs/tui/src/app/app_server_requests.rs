@@ -23,7 +23,7 @@ impl App {
     ) {
         self.enqueue_connection_operation(
             app_server_client,
-            super::turn_submissions::ThreadOperation::Response(Box::new(
+            super::turn_submissions::ServerOperation::Response(Box::new(
                 super::turn_submissions::ServerRequestDelivery::Rejected {
                     request_id,
                     error: JSONRPCErrorError {

@@ -621,7 +621,7 @@ impl App {
         if let ServerRequest::DynamicToolCall { request_id, .. } = &request {
             self.app_event_tx.send(AppEvent::DynamicToolCallCompleted {
                 request_id: request_id.clone(),
-                epoch: self.server_operations.epoch,
+                epoch: self.server_operations.epoch(),
                 response: crate::dynamic_tools::failure_response("Thread coordination is owned by the app server; this frontend does not execute task tools."),
             });
             return;

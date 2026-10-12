@@ -123,7 +123,7 @@ pub(super) async fn merge_thread_item_page(
     Ok(items)
 }
 
-pub(super) async fn read_thread(
+pub(in crate::app_server_session) async fn read_thread(
     handle: &codex_app_server_client::AppServerRequestHandle,
     thread_id: ThreadId,
     include_turns: bool,

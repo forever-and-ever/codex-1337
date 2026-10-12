@@ -16,8 +16,8 @@ const REALTIME_STOP_TIMEOUT: Duration = Duration::from_secs(/*secs*/ 1);
 
 use super::turn_submissions::CatalogRequest;
 use super::turn_submissions::ConnectionMutation;
+use super::turn_submissions::ServerOperation;
 use super::turn_submissions::ThreadMutation;
-use super::turn_submissions::ThreadOperation;
 
 impl App {
     pub(super) async fn stop_realtime_conversation(&mut self, app_server: &mut AppServerSession) {
@@ -681,7 +681,7 @@ impl App {
                 self.enqueue_server_operation(
                     app_server,
                     thread_id,
-                    ThreadOperation::Control(
+                    ServerOperation::Control(
                         super::turn_submissions::ControlOperation::Interrupt { turn_id },
                     ),
                 );
@@ -809,7 +809,7 @@ impl App {
                 self.enqueue_server_operation(
                     app_server,
                     thread_id,
-                    ThreadOperation::Catalog(CatalogRequest::Skills {
+                    ServerOperation::Catalog(CatalogRequest::Skills {
                         params: codex_app_server_protocol::SkillsListParams {
                             cwds: cwds.clone(),
                             force_reload: *force_reload,
@@ -823,7 +823,7 @@ impl App {
                 self.enqueue_server_operation(
                     app_server,
                     thread_id,
-                    ThreadOperation::Mutation(ThreadMutation::Compact),
+                    ServerOperation::Mutation(ThreadMutation::Compact),
                 );
                 Ok(true)
             }
@@ -836,7 +836,7 @@ impl App {
                 self.enqueue_server_operation(
                     app_server,
                     thread_id,
-                    ThreadOperation::Mutation(ThreadMutation::Review(target.clone())),
+                    ServerOperation::Mutation(ThreadMutation::Review(target.clone())),
                 );
                 Ok(true)
             }
@@ -844,7 +844,7 @@ impl App {
                 self.enqueue_server_operation(
                     app_server,
                     thread_id,
-                    ThreadOperation::Mutation(ThreadMutation::CleanBackgroundTerminals),
+                    ServerOperation::Mutation(ThreadMutation::CleanBackgroundTerminals),
                 );
                 Ok(true)
             }
@@ -866,7 +866,7 @@ impl App {
                 self.enqueue_server_operation(
                     app_server,
                     thread_id,
-                    ThreadOperation::Realtime(
+                    ServerOperation::Realtime(
                         super::turn_submissions::RealtimeOperation::Prepare {
                             identity: super::turn_submissions::RealtimeIdentity {
                                 attempt_id: *attempt_id,
@@ -887,7 +887,7 @@ impl App {
                 self.enqueue_server_operation(
                     app_server,
                     *realtime_thread_id,
-                    ThreadOperation::Control(
+                    ServerOperation::Control(
                         super::turn_submissions::ControlOperation::RealtimeStop {
                             attempt_id: *attempt_id,
                         },
@@ -908,7 +908,7 @@ impl App {
                 self.enqueue_server_operation(
                     app_server,
                     thread_id,
-                    ThreadOperation::Realtime(super::turn_submissions::RealtimeOperation::Speech {
+                    ServerOperation::Realtime(super::turn_submissions::RealtimeOperation::Speech {
                         identity: super::turn_submissions::RealtimeIdentity {
                             attempt_id: *attempt_id,
                             input_generation: *input_generation,
@@ -923,7 +923,7 @@ impl App {
                 self.enqueue_server_operation(
                     app_server,
                     thread_id,
-                    ThreadOperation::Mutation(ThreadMutation::ServerShell(command.clone())),
+                    ServerOperation::Mutation(ThreadMutation::ServerShell(command.clone())),
                 );
                 Ok(true)
             }
@@ -931,7 +931,7 @@ impl App {
                 self.enqueue_server_operation(
                     app_server,
                     thread_id,
-                    ThreadOperation::Connection(ConnectionMutation::ReloadUserConfig),
+                    ServerOperation::Connection(ConnectionMutation::ReloadUserConfig),
                 );
                 Ok(true)
             }
@@ -946,7 +946,7 @@ impl App {
                 self.enqueue_server_operation(
                     app_server,
                     thread_id,
-                    ThreadOperation::Mutation(ThreadMutation::GuardianApproval(event)),
+                    ServerOperation::Mutation(ThreadMutation::GuardianApproval(event)),
                 );
                 Ok(true)
             }
@@ -1013,7 +1013,7 @@ impl App {
         self.enqueue_server_operation(
             app_server,
             thread_id,
-            ThreadOperation::Response(Box::new(
+            ServerOperation::Response(Box::new(
                 super::turn_submissions::ServerRequestDelivery::Resolved {
                     resolution,
                     command: op.clone(),
